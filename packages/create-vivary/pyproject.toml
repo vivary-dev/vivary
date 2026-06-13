@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "create-vivary"
+version = "0.1.0"
+description = "Scaffold a complete Vivary agent workspace."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "../../LICENSE" }
+authors = [{ name = "Jeff Kazzee" }]
+keywords = ["agents", "workspace", "scaffold", "knowledge-graph"]
+dependencies = []
+
+[project.scripts]
+create-vivary = "create_vivary:main"
+
+[tool.setuptools]
+py-modules = ["create_vivary"]

@@ -12,8 +12,9 @@ frontmatter** and still be fully typed and valid.
 
 > Status: **working engine (v0.1).** `tropo.py` implements spec v1 end-to-end —
 > folder-as-type resolution, derivation, validation, packs, **overlays**, the
-> `signal` report, **`fix`** (de-noise), and **`init`**. An agent can drive the
-> whole thing via [.claude/skills/tropo/SKILL.md](.claude/skills/tropo/SKILL.md).
+> `signal` report, **`fix`** (de-noise), **`init`**, and the graph layer
+> (`graph`/`blast`/`view`/`plan`). An agent can drive the whole thing via
+> [.claude/skills/tropo/SKILL.md](.claude/skills/tropo/SKILL.md).
 > See [SPEC.md](SPEC.md).
 
 ## Quickstart
@@ -23,6 +24,8 @@ python tropo.py init my-vault                   # scaffold a tropo.toml (--packs
 python tropo.py types  --root examples/vault    # the resolved type registry
 python tropo.py check  --root examples/vault    # validate (exit 0 clean / 1 errors)
 python tropo.py signal --root examples/vault    # print ONLY the irreducible metadata
+python tropo.py graph  --root examples/vault    # emit typed nodes + edges
+python tropo.py view   --root examples/vault --out graph.html
 python tropo.py fix    --dry-run                 # preview redundant-frontmatter removal
 python tests/test_tropo.py                       # run the test suite
 ```

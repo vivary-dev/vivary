@@ -29,7 +29,7 @@ templates load once at bootstrap, and the procedures load on demand from the ski
 ## How it's used
 
 strato is the **framework**; a workspace is the **instance**. You don't edit strato per
-project — you lay its `templates/` down into a new workspace (`create-vivary` will do
+project — you lay its `templates/` down into a new workspace (`create-vivary` does
 this) and run the strato skill to `bootstrap`, then `heartbeat` on a cadence. The
 workspace's own `AGENTS.md` (from `templates/AGENTS.md`) is distinct from Vivary's root
 `AGENTS.md`, which governs agents working on Vivary itself.

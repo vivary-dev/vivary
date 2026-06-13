@@ -18,9 +18,11 @@ The baseline = **a self-improving loop over a typed knowledge graph, with one
 visible state surface and human gates.** Design law: the framework must cost
 almost nothing to load (throughline's minimalism hypothesis).
 
-**Right now:** `packages/tropo` works (knowledge-graph CLI ported from loam, 22
-tests passing). Everything else is stubs + docs. The repo is local-only (git
-initialized, no remote).
+**Right now:** `packages/tropo` works (knowledge-graph CLI ported from loam, 42
+tests passing). `packages/strato` has the fused agent OS contract, templates, and
+skill. `packages/create-vivary` now scaffolds a complete agent workspace locally.
+`ozone` and `exo` are still stubs. The repo is local-only (git initialized, no
+remote).
 
 ---
 
@@ -80,19 +82,19 @@ vivary/
 ├─ docs/ARCHITECTURE.md   full model
 ├─ LICENSE                MIT
 ├─ packages/
-│  ├─ tropo/              WORKING — ported from loam, renamed loam→tropo, 22 tests pass
-│  │                       includes packs/repo-graph.toml (WIP toward the graph layer)
-│  ├─ strato/             STUB — README only (throughline + flywheel to be fused here)
+│  ├─ tropo/              WORKING — ported from loam, renamed loam→tropo, 42 tests pass
+│  │                       includes graph/blast/view/plan and packs/repo-graph.toml
+│  ├─ strato/             WORKING MODEL — STRATO.md + templates + strato skill
+│  ├─ create-vivary/      WORKING LOCAL SCAFFOLDER — lays down full workspace shells
 │  ├─ ozone/              STUB — README only (review: code + editorial)
 │  └─ exo/                STUB — README only (multi-agent orchestration)
-└─ sandboxes/             empty — throwaway workspaces to test `create vivary` against
+└─ sandboxes/             ignored throwaway workspaces to test `create vivary` against
 ```
 
-`packages/tropo` is loam's engine verbatim with a clean `loam`→`tropo` rename
-(`tropo.py`, `tropo.toml`, command `tropo`, `CONFIG_NAME="tropo.toml"`). Its
-`SPEC.md` / `README.md` are loam's docs renamed — content is correct but the
-*framing* still reads as a standalone tool; it needs a pass to position it as
-`@vivary/tropo`.
+`packages/tropo` is loam's engine with a clean `loam`→`tropo` rename plus the
+graph layer (`graph`/`blast`/`view`/`plan`). Its `SPEC.md` / `README.md` still
+need a framing pass to position it as `@vivary/tropo`, but the implementation is
+no longer just the original parser.
 
 ---
 
@@ -100,8 +102,8 @@ vivary/
 
 1. **GitHub org handle** — bare `vivary` is taken. Recommended `vivary-dev`; alts
    `usevivary`, `getvivary`, `vivarylabs`. Org NOT created yet.
-2. **`create-vivary` npm name** — not yet verified (almost certainly free since
-   `vivary` is).
+2. **`create-vivary` npm name** — package exists locally, but npm name is not yet
+   verified or published.
 3. **Config filename** — tropo currently uses `tropo.toml` (inherited from
    `loam.toml`). Decide: per-module config vs. one workspace-level `vivary.toml`.
 4. **Is `strato` one package or two?** Jeff chose **one** (fuse throughline +
@@ -117,15 +119,11 @@ vivary/
   (`msa.contract.md`) → folder-as-type default. Folder stays the zero-noise
   default; declare type only when structure can't carry it. A redundant `type:`
   that repeats the folder is flagged as noise (W210), same as any derived field.
-- **The graph layer for tropo (the moat).** tropo's `ref`/`ref-list` fields are
-  *already* typed edges, so it's secretly a graph. Build: `tropo graph` (emit
-  JSON), `tropo blast <id>` (blast radius = inbound-edge closure), `tropo plan`
-  (simulate proposed changes, render the delta without touching disk), `tropo
-  view` (self-contained HTML of the graph / blast radius / plan), and a semantic
-  graph-diff (nodes retyped, edges broken/created) that beats a text diff. The
-  `packs/repo-graph.toml` WIP and graphify integration feed this. **loam = the
-  parser; graphify = the reasoner** (graphify consumes tropo's clean graph; do
-  NOT put embeddings in tropo — that's where minimalism dies).
+- **The graph layer for tropo (the moat).** `tropo graph`, `blast`, `view`, and
+  `plan` now exist, with a semantic graph-diff. The next value-add here is making
+  `create-vivary` dogfood that graph more richly and later letting Graphify consume
+  tropo's clean graph. **loam = the parser; graphify = the reasoner** (do NOT put
+  embeddings in tropo — that's where minimalism dies).
 - **Overlays + `fix` already exist in tropo** (from loam): nested config tightens
   a subtree (tighten-only law, E120); `tropo fix` strips frontmatter that repeats
   a derived value. Packs compose type bundles.
@@ -134,15 +132,13 @@ vivary/
 
 ## Recommended next steps (in order)
 
-1. **Fuse throughline + flywheel → `packages/strato`.** One model: visible State
-   Surface + compounding memory + the `Ask→…→gate` loop + human gates + the
-   heartbeat/third-strike/playbook self-improvement. Honor the minimalism law —
-   this should be tiny to load. Start from throughline's `THROUGHLINE.md`
-   compressed model and flywheel's three modes (bootstrap/heartbeat/self-improve).
-2. **Build tropo's graph layer** (`graph`/`blast`/`view`) — the headline value-add.
+1. **Harden `create-vivary` presets.** `coding` now has the full scaffold; define
+   exactly how `second-brain` and `writing` differ, then add tests for those outputs.
+2. **Dogfood the scaffold.** Generate a sandbox, run `tropo check`/`graph`/`view`,
+   and use the output to refine the typed starter graph.
 3. **Add the type-inference ladder** to tropo so it isn't folder-only.
-4. **Design `create vivary`** + the three presets.
-5. **Reframe tropo's docs** from standalone-loam to `@vivary/tropo`.
+4. **Reframe tropo's docs** from standalone-loam to `@vivary/tropo`.
+5. **Build ozone's first review pack** on top of tropo graph/blast.
 6. **Naming/publishing** (needs Jeff's explicit go-ahead, per item): pick the org
    handle, create the org, verify `create-vivary`, publish.
 
@@ -173,7 +169,11 @@ vivary/
 
 ```bash
 cd ~/dev/vivary/packages/tropo
-python tests/test_tropo.py          # 22/22
+python tests/test_tropo.py          # 42/42
 python tropo.py check  --root examples/vault    # clean
 python tropo.py signal --root examples/vault    # the irreducible-metadata report
+
+cd ~/dev/vivary
+python packages/create-vivary/create_vivary.py init sandboxes/coding-demo --preset coding
+python packages/tropo/tropo.py check --root sandboxes/coding-demo
 ```

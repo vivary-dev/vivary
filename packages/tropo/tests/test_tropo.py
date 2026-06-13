@@ -1,6 +1,10 @@
 """Tests for the tropo engine. Run: python -m pytest tests/ (or python tests/test_tropo.py)."""
 import os
+import shutil
 import sys
+import uuid
+from contextlib import contextmanager
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import tropo  # noqa: E402
@@ -8,6 +12,23 @@ import tropo  # noqa: E402
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VAULT = os.path.join(ROOT, "examples", "vault")
 SCRIPT_DIR = ROOT
+REPO_TMP = os.path.abspath(os.path.join(ROOT, "..", "..", "sandboxes"))
+
+
+def make_tmp_path():
+    base = REPO_TMP if os.path.isdir(REPO_TMP) else os.getcwd()
+    path = Path(base) / f"test-tropo-{uuid.uuid4().hex}"
+    path.mkdir(parents=True)
+    return path
+
+
+@contextmanager
+def temp_workspace():
+    path = make_tmp_path()
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path)
 
 
 import argparse  # noqa: E402
@@ -194,8 +215,7 @@ def test_types_and_stats_json():
 # --- packs + tighten-only law ----------------------------------------------
 
 def test_pack_composes():
-    import tempfile
-    with tempfile.TemporaryDirectory() as td:
+    with temp_workspace() as td:
         with open(os.path.join(td, "tropo.toml"), "w") as fh:
             fh.write('packs = ["dev-project"]\n')
         c = tropo.load_config(td, SCRIPT_DIR)
@@ -203,8 +223,7 @@ def test_pack_composes():
 
 
 def test_repo_graph_pack_composes():
-    import tempfile
-    with tempfile.TemporaryDirectory() as td:
+    with temp_workspace() as td:
         with open(os.path.join(td, "tropo.toml"), "w") as fh:
             fh.write('packs = ["repo-graph"]\n')
         c = tropo.load_config(td, SCRIPT_DIR)
@@ -451,13 +470,16 @@ if __name__ == "__main__":
         import inspect
         kw = {}
         if "tmp_path" in inspect.signature(fn).parameters:
-            import tempfile, pathlib
-            kw["tmp_path"] = pathlib.Path(tempfile.mkdtemp())
+            kw["tmp_path"] = make_tmp_path()
         try:
             fn(**kw)
             print(f"  ok  {fn.__name__}")
             passed += 1
         except Exception as e:
             print(f"FAIL  {fn.__name__}: {e}")
+        finally:
+            tmp_path = kw.get("tmp_path")
+            if tmp_path is not None and tmp_path.exists():
+                shutil.rmtree(tmp_path)
     print(f"\n{passed}/{len(fns)} passed")
     sys.exit(0 if passed == len(fns) else 1)
