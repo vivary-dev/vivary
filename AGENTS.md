@@ -27,18 +27,18 @@ and confirm before guessing. Do one verified slice at a time.
 
 These are not optional and are not batchable. One explicit human approval per item.
 
-1. **Ultraplan before merge** (see below) — no branch merges without it.
+1. **Plan + alignment before merge** (see below) — no branch merges without it.
 2. **Publishing / outward actions** — npm or PyPI publish, GitHub org/repo
    creation, `push`, opening a PR. Each, explicitly, per item.
 3. **Destructive ops** — delete, force-push, history rewrite.
 4. **The four source repos are read-only** — loam, braincheck, throughline,
    flywheel. Copy from them; never modify them.
 
-## Ultraplan (the alignment gate before merging)
+## Plan + alignment before merge
 
 **Human and agent must be aligned — in writing — before anything merges.** Before
-merging a branch or landing a substantial change, produce an **ultraplan** and get
-explicit human approval. The ultraplan states:
+merging a branch or landing a substantial change, produce a written plan and get
+explicit human approval. The plan states:
 
 1. **Intent** — what changes and why; which layer/module and how it serves the
    baseline thesis.
@@ -49,9 +49,12 @@ explicit human approval. The ultraplan states:
 5. **Alignment** — "I think I know / I am inferring / I do not know — confirm or
    correct." The human confirms or corrects.
 
-No merge until the human has approved the ultraplan **and** the delivered change
-matches it. If the work diverged from the approved plan, re-align before merging,
-don't merge and explain after.
+No merge until the human has approved the plan **and** the delivered change matches
+it. If the work diverged from the approved plan, re-align before merging — don't
+merge and explain after.
+
+*How* you produce the plan is runtime-specific; your runtime overlay names the
+mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
 
 ## Constraints
 

@@ -74,8 +74,8 @@ We hit "the bare word is taken" three times. The verified findings:
 ```
 vivary/
 ├─ README.md              vision
-├─ AGENTS.md              runtime contract for any agent (incl. the ultraplan gate)
-├─ CLAUDE.md              Claude Code overlay (ultraplan = plan mode)
+├─ AGENTS.md              runtime contract for any agent (plan+alignment merge gate)
+├─ CLAUDE.md              Claude Code overlay (ultraplan = Claude's mechanism for it)
 ├─ HANDOFF.md             this file
 ├─ docs/ARCHITECTURE.md   full model
 ├─ LICENSE                MIT
@@ -155,10 +155,11 @@ vivary/
 - **Minimalism is the design law.** If a layer is expensive to load, it's wrong.
 - **No nested git repos.** Vivary is ONE repo; packages are plain subdirectories,
   not their own `.git`. (Jeff's standing rule.)
-- **Ultraplan before merge** (see [AGENTS.md](AGENTS.md)). No branch merges
+- **Plan + alignment before merge** (see [AGENTS.md](AGENTS.md)). No branch merges
   without a written, human-approved plan (intent · blast radius · verification ·
-  out-of-scope · alignment). Human and agent must be aligned in writing; for
-  Claude this is plan mode + ExitPlanMode approval. Never merge-then-explain.
+  out-of-scope · alignment); human and agent aligned in writing, never
+  merge-then-explain. Claude's mechanism for this gate is **ultraplan** (plan mode)
+  — see [CLAUDE.md](CLAUDE.md).
 - **Publishing is gated per item.** npm/PyPI publish, GitHub org/repo creation,
   pushes, PRs — each needs Jeff's explicit chat confirmation. Don't batch.
 - **Supply chain.** Before any install, check `~/dev/agents/.shared/deny-list-npm.json`

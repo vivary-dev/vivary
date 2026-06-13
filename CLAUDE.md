@@ -4,9 +4,11 @@
 governs you.** This file only adds Claude Code specifics. Starting fresh? Begin
 from [HANDOFF.md](HANDOFF.md).
 
-## Ultraplan = plan mode, approved before you merge
+## Ultraplan — how Claude satisfies the plan+alignment gate
 
-The "ultraplan before merge" gate in AGENTS.md maps to **plan mode**:
+AGENTS.md requires a written, human-approved plan before any merge (runtime-
+agnostic). **Ultraplan is Claude's mechanism for it** — it lives here, not in
+AGENTS.md. It maps to **plan mode**:
 
 - For any substantial change or branch you intend to merge, **enter plan mode**,
   build the ultraplan (intent · blast radius · verification · out-of-scope ·
