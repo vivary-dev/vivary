@@ -246,6 +246,7 @@ tropo stats           # document counts per type + health summary
 tropo graph           # emit the typed graph: documents as nodes, refs as edges
 tropo blast ID        # what (transitively) refs ID — its blast radius
 tropo view [graph|blast ID]  # self-contained HTML render of the graph or a radius
+tropo plan SPEC.toml  # simulate a change (remove/retype/break/add) — render the delta
 tropo init [DIR]      # scaffold a tropo.toml (optionally --packs a,b)
 ```
 
@@ -280,9 +281,23 @@ circle; `view blast ID` uses concentric rings (the target at the centre, each
 ring a hop further out). `--out FILE` writes it; otherwise the HTML goes to
 stdout.
 
-Planned next (a later slice): `tropo plan` — simulate a proposed change (retype,
-remove, break an edge) and render the delta without touching disk — plus a
-semantic graph-diff over those deltas.
+`tropo plan SPEC.toml` simulates a proposed change to the graph and renders the
+**delta** — without ever touching disk. The change-spec is a small TOML file:
+
+```toml
+remove = ["old-decision"]            # delete nodes (and their outbound edges)
+retype = { draft = "decision" }      # change a node's type
+break  = [{ from = "a", to = "b" }]  # delete matching edges (field optional)
+add    = [{ from = "x", field = "depends_on", to = "y" }]   # add edges
+```
+
+The engine builds the current graph, applies the spec to a copy, and reports the
+**semantic diff**: nodes added / removed / retyped, edges added / removed, and
+the actionable `edges_newly_broken` — edges that *survived* the change but now
+point at nothing (e.g. their target was removed). It also lists the documents
+*affected* (those in a changed node's blast radius). `plan` exits non-zero when
+the change would introduce broken edges, so it works as a pre-merge gate. This
+is the impact reasoning a text diff cannot give.
 
 ---
 

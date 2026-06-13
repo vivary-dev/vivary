@@ -372,6 +372,78 @@ def test_layout_ranks_put_target_at_center():
     assert pos["a"] != (100, 100) and pos["b"] != (100, 100)
 
 
+# --- plan + semantic graph-diff --------------------------------------------
+
+def _capture_rc(fn, *a, **k):
+    import contextlib
+    import io
+    import json
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = fn(*a, **k)
+    return rc, json.loads(buf.getvalue())
+
+
+def _chain(tmp_path):
+    return tropo.build_graph(_graph_tree(tmp_path, {
+        "a.md": "---\ndepends_on: b\n---\n# A\n", "b.md": "# B\n"}))
+
+
+def test_apply_change_remove_breaks_inbound_edge(tmp_path):
+    nodes, edges = _chain(tmp_path)
+    n2, e2 = tropo.apply_change(nodes, edges, {"remove": ["b"]})
+    assert "b" not in n2
+    assert [e for e in e2 if e["from"] == "a"][0]["broken"] is True
+
+
+def test_apply_change_break_and_add(tmp_path):
+    nodes, edges = _chain(tmp_path)
+    _, e2 = tropo.apply_change(nodes, edges, {
+        "break": [{"from": "a", "to": "b"}],
+        "add": [{"from": "b", "field": "depends_on", "to": "a"}]})
+    pairs = {(e["from"], e["to"]) for e in e2}
+    assert ("a", "b") not in pairs and ("b", "a") in pairs
+
+
+def test_graph_diff_reports_retype_and_newly_broken(tmp_path):
+    nodes, edges = _chain(tmp_path)
+    n2, e2 = tropo.apply_change(nodes, edges, {"remove": ["b"], "retype": {"a": "decision"}})
+    d = tropo.graph_diff(nodes, edges, n2, e2)
+    assert d["nodes_removed"] == ["b"]
+    assert any(r["id"] == "a" and r["to"] == "decision" for r in d["nodes_retyped"])
+    assert any(e["from"] == "a" and e["to"] == "b" for e in d["edges_newly_broken"])
+
+
+def test_cmd_plan_breaking_change_exits_1(tmp_path):
+    _chain(tmp_path)
+    (tmp_path / "plan.toml").write_text('remove = ["b"]\n')
+    rc, out = _capture_rc(tropo.cmd_plan,
+                          argparse.Namespace(paths=[str(tmp_path / "plan.toml")], json=True),
+                          res(str(tmp_path)))
+    assert rc == 1 and out["problems"] == 1
+    assert out["delta"]["nodes_removed"] == ["b"]
+    assert out["affected"]["a"] == ["b"]  # a depends on the removed b
+
+
+def test_cmd_plan_noop_exits_0(tmp_path):
+    _graph_tree(tmp_path, {"a.md": "# A\n"})
+    (tmp_path / "plan.toml").write_text("# no changes\n")
+    rc, out = _capture_rc(tropo.cmd_plan,
+                          argparse.Namespace(paths=[str(tmp_path / "plan.toml")], json=True),
+                          res(str(tmp_path)))
+    assert rc == 0 and out["problems"] == 0
+
+
+def test_cmd_plan_missing_file_exits(tmp_path):
+    _graph_tree(tmp_path, {"a.md": "# A\n"})
+    try:
+        tropo.cmd_plan(argparse.Namespace(paths=[str(tmp_path / "nope.toml")], json=True),
+                       res(str(tmp_path)))
+        assert False, "expected SystemExit for missing change-spec"
+    except SystemExit:
+        pass
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

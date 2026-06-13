@@ -14,6 +14,7 @@ Usage:
   tropo graph [--json]
   tropo blast <id> [--depth N] [--json]
   tropo view [graph | blast <id>] [--out FILE]
+  tropo plan <change-spec.toml> [--json]
 
 Config is TOML (tropo.toml, resolved by walking up). Content frontmatter is YAML.
 Zero dependencies. Requires Python 3.11+ (for tomllib).
@@ -771,6 +772,60 @@ def blast_radius(edges, target, max_depth=None):
     return impacted
 
 
+def apply_change(nodes, edges, spec):
+    """Apply a change-spec to a graph, in memory, returning a NEW (nodes, edges)
+    — the disk is never touched. Spec keys (all optional):
+      remove = ["id", ...]                  delete nodes (and their outbound edges)
+      retype = { id = "newtype", ... }      change a node's type
+      break  = [{from, to, field?}, ...]    delete matching edges
+      add    = [{from, field, to}, ...]     add edges
+    `broken` is recomputed against the proposed node set."""
+    nodes = {k: dict(v) for k, v in nodes.items()}
+    edges = [dict(e) for e in edges]
+    removed = set(spec.get("remove") or [])
+    for nid in removed:
+        nodes.pop(nid, None)
+    edges = [e for e in edges if e["from"] not in removed]  # gone docs make no refs
+    for nid, t in (spec.get("retype") or {}).items():
+        if nid in nodes:
+            nodes[nid]["type"] = t
+    for b in spec.get("break") or []:
+        frm, to, fld = b.get("from"), b.get("to"), b.get("field")
+        edges = [e for e in edges if not (e["from"] == frm and e["to"] == to
+                                          and (fld is None or e["field"] == fld))]
+    for a in spec.get("add") or []:
+        edges.append({"from": a["from"], "field": a.get("field", "ref"),
+                      "to": a["to"], "broken": False})
+    ids = set(nodes)
+    for e in edges:
+        e["broken"] = e["to"] not in ids
+    edges.sort(key=lambda e: (e["from"], e["field"], e["to"]))
+    return nodes, edges
+
+
+def graph_diff(old_nodes, old_edges, new_nodes, new_edges):
+    """Semantic delta between two graphs: nodes added/removed/retyped and edges
+    added/removed/newly-broken — the structural change a text diff can't show.
+    `edges_newly_broken` is the actionable set: edges that *survived* the change
+    but now point at nothing (e.g. their target was removed)."""
+    def key(e):
+        return (e["from"], e["field"], e["to"])
+    old_e = {key(e): e for e in old_edges}
+    new_e = {key(e): e for e in new_edges}
+    retyped = [{"id": n, "from": old_nodes[n]["type"], "to": new_nodes[n]["type"]}
+               for n in new_nodes
+               if n in old_nodes and old_nodes[n]["type"] != new_nodes[n]["type"]]
+    return {
+        "nodes_added": sorted(set(new_nodes) - set(old_nodes)),
+        "nodes_removed": sorted(set(old_nodes) - set(new_nodes)),
+        "nodes_retyped": sorted(retyped, key=lambda r: r["id"]),
+        "edges_added": [new_e[k] for k in new_e if k not in old_e],
+        "edges_removed": [old_e[k] for k in old_e if k not in new_e],
+        "edges_newly_broken": [new_e[k] for k in new_e
+                               if k in old_e and new_e[k]["broken"] and not old_e[k]["broken"]],
+    }
+
+
 # ---------------------------------------------------------------------------
 # View: a self-contained HTML render of the graph (zero external assets)
 # ---------------------------------------------------------------------------
@@ -1117,6 +1172,69 @@ def cmd_view(args, resolver):
     return 0
 
 
+def cmd_plan(args, resolver):
+    """Simulate a proposed change to the graph and render the delta — what gets
+    retyped, which edges break or appear, which documents are affected — WITHOUT
+    touching disk. The change-spec is a small TOML file (see apply_change).
+    Exits 1 if the change would introduce broken edges (a pre-merge signal)."""
+    if not args.paths:
+        sys.exit("tropo: plan requires a change-spec file (tropo plan <plan.toml>)")
+    spec_path = args.paths[0]
+    if not os.path.isfile(spec_path):
+        sys.exit(f"tropo: change-spec not found: {spec_path}")
+    try:
+        spec = _read_toml(spec_path)
+    except ConfigError as e:
+        sys.exit(f"tropo: {e}")
+
+    nodes, edges = build_graph(analyze(resolver.root, [], resolver))
+    requested = set(spec.get("remove") or []) | set(spec.get("retype") or {})
+    unknown = sorted(t for t in requested if t not in nodes)
+    new_nodes, new_edges = apply_change(nodes, edges, spec)
+    delta = graph_diff(nodes, edges, new_nodes, new_edges)
+
+    gone = set(delta["nodes_removed"])
+    changed = delta["nodes_removed"] + [r["id"] for r in delta["nodes_retyped"]]
+    affected = {}
+    for nid in changed:
+        for dep in blast_radius(edges, nid):
+            if dep not in gone:  # a removed doc isn't "affected", it's gone
+                affected.setdefault(dep, set()).add(nid)
+    broken_added = [e for e in delta["edges_added"] if e["broken"]]
+    problems = len(delta["edges_newly_broken"]) + len(broken_added)
+
+    if args.json:
+        print(json.dumps({
+            "root": resolver.root, "spec": spec_path, "unknown_targets": unknown,
+            "delta": delta, "broken_added": broken_added,
+            "affected": {k: sorted(v) for k, v in sorted(affected.items())},
+            "problems": problems,
+        }, indent=2))
+        return 1 if problems else 0
+
+    print(f"tropo plan: {spec_path}\n")
+    if unknown:
+        print(f"  note: spec targets no such id: {', '.join(unknown)}\n")
+    for nid in delta["nodes_removed"]:
+        print(f"  remove   {nid}")
+    for r in delta["nodes_retyped"]:
+        print(f"  retype   {r['id']}  ({r['from'] or 'untyped'} → {r['to'] or 'untyped'})")
+    for e in delta["edges_removed"]:
+        print(f"  edge -   {e['from']} --{e['field']}--> {e['to']}")
+    for e in delta["edges_added"]:
+        print(f"  edge +   {e['from']} --{e['field']}--> {e['to']}"
+              + ("  (broken!)" if e["broken"] else ""))
+    for e in delta["edges_newly_broken"]:
+        print(f"  BROKEN   {e['from']} --{e['field']}--> {e['to']}   (target gone)")
+    if affected:
+        print("\n  affected (depend on a changed node):")
+        for dep, via in sorted(affected.items()):
+            print(f"    {dep}  (via {', '.join(sorted(via))})")
+    print(f"\ntropo plan: {problems} broken edge(s) introduced, "
+          f"{len(affected)} affected document(s)")
+    return 1 if problems else 0
+
+
 def cmd_fix(args, resolver):
     """Strip frontmatter fields that merely repeat a derived value (W210).
     The only safe mechanical fix tropo makes — it removes noise, never invents
@@ -1187,7 +1305,7 @@ def main(argv=None):
     p.add_argument("--version", action="version", version=f"tropo {__version__}")
     p.add_argument("command", nargs="?", default="check",
                    choices=["check", "signal", "types", "stats", "graph", "blast",
-                            "view", "fix", "init"])
+                            "view", "plan", "fix", "init"])
     p.add_argument("paths", nargs="*",
                    help="files or folders (default: whole tree); for blast, the target id")
     p.add_argument("--strict", action="store_true", help="treat warnings as errors")
@@ -1219,7 +1337,7 @@ def main(argv=None):
 
     return {"check": cmd_check, "signal": cmd_signal, "types": cmd_types,
             "stats": cmd_stats, "graph": cmd_graph, "blast": cmd_blast,
-            "view": cmd_view, "fix": cmd_fix}[args.command](args, resolver)
+            "view": cmd_view, "plan": cmd_plan, "fix": cmd_fix}[args.command](args, resolver)
 
 
 if __name__ == "__main__":
