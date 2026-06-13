@@ -18,7 +18,10 @@ speeds:
   `learn`ed into durable memory, a bug-risk playbook (self-healing), skills
   extracted on the third occurrence of a pattern, and workspace hygiene audits.
 
-Memory, agent state, and agent roles live here.
+Memory, agent state, and agent roles live here. So does **loop literacy** — the
+[loops skill](../../.claude/skills/loops/SKILL.md) (when to recommend a loop and
+how to set one up safely) is strato's domain; it sits at the repo root for now and
+strato should absorb it when built.
 
 **Design law:** this must be *tiny to load*. throughline's whole thesis is that
 the framework must not steal the context the work needs. Resist turning the agent

@@ -21,19 +21,12 @@ AGENTS.md. It maps to **plan mode**:
 - For large or risky changes, you may use a planning subagent / the Plan agent to
   draft the ultraplan, but the human approval gate is the same.
 
-## Loops — Claude's mechanisms
+## Loops
 
-AGENTS.md says *work in loops when possible*. Claude's tools for it:
-
-- **`/loop`** — run a prompt or skill on an interval or self-paced (e.g. "babysit
-  my PRs, auto-fix build issues, address review comments in a worktree").
-- **`/goal`** — keep going until a validator confirms the task is done.
-- **dynamic workflows** — orchestrate many agents for one task.
-- **cloud + auto-mode** — run unattended with the laptop closed.
-
-Always give the loop a way to **self-verify end to end**, and cap it (iterations,
-no-progress, budget). The loop still honors every AGENTS.md hard gate — it stops
-for the plan+alignment merge gate and for publishing. Don't loop across the edges.
+Loops are a recommend-when-it-fits tool, not a default. The **loops skill**
+(`.claude/skills/loops/`) covers when to recommend one and how to set it up with
+Claude's mechanisms (`/loop`, `/goal`, dynamic workflows, cloud + auto-mode).
+Always self-verify and cap; a loop still stops at the hard gates.
 
 ## Skills
 
