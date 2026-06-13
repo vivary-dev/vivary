@@ -13,6 +13,7 @@ Usage:
   tropo stats
   tropo graph [--json]
   tropo blast <id> [--depth N] [--json]
+  tropo view [graph | blast <id>] [--out FILE]
 
 Config is TOML (tropo.toml, resolved by walking up). Content frontmatter is YAML.
 Zero dependencies. Requires Python 3.11+ (for tomllib).
@@ -23,6 +24,7 @@ import argparse
 import copy
 import datetime
 import json
+import math
 import os
 import re
 import subprocess
@@ -770,6 +772,153 @@ def blast_radius(edges, target, max_depth=None):
 
 
 # ---------------------------------------------------------------------------
+# View: a self-contained HTML render of the graph (zero external assets)
+# ---------------------------------------------------------------------------
+
+_PALETTE = ["#4f7cff", "#23b26d", "#e0823d", "#b455d6", "#d6455a", "#2bb8c4", "#9a8c2b"]
+_CANVAS_W, _CANVAS_H, _NODE_R = 960, 640, 22
+
+
+def _color_for(type_name):
+    if not type_name:
+        return "#8a8f99"
+    return _PALETTE[sum(map(ord, type_name)) % len(_PALETTE)]
+
+
+def _esc(s):
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _layout(node_ids, ranks, cx, cy, span):
+    """Position nodes. `ranks` maps id -> ring index (0 = centre); when every
+    node shares rank 0 (the whole-graph view) they fall on one circle."""
+    pos, by_rank = {}, {}
+    for nid in node_ids:
+        by_rank.setdefault(ranks.get(nid, 0), []).append(nid)
+    max_rank = max(by_rank, default=0)
+    for rank, ids in by_rank.items():
+        ids = sorted(ids)
+        n = len(ids)
+        if rank == 0 and n == 1:
+            pos[ids[0]] = (cx, cy)
+            continue
+        r = span if max_rank == 0 else span * rank / max_rank
+        r = r or span  # single ring (whole graph) sits on the outer circle
+        for i, nid in enumerate(ids):
+            ang = (2 * math.pi * i / n if n > 1 else 0) - math.pi / 2
+            pos[nid] = (cx + r * math.cos(ang), cy + r * math.sin(ang))
+    return pos
+
+
+def render_graph_html(title, nodes, edges, ranks=None):
+    """A complete, self-contained HTML document drawing `nodes`/`edges` as an
+    SVG (inline data, no CDN/library). `ranks` (id -> ring) drives the blast
+    concentric layout; absent, the whole graph is laid out on one circle."""
+    ranks = ranks or {}
+    cx, cy = _CANVAS_W / 2, _CANVAS_H / 2
+    span = min(cx, cy) - 90
+    pos = _layout(list(nodes), ranks, cx, cy, span)
+
+    edge_svg = []
+    for e in edges:
+        if e["from"] not in pos or e["to"] not in pos:
+            continue
+        x1, y1 = pos[e["from"]]
+        x2, y2 = pos[e["to"]]
+        dx, dy = x2 - x1, y2 - y1
+        d = math.hypot(dx, dy) or 1
+        ux, uy = dx / d, dy / d
+        cls = "edge broken" if e["broken"] else "edge"
+        edge_svg.append(
+            f'<line class="{cls}" data-from="{_esc(e["from"])}" data-to="{_esc(e["to"])}" '
+            f'x1="{x1 + ux * _NODE_R:.1f}" y1="{y1 + uy * _NODE_R:.1f}" '
+            f'x2="{x2 - ux * _NODE_R:.1f}" y2="{y2 - uy * _NODE_R:.1f}" '
+            f'marker-end="url(#arrow)"><title>{_esc(e["from"])} --{_esc(e["field"])}--> '
+            f'{_esc(e["to"])}{" (broken)" if e["broken"] else ""}</title></line>')
+
+    node_svg = []
+    for nid, n in sorted(nodes.items()):
+        x, y = pos[nid]
+        color = _color_for(n["type"])
+        node_svg.append(
+            f'<g class="node" data-id="{_esc(nid)}" transform="translate({x:.1f},{y:.1f})">'
+            f'<circle r="{_NODE_R}" fill="{color}"></circle>'
+            f'<text class="lbl" y="{_NODE_R + 14}">{_esc(nid)}</text>'
+            f'<title>{_esc(nid)} [{_esc(n["type"] or "untyped")}]\n{_esc(n["path"])}</title></g>')
+
+    types = sorted({n["type"] for n in nodes.values()}, key=lambda t: (t is None, t))
+    legend = "".join(
+        f'<span class="key"><i style="background:{_color_for(t)}"></i>{_esc(t or "untyped")}</span>'
+        for t in types)
+    broken = sum(1 for e in edges if e["broken"])
+    sub = (f"{len(nodes)} node(s) · {len(edges)} edge(s)"
+           + (f" · {broken} broken" if broken else ""))
+
+    return _HTML_SHELL.format(
+        title=_esc(title), sub=_esc(sub), legend=legend,
+        w=_CANVAS_W, h=_CANVAS_H,
+        edges="\n".join(edge_svg), nodes="\n".join(node_svg))
+
+
+_HTML_SHELL = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>tropo · {title}</title>
+<style>
+  :root {{ color-scheme: dark light; }}
+  body {{ margin: 0; font: 14px/1.4 ui-sans-serif, system-ui, sans-serif;
+          background: #14161c; color: #e6e8ee; }}
+  header {{ padding: 14px 20px; border-bottom: 1px solid #2a2e38; }}
+  header h1 {{ margin: 0; font-size: 16px; }}
+  header .sub {{ color: #9aa0ad; font-size: 12px; }}
+  .legend {{ padding: 8px 20px; display: flex; gap: 16px; flex-wrap: wrap; }}
+  .key {{ display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #c4c9d4; }}
+  .key i {{ width: 12px; height: 12px; border-radius: 3px; display: inline-block; }}
+  svg {{ display: block; width: 100%; height: auto; }}
+  .edge {{ stroke: #5b6270; stroke-width: 1.5; }}
+  .edge.broken {{ stroke: #d6455a; stroke-dasharray: 5 4; }}
+  .node circle {{ stroke: #14161c; stroke-width: 2; cursor: pointer; }}
+  .lbl {{ text-anchor: middle; fill: #c4c9d4; font-size: 11px; pointer-events: none; }}
+  svg.dim .node, svg.dim .edge {{ opacity: .12; }}
+  svg.dim .node.hi, svg.dim .edge.hi {{ opacity: 1; }}
+  #arrow {{ fill: #5b6270; }}
+</style></head>
+<body>
+<header><h1>tropo · {title}</h1><div class="sub">{sub}</div></header>
+<div class="legend">{legend}</div>
+<svg viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="3"
+    orient="auto" markerUnits="strokeWidth">
+    <path d="M0,0 L7,3 L0,6 z" fill="#5b6270"></path></marker></defs>
+  <g class="edges">{edges}</g>
+  <g class="nodes">{nodes}</g>
+</svg>
+<script>
+  const svg = document.querySelector('svg');
+  const sel = id => svg.querySelector('.node[data-id="' + (window.CSS ? CSS.escape(id) : id) + '"]');
+  svg.querySelectorAll('.node').forEach(node => {{
+    node.addEventListener('mouseenter', () => {{
+      const id = node.dataset.id;
+      svg.classList.add('dim'); node.classList.add('hi');
+      svg.querySelectorAll('.edge').forEach(e => {{
+        if (e.dataset.from === id || e.dataset.to === id) {{
+          e.classList.add('hi');
+          sel(e.dataset.from) && sel(e.dataset.from).classList.add('hi');
+          sel(e.dataset.to) && sel(e.dataset.to).classList.add('hi');
+        }}
+      }});
+    }});
+    node.addEventListener('mouseleave', () => {{
+      svg.classList.remove('dim');
+      svg.querySelectorAll('.hi').forEach(x => x.classList.remove('hi'));
+    }});
+  }});
+</script>
+</body></html>
+"""
+
+
+# ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
@@ -932,6 +1081,42 @@ def cmd_blast(args, resolver):
     return 0
 
 
+def cmd_view(args, resolver):
+    """Render the graph (or a blast radius) as one self-contained HTML file.
+    `tropo view` → whole graph; `tropo view blast <id>` → that node's radius.
+    Writes to --out, else prints the HTML to stdout."""
+    subject = args.paths[0] if args.paths else "graph"
+    docs = analyze(resolver.root, [], resolver)
+    nodes, edges = build_graph(docs)
+
+    if subject == "graph":
+        title, ranks = "graph", None
+        sub_nodes, sub_edges = nodes, edges
+    elif subject == "blast":
+        if len(args.paths) < 2:
+            sys.exit("tropo: view blast requires a document id (tropo view blast <id>)")
+        target = args.paths[1]
+        if target not in nodes:
+            sys.exit(f"tropo: no document with id {target!r} (run `tropo graph` to list ids)")
+        impacted = blast_radius(edges, target, args.depth)
+        keep = set(impacted) | {target}
+        sub_nodes = {nid: nodes[nid] for nid in keep}
+        sub_edges = [e for e in edges if e["from"] in keep and e["to"] in keep]
+        ranks = {target: 0, **{nid: info["distance"] for nid, info in impacted.items()}}
+        title = f"blast · {target}"
+    else:
+        sys.exit(f"tropo: unknown view subject {subject!r} (use 'graph' or 'blast <id>')")
+
+    html = render_graph_html(title, sub_nodes, sub_edges, ranks)
+    if args.out:
+        with open(args.out, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(html)
+        print(f"tropo: wrote {args.out}  ({len(sub_nodes)} node(s), {len(sub_edges)} edge(s))")
+    else:
+        print(html)
+    return 0
+
+
 def cmd_fix(args, resolver):
     """Strip frontmatter fields that merely repeat a derived value (W210).
     The only safe mechanical fix tropo makes — it removes noise, never invents
@@ -1002,7 +1187,7 @@ def main(argv=None):
     p.add_argument("--version", action="version", version=f"tropo {__version__}")
     p.add_argument("command", nargs="?", default="check",
                    choices=["check", "signal", "types", "stats", "graph", "blast",
-                            "fix", "init"])
+                            "view", "fix", "init"])
     p.add_argument("paths", nargs="*",
                    help="files or folders (default: whole tree); for blast, the target id")
     p.add_argument("--strict", action="store_true", help="treat warnings as errors")
@@ -1010,6 +1195,7 @@ def main(argv=None):
     p.add_argument("--quiet", action="store_true", help="hide warnings")
     p.add_argument("--dry-run", action="store_true", help="fix: preview without writing")
     p.add_argument("--depth", type=int, default=None, help="blast: max hops (default: unlimited)")
+    p.add_argument("--out", default=None, help="view: write HTML here (default: stdout)")
     p.add_argument("--packs", default=None, help="init: comma-separated pack names")
     p.add_argument("--root", default=None, help="tree root (default: walk up for tropo.toml)")
     p.add_argument("--config", default=None, help="explicit tropo.toml path")
@@ -1033,7 +1219,7 @@ def main(argv=None):
 
     return {"check": cmd_check, "signal": cmd_signal, "types": cmd_types,
             "stats": cmd_stats, "graph": cmd_graph, "blast": cmd_blast,
-            "fix": cmd_fix}[args.command](args, resolver)
+            "view": cmd_view, "fix": cmd_fix}[args.command](args, resolver)
 
 
 if __name__ == "__main__":

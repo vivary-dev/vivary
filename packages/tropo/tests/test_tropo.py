@@ -320,6 +320,58 @@ def test_blast_unknown_id_exits(tmp_path):
         pass
 
 
+# --- view (self-contained HTML render) -------------------------------------
+
+def _assert_self_contained(txt):
+    assert txt.startswith("<!doctype html>")
+    assert "<svg" in txt and "</svg>" in txt
+    body = txt.replace('xmlns="http://www.w3.org/2000/svg"', "")
+    for bad in ("src=", "http://", "https://", "<link", "<script src"):
+        assert bad not in body, f"not self-contained: found {bad!r}"
+
+
+def test_view_writes_self_contained_html(tmp_path):
+    out = tmp_path / "g.html"
+    tropo.cmd_view(argparse.Namespace(paths=["graph"], depth=None, out=str(out)), res())
+    txt = out.read_text(encoding="utf-8")
+    _assert_self_contained(txt)
+    for nid in ("tropo", "jeff", "2026-06-12-kickoff", "0001-folder-as-type"):
+        assert f'data-id="{nid}"' in txt
+
+
+def test_view_blast_subgraph_only_radius(tmp_path):
+    _graph_tree(tmp_path, {"a.md": "---\ndepends_on: b\n---\n# A\n",
+                           "b.md": "---\ndepends_on: c\n---\n# B\n",
+                           "c.md": "# C\n", "z.md": "# Z (unrelated)\n"})
+    out = tmp_path / "b.html"
+    tropo.cmd_view(argparse.Namespace(paths=["blast", "c"], depth=None, out=str(out)),
+                   res(str(tmp_path)))
+    txt = out.read_text(encoding="utf-8")
+    _assert_self_contained(txt)
+    assert all(f'data-id="{n}"' in txt for n in ("a", "b", "c"))
+    assert 'data-id="z"' not in txt  # unrelated node not in the blast radius
+
+
+def test_view_blast_unknown_id_exits(tmp_path):
+    _graph_tree(tmp_path, {"a.md": "# A\n"})
+    try:
+        tropo.cmd_view(argparse.Namespace(paths=["blast", "nope"], depth=None, out=None),
+                       res(str(tmp_path)))
+        assert False, "expected SystemExit for unknown id"
+    except SystemExit:
+        pass
+
+
+def test_render_empty_graph_ok():
+    _assert_self_contained(tropo.render_graph_html("graph", {}, []))
+
+
+def test_layout_ranks_put_target_at_center():
+    pos = tropo._layout(["t", "a", "b"], {"t": 0, "a": 1, "b": 1}, 100, 100, 60)
+    assert pos["t"] == (100, 100)               # rank-0 sole node sits at centre
+    assert pos["a"] != (100, 100) and pos["b"] != (100, 100)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

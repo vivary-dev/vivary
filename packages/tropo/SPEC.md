@@ -245,12 +245,13 @@ tropo types           # print the resolved, merged type registry
 tropo stats           # document counts per type + health summary
 tropo graph           # emit the typed graph: documents as nodes, refs as edges
 tropo blast ID        # what (transitively) refs ID — its blast radius
+tropo view [graph|blast ID]  # self-contained HTML render of the graph or a radius
 tropo init [DIR]      # scaffold a tropo.toml (optionally --packs a,b)
 ```
 
 Global flags: `--config PATH`, `--root PATH`, `--json`, `--strict`
 (warnings→errors), `--quiet` (errors only), `--dry-run` (fix preview),
-`--depth N` (blast hop limit), `--packs a,b` (init).
+`--depth N` (blast hop limit), `--out FILE` (view target), `--packs a,b` (init).
 
 `tropo fix` is deliberately minimal: it removes `W210` noise (a declared field
 equal to its derived value) and deletes a frontmatter block that becomes empty.
@@ -272,9 +273,15 @@ transitively, `ref`s `ID` — i.e. what a change to it could touch (the inbound-
 closure). `--depth N` caps the hops. Cycles terminate and a node never appears in
 its own blast radius. This is the impact reasoning a line diff cannot give.
 
-Planned next (later slices): `tropo view` (a self-contained HTML render of the
-graph or a blast radius) and `tropo plan` (simulate a proposed change — retype,
-remove, break an edge — and render the delta without touching disk), plus a
+`tropo view` renders the graph — or a single blast radius — as **one
+self-contained HTML file**: inline SVG, inline data, no CDN, no library, in
+keeping with the zero-dependency engine. The whole-graph view lays nodes on a
+circle; `view blast ID` uses concentric rings (the target at the centre, each
+ring a hop further out). `--out FILE` writes it; otherwise the HTML goes to
+stdout.
+
+Planned next (a later slice): `tropo plan` — simulate a proposed change (retype,
+remove, break an edge) and render the delta without touching disk — plus a
 semantic graph-diff over those deltas.
 
 ---
