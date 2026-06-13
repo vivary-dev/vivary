@@ -18,10 +18,31 @@ gates.* Modules: **tropo** (knowledge), **strato** (agent OS), **ozone**
 layer or file that is expensive to load is *wrong*. Fewer files, fewer words, more
 room for the work. This file obeys its own law — keep it that way.
 
-## The loop
+## The operating loop (per turn)
 
 `Ask → retrieve → act → verify → learn → gate.` State known / inferred / unknown
 and confirm before guessing. Do one verified slice at a time.
+
+## Work in loops (when work is repeatable or long-running)
+
+Prefer designing a loop over one-off prompting. A loop is *cron plus a
+decision-maker in the body*: each tick, read the current state, decide the next
+action, do it, check it worked, decide whether to continue. You author the loop
+and its stopping behavior; the agent runs inside it.
+
+A loop without these guardrails is a billing accident, not automation:
+
+- **Self-verification** — the loop checks its own work every tick (tests, build,
+  sources). A loop with no feedback is a machine for confident mistakes.
+- **Hard stops** — a max iteration count, **no-progress detection**, and a
+  token/$ budget ceiling. Most of the job is making the loop halt.
+- **Skills, not re-derived prompts** — loops call sharp, named skills (extract one
+  the third time a pattern recurs). Loops that re-derive everything burn money.
+- **Durable state** — lean on git-backed state so the loop survives a restart.
+
+**Loops never cross the hard gates (below).** A loop may iterate on a branch
+autonomously, but it STOPS for human approval at merge, publishing, destructive,
+and source-repo boundaries. Autonomy inside the work; alignment at the edges.
 
 ## 🚦 Hard gates — STOP and get the human
 
