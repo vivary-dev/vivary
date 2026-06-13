@@ -1,0 +1,17 @@
+# dev-project pack — a typed-knowledge layer for a codebase's docs/.
+# Drop `packs = ["dev-project"]` into a repo's tropo.toml to enable these types.
+
+[types.decision]
+folder   = "decisions"          # ADRs; nests under any component folder
+required = { status = "enum:proposed|accepted|superseded", date = "date" }
+optional = { supersedes = "ref", superseded_by = "ref", deciders = "string-list" }
+
+[types.runbook]
+folder   = "runbooks"
+required = { owner = "string" }
+optional = { severity = "enum:low|medium|high|critical", last_drill = "date" }
+
+[types.spec]
+folder   = "specs"
+required = { status = "enum:draft|review|stable|deprecated" }
+optional = { supersedes = "ref" }

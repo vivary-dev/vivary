@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tropo"
+version = "0.1.0"
+description = "The filesystem is the schema: a folder-as-type typed-knowledge layer for Markdown."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Jeff Kazzee" }]
+keywords = ["markdown", "frontmatter", "knowledge-base", "second-brain", "typechecker"]
+dependencies = []
+
+[project.scripts]
+tropo = "tropo:main"
+
+[tool.setuptools]
+py-modules = ["tropo"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

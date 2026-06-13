@@ -1,0 +1,19 @@
+# tropo's own config — tropo is governed by tropo.
+# This repo is mostly prose, so the type surface here is intentionally small.
+version = 1
+
+# examples/vault is its own independent tropo tree (it has its own tropo.toml);
+# keep it out of this repo's tree so each is checked against its own config.
+exclude = ["examples"]
+
+[base]
+derive        = ["id", "title", "created", "updated"]
+optional      = { tags = "string-list", status = "string" }
+allow_untyped = true            # README.md / SPEC.md sit outside any type root
+
+# Decision records for the project itself. Lives at examples/ during spec stage;
+# promote to a top-level decisions/ once the engine exists.
+[types.decision]
+folder   = "decisions"
+required = { status = "enum:proposed|accepted|superseded", date = "date" }
+optional = { supersedes = "ref", superseded_by = "ref" }

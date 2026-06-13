@@ -1,0 +1,28 @@
+# A complete, drop-in tropo config for a small personal vault.
+# Copy this to the root of any folder of Markdown to give it a typed layer.
+version = 1
+
+[base]
+derive        = ["id", "title", "created", "updated"]
+optional      = { tags = "string-list", aliases = "string-list" }
+allow_untyped = true
+
+[types.person]
+folder   = ["people", "contacts"]   # folder aliases: either roots a person
+required = { relationship = "enum:self|family|friend|colleague|other" }
+optional = { company = "string", email = "url" }
+
+[types.project]
+folder   = "projects"
+required = { status = "enum:idea|active|paused|shipped|archived" }
+optional = { repo = "url", target_ship = "date" }
+
+[types.decision]
+folder   = "decisions"          # nests inside projects/<name>/decisions/
+required = { status = "enum:proposed|accepted|superseded", date = "date" }
+optional = { supersedes = "ref" }
+
+[types.meeting]
+folder   = "meetings"
+required = { attendees = "string-list" }
+optional = { date = "date", project = "ref" }

@@ -1,0 +1,6 @@
+# Overlay: tightens the `decision` type for decisions under this project only.
+# Overlays may ONLY add constraints (SPEC §5.6). Here: decisions about tropo
+# must record who decided. A decision elsewhere in the vault is unaffected.
+[types.decision]
+folder   = "decisions"
+required = { deciders = "string-list" }

@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Node
+node_modules/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Disposable test workspaces (keep the README, ignore the rest)
+sandboxes/*
+!sandboxes/README.md
+
+# Local drafts
+drafts/

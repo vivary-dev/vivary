@@ -1,0 +1,101 @@
+# repo-graph pack - typed Markdown nodes for Graphify-friendly repo maps.
+#
+# This pack is intentionally explicit-friendly. Unlike Tropo's stricter
+# zero-frontmatter examples, repo graph nodes often carry stable ids and
+# relationship fields so external graph tools can consume them directly.
+
+[base]
+allow_untyped = true
+
+[base.optional]
+id = "slug"
+type = "string"
+project = "string"
+status = "enum:active|closed-local|closed|blocked|deferred|superseded|draft"
+created = "date"
+updated = "date"
+tags = "string-list"
+aliases = "string-list"
+related = "string-list"
+source_of_truth = "string-list"
+
+[types.module]
+folder = "modules"
+
+[types.module.required]
+project = "string"
+status = "enum:active|closed-local|closed|blocked|deferred|superseded|draft"
+module_area = "string"
+
+[types.module.optional]
+app_repo_path = "string"
+source_files = "string-list"
+test_files = "string-list"
+related_modules = "string-list"
+related_changes = "string-list"
+verification = "any"
+gates = "string-list"
+
+[types.implementation_slice]
+folder = "changes"
+
+[types.implementation_slice.required]
+project = "string"
+status = "enum:active|closed-local|closed|blocked|deferred|superseded|draft"
+slice = "string"
+
+[types.implementation_slice.optional]
+branch = "string"
+app_repo_path = "string"
+local_base_sha = "string"
+remote_dev_sha_at_graph_creation = "string"
+provider_spend = "string"
+push_or_merge = "string"
+related_modules = "string-list"
+related_changes = "string-list"
+verification = "any"
+gates = "string-list"
+
+[types.decision]
+folder = "decisions"
+
+[types.decision.required]
+project = "string"
+status = "enum:proposed|accepted|superseded|deferred"
+date = "date"
+
+[types.decision.optional]
+supersedes = "string"
+superseded_by = "string"
+related_modules = "string-list"
+related_changes = "string-list"
+rationale = "string"
+
+[types.verification]
+folder = "verification"
+
+[types.verification.required]
+project = "string"
+status = "enum:planned|passed|failed|blocked|deferred"
+target = "string"
+
+[types.verification.optional]
+command = "string"
+evidence = "any"
+related_modules = "string-list"
+related_changes = "string-list"
+
+[types.gate]
+folder = "gates"
+
+[types.gate.required]
+project = "string"
+status = "enum:open|approved|rejected|deferred"
+gate = "string"
+
+[types.gate.optional]
+approver = "string"
+approved_at = "datetime"
+command_intent = "string"
+related_modules = "string-list"
+related_changes = "string-list"

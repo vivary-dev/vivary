@@ -1,0 +1,15 @@
+# Python (engine slice, later)
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Local marketing/content drafts — not part of the public repo
+drafts/
