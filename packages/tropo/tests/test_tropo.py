@@ -237,6 +237,89 @@ def test_tighten_only_rejects_required_to_optional():
         pass
 
 
+# --- graph + blast (typed edges) -------------------------------------------
+
+def _graph_tree(tmp_path, files):
+    """Write a tree whose base config types `depends_on` (ref) and `related`
+    (ref-list), then analyze it. `files` maps name -> file content."""
+    (tmp_path / "tropo.toml").write_text(
+        "[base]\nderive = ['id', 'title']\n"
+        'optional = { depends_on = "ref", related = "ref-list" }\n'
+        "allow_untyped = true\n")
+    for name, content in files.items():
+        (tmp_path / name).write_text(content)
+    return tropo.analyze(str(tmp_path), [], res(str(tmp_path)))
+
+
+def test_build_graph_real_vault():
+    nodes, edges = tropo.build_graph(tropo.analyze(VAULT, [], res()))
+    assert set(nodes) == {"jeff", "tropo", "2026-06-12-kickoff", "0001-folder-as-type"}
+    assert {"from": "2026-06-12-kickoff", "field": "project",
+            "to": "tropo", "broken": False} in edges
+    assert all(not e["broken"] for e in edges)
+
+
+def test_build_graph_marks_broken_ref(tmp_path):
+    docs = _graph_tree(tmp_path, {"a.md": "---\ndepends_on: ghost\n---\n# A\n"})
+    _, edges = tropo.build_graph(docs)
+    assert edges == [{"from": "a", "field": "depends_on", "to": "ghost", "broken": True}]
+
+
+def test_build_graph_ref_list_is_multiple_edges(tmp_path):
+    docs = _graph_tree(tmp_path, {"a.md": "---\nrelated: [b, c]\n---\n# A\n",
+                                  "b.md": "# B\n", "c.md": "# C\n"})
+    _, edges = tropo.build_graph(docs)
+    assert {(e["from"], e["to"]) for e in edges} == {("a", "b"), ("a", "c")}
+
+
+def test_blast_transitive_closure(tmp_path):
+    docs = _graph_tree(tmp_path, {"a.md": "---\ndepends_on: b\n---\n# A\n",
+                                  "b.md": "---\ndepends_on: c\n---\n# B\n",
+                                  "c.md": "# C\n"})
+    _, edges = tropo.build_graph(docs)
+    impacted = tropo.blast_radius(edges, "c")
+    assert impacted["b"]["distance"] == 1 and impacted["a"]["distance"] == 2
+    assert "c" not in impacted  # never includes the target itself
+
+
+def test_blast_depth_limit(tmp_path):
+    docs = _graph_tree(tmp_path, {"a.md": "---\ndepends_on: b\n---\n# A\n",
+                                  "b.md": "---\ndepends_on: c\n---\n# B\n",
+                                  "c.md": "# C\n"})
+    _, edges = tropo.build_graph(docs)
+    assert set(tropo.blast_radius(edges, "c", max_depth=1)) == {"b"}
+
+
+def test_blast_handles_cycle(tmp_path):
+    docs = _graph_tree(tmp_path, {"a.md": "---\ndepends_on: b\n---\n# A\n",
+                                  "b.md": "---\ndepends_on: a\n---\n# B\n"})
+    _, edges = tropo.build_graph(docs)
+    assert set(tropo.blast_radius(edges, "a")) == {"b"}  # cycle terminates, excludes a
+
+
+def test_graph_json_surface():
+    out = _capture(tropo.cmd_graph, argparse.Namespace(json=True), res())
+    assert out["counts"] == {"nodes": 4, "edges": 1, "broken": 0}
+    assert {n["id"] for n in out["nodes"]} >= {"tropo", "jeff"}
+
+
+def test_blast_json_surface():
+    out = _capture(tropo.cmd_blast,
+                   argparse.Namespace(paths=["tropo"], depth=None, json=True), res())
+    assert out["target"] == "tropo"
+    assert out["impacted"][0]["id"] == "2026-06-12-kickoff"
+
+
+def test_blast_unknown_id_exits(tmp_path):
+    _graph_tree(tmp_path, {"a.md": "# A\n"})
+    try:
+        tropo.cmd_blast(argparse.Namespace(paths=["nope"], depth=None, json=True),
+                        res(str(tmp_path)))
+        assert False, "expected SystemExit for unknown id"
+    except SystemExit:
+        pass
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

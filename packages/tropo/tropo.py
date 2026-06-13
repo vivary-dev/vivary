@@ -11,6 +11,8 @@ Usage:
   tropo signal [paths...]
   tropo types
   tropo stats
+  tropo graph [--json]
+  tropo blast <id> [--depth N] [--json]
 
 Config is TOML (tropo.toml, resolved by walking up). Content frontmatter is YAML.
 Zero dependencies. Requires Python 3.11+ (for tomllib).
@@ -26,7 +28,7 @@ import re
 import subprocess
 import sys
 import tomllib
-from collections import Counter
+from collections import Counter, deque
 
 __version__ = "0.1.0"
 
@@ -708,6 +710,66 @@ def analyze(root, paths, config):
 
 
 # ---------------------------------------------------------------------------
+# Graph: the typed edges (ref/ref-list) as a navigable graph
+# ---------------------------------------------------------------------------
+
+def build_graph(docs):
+    """Build the typed graph from analyzed docs.
+
+    Nodes are documents keyed by their derived `id`; edges are the `ref`/`ref-list`
+    fields already collected in `Doc.refs`. An edge whose target matches no node
+    id is `broken` (the same condition `check` reports as W220). Returns
+    `(nodes, edges)`:
+      nodes: dict id -> {"id", "type", "path"}
+      edges: list of {"from", "field", "to", "broken"}, sorted for stable output
+    """
+    nodes = {}
+    for d in docs:
+        nid = d.derived.get("id")
+        if nid is None:  # unreadable file (E000) — no node
+            continue
+        nodes.setdefault(nid, {"id": nid, "type": d.type,
+                               "path": d.rel.replace("\\", "/")})
+    edges = []
+    for d in docs:
+        src = d.derived.get("id")
+        if src is None:
+            continue
+        for field, target, _line in d.refs:
+            if not isinstance(target, str):
+                continue
+            edges.append({"from": src, "field": field, "to": target,
+                          "broken": target not in nodes})
+    edges.sort(key=lambda e: (e["from"], e["field"], e["to"]))
+    return nodes, edges
+
+
+def blast_radius(edges, target, max_depth=None):
+    """Inbound-edge transitive closure: every node that (transitively) refs
+    `target` — what a change to `target` could touch. Reverse BFS over the edge
+    list. Returns dict id -> {"distance", "via"} (nearest distance wins),
+    excluding `target` itself even if a cycle leads back to it."""
+    rev = {}
+    for e in edges:
+        rev.setdefault(e["to"], []).append((e["from"], e["field"]))
+    impacted = {}
+    queue = deque((src, 1, field) for src, field in rev.get(target, []))
+    while queue:
+        nid, dist, via = queue.popleft()
+        if nid == target:
+            continue
+        if max_depth is not None and dist > max_depth:
+            continue
+        prev = impacted.get(nid)
+        if prev is not None and prev["distance"] <= dist:
+            continue
+        impacted[nid] = {"distance": dist, "via": via}
+        for src, field in rev.get(nid, []):
+            queue.append((src, dist + 1, field))
+    return impacted
+
+
+# ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
@@ -809,6 +871,67 @@ def cmd_stats(args, resolver):
     return 0
 
 
+def cmd_graph(args, resolver):
+    """Emit the typed knowledge graph — documents as nodes, ref/ref-list fields
+    as edges. The whole tree is analyzed regardless of path args, since an edge
+    may originate anywhere."""
+    docs = analyze(resolver.root, [], resolver)
+    nodes, edges = build_graph(docs)
+    broken = sum(1 for e in edges if e["broken"])
+    if args.json:
+        print(json.dumps({
+            "root": resolver.root,
+            "nodes": sorted(nodes.values(), key=lambda n: n["id"]),
+            "edges": edges,
+            "counts": {"nodes": len(nodes), "edges": len(edges), "broken": broken},
+        }, indent=2))
+        return 0
+    print(f"tropo graph: {len(nodes)} node(s), {len(edges)} edge(s)"
+          + (f", {broken} broken" if broken else ""))
+    out = {}
+    for e in edges:
+        out.setdefault(e["from"], []).append(e)
+    for nid in sorted(nodes):
+        n = nodes[nid]
+        print(f"\n  {nid}  [{n['type'] or 'untyped'}]")
+        for e in out.get(nid, []):
+            print(f"    --{e['field']}--> {e['to']}" + ("  (broken)" if e["broken"] else ""))
+    return 0
+
+
+def cmd_blast(args, resolver):
+    """Show a document's blast radius — everything that (transitively) refs it,
+    i.e. what a change to it could touch (inbound-edge closure)."""
+    if not args.paths:
+        sys.exit("tropo: blast requires a document id (tropo blast <id>)")
+    target = args.paths[0]
+    docs = analyze(resolver.root, [], resolver)
+    nodes, edges = build_graph(docs)
+    if target not in nodes:
+        sys.exit(f"tropo: no document with id {target!r} (run `tropo graph` to list ids)")
+    impacted = blast_radius(edges, target, args.depth)
+    rows = sorted(impacted.items(), key=lambda kv: (kv[1]["distance"], kv[0]))
+    if args.json:
+        print(json.dumps({
+            "root": resolver.root,
+            "target": target,
+            "depth": args.depth,
+            "impacted": [{"id": nid, "type": nodes[nid]["type"],
+                          "distance": info["distance"], "via": info["via"]}
+                         for nid, info in rows],
+            "counts": {"impacted": len(rows)},
+        }, indent=2))
+        return 0
+    n = nodes[target]
+    print(f"tropo blast: {target} [{n['type'] or 'untyped'}] — "
+          f"{len(rows)} document(s) depend on it"
+          + (f" (depth ≤ {args.depth})" if args.depth is not None else ""))
+    for nid, info in rows:
+        print(f"  {nid}  [{nodes[nid]['type'] or 'untyped'}]"
+              f"   (distance {info['distance']}, via {info['via']})")
+    return 0
+
+
 def cmd_fix(args, resolver):
     """Strip frontmatter fields that merely repeat a derived value (W210).
     The only safe mechanical fix tropo makes — it removes noise, never invents
@@ -878,12 +1001,15 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="tropo", description="The filesystem is the schema.")
     p.add_argument("--version", action="version", version=f"tropo {__version__}")
     p.add_argument("command", nargs="?", default="check",
-                   choices=["check", "signal", "types", "stats", "fix", "init"])
-    p.add_argument("paths", nargs="*", help="files or folders (default: whole tree)")
+                   choices=["check", "signal", "types", "stats", "graph", "blast",
+                            "fix", "init"])
+    p.add_argument("paths", nargs="*",
+                   help="files or folders (default: whole tree); for blast, the target id")
     p.add_argument("--strict", action="store_true", help="treat warnings as errors")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument("--quiet", action="store_true", help="hide warnings")
     p.add_argument("--dry-run", action="store_true", help="fix: preview without writing")
+    p.add_argument("--depth", type=int, default=None, help="blast: max hops (default: unlimited)")
     p.add_argument("--packs", default=None, help="init: comma-separated pack names")
     p.add_argument("--root", default=None, help="tree root (default: walk up for tropo.toml)")
     p.add_argument("--config", default=None, help="explicit tropo.toml path")
@@ -906,7 +1032,8 @@ def main(argv=None):
         sys.exit(f"tropo: config error: {e}")
 
     return {"check": cmd_check, "signal": cmd_signal, "types": cmd_types,
-            "stats": cmd_stats, "fix": cmd_fix}[args.command](args, resolver)
+            "stats": cmd_stats, "graph": cmd_graph, "blast": cmd_blast,
+            "fix": cmd_fix}[args.command](args, resolver)
 
 
 if __name__ == "__main__":

@@ -234,10 +234,7 @@ constraint away.
 
 ---
 
-## 6. CLI surface (planned)
-
-The engine is spec'd here for reference; implementation follows in a later
-slice.
+## 6. CLI surface
 
 ```
 tropo            # check the tree rooted at the nearest tropo.toml (cwd)
@@ -246,12 +243,14 @@ tropo fix             # strip frontmatter that merely repeats a derived value (d
 tropo signal          # print ONLY the irreducible declared metadata, per document
 tropo types           # print the resolved, merged type registry
 tropo stats           # document counts per type + health summary
+tropo graph           # emit the typed graph: documents as nodes, refs as edges
+tropo blast ID        # what (transitively) refs ID — its blast radius
 tropo init [DIR]      # scaffold a tropo.toml (optionally --packs a,b)
 ```
 
 Global flags: `--config PATH`, `--root PATH`, `--json`, `--strict`
 (warnings→errors), `--quiet` (errors only), `--dry-run` (fix preview),
-`--packs a,b` (init).
+`--depth N` (blast hop limit), `--packs a,b` (init).
 
 `tropo fix` is deliberately minimal: it removes `W210` noise (a declared field
 equal to its derived value) and deletes a frontmatter block that becomes empty.
@@ -261,6 +260,22 @@ did not derive — de-noising is the whole job, in keeping with signal-over-nois
 `tropo signal` is the namesake report: it walks the tree and prints, per
 document, only the fields that are *not* derivable — the literal signal, with
 the noise removed. It is the fastest way to see what a vault actually asserts.
+
+`tropo graph` treats a document's `ref`/`ref-list` fields as **typed edges**: the
+tree is already a graph, so this just makes it navigable. Nodes are documents
+(keyed by `id`); each edge carries the field it came from. An edge whose target
+matches no `id` is reported `broken` (the W220 condition). Whole-tree always —
+an edge may originate anywhere.
+
+`tropo blast ID` is the **blast radius**: every document that, directly or
+transitively, `ref`s `ID` — i.e. what a change to it could touch (the inbound-edge
+closure). `--depth N` caps the hops. Cycles terminate and a node never appears in
+its own blast radius. This is the impact reasoning a line diff cannot give.
+
+Planned next (later slices): `tropo view` (a self-contained HTML render of the
+graph or a blast radius) and `tropo plan` (simulate a proposed change — retype,
+remove, break an edge — and render the delta without touching disk), plus a
+semantic graph-diff over those deltas.
 
 ---
 
