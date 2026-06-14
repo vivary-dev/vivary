@@ -200,9 +200,70 @@ def _capture(fn, *a, **k):
 
 def test_check_json_has_summary():
     out = _capture(tropo.cmd_check,
-                   argparse.Namespace(paths=[], strict=False, json=True, quiet=False), res())
+                   argparse.Namespace(paths=[], strict=False, lenient=True,
+                                      json=True, quiet=False), res())
     assert set(out) >= {"checked", "clean", "errors", "warnings", "findings"}
     assert out["errors"] == 0
+
+
+# --- opinionated check: strict by default ----------------------------------
+
+def _bad_vault(td):
+    """A vault with one broken ref (W220), one unknown field (W202), and one
+    untyped doc (W201) — three warnings, no hard errors."""
+    Path(td, "tropo.toml").write_text(
+        '[base]\nallow_untyped = true\n'
+        '[types.module]\nfolder = "modules"\n'
+        '[types.module.optional]\nrelated_modules = "ref-list"\n')
+    Path(td, "modules").mkdir()
+    Path(td, "modules", "alpha.md").write_text(
+        "---\nrelated_modules: [missing]\nstray: x\n---\n# Alpha\n")
+    Path(td, "notes").mkdir()
+    Path(td, "notes", "loose.md").write_text("# Loose\n")
+
+
+def _check_rc(root, strict=False, lenient=False):
+    import contextlib
+    import io
+    args = argparse.Namespace(paths=[], strict=strict, lenient=lenient,
+                              json=False, quiet=False)
+    with contextlib.redirect_stdout(io.StringIO()):
+        return tropo.cmd_check(args, res(root))
+
+
+def test_check_is_strict_by_default():
+    with temp_workspace() as td:
+        _bad_vault(td)
+        assert _check_rc(str(td)) == 1  # warnings fail the check
+
+
+def test_check_lenient_allows_warnings():
+    with temp_workspace() as td:
+        _bad_vault(td)
+        assert _check_rc(str(td), lenient=True) == 0  # warnings shown, exit 0
+
+
+def test_check_strict_config_false_relaxes_and_flag_overrides():
+    with temp_workspace() as td:
+        _bad_vault(td)
+        p = Path(td, "tropo.toml")
+        p.write_text(p.read_text().replace(
+            "allow_untyped = true", "allow_untyped = true\nstrict = false"))
+        assert _check_rc(str(td)) == 0           # config opts into lenient
+        assert _check_rc(str(td), strict=True) == 1  # --strict overrides config
+
+
+def test_overlay_cannot_loosen_strict():
+    with temp_workspace() as td:
+        Path(td, "tropo.toml").write_text('[base]\nstrict = true\n')
+        sub = Path(td, "sub")
+        sub.mkdir()
+        Path(sub, "tropo.toml").write_text('[base]\nstrict = false\n')
+        try:
+            tropo.ConfigResolver(str(td), SCRIPT_DIR).for_dir(str(sub))
+            assert False, "expected ConfigError for strict false->true loosening"
+        except tropo.ConfigError:
+            pass
 
 
 def test_types_and_stats_json():
