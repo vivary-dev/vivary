@@ -13,6 +13,7 @@ node_modules/
 .DS_Store
 .idea/
 .vscode/
+.obsidian/
 
 # Disposable test workspaces (keep the README, ignore the rest)
 sandboxes/*

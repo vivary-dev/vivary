@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "exo"
+version = "0.1.0"
+description = "The coordination layer: graph-aware conflict detection and role contracts over a tropo knowledge graph."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "../../LICENSE" }
+authors = [{ name = "Jeff Kazzee" }]
+keywords = ["orchestration", "multi-agent", "knowledge-graph", "coordination"]
+dependencies = []
+
+[project.scripts]
+exo = "exo:main"
+
+[tool.setuptools]
+py-modules = ["exo"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
