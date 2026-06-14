@@ -167,6 +167,7 @@ derive       = ["id", "title", "created", "updated"]
 # Fields any document MAY carry regardless of type.
 optional     = { tags = "string-list", aliases = "string-list", status = "string" }
 allow_untyped = true          # W201 instead of E for files outside any type root
+strict        = true          # opinionated default: warnings fail `check` (see below)
 timezone      = "local"       # or an IANA name, e.g. "America/New_York"
 
 # --- Type definitions ----------------------------------------------------
@@ -250,9 +251,17 @@ tropo plan SPEC.toml  # simulate a change (remove/retype/break/add) — render t
 tropo init [DIR]      # scaffold a tropo.toml (optionally --packs a,b)
 ```
 
-Global flags: `--config PATH`, `--root PATH`, `--json`, `--strict`
-(warnings→errors), `--quiet` (errors only), `--dry-run` (fix preview),
-`--depth N` (blast hop limit), `--out FILE` (view target), `--packs a,b` (init).
+Global flags: `--config PATH`, `--root PATH`, `--json`, `--lenient`
+(allow warnings without failing), `--strict` (force warnings→errors, overriding a
+lenient config), `--quiet` (errors only), `--dry-run` (fix preview), `--depth N`
+(blast hop limit), `--out FILE` (view target), `--packs a,b` (init).
+
+**`check` is opinionated by default: any warning fails it** (exit `1`). The CLI is a
+gate, not a linter — untyped docs (`W201`), unknown fields (`W202`), broken refs
+(`W220`), and redundant frontmatter (`W210`) all fail unless you opt out. Relax with
+`--lenient` per run or `base.strict = false` in `tropo.toml`; `--strict` forces it
+back on. `strict` is **tighten-only** under overlays: a nested config may turn it on,
+never off. (When a `W210` is present, `check` hints to run `tropo fix`.)
 
 `tropo fix` is deliberately minimal: it removes `W210` noise (a declared field
 equal to its derived value) and deletes a frontmatter block that becomes empty.

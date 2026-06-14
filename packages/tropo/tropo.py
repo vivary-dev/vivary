@@ -7,7 +7,7 @@ model. This engine implements spec v1: config resolution, folder-as-type,
 derivation, validation, and the `signal` report.
 
 Usage:
-  tropo [check] [paths...] [--strict] [--json] [--quiet]
+  tropo [check] [paths...] [--lenient | --strict] [--json] [--quiet]
   tropo signal [paths...]
   tropo types
   tropo stats
@@ -347,6 +347,10 @@ def _merge_config(base, add):
         if b_base.get("allow_untyped") is False and a_base["allow_untyped"] is True:
             raise ConfigError("base.allow_untyped: true loosens an inherited false")
         b_base["allow_untyped"] = a_base["allow_untyped"]
+    if "strict" in a_base:
+        if b_base.get("strict") is True and a_base["strict"] is False:
+            raise ConfigError("base.strict: false loosens an inherited true")
+        b_base["strict"] = a_base["strict"]
     if "timezone" in a_base:
         b_base["timezone"] = a_base["timezone"]
     base.setdefault("exclude", [])
@@ -396,6 +400,7 @@ class Config:
         self.derive = base.get("derive", [])
         self.base_optional = base.get("optional", {})
         self.allow_untyped = base.get("allow_untyped", True)
+        self.strict = base.get("strict", True)
         self.types = data.get("types", {})
         self.exclude = DEFAULT_EXCLUDE + [e for e in data.get("exclude", [])
                                           if e not in DEFAULT_EXCLUDE]
@@ -981,7 +986,16 @@ _HTML_SHELL = """<!doctype html>
 def cmd_check(args, resolver):
     docs = analyze(resolver.root, args.paths, resolver)
     findings = [f for d in docs for f in d.findings]
+    # Opinionated by default: warnings fail the check. `strict` is on unless the
+    # config sets `strict = false` or `--lenient` is passed; `--strict` forces it
+    # back on (and overrides a lenient config).
+    strict = resolver.base.strict
     if args.strict:
+        strict = True
+    if getattr(args, "lenient", False):
+        strict = False
+    noisy = any(f.code == "W210" for f in findings)
+    if strict:
         for f in findings:
             if f.level == "warning":
                 f.level = "error"
@@ -1003,6 +1017,8 @@ def cmd_check(args, resolver):
             print(f.render())
         print(f"\ntropo: {len(docs)} document(s), "
               f"{len(errors)} error(s), {len(warnings)} warning(s)")
+        if noisy:
+            print("hint: redundant frontmatter detected — run `tropo fix` to remove it")
     return 1 if errors else 0
 
 
@@ -1309,7 +1325,10 @@ def main(argv=None):
                             "view", "plan", "fix", "init"])
     p.add_argument("paths", nargs="*",
                    help="files or folders (default: whole tree); for blast, the target id")
-    p.add_argument("--strict", action="store_true", help="treat warnings as errors")
+    p.add_argument("--strict", action="store_true",
+                   help="check: force warnings to fail (the default; overrides a lenient config)")
+    p.add_argument("--lenient", action="store_true",
+                   help="check: allow warnings without failing (relax the opinionated default)")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument("--quiet", action="store_true", help="hide warnings")
     p.add_argument("--dry-run", action="store_true", help="fix: preview without writing")

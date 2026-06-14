@@ -22,7 +22,7 @@ frontmatter** and still be fully typed and valid.
 ```bash
 python tropo.py init my-vault                   # scaffold a tropo.toml (--packs dev-project)
 python tropo.py types  --root examples/vault    # the resolved type registry
-python tropo.py check  --root examples/vault    # validate (exit 0 clean / 1 errors)
+python tropo.py check  --root examples/vault    # validate — opinionated: warnings fail too (--lenient to relax)
 python tropo.py signal --root examples/vault    # print ONLY the irreducible metadata
 python tropo.py graph  --root examples/vault    # emit typed nodes + edges
 python tropo.py view   --root examples/vault --out graph.html

@@ -53,9 +53,11 @@ tropo fix --dry-run         # preview what fix would remove
 tropo init [DIR]            # scaffold a tropo.toml (optionally --packs a,b)
 ```
 
-Flags: `--strict` (warnings→errors), `--json`, `--quiet`, `--root PATH`,
-`--config PATH`. Exit codes: `0` clean · `1` errors · `2` config/usage problem —
-gate CI on the exit code, don't parse text.
+Flags: `--lenient` (allow warnings without failing), `--strict` (force
+warnings→errors), `--json`, `--quiet`, `--root PATH`, `--config PATH`. **`check` is
+opinionated: warnings fail it by default** — relax with `--lenient` or `base.strict =
+false`. Exit codes: `0` clean · `1` errors (or any warning, unless lenient) · `2`
+config/usage problem — gate CI on the exit code, don't parse text.
 
 ## Finding codes
 
@@ -88,7 +90,8 @@ gate CI on the exit code, don't parse text.
    - Flood of `W202` → the schema is behind reality; add the field to the type.
    - `E101`/`E103` → genuine gaps in irreducible metadata; fill them *with the
      user* — never invent semantic values.
-5. **Re-run until clean.** For CI, gate on exit code, optionally `--strict`.
+5. **Re-run until clean.** `check` is strict by default, so warnings already fail
+   the exit code — gate CI on it directly; use `--lenient` only to triage.
 
 ## What `tropo fix` does — and never does
 
