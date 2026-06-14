@@ -1,0 +1,31 @@
+{
+  "name": "create-vivary",
+  "version": "0.1.0",
+  "description": "Scaffold a complete Vivary agent workspace — the create-t3-app for agent-native workspaces. Runs the Python create-vivary via uv/pipx.",
+  "bin": {
+    "create-vivary": "index.js"
+  },
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "vivary",
+    "agents",
+    "workspace",
+    "scaffold",
+    "create-app",
+    "knowledge-graph"
+  ],
+  "license": "MIT",
+  "author": "Jeff Kazzee",
+  "homepage": "https://github.com/Jeff-Kazzee/vivary",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jeff-Kazzee/vivary.git"
+  },
+  "files": [
+    "index.js",
+    "README.md"
+  ]
+}
