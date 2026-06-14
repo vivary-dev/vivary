@@ -41,6 +41,10 @@ Everything Vivary ships is a facet of that one sentence. The design law (inherit
 from [throughline](https://github.com/Jeff-Kazzee/throughline)): *the framework
 must cost almost nothing to load, or it steals the context the work needs.*
 
+**No lock-in.** A workspace is plain Markdown + YAML and a few CLIs — it works in any
+editor, or none, and on any agent runtime (Claude Code reads `.claude/skills/`, Codex
+reads `AGENTS.md` + `.agents/`). Obsidian, an IDE, a particular agent — all optional.
+
 ## Modules
 
 Standalone packages, scoped `@vivary/*` (npm) / `vivary-*` (PyPI), composed by
