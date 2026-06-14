@@ -1,0 +1,276 @@
+# Instincts generated from https://github.com/Jeff-Kazzee/vivary
+# Generated: 2026-06-14T17:07:45.857Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: vivary-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Jeff-Kazzee/vivary
+---
+
+# Vivary Commit Length
+
+## Action
+
+Write moderate-length commit messages (~54 characters)
+
+## Evidence
+
+- Average commit message length: 54 chars
+- Based on 2 commits
+
+---
+id: vivary-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Jeff-Kazzee/vivary
+---
+
+# Vivary Naming Files
+
+## Action
+
+Use camelCase naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: camelCase
+
+---
+id: vivary-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Jeff-Kazzee/vivary
+---
+
+# Vivary Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: vivary-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Jeff-Kazzee/vivary
+---
+
+# Vivary Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: vivary-instinct-file-naming-camelcase
+trigger: "When creating a new Python file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct File Naming Camelcase
+
+## Action
+
+Name the file using camelCase (e.g., myModule.py)
+
+## Evidence
+
+- Pattern in files: namingConventions.files = camelCase
+
+---
+id: vivary-instinct-function-naming-camelcase
+trigger: "When defining a new function"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Function Naming Camelcase
+
+## Action
+
+Name the function using camelCase (e.g., processData)
+
+## Evidence
+
+- Pattern in files: namingConventions.functions = camelCase
+
+---
+id: vivary-instinct-class-naming-pascalcase
+trigger: "When defining a new class"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Class Naming Pascalcase
+
+## Action
+
+Name the class using PascalCase (e.g., DataProcessor)
+
+## Evidence
+
+- Pattern in files: namingConventions.classes = PascalCase
+
+---
+id: vivary-instinct-constant-naming-screaming-snake
+trigger: "When defining a constant"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Constant Naming Screaming Snake
+
+## Action
+
+Name the constant using SCREAMING_SNAKE_CASE (e.g., MAX_SIZE)
+
+## Evidence
+
+- Pattern in files: namingConventions.constants = SCREAMING_SNAKE_CASE
+
+---
+id: vivary-instinct-import-style-relative
+trigger: "When importing modules within the repository"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Import Style Relative
+
+## Action
+
+Use relative imports
+
+## Evidence
+
+- Pattern in files: importStyle = relative
+
+---
+id: vivary-instinct-export-style-named
+trigger: "When exporting functions or classes from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Export Style Named
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern in files: exportStyle = named
+
+---
+id: vivary-instinct-git-commit-prefix-exo
+trigger: "When committing a feature or significant change"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Git Commit Prefix Exo
+
+## Action
+
+Prefix the commit message with 'exo:'
+
+## Evidence
+
+- Seen in commit: exo: coordination layer — graph conflict detection + role contracts
+
+---
+id: vivary-instinct-git-commit-prefix-chore
+trigger: "When committing a maintenance or non-feature change"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Git Commit Prefix Chore
+
+## Action
+
+Prefix the commit message with 'chore:'
+
+## Evidence
+
+- Seen in commit: chore: gitignore .obsidian editor folder
+
+---
+id: vivary-instinct-git-commit-length
+trigger: "When writing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Git Commit Length
+
+## Action
+
+Keep the commit message concise, around 54 characters on average
+
+## Evidence
+
+- Pattern in commits: averageLength = 54
+
+---
+id: vivary-instinct-monorepo-packages-folder
+trigger: "When adding a new package or module"
+confidence: 0.8
+domain: architecture
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Monorepo Packages Folder
+
+## Action
+
+Place it inside the 'packages' folder
+
+## Evidence
+
+- Pattern in architecture: commonFolders = ['packages']
+
