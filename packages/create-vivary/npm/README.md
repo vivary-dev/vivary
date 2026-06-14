@@ -1,13 +1,13 @@
-# create-vivary
+# @vivary/create
 
 **The `create-t3-app` for agent-native workspaces.** Scaffold a complete Vivary
 workspace — typed knowledge graph (tropo), agent OS (strato), and starter graph — in
 one command.
 
 ```bash
-npm create vivary my-workspace -- --preset coding
+npm create @vivary my-workspace -- --preset coding
 # or
-npx create-vivary my-workspace --preset coding
+npx @vivary/create my-workspace --preset coding
 ```
 
 Presets: `coding` · `second-brain` · `writing`.
