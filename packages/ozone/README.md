@@ -1,22 +1,54 @@
 # @vivary/ozone
 
-> Status: **stub** (optional layer). See [../../HANDOFF.md](../../HANDOFF.md).
+> Status: **working** (first slice — deterministic review). The optional review layer.
 
-**The review layer** — the protective filter. Ozone is the stratum that filters
-out what's harmful; this layer reviews changes before they land.
+**The review layer** — the protective filter. Where `tropo` answers *"is each
+document valid?"*, `ozone` reviews the **whole graph**: the relationship-level gaps a
+per-document check can't see, and the **blast radius** of a change — everything that
+depends on it. A review is graph-aware by construction because ozone reads tropo's
+typed graph in-process (one graph implementation, never a fork).
 
 The defining idea: **code review and editorial review are the same layer with
-different rule packs.** ozone runs over tropo's graph, so a review is
-graph-aware — it can show a change's **blast radius** (what else it touches), not
-just a line diff.
+different rule packs.** This first slice ships the deterministic core — one
+`structure` pack over the Vivary workspace vocabulary, zero dependencies, no LLM.
+Medium-specific and semantic ("organize by meaning") review layer on top later;
+semantic relatedness is graphify's job, not ozone's core.
 
-- For code: correctness, security, regressions, the impact set.
-- For prose: voice, claims/citations, structure, the impact set.
+## Try it locally
 
-A review is a specialized `verify`/`gate` step in strato's loop, factored out so
-it can be invoked on its own.
+```bash
+python ozone.py review --root <workspace>      # findings over the graph
+python ozone.py review --root <workspace> --strict   # gate mode: exit 1 on warnings
+python ozone.py impact <id> --root <workspace> # what depends on <id> (blast radius)
+python ozone.py packs                          # list rule packs
+```
 
-## To build
+`review` is **advisory by default** (exit 0) — a work-in-progress change legitimately
+has nothing verifying it yet. Pass `--strict` to make it a gate (exit 1 when warnings
+exist), e.g. pre-merge or in CI. `tropo check` remains the hard structural gate;
+ozone is the relationship/impact review layered on top.
 
-Depends on tropo's graph layer (`graph`/`blast`) existing first. Then: rule packs
-per medium, and a render of the review + blast radius (reuse tropo's `view`).
+## The `structure` pack
+
+Deterministic, topology-derived findings keyed on a node's workspace folder:
+
+| rule | severity | fires when |
+|---|---|---|
+| `change-unverified` | warn | a `changes/` node has no `verification` edge |
+| `change-ungated` | info | a `changes/` node has no `gates` edge |
+| `module-unverified` | info | a `modules/` node has no `verification` edge |
+| `orphan` | info | a node has no edges in or out |
+| `broken-edge` | warn | an edge points at a missing node (tropo `check` enforces this) |
+
+## Render
+
+For a visual of a change's blast radius, reuse tropo's renderer:
+
+```bash
+python ../tropo/tropo.py view blast <id> --root <workspace> --out impact.html
+```
+
+## Requirements
+
+Python 3.11+. Loads the sibling `packages/tropo/tropo.py` engine in-process (no pip
+install needed in the repo); packaged builds depend on the `tropo` package.

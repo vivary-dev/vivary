@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ozone"
+version = "0.1.0"
+description = "The review layer: graph-aware review and blast-radius impact over a tropo knowledge graph."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "../../LICENSE" }
+authors = [{ name = "Jeff Kazzee" }]
+keywords = ["review", "knowledge-graph", "agents", "blast-radius", "gate"]
+dependencies = []
+
+[project.scripts]
+ozone = "ozone:main"
+
+[tool.setuptools]
+py-modules = ["ozone"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
