@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tropo"
+name = "vivary-tropo"
 version = "0.1.0"
 description = "The filesystem is the schema: a folder-as-type typed-knowledge layer for Markdown."
 readme = "README.md"
@@ -11,13 +11,28 @@ requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [{ name = "Jeff Kazzee" }]
 keywords = ["markdown", "frontmatter", "knowledge-base", "second-brain", "typechecker"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Documentation",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/Jeff-Kazzee/vivary"
+Repository = "https://github.com/Jeff-Kazzee/vivary"
 
 [project.scripts]
 tropo = "tropo:main"
 
 [tool.setuptools]
 py-modules = ["tropo"]
+# NOTE: the bundled starter packs (packs/*.toml) are a repo convenience and do not
+# ship in the wheel (v0.1.0). All core commands work without them; per-vault packs in
+# `.tropo/packs/` are still resolved. Bundling starter packs is a v0.2 follow-up.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

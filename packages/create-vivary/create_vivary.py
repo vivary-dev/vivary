@@ -178,7 +178,7 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
     if not errors:
         try:
             tropo = _load_tropo(root)
-            resolver = tropo.ConfigResolver(str(target), str(root / "packages" / "tropo"))
+            resolver = tropo.ConfigResolver(str(target), str(Path(tropo.__file__).parent))
             docs = tropo.analyze(str(target), [], resolver)
             findings = [f.render() for doc in docs for f in doc.findings]
             nodes, edges = tropo.build_graph(docs)
@@ -206,24 +206,43 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
 
 
 def _source_paths(root: Path) -> dict[str, Path]:
-    return {
+    """Where the scaffold assets live. In the repo, the canonical sources; once
+    pip-installed, the bundled copy under `create_vivary_assets/` (kept in sync by
+    tools/sync_assets.py)."""
+    repo = {
         "strato": root / "packages" / "strato" / "STRATO.md",
         "strato_templates": root / "packages" / "strato" / "templates",
         "strato_skill": root / "packages" / "strato" / ".claude" / "skills" / "strato",
         "claude_loops_skill": root / ".claude" / "skills" / "loops",
         "agents_loops_skill": root / ".agents" / "skills" / "loops",
     }
+    if repo["strato"].exists():
+        return repo
+    assets = Path(__file__).resolve().parent / "create_vivary_assets"
+    return {
+        "strato": assets / "STRATO.md",
+        "strato_templates": assets / "templates",
+        "strato_skill": assets / "strato-skill",
+        "claude_loops_skill": assets / "loops-skill",
+        "agents_loops_skill": assets / "loops-skill",
+    }
 
 
 def _load_tropo(root: Path):
+    """Load the tropo engine for doctor's graph validation. Prefers the in-repo
+    sibling; once installed, falls back to the `vivary-tropo` dependency."""
     tropo_path = root / "packages" / "tropo" / "tropo.py"
-    if not tropo_path.exists():
-        raise ScaffoldError(f"missing tropo engine: {tropo_path}")
-    spec = importlib.util.spec_from_file_location("vivary_doctor_tropo", tropo_path)
-    if spec is None or spec.loader is None:
-        raise ScaffoldError(f"could not load tropo engine: {tropo_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    if tropo_path.exists():
+        spec = importlib.util.spec_from_file_location("vivary_doctor_tropo", tropo_path)
+        if spec is None or spec.loader is None:
+            raise ScaffoldError(f"could not load tropo engine: {tropo_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    try:
+        import tropo as module
+    except ImportError as exc:
+        raise ScaffoldError(f"tropo engine not found (install vivary-tropo): {exc}")
     return module
 
 

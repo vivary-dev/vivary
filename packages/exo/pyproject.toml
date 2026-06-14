@@ -3,15 +3,26 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "exo"
+name = "vivary-exo"
 version = "0.1.0"
 description = "The coordination layer: graph-aware conflict detection and role contracts over a tropo knowledge graph."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { file = "../../LICENSE" }
+license = { file = "LICENSE" }
 authors = [{ name = "Jeff Kazzee" }]
 keywords = ["orchestration", "multi-agent", "knowledge-graph", "coordination"]
-dependencies = []
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = ["vivary-tropo>=0.1.0"]
+
+[project.urls]
+Homepage = "https://github.com/Jeff-Kazzee/vivary"
+Repository = "https://github.com/Jeff-Kazzee/vivary"
 
 [project.scripts]
 exo = "exo:main"
