@@ -55,7 +55,7 @@ explicit human approval. The plan states:
 1. **Intent** — what changes and why; which layer/module and how it serves the
    baseline thesis.
 2. **Blast radius** — everything it touches: files, packages, the knowledge graph,
-   downstream layers. (Use tropo's graph/blast once it exists.)
+   downstream layers. (Use tropo's `graph`/`blast` and `ozone impact`.)
 3. **Verification** — how we'll know it's right: tests, checks, a sandbox run.
 4. **Out of scope** — what this deliberately does *not* do.
 5. **Alignment** — "I think I know / I am inferring / I do not know — confirm or
@@ -82,6 +82,11 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
 ## Verify
 
 ```bash
-cd packages/tropo && python tests/test_tropo.py        # 22/22
-python tropo.py check --root examples/vault            # clean
+python packages/tropo/tests/test_tropo.py                  # 46/46
+python packages/ozone/tests/test_ozone.py                  # 7/7
+python packages/exo/tests/test_exo.py                      # 4/4
+python packages/create-vivary/tests/test_create_vivary.py  # 8/8  (+ test_assets_parity 2/2)
+python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # clean
 ```
+
+Vivary 0.1.0 is published (PyPI + npm); full guides live in [docs/](docs/).

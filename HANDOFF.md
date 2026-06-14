@@ -11,11 +11,12 @@ editing.
 Use this prompt in a new window:
 
 ```text
-We are in C:\Users\jeffk\dev\vivary. Read HANDOFF.md and docs/ARCHITECTURE.md.
-Verify git status/branch/remotes before making claims. All four layers are built
-and merged to `dev`; continue from `dev` with a branch per change. Tests must be
-planned before edits. Do not push, open PRs, merge, publish, create orgs/repos,
-install dependencies, or delete files without explicit approval.
+We are in C:\Users\jeffk\dev\vivary (repo: github.com/vivary-dev/vivary). Read
+HANDOFF.md, docs/README.md, and docs/ARCHITECTURE.md. Verify git status/branch/
+remotes before making claims. Vivary 0.1.0 is SHIPPED — all four layers are
+published to PyPI + npm and merged to `dev`. Continue from `dev` with a branch per
+change. Tests must be planned before edits. Do not push, open PRs, merge, publish,
+create orgs/repos, install dependencies, or delete files without explicit approval.
 ```
 
 ## Current Truth
@@ -40,6 +41,17 @@ tropo    typed knowledge graph: what is true        baseline
 Design law: **minimalism**. Always-on context must be tiny. Expensive-to-load
 framework files are wrong.
 
+**Shipped (0.1.0).** Anyone can install it:
+
+```bash
+npm create @vivary my-workspace                          # the scaffolder UX
+pip install vivary-tropo vivary-ozone vivary-exo create-vivary
+uvx vivary-tropo check                                   # run without installing
+```
+
+PyPI: `vivary-tropo` · `vivary-ozone` · `vivary-exo` · `create-vivary`. npm:
+`@vivary/create`. Full docs in [docs/](docs/) (start at [docs/README.md](docs/README.md)).
+
 ## Live Repo State
 
 Repo path:
@@ -58,19 +70,19 @@ visibility: public
 
 Current local branch: `dev` (no active feature branch between phases).
 
-All four-layer + packaging work is merged to `dev` via PRs **#3–#8**:
-A (create-vivary baseline) · B (opinionated `tropo check`) · C (ozone) · D (exo) ·
-E1+E2 (packaging: all packages installable + npm wrapper). Feature branches were
-deleted after merge; only `dev` + `main` remain. `main` is the vestigial
-tropo+strato baseline (untouched). No `prod` branch yet; `prod` is reserved for the
-post-publish v1 cut. **Nothing is published to PyPI/npm yet.** Verify live state
-(`git status --short --branch`, `gh pr list`) before acting.
+Everything is merged to `dev` via PRs **#3–#14** (each its own plan + gate): the four
+layers (A–D), packaging (E1+E2), doc reframe (F1), org transfer to `vivary-dev` +
+URL update, the agentic-loop wiring, Obsidian-optional, and the comprehensive docs.
+Feature branches are deleted after merge; only `dev` + `main` remain (`main` is the
+vestigial tropo+strato baseline). **All five packages are published at 0.1.0** (PyPI
+×4 + npm `@vivary/create`). **No `prod` branch or release tag yet** — `v0.1.0` is the
+next step (see Remaining Work). Ten roadmap issues are open: **#15–#24**. Verify live
+state (`git status --short --branch`, `gh pr list`, `gh issue list`) before acting.
 
 ## What Exists
 
-All four layers are working, tested packages. Every package is pip-installable
-(dist names `vivary-tropo` / `vivary-ozone` / `vivary-exo` / `create-vivary`; CLI
-commands unchanged) and was proven in a clean venv.
+All four layers are working, tested, **published** packages (0.1.0 on PyPI + npm;
+CLI commands stay `tropo`/`ozone`/`exo`/`create-vivary`), proven in a clean venv.
 
 ```text
 packages/tropo/        vivary-tropo   — knowledge-graph CLI (check/signal/types/stats/
@@ -88,6 +100,9 @@ packages/create-vivary/ create-vivary — scaffolder: init --preset coding|secon
                        Tests: 8/8 + parity 2/2.
 
 .github/workflows/ci.yml  CI contract (billing-locked; verify locally).
+docs/                  Full guides: README (index), GETTING-STARTED, COMMANDS,
+                       HOWTO, SKILLS, FAQ, ARCHITECTURE, OBSIDIAN, WEBSITE-BRIEF,
+                       LAUNCH (draft, unpublished).
 ```
 
 ## Decisions Already Made
@@ -165,19 +180,18 @@ doctor: ok
 1. **PR/merge process.** _Settled:_ branch per change off `dev`, written
    plan+alignment, explicit approval, then PR + merge. CI is billing-locked → local
    green is the real gate. (Phases A–E followed this; PRs #3–#8.)
-2. **Publishing scope.** _Decided:_ publish to **both PyPI and npm + a GitHub org**.
-   Names verified available: `vivary`, `create-vivary`, `@vivary` (npm); `vivary`,
-   `vivary-tropo/-strato/-ozone/-exo`, `create-vivary` (PyPI; bare `tropo/ozone/exo`
-   are taken). Still open: scoped (`@vivary/*`) vs unscoped names; publish all four
-   `vivary-*` or just the user-facing `create-vivary` + `vivary-tropo` first.
-3. **Publish prerequisites (yours).** PyPI + npm tokens configured locally; the
-   GitHub org created via web; the `ecc-tools` bot app uninstalled (it re-opens spam
-   PRs on every push).
+2. **Publishing.** _Done 2026-06-14:_ published to **both PyPI and npm**. PyPI
+   `vivary-tropo` / `vivary-ozone` / `vivary-exo` / `create-vivary`; npm scoped
+   `@vivary/create` (CLI commands stay `tropo`/`ozone`/`exo`/`create-vivary`). All
+   0.1.0.
+3. **npm 2FA.** npm enforces 2FA on publish; the granular tokens tried did *not*
+   bypass it, so `@vivary/create` was published by Jeff running `npm publish` with his
+   passkey. For automation, set up **OIDC trusted publishing** (issue #15/#22) — it
+   only runs once Actions billing is unlocked.
 4. **Config filename.** _Resolved 2026-06-14:_ keep per-module `tropo.toml`; no
    workspace-level `vivary.toml` unification. (Settled — do not re-litigate.)
-5. **GitHub org/namespace.** Repo lives under `vivary-dev/vivary`. `github.com/vivary`
-   is a dead login → recommended handle **`vivary-dev`** (pending Jeff's choice). Org
-   creation is a hard gate and is web-only (the API can't create a user org).
+5. **GitHub org.** _Done:_ repo transferred to **`vivary-dev/vivary`**; in-repo URLs
+   updated. (`github.com/vivary` is a dead login; npm scope is `@vivary`.)
 6. **Preset depth.** _Resolved 2026-06-14:_ presets differ by starter graph only and
    stay graph-only (no extra folder/workflow scaffolding) — honors the minimalism law.
 
@@ -187,27 +201,29 @@ baseline (left untouched). `prod` is reserved for the eventual MVP-solid cut.
 
 ## Remaining Work
 
-The four-layer build + packaging is **done**. What's left is publishing and the v1
-cut. (Note: the original type-inference ladder was dropped in favour of making
-`tropo check` opinionated — folder-as-type stays the single source of truth.)
+The four layers are built, packaged, **published (0.1.0)**, and documented. What's
+left is the release marker and the next wave of value. The full roadmap is the open
+issues **#15–#24**; the near-term:
 
-### E3 — Prerequisites (Jeff)
+- **Tag the release.** Tag **`v0.1.0`** on `dev` (matches the published packages — not
+  `v1.0.0`, which would overclaim) and push it; optionally cut a `prod` branch. Then
+  optionally a GitHub Release from `docs/LAUNCH.md` (a publishing gate). *(pending
+  Jeff's go.)*
+- **Launch.** `docs/LAUNCH.md` holds the Twitter thread + GitHub release copy
+  (UNPUBLISHED — posting is a per-item gate). `docs/WEBSITE-BRIEF.md` is the handoff
+  for the agent building the marketing site.
+- **Worth-using dogfood (#24).** Stand up a Vivary `writing` workspace for the
+  website and rewrite its copy through the loop, using the *published* CLIs; capture
+  `docs/WALKTHROUGH.md`.
+- **Release automation (#15/#22).** A `.github/workflows/release.yml` that publishes
+  npm + PyPI via **OIDC trusted publishing** on a version tag — tokenless, but needs
+  Actions billing unlocked to run.
+- **Other roadmap (#16–#23):** ship tropo starter packs in the wheel · exo `claim`
+  write · ozone LLM packs + a prose pack · graphify semantic layer · a multi-agent
+  preset · move the `loops` skill into strato.
 
-- Uninstall the `ecc-tools` bot (github.com/settings/installations).
-- Create the GitHub org (web; handle `vivary-dev`?).
-- Configure PyPI + npm tokens locally.
-
-### E4 — Publish (each a per-item hard gate)
-
-`twine upload` `vivary-tropo` / `vivary-ozone` / `vivary-exo` / `create-vivary` to
-PyPI (start `0.1.0`); `npm publish` `create-vivary`. Build with `python -m build`,
-check with `twine check`; everything already passes locally and installs in a clean
-venv.
-
-### F2 — prod cut + v1
-
-Move the `loops` skill into strato (with the create-vivary `_source_paths` +
-`sync_assets` follow-through); cut `prod` from `dev`; tag `v1.0.0`. After publish.
+(The original type-inference ladder was dropped in favour of making `tropo check`
+opinionated — folder-as-type stays the single source of truth.)
 
 ## Known Risks
 
