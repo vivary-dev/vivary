@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
+import json
 import shutil
 import sys
 from datetime import date
@@ -10,6 +12,24 @@ from pathlib import Path
 
 
 PRESETS = ("coding", "second-brain", "writing")
+
+REQUIRED_WORKSPACE_FILES = (
+    "README.md",
+    "AGENTS.md",
+    "SOUL.md",
+    "STRATO.md",
+    "STATE.md",
+    "USER.md",
+    "MEMORY.md",
+    "bug-risk-playbook.md",
+    "tropo.toml",
+    ".gitignore",
+    "templates/AGENTS.md",
+    ".claude/skills/strato/SKILL.md",
+    ".claude/skills/loops/SKILL.md",
+    ".agents/skills/strato/SKILL.md",
+    ".agents/skills/loops/SKILL.md",
+)
 
 PRESET_STARTERS = {
     "coding": {
@@ -128,6 +148,63 @@ def scaffold_workspace(
     return created
 
 
+def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None) -> dict:
+    """Validate that a directory looks like a usable Vivary agent workspace."""
+    root = Path(repo_root) if repo_root is not None else default_repo_root()
+    root = root.resolve()
+    target = Path(target).resolve()
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not target.exists():
+        errors.append(f"workspace does not exist: {target}")
+    elif not target.is_dir():
+        errors.append(f"workspace is not a directory: {target}")
+
+    if not errors:
+        for rel in REQUIRED_WORKSPACE_FILES:
+            if not (target / rel).exists():
+                errors.append(f"missing required file: {rel}")
+
+        gitignore = target / ".gitignore"
+        if gitignore.exists():
+            txt = gitignore.read_text(encoding="utf-8", errors="replace")
+            for pattern in ("USER.md", "MEMORY.md", "memory/*"):
+                if pattern not in txt:
+                    errors.append(f"privacy ignore missing: {pattern}")
+
+    graph = {"nodes": 0, "edges": 0, "broken": 0}
+    findings: list[str] = []
+    if not errors:
+        try:
+            tropo = _load_tropo(root)
+            resolver = tropo.ConfigResolver(str(target), str(root / "packages" / "tropo"))
+            docs = tropo.analyze(str(target), [], resolver)
+            findings = [f.render() for doc in docs for f in doc.findings]
+            nodes, edges = tropo.build_graph(docs)
+            graph = {
+                "nodes": len(nodes),
+                "edges": len(edges),
+                "broken": sum(1 for edge in edges if edge["broken"]),
+            }
+            if findings:
+                errors.extend(f"tropo finding: {finding}" for finding in findings)
+            if graph["broken"]:
+                errors.append(f"graph has {graph['broken']} broken edge(s)")
+            if graph["nodes"] == 0:
+                warnings.append("typed graph has no nodes")
+        except Exception as exc:  # keep doctor a report, not a traceback
+            errors.append(f"tropo validation failed: {exc}")
+
+    return {
+        "ok": not errors,
+        "root": str(target),
+        "errors": errors,
+        "warnings": warnings,
+        "graph": graph,
+    }
+
+
 def _source_paths(root: Path) -> dict[str, Path]:
     return {
         "strato": root / "packages" / "strato" / "STRATO.md",
@@ -136,6 +213,18 @@ def _source_paths(root: Path) -> dict[str, Path]:
         "claude_loops_skill": root / ".claude" / "skills" / "loops",
         "agents_loops_skill": root / ".agents" / "skills" / "loops",
     }
+
+
+def _load_tropo(root: Path):
+    tropo_path = root / "packages" / "tropo" / "tropo.py"
+    if not tropo_path.exists():
+        raise ScaffoldError(f"missing tropo engine: {tropo_path}")
+    spec = importlib.util.spec_from_file_location("vivary_doctor_tropo", tropo_path)
+    if spec is None or spec.loader is None:
+        raise ScaffoldError(f"could not load tropo engine: {tropo_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _copy_plan(target: Path, sources: dict[str, Path]) -> list[tuple[Path, Path]]:
@@ -447,12 +536,29 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Vivary source checkout root (mainly for local development/tests)",
     )
+
+    doctor = sub.add_parser("doctor", help="validate a Vivary workspace scaffold")
+    doctor.add_argument("target", help="workspace directory to validate")
+    doctor.add_argument("--json", action="store_true", help="print a JSON report")
+    doctor.add_argument(
+        "--repo-root",
+        default=None,
+        help="Vivary source checkout root (mainly for local development/tests)",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "doctor":
+        report = doctor_workspace(args.target, repo_root=args.repo_root)
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            _print_doctor_report(report)
+        return 0 if report["ok"] else 1
+
     if args.command != "init":
         parser.print_help()
         return 2
@@ -470,6 +576,19 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"create-vivary: wrote {len(created)} file(s) to {Path(args.target).resolve()}")
     return 0
+
+
+def _print_doctor_report(report: dict) -> None:
+    status = "ok" if report["ok"] else "failed"
+    graph = report["graph"]
+    print(
+        f"create-vivary doctor: {status} "
+        f"({graph['nodes']} node(s), {graph['edges']} edge(s), {graph['broken']} broken)"
+    )
+    for warning in report["warnings"]:
+        print(f"warning: {warning}")
+    for error in report["errors"]:
+        print(f"error: {error}")
 
 
 if __name__ == "__main__":

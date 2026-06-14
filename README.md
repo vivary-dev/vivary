@@ -18,13 +18,15 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
 ```bash
 python packages/create-vivary/create_vivary.py init sandboxes/coding-demo --preset coding
+python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo
 python packages/tropo/tropo.py check --root sandboxes/coding-demo
 python packages/tropo/tropo.py graph --root sandboxes/coding-demo --json
 ```
 
 The scaffolder writes a full workspace shell: `AGENTS.md`, `STATE.md`, `SOUL.md`,
 private `USER.md`/`MEMORY.md` boundaries, strato runtime skills for Claude/Codex-style
-agents, a `tropo.toml`, and a starter typed graph.
+agents, a `tropo.toml`, and a starter typed graph. `doctor` validates the shell,
+privacy ignores, and graph health after creation.
 
 ## The irreducible baseline
 

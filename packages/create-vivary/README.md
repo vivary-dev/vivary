@@ -7,6 +7,7 @@ runtime skills, private-memory boundaries, and a starter typed graph.
 
 ```bash
 python packages/create-vivary/create_vivary.py init sandboxes/coding-demo --preset coding
+python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo
 python packages/tropo/tropo.py check --root sandboxes/coding-demo
 ```
 
@@ -20,3 +21,9 @@ Presets share the same agent OS shell, then seed a different starter graph:
 
 The command is local-only and zero-dependency. It does not install packages, initialize
 git, push, publish, or enable hooks.
+
+`doctor` validates the generated shell, privacy ignores, and typed graph:
+
+```bash
+python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo --json
+```

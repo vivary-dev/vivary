@@ -170,6 +170,50 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertTrue((target / "AGENTS.md").exists())
 
+    def test_doctor_accepts_generated_workspace(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="writing", force=False, repo_root=ROOT
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertTrue(report["ok"], report)
+            self.assertEqual(report["errors"], [])
+            self.assertEqual(report["graph"]["broken"], 0)
+            self.assertGreaterEqual(report["graph"]["nodes"], 8)
+
+    def test_doctor_reports_missing_contract_file(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / "STATE.md").unlink()
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertFalse(report["ok"])
+            self.assertIn("missing required file: STATE.md", report["errors"])
+
+    def test_cli_doctor_exit_codes(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="second-brain", force=False, repo_root=ROOT
+            )
+
+            self.assertEqual(
+                create_vivary.main(["doctor", str(target), "--repo-root", str(ROOT)]),
+                0,
+            )
+            (target / "AGENTS.md").unlink()
+            self.assertEqual(
+                create_vivary.main(["doctor", str(target), "--repo-root", str(ROOT)]),
+                1,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

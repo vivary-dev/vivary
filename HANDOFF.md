@@ -20,9 +20,9 @@ almost nothing to load (throughline's minimalism hypothesis).
 
 **Right now:** `packages/tropo` works (knowledge-graph CLI ported from loam, 42
 tests passing). `packages/strato` has the fused agent OS contract, templates, and
-skill. `packages/create-vivary` now scaffolds a complete agent workspace locally.
-`ozone` and `exo` are still stubs. The repo is local-only (git initialized, no
-remote).
+skill. `packages/create-vivary` now scaffolds and doctors complete agent workspaces
+locally. `ozone` and `exo` are still stubs. The repo is on GitHub with `dev` as the
+default branch and feature work on short-lived branches.
 
 ---
 
@@ -85,7 +85,7 @@ vivary/
 │  ├─ tropo/              WORKING — ported from loam, renamed loam→tropo, 42 tests pass
 │  │                       includes graph/blast/view/plan and packs/repo-graph.toml
 │  ├─ strato/             WORKING MODEL — STRATO.md + templates + strato skill
-│  ├─ create-vivary/      WORKING LOCAL SCAFFOLDER — lays down full workspace shells
+│  ├─ create-vivary/      WORKING LOCAL SCAFFOLDER — init + doctor workspace shells
 │  ├─ ozone/              STUB — README only (review: code + editorial)
 │  └─ exo/                STUB — README only (multi-agent orchestration)
 └─ sandboxes/             ignored throwaway workspaces to test `create vivary` against
@@ -132,10 +132,11 @@ no longer just the original parser.
 
 ## Recommended next steps (in order)
 
-1. **Harden `create-vivary` presets.** `coding` now has the full scaffold; define
-   exactly how `second-brain` and `writing` differ, then add tests for those outputs.
-2. **Dogfood the scaffold.** Generate a sandbox, run `tropo check`/`graph`/`view`,
-   and use the output to refine the typed starter graph.
+1. **Dogfood the scaffold.** Generate a sandbox for each preset, run
+   `create-vivary doctor`, `tropo check`/`graph`/`view`, and use the output to refine
+   the typed starter graph.
+2. **Open a PR for the scaffold branch** once Jeff approves; CI is defined in
+   `.github/workflows/ci.yml`, though Actions may be billing-locked.
 3. **Add the type-inference ladder** to tropo so it isn't folder-only.
 4. **Reframe tropo's docs** from standalone-loam to `@vivary/tropo`.
 5. **Build ozone's first review pack** on top of tropo graph/blast.
@@ -175,5 +176,6 @@ python tropo.py signal --root examples/vault    # the irreducible-metadata repor
 
 cd ~/dev/vivary
 python packages/create-vivary/create_vivary.py init sandboxes/coding-demo --preset coding
+python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo
 python packages/tropo/tropo.py check --root sandboxes/coding-demo
 ```
