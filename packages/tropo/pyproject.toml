@@ -22,8 +22,8 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/Jeff-Kazzee/vivary"
-Repository = "https://github.com/Jeff-Kazzee/vivary"
+Homepage = "https://github.com/vivary-dev/vivary"
+Repository = "https://github.com/vivary-dev/vivary"
 
 [project.scripts]
 tropo = "tropo:main"

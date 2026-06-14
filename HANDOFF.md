@@ -51,7 +51,7 @@ C:\Users\jeffk\dev\vivary
 GitHub:
 
 ```text
-https://github.com/Jeff-Kazzee/vivary
+https://github.com/vivary-dev/vivary
 default branch: dev
 visibility: public
 ```
@@ -175,7 +175,7 @@ doctor: ok
    PRs on every push).
 4. **Config filename.** _Resolved 2026-06-14:_ keep per-module `tropo.toml`; no
    workspace-level `vivary.toml` unification. (Settled — do not re-litigate.)
-5. **GitHub org/namespace.** Repo lives under `Jeff-Kazzee/vivary`. `github.com/vivary`
+5. **GitHub org/namespace.** Repo lives under `vivary-dev/vivary`. `github.com/vivary`
    is a dead login → recommended handle **`vivary-dev`** (pending Jeff's choice). Org
    creation is a hard gate and is web-only (the API can't create a user org).
 6. **Preset depth.** _Resolved 2026-06-14:_ presets differ by starter graph only and
@@ -229,7 +229,7 @@ git status --short --branch
 git log --oneline --decorate -n 8
 git remote -v
 gh pr list --state all --limit 10
-gh repo view Jeff-Kazzee/vivary --json nameWithOwner,url,defaultBranchRef,isEmpty,visibility
+gh repo view vivary-dev/vivary --json nameWithOwner,url,defaultBranchRef,isEmpty,visibility
 ```
 
 ## Hard Gates To Remember

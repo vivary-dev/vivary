@@ -21,8 +21,8 @@ classifiers = [
 dependencies = ["vivary-tropo>=0.1.0"]
 
 [project.urls]
-Homepage = "https://github.com/Jeff-Kazzee/vivary"
-Repository = "https://github.com/Jeff-Kazzee/vivary"
+Homepage = "https://github.com/vivary-dev/vivary"
+Repository = "https://github.com/vivary-dev/vivary"
 
 [project.scripts]
 create-vivary = "create_vivary:main"
