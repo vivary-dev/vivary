@@ -1,0 +1,360 @@
+# Instincts generated from https://github.com/Jeff-Kazzee/vivary
+# Generated: 2026-06-14T00:52:47.282Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: vivary-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Jeff-Kazzee/vivary
+---
+
+# Vivary Commit Length
+
+## Action
+
+Keep commit messages concise (~38 characters)
+
+## Evidence
+
+- Average commit message length: 38 chars
+- Based on 3 commits
+
+---
+id: vivary-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Jeff-Kazzee/vivary
+---
+
+# Vivary Naming Files
+
+## Action
+
+Use PascalCase naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: PascalCase
+
+---
+id: vivary-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Jeff-Kazzee/vivary
+---
+
+# Vivary Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: vivary-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Jeff-Kazzee/vivary
+---
+
+# Vivary Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: vivary-workflow-update-create-vivary-package
+trigger: "when doing update create vivary package"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Jeff-Kazzee/vivary
+---
+
+# Vivary Workflow Update Create Vivary Package
+
+## Action
+
+Follow the update-create-vivary-package workflow:
+1. Edit or add implementation in packages/create-vivary/create_vivary.py
+2. Update documentation in packages/create-vivary/README.md
+3. Add or update tests in packages/create-vivary/tests/test_create_vivary.py
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: packages/create-vivary/create_vivary.py, packages/create-vivary/README.md, packages/create-vivary/tests/test_create_vivary.py
+
+---
+id: vivary-instinct-file-naming
+trigger: "When creating or renaming a Python file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct File Naming
+
+## Action
+
+Use PascalCase for file names
+
+## Evidence
+
+- Pattern in namingConventions.files: PascalCase
+
+---
+id: vivary-instinct-function-naming
+trigger: "When defining a new function"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Function Naming
+
+## Action
+
+Use camelCase for function names
+
+## Evidence
+
+- Pattern in namingConventions.functions: camelCase
+
+---
+id: vivary-instinct-class-naming
+trigger: "When defining a new class"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Class Naming
+
+## Action
+
+Use PascalCase for class names
+
+## Evidence
+
+- Pattern in namingConventions.classes: PascalCase
+
+---
+id: vivary-instinct-constant-naming
+trigger: "When defining a constant"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Constant Naming
+
+## Action
+
+Use SCREAMING_SNAKE_CASE for constant names
+
+## Evidence
+
+- Pattern in namingConventions.constants: SCREAMING_SNAKE_CASE
+
+---
+id: vivary-instinct-import-style
+trigger: "When importing modules in Python files"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Import Style
+
+## Action
+
+Use relative imports
+
+## Evidence
+
+- Pattern in importStyle: relative
+
+---
+id: vivary-instinct-export-style
+trigger: "When exporting functions or classes"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Export Style
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern in exportStyle: named
+
+---
+id: vivary-instinct-test-location
+trigger: "When adding or updating tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Test Location
+
+## Action
+
+Place test files in a mixed location, often under a 'tests' folder within the relevant package
+
+## Evidence
+
+- Pattern in architecture.testLocation: mixed
+- Example: packages/create-vivary/tests/test_create_vivary.py
+
+---
+id: vivary-instinct-test-file-naming
+trigger: "When naming a test file"
+confidence: 0.7
+domain: testing
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Test File Naming
+
+## Action
+
+Prefix the file with 'test_' and use PascalCase for the rest
+
+## Evidence
+
+- Example: test_create_vivary.py
+
+---
+id: vivary-instinct-test-update
+trigger: "When implementing or updating a feature"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Test Update
+
+## Action
+
+Add or update corresponding tests in the same commit sequence
+
+## Evidence
+
+- Workflow: update-create-vivary-package
+- Commit sequence includes test updates
+
+---
+id: vivary-instinct-commit-prefix
+trigger: "When writing a commit message for CI or workflow changes"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Commit Prefix
+
+## Action
+
+Prefix the commit message with 'ci:'
+
+## Evidence
+
+- Commit example: ci: add workflow and scaffold doctor
+
+---
+id: vivary-instinct-commit-format-create-vivary
+trigger: "When committing changes related to the create-vivary package"
+confidence: 0.8
+domain: git
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Commit Format Create Vivary
+
+## Action
+
+Prefix the commit message with 'create-vivary:'
+
+## Evidence
+
+- Commit example: create-vivary: scaffold agent workspace
+
+---
+id: vivary-instinct-commit-length
+trigger: "When writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Commit Length
+
+## Action
+
+Keep the commit message concise, around 38 characters on average
+
+## Evidence
+
+- Pattern in commits.averageLength: 38
+
+---
+id: vivary-instinct-update-create-vivary-workflow
+trigger: "When someone wants to add or enhance functionality in the create-vivary package"
+confidence: 0.95
+domain: workflow
+source: repo-analysis
+source_repo: Jeff-Kazzee/vivary
+---
+
+# Vivary Instinct Update Create Vivary Workflow
+
+## Action
+
+Edit or add implementation in packages/create-vivary/create_vivary.py, update documentation in packages/create-vivary/README.md, and add or update tests in packages/create-vivary/tests/test_create_vivary.py
+
+## Evidence
+
+- Workflow: update-create-vivary-package
+- Commit sequence and files involved
+
