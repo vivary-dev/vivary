@@ -93,6 +93,7 @@ def scaffold_workspace(
     *,
     preset: str = "coding",
     force: bool = False,
+    obsidian: bool = False,
     repo_root: str | Path | None = None,
 ) -> list[Path]:
     """Lay down a full Vivary workspace scaffold.
@@ -130,6 +131,8 @@ def scaffold_workspace(
         (target / "heartbeat-reports" / ".gitkeep", ""),
     ]
     writes.extend(_preset_writes(target, project, PRESET_STARTERS[preset]))
+    if obsidian:
+        writes.extend(_obsidian_writes(target))
 
     copies = _copy_plan(target, sources)
     _ensure_no_conflicts([p for p, _ in writes] + [dst for _, dst in copies], force)
@@ -203,6 +206,30 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         "warnings": warnings,
         "graph": graph,
     }
+
+
+def _obsidian_writes(target: Path) -> list[tuple[Path, str]]:
+    """Opt-in Obsidian vault config (`--obsidian`). Bare-minimum and never required:
+    the precise typed-graph visual is `tropo view` (editor-free); this just colours
+    Obsidian's graph nodes by Vivary type for fans. Obsidian's ephemeral UI state is
+    gitignored. Nothing in Vivary depends on Obsidian."""
+    folder_colors = [
+        ("modules", 5213695), ("changes", 16752963), ("decisions", 10837226),
+        ("verification", 2547329), ("gates", 16538725),
+    ]
+    graph = {
+        "colorGroups": [
+            {"query": f"path:{folder}/", "color": {"a": 1, "rgb": rgb}}
+            for folder, rgb in folder_colors
+        ],
+        "showTags": False,
+        "showAttachments": False,
+    }
+    return [
+        (target / ".obsidian" / "app.json", "{}\n"),
+        (target / ".obsidian" / "graph.json", json.dumps(graph, indent=2) + "\n"),
+        (target / ".obsidian" / ".gitignore", "workspace.json\nworkspace-mobile.json\n"),
+    ]
 
 
 def _source_paths(root: Path) -> dict[str, Path]:
@@ -550,6 +577,9 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("target", help="directory to create or populate")
     init.add_argument("--preset", choices=PRESETS, default="coding")
     init.add_argument("--force", action="store_true", help="overwrite scaffold files")
+    init.add_argument("--obsidian", action="store_true",
+                      help="also drop an optional Obsidian vault config (graph coloured "
+                           "by type); never required — see docs/OBSIDIAN.md")
     init.add_argument(
         "--repo-root",
         default=None,
@@ -587,6 +617,7 @@ def main(argv: list[str] | None = None) -> int:
             args.target,
             preset=args.preset,
             force=args.force,
+            obsidian=args.obsidian,
             repo_root=args.repo_root,
         )
     except ScaffoldError as exc:

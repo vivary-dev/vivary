@@ -95,6 +95,23 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertIn(("scaffold-smoke", "scaffold-init"), edge_pairs)
             self.assertTrue(all(not e["broken"] for e in edges))
 
+    def test_obsidian_flag_is_opt_in(self):
+        import json
+        with temp_workspace() as td:
+            plain = Path(td) / "plain"
+            create_vivary.scaffold_workspace(plain, preset="coding", repo_root=ROOT)
+            self.assertFalse((plain / ".obsidian").exists())  # default: no Obsidian
+
+            vault = Path(td) / "vault"
+            create_vivary.scaffold_workspace(
+                vault, preset="coding", obsidian=True, repo_root=ROOT)
+            self.assertTrue((vault / ".obsidian" / "app.json").exists())
+            graph = json.loads((vault / ".obsidian" / "graph.json").read_text(encoding="utf-8"))
+            queries = {g["query"] for g in graph["colorGroups"]}
+            self.assertIn("path:modules/", queries)
+            self.assertIn("path:gates/", queries)
+            self.assertTrue((vault / "AGENTS.md").exists())  # still a real workspace
+
     def test_presets_write_distinct_starter_graphs(self):
         cases = {
             "coding": {

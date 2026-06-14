@@ -44,6 +44,8 @@ must cost almost nothing to load, or it steals the context the work needs.*
 **No lock-in.** A workspace is plain Markdown + YAML and a few CLIs — it works in any
 editor, or none, and on any agent runtime (Claude Code reads `.claude/skills/`, Codex
 reads `AGENTS.md` + `.agents/`). Obsidian, an IDE, a particular agent — all optional.
+The visual knowledge graph renders editor-free with `tropo view`; Obsidian fans get an
+opt-in setup (`create-vivary init … --obsidian`) — see [docs/OBSIDIAN.md](docs/OBSIDIAN.md).
 
 ## Modules
 
