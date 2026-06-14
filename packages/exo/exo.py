@@ -48,17 +48,23 @@ class ExoError(Exception):
 
 
 def _load_tropo():
+    """Load the tropo engine in-process. Prefers the in-repo sibling
+    `../tropo/tropo.py`; when installed, falls back to the `vivary-tropo`
+    dependency (`import tropo`)."""
     here = os.path.dirname(os.path.abspath(__file__))
-    tropo_dir = os.path.join(os.path.dirname(here), "tropo")
-    tropo_path = os.path.join(tropo_dir, "tropo.py")
-    if not os.path.isfile(tropo_path):
-        raise ExoError(f"tropo engine not found at {tropo_path}")
-    spec = importlib.util.spec_from_file_location("exo_tropo", tropo_path)
-    if spec is None or spec.loader is None:
-        raise ExoError(f"could not load tropo engine: {tropo_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module, tropo_dir
+    sibling = os.path.join(os.path.dirname(here), "tropo", "tropo.py")
+    if os.path.isfile(sibling):
+        spec = importlib.util.spec_from_file_location("exo_tropo", sibling)
+        if spec is None or spec.loader is None:
+            raise ExoError(f"could not load tropo engine: {sibling}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module, os.path.dirname(sibling)
+    try:
+        import tropo as module
+    except ImportError as e:
+        raise ExoError(f"tropo engine not found (install vivary-tropo): {e}")
+    return module, os.path.dirname(os.path.abspath(module.__file__))
 
 
 def workspace_state(root):
