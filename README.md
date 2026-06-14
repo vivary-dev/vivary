@@ -8,10 +8,12 @@ A *vivary* is an archaic word for a vivarium: a self-contained world where livin
 things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
-> Status: **local scaffold MVP.** `packages/tropo` is a working knowledge-graph
-> CLI, `packages/strato` contains the agent OS contract/templates/skill, and
-> `packages/create-vivary` scaffolds a complete agent workspace. `ozone` and `exo`
-> are still stubs. See [HANDOFF.md](HANDOFF.md) to continue, and
+> Status: **all four layers built and installable; publishing in progress.**
+> `tropo` (typed knowledge graph), `strato` (agent OS contract/templates/skill),
+> `ozone` (graph-aware review), and `exo` (coordination) are all working packages,
+> composed by `create-vivary`. Every package builds + installs from a clean venv;
+> the npm `create vivary` wrapper works. Not yet on PyPI/npm — that's the remaining
+> step. See [HANDOFF.md](HANDOFF.md) to continue, and
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full model.
 
 ## Try it locally
@@ -48,19 +50,21 @@ Standalone packages, scoped `@vivary/*` (npm) / `vivary-*` (PyPI), composed by
 |---|---|---|---|
 | **tropo** | troposphere — the living foundation | typed knowledge graph: what the workspace *knows* | loam ✓ |
 | **strato** | stratosphere — the stable layer | agent OS: state surface, memory, the loop, gates, self-improvement | throughline + flywheel |
-| **ozone** | the protective filter | review — code *and* editorial | new |
-| **exo** | the outermost layer | multi-agent orchestration | new |
+| **ozone** | the protective filter | review — graph-aware, code *and* editorial | new ✓ |
+| **exo** | the outermost layer | coordination — conflict detection + role contracts | new ✓ |
 
 `create vivary` → pick a preset (**second brain · coding · writing**) → it lays
 down `tropo` + `strato` and whichever optional layers fit.
 
-The current local command surface is:
+Run it locally from the repo:
 
 ```bash
 python packages/create-vivary/create_vivary.py init <dir> --preset coding
 ```
 
-npm packaging is still gated future work.
+All four packages are pip-installable (`vivary-tropo`, `vivary-ozone`, `vivary-exo`,
+`create-vivary`) and the npm `create vivary` wrapper works; the packages are not yet
+published to PyPI/npm — that's the remaining step.
 
 ## The value-add (why this isn't another harness)
 
