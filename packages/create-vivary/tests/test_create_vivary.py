@@ -60,6 +60,9 @@ class CreateVivaryTests(unittest.TestCase):
                 "decisions/0001-vivary-baseline.md",
                 "verification/scaffold-smoke.md",
                 "gates/human-gates.md",
+                "modules/codebase.md",
+                "changes/local-ci-baseline.md",
+                "verification/local-checks.md",
             ]
             missing = [p for p in expected if not (target / p).exists()]
             self.assertEqual(missing, [])
@@ -77,9 +80,12 @@ class CreateVivaryTests(unittest.TestCase):
             nodes, edges = tropo.build_graph(docs)
             for node in [
                 "agent-workspace",
+                "codebase",
                 "scaffold-init",
+                "local-ci-baseline",
                 "0001-vivary-baseline",
                 "scaffold-smoke",
+                "local-checks",
                 "human-gates",
             ]:
                 self.assertIn(node, nodes)
@@ -88,6 +94,43 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertIn(("scaffold-init", "agent-workspace"), edge_pairs)
             self.assertIn(("scaffold-smoke", "scaffold-init"), edge_pairs)
             self.assertTrue(all(not e["broken"] for e in edges))
+
+    def test_presets_write_distinct_starter_graphs(self):
+        cases = {
+            "coding": {
+                "module": "codebase",
+                "change": "local-ci-baseline",
+                "verification": "local-checks",
+            },
+            "second-brain": {
+                "module": "knowledge-base",
+                "change": "capture-routine",
+                "verification": "retrieval-smoke",
+            },
+            "writing": {
+                "module": "manuscript-system",
+                "change": "draft-review-loop",
+                "verification": "editorial-review",
+            },
+        }
+
+        for preset, expected in cases.items():
+            with self.subTest(preset=preset), temp_workspace() as td:
+                target = Path(td) / f"{preset}-workspace"
+                create_vivary.scaffold_workspace(
+                    target, preset=preset, force=False, repo_root=ROOT
+                )
+
+                resolver = tropo.ConfigResolver(str(target), str(TROPO))
+                docs = tropo.analyze(str(target), [], resolver)
+                findings = [f.render() for d in docs for f in d.findings]
+                self.assertEqual(findings, [])
+
+                nodes, edges = tropo.build_graph(docs)
+                for node in expected.values():
+                    self.assertIn(node, nodes)
+                self.assertIn("agent-workspace", nodes)
+                self.assertTrue(all(not e["broken"] for e in edges))
 
     def test_refuses_to_overwrite_without_force(self):
         with temp_workspace() as td:

@@ -11,6 +11,54 @@ from pathlib import Path
 
 PRESETS = ("coding", "second-brain", "writing")
 
+PRESET_STARTERS = {
+    "coding": {
+        "module_id": "codebase",
+        "module_title": "Codebase",
+        "module_area": "software project",
+        "module_body": "Code, docs, tests, and release gates for a software workspace.",
+        "change_id": "local-ci-baseline",
+        "change_title": "Local CI Baseline",
+        "change_slice": "local verification baseline",
+        "change_body": "Define the local checks that stand in for remote CI while the project is early.",
+        "verification_id": "local-checks",
+        "verification_title": "Local Checks",
+        "verification_target": "local-ci-baseline",
+        "verification_command": "run the project-local tests and build",
+        "verification_body": "Run the checks that prove a code slice is ready to review.",
+    },
+    "second-brain": {
+        "module_id": "knowledge-base",
+        "module_title": "Knowledge Base",
+        "module_area": "personal knowledge system",
+        "module_body": "Captured notes, sources, decisions, and retrieval paths for a thinking workspace.",
+        "change_id": "capture-routine",
+        "change_title": "Capture Routine",
+        "change_slice": "knowledge capture loop",
+        "change_body": "Start with one reliable path for capture, triage, retrieval, and promotion.",
+        "verification_id": "retrieval-smoke",
+        "verification_title": "Retrieval Smoke",
+        "verification_target": "capture-routine",
+        "verification_command": "retrieve one known note from the typed graph",
+        "verification_body": "Prove the workspace can find a saved note and its related context.",
+    },
+    "writing": {
+        "module_id": "manuscript-system",
+        "module_title": "Manuscript System",
+        "module_area": "writing project",
+        "module_body": "Drafts, research, editorial passes, and publication gates for a writing workspace.",
+        "change_id": "draft-review-loop",
+        "change_title": "Draft Review Loop",
+        "change_slice": "draft to review workflow",
+        "change_body": "Set up the first repeatable loop from draft to critique to revision.",
+        "verification_id": "editorial-review",
+        "verification_title": "Editorial Review",
+        "verification_target": "draft-review-loop",
+        "verification_command": "review one draft against the workspace editorial criteria",
+        "verification_body": "Prove a draft can move through review with evidence and next actions.",
+    },
+}
+
 
 class ScaffoldError(RuntimeError):
     """Raised when a workspace cannot be scaffolded safely."""
@@ -61,6 +109,7 @@ def scaffold_workspace(
         (target / "memory" / ".gitkeep", ""),
         (target / "heartbeat-reports" / ".gitkeep", ""),
     ]
+    writes.extend(_preset_writes(target, project, PRESET_STARTERS[preset]))
 
     copies = _copy_plan(target, sources)
     _ensure_no_conflicts([p for p, _ in writes] + [dst for _, dst in copies], force)
@@ -133,6 +182,7 @@ def _ensure_no_conflicts(paths: list[Path], force: bool) -> None:
 
 
 def _workspace_readme(project: str, preset: str) -> str:
+    starter = PRESET_STARTERS[preset]
     return f"""# {project}
 
 Vivary agent workspace scaffold.
@@ -149,6 +199,12 @@ Start here:
 The scaffold includes tropo for typed workspace knowledge, strato for the agent OS,
 runtime skills for Claude/Codex-style agents, and a starter graph under
 `modules/`, `changes/`, `decisions/`, `verification/`, and `gates/`.
+
+Preset starter:
+
+- Module: `{starter["module_id"]}`
+- First slice: `{starter["change_id"]}`
+- Verification: `{starter["verification_id"]}`
 """
 
 
@@ -244,6 +300,70 @@ gates: [human-gates]
 
 The root agent workspace shell: state surface, human contract, private memory,
 runtime skills, and typed graph folders.
+"""
+
+
+def _preset_writes(target: Path, project: str, starter: dict[str, str]) -> list[tuple[Path, str]]:
+    return [
+        (
+            target / "modules" / f'{starter["module_id"]}.md',
+            _preset_module_doc(project, starter),
+        ),
+        (
+            target / "changes" / f'{starter["change_id"]}.md',
+            _preset_change_doc(project, starter),
+        ),
+        (
+            target / "verification" / f'{starter["verification_id"]}.md',
+            _preset_verification_doc(project, starter),
+        ),
+    ]
+
+
+def _preset_module_doc(project: str, starter: dict[str, str]) -> str:
+    return f"""---
+project: {project}
+status: active
+module_area: {starter["module_area"]}
+related_modules: [agent-workspace]
+related_changes: [{starter["change_id"]}]
+verification: [{starter["verification_id"]}]
+gates: [human-gates]
+---
+# {starter["module_title"]}
+
+{starter["module_body"]}
+"""
+
+
+def _preset_change_doc(project: str, starter: dict[str, str]) -> str:
+    return f"""---
+project: {project}
+status: planned
+slice: {starter["change_slice"]}
+related_modules: [{starter["module_id"]}, agent-workspace]
+related_changes: [scaffold-init]
+verification: [{starter["verification_id"]}]
+gates: [human-gates]
+---
+# {starter["change_title"]}
+
+{starter["change_body"]}
+"""
+
+
+def _preset_verification_doc(project: str, starter: dict[str, str]) -> str:
+    return f"""---
+project: {project}
+status: planned
+target: {starter["verification_target"]}
+command: {starter["verification_command"]}
+related_modules: [{starter["module_id"]}, agent-workspace]
+related_changes: [{starter["change_id"]}]
+---
+# {starter["verification_title"]}
+
+{starter["verification_body"]}
 """
 
 
