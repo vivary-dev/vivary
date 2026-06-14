@@ -188,13 +188,16 @@ doctor: ok
    approval. If the PR diverges from the plan, re-align before merging.
 3. **Package naming/publishing.** Local package is `packages/create-vivary`, but npm
    name availability has not been verified and nothing is published.
-4. **Config filename.** Current generated workspaces use `tropo.toml`. Open question:
-   keep per-layer configs, or eventually introduce workspace-level `vivary.toml`.
+4. **Config filename.** _Resolved 2026-06-14:_ keep per-module `tropo.toml`; no
+   workspace-level `vivary.toml` unification. (Settled — do not re-litigate.)
 5. **GitHub org/namespace.** Current repo lives under `Jeff-Kazzee/vivary`. A future
    org handle is still undecided. Do not create one without approval.
-6. **Preset depth.** Current presets differ by starter graph only. Decide how much
-   folder structure and workflow material each preset should earn without bloating the
-   scaffold.
+6. **Preset depth.** _Resolved 2026-06-14:_ presets differ by starter graph only and
+   stay graph-only (no extra folder/workflow scaffolding) — honors the minimalism law.
+
+**Branch roles (2026-06-14):** `dev` is the GitHub default and the integration
+branch; feature branches cut from `dev`. `main` is the vestigial tropo+strato
+baseline (left untouched). `prod` is reserved for the eventual MVP-solid cut.
 
 ## Recommended Next Build Sequence
 
