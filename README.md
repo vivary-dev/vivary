@@ -68,9 +68,20 @@ Run it locally from the repo:
 python packages/create-vivary/create_vivary.py init <dir> --preset coding
 ```
 
-All four packages are pip-installable (`vivary-tropo`, `vivary-ozone`, `vivary-exo`,
-`create-vivary`) and the npm `create vivary` wrapper works; the packages are not yet
-published to PyPI/npm — that's the remaining step.
+Install from PyPI (or run on demand with `uvx`):
+
+```bash
+pip install vivary-tropo vivary-ozone vivary-exo create-vivary
+```
+
+## Documentation
+
+Full docs live in [docs/](docs/):
+
+- [Getting started](docs/GETTING-STARTED.md) — install → workspace → loop
+- [Command reference](docs/COMMANDS.md) — every CLI, flag, and exit code
+- [How-to recipes](docs/HOWTO.md) · [Agent skills](docs/SKILLS.md) · [FAQ](docs/FAQ.md)
+- [Architecture](docs/ARCHITECTURE.md) · [Obsidian (optional)](docs/OBSIDIAN.md)
 
 ## The value-add (why this isn't another harness)
 

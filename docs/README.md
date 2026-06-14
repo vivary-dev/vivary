@@ -1,0 +1,26 @@
+# Vivary documentation
+
+Start here.
+
+| Doc | What it covers |
+|---|---|
+| [GETTING-STARTED.md](GETTING-STARTED.md) | Install → create a workspace → run the loop. Begin here. |
+| [COMMANDS.md](COMMANDS.md) | Full CLI reference for `tropo` · `ozone` · `exo` · `create-vivary`. |
+| [HOWTO.md](HOWTO.md) | Task recipes: add a type, see blast radius, review, CI, multi-agent, … |
+| [SKILLS.md](SKILLS.md) | The agent skills: strato (bootstrap/heartbeat/self-improve), tropo, loops. |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | The layer model (tropo → strato → ozone → exo) and the why. |
+| [OBSIDIAN.md](OBSIDIAN.md) | Optional Obsidian setup for fans (never required). |
+| [FAQ.md](FAQ.md) | Common questions. |
+
+Deeper, per-package: [tropo SPEC](../packages/tropo/SPEC.md) (the normative
+folder-as-type model), and each package's `README.md`.
+
+## The one-paragraph mental model
+
+A Vivary workspace is a folder where **the filesystem is the schema**: a document's type
+is the folder it lives in (`tropo`), and typed frontmatter fields become a navigable
+graph. An agent operates it with a per-turn loop — *Ask → retrieve → act → verify →
+learn → gate* (`strato`) — retrieving from the graph, verifying with `tropo check` +
+`ozone review`, naming blast radius before risky changes, and stopping at human gates.
+When one agent becomes many, `exo` coordinates them. Everything is plain Markdown +
+zero-dependency CLIs — no editor, no vendor, no lock-in.
