@@ -1,0 +1,30 @@
+/* Vivary brand — atmosphere greens/teals. Overrides Starlight's accent + grays. */
+:root {
+	--sl-color-accent-low: #102b22;
+	--sl-color-accent: #1f9d72;
+	--sl-color-accent-high: #9fe7c9;
+	--sl-color-white: #f4f8f6;
+	--sl-color-gray-1: #e3ece8;
+	--sl-color-gray-2: #b6c4be;
+	--sl-color-gray-3: #7c8d86;
+	--sl-color-gray-4: #475852;
+	--sl-color-gray-5: #2a3a34;
+	--sl-color-gray-6: #1a2622;
+	--sl-color-black: #131c19;
+}
+
+:root[data-theme='light'] {
+	--sl-color-accent-low: #c8efdd;
+	--sl-color-accent: #16805d;
+	--sl-color-accent-high: #0c3a2a;
+	--sl-color-white: #131c19;
+	--sl-color-gray-1: #1f2a26;
+	--sl-color-gray-2: #38453f;
+	--sl-color-gray-3: #5c6b64;
+	--sl-color-gray-4: #8b9a93;
+	--sl-color-gray-5: #c2cec9;
+	--sl-color-gray-6: #eef3f1;
+	--sl-color-gray-7: #f6faf8;
+	--sl-color-black: #ffffff;
+}
+

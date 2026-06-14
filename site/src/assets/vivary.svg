@@ -1,0 +1,13 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vivary">
+  <rect width="32" height="32" rx="8" fill="url(#vg)"/>
+  <path d="M6 22.5c3-2 7-2 10 0s7 2 10 0" stroke="#fff" stroke-width="1.6" stroke-linecap="round" opacity="0.55"/>
+  <path d="M6 17c3-2 7-2 10 0s7 2 10 0" stroke="#fff" stroke-width="1.7" stroke-linecap="round" opacity="0.75"/>
+  <path d="M6 11.5c3-2 7-2 10 0s7 2 10 0" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
+  <circle cx="16" cy="8.5" r="1.7" fill="#fff"/>
+  <defs>
+    <linearGradient id="vg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1f9d72"/>
+      <stop offset="1" stop-color="#1b6fa8"/>
+    </linearGradient>
+  </defs>
+</svg>
