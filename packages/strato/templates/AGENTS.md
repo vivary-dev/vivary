@@ -13,6 +13,19 @@ model is strato's `STRATO.md`. Read this on startup.
 `Ask → retrieve → act → verify → learn → gate.` State known / inferred / unknown;
 confirm before guessing. One verified slice at a time.
 
+This workspace **is a typed knowledge graph** — work it, don't just take notes in it:
+
+- **retrieve** — see the graph with `tropo graph`; what depends on a node with
+  `tropo blast <id>`. The graph is the first source of truth; grep notes second.
+- **verify** — `tropo check` (strict — warnings fail) on what you touched, and
+  `ozone review` for relationship gaps (an unverified change, a broken link) before a
+  gate.
+- **gate** — for a risky change, name its blast radius first (`ozone impact <id>`).
+- **many agents** — coordinate with `exo` (`conflicts` / `board` / `roles`).
+
+> Tooling: `pip install vivary-tropo vivary-ozone vivary-exo` (or run via `uvx`,
+> e.g. `uvx vivary-tropo check`). No editor required — the graph is plain Markdown.
+
 ## Visible state
 
 Keep `STATE.md` current (Focus / Status / Next / Open decisions / Blockers / Checks /

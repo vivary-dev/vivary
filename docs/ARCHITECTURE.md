@@ -32,6 +32,12 @@ competes with the user's task for context. The framework must cost almost nothin
 to load. Fewer files, fewer words, more room for the work. This is the constraint
 that keeps Vivary from bloating into a heavy harness.
 
+**No lock-in (corollary):** a workspace is plain Markdown + YAML plus a few
+zero-dependency CLIs. It works in any editor or none and on any agent runtime
+(Claude Code via `.claude/`, Codex via `AGENTS.md` + `.agents/`). tropo even ignores
+`.obsidian/`, `.vscode/`, etc. — no editor, plugin, or single-vendor agent is ever
+required.
+
 ## 3. The layer model
 
 A vertical column. Each layer is a standalone package that reads/writes the same
