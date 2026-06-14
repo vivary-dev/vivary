@@ -22,7 +22,7 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/vivary-dev/vivary"
+Homepage = "https://vivary.vercel.app/"
 Repository = "https://github.com/vivary-dev/vivary"
 
 [project.scripts]

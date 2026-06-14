@@ -22,7 +22,7 @@
   ],
   "license": "MIT",
   "author": "Jeff Kazzee",
-  "homepage": "https://github.com/vivary-dev/vivary",
+  "homepage": "https://vivary.vercel.app/",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vivary-dev/vivary.git"

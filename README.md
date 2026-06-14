@@ -76,7 +76,8 @@ pip install vivary-tropo vivary-ozone vivary-exo create-vivary
 
 ## Documentation
 
-Full docs live in [docs/](docs/):
+**Website: [vivary.vercel.app](https://vivary.vercel.app/)** — or browse the source in
+[docs/](docs/):
 
 - [Getting started](docs/GETTING-STARTED.md) — install → workspace → loop
 - [Command reference](docs/COMMANDS.md) — every CLI, flag, and exit code

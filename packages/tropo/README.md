@@ -134,3 +134,7 @@ tropo/
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+Website & docs: <https://vivary.vercel.app/>
