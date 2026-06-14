@@ -52,3 +52,7 @@ python ../tropo/tropo.py view blast <id> --root <workspace> --out impact.html
 
 Python 3.11+. Loads the sibling `packages/tropo/tropo.py` engine in-process (no pip
 install needed in the repo); packaged builds depend on the `tropo` package.
+
+---
+
+Website & docs: <https://vivary.vercel.app/>

@@ -25,3 +25,7 @@ Prefer Python directly? `uvx create-vivary my-workspace --preset coding` or
 ## License
 
 MIT.
+
+---
+
+Website & docs: <https://vivary.vercel.app/>

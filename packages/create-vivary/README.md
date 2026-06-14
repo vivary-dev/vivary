@@ -27,3 +27,7 @@ git, push, publish, or enable hooks.
 ```bash
 python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo --json
 ```
+
+---
+
+Website & docs: <https://vivary.vercel.app/>
