@@ -1,181 +1,315 @@
-# Vivary — handoff (start a fresh chat here)
+# Vivary — fresh-chat handoff
 
-This document is self-contained. A new session can pick up Vivary from this file
-alone. Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) alongside it.
+_Updated 2026-06-14._
 
-_Written 2026-06-13._
+This is the starting point for a fresh chat. Read this first, then
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), then inspect live git state before
+editing.
 
----
+## Fresh Chat Opener
 
-## TL;DR
+Use this prompt in a new window:
 
-Vivary is a **standard + scaffolder for agent-native workspaces** — the
-`create-t3-app` of agent workspaces. It composes standalone, atmosphere-named
-modules into a normalized workspace (second brain / coding / writing), on any
-agent runtime and any stack.
+```text
+We are in C:\Users\jeffk\dev\vivary. Read HANDOFF.md and docs/ARCHITECTURE.md.
+Verify git status/branch/remotes before making claims. Continue building Vivary
+from the current feature branch unless I say otherwise. Tests must be planned
+before edits. Do not push, open PRs, merge, publish, create orgs/repos, install
+dependencies, or delete files without explicit approval.
+```
 
-The baseline = **a self-improving loop over a typed knowledge graph, with one
-visible state surface and human gates.** Design law: the framework must cost
-almost nothing to load (throughline's minimalism hypothesis).
+## Current Truth
 
-**Right now:** `packages/tropo` works (knowledge-graph CLI ported from loam, 42
-tests passing). `packages/strato` has the fused agent OS contract, templates, and
-skill. `packages/create-vivary` now scaffolds and doctors complete agent workspaces
-locally. `ozone` and `exo` are still stubs. The repo is on GitHub with `dev` as the
-default branch and feature work on short-lived branches.
+Vivary is a **standard + scaffolder for agent-native workspaces**: the
+`create-t3-app` of agent workspaces.
 
----
+The baseline thesis:
 
-## How we got here (so the reasoning isn't lost)
+> A self-improving loop running over a typed, navigable knowledge graph, with one
+> visible state surface and human gates.
 
-This started as "install braincheck's second-brain skill," became **loam** (a
-folder-as-type typed knowledge layer, now public at
-github.com/Jeff-Kazzee/loam), then the scope expanded: loam is just one layer of
-a larger **agent workspace ecosystem**. Jeff pulled in three more of his own
-repos and asked to distill all four into one baseline.
+Layer model:
 
-### The four source repos (DO NOT MODIFY — copy only)
+```text
+exo      multi-agent orchestration                 optional
+ozone    review/gates: code + editorial            optional
+strato   agent OS: state, memory, loop, gates       baseline
+tropo    typed knowledge graph: what is true        baseline
+```
 
-| Repo | Role | Becomes |
+Design law: **minimalism**. Always-on context must be tiny. Expensive-to-load
+framework files are wrong.
+
+## Live Repo State
+
+Repo path:
+
+```powershell
+C:\Users\jeffk\dev\vivary
+```
+
+GitHub:
+
+```text
+https://github.com/Jeff-Kazzee/vivary
+default branch: dev
+visibility: public
+```
+
+Current local branch:
+
+```text
+feat/create-vivary-workspace-scaffold
+```
+
+Current pushed feature branch tip before this handoff edit:
+
+```text
+eda3d85 ci: add workflow and scaffold doctor
+```
+
+Remote branch state at the time this handoff was written:
+
+```text
+origin/feat/create-vivary-workspace-scaffold -> eda3d85
+origin/dev -> a5d4283
+```
+
+If this handoff has been committed locally but not pushed, `git status --short --branch`
+will show the feature branch ahead of origin. Verify live state before pushing.
+
+No PR has been opened. Nothing has been merged into `dev` from this feature
+branch yet. No `prod` branch has been created; `prod` is reserved for finished
+product/MVP-solid.
+
+## What Exists
+
+```text
+packages/tropo/
+  Working zero-dependency Python knowledge-graph CLI.
+  Commands include check, signal, fix, init, graph, blast, view, plan.
+  Tests: 42/42 passing locally.
+
+packages/strato/
+  Working agent OS model, templates, and strato skill.
+  Fuses throughline + flywheel into one package.
+
+packages/create-vivary/
+  Working local scaffold CLI.
+  Commands:
+    init <dir> --preset coding|second-brain|writing
+    doctor <dir> [--json]
+  Tests: 8/8 passing locally.
+
+packages/ozone/
+  Stub. Intended review layer: code + editorial, graph-aware.
+
+packages/exo/
+  Stub. Intended multi-agent orchestration layer.
+
+.github/workflows/ci.yml
+  CI contract exists. It runs create-vivary tests, tropo tests, and git diff --check.
+  GitHub Actions may still be billing-locked on this account; verify locally.
+```
+
+## Decisions Already Made
+
+- **Vivary is the product**, not just a code name. It is a standard plus a
+  scaffolder for agent-native workspaces.
+- **Baseline is tropo + strato.** Ozone and exo are optional layers.
+- **strato is one package**, not separate throughline/flywheel packages. The model is
+  one loop at two speeds: per-turn and heartbeat.
+- **tropo owns the typed graph**, but not embeddings. Graphify can consume tropo's
+  clean graph later. Do not put semantic/embedding machinery into tropo.
+- **create-vivary is the product spine right now.** The current highest-leverage
+  work is making a new workspace useful from a cold start.
+- **Presets share the same agent OS shell** and seed different starter graphs:
+
+| Preset | Module | First slice | Verification |
+|---|---|---|---|
+| `coding` | `codebase` | `local-ci-baseline` | `local-checks` |
+| `second-brain` | `knowledge-base` | `capture-routine` | `retrieval-smoke` |
+| `writing` | `manuscript-system` | `draft-review-loop` | `editorial-review` |
+
+- **doctor is part of the scaffold contract.** It validates required workspace
+  files, privacy ignores, and tropo graph health.
+- **No nested git repos.** Vivary packages are plain subdirectories.
+- **Branch policy:** active development on `dev`, feature branches off `dev`, PR
+  and checks before merge, `prod` only after MVP is solid.
+- **Publishing and outward actions are gated** per item: push, PR, merge, npm/PyPI,
+  GitHub org/repo actions, installs, hooks, destructive ops.
+
+## Source Repo Boundary
+
+The four source repos are read-only. Copy ideas/content into Vivary; do not modify
+the source repos from this workspace.
+
+| Repo | Role | Vivary layer |
 |---|---|---|
-| [braincheck](https://github.com/Jeff-Kazzee/braincheck) | frontmatter typechecker, declaration-first | **retired ancestor** of tropo |
-| [loam](https://github.com/Jeff-Kazzee/loam) | folder-as-type typed knowledge graph | **`@vivary/tropo`** (already ported) |
-| [throughline](https://github.com/Jeff-Kazzee/throughline) | "Tiny Agent OS": visible State Surface, the `Ask→retrieve→act→verify→learn→gate` loop, FW/WS/PRIV grammar, human gates, MEMORY/USER templates | **`@vivary/strato`** |
-| [flywheel](https://github.com/Jeff-Kazzee/flywheel) | bootstrap (SOUL/USER/AGENTS/MEMORY) + heartbeat audit + self-improvement (bug-risk playbook, third-strike skill rule, plugin packaging) | **`@vivary/strato`** |
+| `braincheck` | frontmatter typechecker ancestor | retired ancestor of tropo |
+| `loam` | folder-as-type typed knowledge graph | `@vivary/tropo` |
+| `throughline` | tiny agent OS, visible state, gates | `@vivary/strato` |
+| `flywheel` | bootstrap, heartbeat, self-improvement | `@vivary/strato` |
 
-**Key insight:** throughline and flywheel are the *same loop at two speeds* —
-throughline runs it per-turn, flywheel distills it on a heartbeat. Jeff chose to
-**fuse them into one `strato` package**, not keep them separate.
+## Verification Commands
 
-### Naming journey (why "Vivary")
+Run these before claiming the feature branch is healthy:
 
-We hit "the bare word is taken" three times. The verified findings:
-
-- **loam** — PyPI + npm both taken; "LOAM" is a robotics acronym. Dropped as a
-  system name (the loam *repo* stays as Jeff's public experiment).
-- **Trellis** — taken by `mindfold-ai/Trellis`, a Claude Code agent harness (a
-  direct competitor), and Sprout Social's agent. Rejected.
-- **garden / grove / greenhouse / orchard** — Google **Agent Garden** owns the
-  metaphor; most are claimed (Orchard CMS, Canopy fintech). Rejected.
-- **rhizome** — taken, and collides *in our own domain* (ztellman/rhizome is a
-  graph-viz lib; RhizomeDB). Rejected.
-- **terroir** — PyPI taken (terraform tool). Rejected.
-- **vivarium** — real Python microsim framework on PyPI + the `github.com/vivarium`
-  org. Contested.
-- **welkin** — "Welkin Health" company on PyPI; org taken. Rejected.
-- **✅ Vivary** — archaic word for *vivarium*. **Free on npm and PyPI.** GitHub
-  bare login is a dead "Vivary Golf Club" (★0) → org needs a handle variant.
-
-**Namespace strategy:** the brand owns the scope; modules are scoped
-(`@vivary/tropo`, PyPI `vivary-tropo`), so taken bare module names don't matter.
-
----
-
-## Current state of this repo (`~/dev/vivary`)
-
-```
-vivary/
-├─ README.md              vision
-├─ AGENTS.md              runtime contract for any agent (plan+alignment merge gate)
-├─ CLAUDE.md              Claude Code overlay (ultraplan = Claude's mechanism for it)
-├─ HANDOFF.md             this file
-├─ docs/ARCHITECTURE.md   full model
-├─ LICENSE                MIT
-├─ packages/
-│  ├─ tropo/              WORKING — ported from loam, renamed loam→tropo, 42 tests pass
-│  │                       includes graph/blast/view/plan and packs/repo-graph.toml
-│  ├─ strato/             WORKING MODEL — STRATO.md + templates + strato skill
-│  ├─ create-vivary/      WORKING LOCAL SCAFFOLDER — init + doctor workspace shells
-│  ├─ ozone/              STUB — README only (review: code + editorial)
-│  └─ exo/                STUB — README only (multi-agent orchestration)
-└─ sandboxes/             ignored throwaway workspaces to test `create vivary` against
+```powershell
+python packages\create-vivary\tests\test_create_vivary.py
+python packages\tropo\tests\test_tropo.py
+git diff --check
 ```
 
-`packages/tropo` is loam's engine with a clean `loam`→`tropo` rename plus the
-graph layer (`graph`/`blast`/`view`/`plan`). Its `SPEC.md` / `README.md` still
-need a framing pass to position it as `@vivary/tropo`, but the implementation is
-no longer just the original parser.
+Smoke a generated workspace:
 
----
-
-## Open decisions (need Jeff or a call)
-
-1. **GitHub org handle** — bare `vivary` is taken. Recommended `vivary-dev`; alts
-   `usevivary`, `getvivary`, `vivarylabs`. Org NOT created yet.
-2. **`create-vivary` npm name** — package exists locally, but npm name is not yet
-   verified or published.
-3. **Config filename** — tropo currently uses `tropo.toml` (inherited from
-   `loam.toml`). Decide: per-module config vs. one workspace-level `vivary.toml`.
-4. **Is `strato` one package or two?** Jeff chose **one** (fuse throughline +
-   flywheel). Confirm before splitting.
-5. **`create vivary` presets** — second brain / coding / writing. Define what each
-   lays down.
-
-## Known-but-unbuilt design (high-value, already thought through)
-
-- **The type-inference ladder for tropo.** loam is folder-as-type *only*, which
-  couples organization to type. We designed (but did not build) a resolution
-  ladder: explicit `type:` in frontmatter → optional filename convention
-  (`msa.contract.md`) → folder-as-type default. Folder stays the zero-noise
-  default; declare type only when structure can't carry it. A redundant `type:`
-  that repeats the folder is flagged as noise (W210), same as any derived field.
-- **The graph layer for tropo (the moat).** `tropo graph`, `blast`, `view`, and
-  `plan` now exist, with a semantic graph-diff. The next value-add here is making
-  `create-vivary` dogfood that graph more richly and later letting Graphify consume
-  tropo's clean graph. **loam = the parser; graphify = the reasoner** (do NOT put
-  embeddings in tropo — that's where minimalism dies).
-- **Overlays + `fix` already exist in tropo** (from loam): nested config tightens
-  a subtree (tighten-only law, E120); `tropo fix` strips frontmatter that repeats
-  a derived value. Packs compose type bundles.
-
----
-
-## Recommended next steps (in order)
-
-1. **Dogfood the scaffold.** Generate a sandbox for each preset, run
-   `create-vivary doctor`, `tropo check`/`graph`/`view`, and use the output to refine
-   the typed starter graph.
-2. **Open a PR for the scaffold branch** once Jeff approves; CI is defined in
-   `.github/workflows/ci.yml`, though Actions may be billing-locked.
-3. **Add the type-inference ladder** to tropo so it isn't folder-only.
-4. **Reframe tropo's docs** from standalone-loam to `@vivary/tropo`.
-5. **Build ozone's first review pack** on top of tropo graph/blast.
-6. **Naming/publishing** (needs Jeff's explicit go-ahead, per item): pick the org
-   handle, create the org, verify `create-vivary`, publish.
-
----
-
-## Constraints & rules (carry these forward)
-
-- **Do NOT modify the four source repos.** loam/braincheck/throughline/flywheel
-  stay as Jeff's published originals. Vivary copies from them.
-- **Minimalism is the design law.** If a layer is expensive to load, it's wrong.
-- **No nested git repos.** Vivary is ONE repo; packages are plain subdirectories,
-  not their own `.git`. (Jeff's standing rule.)
-- **Plan + alignment before merge** (see [AGENTS.md](AGENTS.md)). No branch merges
-  without a written, human-approved plan (intent · blast radius · verification ·
-  out-of-scope · alignment); human and agent aligned in writing, never
-  merge-then-explain. Claude's mechanism for this gate is **ultraplan** (plan mode)
-  — see [CLAUDE.md](CLAUDE.md).
-- **Publishing is gated per item.** npm/PyPI publish, GitHub org/repo creation,
-  pushes, PRs — each needs Jeff's explicit chat confirmation. Don't batch.
-- **Supply chain.** Before any install, check `~/dev/agents/.shared/deny-list-npm.json`
-  and run `npm/pnpm audit`. Vet new deps.
-- **GitHub Actions is billing-locked** on the Jeff-Kazzee account — CI jobs are
-  created but never run. Verify locally; a red CI is not a code defect.
-- **Platform:** Windows 11 / PowerShell (use `$null`, not `nul`; bash also
-  available). Python 3.11+ (tropo needs stdlib `tomllib`).
-
-## Verify the current state
-
-```bash
-cd ~/dev/vivary/packages/tropo
-python tests/test_tropo.py          # 42/42
-python tropo.py check  --root examples/vault    # clean
-python tropo.py signal --root examples/vault    # the irreducible-metadata report
-
-cd ~/dev/vivary
-python packages/create-vivary/create_vivary.py init sandboxes/coding-demo --preset coding
-python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo
-python packages/tropo/tropo.py check --root sandboxes/coding-demo
+```powershell
+python packages\create-vivary\create_vivary.py init sandboxes\coding-demo --preset coding --force
+python packages\create-vivary\create_vivary.py doctor sandboxes\coding-demo
+python packages\tropo\tropo.py check --root sandboxes\coding-demo
+python packages\tropo\tropo.py graph --root sandboxes\coding-demo --json
 ```
+
+Expected current smoke result for `coding-demo`:
+
+```text
+doctor: ok
+8 nodes
+24 edges
+0 broken
+```
+
+## Open Decisions
+
+1. **PR timing.** Open a PR from `feat/create-vivary-workspace-scaffold` to `dev`
+   after Jeff approves. CI may not run due to billing lock, so local verification is
+   the real gate.
+2. **Merge timing.** Do not merge without written plan+alignment and explicit Jeff
+   approval. If the PR diverges from the plan, re-align before merging.
+3. **Package naming/publishing.** Local package is `packages/create-vivary`, but npm
+   name availability has not been verified and nothing is published.
+4. **Config filename.** _Resolved 2026-06-14:_ keep per-module `tropo.toml`; no
+   workspace-level `vivary.toml` unification. (Settled — do not re-litigate.)
+5. **GitHub org/namespace.** Current repo lives under `Jeff-Kazzee/vivary`. A future
+   org handle is still undecided. Do not create one without approval.
+6. **Preset depth.** _Resolved 2026-06-14:_ presets differ by starter graph only and
+   stay graph-only (no extra folder/workflow scaffolding) — honors the minimalism law.
+
+**Branch roles (2026-06-14):** `dev` is the GitHub default and the integration
+branch; feature branches cut from `dev`. `main` is the vestigial tropo+strato
+baseline (left untouched). `prod` is reserved for the eventual MVP-solid cut.
+
+## Recommended Next Build Sequence
+
+Do not spend the next session only polishing docs. Build forward in small verified
+slices.
+
+### Slice 1 — Dogfood All Presets
+
+Goal: prove every preset produces a useful workspace, not just a passing test.
+
+Tasks:
+
+- Generate `sandboxes/coding-demo`, `sandboxes/second-brain-demo`, and
+  `sandboxes/writing-demo`.
+- Run `create-vivary doctor`, `tropo check`, `tropo graph --json`, and `tropo view`
+  for each.
+- Inspect the starter graphs and tighten names/edges if they feel generic or noisy.
+- Add tests if any repeated expectation emerges.
+
+Verification:
+
+```powershell
+python packages\create-vivary\tests\test_create_vivary.py
+python packages\tropo\tests\test_tropo.py
+git diff --check
+```
+
+### Slice 2 — PR Readiness
+
+Goal: prepare the scaffold branch for review/merge into `dev`.
+
+Tasks:
+
+- Produce the required merge plan: intent, blast radius, verification, out of scope,
+  alignment.
+- If Jeff approves, open the PR.
+- Treat remote CI as informational if billing-locked; rely on local checks.
+
+Gate: opening the PR requires explicit approval.
+
+### Slice 3 — Tropo Type-Inference Ladder
+
+Goal: make tropo less folder-only while preserving minimalism.
+
+Resolution ladder to implement:
+
+```text
+explicit frontmatter type
+-> optional filename convention
+-> folder-as-type default
+```
+
+Rules:
+
+- Folder remains the zero-noise default.
+- Redundant `type:` that simply repeats the folder-derived type should be warning
+  noise, not required metadata.
+- Keep the engine zero-dependency.
+
+### Slice 4 — Ozone First Review Pack
+
+Goal: turn the graph/blast radius into a review surface.
+
+Start with one narrow pack:
+
+- code-review pack over `modules/`, `changes/`, `verification/`, `gates/`
+- findings-first output
+- uses `tropo graph`/`blast`
+- no LLM dependency in core
+
+### Slice 5 — Packaging Strategy
+
+Goal: decide how users will install/run Vivary.
+
+Do not publish yet. First decide:
+
+- Python package only first?
+- npm wrapper for `create-vivary`?
+- scoped packages under a future org?
+- how `tropo` and `create-vivary` share versioning?
+
+Publishing is a hard gate.
+
+## Known Risks
+
+- **GitHub Actions billing lock:** workflows may be present but not run. Local
+  verification is required.
+- **Windows temp dirs:** default Python temp locations can fail in this sandbox. Tests
+  intentionally use repo-local `sandboxes/` temp roots.
+- **Git HTTPS on this machine:** normal Git credential/TLS paths may fail. Previous
+  pushes used `gh auth token` with an in-memory Basic auth header and OpenSSL backend.
+- **Handoff drift:** old notes may say `strato` or graph layer are stubs. Current truth
+  is in this file plus live git state.
+- **Scope creep:** avoid building a heavy harness. The product is useful because the
+  always-on load is small.
+
+## Commands For GitHub State
+
+```powershell
+git status --short --branch
+git log --oneline --decorate -n 8
+git remote -v
+gh repo view Jeff-Kazzee/vivary --json nameWithOwner,url,defaultBranchRef,isEmpty,visibility
+gh api repos/Jeff-Kazzee/vivary/branches/feat/create-vivary-workspace-scaffold
+```
+
+## Hard Gates To Remember
+
+- Do not push without approval.
+- Do not open a PR without approval.
+- Do not merge without written plan+alignment and approval.
+- Do not publish npm/PyPI without approval.
+- Do not create GitHub orgs/repos without approval.
+- Do not delete/force-push/rewrite history without approval.
+- Do not modify the four source repos.
