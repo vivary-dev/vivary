@@ -1,0 +1,34 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - dev
+      - "feat/**"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Create sandbox root
+        run: mkdir -p sandboxes
+
+      - name: Test create-vivary
+        run: python packages/create-vivary/tests/test_create_vivary.py
+
+      - name: Test tropo
+        run: python packages/tropo/tests/test_tropo.py
+
+      - name: Diff hygiene
+        run: git diff --check

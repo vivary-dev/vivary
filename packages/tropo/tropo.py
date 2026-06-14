@@ -625,7 +625,8 @@ def analyze_file(full, rel, config):
     rel = rel.replace("\\", "/")
 
     try:
-        text = open(full, encoding="utf-8", errors="replace").read()
+        with open(full, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
     except OSError as e:
         doc.findings.append(Finding(rel, 0, "error", "E000", f"cannot read file: {e}"))
         doc.type, doc.fields, doc.derived = None, {}, {}

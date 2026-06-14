@@ -8,10 +8,25 @@ A *vivary* is an archaic word for a vivarium: a self-contained world where livin
 things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
-> Status: **skeleton.** `packages/tropo` is a working knowledge-graph CLI (ported
-> from [loam](https://github.com/Jeff-Kazzee/loam), 22 tests passing). The other
-> layers are stubs. See [HANDOFF.md](HANDOFF.md) to continue, and
+> Status: **local scaffold MVP.** `packages/tropo` is a working knowledge-graph
+> CLI, `packages/strato` contains the agent OS contract/templates/skill, and
+> `packages/create-vivary` scaffolds a complete agent workspace. `ozone` and `exo`
+> are still stubs. See [HANDOFF.md](HANDOFF.md) to continue, and
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full model.
+
+## Try it locally
+
+```bash
+python packages/create-vivary/create_vivary.py init sandboxes/coding-demo --preset coding
+python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo
+python packages/tropo/tropo.py check --root sandboxes/coding-demo
+python packages/tropo/tropo.py graph --root sandboxes/coding-demo --json
+```
+
+The scaffolder writes a full workspace shell: `AGENTS.md`, `STATE.md`, `SOUL.md`,
+private `USER.md`/`MEMORY.md` boundaries, strato runtime skills for Claude/Codex-style
+agents, a `tropo.toml`, and a starter typed graph. `doctor` validates the shell,
+privacy ignores, and graph health after creation.
 
 ## The irreducible baseline
 
@@ -38,6 +53,14 @@ Standalone packages, scoped `@vivary/*` (npm) / `vivary-*` (PyPI), composed by
 
 `create vivary` → pick a preset (**second brain · coding · writing**) → it lays
 down `tropo` + `strato` and whichever optional layers fit.
+
+The current local command surface is:
+
+```bash
+python packages/create-vivary/create_vivary.py init <dir> --preset coding
+```
+
+npm packaging is still gated future work.
 
 ## The value-add (why this isn't another harness)
 
