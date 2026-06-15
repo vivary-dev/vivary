@@ -105,8 +105,7 @@ packages/create-vivary/ create-vivary — scaffolder: init --preset coding|secon
                        tropo check + `ozone review --strict` gate + site build,
                        on every PR/push. Passing.
 docs/                  Full guides: README (index), GETTING-STARTED, COMMANDS,
-                       HOWTO, SKILLS, FAQ, ARCHITECTURE, OBSIDIAN, WEBSITE-BRIEF,
-                       LAUNCH (draft, unpublished).
+                       HOWTO, SKILLS, FAQ, ARCHITECTURE, OBSIDIAN.
 ```
 
 ## Decisions Already Made
@@ -214,12 +213,12 @@ issues **#15–#24**; the near-term:
 
 - **Released.** `v0.1.0` is tagged + pushed; the site is live at vivary.vercel.app
   (Vercel, root dir `site`). Old `vivary-landing-page` repo archived. A GitHub Release
-  from `docs/LAUNCH.md` is still optional (a publishing gate).
+  is still optional (a publishing gate).
 - **Optional `0.1.1`.** A metadata-only bump would make the live PyPI/npm package
   pages show the site URL (0.1.0 metadata is frozen). The repo already points at it.
-- **Launch.** `docs/LAUNCH.md` holds the Twitter thread + GitHub release copy
-  (UNPUBLISHED — posting is a per-item gate). `docs/WEBSITE-BRIEF.md` is the handoff
-  for the agent building the marketing site.
+- **Launch.** Launch copy (Twitter thread + GitHub release) and the website brief were
+  drafted but kept private (not committed to the public repo). Posting is a per-item
+  gate.
 - **Worth-using dogfood (#24).** Stand up a Vivary `writing` workspace for the
   website and rewrite its copy through the loop, using the *published* CLIs; capture
   `docs/WALKTHROUGH.md`.
