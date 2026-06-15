@@ -1,0 +1,46 @@
+// Tests for the npm launcher arg-mapping (packages/create-vivary/npm/index.js).
+// The launcher defaults a bare target to the `init` subcommand so the documented
+// `npm create @vivary my-workspace` UX reaches the Python CLI, which requires an
+// explicit `init`/`doctor` subcommand.
+"use strict";
+
+const assert = require("node:assert");
+const path = require("node:path");
+
+const { mapArgs } = require(path.join(__dirname, "..", "npm", "index.js"));
+
+const cases = [
+  // [input, expected, description]
+  [["Benchmarkies"], ["init", "Benchmarkies"], "bare target gets init"],
+  [
+    ["Benchmarkies", "--preset", "coding"],
+    ["init", "Benchmarkies", "--preset", "coding"],
+    "bare target keeps trailing flags",
+  ],
+  [["init", "ws"], ["init", "ws"], "explicit init unchanged"],
+  [["doctor", "ws"], ["doctor", "ws"], "explicit doctor unchanged"],
+  [["-h"], ["-h"], "leading short help flag unchanged"],
+  [["--help"], ["--help"], "leading long help flag unchanged"],
+  [[], [], "no args unchanged"],
+];
+
+let failed = 0;
+for (const [input, expected, description] of cases) {
+  const actual = mapArgs(input);
+  try {
+    assert.deepStrictEqual(actual, expected);
+    console.log(`ok - ${description}`);
+  } catch {
+    failed += 1;
+    console.error(`FAIL - ${description}`);
+    console.error(`  input:    ${JSON.stringify(input)}`);
+    console.error(`  expected: ${JSON.stringify(expected)}`);
+    console.error(`  actual:   ${JSON.stringify(actual)}`);
+  }
+}
+
+if (failed) {
+  console.error(`\n${failed} launcher test(s) failed`);
+  process.exit(1);
+}
+console.log(`\nall ${cases.length} launcher tests passed`);
