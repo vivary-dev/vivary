@@ -40,6 +40,7 @@ export default defineConfig({
 						{ label: 'Architecture', slug: 'architecture' },
 						{ label: 'FAQ', slug: 'faq' },
 						{ label: 'Obsidian (optional)', slug: 'obsidian' },
+						{ label: 'Changelog', slug: 'changelog' },
 					],
 				},
 			],
