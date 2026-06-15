@@ -50,7 +50,9 @@ uvx vivary-tropo check                                   # run without installin
 ```
 
 PyPI: `vivary-tropo` · `vivary-ozone` · `vivary-exo` · `create-vivary`. npm:
-`@vivary/create`. Full docs in [docs/](docs/) (start at [docs/README.md](docs/README.md)).
+`@vivary/create`. Tagged **`v0.1.0`**. Website: **https://vivary.vercel.app/**. Full
+docs in [docs/](docs/) (start at [docs/README.md](docs/README.md)); the site is
+generated from `docs/` (`cd site && npm run sync-docs`).
 
 ## Live Repo State
 
@@ -205,10 +207,11 @@ The four layers are built, packaged, **published (0.1.0)**, and documented. What
 left is the release marker and the next wave of value. The full roadmap is the open
 issues **#15–#24**; the near-term:
 
-- **Tag the release.** Tag **`v0.1.0`** on `dev` (matches the published packages — not
-  `v1.0.0`, which would overclaim) and push it; optionally cut a `prod` branch. Then
-  optionally a GitHub Release from `docs/LAUNCH.md` (a publishing gate). *(pending
-  Jeff's go.)*
+- **Released.** `v0.1.0` is tagged + pushed; the site is live at vivary.vercel.app
+  (Vercel, root dir `site`). Old `vivary-landing-page` repo archived. A GitHub Release
+  from `docs/LAUNCH.md` is still optional (a publishing gate).
+- **Optional `0.1.1`.** A metadata-only bump would make the live PyPI/npm package
+  pages show the site URL (0.1.0 metadata is frozen). The repo already points at it.
 - **Launch.** `docs/LAUNCH.md` holds the Twitter thread + GitHub release copy
   (UNPUBLISHED — posting is a per-item gate). `docs/WEBSITE-BRIEF.md` is the handoff
   for the agent building the marketing site.
