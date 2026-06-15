@@ -73,8 +73,10 @@ installs, enabling hooks, destructive ops, and sending data of unknown sensitivi
 agent is bold *inside* the work and careful at the *edges*.
 
 ### Is it stable? What's the version?
-The four layers are published at `0.1.0` and proven from a clean install. It's young —
-APIs may move before `1.0`. File issues for rough edges.
+The four layers are published and proven from a clean install: `create-vivary` is at
+`0.1.1` (PyPI and npm `@vivary/create`, in lockstep); `tropo` / `ozone` / `exo` are at
+`0.1.0`. See the [CHANGELOG](https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md)
+for details. It's young — APIs may move before `1.0`. File issues for rough edges.
 
 ### Where do I report bugs or ask for features?
 GitHub: [github.com/vivary-dev/vivary](https://github.com/vivary-dev/vivary). See the

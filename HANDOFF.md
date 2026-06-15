@@ -70,7 +70,8 @@ PyPI package `create-vivary` and the npm launcher `@vivary/create` — and they 
 The **0.1.1** bump affects **only `create-vivary`** (both its PyPI package and its npm
 launcher): a bare target now defaults to the `init` subcommand, so `create-vivary
 <name>` and `npm create @vivary <name>` both work like `… init <name>`. `tropo` /
-`ozone` / `exo` are **untouched at 0.1.0**.
+`ozone` / `exo` are **untouched at 0.1.0**. Per-release history lives in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Live Repo State
 
@@ -209,7 +210,7 @@ doctor: ok
    `vivary-tropo` / `vivary-ozone` / `vivary-exo` / `create-vivary`; npm scoped
    `@vivary/create` (CLI commands stay `tropo`/`ozone`/`exo`/`create-vivary`).
    `tropo`/`ozone`/`exo` at 0.1.0. **`create-vivary` at 0.1.1 on both registries**
-   (_2026-06-15:_ a bare target defaults to `init` on both the Python CLI and the npm
+   (_2026-06-14:_ a bare target defaults to `init` on both the Python CLI and the npm
    launcher — PR #33 shipped the npm side; the PyPI side is the parity follow-up). PyPI
    `create-vivary` and npm `@vivary/create` are versioned in lockstep.
 3. **npm 2FA.** npm enforces 2FA on publish; the granular tokens tried did *not*
