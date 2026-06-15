@@ -187,6 +187,30 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertTrue((target / "AGENTS.md").exists())
 
+    def test_with_default_command_injects_init(self):
+        # Bare target -> init (parity with the npm launcher's mapArgs).
+        self.assertEqual(create_vivary.with_default_command(["ws"]), ["init", "ws"])
+        self.assertEqual(
+            create_vivary.with_default_command(["ws", "--preset", "coding"]),
+            ["init", "ws", "--preset", "coding"],
+        )
+        # Explicit subcommands and leading flags pass through unchanged.
+        self.assertEqual(create_vivary.with_default_command(["init", "ws"]), ["init", "ws"])
+        self.assertEqual(create_vivary.with_default_command(["doctor", "ws"]), ["doctor", "ws"])
+        self.assertEqual(create_vivary.with_default_command(["-h"]), ["-h"])
+        self.assertEqual(create_vivary.with_default_command([]), [])
+
+    def test_cli_bare_target_defaults_to_init(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            # No "init" subcommand — a bare target must still scaffold.
+            rc = create_vivary.main(
+                [str(target), "--preset", "coding", "--repo-root", str(ROOT)]
+            )
+
+            self.assertEqual(rc, 0)
+            self.assertTrue((target / "AGENTS.md").exists())
+
     def test_doctor_accepts_generated_workspace(self):
         with temp_workspace() as td:
             target = Path(td) / "agent-workspace"

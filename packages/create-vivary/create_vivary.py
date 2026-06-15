@@ -13,6 +13,8 @@ from pathlib import Path
 
 PRESETS = ("coding", "second-brain", "writing")
 
+SUBCOMMANDS = ("init", "doctor")
+
 REQUIRED_WORKSPACE_FILES = (
     "README.md",
     "AGENTS.md",
@@ -597,7 +599,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def with_default_command(argv: list[str]) -> list[str]:
+    """Default a bare target to the ``init`` subcommand so ``create-vivary <name>``
+    behaves like ``create-vivary init <name>``. This mirrors the npm launcher
+    (`@vivary/create`) so both entry points share one UX. An explicit subcommand or
+    a leading flag (e.g. ``-h``/``--help``) passes through unchanged."""
+    if argv and not argv[0].startswith("-") and argv[0] not in SUBCOMMANDS:
+        return ["init", *argv]
+    return argv
+
+
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    argv = with_default_command(argv)
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "doctor":

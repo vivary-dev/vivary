@@ -3,6 +3,19 @@
 Scaffold a complete Vivary agent workspace: tropo config, strato workspace files,
 runtime skills, private-memory boundaries, and a starter typed graph.
 
+## Install & scaffold
+
+```bash
+pip install create-vivary                     # or run without installing: uvx create-vivary …
+create-vivary my-workspace --preset coding    # bare target defaults to `init`
+create-vivary doctor my-workspace
+```
+
+`create-vivary <name>` is shorthand for `create-vivary init <name>` (since 0.1.1);
+pass `init` / `doctor` explicitly whenever you prefer. The same UX is available on npm
+via the `@vivary/create` launcher (`npm create @vivary my-workspace`), versioned in
+lockstep.
+
 ## Local use
 
 ```bash

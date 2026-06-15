@@ -22,8 +22,9 @@ This package is a thin launcher: it runs the Python `create-vivary` scaffolder v
 scaffolder stays one source of truth in Python while you get a Node-native entry
 point. **Python 3.11+ and uv (or pipx) must be installed.**
 
-Prefer Python directly? The Python CLI takes the explicit subcommand:
-`uvx create-vivary init my-workspace --preset coding` or `pip install create-vivary`.
+Prefer Python directly? `uvx create-vivary my-workspace --preset coding` — a bare
+target defaults to `init` there too (the PyPI `create-vivary` is versioned in lockstep
+with this launcher) — or `pip install create-vivary`.
 
 ## License
 
