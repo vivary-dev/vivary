@@ -76,15 +76,17 @@ Everything is merged to `dev` via PRs **#3–#14** (each its own plan + gate): t
 layers (A–D), packaging (E1+E2), doc reframe (F1), org transfer to `vivary-dev` +
 URL update, the agentic-loop wiring, Obsidian-optional, and the comprehensive docs.
 Feature branches are deleted after merge; only `dev` + `main` remain (`main` is the
-vestigial tropo+strato baseline). **All five packages are published at 0.1.0** (PyPI
-×4 + npm `@vivary/create`). **No `prod` branch or release tag yet** — `v0.1.0` is the
+vestigial tropo+strato baseline). **Published:** the four PyPI packages at 0.1.0;
+npm `@vivary/create` at **0.1.1** (launcher fix: a bare `npm create @vivary <name>`
+now defaults to the `init` subcommand). **No `prod` branch or release tag yet** — `v0.1.0` is the
 next step (see Remaining Work). Ten roadmap issues are open: **#15–#24**. Verify live
 state (`git status --short --branch`, `gh pr list`, `gh issue list`) before acting.
 
 ## What Exists
 
-All four layers are working, tested, **published** packages (0.1.0 on PyPI + npm;
-CLI commands stay `tropo`/`ozone`/`exo`/`create-vivary`), proven in a clean venv.
+All four layers are working, tested, **published** packages (0.1.0 on PyPI; npm
+`@vivary/create` at 0.1.1; CLI commands stay `tropo`/`ozone`/`exo`/`create-vivary`),
+proven in a clean venv.
 
 ```text
 packages/tropo/        vivary-tropo   — knowledge-graph CLI (check/signal/types/stats/
@@ -186,8 +188,10 @@ doctor: ok
    on the suites + `ozone review`; verify locally too.
 2. **Publishing.** _Done 2026-06-14:_ published to **both PyPI and npm**. PyPI
    `vivary-tropo` / `vivary-ozone` / `vivary-exo` / `create-vivary`; npm scoped
-   `@vivary/create` (CLI commands stay `tropo`/`ozone`/`exo`/`create-vivary`). All
-   0.1.0.
+   `@vivary/create` (CLI commands stay `tropo`/`ozone`/`exo`/`create-vivary`). PyPI ×4
+   at 0.1.0; npm `@vivary/create` at **0.1.1** (_2026-06-15:_ launcher now defaults a
+   bare `npm create @vivary <name>` to the `init` subcommand, so the documented UX
+   works — see PR #33).
 3. **npm 2FA.** npm enforces 2FA on publish; the granular tokens tried did *not*
    bypass it, so `@vivary/create` was published by Jeff running `npm publish` with his
    passkey. For automation, set up **OIDC trusted publishing** (issue #15/#22) — it
@@ -214,8 +218,9 @@ issues **#15–#24**; the near-term:
 - **Released.** `v0.1.0` is tagged + pushed; the site is live at vivary.vercel.app
   (Vercel, root dir `site`). Old `vivary-landing-page` repo archived. A GitHub Release
   is still optional (a publishing gate).
-- **Optional `0.1.1`.** A metadata-only bump would make the live PyPI/npm package
-  pages show the site URL (0.1.0 metadata is frozen). The repo already points at it.
+- **`0.1.1` (npm only, shipped).** `@vivary/create@0.1.1` shipped the launcher
+  `init`-default fix (PR #33). A separate metadata-only bump for the PyPI ×4 would make
+  their package pages show the site URL (0.1.0 metadata is frozen) — still optional.
 - **Launch.** Launch copy (Twitter thread + GitHub release) and the website brief were
   drafted but kept private (not committed to the public repo). Posting is a per-item
   gate.
