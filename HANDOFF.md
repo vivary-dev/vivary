@@ -101,7 +101,9 @@ packages/create-vivary/ create-vivary — scaffolder: init --preset coding|secon
                        (tools/sync_assets.py + parity test). npm wrapper in npm/.
                        Tests: 8/8 + parity 2/2.
 
-.github/workflows/ci.yml  CI contract (billing-locked; verify locally).
+.github/workflows/ci.yml  CI: runs FREE (public repo) — all 4 suites + parity +
+                       tropo check + `ozone review --strict` gate + site build,
+                       on every PR/push. Passing.
 docs/                  Full guides: README (index), GETTING-STARTED, COMMANDS,
                        HOWTO, SKILLS, FAQ, ARCHITECTURE, OBSIDIAN, WEBSITE-BRIEF,
                        LAUNCH (draft, unpublished).
@@ -180,8 +182,9 @@ doctor: ok
 ## Open Decisions
 
 1. **PR/merge process.** _Settled:_ branch per change off `dev`, written
-   plan+alignment, explicit approval, then PR + merge. CI is billing-locked → local
-   green is the real gate. (Phases A–E followed this; PRs #3–#8.)
+   plan+alignment, explicit approval, then PR + merge. **CI runs free on the public
+   repo** (the old "billing-locked" note was a Jeff-Kazzee account artifact) and gates
+   on the suites + `ozone review`; verify locally too.
 2. **Publishing.** _Done 2026-06-14:_ published to **both PyPI and npm**. PyPI
    `vivary-tropo` / `vivary-ozone` / `vivary-exo` / `create-vivary`; npm scoped
    `@vivary/create` (CLI commands stay `tropo`/`ozone`/`exo`/`create-vivary`). All
@@ -230,8 +233,10 @@ opinionated — folder-as-type stays the single source of truth.)
 
 ## Known Risks
 
-- **GitHub Actions billing lock:** workflows may be present but not run. Local
-  verification is required.
+- **CI:** runs free on the public repo and is the enforced gate (suites + `ozone
+  review`). The old "billing lock" was a personal-account artifact, now moot. (For
+  *publishing* automation, OIDC trusted publishing via Actions is viable — issues
+  #15/#22.)
 - **Windows temp dirs:** default Python temp locations can fail in this sandbox. Tests
   intentionally use repo-local `sandboxes/` temp roots.
 - **Git HTTPS on this machine:** normal Git credential/TLS paths may fail. Previous
