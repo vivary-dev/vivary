@@ -78,6 +78,11 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
   `tropo` needs Python 3.11+ (stdlib `tomllib`).
 - **CI is billing-locked** on this account — jobs are created but never run.
   Verify locally; a red CI is not a code defect.
+- **Docs stay in sync.** Update the affected docs in the *same* change as any
+  behavior / command / flag / structure change — never leave them stale (stale docs
+  are a bug). Source of truth is `docs/`; the website under `site/` is generated from
+  it (`cd site && npm run sync-docs`, also auto-run on build). Touch the package
+  READMEs and `HANDOFF.md` too when relevant. Every merge's verification includes it.
 
 ## Verify
 

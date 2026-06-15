@@ -1,8 +1,9 @@
 # Vivary — website
 
 The Vivary marketing + docs site. Astro + [Starlight](https://starlight.astro.build).
-The landing page lives in `src/content/docs/index.mdx`; the docs are ported from the
-repo's [`../docs/`](../docs/) (keep them in sync when the canonical docs change).
+The landing page is `src/pages/index.astro`. The doc pages are **generated** from the
+repo's canonical [`../docs/`](../docs/) by `npm run sync-docs` (auto-run on `dev` and
+`build`) — edit `../docs/`, never the generated copies under `src/content/docs/`.
 
 ## Develop
 

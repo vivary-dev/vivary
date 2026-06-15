@@ -1,8 +1,7 @@
 ---
-title: Getting started
-description: Install Vivary and run your first agent workspace.
+title: "Getting started"
+description: "Install Vivary and run your first agent workspace."
 ---
-
 
 Vivary turns a folder into an **agent-native workspace**: a typed knowledge graph,
 an agent operating loop with visible state and memory, graph-aware review, and human

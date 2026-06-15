@@ -1,8 +1,7 @@
 ---
-title: How-to recipes
-description: Task recipes — add a type, see blast radius, review, CI, multi-agent.
+title: "How-to recipes"
+description: "Task recipes: add a type, see blast radius, review, CI, multi-agent."
 ---
-
 
 Task-oriented recipes. Assumes the CLIs are installed (`pip install vivary-tropo
 vivary-ozone vivary-exo create-vivary`) or run via `uvx`. Run commands from inside a

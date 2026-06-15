@@ -1,8 +1,7 @@
 ---
-title: Architecture
-description: The four-layer model and the principles behind Vivary.
+title: "Architecture"
+description: "The four-layer model and the principles behind Vivary."
 ---
-
 
 ## 1. What Vivary is
 

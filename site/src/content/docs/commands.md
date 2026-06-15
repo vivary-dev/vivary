@@ -1,8 +1,7 @@
 ---
-title: Command reference
-description: Every CLI across the four layers — tropo, ozone, exo, create-vivary.
+title: "Command reference"
+description: "Every CLI across the four layers: tropo, ozone, exo, create-vivary."
 ---
-
 
 Every CLI across the four layers. All engines are zero-dependency Python (3.11+);
 the CLI command names are `tropo` / `ozone` / `exo` / `create-vivary` regardless of

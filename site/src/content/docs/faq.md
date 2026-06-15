@@ -1,8 +1,7 @@
 ---
-title: FAQ
-description: Common questions about Vivary.
+title: "FAQ"
+description: "Common questions about Vivary."
 ---
-
 
 ### What is Vivary, in one sentence?
 A standard + scaffolder for agent-native workspaces — *a self-improving loop running
