@@ -54,6 +54,24 @@ PyPI: `vivary-tropo` · `vivary-ozone` · `vivary-exo` · `create-vivary`. npm:
 docs in [docs/](docs/) (start at [docs/README.md](docs/README.md)); the site is
 generated from `docs/` (`cd site && npm run sync-docs`).
 
+**Package versions — read this before touching a version number.** The suite is the
+`v0.1.0` line; **the only package past 0.1.0 is `create-vivary`, now at 0.1.1 on both
+registries.** `create-vivary` ships as two entry points to the *same* scaffolder — the
+PyPI package `create-vivary` and the npm launcher `@vivary/create` — and they are
+**kept in lockstep** (same version, same behavior).
+
+| Package | PyPI | npm | At |
+|---|---|---|---|
+| `vivary-tropo` | `vivary-tropo` | — | 0.1.0 |
+| `vivary-ozone` | `vivary-ozone` | — | 0.1.0 |
+| `vivary-exo`   | `vivary-exo`   | — | 0.1.0 |
+| `create-vivary` | `create-vivary` | `@vivary/create` | **0.1.1** |
+
+The **0.1.1** bump affects **only `create-vivary`** (both its PyPI package and its npm
+launcher): a bare target now defaults to the `init` subcommand, so `create-vivary
+<name>` and `npm create @vivary <name>` both work like `… init <name>`. `tropo` /
+`ozone` / `exo` are **untouched at 0.1.0**.
+
 ## Live Repo State
 
 Repo path:
@@ -76,17 +94,18 @@ Everything is merged to `dev` via PRs **#3–#14** (each its own plan + gate): t
 layers (A–D), packaging (E1+E2), doc reframe (F1), org transfer to `vivary-dev` +
 URL update, the agentic-loop wiring, Obsidian-optional, and the comprehensive docs.
 Feature branches are deleted after merge; only `dev` + `main` remain (`main` is the
-vestigial tropo+strato baseline). **Published:** the four PyPI packages at 0.1.0;
-npm `@vivary/create` at **0.1.1** (launcher fix: a bare `npm create @vivary <name>`
-now defaults to the `init` subcommand). **No `prod` branch or release tag yet** — `v0.1.0` is the
+vestigial tropo+strato baseline). **Published:** `vivary-tropo` / `vivary-ozone` /
+`vivary-exo` at 0.1.0 (PyPI); **`create-vivary` at 0.1.1 on both PyPI and npm
+(`@vivary/create`), in lockstep** — bare target defaults to `init` (see the version
+table above). **No `prod` branch or release tag yet** — `v0.1.0` is the
 next step (see Remaining Work). Ten roadmap issues are open: **#15–#24**. Verify live
 state (`git status --short --branch`, `gh pr list`, `gh issue list`) before acting.
 
 ## What Exists
 
-All four layers are working, tested, **published** packages (0.1.0 on PyPI; npm
-`@vivary/create` at 0.1.1; CLI commands stay `tropo`/`ozone`/`exo`/`create-vivary`),
-proven in a clean venv.
+All four layers are working, tested, **published** packages (`tropo` / `ozone` /
+`exo` at 0.1.0; `create-vivary` at 0.1.1 on PyPI + npm; CLI commands stay
+`tropo`/`ozone`/`exo`/`create-vivary`), proven in a clean venv.
 
 ```text
 packages/tropo/        vivary-tropo   — knowledge-graph CLI (check/signal/types/stats/
@@ -188,10 +207,11 @@ doctor: ok
    on the suites + `ozone review`; verify locally too.
 2. **Publishing.** _Done 2026-06-14:_ published to **both PyPI and npm**. PyPI
    `vivary-tropo` / `vivary-ozone` / `vivary-exo` / `create-vivary`; npm scoped
-   `@vivary/create` (CLI commands stay `tropo`/`ozone`/`exo`/`create-vivary`). PyPI ×4
-   at 0.1.0; npm `@vivary/create` at **0.1.1** (_2026-06-15:_ launcher now defaults a
-   bare `npm create @vivary <name>` to the `init` subcommand, so the documented UX
-   works — see PR #33).
+   `@vivary/create` (CLI commands stay `tropo`/`ozone`/`exo`/`create-vivary`).
+   `tropo`/`ozone`/`exo` at 0.1.0. **`create-vivary` at 0.1.1 on both registries**
+   (_2026-06-15:_ a bare target defaults to `init` on both the Python CLI and the npm
+   launcher — PR #33 shipped the npm side; the PyPI side is the parity follow-up). PyPI
+   `create-vivary` and npm `@vivary/create` are versioned in lockstep.
 3. **npm 2FA.** npm enforces 2FA on publish; the granular tokens tried did *not*
    bypass it, so `@vivary/create` was published by Jeff running `npm publish` with his
    passkey. For automation, set up **OIDC trusted publishing** (issue #15/#22) — it
@@ -218,9 +238,12 @@ issues **#15–#24**; the near-term:
 - **Released.** `v0.1.0` is tagged + pushed; the site is live at vivary.vercel.app
   (Vercel, root dir `site`). Old `vivary-landing-page` repo archived. A GitHub Release
   is still optional (a publishing gate).
-- **`0.1.1` (npm only, shipped).** `@vivary/create@0.1.1` shipped the launcher
-  `init`-default fix (PR #33). A separate metadata-only bump for the PyPI ×4 would make
-  their package pages show the site URL (0.1.0 metadata is frozen) — still optional.
+- **`create-vivary 0.1.1` (both registries).** npm `@vivary/create@0.1.1` shipped the
+  launcher `init`-default fix (PR #33); the PyPI `create-vivary` parity bump (same
+  `init`-default in the Python CLI) keeps the two in lockstep — **republish to PyPI is
+  the only remaining manual step** (2FA, owner-run). A separate metadata-only bump for
+  `tropo`/`ozone`/`exo` would make their pages show the site URL (0.1.0 metadata is
+  frozen) — still optional.
 - **Launch.** Launch copy (Twitter thread + GitHub release) and the website brief were
   drafted but kept private (not committed to the public repo). Posting is a per-item
   gate.
