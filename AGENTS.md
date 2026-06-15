@@ -70,6 +70,10 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
 
 ## Constraints
 
+- **Branch rules (enforced).** `dev` is the protected integration branch — **no direct
+  pushes**. Every change lands via a feature branch cut from `dev` → PR → merge, with
+  the `ci` checks + the `ozone review` gate green first. `dev` blocks force-push and
+  deletion. `main` is the vestigial baseline; `prod` is reserved for a future release cut.
 - **No nested git repos.** Vivary is one repo; packages are plain subdirectories.
 - **Supply chain.** Before any install, check `~/dev/agents/.shared/deny-list-npm.json`
   and run `npm`/`pnpm audit`. Vet new dependencies; prefer pinned pre-compromise

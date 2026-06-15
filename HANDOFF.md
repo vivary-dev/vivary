@@ -200,9 +200,11 @@ doctor: ok
 6. **Preset depth.** _Resolved 2026-06-14:_ presets differ by starter graph only and
    stay graph-only (no extra folder/workflow scaffolding) — honors the minimalism law.
 
-**Branch roles (2026-06-14):** `dev` is the GitHub default and the integration
-branch; feature branches cut from `dev`. `main` is the vestigial tropo+strato
-baseline (left untouched). `prod` is reserved for the eventual MVP-solid cut.
+**Branch roles (enforced via branch protection):** `dev` is the GitHub default +
+integration branch — **no direct pushes**; every change is a feature branch cut from
+`dev` → PR → merge, with the `ci` checks + `ozone review` gate green first (force-push
+and deletion blocked). `main` is the vestigial baseline; `prod` is reserved for a
+release cut.
 
 ## Remaining Work
 
