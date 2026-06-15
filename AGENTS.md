@@ -76,8 +76,10 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
   versions.
 - **Platform.** Windows / PowerShell (`$null`, never `nul`; bash also available).
   `tropo` needs Python 3.11+ (stdlib `tomllib`).
-- **CI is billing-locked** on this account — jobs are created but never run.
-  Verify locally; a red CI is not a code defect.
+- **CI runs free** on the public `vivary-dev/vivary` repo (Actions is free for public
+  repos): `.github/workflows/ci.yml` runs all four suites + parity + `tropo check` +
+  the `ozone review --strict` review gate + a site build on every PR/push. Verify
+  locally too; the local suite is fast.
 - **Docs stay in sync.** Update the affected docs in the *same* change as any
   behavior / command / flag / structure change — never leave them stale (stale docs
   are a bug). Source of truth is `docs/`; the website under `site/` is generated from
