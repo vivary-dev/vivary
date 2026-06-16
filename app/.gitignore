@@ -1,0 +1,12 @@
+# Python
+backend/.venv/
+**/__pycache__/
+*.egg-info/
+.pytest_cache/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Local env / runtime
+frontend/.env.local

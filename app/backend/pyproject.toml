@@ -1,0 +1,30 @@
+[project]
+name = "vivary-gui-backend"
+version = "0.0.1"
+description = "Experimental local GUI for Vivary workspaces (backend): search + agent orchestration."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1.0",
+  "uvicorn[standard]>=0.34,<1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<9",
+  "httpx>=0.27",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = [
+  "vivary_gui",
+  "vivary_gui.bridge",
+  "vivary_gui.services",
+  "vivary_gui.services.sandbox",
+  "vivary_gui.services.agents",
+  "vivary_gui.index",
+  "vivary_gui.routers",
+]
