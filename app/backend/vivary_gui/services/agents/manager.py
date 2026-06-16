@@ -9,8 +9,10 @@ only when the session is ended.
 from __future__ import annotations
 
 import asyncio
+import os
 import secrets
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -67,6 +69,30 @@ class Session:
         }
 
 
+def _agent_env(sess: Session) -> dict[str, str]:
+    """Environment inherited by the spawned agent and its sandbox commands."""
+    env = os.environ.copy()
+    python_dir = str(Path(sys.executable).resolve().parent)
+    path_key = "PATH"
+    old_path = env.get(path_key, "")
+    old_parts = [part for part in old_path.split(os.pathsep) if part]
+    existing = {part.casefold() for part in old_parts}
+    path_parts = [python_dir]
+    if python_dir.casefold() in existing:
+        path_parts.extend(part for part in old_parts if part.casefold() != python_dir.casefold())
+    else:
+        path_parts.extend(old_parts)
+    env[path_key] = os.pathsep.join(path_parts)
+    env.setdefault("PYTHONUTF8", "1")
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env["VIVARY_GUI_SESSION_ID"] = sess.id
+    env["VIVARY_GUI_WORKSPACE_ID"] = sess.workspace_id
+    env["VIVARY_GUI_SANDBOX_CWD"] = str(sess.cwd)
+    env["VIVARY_GUI_SANDBOX_ISOLATION"] = sess.sandbox.isolation if sess.sandbox else "none"
+    env["VIVARY_GUI_TOOL_MODE"] = sess.tool_mode
+    return env
+
+
 class Manager:
     def __init__(self) -> None:
         self.sessions: dict[str, Session] = {}
@@ -120,6 +146,7 @@ class Manager:
         proc = await asyncio.create_subprocess_exec(
             *rt.build_command(text, resume, sess.cwd, sess.tool_mode),
             cwd=str(sess.cwd),
+            env=_agent_env(sess),
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
