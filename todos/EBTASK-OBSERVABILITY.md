@@ -434,6 +434,18 @@ Evidence:
     stories.
   - Existing Meso worktree has dirty overlapping harness/UI files; no consolidation
     should happen until Jeff/agents coordinate branches.
+- Follow-up after human visual review:
+  - Observed State panel warnings (`exo board` / `ozone review`: no `tropo.toml`) came
+    from the temp observability fixture workspace, not the chat observability pipeline.
+  - Updated Playwright fixture workspace setup to include `tropo.toml` and `STATE.md`,
+    and asserted the page does not show `no tropo.toml`.
+  - Added ESLint global ignores for Playwright/Vite output folders so lint remains
+    stable after E2E generates ignored artifacts.
+  - Verification: `npm run e2e` -> 1 passed; `npm run lint` -> passed after ignore fix;
+    `npm run test` -> 11 passed; `npm run build` -> passed; `git diff --check` -> passed.
+  - Manual browser rerun against `http://127.0.0.1:15177` with a valid temp fixture
+    workspace found `noTropoCount: 0`, no console errors, and saved
+    `%TEMP%\vivary-gui-obs-preview\valid-state-pass.png`.
 
 ## Last Verified Matrix
 
@@ -474,6 +486,10 @@ deleting old evidence.
   - Original Vivary suites: tropo 46/46, ozone 7/7, exo 4/4, create-vivary 11 passed,
     assets parity 2/2, npm launcher 7/7, tropo check clean.
   - `git diff --check` and `git diff --check 1c68440`: passed.
+- 2026-06-16 EB-OBS-070 follow-up:
+  - Fixture State warnings fixed in E2E fixture setup.
+  - E2E 1 passed; lint passed; frontend tests 11 passed; build passed; diff hygiene passed.
+  - Manual browser rerun: no `no tropo.toml` warning and no console errors.
 
 ## Handoff / Status For Other Agents
 
