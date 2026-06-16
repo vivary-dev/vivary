@@ -1,0 +1,14 @@
+{"type":"thread.started","thread_id":"019ecodex-0000-7000-9000-fixture000001"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"rsn_1","type":"reasoning","text":"I will inspect the workspace.","status":"in_progress"}}
+{"type":"item.updated","item":{"id":"rsn_1","type":"reasoning","text":"I will inspect the workspace, then summarize.","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"rsn_1","type":"reasoning","text":"Inspected before answering.","status":"completed"}}
+{"type":"item.started","item":{"id":"cmd_1","type":"command_execution","command":"rg --files","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"cmd_1","type":"command_execution","command":"rg --files","aggregated_output":"README.md\napp/frontend/src/App.tsx\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"chg_1","type":"file_change","changes":[{"path":"app/frontend/src/App.tsx","kind":"update","additions":2,"deletions":1},{"path":"docs/new.md","kind":"add","additions":8,"deletions":0}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"plan_1","type":"todo_list","items":[{"text":"Inspect files","completed":true},{"text":"Summarize findings","completed":false}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"search_1","type":"web_search","query":"Codex JSONL events","status":"completed"}}
+{"type":"item.completed","item":{"id":"msg_1","type":"agent_message","text":"Here is the answer.","status":"completed"}}
+{"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":80,"output_tokens":40,"reasoning_output_tokens":12}}
+{"type":"error","message":"recoverable warning"}
+{"type":"turn.failed","error":"synthetic failure"}

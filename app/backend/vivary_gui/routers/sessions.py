@@ -27,6 +27,12 @@ class GateDecision(BaseModel):
     approver: str | None = None
 
 
+class ApprovalDecision(BaseModel):
+    scope: str = "global"
+    pattern: str = ""
+    steering: str = ""
+
+
 def _session(sid: str):
     sess = manager.sessions.get(sid)
     if sess is None:
@@ -106,3 +112,20 @@ async def resume_session(sid: str) -> dict:
     except RuntimeError as exc:
         raise HTTPException(409, str(exc))
     return {"resumed": sid}
+
+
+@router.post("/sessions/{sid}/approvals/{approval_id}/{decision}")
+async def decide_approval(sid: str, approval_id: str, decision: str, body: ApprovalDecision | None = None) -> dict:
+    try:
+        return manager.decide_approval(
+            sid,
+            approval_id,
+            decision,
+            scope=body.scope if body else "global",
+            pattern=body.pattern if body else "",
+            steering=body.steering if body else "",
+        )
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))

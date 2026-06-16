@@ -21,3 +21,6 @@ sandboxes/*
 
 # Local drafts
 drafts/
+app/frontend/.e2e-home/
+app/frontend/test-results/
+app/frontend/playwright-report/

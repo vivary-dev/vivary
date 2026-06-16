@@ -27,8 +27,8 @@ packages = [
   "vivary_gui",
   "vivary_gui.bridge",
   "vivary_gui.services",
-  "vivary_gui.services.sandbox",
   "vivary_gui.services.agents",
+  "vivary_gui.services.sandbox",
   "vivary_gui.index",
   "vivary_gui.routers",
 ]

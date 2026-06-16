@@ -151,6 +151,14 @@ export const decideSessionGate = (sid: string, gid: string, decision: 'approve' 
 export const resumeSession = (id: string) =>
   api<{ resumed: string }>(`/sessions/${id}/resume`, { method: 'POST' })
 
+export const decideApproval = (
+  sid: string,
+  approvalId: string,
+  decision: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always',
+  body: { scope?: string; pattern?: string; steering?: string } = {},
+) =>
+  api<Record<string, unknown>>(`/sessions/${sid}/approvals/${approvalId}/${decision}`, { method: 'POST', body: JSON.stringify(body) })
+
 export interface Conflicts {
   active: string[]
   conflicts: { a: string; b: string; shared: string[] }[]

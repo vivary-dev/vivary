@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import gates
+from .. import approval
 from ..sandbox.local import LocalProvider, Sandbox
 from .base import RUNTIMES, AgentEvent, Runtime
 
@@ -52,6 +53,7 @@ class Session:
     queues: set[asyncio.Queue] = field(default_factory=set)
     proc: asyncio.subprocess.Process | None = None
     awaiting_gates: set[str] = field(default_factory=set)  # gates this session raised, pending decision
+    approvals: dict[str, dict] = field(default_factory=dict)
     _open_before: set[str] = field(default_factory=set)    # open-gate snapshot taken before the turn
 
     def summary(self) -> dict:
@@ -95,7 +97,7 @@ class Manager:
 
         resume = sess.agent_session_id if rt.multi_turn else None
         proc = await asyncio.create_subprocess_exec(
-            *rt.build_command(text, resume),
+            *rt.build_command(text, resume, sess.cwd),
             cwd=str(sess.cwd),
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
@@ -185,6 +187,46 @@ class Manager:
             self._emit(sess, AgentEvent("status", "gate decided — re-prompt the agent to continue (this runtime can't auto-resume)"))
             return
         await self.send(sid, note)  # reuses --resume plumbing + emits the note as the next turn
+
+    def decide_approval(
+        self,
+        sid: str,
+        approval_id: str,
+        decision: str,
+        scope: str = "global",
+        pattern: str = "",
+        steering: str = "",
+    ) -> dict:
+        sess = self.sessions.get(sid)
+        if sess is None:
+            raise KeyError("session not found")
+        if decision not in {"allow_once", "allow_always", "reject_once", "reject_always"}:
+            raise ValueError("invalid approval decision")
+        status = "approved" if decision.startswith("allow") else "rejected"
+        saved_rule = None
+        if decision in {"allow_always", "reject_always"}:
+            pol = approval.load_policy()
+            rule_decision = "allow" if decision == "allow_always" else "deny"
+            saved_rule = approval.add_rule(
+                pol,
+                pattern or approval.safe_prefix(steering),
+                rule_decision,  # type: ignore[arg-type]
+                scope if scope in {"command", "project", "global"} else "global",  # type: ignore[arg-type]
+                steering,
+            )
+            approval.save_policy(pol)
+        meta = {
+            "id": approval_id,
+            "status": status,
+            "decision": decision,
+            "scope": scope,
+            "pattern": pattern,
+            "steering": steering,
+            "saved_rule": saved_rule,
+        }
+        sess.approvals[approval_id] = meta
+        self._emit(sess, AgentEvent("approval_request", f"approval {status}", meta=meta))
+        return meta
 
     async def end(self, sid: str) -> None:
         await self.cancel(sid)

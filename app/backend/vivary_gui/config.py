@@ -16,6 +16,8 @@ APP_DIR = Path(os.environ.get("VIVARY_GUI_HOME", Path.home() / ".vivary-gui"))
 REGISTRY_PATH = APP_DIR / "registry.json"
 RUNTIME_PATH = APP_DIR / "runtime.json"
 INDEX_DB = APP_DIR / "index.db"
+MESO_DIR = APP_DIR / "canvases"
+POLICY_PATH = APP_DIR / "policy.json"
 
 DEFAULT_HOST = os.environ.get("VIVARY_GUI_HOST", "127.0.0.1")
 DEFAULT_PORT = int(os.environ.get("VIVARY_GUI_PORT", "8765"))

@@ -1,0 +1,927 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vivary GUI — Observability Atlas</title>
+<style>
+  /* ── Palette: lifted verbatim from app/frontend/src/theme.ts so this doc and the app
+     read as one surface. oklch dark teal shell, bioluminescent mint accent. ── */
+  :root{
+    --bg:oklch(0.200 0.014 215); --panel:oklch(0.242 0.016 215); --raise:oklch(0.285 0.017 215);
+    --border:oklch(0.330 0.016 215); --text:oklch(0.945 0.012 215); --read:oklch(0.905 0.013 215);
+    --muted:oklch(0.625 0.016 215); --accent:oklch(0.805 0.130 165); --warn:oklch(0.820 0.120 78);
+    --priv:oklch(0.740 0.120 300); --err:oklch(0.705 0.150 25); --blue:oklch(0.740 0.095 245);
+    --serif:"Iowan Old Style","Palatino Linotype",Georgia,serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code",Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--read);font-family:var(--sans);font-size:15px;line-height:1.62;
+    background-image:radial-gradient(80% 40% at 50% -5%,oklch(0.24 0.03 195 / .55),transparent 70%);}
+  a{color:var(--blue);text-decoration:underline;text-underline-offset:2px}
+  code{font-family:var(--mono);font-size:.88em;background:var(--raise);border:1px solid var(--border);border-radius:5px;padding:1px 5px;color:var(--read)}
+  h1,h2,h3{font-family:var(--serif);color:var(--text);line-height:1.25;font-weight:650}
+  h2{font-size:27px;margin:0 0 6px;scroll-margin-top:24px}
+  h3{font-size:19px;margin:26px 0 8px}
+  p{margin:9px 0}
+  .muted{color:var(--muted)} .mono{font-family:var(--mono)} .accent{color:var(--accent)}
+  .warn{color:var(--warn)} .err{color:var(--err)} .priv{color:var(--priv)} .blue{color:var(--blue)}
+
+  /* layout */
+  .wrap{display:grid;grid-template-columns:248px minmax(0,1fr);max-width:1320px;margin:0 auto;gap:0}
+  nav{position:sticky;top:0;align-self:start;height:100vh;overflow:auto;padding:22px 14px 40px;border-right:1px solid var(--border);background:oklch(0.215 0.015 215 / .6);backdrop-filter:blur(6px)}
+  nav .brand{font-family:var(--serif);font-size:19px;color:var(--text);font-weight:650;padding:0 8px 4px}
+  nav .sub{font-size:11px;letter-spacing:.13em;color:var(--muted);text-transform:uppercase;padding:0 8px 14px}
+  nav a{display:block;padding:6px 9px;margin:1px 0;border-radius:7px;color:var(--muted);text-decoration:none;font-size:13px;border-left:2px solid transparent}
+  nav a:hover{background:var(--panel);color:var(--read)}
+  nav a.on{color:var(--text);background:var(--raise);border-left-color:var(--accent)}
+  nav .grp{font-size:10.5px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;padding:14px 9px 4px;opacity:.7}
+  main{padding:40px 46px 120px;min-width:0}
+  section{margin:0 0 56px;scroll-margin-top:20px}
+  .lede{font-size:17px;color:var(--read)}
+  .kicker{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:600;margin-bottom:6px}
+
+  /* cards & callouts */
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:13px;padding:18px 20px;margin:14px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  @media(max-width:920px){.wrap{grid-template-columns:1fr}nav{display:none}.grid2,.grid3{grid-template-columns:1fr}}
+  .note{border-left:3px solid var(--accent);background:oklch(0.24 0.03 165 / .14);border-radius:0 9px 9px 0;padding:11px 16px;margin:14px 0}
+  .note.warn{border-color:var(--warn);background:oklch(0.28 0.035 78 / .16)}
+  .note.err{border-color:var(--err);background:oklch(0.28 0.04 25 / .14)}
+  .note .t{font-weight:650;color:var(--text);font-family:var(--serif)}
+
+  /* chips / pills */
+  .chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11.5px;padding:2px 9px;border-radius:999px;border:1px solid var(--border);background:var(--raise);color:var(--read);white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor}
+  .k-read{color:var(--accent)} .k-write{color:var(--warn)} .k-exec{color:var(--err)} .k-net{color:var(--blue)} .k-priv{color:var(--priv)}
+
+  /* code */
+  pre{font-family:var(--mono);font-size:12.5px;line-height:1.6;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:13px 15px;overflow:auto;margin:12px 0;color:var(--read)}
+  pre .c{color:var(--muted)}            /* comment */
+  pre .k{color:var(--accent)}           /* keyword/key */
+  pre .s{color:var(--warn)}             /* string */
+  pre .f{color:var(--blue)}             /* fn/type */
+  pre .p{color:var(--priv)}             /* punctuation accent */
+
+  /* tables */
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+  th,td{border:1px solid var(--border);padding:8px 11px;text-align:left;vertical-align:top}
+  th{background:var(--raise);color:var(--text);font-family:var(--mono);font-size:11.5px;letter-spacing:.04em;text-transform:uppercase}
+  td code{font-size:12px}
+  tr:nth-child(even) td{background:oklch(0.235 0.015 215 / .5)}
+
+  /* the shell diagram */
+  .shell{display:grid;grid-template-columns:.7fr 1.2fr 1fr;gap:8px;border:1px solid var(--border);border-radius:12px;overflow:hidden;margin:14px 0;background:var(--bg)}
+  .shell>div{padding:14px 14px 18px}
+  .shell .col-h{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;display:flex;gap:7px;align-items:center}
+  .shell .ws{border-right:1px solid var(--border)}
+  .shell .chat{border-right:1px solid var(--border);background:radial-gradient(70% 40% at 50% 0%,oklch(0.24 0.03 195 / .4),transparent 70%)}
+  .minirow{font-size:12px;color:var(--muted);padding:5px 8px;border:1px solid var(--border);border-radius:7px;margin:5px 0;background:var(--panel)}
+  .minirow.activ{border-color:var(--accent);color:var(--read)}
+  .tabbar{display:flex;gap:3px;font-size:11px;flex-wrap:wrap}
+  .tabbar span{padding:3px 8px;border-radius:6px;color:var(--muted)}
+  .tabbar span.on{color:var(--text);border-bottom:2px solid var(--accent)}
+
+  /* pipeline flow */
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;margin:16px 0}
+  .stage{flex:1 1 0;min-width:120px;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:11px 12px;position:relative}
+  .stage .n{font-family:var(--mono);font-size:10.5px;color:var(--accent)}
+  .stage .ttl{font-weight:650;color:var(--text);font-size:13.5px;margin:2px 0 3px;font-family:var(--serif)}
+  .stage .d{font-size:11.5px;color:var(--muted);line-height:1.45}
+  .stage .loc{font-family:var(--mono);font-size:10px;color:var(--blue);margin-top:6px;word-break:break-all}
+  .arrow{align-self:center;color:var(--muted);font-size:18px;padding:0 5px;flex:0 0 auto}
+  @media(max-width:920px){.arrow{transform:rotate(90deg)}}
+
+  /* layer cake */
+  .cake>div{border:1px solid var(--border);border-radius:9px;padding:10px 14px;margin:6px 0;display:flex;gap:14px;align-items:baseline}
+  .cake .lyr{font-family:var(--mono);font-size:12px;color:var(--accent);min-width:120px}
+  .cake .dsc{font-size:13px;color:var(--read)}
+
+  /* interactive demo */
+  .demo-ctl{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0}
+  button.run{background:var(--accent);color:oklch(0.2 0.02 250);border:none;border-radius:9px;padding:9px 18px;font:inherit;font-weight:650;cursor:pointer;box-shadow:0 0 18px oklch(0.8 0.13 165 / .3)}
+  button.run:disabled{opacity:.5;cursor:default;box-shadow:none}
+  button.ghost{background:none;border:1px solid var(--border);color:var(--muted);border-radius:9px;padding:9px 14px;font:inherit;cursor:pointer}
+  .demo-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:8px}
+  @media(max-width:920px){.demo-grid{grid-template-columns:1fr}}
+  .screen{background:var(--bg);border:1px solid var(--border);border-radius:11px;padding:14px;height:430px;overflow:auto}
+  .screen h4{margin:0 0 10px;font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;position:sticky;top:-14px;background:var(--bg);padding:4px 0;z-index:2}
+  .screen.bad h4{color:var(--err)} .screen.good h4{color:var(--accent)}
+  .flat-line{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:pre-wrap;word-break:break-word;padding:1px 0;border-bottom:1px dashed oklch(0.33 0.016 215 / .35)}
+  .bubble{align-self:flex-end;background:var(--raise);border:1px solid var(--border);border-radius:14px 14px 4px 14px;padding:8px 12px;font-size:13px;margin:6px 0 6px auto;max-width:85%;width:fit-content}
+  .reason{border:1px dashed var(--border);border-radius:9px;padding:7px 11px;margin:7px 0;font-size:12px;color:var(--muted);background:oklch(0.24 0.02 215 / .5)}
+  .reason .lbl{font-family:var(--mono);font-size:10px;color:var(--priv);letter-spacing:.06em}
+  .tpill{border:1px solid var(--border);border-radius:9px;margin:7px 0;overflow:hidden;background:var(--panel)}
+  .tpill .hd{display:flex;align-items:center;gap:8px;padding:7px 11px;font-family:var(--mono);font-size:12px;cursor:pointer}
+  .tpill .hd .verb{color:var(--text)} .tpill .hd .tgt{color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tpill .bd{border-top:1px solid var(--border);padding:8px 11px;font-family:var(--mono);font-size:11px;color:var(--muted);white-space:pre-wrap;display:none}
+  .tpill.open .bd{display:block}
+  .tpill .stat{font-size:11px}
+  .ans{font-family:var(--serif);font-size:15px;color:var(--read);line-height:1.6;border-top:1px solid var(--border);margin-top:10px;padding-top:10px}
+  .lbar{height:3px;background:var(--accent);border-radius:2px;width:0;transition:width .3s;box-shadow:0 0 8px var(--accent)}
+
+  .filemap details{border:1px solid var(--border);border-radius:10px;margin:8px 0;background:var(--panel);overflow:hidden}
+  .filemap summary{cursor:pointer;padding:10px 14px;font-family:var(--serif);font-weight:650;color:var(--text);font-size:15px;list-style:none}
+  .filemap summary::-webkit-details-marker{display:none}
+  .filemap summary::before{content:"▸ ";color:var(--accent)}
+  .filemap details[open] summary::before{content:"▾ "}
+  .filemap .body{padding:2px 14px 12px}
+  .filerow{display:grid;grid-template-columns:minmax(180px,260px) 1fr;gap:12px;padding:6px 0;border-top:1px solid oklch(0.33 0.016 215 / .4);font-size:12.5px}
+  .filerow .fp{font-family:var(--mono);font-size:11.5px;color:var(--blue);word-break:break-all}
+  .filerow .fd{color:var(--read)}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;margin:8px 0}
+  .tag{font-family:var(--mono);font-size:10px;padding:1px 7px;border-radius:5px;border:1px solid var(--border)}
+  .tag.fe{color:var(--accent)} .tag.be{color:var(--warn)} .tag.eng{color:var(--blue)} .tag.cfg{color:var(--muted)}
+  .phase{display:inline-block;font-family:var(--mono);font-size:11px;border-radius:6px;padding:2px 9px;border:1px solid var(--border)}
+  .pa{color:var(--accent);border-color:var(--accent)} .pb{color:var(--warn);border-color:var(--warn)}
+  hr.sep{border:0;border-top:1px solid var(--border);margin:30px 0}
+  .toplink{font-size:11px;color:var(--muted);text-decoration:none;float:right;font-family:var(--mono)}
+  .check{color:var(--accent)} .cross{color:var(--err)}
+  ul.tight{margin:8px 0;padding-left:20px} ul.tight li{margin:4px 0}
+  .badge{font-family:var(--mono);font-size:10.5px;color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:1px 6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav id="toc">
+  <div class="brand">Vivary GUI</div>
+  <div class="sub">Observability Atlas</div>
+  <a href="#start">Start here</a>
+  <a href="#model">The 30-second model</a>
+  <a href="#shell">The shell (3 columns)</a>
+  <div class="grp">How a turn flows</div>
+  <a href="#pipeline">The event pipeline</a>
+  <a href="#events">Event taxonomy</a>
+  <a href="#runtimes">The three runtimes</a>
+  <a href="#demo">▶ Flat vs structured (live)</a>
+  <div class="grp">The redesign</div>
+  <a href="#codex">Codex event model</a>
+  <a href="#components">New chat components</a>
+  <a href="#approval">The approval system</a>
+  <a href="#gates">Gates (today)</a>
+  <div class="grp">The plumbing</div>
+  <a href="#filemap">Every file, mapped</a>
+  <a href="#security">Security &amp; sandbox</a>
+  <a href="#seam">The engine seam</a>
+  <div class="grp">The work</div>
+  <a href="#verified">What I verified</a>
+  <a href="#plan">Build plan &amp; keystones</a>
+  <a href="#run">Run &amp; verify</a>
+</nav>
+
+<main>
+
+<!-- ───────────────────────────── START ───────────────────────────── -->
+<section id="start">
+  <div class="kicker">Onboarding · feat/gui</div>
+  <h1 style="font-size:38px;margin:0 0 10px">The Vivary GUI, end to end</h1>
+  <p class="lede">You're taking over the <b>observability + chat</b> surface of the Vivary GUI — a local
+  web app that drives agent-native workspaces. This atlas is your map: every module, every surface that
+  connects to the next, and exactly where today's design ends and the redesign begins. It's built from a
+  first-principles read of the live code on this branch, ground-truthed against the tools installed on
+  this machine.</p>
+
+  <div class="note">
+    <div class="t">The one sentence to anchor on</div>
+    A chat turn is a <b>stream of typed events</b> that flows: <span class="mono">agent CLI → a Runtime parser →
+    AgentEvent → the Manager's per-session queue → a WebSocket → a React reducer → rendered blocks</span>.
+    Everything in this redesign is about making those events <i>richer</i> (at the parser) and rendering them
+    <i>structured</i> (at the reducer). Get that spine, and the rest is detail.
+  </div>
+
+  <div class="grid3">
+    <div class="card"><div class="kicker">What it is</div><b>A local cockpit.</b> FastAPI backend on
+      <code>127.0.0.1:8765</code>, React/Vite SPA on <code>:5173</code>. Persistent chat in the center,
+      contextual workspace views on the right.</div>
+    <div class="card"><div class="kicker">What's underneath</div><b>Vivary's engines.</b> <code>tropo</code>
+      (graph), <code>ozone</code> (review), <code>exo</code> (orchestration) — the published PyPI CLIs, reached
+      as subprocesses. The GUI never reimplements them.</div>
+    <div class="card"><div class="kicker">What we're fixing</div><b>The wall of text.</b> Codex turns render
+      as ~2,000 lines of undifferentiated output before the answer. We make them collapsible pills, a reasoning
+      box, a privileged answer — and add real approvals.</div>
+  </div>
+</section>
+
+<!-- ───────────────────────────── MODEL ───────────────────────────── -->
+<section id="model">
+  <a class="toplink" href="#start">↑ top</a>
+  <h2>The 30-second mental model</h2>
+  <p>Four layers. Data flows down on a request, events flow up on a turn. Each layer only knows the one
+  below it through a narrow contract — that's why the redesign is tractable.</p>
+
+  <div class="cake">
+    <div><span class="lyr" style="color:var(--accent)">① Frontend</span><span class="dsc"><code>app/frontend</code> — React + Vite + TS. The 3-column shell, the chat reducer, the workspace views. Talks to the backend over REST + one WebSocket per session.</span></div>
+    <div><span class="lyr" style="color:var(--warn)">② Backend</span><span class="dsc"><code>app/backend/vivary_gui</code> — FastAPI. Routers (HTTP/WS) → Services (the agent Manager, gates, sandbox, search index). Owns session lifecycle and the event stream.</span></div>
+    <div><span class="lyr" style="color:var(--err)">③ Runtimes</span><span class="dsc"><code>services/agents</code> — one adapter per agent CLI (<code>codex</code>, <code>claude</code>, <code>echo</code>). Each turns a raw CLI line into typed <code>AgentEvent</code>s. <b>This is where Phase A lives.</b></span></div>
+    <div><span class="lyr" style="color:var(--blue)">④ Vivary engines</span><span class="dsc"><code>bridge/</code> — the seam to the published <code>tropo</code>/<code>ozone</code>/<code>exo</code> CLIs (run via <code>python -m</code>) plus <code>create-vivary</code> for workspace doctor. Read-only views.</span></div>
+  </div>
+
+  <div class="note">
+    <div class="t">Why this separation matters for you</div>
+    The redesign touches layers ① and ③ almost exclusively. The Codex parser (③) starts emitting rich events;
+    the chat reducer + components (①) start rendering them. Layer ② mostly <i>passes events through</i> unchanged
+    (it already does), and layer ④ isn't touched at all. Small blast radius by design.
+  </div>
+</section>
+
+<!-- ───────────────────────────── SHELL ───────────────────────────── -->
+<section id="shell">
+  <a class="toplink" href="#start">↑ top</a>
+  <h2>The shell: three columns</h2>
+  <p>The whole app is one CSS grid in <code>App.tsx</code> —
+  <code>grid-template-columns: 236px · minmax(440px,1.1fr) · minmax(400px,1fr)</code>. Left rail picks the
+  workspace; center is the <b>persistent chat</b> (the centerpiece, never interrupted); right is the
+  <b>stage</b> — whichever workspace view you're looking at while the agent works.</p>
+
+  <div class="shell">
+    <div class="ws">
+      <div class="col-h"><span class="dot accent"></span>Workspaces</div>
+      <div class="minirow activ">my-workspace &nbsp;●&nbsp;<span class="muted">8 nodes</span></div>
+      <div class="minirow">writing-os &nbsp;○</div>
+      <div class="minirow muted">+ Add workspace</div>
+      <p class="muted" style="font-size:11px;margin-top:12px">Each workspace = a folder Vivary validates
+      (<code>doctor</code>). Health dot + node count from <code>tropo graph</code>.</p>
+    </div>
+    <div class="chat">
+      <div class="col-h"><span class="dot" style="color:var(--warn)"></span>Chat — the centerpiece</div>
+      <div class="bubble">List the files and read the README</div>
+      <div class="tpill open"><div class="hd"><span class="k-read">◐</span><span class="verb">Read</span><span class="tgt">README.md</span><span class="stat check">✓</span></div><div class="bd">tropo · ozone · exo …</div></div>
+      <div class="ans">Here's what this workspace contains…</div>
+      <p class="muted" style="font-size:11px;margin-top:10px"><code>ChatPanel.tsx</code> — one WebSocket,
+      a reducer over events, a header meter (tokens · cost), a runtime picker.</p>
+    </div>
+    <div>
+      <div class="col-h"><span class="dot blue"></span>Stage — the view you navigate</div>
+      <div class="tabbar"><span>state</span><span class="on">graph</span><span>files</span><span>search</span><span>gates</span><span>dashboard</span></div>
+      <div class="minirow" style="margin-top:10px">⬡ interactive graph (tropo view)</div>
+      <p class="muted" style="font-size:11px;margin-top:10px">Six panels, each a contextual read of the
+      workspace. Switching tabs <b>never</b> touches the conversation — the chat keeps streaming.</p>
+    </div>
+  </div>
+
+  <p class="muted">The right-column tabs map to the <code>views/</code> files: <code>StatePanel</code>,
+  <code>GraphPanel</code>, <code>FilesPanel</code>, <code>SearchPanel</code> (inline in <code>App.tsx</code>),
+  <code>GatesPanel</code>, <code>DashboardPanel</code>. They're the "stage" the agent acts on — secondary to
+  the chat for this redesign, but they're why the chat needs to be calm: you watch the work happen on the right.</p>
+</section>
+
+<!-- ───────────────────────────── PIPELINE ───────────────────────────── -->
+<section id="pipeline">
+  <a class="toplink" href="#start">↑ top</a>
+  <h2>The event pipeline — the spine of everything</h2>
+  <p>This is <b>the</b> diagram to memorize. A single line of agent output becomes a rendered block by passing
+  through seven hops. Two of them are where all the redesign work happens (marked <span class="phase pa">PHASE&nbsp;A</span>).</p>
+
+  <div class="flow">
+    <div class="stage"><div class="n">01 · spawn</div><div class="ttl">CLI subprocess</div><div class="d">Manager runs <code>build_command()</code> and spawns the agent CLI, piping stdout+stderr.</div><div class="loc">manager.send()</div></div>
+    <div class="arrow">→</div>
+    <div class="stage" style="border-color:var(--accent)"><div class="n accent">02 · parse</div><div class="ttl">Runtime.parse(line)</div><div class="d">Each output line → zero-or-more typed <code>AgentEvent</code>s. <b>Phase A rewrites Codex's parser here.</b></div><div class="loc">agents/base.py</div></div>
+    <div class="arrow">→</div>
+    <div class="stage"><div class="n">03 · emit</div><div class="ttl">Manager._emit</div><div class="d">Appends to <code>session.events</code> (history) and fans out to every subscriber queue.</div><div class="loc">manager._run_turn()</div></div>
+    <div class="arrow">→</div>
+    <div class="stage"><div class="n">04 · queue→WS</div><div class="ttl">WebSocket</div><div class="d"><code>subscribe()</code> drains the queue; the WS sends each event as JSON.</div><div class="loc">routers/ws.py</div></div>
+    <div class="arrow">→</div>
+    <div class="stage" style="border-color:var(--accent)"><div class="n accent">05 · reduce</div><div class="ttl">apply(prev, ev)</div><div class="d">Pure reducer folds events into <code>Item[]</code>. <b>Phase A adds new item kinds here.</b></div><div class="loc">ChatPanel.tsx</div></div>
+    <div class="arrow">→</div>
+    <div class="stage" style="border-color:var(--accent)"><div class="n accent">06 · render</div><div class="ttl">&lt;Block&gt; / components</div><div class="d">Each item → a React node. <b>Phase A replaces the flat Block with pills/reasoning/diffs.</b></div><div class="loc">views + new components</div></div>
+  </div>
+
+  <h3>The same path, in code</h3>
+  <p>Read these four snippets top-to-bottom and you've read the spine of the app.</p>
+
+  <pre><span class="c"># ② backend — agents/base.py · the contract every runtime implements</span>
+<span class="k">class</span> <span class="f">Runtime</span>:
+    name: str; label: str
+    multi_turn: bool = <span class="k">False</span>        <span class="c"># can it --resume a prior conversation?</span>
+    stderr_is_error: bool = <span class="k">True</span>     <span class="c"># Codex flips this False — it writes its transcript to stderr</span>
+    <span class="k">def</span> <span class="f">build_command</span>(self, prompt, resume=<span class="k">None</span>) -> list[str]: ...
+    <span class="k">def</span> <span class="f">parse</span>(self, line: str) -> list[<span class="f">AgentEvent</span>]: ...   <span class="c"># ← the redesign's center of gravity</span>
+
+<span class="k">class</span> <span class="f">AgentEvent</span>:                       <span class="c"># the universal currency on the wire</span>
+    type: str; text: str = <span class="s">""</span>; tool: str = <span class="s">""</span>; meta: dict = {}</pre>
+
+  <pre><span class="c"># ② backend — manager.py · spawn, read both streams, parse→emit, then diff gates</span>
+<span class="k">async def</span> <span class="f">_run_turn</span>(self, sess, rt, proc):
+    <span class="k">async def</span> <span class="f">read</span>(stream, is_stderr):
+        <span class="k">async for</span> raw <span class="k">in</span> stream:
+            line = raw.decode(...).rstrip()
+            <span class="k">if</span> is_stderr <span class="k">and</span> rt.stderr_is_error: self._emit(sess, <span class="f">AgentEvent</span>(<span class="s">"error"</span>, line))
+            <span class="k">else</span>:
+                <span class="k">for</span> ev <span class="k">in</span> rt.parse(line): self._emit(sess, ev)   <span class="c"># ← hop 02→03</span>
+    <span class="k">await</span> asyncio.gather(read(proc.stdout, <span class="k">False</span>), read(proc.stderr, <span class="k">True</span>))
+    <span class="c"># …on exit: any NEW gates/*.md that appeared this turn → emit "gates_open" + pause</span></pre>
+
+  <pre><span class="c"># ① frontend — api/client.ts · token rides the WS subprotocol, never the URL</span>
+<span class="k">export const</span> <span class="f">openSessionWs</span> = (id) => <span class="k">new</span> <span class="f">WebSocket</span>(sessionWsUrl(id), [<span class="s">'vivary'</span>, <span class="s">`token.${TOKEN}`</span>])</pre>
+
+  <pre><span class="c"># ① frontend — ChatPanel.tsx · the reducer (hop 05) and the live wiring</span>
+ws.onmessage = (m) => {
+    <span class="k">const</span> ev = JSON.parse(m.data)
+    setItems((p) => <span class="f">apply</span>(p, ev))                          <span class="c"># fold event into the transcript</span>
+    <span class="k">if</span> (ev.type === <span class="s">'result'</span>) setObs(... += tokens, cost)   <span class="c"># update the header meter</span>
+    <span class="k">else if</span> (ev.type === <span class="s">'gates_open'</span>) { loadGates(id); setAwaiting(<span class="k">true</span>) }  <span class="c"># pause for approval</span>
+}</pre>
+</section>
+
+<!-- ───────────────────────────── EVENTS ───────────────────────────── -->
+<section id="events">
+  <a class="toplink" href="#start">↑ top</a>
+  <h2>Event taxonomy: today vs target</h2>
+  <p>An <code>AgentEvent</code> is deliberately tiny — <code>{type, text, tool, meta}</code> — so the wire format
+  never has to change shape; richness lives in <code>type</code> + <code>meta</code>. Here's the full set today,
+  and what Phase A adds.</p>
+
+  <table>
+    <tr><th>Event type</th><th>Emitted when</th><th>Carried in</th><th>Status</th></tr>
+    <tr><td><code>user_msg</code></td><td>You send a turn</td><td><code>text</code></td><td>live</td></tr>
+    <tr><td><code>text</code></td><td>Assistant prose</td><td><code>text</code> (markdown)</td><td>live</td></tr>
+    <tr><td><code>tool_use</code></td><td>Agent calls a tool</td><td><code>tool</code> + <code>meta.input</code></td><td>live</td></tr>
+    <tr><td><code>tool_result</code></td><td>Tool returns</td><td><code>text</code> (preview)</td><td>live</td></tr>
+    <tr><td><code>result</code></td><td>Turn's usage tally</td><td><code>meta.cost / input_tokens / output_tokens</code></td><td>live</td></tr>
+    <tr><td><code>status</code></td><td>Lifecycle note</td><td><code>text</code></td><td>live</td></tr>
+    <tr><td><code>error</code></td><td>stderr / failure</td><td><code>text</code></td><td>live</td></tr>
+    <tr><td><code>turn_end</code></td><td>Process exits</td><td><code>text</code> (exit code)</td><td>live</td></tr>
+    <tr><td><code>gates_open</code></td><td>Agent raised a gate &amp; paused</td><td><code>meta.gates[]</code></td><td>live</td></tr>
+    <tr style="outline:1.5px solid var(--accent)"><td><code class="accent">reasoning</code></td><td>Thinking step (streamable)</td><td><code>text</code> + <code>meta.streaming</code></td><td><span class="phase pa">add</span></td></tr>
+    <tr style="outline:1.5px solid var(--accent)"><td><code class="accent">tool</code></td><td>Unified tool lifecycle</td><td><code>meta.kind/status/exit_code</code></td><td><span class="phase pa">add</span></td></tr>
+    <tr style="outline:1.5px solid var(--accent)"><td><code class="accent">file_change</code></td><td>Files added/updated/deleted</td><td><code>meta.changes[]</code></td><td><span class="phase pa">add</span></td></tr>
+    <tr style="outline:1.5px solid var(--accent)"><td><code class="accent">plan</code> / <code class="accent">todo</code></td><td>Live task list</td><td><code>meta.items[]</code></td><td><span class="phase pa">add</span></td></tr>
+    <tr style="outline:1.5px solid var(--warn)"><td><code class="warn">approval_request</code></td><td>Agent needs permission mid-run</td><td><code>meta.kind/command/risk</code></td><td><span class="phase pb">Phase B</span></td></tr>
+  </table>
+
+  <div class="note">
+    <div class="t">Design constraint that makes this safe</div>
+    <code>meta</code> is already a free-form dict serialized straight to JSON. So adding <code>reasoning</code>,
+    <code>file_change</code>, etc. is <b>additive</b> — old events keep working, the reducer just learns new
+    <code>case</code>s. No migration, no breaking the echo/claude paths.
+  </div>
+</section>
+
+<!-- ───────────────────────────── RUNTIMES ───────────────────────────── -->
+<section id="runtimes">
+  <a class="toplink" href="#start">↑ top</a>
+  <h2>The three runtimes — and why Codex is the problem child</h2>
+  <p>All three implement the same <code>Runtime</code> contract; they differ only in how rich their
+  <code>parse()</code> is. This table <i>is</i> the diagnosis.</p>
+
+  <table>
+    <tr><th>Runtime</th><th>Command</th><th>parse() richness</th><th>multi&#8209;turn</th><th>Verdict</th></tr>
+    <tr>
+      <td><b>echo</b><br><span class="muted">test, no tokens</span></td>
+      <td><code>python _echo_agent.py "&lt;prompt&gt;"</code></td>
+      <td>NDJSON → <code>text</code>/<code>status</code>. The pipeline's tracer bullet.</td>
+      <td><span class="cross">✗</span></td>
+      <td>Keep green. It's the deterministic fixture for tests.</td>
+    </tr>
+    <tr>
+      <td><b>claude</b><br><span class="muted">Claude Code</span></td>
+      <td><code>claude -p --output-format stream-json --verbose …</code></td>
+      <td class="accent"><b>Already rich.</b> Parses <code>assistant</code> (text + tool_use), <code>user</code> (tool_result), <code>result</code> (cost/tokens), <code>system.init</code>.</td>
+      <td><span class="check">✓</span> via <code>--resume</code></td>
+      <td>The reference. It proves the rich-event path already works end-to-end.</td>
+    </tr>
+    <tr style="outline:1.5px solid var(--err)">
+      <td><b>codex</b><br><span class="muted">the cornerstone</span></td>
+      <td class="err"><code>codex exec -- "&lt;prompt&gt;"</code> &nbsp;(plain text!)</td>
+      <td class="err"><b>One <code>text</code> event per output line.</b> No structure. <i>This is the wall of text.</i></td>
+      <td><span class="cross">✗</span> (single-turn)</td>
+      <td><span class="phase pa">PHASE A</span> Rewrite to <code>exec --json</code> + an item parser.</td>
+    </tr>
+  </table>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="kicker err">Today — the culprit, verbatim</div>
+      <pre style="margin-top:6px"><span class="k">class</span> <span class="f">CodexRuntime</span>(Runtime):
+    multi_turn = <span class="k">False</span>
+    stderr_is_error = <span class="k">False</span>  <span class="c"># transcript goes to stderr</span>
+    <span class="k">def</span> <span class="f">build_command</span>(self, prompt, resume=<span class="k">None</span>):
+        <span class="k">return</span> [exe, <span class="s">"exec"</span>, <span class="s">"--"</span>, prompt]
+    <span class="k">def</span> <span class="f">parse</span>(self, line):
+        <span class="k">return</span> [<span class="f">AgentEvent</span>(<span class="s">"text"</span>, line)] <span class="k">if</span> line.strip() <span class="k">else</span> []</pre>
+      <p class="muted" style="font-size:12px">Every line — commands, output, reasoning, metadata — becomes
+      an undifferentiated <code>text</code> block. The UI can't tell a command from an answer.</p>
+    </div>
+    <div class="card">
+      <div class="kicker accent">Target — structured at the source</div>
+      <pre style="margin-top:6px"><span class="k">def</span> <span class="f">build_command</span>(self, prompt, resume=<span class="k">None</span>):
+        cmd = [exe, <span class="s">"exec"</span>, <span class="s">"--json"</span>,
+               <span class="s">"--skip-git-repo-check"</span>, <span class="s">"-C"</span>, cwd,
+               <span class="s">"--sandbox"</span>, mode]          <span class="c"># read-only by default</span>
+        <span class="k">if</span> resume: cmd += [<span class="s">"resume"</span>, thread_id]
+        <span class="k">return</span> cmd + [<span class="s">"--"</span>, prompt]
+    <span class="k">def</span> <span class="f">parse</span>(self, line):
+        ev = json.loads(line)                <span class="c"># JSONL, one event/line</span>
+        <span class="c"># map item.type → reasoning | tool | file_change | …</span></pre>
+      <p class="muted" style="font-size:12px">Each line is now a typed item. The parser maps it to the rich
+      events; the UI renders pills, a reasoning box, diffs.</p>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <div class="t">Subtle gotcha you'll hit</div>
+    Codex writes its human transcript to <b>stderr</b>, which is why <code>stderr_is_error=False</code> today.
+    Once you move to <code>--json</code>, the structured events come on <b>stdout</b>. You'll likely keep
+    stderr non-fatal (it may carry warnings) but stop treating it as the content channel. Confirm against a
+    captured fixture before assuming.
+  </div>
+</section>
+
+<!-- ───────────────────────────── DEMO ───────────────────────────── -->
+<section id="demo">
+  <a class="toplink" href="#start">↑ top</a>
+  <h2>See it: flat stream vs. structured surface</h2>
+  <p>Same underlying turn, same events. Left renders them the way Codex does <b>today</b> (one text line each).
+  Right renders them the way the <b>redesign</b> does (reasoning box → collapsible risk-colored pills →
+  privileged answer). Press play and watch the difference land.</p>
+
+  <div class="demo-ctl">
+    <button class="run" id="play">▶ Run a Codex turn</button>
+    <button class="ghost" id="reset">Reset</button>
+    <div class="lbar" id="lbar"></div>
+    <span class="muted mono" id="evcount" style="font-size:11px"></span>
+  </div>
+
+  <div class="demo-grid">
+    <div class="screen bad"><h4>✗ Today — flat stream (CodexRuntime.parse)</h4><div id="flat"></div></div>
+    <div class="screen good"><h4>✓ Redesign — structured (ToolPill · ReasoningBox · Answer)</h4><div id="rich"></div></div>
+  </div>
+  <p class="muted" style="font-size:12px">Tip: click a pill on the right to expand its command + output —
+  that collapse-by-default behavior is the single biggest anti-wall-of-text lever.</p>
+</section>
+
+<!-- ───────────────────────────── CODEX MODEL ───────────────────────────── -->
+<section id="codex">
+  <a class="toplink" href="#start">↑ top</a>
+  <h2>The Codex event model — build the parser to this</h2>
+  <p><code>codex exec --json</code> emits <b>JSONL</b> in two tiers: <b>lifecycle</b> events
+  (<code>thread.started</code>, <code>turn.started</code>, <code>turn.completed</code>) and <b>item</b> events
+  (<code>item.started</code> / <code>item.updated</code> / <code>item.completed</code>, each with an
+  <code>item.id</code> and an <code>item.type</code>). Correlate by <code>item.id</code> to take a tool pill
+  from <i>running</i> → <i>done</i>.</p>
+
+  <pre><span class="p">{</span><span class="k">"type"</span>:<span class="s">"thread.started"</span>, <span class="k">"thread_id"</span>:<span class="s">"019…"</span><span class="p">}</span>            <span class="c"># ← capture for resume</span>
+<span class="p">{</span><span class="k">"type"</span>:<span class="s">"turn.started"</span><span class="p">}</span>
+<span class="p">{</span><span class="k">"type"</span>:<span class="s">"item.started"</span>,  <span class="k">"item"</span>:<span class="p">{</span><span class="k">"id"</span>:<span class="s">"i1"</span>,<span class="k">"type"</span>:<span class="s">"command_execution"</span>,<span class="k">"command"</span>:<span class="s">"bash -lc ls"</span>,<span class="k">"status"</span>:<span class="s">"in_progress"</span><span class="p">}}</span>
+<span class="p">{</span><span class="k">"type"</span>:<span class="s">"item.completed"</span>,<span class="k">"item"</span>:<span class="p">{</span><span class="k">"id"</span>:<span class="s">"i1"</span>,<span class="k">"type"</span>:<span class="s">"command_execution"</span>,<span class="k">"aggregated_output"</span>:<span class="s">"docs\nsrc\n"</span>,<span class="k">"exit_code"</span>:0,<span class="k">"status"</span>:<span class="s">"completed"</span><span class="p">}}</span>
+<span class="p">{</span><span class="k">"type"</span>:<span class="s">"item.completed"</span>,<span class="k">"item"</span>:<span class="p">{</span><span class="k">"id"</span>:<span class="s">"i4"</span>,<span class="k">"type"</span>:<span class="s">"file_change"</span>,<span class="k">"changes"</span>:[<span class="p">{</span><span class="k">"path"</span>:<span class="s">"a.md"</span>,<span class="k">"kind"</span>:<span class="s">"update"</span><span class="p">}</span>]<span class="p">}}</span>
+<span class="p">{</span><span class="k">"type"</span>:<span class="s">"turn.completed"</span>,<span class="k">"usage"</span>:<span class="p">{</span><span class="k">"input_tokens"</span>:…,<span class="k">"output_tokens"</span>:…,<span class="k">"reasoning_output_tokens"</span>:…<span class="p">}}</span>   <span class="c"># ← the meter</span></pre>
+
+  <table>
+    <tr><th>item.type</th><th>Key fields</th><th>Renders as</th></tr>
+    <tr><td><code>agent_message</code></td><td><code>text</code></td><td>the <b>clean final answer</b> — full markdown weight</td></tr>
+    <tr><td><code>reasoning</code></td><td><code>text</code> (stream via <code>item.updated</code>)</td><td>the streaming <b>ReasoningBox</b></td></tr>
+    <tr><td><code>command_execution</code></td><td><code>command</code>, <code>aggregated_output</code>, <code>exit_code</code>, <code>status</code></td><td>collapsible risk-colored <b>ToolPill</b></td></tr>
+    <tr><td><code>file_change</code></td><td><code>changes[].path</code>, <code>.kind</code> (add/update/delete)</td><td>per-file <b>FileChange</b> diff list</td></tr>
+    <tr><td><code>mcp_tool_call</code></td><td><code>server</code>, <code>tool</code>, <code>arguments</code>, <code>result</code></td><td>tool-call card</td></tr>
+    <tr><td><code>web_search</code></td><td><code>query</code></td><td>search pill</td></tr>
+    <tr><td><code>todo_list</code></td><td><code>items[].text</code>, <code>.completed</code></td><td>live <b>PlanRail</b> checklist</td></tr>
+    <tr><td><code>error</code></td><td><code>message</code></td><td>inline warning</td></tr>
+  </table>
+
+  <div class="note">
+    <div class="t">Keystone unknown #2 — capture a real fixture first</div>
+    Does <code>exec --json</code> emit <code>item.updated</code> <i>deltas</i> for <code>reasoning</code> (needed
+    for the live one-line ticker), or only <code>item.completed</code>? Don't guess — capture a real multi-tool
+    run as a JSONL fixture (command in <a href="#run">Run &amp; verify</a>) and let the bytes decide. That same
+    fixture becomes your parser's unit test.
+  </div>
+</section>
+
+<!-- ───────────────────────────── COMPONENTS ───────────────────────────── -->
+<section id="components">
+  <a class="toplink" href="#start">↑ top</a>
+  <h2>The new chat components (Phase A, frontend)</h2>
+  <p>Today <code>ChatPanel.tsx</code> has one <code>&lt;Block&gt;</code> that renders <code>user|text|tool|status|error</code>,
+  with the tool card <b>always expanded</b>. The redesign replaces it with a small set of composable, collapsed-by-default
+  components — all styled from the existing <code>theme.ts</code> tokens, so no design system work.</p>
+
+  <div class="grid2">
+    <div class="card"><div class="kicker">ToolPill</div>One line: <span class="chip"><span class="k-read">◐</span> Read · README.md · ✓</span> — kind icon + verb + target + status + diffstat. Collapsed by default; click → command + <code>aggregated_output</code> + exit/duration. <b>Color = risk</b> (mint read · amber write · red execute/delete).</div>
+    <div class="card"><div class="kicker">ReasoningBox</div>One live line that updates while thinking, then collapses to <i>"Thought for N s"</i>. Pinnable open. Shows the <b>summarized</b> trace, never raw. Two hard rules: don't auto-collapse while being read; don't expand-by-default and bury the answer.</div>
+    <div class="card"><div class="kicker">FileChange</div>Per-file diff list from <code>file_change.changes[]</code>. Route edits <b>here</b>, not into the inline text stream (the single biggest clarity win other harnesses found). Stretch: per-hunk accept/reject <i>before</i> the write.</div>
+    <div class="card"><div class="kicker">PlanRail</div><code>todo_list</code> items as a live checklist — the agent's plan, ticking off in place. Plus a <b>density control</b> (Compact/Balanced/Detailed) and repeat-consolidation ("Read ×3").</div>
+  </div>
+
+  <div class="note">
+    <div class="t">The hierarchy rule</div>
+    The <code>agent_message</code> (final answer) is the <b>only</b> full-fidelity element — rendered with the
+    existing <code>&lt;Markdown&gt;</code> serif treatment. Everything else is a collapsed receipt or a side
+    panel. Color is spent only on the live/active step. That's the whole anti-wall-of-text thesis in one line.
+  </div>
+</section>
+
+<!-- ───────────────────────────── APPROVAL ───────────────────────────── -->
+<section id="approval">
+  <a class="toplink" href="#start">↑ top</a>
+  <h2>The approval system — the centerpiece &amp; the differentiator</h2>
+  <p>This is what makes the GUI more than a transcript viewer. Two halves: a deterministic <b>policy engine</b>
+  (backend) that decides auto/ask/deny per action, and an <b>ApprovalCard</b> (frontend) with real buttons.</p>
+
+  <h3>Risk tiers — classified deterministically, never self-labeled by the model</h3>
+  <div class="legend">
+    <span class="chip k-read"><span class="dot"></span>read → <b>auto</b></span>
+    <span class="chip k-write"><span class="dot"></span>write → <b>ask</b></span>
+    <span class="chip k-exec"><span class="dot"></span>execute / delete → <b>always ask</b></span>
+    <span class="chip k-net"><span class="dot"></span>network → <b>ask</b></span>
+    <span class="chip k-priv"><span class="dot"></span>protected path → <b>never auto</b></span>
+  </div>
+
+  <div class="grid2" style="margin-top:14px">
+    <div class="card">
+      <div class="kicker">The three-rung ladder (default the middle)</div>
+      <div class="cake">
+        <div><span class="lyr">Manual</span><span class="dsc muted">ask for everything</span></div>
+        <div style="border-color:var(--accent)"><span class="lyr accent">Auto ◀ default</span><span class="dsc">read auto · write+execute ask</span></div>
+        <div><span class="lyr">YOLO</span><span class="dsc muted">allowlist drives; minimal asks</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="kicker">Real buttons — deny doubles as steering</div>
+      <div class="tpill open" style="border-color:var(--err)">
+        <div class="hd"><span class="k-exec">▲</span><span class="verb">run</span><span class="tgt">rm -rf build/</span><span class="stat err">execute</span></div>
+        <div class="bd" style="display:block">
+          <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
+            <span class="chip accent">Allow once</span>
+            <span class="chip">Allow always ▾ <span class="muted">(command·project·global)</span></span>
+            <span class="chip err">Deny + "do X instead"</span>
+          </div>
+        </div>
+      </div>
+      <p class="muted" style="font-size:11.5px;margin-top:8px">Mirrors Codex's CLI prompt &amp; ACP's
+      <code>allow_once / allow_always / reject_once / reject_always</code>.</p>
+    </div>
+  </div>
+
+  <h3>The rules that make it not annoying</h3>
+  <ul class="tight">
+    <li><b>Allowlist-first, never denylist-first.</b> Denylists are bypassable (Base64, subshells). Match by longest-prefix / word-boundary; <b>deny beats allow</b>.</li>
+    <li><b>"Always" = a pattern-scoped, persisted rule</b>, not an exact string. Codex's #1 documented pain is re-prompting on slight variation — we fix it by extracting a safe prefix and persisting it (<code>command</code> / <code>project</code> / <code>global</code> scope).</li>
+    <li><b>Protected paths never auto-approve</b>: <code>.git</code>, <code>.env</code>, config, dotfiles.</li>
+    <li><b>Circuit-breaker</b>: cap auto-approvals per turn/session, then fall back to ask. Stops a runaway loop.</li>
+    <li><b>Persistence</b>: <code>~/.vivary-gui/policy.json</code> (global) + per-workspace <code>.vivary/rules</code> (project, version-controllable).</li>
+  </ul>
+
+  <div class="note warn">
+    <div class="t">Keystone unknown #1 — the live-interception protocol (resolve before Phase B)</div>
+    <code>codex exec</code> is <b>one-shot and non-interactive</b> — I confirmed on this machine that
+    <code>--ask-for-approval</code> is a <i>global</i> flag and, under <code>exec</code>, only
+    <code>on-failure</code>/<code>never</code> make sense (there's no TTY to answer a prompt). So observability
+    ships on <code>exec --json</code>, but <b>live mid-run approval</b> needs a bidirectional surface:
+    <code>codex app-server</code> (experimental JSON-RPC, what the IDE uses), <code>codex mcp-server</code>
+    (stdio MCP), or the newer <code>exec-server</code>/<code>remote-control</code> (both present in 0.139.0).
+    Spike these first; the choice sets the backend shape for the approval half. Target ACP vocabulary.
+  </div>
+</section>
+
+<!-- ───────────────────────────── GATES ───────────────────────────── -->
+<section id="gates">
+  <a class="toplink" href="#start">↑ top</a>
+  <h2>Gates — the approval mechanism that already works</h2>
+  <p>Before the live approval system exists, there's already a <b>turn-boundary</b> gate: a Vivary-native human
+  checkpoint. Understanding it matters because (a) it ships today and (b) the redesign <i>keeps</i> it as a
+  differentiator (Codex cloud has no mid-run gate).</p>
+
+  <div class="flow">
+    <div class="stage"><div class="n">1</div><div class="ttl">snapshot</div><div class="d"><code>send()</code> records which <code>gates/*.md</code> are <code>open</code> before the turn.</div></div>
+    <div class="arrow">→</div>
+    <div class="stage"><div class="n">2</div><div class="ttl">agent raises</div><div class="d">Mid-work, the agent writes a new <code>gates/&lt;id&gt;.md</code> with <code>status: open</code> and stops.</div></div>
+    <div class="arrow">→</div>
+    <div class="stage" style="border-color:var(--warn)"><div class="n warn">3</div><div class="ttl">diff → pause</div><div class="d">On exit, <code>_run_turn</code> diffs open gates. New ones → <code>gates_open</code> event, status <code>awaiting</code>.</div></div>
+    <div class="arrow">→</div>
+    <div class="stage"><div class="n">4</div><div class="ttl">you decide</div><div class="d">Inline card: Approve / Reject. Writes frontmatter <code>status</code> (working-tree only — never a commit).</div></div>
+    <div class="arrow">→</div>
+    <div class="stage" style="border-color:var(--accent)"><div class="n accent">5</div><div class="ttl">resume</div><div class="d">All gates decided → <code>resume()</code> re-prompts the agent with the decision note (via <code>--resume</code>).</div></div>
+  </div>
+
+  <div class="grid2">
+    <div class="card"><div class="kicker">A gate is just a file</div>
+      <pre style="margin-top:6px"><span class="p">---</span>
+<span class="k">status</span>: <span class="s">open</span>          <span class="c"># → approved | rejected</span>
+<span class="k">gate</span>: <span class="s">push to origin/main</span>
+<span class="k">command_intent</span>: <span class="s">git push</span>
+<span class="p">---</span></pre>
+      <p class="muted" style="font-size:12px"><code>services/gates.py</code> reads/writes this frontmatter.
+      No database — the file is the source of truth, consistent with Vivary's whole philosophy.</p>
+    </div>
+    <div class="card"><div class="kicker">Why session-scoped</div>
+      <p style="font-size:13px">The agent runs in a <b>git worktree</b> (its sandbox cwd), so it raises gates
+      <i>there</i>, not in the workspace root. That's why the chat decides gates via
+      <code>/sessions/{sid}/gates</code> — the workspace-scoped route would miss them. A real subtlety worth
+      remembering when you debug "why isn't my gate showing up."</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <div class="t">Gates vs. the new approval system — not the same thing</div>
+    <b>Gates</b> are coarse, turn-boundary, Vivary-native (the agent <i>chooses</i> to stop and ask).
+    <b>Approvals</b> (Phase B) are fine-grained, mid-run, harness-enforced (the policy engine <i>intercepts</i>
+    a risky action before it runs). They're complementary: keep gates for "should I do this whole plan?",
+    add approvals for "may I run <i>this command</i>?"
+  </div>
+</section>
+
+<!-- ───────────────────────────── FILEMAP ───────────────────────────── -->
+<section id="filemap" class="filemap">
+  <a class="toplink" href="#start">↑ top</a>
+  <h2>Every file, mapped</h2>
+  <p>The whole surface area you'll touch, grouped by layer. Expand each. <span class="legend">
+    <span class="tag fe">frontend</span><span class="tag be">backend</span><span class="tag eng">engine seam</span><span class="tag cfg">config/infra</span>
+  </span></p>
+
+  <details open>
+    <summary>① Frontend — <span class="badge">app/frontend/src</span></summary>
+    <div class="body">
+      <div class="filerow"><span class="fp">App.tsx</span><span class="fd">The 3-column shell + workspace rail + the inline <code>SearchPanel</code>. Picks which stage view to show.</span></div>
+      <div class="filerow"><span class="fp">views/ChatPanel.tsx <span class="tag fe">edit ▸ Phase A</span></span><span class="fd"><b>The centerpiece.</b> WebSocket wiring, the <code>apply()</code> reducer, the obs meter, the inline gate card, and the flat <code>&lt;Block&gt;</code> renderer you'll replace.</span></div>
+      <div class="filerow"><span class="fp">markdown.tsx</span><span class="fd">Dependency-free, injection-safe markdown → React. Strips frontmatter; treats only <code>*</code>/<code>**</code> as emphasis (snake_case-safe). Renders the privileged answer. <b>Reuse as-is.</b></span></div>
+      <div class="filerow"><span class="fp">api/client.ts <span class="tag fe">edit ▸ Phase A</span></span><span class="fd">Typed REST + WS client. Add the new event-type interfaces here. Token rides the WS subprotocol, not the URL.</span></div>
+      <div class="filerow"><span class="fp">theme.ts</span><span class="fd">The oklch palette + fonts. Your risk colors already exist: <code>accent</code>=read, <code>warn</code>=write/net, <code>err</code>=execute/delete, <code>priv</code>=private.</span></div>
+      <div class="filerow"><span class="fp">views/{State,Graph,Files,Gates,Dashboard}Panel.tsx</span><span class="fd">The six stage views. Secondary to this redesign; <code>GatesPanel</code> is the workspace-level gate list (vs the session-scoped one in chat).</span></div>
+    </div>
+  </details>
+
+  <details open>
+    <summary>③ Runtimes &amp; the Manager — <span class="badge">backend/vivary_gui/services/agents</span></summary>
+    <div class="body">
+      <div class="filerow"><span class="fp">base.py <span class="tag be">edit ▸ Phase A</span></span><span class="fd"><b>The heart.</b> <code>AgentEvent</code>, the <code>Runtime</code> contract, and the three runtimes. Extend the event taxonomy + rewrite <code>CodexRuntime</code> to <code>exec --json</code>.</span></div>
+      <div class="filerow"><span class="fp">manager.py <span class="tag be">edit ▸ Phase B</span></span><span class="fd">Session lifecycle: create · send · <code>_run_turn</code> (read/parse/emit) · subscribe · cancel · resume · gate-diff. Mostly stands; Phase B adds the policy engine + bidirectional approval channel.</span></div>
+      <div class="filerow"><span class="fp">_echo_agent.py</span><span class="fd">The fake agent (NDJSON). The model for your test fixtures; <code>RAISE_GATE</code> in a prompt makes it raise a gate, exercising the pause/resume path.</span></div>
+    </div>
+  </details>
+
+  <details>
+    <summary>② Backend — routers &amp; services — <span class="badge">backend/vivary_gui</span></summary>
+    <div class="body">
+      <div class="filerow"><span class="fp">main.py</span><span class="fd">FastAPI factory. Lifespan writes <code>runtime.json</code> (host/port/token), wires every router, kills live agents on shutdown. CORS = Vite origins only.</span></div>
+      <div class="filerow"><span class="fp">routers/sessions.py</span><span class="fd">REST: list runtimes, create session, send, cancel, session-scoped gates + decision, resume. Where a Phase-B <code>approval</code> decision endpoint would live.</span></div>
+      <div class="filerow"><span class="fp">routers/ws.py</span><span class="fd">The one WebSocket: <code>/ws/sessions/{sid}</code>. Auth via <code>token.&lt;TOKEN&gt;</code> subprotocol. Drains <code>manager.subscribe()</code> → JSON.</span></div>
+      <div class="filerow"><span class="fp">services/gates.py</span><span class="fd">Read/write <code>gates/*.md</code> frontmatter status. Working-tree edits only — committing is itself a Vivary hard gate.</span></div>
+      <div class="filerow"><span class="fp">services/sandbox/local.py</span><span class="fd">Per-session git worktree (when the workspace is its own repo root), else run in-place. The <code>create()</code> contract a Docker/Daytona provider would later implement.</span></div>
+      <div class="filerow"><span class="fp">routers/{workspaces,search,files,state,graph,gates}.py</span><span class="fd">The workspace surfaces feeding the stage views: registry, FTS5 search, file tree/read, state surface, graph/blast, workspace gates.</span></div>
+      <div class="filerow"><span class="fp">index/indexer.py</span><span class="fd">SQLite FTS5 index over workspace markdown (powers Search). Rebuildable; no content stored as truth.</span></div>
+    </div>
+  </details>
+
+  <details>
+    <summary>④ The engine seam &amp; ⑤ config/infra — <span class="badge">bridge · config · security</span></summary>
+    <div class="body">
+      <div class="filerow"><span class="fp">bridge/cli.py <span class="tag eng">engine</span></span><span class="fd">Runs published engines as subprocesses: <code>python -m tropo/ozone/exo … --json</code> → graph, blast, review, board, conflicts, and the self-contained <code>tropo view</code> HTML.</span></div>
+      <div class="filerow"><span class="fp">bridge/loader.py <span class="tag eng">engine</span></span><span class="fd">Workspace <code>doctor()</code> via the installed <code>create-vivary</code> package (lazy import). The decouple-from-monorepo seam.</span></div>
+      <div class="filerow"><span class="fp">config.py <span class="tag cfg">infra</span></span><span class="fd"><code>~/.vivary-gui/</code> home: registry.json, index.db, runtime.json. Host <code>127.0.0.1</code>, port <code>8765</code>. Vite-only CORS origins.</span></div>
+      <div class="filerow"><span class="fp">security.py <span class="tag cfg">infra</span></span><span class="fd">Per-launch token (env → last-runtime → fresh). <code>require_token</code> guard (header <code>X-Vivary-Token</code>) on every protected route.</span></div>
+      <div class="filerow"><span class="fp">app/dev.ps1 <span class="tag cfg">infra</span></span><span class="fd">The launcher: one shared token, backend job on :8765, Vite on :5173, mirrors the token into <code>frontend/.env.local</code>. Ctrl-C stops both.</span></div>
+    </div>
+  </details>
+</section>
+
+<!-- ───────────────────────────── SECURITY ───────────────────────────── -->
+<section id="security">
+  <a class="toplink" href="#start">↑ top</a>
+  <h2>Security &amp; sandbox — the harness boundary</h2>
+  <p>"Getting the harness right" includes its containment. Four concentric guards keep a locally-bound app
+  from being a foothold:</p>
+  <div class="grid2">
+    <div class="card"><div class="kicker">Bind + token</div>Backend binds <code>127.0.0.1</code> only. Every route except <code>/api/health</code> needs the per-launch token. Two layers: the custom header forces a CORS preflight (blocks cross-origin pages), and the token blocks other local processes.</div>
+    <div class="card"><div class="kicker">WS token hygiene</div>The token rides the WebSocket <b>subprotocol offer</b> (<code>token.&lt;TOKEN&gt;</code>), never the URL — query strings leak into logs, proxies, history. Compared with <code>secrets.compare_digest</code>.</div>
+    <div class="card"><div class="kicker">Worktree isolation</div>Each session runs in its own detached git worktree under <code>~/.vivary-gui/worktrees/&lt;sid&gt;</code> (when the workspace is a repo root). The agent's edits + gates are isolated there; teardown removes it.</div>
+    <div class="card"><div class="kicker">Codex sandbox modes</div>The new <code>--sandbox</code> flag adds a second ring <i>inside</i> the agent: <code>read-only</code> (default for observability) → <code>workspace-write</code> → <code>danger-full-access</code>. Pair with the policy engine, never bypass with <code>--dangerously-bypass-…</code>.</div>
+  </div>
+</section>
+
+<!-- ───────────────────────────── SEAM ───────────────────────────── -->
+<section id="seam">
+  <a class="toplink" href="#start">↑ top</a>
+  <h2>The engine seam — how the GUI reaches Vivary</h2>
+  <p>The GUI is a <b>shell over the published Vivary CLIs</b>, not a fork of them. The recent
+  "decouple the bridge" refactor means it no longer needs the monorepo's <code>packages/</code> dir — it runs
+  whatever <code>vivary-tropo / vivary-ozone / vivary-exo / create-vivary</code> are pip-installed in the
+  backend's venv.</p>
+  <pre><span class="c"># bridge/cli.py — read-only views run the engines out-of-process for robustness</span>
+<span class="k">def</span> <span class="f">_run_json</span>(module, args, root):
+    cmd = [sys.executable, <span class="s">"-m"</span>, module, *args, <span class="s">"--root"</span>, str(root), <span class="s">"--json"</span>]
+    <span class="k">return</span> json.loads(subprocess.run(cmd, capture_output=<span class="k">True</span>, …).stdout)
+
+graph   = <span class="k">lambda</span> root: _run_json(<span class="s">"tropo"</span>, [<span class="s">"graph"</span>], root)        <span class="c"># GraphPanel</span>
+blast   = <span class="k">lambda</span> root,n: _run_json(<span class="s">"tropo"</span>, [<span class="s">"blast"</span>, n], root)     <span class="c"># blast radius</span>
+review  = <span class="k">lambda</span> root: _run_json(<span class="s">"ozone"</span>, [<span class="s">"review"</span>], root)       <span class="c"># StatePanel</span>
+board   = <span class="k">lambda</span> root: _run_json(<span class="s">"exo"</span>,   [<span class="s">"board"</span>], root)        <span class="c"># DashboardPanel</span></pre>
+  <p class="muted">Subprocess (not in-process import) keeps the GUI robust to engine internals and matches the
+  engines' verified JSON contracts. The per-call latency is fine for interactive reads. <b>Agent runtimes
+  (codex/claude) are spawned the same way</b> — the GUI's whole posture is "drive trusted CLIs, normalize
+  their output."</p>
+</section>
+
+<!-- ───────────────────────────── VERIFIED ───────────────────────────── -->
+<section id="verified">
+  <a class="toplink" href="#start">↑ top</a>
+  <h2>What I verified on this machine</h2>
+  <p>So the plan rests on facts, not the handoff doc's assertions. Checked just now:</p>
+  <table>
+    <tr><th>Claim</th><th>Result</th></tr>
+    <tr><td><code>codex</code> on PATH</td><td><span class="check">✓</span> <code>codex-cli 0.139.0</code> at <code>…\AppData\Roaming\npm\codex.ps1</code></td></tr>
+    <tr><td><code>claude</code> on PATH</td><td><span class="check">✓</span> <code>…\.local\bin\claude.exe</code></td></tr>
+    <tr><td><code>codex exec --json</code> exists</td><td><span class="check">✓</span> "Print events to stdout as JSONL"</td></tr>
+    <tr><td><code>--sandbox</code> modes</td><td><span class="check">✓</span> exactly <code>read-only · workspace-write · danger-full-access</code></td></tr>
+    <tr><td><code>-C/--cd</code>, <code>--skip-git-repo-check</code>, <code>--output-schema</code>, <code>-o</code></td><td><span class="check">✓</span> all present on <code>exec</code></td></tr>
+    <tr><td><code>codex exec resume</code></td><td><span class="check">✓</span> subcommand exists (resume by id or <code>--last</code>)</td></tr>
+    <tr><td><code>--ask-for-approval</code> on <code>exec</code></td><td><span class="cross">✗</span> it's a <b>global</b> flag; <code>exec</code> is non-interactive → confirms live approval needs another surface</td></tr>
+    <tr><td>Programmatic surfaces for live approval</td><td><span class="check">✓</span> <code>app-server</code>, <code>mcp-server</code>, <b>+ new in 0.139.0:</b> <code>exec-server</code>, <code>remote-control</code> (doc predates these)</td></tr>
+    <tr><td>Branch</td><td><span class="check">✓</span> <code>feat/gui</code>; <code>OBSERVABILITY-REDESIGN.md</code> untracked</td></tr>
+  </table>
+  <div class="note">
+    <div class="t">The one fact the doc didn't have</div>
+    Codex 0.139.0 ships <b><code>exec-server</code></b> and <b><code>remote-control</code></b> (both experimental)
+    beyond the <code>app-server</code>/<code>mcp-server</code> the doc names. When we spike keystone #1, these are
+    extra candidates — possibly a cleaner fit for "non-interactive run + out-of-band approval" than app-server.
+  </div>
+</section>
+
+<!-- ───────────────────────────── PLAN ───────────────────────────── -->
+<section id="plan">
+  <a class="toplink" href="#start">↑ top</a>
+  <h2>Build plan &amp; the keystone unknowns</h2>
+  <div class="grid2">
+    <div class="card" style="border-color:var(--accent)">
+      <div class="kicker accent">Phase A — Observability</div>
+      <p style="font-size:13.5px">Low risk, independent, ships the wall-of-text fix on its own.</p>
+      <ul class="tight" style="font-size:13px">
+        <li>Capture a real Codex <code>--json</code> JSONL fixture (answers keystone #2).</li>
+        <li><code>CodexRuntime</code> → <code>exec --json</code> + item parser; track <code>item.id</code>; capture <code>thread_id</code>; map <code>usage</code> → meter.</li>
+        <li>Extend the <code>AgentEvent</code> taxonomy (<code>reasoning</code>, <code>tool</code>, <code>file_change</code>, <code>plan</code>).</li>
+        <li>Build <code>ToolPill</code> / <code>ReasoningBox</code> / <code>FileChange</code> / <code>PlanRail</code> + density control; privilege the answer.</li>
+        <li>Extend <code>api/client.ts</code> types + the <code>apply()</code> reducer.</li>
+      </ul>
+    </div>
+    <div class="card" style="border-color:var(--warn)">
+      <div class="kicker warn">Phase B — Approval</div>
+      <p style="font-size:13.5px">Depends on the keystone-#1 protocol spike.</p>
+      <ul class="tight" style="font-size:13px">
+        <li>Spike <code>app-server</code> / <code>mcp-server</code> / <code>exec-server</code>: how does the GUI receive a request mid-run and send allow/deny?</li>
+        <li>Policy engine (<code>services/approval.py</code>): risk tiers, allowlist (prefix, deny-beats-allow), protected paths, circuit-breaker, persistence.</li>
+        <li><code>ApprovalCard</code> + a Settings panel (three-rung mode + per-risk policy + allowlist mgmt).</li>
+        <li>Per-command risk classifier; pattern-scoped "always" that doesn't re-prompt on variation.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>The four keystone unknowns (resolve before/early)</h3>
+  <ol class="tight">
+    <li><b>Live-approval protocol</b> — which Codex surface carries mid-run approval? (Phase B blocker; observability doesn't depend on it.)</li>
+    <li><b>Reasoning streaming granularity</b> — does <code>--json</code> emit <code>item.updated</code> deltas for reasoning? (Capture a fixture.)</li>
+    <li><b>Resume semantics</b> — <code>codex exec resume &lt;id&gt;</code> vs. app-server thread continuation.</li>
+    <li><b>Policy persistence location</b> — <code>~/.vivary-gui/</code> vs per-workspace <code>.vivary/</code>.</li>
+  </ol>
+
+  <div class="note warn">
+    <div class="t">The gate before any of this merges (CLAUDE.md / AGENTS.md)</div>
+    Implementation needs a written, human-approved <b>ultraplan</b> (plan mode → ExitPlanMode) before merge —
+    intent · blast radius · verification · out-of-scope · alignment. This atlas is the shared understanding;
+    the ultraplan is the contract for the actual edits. We enter plan mode when we start Phase A.
+  </div>
+</section>
+
+<!-- ───────────────────────────── RUN ───────────────────────────── -->
+<section id="run">
+  <a class="toplink" href="#start">↑ top</a>
+  <h2>Run it &amp; verify</h2>
+  <div class="grid2">
+    <div class="card">
+      <div class="kicker">Launch the app</div>
+      <pre><span class="c"># one shared token, backend :8765 + Vite :5173</span>
+pwsh app/dev.ps1
+<span class="c"># needs backend venv: python -m venv app/backend/.venv</span>
+<span class="c">#                     pip install -e app/backend</span></pre>
+    </div>
+    <div class="card">
+      <div class="kicker">Capture the Codex fixture (keystone #2)</div>
+      <pre><span class="c"># a real multi-tool run → save the JSONL as a parser test fixture</span>
+codex exec --json --skip-git-repo-check <span class="p">\</span>
+  -C &lt;repo&gt; --sandbox read-only <span class="p">\</span>
+  -- <span class="s">"list the files and read README"</span> <span class="p">&gt;</span> codex-run.jsonl</pre>
+    </div>
+  </div>
+  <div class="card">
+    <div class="kicker">Backend tests (mirror these for the new parser)</div>
+    <pre><span class="c"># from app/backend, with the venv active</span>
+python -m pytest -q                       <span class="c"># all suites incl. agents + gate-turns</span>
+<span class="c"># the redesign adds: parse captured JSONL fixtures → assert the right AgentEvents</span>
+<span class="c"># frontend: tsc -b && eslint  (keep the echo runtime green throughout)</span></pre>
+  </div>
+  <div class="note">
+    <div class="t">The verification bar for "done"</div>
+    Run a real Codex session in the GUI → pills/reasoning/diffs/plan render, transcript is <b>answer-first</b>.
+    Trigger a gated command → the ApprovalCard blocks, allow/deny works, and <b>"Allow always" persists and does
+    NOT re-prompt</b> on a variant command. That last clause is the headline feature — test it explicitly.
+  </div>
+</section>
+
+<p class="muted" style="font-size:12px;border-top:1px solid var(--border);padding-top:16px">
+  Built from a live read of <code>feat/gui</code> · pairs with <code>OBSERVABILITY-REDESIGN.md</code> ·
+  self-contained, offline, no external scripts. Re-open any time as the shared map.
+</p>
+
+</main>
+</div>
+
+<script>
+/* ── Scroll-spy: highlight the TOC entry for the section in view ── */
+(function(){
+  const links = [...document.querySelectorAll('#toc a')];
+  const map = new Map(links.map(a => [a.getAttribute('href').slice(1), a]));
+  const obs = new IntersectionObserver((ents)=>{
+    ents.forEach(e=>{ if(e.isIntersecting){ links.forEach(l=>l.classList.remove('on')); const a=map.get(e.target.id); if(a)a.classList.add('on'); }});
+  },{rootMargin:'-10% 0px -80% 0px',threshold:0});
+  document.querySelectorAll('section[id]').forEach(s=>obs.observe(s));
+})();
+
+/* ── The flat-vs-structured demo. One scripted turn; rendered two ways. ── */
+(function(){
+  // A realistic mini event sequence (what CodexRuntime would surface).
+  const EVENTS = [
+    {t:'user', text:'List the files and summarize the README'},
+    {t:'reason', text:'Planning: list the directory, then read README to summarize.'},
+    {t:'reason', text:'I should use a read-only listing first, then open README.md.'},
+    {t:'tool', kind:'read', verb:'List', tgt:'.', out:'AGENTS.md  docs/  packages/  README.md  site/', code:0},
+    {t:'tool', kind:'read', verb:'Read', tgt:'README.md', out:'# Vivary\\nA standard + scaffolder for agent-native workspaces…\\n(48 lines)', code:0},
+    {t:'tool', kind:'exec', verb:'run', tgt:'python -m tropo check', out:'check: clean — 8 nodes, 24 edges, 0 broken', code:0},
+    {t:'reason', text:'I have enough to summarize the workspace.'},
+    {t:'answer', text:'This workspace is a Vivary project: a typed knowledge graph (8 nodes, clean) with docs and packages. The README frames it as a scaffolder for agent-native workspaces.'},
+    {t:'result', text:'1,204 in · 380 out · $0.011'}
+  ];
+  const KIND = {
+    read:{c:'k-read', i:'◐', label:'read'},
+    write:{c:'k-write', i:'✎', label:'write'},
+    exec:{c:'k-exec', i:'▲', label:'execute'}
+  };
+  const flat = document.getElementById('flat');
+  const rich = document.getElementById('rich');
+  const playBtn = document.getElementById('play');
+  const resetBtn = document.getElementById('reset');
+  const lbar = document.getElementById('lbar');
+  const evc = document.getElementById('evcount');
+  let timer=null, reasonBox=null;
+
+  function reset(){
+    if(timer){clearTimeout(timer);timer=null;}
+    flat.innerHTML=''; rich.innerHTML=''; reasonBox=null;
+    lbar.style.width='0'; evc.textContent=''; playBtn.disabled=false; playBtn.textContent='▶ Run a Codex turn';
+  }
+  function flatLine(s){ const d=document.createElement('div'); d.className='flat-line'; d.textContent=s; flat.appendChild(d); flat.scrollTop=flat.scrollHeight; }
+
+  function richRender(ev){
+    if(ev.t==='user'){ const d=document.createElement('div'); d.className='bubble'; d.textContent=ev.text; rich.appendChild(d); reasonBox=null; }
+    else if(ev.t==='reason'){
+      if(!reasonBox){ reasonBox=document.createElement('div'); reasonBox.className='reason';
+        reasonBox.innerHTML='<div class="lbl">REASONING</div><div class="rtext"></div>'; rich.appendChild(reasonBox); }
+      reasonBox.querySelector('.rtext').textContent=ev.text;  // one live line that updates
+    }
+    else if(ev.t==='tool'){
+      reasonBox=null; const k=KIND[ev.kind];
+      const pill=document.createElement('div'); pill.className='tpill';
+      pill.innerHTML='<div class="hd"><span class="'+k.c+'">'+k.i+'</span><span class="verb">'+ev.verb+
+        '</span><span class="tgt">'+ev.tgt+'</span><span class="stat '+(ev.code===0?'check':'err')+'">'+(ev.code===0?'✓':'✗')+
+        '</span></div><div class="bd">'+ev.out.replace(/\\n/g,'\n')+'\nexit '+ev.code+'</div>';
+      pill.querySelector('.hd').addEventListener('click',()=>pill.classList.toggle('open'));
+      rich.appendChild(pill);
+    }
+    else if(ev.t==='answer'){ reasonBox=null; const d=document.createElement('div'); d.className='ans'; d.textContent=ev.text; rich.appendChild(d); }
+    else if(ev.t==='result'){ const d=document.createElement('div'); d.className='muted mono'; d.style.fontSize='10.5px'; d.style.marginTop='8px'; d.textContent=ev.text; rich.appendChild(d); }
+    rich.scrollTop=rich.scrollHeight;
+  }
+
+  // The flat side: collapse a reasoning step's "Thought" receipt + emit MANY lines per tool,
+  // mimicking how today's parser turns every transcript line into its own text block.
+  function flatRender(ev){
+    if(ev.t==='user'){ flatLine('user> '+ev.text); }
+    else if(ev.t==='reason'){ flatLine('thinking… '+ev.text); }
+    else if(ev.t==='tool'){
+      flatLine('['+KIND[ev.kind].label+'] '+ev.verb+' '+ev.tgt);
+      ev.out.split('\\n').forEach(l=>flatLine('  '+l));
+      flatLine('  exit '+ev.code);
+    }
+    else if(ev.t==='answer'){ ev.text.match(/.{1,64}(\s|$)/g).forEach(l=>flatLine(l.trim())); }
+    else if(ev.t==='result'){ flatLine('-- '+ev.text+' --'); }
+  }
+
+  function play(){
+    reset(); playBtn.disabled=true; playBtn.textContent='running…';
+    let i=0;
+    (function step(){
+      if(i>=EVENTS.length){ playBtn.textContent='✓ done — click a pill ▸'; evc.textContent=EVENTS.length+' events'; lbar.style.width='120px'; return; }
+      const ev=EVENTS[i++];
+      flatRender(ev); richRender(ev);
+      evc.textContent=i+' / '+EVENTS.length+' events';
+      lbar.style.width=(120*i/EVENTS.length)+'px';
+      timer=setTimeout(step, ev.t==='reason'?520:760);
+    })();
+  }
+  playBtn.addEventListener('click',play);
+  resetBtn.addEventListener('click',reset);
+})();
+</script>
+</body>
+</html>

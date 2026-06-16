@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   cancelSession,
   createSession,
+  decideApproval,
   decideSessionGate,
   getRuntimes,
   getSessionGates,
@@ -11,80 +12,105 @@ import {
   type Gate,
   type RuntimeInfo,
 } from '../api/client'
+import { applyEvent, visibleItems } from '../chat/reducer'
+import type { AgentEvent, ChatItem, Density, Obs } from '../chat/types'
+import { ZERO_OBS } from '../chat/types'
+import { DensityControl } from '../chat/controls'
+import {
+  ApprovalCard,
+  FileChangeReceipt,
+  PlanRail,
+  ReasoningBox,
+  ToolGroup,
+  ToolPill,
+} from '../chat/receipts'
 import { C, FONT_MONO } from '../theme'
 import { Markdown } from '../markdown'
-
-// The persistent agent conversation: the app's centerpiece, present on every page.
-// Talk drives the workspace; the views to the right are the stage it acts on.
-interface Ev { type: string; text: string; tool: string; meta: { cost?: number; input_tokens?: number; output_tokens?: number } }
-type Item =
-  | { kind: 'user'; text: string }
-  | { kind: 'text'; text: string }
-  | { kind: 'tool'; tool: string; target: string; result?: string }
-  | { kind: 'status'; text: string }
-  | { kind: 'error'; text: string }
-interface Obs { status: 'idle' | 'running'; cost: number; inTok: number; outTok: number; turn: number }
-const ZERO: Obs = { status: 'idle', cost: 0, inTok: 0, outTok: 0, turn: 0 }
-
-function apply(prev: Item[], ev: Ev): Item[] {
-  switch (ev.type) {
-    case 'user_msg': return [...prev, { kind: 'user', text: ev.text }]
-    case 'text': return [...prev, { kind: 'text', text: ev.text }]
-    case 'tool_use': return [...prev, { kind: 'tool', tool: ev.tool, target: ev.text }]
-    case 'tool_result': {
-      const rev = [...prev].reverse().findIndex((x) => x.kind === 'tool' && x.result === undefined)
-      if (rev < 0) return prev
-      const idx = prev.length - 1 - rev
-      const copy = [...prev]
-      copy[idx] = { ...(copy[idx] as Extract<Item, { kind: 'tool' }>), result: ev.text }
-      return copy
-    }
-    case 'status': return ev.text && ev.text !== 'session created' ? [...prev, { kind: 'status', text: ev.text }] : prev
-    case 'error': return [...prev, { kind: 'error', text: ev.text }]
-    default: return prev
-  }
-}
 
 export function ChatPanel({ wsid }: { wsid: string }) {
   const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([])
   const [runtime, setRuntime] = useState('claude')
+  const [density, setDensity] = useState<Density>('balanced')
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    getRuntimes().then(setRuntimes).catch((e) => setError(String(e)))
+  }, [])
+
+  return (
+    <ChatSession
+      key={`${wsid}:${runtime}`}
+      wsid={wsid}
+      runtime={runtime}
+      runtimes={runtimes}
+      density={density}
+      onDensity={setDensity}
+      onRuntime={setRuntime}
+      setupError={error}
+    />
+  )
+}
+
+function ChatSession({
+  wsid,
+  runtime,
+  runtimes,
+  density,
+  onDensity,
+  onRuntime,
+  setupError,
+}: {
+  wsid: string
+  runtime: string
+  runtimes: RuntimeInfo[]
+  density: Density
+  onDensity: (next: Density) => void
+  onRuntime: (next: string) => void
+  setupError: string | null
+}) {
   const [sid, setSid] = useState<string | null>(null)
-  const [items, setItems] = useState<Item[]>([])
-  const [obs, setObs] = useState<Obs>(ZERO)
+  const [items, setItems] = useState<ChatItem[]>([])
+  const [obs, setObs] = useState<Obs>(ZERO_OBS)
   const [gates, setGates] = useState<Gate[]>([])
   const [awaiting, setAwaiting] = useState(false)
   const [input, setInput] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(setupError)
   const wsRef = useRef<WebSocket | null>(null)
   const logRef = useRef<HTMLDivElement | null>(null)
   const stick = useRef(true)
 
-  useEffect(() => { getRuntimes().then(setRuntimes).catch((e) => setError(String(e))) }, [])
-  const loadGates = (s: string) => getSessionGates(s).then((g) => setGates(g.filter((x) => x.status === 'open'))).catch(() => {})
+  const loadGates = (s: string) =>
+    getSessionGates(s).then((g) => setGates(g.filter((x) => x.status === 'open'))).catch(() => {})
 
   useEffect(() => {
     let dead = false
-    setItems([]); setObs(ZERO); setSid(null); setGates([]); setAwaiting(false)
-    wsRef.current?.close()
     createSession(wsid, runtime).then(({ id }) => {
       if (dead) return
       setSid(id)
       const ws = openSessionWs(id)
       wsRef.current = ws
       ws.onmessage = (m) => {
-        const ev = JSON.parse(m.data) as Ev
-        setItems((p) => apply(p, ev))
-        if (ev.type === 'user_msg') setObs((o) => ({ ...o, status: 'running' }))
-        else if (ev.type === 'result') setObs((o) => ({ ...o, cost: o.cost + (ev.meta?.cost ?? 0), inTok: o.inTok + (ev.meta?.input_tokens ?? 0), outTok: o.outTok + (ev.meta?.output_tokens ?? 0), turn: o.turn + 1 }))
-        else if (ev.type === 'turn_end') setObs((o) => ({ ...o, status: 'idle' }))
-        else if (ev.type === 'gates_open') { loadGates(id); setAwaiting(true) }
+        const ev = JSON.parse(m.data) as AgentEvent
+        setItems((p) => applyEvent(p, ev))
+        setObs((o) => observe(o, ev))
+        if (ev.type === 'gates_open') {
+          loadGates(id)
+          setAwaiting(true)
+        }
       }
       ws.onerror = () => setError('websocket error')
     }).catch((e) => setError(String(e)))
-    return () => { dead = true; wsRef.current?.close() }
+    return () => {
+      dead = true
+      wsRef.current?.close()
+    }
   }, [wsid, runtime])
 
-  useEffect(() => { if (stick.current) logRef.current?.scrollTo({ top: logRef.current.scrollHeight }) }, [items])
+  useEffect(() => {
+    if (stick.current) logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
+  }, [items])
+
+  const shown = useMemo(() => visibleItems(items, density), [items, density])
 
   const onLogScroll = () => {
     const el = logRef.current
@@ -93,17 +119,38 @@ export function ChatPanel({ wsid }: { wsid: string }) {
 
   const send = async () => {
     if (!input.trim() || !sid || obs.status === 'running') return
-    const text = input.trim(); setInput(''); setAwaiting(false)
+    const text = input.trim()
+    setInput('')
+    setAwaiting(false)
     try { await sendMessage(sid, text) } catch (e) { setError(String(e)) }
   }
+
   const decide = async (gid: string, d: 'approve' | 'reject') => {
     if (!sid) return
     try {
       await decideSessionGate(sid, gid, d)
       const remaining = (await getSessionGates(sid)).filter((x) => x.status === 'open')
       setGates(remaining)
-      if (awaiting && remaining.length === 0) { setAwaiting(false); await resumeSession(sid) }
-    } catch (e) { setError(String(e)) }
+      if (awaiting && remaining.length === 0) {
+        setAwaiting(false)
+        await resumeSession(sid)
+      }
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
+  const decideApprovalRequest = async (
+    approvalId: string,
+    decision: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always',
+    body: { scope?: string; pattern?: string; steering?: string },
+  ) => {
+    if (!sid) return
+    try {
+      await decideApproval(sid, approvalId, decision, body)
+    } catch (e) {
+      setError(String(e))
+    }
   }
 
   return (
@@ -111,41 +158,39 @@ export function ChatPanel({ wsid }: { wsid: string }) {
       <header style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 22px', borderBottom: `1px solid ${C.border}` }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: obs.status === 'running' ? C.warn : C.accent }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'currentColor', boxShadow: '0 0 9px currentColor' }} />
-          {obs.status === 'running' ? 'working' : 'ready'}
+          {obs.status === 'running' ? 'working' : awaiting ? 'awaiting' : 'ready'}
         </span>
         <span style={{ fontSize: 12.5, color: C.muted, fontVariantNumeric: 'tabular-nums' }}>
-          {obs.turn > 0 && <>{obs.inTok.toLocaleString()} in · {obs.outTok.toLocaleString()} out · ${obs.cost.toFixed(3)}</>}
+          {obs.turn > 0 && <>{obs.inTok.toLocaleString()} in · {obs.outTok.toLocaleString()} out · {obs.reasoningTok.toLocaleString()} reasoning</>}
         </span>
-        <select value={runtime} onChange={(e) => setRuntime(e.target.value)} style={{ marginLeft: 'auto', padding: '5px 9px', background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12.5 }}>
-          {runtimes.map((r) => <option key={r.name} value={r.name} disabled={!r.available}>{r.label}{r.available ? '' : ' (n/a)'}</option>)}
-        </select>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <DensityControl density={density} onChange={onDensity} />
+          <select value={runtime} onChange={(e) => onRuntime(e.target.value)} style={{ padding: '5px 9px', background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12.5 }}>
+            {runtimes.map((r) => <option key={r.name} value={r.name} disabled={!r.available}>{r.label}{r.available ? '' : ' (n/a)'}</option>)}
+          </select>
+        </div>
       </header>
 
       <div ref={logRef} onScroll={onLogScroll} style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '24px 22px' }}>
-        <div style={{ maxWidth: '60ch', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 15 }}>
-          {awaiting && gates.length > 0 && <div style={{ fontSize: 12.5, color: C.warn }}>The agent paused for approval — approving resumes it; rejecting tells it to stop.</div>}
-          {gates.map((g) => (
-            <div key={g.id} style={{ border: `1px solid ${C.warn}`, background: `linear-gradient(180deg, oklch(0.28 0.035 78 / .4), ${C.panel})`, borderRadius: 11, overflow: 'hidden' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 13px', fontFamily: FONT_MONO, fontSize: 12.5, color: C.warn }}>⚠ Gate <span style={{ color: C.text }}>{g.id}</span></div>
-              <div style={{ padding: '0 13px 10px', fontSize: 12.5, color: C.muted }}>{g.gate}</div>
-              <div style={{ display: 'flex', gap: 8, padding: '10px 13px', borderTop: `1px solid ${C.border}` }}>
-                <button onClick={() => decide(g.id, 'approve')} style={btn(C.warn)}>Approve</button>
-                <button onClick={() => decide(g.id, 'reject')} style={ghost()}>Reject</button>
-              </div>
-            </div>
-          ))}
-          {items.length === 0 && gates.length === 0 && <span style={{ color: C.muted, fontSize: 14.5 }}>Ask Vivary to develop this workspace. It can read, search, edit, and act, in the open, while you watch it work on the right.</span>}
-          {items.map((it, i) => <Block key={i} it={it} />)}
+        <div style={{ maxWidth: '68ch', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 13 }}>
+          {awaiting && gates.length > 0 && <div style={{ fontSize: 12.5, color: C.warn }}>The agent paused for approval. Approving resumes it; rejecting tells it to stop.</div>}
+          {gates.map((g) => <GateCard key={g.id} gate={g} onDecide={decide} />)}
+          {shown.length === 0 && gates.length === 0 && <span style={{ color: C.muted, fontSize: 14.5 }}>Ask Vivary to develop this workspace. It can read, search, edit, and act while you watch structured receipts instead of raw output.</span>}
+          {shown.map((it) => <Block key={it.id} item={it} density={density} onApprovalDecide={decideApprovalRequest} />)}
         </div>
       </div>
 
       {error && <div style={{ color: C.err, fontSize: 13, padding: '0 22px 8px' }}>{error}</div>}
       <div style={{ borderTop: `1px solid ${C.border}`, padding: '14px 22px 18px' }}>
-        <div style={{ maxWidth: '60ch', margin: '0 auto', display: 'flex', gap: 9, alignItems: 'center' }}>
-          <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()}
-            placeholder={obs.status === 'running' ? 'agent is working…' : 'Reply, or ask Vivary to act on the workspace…'}
+        <div style={{ maxWidth: '68ch', margin: '0 auto', display: 'flex', gap: 9, alignItems: 'center' }}>
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && send()}
+            placeholder={obs.status === 'running' ? 'agent is working...' : 'Reply, or ask Vivary to act on the workspace...'}
             disabled={obs.status === 'running' || !sid}
-            style={{ flex: 1, background: C.panel, border: `1px solid ${C.border}`, borderRadius: 12, padding: '12px 15px', color: C.text, fontSize: 14.5 }} />
+            style={{ flex: 1, background: C.panel, border: `1px solid ${C.border}`, borderRadius: 12, padding: '12px 15px', color: C.text, fontSize: 14.5 }}
+          />
           {obs.status === 'running'
             ? <button onClick={() => sid && cancelSession(sid)} style={ghost(C.err)}>Stop</button>
             : <button onClick={send} disabled={!sid} style={{ ...btn(C.accent), padding: '11px 20px', boxShadow: '0 0 18px oklch(0.8 0.13 165 / .35)' }}>Send</button>}
@@ -155,32 +200,65 @@ export function ChatPanel({ wsid }: { wsid: string }) {
   )
 }
 
-function Block({ it }: { it: Item }) {
-  if (it.kind === 'user') {
-    return <div style={{ alignSelf: 'flex-end', maxWidth: '85%', background: C.raise, border: `1px solid ${C.border}`, borderRadius: '14px 14px 4px 14px', padding: '10px 14px', fontSize: 14.5, lineHeight: 1.5 }}>{it.text}</div>
+function observe(prev: Obs, ev: AgentEvent): Obs {
+  if (ev.type === 'user_msg') return { ...prev, status: 'running' }
+  if (ev.type === 'turn_end') return { ...prev, status: 'idle' }
+  if (ev.type !== 'result') return prev
+  return {
+    ...prev,
+    cost: prev.cost + numeric(ev.meta.cost),
+    inTok: prev.inTok + numeric(ev.meta.input_tokens),
+    cachedInTok: prev.cachedInTok + numeric(ev.meta.cached_input_tokens),
+    outTok: prev.outTok + numeric(ev.meta.output_tokens),
+    reasoningTok: prev.reasoningTok + numeric(ev.meta.reasoning_output_tokens),
+    turn: prev.turn + 1,
   }
-  if (it.kind === 'text') {
-    return <Markdown text={it.text} />
+}
+
+function numeric(value: unknown): number {
+  return typeof value === 'number' ? value : 0
+}
+
+function Block({
+  item,
+  density,
+  onApprovalDecide,
+}: {
+  item: ChatItem
+  density: Density
+  onApprovalDecide: (approvalId: string, decision: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always', body: { scope?: string; pattern?: string; steering?: string }) => void
+}) {
+  if (item.kind === 'user') {
+    return <div style={{ alignSelf: 'flex-end', maxWidth: '85%', background: C.raise, border: `1px solid ${C.border}`, borderRadius: '14px 14px 4px 14px', padding: '10px 14px', fontSize: 14.5, lineHeight: 1.5 }}>{item.text}</div>
   }
-  if (it.kind === 'tool') {
-    return (
-      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden', background: C.panel }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 12px', fontFamily: FONT_MONO, fontSize: 12.5, color: C.muted }}>
-          <span style={{ color: C.accent }}>⚙</span><span style={{ color: C.read }}>{it.tool}</span><span>{it.target.replace(`${it.tool}: `, '').replace(it.tool, '')}</span>
-        </div>
-        {it.result && <div style={{ borderTop: `1px solid ${C.border}`, padding: '8px 12px', fontFamily: FONT_MONO, fontSize: 11.5, color: C.muted, lineHeight: 1.5 }}>{it.result}</div>}
+  if (item.kind === 'answer') return <Markdown text={item.text} />
+  if (item.kind === 'reasoning') return <ReasoningBox item={item} density={density} />
+  if (item.kind === 'tool') return <ToolPill item={item} density={density} />
+  if (item.kind === 'toolGroup') return <ToolGroup item={item} />
+  if (item.kind === 'fileChange') return <FileChangeReceipt item={item} />
+  if (item.kind === 'plan') return <PlanRail item={item} />
+  if (item.kind === 'approval') return <ApprovalCard item={item} onDecide={onApprovalDecide} />
+  if (item.kind === 'error') return <div style={{ fontFamily: FONT_MONO, fontSize: 12, color: C.err }}>{item.text}</div>
+  return <div style={{ alignSelf: 'center', fontSize: 11, color: C.muted }}>{item.text}</div>
+}
+
+function GateCard({ gate, onDecide }: { gate: Gate; onDecide: (gid: string, d: 'approve' | 'reject') => void }) {
+  return (
+    <div style={{ border: `1px solid ${C.warn}`, background: `linear-gradient(180deg, oklch(0.28 0.035 78 / .4), ${C.panel})`, borderRadius: 11, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 13px', fontFamily: FONT_MONO, fontSize: 12.5, color: C.warn }}>Gate <span style={{ color: C.text }}>{gate.id}</span></div>
+      <div style={{ padding: '0 13px 10px', fontSize: 12.5, color: C.muted }}>{gate.gate}</div>
+      <div style={{ display: 'flex', gap: 8, padding: '10px 13px', borderTop: `1px solid ${C.border}` }}>
+        <button onClick={() => onDecide(gate.id, 'approve')} style={btn(C.warn)}>Approve</button>
+        <button onClick={() => onDecide(gate.id, 'reject')} style={ghost()}>Reject</button>
       </div>
-    )
-  }
-  if (it.kind === 'error') {
-    return <div style={{ fontFamily: FONT_MONO, fontSize: 12, color: C.err }}>{it.text}</div>
-  }
-  return <div style={{ alignSelf: 'center', fontSize: 11, color: C.muted }}>{it.text}</div>
+    </div>
+  )
 }
 
 function btn(bg: string): React.CSSProperties {
-  return { background: bg, color: 'oklch(0.2 0.02 250)', border: 'none', borderRadius: 9, padding: '8px 14px', font: 'inherit', fontWeight: 650, fontSize: 13, cursor: 'pointer' }
+  return { background: bg, color: 'oklch(0.2 0.02 250)', border: 'none', borderRadius: 9, padding: '8px 14px', fontWeight: 650, fontSize: 13, cursor: 'pointer' }
 }
+
 function ghost(color: string = C.muted): React.CSSProperties {
-  return { background: 'none', border: `1px solid ${C.border}`, color, borderRadius: 9, padding: '8px 14px', font: 'inherit', fontSize: 13, cursor: 'pointer' }
+  return { background: 'none', border: `1px solid ${C.border}`, color, borderRadius: 9, padding: '8px 14px', fontSize: 13, cursor: 'pointer' }
 }
