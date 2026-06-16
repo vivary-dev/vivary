@@ -1,5 +1,6 @@
 from vivary_gui.services import approval
 from vivary_gui.services.approval import Action
+from vivary_gui.services.agents.manager import Manager
 
 
 def test_read_is_allowed_by_default():
@@ -19,6 +20,30 @@ def test_protected_paths_never_auto_approve():
     assert result["risk"] == "protected"
 
 
+def test_dotfile_path_segments_are_protected():
+    policy = approval.default_policy()
+    for target in (".env.local", ".github/workflows/ci.yml", "nested/.npmrc"):
+        result = approval.evaluate(policy, Action(kind="read", command=f"Get-Content {target}", target=target))
+        assert result["decision"] == "ask"
+        assert result["risk"] == "protected"
+
+
+def test_windows_shell_wrappers_classify_inner_command():
+    policy = approval.default_policy()
+    read = approval.evaluate(
+        policy,
+        Action(kind="execute", command='"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command \'Get-Content README.md\''),
+    )
+    write = approval.evaluate(
+        policy,
+        Action(kind="execute", command='powershell.exe -Command "Set-Content README.md changed"'),
+    )
+    assert read["decision"] == "allow"
+    assert read["risk"] == "read"
+    assert write["decision"] == "ask"
+    assert write["risk"] == "write"
+
+
 def test_deny_rule_beats_allow_rule():
     policy = approval.default_policy()
     approval.add_rule(policy, "npm", "allow")
@@ -35,6 +60,14 @@ def test_circuit_breaker_falls_back_to_ask():
     assert result["reason"] == "circuit breaker"
 
 
+def test_rule_matching_normalizes_spacing_and_ignores_empty_patterns():
+    policy = approval.default_policy()
+    approval.add_rule(policy, "npm    test", "allow")
+    approval.add_rule(policy, "", "deny")
+    result = approval.evaluate(policy, Action(kind="execute", command="npm test -- --runInBand"))
+    assert result["decision"] == "allow"
+
+
 def test_policy_persists(tmp_path, monkeypatch):
     path = tmp_path / "policy.json"
     monkeypatch.setattr(approval.config, "POLICY_PATH", path)
@@ -43,3 +76,18 @@ def test_policy_persists(tmp_path, monkeypatch):
     approval.save_policy(policy)
     loaded = approval.load_policy()
     assert loaded["rules"][0]["pattern"] == "rg"
+
+
+def test_manager_approval_decision_persists_and_emits(tmp_path, monkeypatch):
+    path = tmp_path / "policy.json"
+    monkeypatch.setattr(approval.config, "POLICY_PATH", path)
+    manager = Manager()
+    sid = manager.create(tmp_path, "ws1", "echo")
+
+    meta = manager.decide_approval(sid, "approval_1", "allow_always", pattern="npm test")
+
+    assert meta["status"] == "approved"
+    assert meta["saved_rule"]["pattern"] == "npm test"
+    assert approval.load_policy()["rules"][0]["decision"] == "allow"
+    assert manager.sessions[sid].events[-1].type == "approval_request"
+    assert manager.sessions[sid].events[-1].meta["status"] == "approved"

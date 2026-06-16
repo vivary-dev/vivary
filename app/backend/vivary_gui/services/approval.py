@@ -59,12 +59,13 @@ def load_policy(path: Path | None = None) -> dict:
 def save_policy(policy: dict, path: Path | None = None) -> None:
     p = path or config.POLICY_PATH
     config.ensure_app_dir()
+    p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(policy, indent=2), encoding="utf-8")
 
 
 def classify(action: Action) -> str:
     kind = action.kind.lower()
-    command = " ".join(action.command.split())
+    command = _classifiable_command(action.command)
     if kind in {"delete", "destructive"} or DELETE_RE.search(command):
         return "danger"
     if is_protected(action):
@@ -80,6 +81,21 @@ def classify(action: Action) -> str:
     return "write"
 
 
+def _normalize_command(command: str) -> str:
+    return " ".join(command.split())
+
+
+def _classifiable_command(command: str) -> str:
+    cmd = _normalize_command(command)
+    marker = re.search(r"\s-(?:Command|c)\s+(.+)$", cmd, re.IGNORECASE)
+    if marker and re.search(r"(?:powershell|pwsh)(?:\.exe)?", cmd[: marker.start()], re.IGNORECASE):
+        inner = marker.group(1).strip()
+        if len(inner) >= 2 and inner[0] == inner[-1] and inner[0] in {"'", '"'}:
+            inner = inner[1:-1]
+        return _normalize_command(inner)
+    return cmd
+
+
 def is_protected(action: Action) -> bool:
     candidates = [action.target, *action.paths]
     for raw in candidates:
@@ -88,7 +104,10 @@ def is_protected(action: Action) -> bool:
         parts = {p for p in Path(raw).parts}
         if parts & PROTECTED_PARTS:
             return True
-        if Path(raw).name in PROTECTED_FILES:
+        if any(p.startswith(".") and p not in {".", ".."} for p in parts):
+            return True
+        name = Path(raw).name
+        if name in PROTECTED_FILES:
             return True
     return False
 
@@ -119,6 +138,7 @@ def evaluate(policy: dict, action: Action, auto_count: int = 0) -> dict:
 
 
 def match_rule(rules: list, command: str) -> dict | None:
+    normalized = _normalize_command(command)
     matches = []
     for rule in rules:
         if not isinstance(rule, dict):
@@ -127,7 +147,10 @@ def match_rule(rules: list, command: str) -> dict | None:
         decision = rule.get("decision")
         if not isinstance(pattern, str) or decision not in {"allow", "ask", "deny"}:
             continue
-        if command == pattern or command.startswith(pattern + " "):
+        pattern = _normalize_command(pattern)
+        if not pattern:
+            continue
+        if normalized == pattern or normalized.startswith(pattern + " "):
             matches.append(rule)
     if not matches:
         return None
@@ -136,7 +159,7 @@ def match_rule(rules: list, command: str) -> dict | None:
 
 
 def add_rule(policy: dict, pattern: str, decision: Decision, scope: Scope = "global", reason: str = "") -> dict:
-    rule = {"pattern": pattern.strip(), "decision": decision, "scope": scope, "reason": reason}
+    rule = {"pattern": _normalize_command(pattern), "decision": decision, "scope": scope, "reason": reason}
     policy.setdefault("rules", [])
     policy["rules"] = [r for r in policy["rules"] if not (isinstance(r, dict) and r.get("pattern") == rule["pattern"] and r.get("scope") == scope)]
     policy["rules"].append(rule)

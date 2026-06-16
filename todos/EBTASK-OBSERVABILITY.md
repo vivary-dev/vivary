@@ -217,7 +217,7 @@ Evidence:
 
 ### EB-OBS-030 Deterministic approval policy and backend API
 
-Status: pending  
+Status: completed
 Dependencies: EB-OBS-000  
 Acceptance criteria:
 
@@ -238,7 +238,18 @@ Test plan before edits:
 
 Evidence:
 
-- Pending.
+- Hardened approval classification to inspect the inner command of PowerShell wrappers.
+- Protected path detection now treats any dotfile/dot-directory segment as protected,
+  including `.env.local`, `.github/*`, and nested dotfiles.
+- Rule matching now normalizes whitespace and ignores empty patterns.
+- Policy save creates the policy parent directory when needed.
+- `allow_always` / `reject_always` manager decisions persist only non-empty rule patterns.
+- Added manager-level approval test proving persisted rule metadata and emitted
+  `approval_request` status updates.
+- Verification:
+  - Approval tests: 10 passed.
+  - Backend GUI tests: 30 passed, 1 warning.
+  - `git diff --check`: passed.
 
 ### EB-OBS-040 Reducer-driven chat UI receipts and density control
 
@@ -346,10 +357,14 @@ deleting old evidence.
   - `codex --version`: `codex-cli 0.139.0`.
   - `codex exec/app-server/exec-server/remote-control/mcp-server --help`: passed.
   - `git diff --check`: passed.
+- 2026-06-16 EB-OBS-030:
+  - Approval policy tests: 10 passed.
+  - Backend GUI tests: 30 passed, 1 warning.
+  - `git diff --check`: passed.
 
 ## Handoff / Status For Other Agents
 
-- Current phase: EB-OBS-020 complete; next open story is EB-OBS-030 approval policy/API.
+- Current phase: EB-OBS-030 complete; next open story is EB-OBS-040 chat UI receipts.
 - Coordination setup is complete; observability implementation is owned by
   `C:\Users\jeffk\dev\vivary-GUI-obs-loop`.
 - Do not edit observability paths from the coordination tree.

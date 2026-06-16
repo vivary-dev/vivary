@@ -207,14 +207,16 @@ class Manager:
         if decision in {"allow_always", "reject_always"}:
             pol = approval.load_policy()
             rule_decision = "allow" if decision == "allow_always" else "deny"
-            saved_rule = approval.add_rule(
-                pol,
-                pattern or approval.safe_prefix(steering),
-                rule_decision,  # type: ignore[arg-type]
-                scope if scope in {"command", "project", "global"} else "global",  # type: ignore[arg-type]
-                steering,
-            )
-            approval.save_policy(pol)
+            rule_pattern = pattern or approval.safe_prefix(steering)
+            if rule_pattern.strip():
+                saved_rule = approval.add_rule(
+                    pol,
+                    rule_pattern,
+                    rule_decision,  # type: ignore[arg-type]
+                    scope if scope in {"command", "project", "global"} else "global",  # type: ignore[arg-type]
+                    steering,
+                )
+                approval.save_policy(pol)
         meta = {
             "id": approval_id,
             "status": status,
