@@ -239,7 +239,7 @@ _NETWORK_COMMAND = re.compile(r"\b(?:curl|wget|Invoke-WebRequest|iwr|npm\s+insta
 
 
 def _command_kind(command: str) -> str:
-    cmd = " ".join(command.split())
+    cmd = _classifiable_command(command)
     if _DELETE_COMMAND.search(cmd):
         return "delete"
     if _NETWORK_COMMAND.search(cmd):
@@ -249,6 +249,23 @@ def _command_kind(command: str) -> str:
     if _READ_COMMAND.search(cmd):
         return "read"
     return "execute"
+
+
+def _classifiable_command(command: str) -> str:
+    """Prefer the inner command when Codex wraps a shell call.
+
+    On Windows, Codex often emits commands as a full powershell.exe invocation:
+    `"C:\\...\\powershell.exe" -Command 'Get-Content README.md'`. The wrapper is
+    execution machinery; risk/color should be derived from the inner command.
+    """
+    cmd = " ".join(command.split())
+    marker = re.search(r"\s-(?:Command|c)\s+(.+)$", cmd, re.IGNORECASE)
+    if marker and re.search(r"(?:powershell|pwsh)(?:\.exe)?", cmd[: marker.start()], re.IGNORECASE):
+        inner = marker.group(1).strip()
+        if len(inner) >= 2 and inner[0] == inner[-1] and inner[0] in {"'", '"'}:
+            inner = inner[1:-1]
+        return inner
+    return cmd
 
 
 def _status_from_item(event_type: str, item: dict) -> str:
@@ -355,7 +372,7 @@ def _tool_label(kind: str, command: str) -> str:
 
 
 def _command_target(command: str) -> str:
-    parts = command.split()
+    parts = _classifiable_command(command).split()
     if not parts:
         return ""
     return " ".join(parts[:4]) + (" …" if len(parts) > 4 else "")

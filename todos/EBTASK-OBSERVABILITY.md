@@ -134,7 +134,7 @@ Evidence:
 
 ### EB-OBS-010 Codex exec JSON parser and live fixture evidence
 
-Status: pending  
+Status: completed
 Dependencies: EB-OBS-000  
 Acceptance criteria:
 
@@ -154,7 +154,28 @@ Test plan before edits:
 
 Evidence:
 
-- Pending.
+- Captured real read-only Codex JSONL fixture:
+  `app/backend/vivary_gui/tests/fixtures/codex_jsonl_live_readonly.jsonl`.
+- First capture attempt timed out after 180s because Codex waited for stdin; process tree
+  was identified and terminated (`node` 37256, `codex` 7592, `node_repl` 39316).
+- Successful capture used an empty PowerShell pipeline to close stdin. Command exited 0,
+  wrote 12,310 bytes, and emitted `thread.started`, `turn.started`, command execution
+  item events, agent messages, and `turn.completed` usage.
+- Live fixture did not emit `reasoning` items, so reasoning delta granularity remains
+  inconclusive for real Codex runs. Synthetic fixture still covers `item.updated`
+  reasoning behavior.
+- Fixed parser command classification for Windows Codex shell wrappers such as
+  `powershell.exe -Command 'Get-Content README.md'`, so read-only wrapped commands render
+  as read receipts instead of danger/execute receipts.
+- Added live fixture parser test for Windows read commands, final answer text, usage, and
+  absence of file changes.
+- Verification:
+  - `PYTHONPATH=C:\Users\jeffk\dev\vivary-GUI-obs-loop\app\backend`
+    `C:\Users\jeffk\dev\vivary-GUI\app\backend\.venv\Scripts\python.exe -m pytest -q app\backend\vivary_gui\tests\test_codex_runtime.py`
+    -> 6 passed.
+  - Same Python/PYTHONPATH with `-m pytest -q app\backend\vivary_gui\tests`
+    -> 26 passed, 1 warning.
+  - `git diff --check` -> passed.
 
 ### EB-OBS-020 Codex approval protocol spike
 
@@ -305,9 +326,14 @@ Evidence:
 See baseline table above. Future ticks must append newer evidence here instead of
 deleting old evidence.
 
+- 2026-06-16 EB-OBS-010:
+  - Parser tests: 6 passed.
+  - Backend GUI tests: 26 passed, 1 warning.
+  - `git diff --check`: passed.
+
 ## Handoff / Status For Other Agents
 
-- Current phase: setting up loop-safe coordination.
+- Current phase: EB-OBS-010 complete; next open story is EB-OBS-020 protocol spike.
 - Coordination setup is complete; observability implementation is owned by
   `C:\Users\jeffk\dev\vivary-GUI-obs-loop`.
 - Do not edit observability paths from the coordination tree.
