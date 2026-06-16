@@ -330,7 +330,7 @@ Evidence:
 
 ### EB-OBS-060 Canonical live spec update
 
-Status: pending  
+Status: completed
 Dependencies: EB-OBS-010, EB-OBS-020, EB-OBS-030, EB-OBS-040, EB-OBS-050  
 Acceptance criteria:
 
@@ -347,7 +347,19 @@ Test plan before edits:
 
 Evidence:
 
-- Pending.
+- Updated `OBSERVABILITY-REDESIGN.md` from a future plan into the canonical live spec.
+- Added live branch/worktree status, stable `AgentEvent` contract, implemented surfaces,
+  gated/non-claimed surfaces, protocol evidence, verification evidence, and human final
+  test gate.
+- Marked real mid-run Codex approval, Codex resume, real reasoning delta granularity,
+  project policy persistence, and policy settings UI as not yet claimed.
+- Updated `OBSERVABILITY-ATLAS.html` to identify it as an archived visual map and point
+  future readers to `OBSERVABILITY-REDESIGN.md` as the live source of truth.
+- Cleaned high-risk stale atlas claims that still described Phase A as future work.
+- Verification:
+  - Stale-claim scan for obsolete phrases (`Nothing here is implemented yet`, `untracked`,
+    `you'll replace`, future Phase A wording, and similar) -> no matches.
+  - `git diff --check` -> passed.
 
 ### EB-OBS-070 Thermonuclear review, P0/P1 fixes, and human test handoff
 
@@ -399,10 +411,13 @@ deleting old evidence.
   - Playwright fixture E2E: 1 passed.
   - `npm audit`: 0 vulnerabilities.
   - `git diff --check`: passed.
+- 2026-06-16 EB-OBS-060:
+  - Canonical spec stale-claim scan: no high-risk matches.
+  - `git diff --check`: passed.
 
 ## Handoff / Status For Other Agents
 
-- Current phase: EB-OBS-050 complete; next open story is EB-OBS-060 canonical live spec update.
+- Current phase: EB-OBS-060 complete; next open story is EB-OBS-070 thermonuclear review and human-test handoff.
 - Coordination setup is complete; observability implementation is owned by
   `C:\Users\jeffk\dev\vivary-GUI-obs-loop`.
 - Do not edit observability paths from the coordination tree.

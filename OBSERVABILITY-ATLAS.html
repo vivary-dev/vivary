@@ -184,6 +184,14 @@
   first-principles read of the live code on this branch, ground-truthed against the tools installed on
   this machine.</p>
 
+  <div class="note warn">
+    <div class="t">Status note — not the live source of truth</div>
+    This atlas is now an archived visual map. The canonical live spec is
+    <code>OBSERVABILITY-REDESIGN.md</code>, updated on 2026-06-16 with the implemented
+    Codex JSON parser, reducer-driven receipts, fixture E2E, deterministic approval
+    policy scaffold, and remaining live-Codex approval gates.
+  </div>
+
   <div class="note">
     <div class="t">The one sentence to anchor on</div>
     A chat turn is a <b>stream of typed events</b> that flows: <span class="mono">agent CLI → a Runtime parser →
@@ -199,9 +207,9 @@
     <div class="card"><div class="kicker">What's underneath</div><b>Vivary's engines.</b> <code>tropo</code>
       (graph), <code>ozone</code> (review), <code>exo</code> (orchestration) — the published PyPI CLIs, reached
       as subprocesses. The GUI never reimplements them.</div>
-    <div class="card"><div class="kicker">What we're fixing</div><b>The wall of text.</b> Codex turns render
-      as ~2,000 lines of undifferentiated output before the answer. We make them collapsible pills, a reasoning
-      box, a privileged answer — and add real approvals.</div>
+    <div class="card"><div class="kicker">What we fixed</div><b>The wall of text.</b> Codex turns now parse
+      structured JSONL into collapsible pills, reasoning receipts, file-change receipts, a plan rail, and a
+      privileged answer. The approval-card path is fixture-tested; real mid-run Codex approval remains protocol-gated.</div>
   </div>
 </section>
 
@@ -272,21 +280,22 @@
 <section id="pipeline">
   <a class="toplink" href="#start">↑ top</a>
   <h2>The event pipeline — the spine of everything</h2>
-  <p>This is <b>the</b> diagram to memorize. A single line of agent output becomes a rendered block by passing
-  through seven hops. Two of them are where all the redesign work happens (marked <span class="phase pa">PHASE&nbsp;A</span>).</p>
+  <p>This is <b>the</b> diagram to memorize. Agent output becomes rendered UI by passing
+  through seven hops. The observability work now lives in the parser, reducer, and receipt components
+  (marked <span class="phase pa">OBS</span>).</p>
 
   <div class="flow">
     <div class="stage"><div class="n">01 · spawn</div><div class="ttl">CLI subprocess</div><div class="d">Manager runs <code>build_command()</code> and spawns the agent CLI, piping stdout+stderr.</div><div class="loc">manager.send()</div></div>
     <div class="arrow">→</div>
-    <div class="stage" style="border-color:var(--accent)"><div class="n accent">02 · parse</div><div class="ttl">Runtime.parse(line)</div><div class="d">Each output line → zero-or-more typed <code>AgentEvent</code>s. <b>Phase A rewrites Codex's parser here.</b></div><div class="loc">agents/base.py</div></div>
+    <div class="stage" style="border-color:var(--accent)"><div class="n accent">02 · parse</div><div class="ttl">Runtime.parse(line)</div><div class="d">Each output line → zero-or-more typed <code>AgentEvent</code>s. <b>Codex JSON parsing is implemented here.</b></div><div class="loc">agents/base.py</div></div>
     <div class="arrow">→</div>
     <div class="stage"><div class="n">03 · emit</div><div class="ttl">Manager._emit</div><div class="d">Appends to <code>session.events</code> (history) and fans out to every subscriber queue.</div><div class="loc">manager._run_turn()</div></div>
     <div class="arrow">→</div>
     <div class="stage"><div class="n">04 · queue→WS</div><div class="ttl">WebSocket</div><div class="d"><code>subscribe()</code> drains the queue; the WS sends each event as JSON.</div><div class="loc">routers/ws.py</div></div>
     <div class="arrow">→</div>
-    <div class="stage" style="border-color:var(--accent)"><div class="n accent">05 · reduce</div><div class="ttl">apply(prev, ev)</div><div class="d">Pure reducer folds events into <code>Item[]</code>. <b>Phase A adds new item kinds here.</b></div><div class="loc">ChatPanel.tsx</div></div>
+    <div class="stage" style="border-color:var(--accent)"><div class="n accent">05 · reduce</div><div class="ttl">apply(prev, ev)</div><div class="d">Pure reducer folds events into <code>Item[]</code>. <b>Structured item kinds are implemented here.</b></div><div class="loc">app/frontend/src/chat</div></div>
     <div class="arrow">→</div>
-    <div class="stage" style="border-color:var(--accent)"><div class="n accent">06 · render</div><div class="ttl">&lt;Block&gt; / components</div><div class="d">Each item → a React node. <b>Phase A replaces the flat Block with pills/reasoning/diffs.</b></div><div class="loc">views + new components</div></div>
+    <div class="stage" style="border-color:var(--accent)"><div class="n accent">06 · render</div><div class="ttl">Receipt components</div><div class="d">Each item → a React node. <b>Flat transcript blocks are replaced with pills, reasoning, files, plans, and approvals.</b></div><div class="loc">chat/receipts.tsx</div></div>
   </div>
 
   <h3>The same path, in code</h3>
@@ -329,10 +338,10 @@ ws.onmessage = (m) => {
 <!-- ───────────────────────────── EVENTS ───────────────────────────── -->
 <section id="events">
   <a class="toplink" href="#start">↑ top</a>
-  <h2>Event taxonomy: today vs target</h2>
+  <h2>Event taxonomy: stable wire, richer events</h2>
   <p>An <code>AgentEvent</code> is deliberately tiny — <code>{type, text, tool, meta}</code> — so the wire format
-  never has to change shape; richness lives in <code>type</code> + <code>meta</code>. Here's the full set today,
-  and what Phase A adds.</p>
+  never has to change shape; richness lives in <code>type</code> + <code>meta</code>. The current implementation
+  keeps legacy events and adds structured observability events.</p>
 
   <table>
     <tr><th>Event type</th><th>Emitted when</th><th>Carried in</th><th>Status</th></tr>
@@ -388,13 +397,13 @@ ws.onmessage = (m) => {
       <td class="err"><code>codex exec -- "&lt;prompt&gt;"</code> &nbsp;(plain text!)</td>
       <td class="err"><b>One <code>text</code> event per output line.</b> No structure. <i>This is the wall of text.</i></td>
       <td><span class="cross">✗</span> (single-turn)</td>
-      <td><span class="phase pa">PHASE A</span> Rewrite to <code>exec --json</code> + an item parser.</td>
+      <td><span class="phase pa">DONE</span> Rewritten to <code>exec --json</code> + an item parser.</td>
     </tr>
   </table>
 
   <div class="grid2">
     <div class="card">
-      <div class="kicker err">Today — the culprit, verbatim</div>
+      <div class="kicker err">Before — the culprit, verbatim</div>
       <pre style="margin-top:6px"><span class="k">class</span> <span class="f">CodexRuntime</span>(Runtime):
     multi_turn = <span class="k">False</span>
     stderr_is_error = <span class="k">False</span>  <span class="c"># transcript goes to stderr</span>
@@ -446,8 +455,8 @@ ws.onmessage = (m) => {
   </div>
 
   <div class="demo-grid">
-    <div class="screen bad"><h4>✗ Today — flat stream (CodexRuntime.parse)</h4><div id="flat"></div></div>
-    <div class="screen good"><h4>✓ Redesign — structured (ToolPill · ReasoningBox · Answer)</h4><div id="rich"></div></div>
+    <div class="screen bad"><h4>✗ Before — flat stream (CodexRuntime.parse)</h4><div id="flat"></div></div>
+    <div class="screen good"><h4>✓ Now — structured (ToolPill · ReasoningBox · Answer)</h4><div id="rich"></div></div>
   </div>
   <p class="muted" style="font-size:12px">Tip: click a pill on the right to expand its command + output —
   that collapse-by-default behavior is the single biggest anti-wall-of-text lever.</p>
@@ -483,21 +492,20 @@ ws.onmessage = (m) => {
   </table>
 
   <div class="note">
-    <div class="t">Keystone unknown #2 — capture a real fixture first</div>
-    Does <code>exec --json</code> emit <code>item.updated</code> <i>deltas</i> for <code>reasoning</code> (needed
-    for the live one-line ticker), or only <code>item.completed</code>? Don't guess — capture a real multi-tool
-    run as a JSONL fixture (command in <a href="#run">Run &amp; verify</a>) and let the bytes decide. That same
-    fixture becomes your parser's unit test.
+    <div class="t">Keystone status — live reasoning remains inconclusive</div>
+    A real read-only Codex JSONL fixture is captured and tested, but it emitted no <code>reasoning</code>
+    items. Synthetic fixtures cover <code>item.updated</code> reasoning parser behavior; real Codex
+    reasoning streaming granularity remains an open protocol/runtime question.
   </div>
 </section>
 
 <!-- ───────────────────────────── COMPONENTS ───────────────────────────── -->
 <section id="components">
   <a class="toplink" href="#start">↑ top</a>
-  <h2>The new chat components (Phase A, frontend)</h2>
-  <p>Today <code>ChatPanel.tsx</code> has one <code>&lt;Block&gt;</code> that renders <code>user|text|tool|status|error</code>,
-  with the tool card <b>always expanded</b>. The redesign replaces it with a small set of composable, collapsed-by-default
-  components — all styled from the existing <code>theme.ts</code> tokens, so no design system work.</p>
+  <h2>The chat receipt components</h2>
+  <p><code>ChatPanel.tsx</code> now delegates structured event rendering to reducer-driven,
+  collapsed-by-default receipt components — all styled from the existing <code>theme.ts</code>
+  tokens, so no design system work was needed.</p>
 
   <div class="grid2">
     <div class="card"><div class="kicker">ToolPill</div>One line: <span class="chip"><span class="k-read">◐</span> Read · README.md · ✓</span> — kind icon + verb + target + status + diffstat. Collapsed by default; click → command + <code>aggregated_output</code> + exit/duration. <b>Color = risk</b> (mint read · amber write · red execute/delete).</div>
@@ -628,7 +636,7 @@ ws.onmessage = (m) => {
 <section id="filemap" class="filemap">
   <a class="toplink" href="#start">↑ top</a>
   <h2>Every file, mapped</h2>
-  <p>The whole surface area you'll touch, grouped by layer. Expand each. <span class="legend">
+  <p>The relevant surface area, grouped by layer. Expand each. <span class="legend">
     <span class="tag fe">frontend</span><span class="tag be">backend</span><span class="tag eng">engine seam</span><span class="tag cfg">config/infra</span>
   </span></p>
 
@@ -636,9 +644,9 @@ ws.onmessage = (m) => {
     <summary>① Frontend — <span class="badge">app/frontend/src</span></summary>
     <div class="body">
       <div class="filerow"><span class="fp">App.tsx</span><span class="fd">The 3-column shell + workspace rail + the inline <code>SearchPanel</code>. Picks which stage view to show.</span></div>
-      <div class="filerow"><span class="fp">views/ChatPanel.tsx <span class="tag fe">edit ▸ Phase A</span></span><span class="fd"><b>The centerpiece.</b> WebSocket wiring, the <code>apply()</code> reducer, the obs meter, the inline gate card, and the flat <code>&lt;Block&gt;</code> renderer you'll replace.</span></div>
+      <div class="filerow"><span class="fp">views/ChatPanel.tsx <span class="tag fe">implemented</span></span><span class="fd"><b>The centerpiece.</b> WebSocket wiring, density controls, final-answer rendering, inline gate card, and handoff to chat receipt components.</span></div>
       <div class="filerow"><span class="fp">markdown.tsx</span><span class="fd">Dependency-free, injection-safe markdown → React. Strips frontmatter; treats only <code>*</code>/<code>**</code> as emphasis (snake_case-safe). Renders the privileged answer. <b>Reuse as-is.</b></span></div>
-      <div class="filerow"><span class="fp">api/client.ts <span class="tag fe">edit ▸ Phase A</span></span><span class="fd">Typed REST + WS client. Add the new event-type interfaces here. Token rides the WS subprotocol, not the URL.</span></div>
+      <div class="filerow"><span class="fp">api/client.ts <span class="tag fe">implemented</span></span><span class="fd">Typed REST + WS client with stable event shape and approval decision API. Token rides the WS subprotocol, not the URL.</span></div>
       <div class="filerow"><span class="fp">theme.ts</span><span class="fd">The oklch palette + fonts. Your risk colors already exist: <code>accent</code>=read, <code>warn</code>=write/net, <code>err</code>=execute/delete, <code>priv</code>=private.</span></div>
       <div class="filerow"><span class="fp">views/{State,Graph,Files,Gates,Dashboard}Panel.tsx</span><span class="fd">The six stage views. Secondary to this redesign; <code>GatesPanel</code> is the workspace-level gate list (vs the session-scoped one in chat).</span></div>
     </div>
@@ -647,8 +655,8 @@ ws.onmessage = (m) => {
   <details open>
     <summary>③ Runtimes &amp; the Manager — <span class="badge">backend/vivary_gui/services/agents</span></summary>
     <div class="body">
-      <div class="filerow"><span class="fp">base.py <span class="tag be">edit ▸ Phase A</span></span><span class="fd"><b>The heart.</b> <code>AgentEvent</code>, the <code>Runtime</code> contract, and the three runtimes. Extend the event taxonomy + rewrite <code>CodexRuntime</code> to <code>exec --json</code>.</span></div>
-      <div class="filerow"><span class="fp">manager.py <span class="tag be">edit ▸ Phase B</span></span><span class="fd">Session lifecycle: create · send · <code>_run_turn</code> (read/parse/emit) · subscribe · cancel · resume · gate-diff. Mostly stands; Phase B adds the policy engine + bidirectional approval channel.</span></div>
+      <div class="filerow"><span class="fp">base.py <span class="tag be">implemented</span></span><span class="fd"><b>The heart.</b> <code>AgentEvent</code>, the <code>Runtime</code> contract, the Codex <code>exec --json</code> parser, and the fixture runtime gate.</span></div>
+      <div class="filerow"><span class="fp">manager.py <span class="tag be">implemented/gated</span></span><span class="fd">Session lifecycle, turn-boundary gates, and tested approval decisions. Real live Codex bidirectional approval remains protocol-gated.</span></div>
       <div class="filerow"><span class="fp">_echo_agent.py</span><span class="fd">The fake agent (NDJSON). The model for your test fixtures; <code>RAISE_GATE</code> in a prompt makes it raise a gate, exercising the pause/resume path.</span></div>
     </div>
   </details>
@@ -657,7 +665,7 @@ ws.onmessage = (m) => {
     <summary>② Backend — routers &amp; services — <span class="badge">backend/vivary_gui</span></summary>
     <div class="body">
       <div class="filerow"><span class="fp">main.py</span><span class="fd">FastAPI factory. Lifespan writes <code>runtime.json</code> (host/port/token), wires every router, kills live agents on shutdown. CORS = Vite origins only.</span></div>
-      <div class="filerow"><span class="fp">routers/sessions.py</span><span class="fd">REST: list runtimes, create session, send, cancel, session-scoped gates + decision, resume. Where a Phase-B <code>approval</code> decision endpoint would live.</span></div>
+      <div class="filerow"><span class="fp">routers/sessions.py</span><span class="fd">REST: list runtimes, create session, send, cancel, session-scoped gates + decision, resume, and approval decision endpoint.</span></div>
       <div class="filerow"><span class="fp">routers/ws.py</span><span class="fd">The one WebSocket: <code>/ws/sessions/{sid}</code>. Auth via <code>token.&lt;TOKEN&gt;</code> subprotocol. Drains <code>manager.subscribe()</code> → JSON.</span></div>
       <div class="filerow"><span class="fp">services/gates.py</span><span class="fd">Read/write <code>gates/*.md</code> frontmatter status. Working-tree edits only — committing is itself a Vivary hard gate.</span></div>
       <div class="filerow"><span class="fp">services/sandbox/local.py</span><span class="fd">Per-session git worktree (when the workspace is its own repo root), else run in-place. The <code>create()</code> contract a Docker/Daytona provider would later implement.</span></div>
@@ -730,7 +738,7 @@ board   = <span class="k">lambda</span> root: _run_json(<span class="s">"exo"</s
     <tr><td><code>codex exec resume</code></td><td><span class="check">✓</span> subcommand exists (resume by id or <code>--last</code>)</td></tr>
     <tr><td><code>--ask-for-approval</code> on <code>exec</code></td><td><span class="cross">✗</span> it's a <b>global</b> flag; <code>exec</code> is non-interactive → confirms live approval needs another surface</td></tr>
     <tr><td>Programmatic surfaces for live approval</td><td><span class="check">✓</span> <code>app-server</code>, <code>mcp-server</code>, <b>+ new in 0.139.0:</b> <code>exec-server</code>, <code>remote-control</code> (doc predates these)</td></tr>
-    <tr><td>Branch</td><td><span class="check">✓</span> <code>feat/gui</code>; <code>OBSERVABILITY-REDESIGN.md</code> untracked</td></tr>
+    <tr><td>Branch</td><td><span class="check">✓</span> implemented in <code>feat/gui-observability-loop</code> worktree; live status is tracked in <code>todos/EBTASK-OBSERVABILITY.md</code></td></tr>
   </table>
   <div class="note">
     <div class="t">The one fact the doc didn't have</div>
@@ -743,44 +751,44 @@ board   = <span class="k">lambda</span> root: _run_json(<span class="s">"exo"</s
 <!-- ───────────────────────────── PLAN ───────────────────────────── -->
 <section id="plan">
   <a class="toplink" href="#start">↑ top</a>
-  <h2>Build plan &amp; the keystone unknowns</h2>
+  <h2>Build status &amp; remaining keystones</h2>
   <div class="grid2">
     <div class="card" style="border-color:var(--accent)">
       <div class="kicker accent">Phase A — Observability</div>
-      <p style="font-size:13.5px">Low risk, independent, ships the wall-of-text fix on its own.</p>
+      <p style="font-size:13.5px">Implemented and locally verified in the observability worktree.</p>
       <ul class="tight" style="font-size:13px">
-        <li>Capture a real Codex <code>--json</code> JSONL fixture (answers keystone #2).</li>
-        <li><code>CodexRuntime</code> → <code>exec --json</code> + item parser; track <code>item.id</code>; capture <code>thread_id</code>; map <code>usage</code> → meter.</li>
-        <li>Extend the <code>AgentEvent</code> taxonomy (<code>reasoning</code>, <code>tool</code>, <code>file_change</code>, <code>plan</code>).</li>
-        <li>Build <code>ToolPill</code> / <code>ReasoningBox</code> / <code>FileChange</code> / <code>PlanRail</code> + density control; privilege the answer.</li>
-        <li>Extend <code>api/client.ts</code> types + the <code>apply()</code> reducer.</li>
+        <li>Captured a real Codex <code>--json</code> JSONL fixture for a read-only run.</li>
+        <li><code>CodexRuntime</code> now uses <code>exec --json</code> + item parser and maps usage.</li>
+        <li><code>AgentEvent</code> taxonomy includes <code>reasoning</code>, <code>tool</code>, <code>file_change</code>, <code>plan</code>, and <code>approval_request</code>.</li>
+        <li><code>ToolPill</code> / <code>ReasoningBox</code> / <code>FileChange</code> / <code>PlanRail</code> + density control are implemented.</li>
+        <li><code>api/client.ts</code> exposes stable event types and approval decisions.</li>
       </ul>
     </div>
     <div class="card" style="border-color:var(--warn)">
       <div class="kicker warn">Phase B — Approval</div>
-      <p style="font-size:13.5px">Depends on the keystone-#1 protocol spike.</p>
+      <p style="font-size:13.5px">Policy and fixture UI are implemented; real Codex live approval remains gated.</p>
       <ul class="tight" style="font-size:13px">
-        <li>Spike <code>app-server</code> / <code>mcp-server</code> / <code>exec-server</code>: how does the GUI receive a request mid-run and send allow/deny?</li>
-        <li>Policy engine (<code>services/approval.py</code>): risk tiers, allowlist (prefix, deny-beats-allow), protected paths, circuit-breaker, persistence.</li>
-        <li><code>ApprovalCard</code> + a Settings panel (three-rung mode + per-risk policy + allowlist mgmt).</li>
-        <li>Per-command risk classifier; pattern-scoped "always" that doesn't re-prompt on variation.</li>
+        <li>Help spikes confirmed <code>app-server</code>, <code>mcp-server</code>, <code>exec-server</code>, and <code>remote-control</code>; no live request/response path is proven yet.</li>
+        <li>Policy engine (<code>services/approval.py</code>) implements risk tiers, allowlist matching, protected paths, circuit breaker, and global persistence.</li>
+        <li><code>ApprovalCard</code> decision flow is implemented and fixture-tested.</li>
+        <li>Settings UI, project policy, and real mid-run Codex approval are future tested stories.</li>
       </ul>
     </div>
   </div>
 
-  <h3>The four keystone unknowns (resolve before/early)</h3>
+  <h3>The remaining keystones</h3>
   <ol class="tight">
-    <li><b>Live-approval protocol</b> — which Codex surface carries mid-run approval? (Phase B blocker; observability doesn't depend on it.)</li>
-    <li><b>Reasoning streaming granularity</b> — does <code>--json</code> emit <code>item.updated</code> deltas for reasoning? (Capture a fixture.)</li>
-    <li><b>Resume semantics</b> — <code>codex exec resume &lt;id&gt;</code> vs. app-server thread continuation.</li>
-    <li><b>Policy persistence location</b> — <code>~/.vivary-gui/</code> vs per-workspace <code>.vivary/</code>.</li>
+    <li><b>Live-approval protocol</b> — which Codex surface carries mid-run approval? Observability does not depend on it.</li>
+    <li><b>Reasoning streaming granularity</b> — live fixture emitted no reasoning events; synthetic fixture covers parser behavior.</li>
+    <li><b>Resume semantics</b> — <code>codex exec resume</code> exists, but GUI resume remains disabled until the protocol contract is proven.</li>
+    <li><b>Project policy persistence</b> — global policy is implemented; project policy waits for a tested story.</li>
   </ol>
 
   <div class="note warn">
     <div class="t">The gate before any of this merges (CLAUDE.md / AGENTS.md)</div>
-    Implementation needs a written, human-approved <b>ultraplan</b> (plan mode → ExitPlanMode) before merge —
-    intent · blast radius · verification · out-of-scope · alignment. This atlas is the shared understanding;
-    the ultraplan is the contract for the actual edits. We enter plan mode when we start Phase A.
+    This work stops at human testing. Before PR, push, merge, or branch consolidation, Jeff gets the branch,
+    worktree, dirty state, full verification matrix, local launch instructions, known P2 risks, and a manual
+    test script. The canonical contract is <code>OBSERVABILITY-REDESIGN.md</code> plus <code>todos/EBTASK-OBSERVABILITY.md</code>.
   </div>
 </section>
 
