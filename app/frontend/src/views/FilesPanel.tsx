@@ -39,11 +39,10 @@ function Node({
 
 export function FilesPanel({ wsid }: { wsid: string }) {
   const [tree, setTree] = useState<TreeNode | null>(null)
-  const [file, setFile] = useState<{ path: string; content: string } | null>(null)
+  const [file, setFile] = useState<{ path: string; content: string; private?: boolean } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setFile(null)
     getTree(wsid).then(setTree).catch((e) => setError(String(e)))
   }, [wsid])
 
@@ -58,7 +57,10 @@ export function FilesPanel({ wsid }: { wsid: string }) {
       <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, overflow: 'auto' }}>
         {file ? (
           <>
-            <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>{file.path}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 8, display: 'flex', gap: 6, alignItems: 'center' }}>
+              {file.path}
+              {file.private && <span style={{ fontSize: 9, color: C.priv, border: `1px solid ${C.priv}`, borderRadius: 3, padding: '0 4px' }}>PRIV</span>}
+            </div>
             <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: 0 }}>{file.content}</pre>
           </>
         ) : (

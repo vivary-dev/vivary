@@ -56,7 +56,7 @@ export const search = (q: string, workspace?: string) => {
 }
 
 export const readFile = (id: string, path: string) =>
-  api<{ path: string; content: string }>(`/workspaces/${id}/file?path=${encodeURIComponent(path)}`)
+  api<{ path: string; content: string; private?: boolean }>(`/workspaces/${id}/file?path=${encodeURIComponent(path)}`)
 
 export interface TreeNode {
   name: string

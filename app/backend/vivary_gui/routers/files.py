@@ -64,11 +64,13 @@ async def read_file(wsid: str, path: str) -> dict:
     ws = registry.get_workspace(wsid)
     if not ws:
         raise HTTPException(404, "workspace not found")
-    target = _resolve_within(Path(ws["path"]), path)
+    root = Path(ws["path"]).resolve()
+    target = _resolve_within(root, path)
     if not target.is_file():
         raise HTTPException(404, "file not found")
     try:
         content = target.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         raise HTTPException(500, f"read failed: {exc}")
-    return {"path": path, "content": content}
+    rel = target.relative_to(root)
+    return {"path": path, "content": content, "private": _is_private(rel) or rel.name in NEVER}
