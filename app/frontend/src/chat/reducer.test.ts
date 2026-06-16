@@ -56,6 +56,22 @@ describe('chat reducer', () => {
     expect(items.map((i) => i.kind)).toEqual(['fileChange', 'plan', 'approval'])
   })
 
+  it('updates approval status without dropping the original action context', () => {
+    let items: ChatItem[] = []
+    items = applyEvent(items, ev('approval_request', '', { id: 'a1', kind: 'execute', risk: 'danger', command: 'npm test', status: 'pending' }))
+    items = applyEvent(items, ev('approval_request', 'approval approved', { id: 'a1', status: 'approved', decision: 'allow_once' }))
+
+    expect(items).toHaveLength(1)
+    const approval = items[0]
+    expect(approval.kind).toBe('approval')
+    if (approval.kind === 'approval') {
+      expect(approval.status).toBe('approved')
+      expect(approval.actionKind).toBe('execute')
+      expect(approval.risk).toBe('danger')
+      expect(approval.command).toBe('npm test')
+    }
+  })
+
   it('consolidates repeated completed reads in compact mode', () => {
     let items: ChatItem[] = []
     items = applyEvent(items, ev('tool', 'Read A', { id: 'a', kind: 'read', status: 'completed', risk: 'read' }, 'command'))

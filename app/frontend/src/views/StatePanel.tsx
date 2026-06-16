@@ -15,7 +15,6 @@ export function StatePanel({ wsid }: { wsid: string }) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setS(null)
     getState(wsid).then(setS).catch((e) => setError(String(e)))
   }, [wsid])
 

@@ -90,7 +90,7 @@ Known baseline gap:
 | EB-OBS-010 | main agent | implementation | `app/backend/vivary_gui/services/agents/base.py`, `app/backend/vivary_gui/tests/test_codex_runtime.py`, `app/backend/vivary_gui/tests/fixtures/` |
 | EB-OBS-020 | main agent | implementation | `OBSERVABILITY-REDESIGN.md`, `todos/EBTASK-OBSERVABILITY.md` |
 | EB-OBS-030 | main agent | implementation | `app/backend/vivary_gui/services/approval.py`, `app/backend/vivary_gui/services/agents/manager.py`, `app/backend/vivary_gui/routers/sessions.py`, `app/backend/vivary_gui/config.py`, `app/backend/vivary_gui/tests/test_approval_policy.py` |
-| EB-OBS-040 | main agent | implementation | `app/frontend/src/chat/`, `app/frontend/src/views/ChatPanel.tsx`, `app/frontend/src/api/client.ts` |
+| EB-OBS-040 | main agent | implementation | `app/frontend/src/chat/`, `app/frontend/src/views/ChatPanel.tsx`, `app/frontend/src/api/client.ts`, lint-only compatibility fixes in `app/frontend/src/views/GraphPanel.tsx` and `app/frontend/src/views/StatePanel.tsx` |
 | EB-OBS-050 | main agent | implementation | `.github/workflows/ci.yml`, `.gitignore`, `app/frontend/package.json`, `app/frontend/package-lock.json`, `app/frontend/vite.config.ts`, `app/frontend/playwright.config.ts`, `app/frontend/e2e/`, `app/frontend/scripts/`, `app/frontend/src/test/`, `app/backend/pyproject.toml`, `app/backend/vivary_gui/services/agents/_fixture_agent.py` |
 | EB-OBS-060 | main agent | implementation | `OBSERVABILITY-REDESIGN.md`, `OBSERVABILITY-ATLAS.html` |
 | EB-OBS-070 | main agent | implementation | Review notes in this ledger plus P0/P1 fixes in owned files above |
@@ -253,7 +253,7 @@ Evidence:
 
 ### EB-OBS-040 Reducer-driven chat UI receipts and density control
 
-Status: pending  
+Status: completed
 Dependencies: EB-OBS-000  
 Acceptance criteria:
 
@@ -273,7 +273,21 @@ Test plan before edits:
 
 Evidence:
 
-- Pending.
+- Added reducer coverage proving `approval_request` status updates preserve the original
+  approval action kind, risk, and command context.
+- Added receipt coverage proving ApprovalCard sends scoped `allow_always` decisions and
+  deny steering text.
+- Added test cleanup between React receipt tests to avoid stale approval cards leaking
+  across DOM assertions.
+- Applied the existing cross-worktree lint hygiene fix in `GraphPanel.tsx` and
+  `StatePanel.tsx` by removing synchronous state resets from effects. The hunks match
+  the dirty coordination and Meso worktrees exactly, so this is compatibility cleanup
+  rather than divergent feature work.
+- Verification:
+  - `npm run test` -> 2 files passed, 11 tests passed.
+  - `npm run lint` -> passed.
+  - `npm run build` -> passed.
+  - `git diff --check` -> passed.
 
 ### EB-OBS-050 Test harness and GUI CI job
 
@@ -361,10 +375,15 @@ deleting old evidence.
   - Approval policy tests: 10 passed.
   - Backend GUI tests: 30 passed, 1 warning.
   - `git diff --check`: passed.
+- 2026-06-16 EB-OBS-040:
+  - Frontend tests: 2 files passed, 11 tests passed.
+  - Frontend lint: passed.
+  - Frontend build: passed.
+  - `git diff --check`: passed.
 
 ## Handoff / Status For Other Agents
 
-- Current phase: EB-OBS-030 complete; next open story is EB-OBS-040 chat UI receipts.
+- Current phase: EB-OBS-040 complete; next open story is EB-OBS-050 test harness and GUI CI.
 - Coordination setup is complete; observability implementation is owned by
   `C:\Users\jeffk\dev\vivary-GUI-obs-loop`.
 - Do not edit observability paths from the coordination tree.
