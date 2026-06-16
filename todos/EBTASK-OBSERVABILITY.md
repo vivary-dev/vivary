@@ -291,7 +291,7 @@ Evidence:
 
 ### EB-OBS-050 Test harness and GUI CI job
 
-Status: pending  
+Status: completed
 Dependencies: EB-OBS-000  
 Acceptance criteria:
 
@@ -311,7 +311,22 @@ Test plan before edits:
 
 Evidence:
 
-- Pending.
+- Worktree audit found Meso dirty/untracked files overlapping several harness paths
+  (`.gitignore`, frontend package files, Playwright config, E2E scripts, and test
+  setup). This story was kept verification-only; no tracked harness source was edited.
+- Reviewed `.github/workflows/ci.yml`: GUI job installs backend dev extras, runs
+  backend tests, frontend tests, lint, build, installs Chromium, and runs fixture E2E.
+- Reviewed fixture runtime gating: `FixtureRuntime` is appended only when
+  `VIVARY_GUI_ENABLE_FIXTURE_RUNTIME=1`, and the Playwright web server sets that env
+  only for E2E.
+- Added an ignored local junction `app/backend/.venv` pointing to the coordination
+  venv so the worktree-local E2E backend launcher uses the verified backend
+  environment without a dependency install.
+- Verification:
+  - `npm run e2e` -> 1 passed. Playwright emitted a nonfatal Vite WebSocket proxy
+    `ECONNABORTED` during shutdown after the test passed.
+  - `npm audit` -> 0 vulnerabilities.
+  - `git diff --check` -> passed.
 
 ### EB-OBS-060 Canonical live spec update
 
@@ -380,10 +395,14 @@ deleting old evidence.
   - Frontend lint: passed.
   - Frontend build: passed.
   - `git diff --check`: passed.
+- 2026-06-16 EB-OBS-050:
+  - Playwright fixture E2E: 1 passed.
+  - `npm audit`: 0 vulnerabilities.
+  - `git diff --check`: passed.
 
 ## Handoff / Status For Other Agents
 
-- Current phase: EB-OBS-040 complete; next open story is EB-OBS-050 test harness and GUI CI.
+- Current phase: EB-OBS-050 complete; next open story is EB-OBS-060 canonical live spec update.
 - Coordination setup is complete; observability implementation is owned by
   `C:\Users\jeffk\dev\vivary-GUI-obs-loop`.
 - Do not edit observability paths from the coordination tree.
