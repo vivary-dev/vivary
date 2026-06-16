@@ -97,18 +97,37 @@ def _classifiable_command(command: str) -> str:
 
 
 def is_protected(action: Action) -> bool:
-    candidates = [action.target, *action.paths]
+    candidates = [action.target, *action.paths, *_command_path_candidates(action.command)]
     for raw in candidates:
         if not raw:
             continue
-        parts = {p for p in Path(raw).parts}
-        if parts & PROTECTED_PARTS:
+        if _path_is_protected(raw):
             return True
-        if any(p.startswith(".") and p not in {".", ".."} for p in parts):
-            return True
-        name = Path(raw).name
-        if name in PROTECTED_FILES:
-            return True
+    return False
+
+
+def _command_path_candidates(command: str) -> list[str]:
+    cmd = _classifiable_command(command)
+    candidates: list[str] = []
+    for token in re.findall(r'"[^"]+"|\'[^\']+\'|\S+', cmd):
+        token = token.strip("'\"")
+        token = token.rstrip(",;)")
+        if not token or token.startswith("-"):
+            continue
+        candidates.append(token)
+    return candidates
+
+
+def _path_is_protected(raw: str) -> bool:
+    normalized = raw.replace("\\", "/")
+    parts = {p for p in Path(normalized).parts}
+    if parts & PROTECTED_PARTS:
+        return True
+    if any(p.startswith(".") and p not in {".", ".."} for p in parts):
+        return True
+    name = Path(normalized).name
+    if name in PROTECTED_FILES:
+        return True
     return False
 
 
@@ -145,7 +164,10 @@ def match_rule(rules: list, command: str) -> dict | None:
             continue
         pattern = rule.get("pattern")
         decision = rule.get("decision")
+        scope = rule.get("scope", "global")
         if not isinstance(pattern, str) or decision not in {"allow", "ask", "deny"}:
+            continue
+        if scope == "project":
             continue
         pattern = _normalize_command(pattern)
         if not pattern:

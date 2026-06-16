@@ -64,12 +64,12 @@ describe('chat receipts', () => {
       onDecide={onDecide}
     />)
 
-    fireEvent.change(screen.getByLabelText('Approval scope'), { target: { value: 'project' } })
+    fireEvent.change(screen.getByLabelText('Approval scope'), { target: { value: 'command' } })
     fireEvent.click(screen.getByText('Allow always'))
-    expect(onDecide).toHaveBeenLastCalledWith('a1', 'allow_always', { scope: 'project', pattern: 'npm test', steering: '' })
+    expect(onDecide).toHaveBeenLastCalledWith('a1', 'allow_always', { scope: 'command', pattern: 'npm test', steering: '' })
 
     fireEvent.change(screen.getByLabelText('Deny steering'), { target: { value: 'Use npm run test instead.' } })
     fireEvent.click(screen.getByText('Deny'))
-    expect(onDecide).toHaveBeenLastCalledWith('a1', 'reject_once', { scope: 'project', pattern: 'npm test', steering: 'Use npm run test instead.' })
+    expect(onDecide).toHaveBeenLastCalledWith('a1', 'reject_once', { scope: 'command', pattern: 'npm test', steering: 'Use npm run test instead.' })
   })
 })

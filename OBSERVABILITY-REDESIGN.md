@@ -52,8 +52,9 @@
   state and command contract.
 - The live Codex fixture did not emit `reasoning` items, so real Codex reasoning
   delta granularity remains inconclusive. Synthetic tests cover the parser shape.
-- Project policy persistence is intentionally not implemented; only global policy is
-  active until a tested story adds project-scoped persistence.
+- Project policy persistence is intentionally not implemented. Project-scoped rules are
+  inert until a tested story adds project context; the active approval UI exposes
+  command/global scopes only.
 - Human app testing is the final gate before PR, push, merge, or branch consolidation.
 
 ## 1. Context
@@ -276,8 +277,10 @@ Protocol, `agentclientprotocol.com`) is the reference vocabulary (`ToolCall.{tit
   future tested story, not part of this implementation.
 
 **Approval UI** (frontend): a risk-colored **ApprovalCard** with **Allow once / Allow always
-(scope selector) / Deny (steering text)** is implemented and tested. A full policy settings
-panel is not implemented in this slice.
+(command/global scope selector) / Deny (steering text)** is implemented and tested. Project
+scope remains accepted by the API shape but does not persist global policy rules until a
+tested project-policy story exists. A full policy settings panel is not implemented in this
+slice.
 
 **Differentiators retained in the roadmap:** per-hunk diffs gated before write,
 pattern-scoped trust that avoids re-prompting on variants, deterministic per-command risk

@@ -204,16 +204,17 @@ class Manager:
             raise ValueError("invalid approval decision")
         status = "approved" if decision.startswith("allow") else "rejected"
         saved_rule = None
+        rule_scope = scope if scope in {"command", "project", "global"} else "global"
         if decision in {"allow_always", "reject_always"}:
             pol = approval.load_policy()
             rule_decision = "allow" if decision == "allow_always" else "deny"
             rule_pattern = pattern or approval.safe_prefix(steering)
-            if rule_pattern.strip():
+            if rule_pattern.strip() and rule_scope != "project":
                 saved_rule = approval.add_rule(
                     pol,
                     rule_pattern,
                     rule_decision,  # type: ignore[arg-type]
-                    scope if scope in {"command", "project", "global"} else "global",  # type: ignore[arg-type]
+                    rule_scope,  # type: ignore[arg-type]
                     steering,
                 )
                 approval.save_policy(pol)
@@ -221,7 +222,7 @@ class Manager:
             "id": approval_id,
             "status": status,
             "decision": decision,
-            "scope": scope,
+            "scope": rule_scope,
             "pattern": pattern,
             "steering": steering,
             "saved_rule": saved_rule,

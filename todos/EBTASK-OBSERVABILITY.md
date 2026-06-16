@@ -1,7 +1,7 @@
 # EBTASK-OBSERVABILITY
 
-Epic: Vivary GUI Observability + Approval Redesign  
-Status: in_progress  
+Epic: Vivary GUI Observability + Approval Redesign
+Status: human_test_pending
 Branch baseline: `feat/gui` at `1c68440`
 Coordination worktree: `C:\Users\jeffk\dev\vivary-GUI`  
 Implementation worktree: `C:\Users\jeffk\dev\vivary-GUI-obs-loop`  
@@ -363,7 +363,7 @@ Evidence:
 
 ### EB-OBS-070 Thermonuclear review, P0/P1 fixes, and human test handoff
 
-Status: pending  
+Status: completed
 Dependencies: EB-OBS-060  
 Acceptance criteria:
 
@@ -383,7 +383,57 @@ Test plan before edits:
 
 Evidence:
 
-- Pending.
+- Review finding P1 fixed: protected-path detection previously depended on structured
+  `target` / `paths`. Commands such as `Get-Content .env.local` without a target could
+  be classified as read. `services/approval.py` now extracts command-token path
+  candidates, including PowerShell inner commands, before allowing reads. Regression
+  coverage added.
+- Review finding P1 fixed: `scope: "project"` could be saved in the global policy file
+  without project context, creating broader trust than the label implied. Project-scope
+  rules are now inert in global evaluation, project-scope `allow_always` does not write
+  a global rule, and the active UI selector exposes only command/global scopes until a
+  tested project-policy story exists.
+- Review finding fixed: the live Codex JSONL fixture was CRLF-captured and failed
+  branch-level `git diff --check`; fixture line endings were normalized to LF.
+- T3 preview was unavailable (`Auth required` from `preview_status` and `preview_open`).
+  Browser-level visual QA was completed with the repo Playwright browser against live
+  preview servers instead.
+- Visual QA evidence:
+  - Fixture-enabled backend on `127.0.0.1:18767`, PID 23244.
+  - Frontend on `127.0.0.1:15177`, PID 38796.
+  - Playwright manual flow added a temp workspace, selected Fixture runtime, sent
+    `approval proof`, confirmed tool output hidden before expand, expanded read output,
+    approved approval card, selected Compact density, and captured
+    `%TEMP%\vivary-gui-obs-preview\visual-pass.png`.
+  - Console errors: none.
+- Full verification matrix:
+  - Backend GUI tests:
+    `PYTHONPATH=C:\Users\jeffk\dev\vivary-GUI-obs-loop\app\backend`
+    `C:\Users\jeffk\dev\vivary-GUI\app\backend\.venv\Scripts\python.exe -m pytest -q app\backend\vivary_gui\tests`
+    -> 33 passed, 1 warning.
+  - Frontend unit tests: `npm run test` -> 2 files passed, 11 tests passed.
+  - Frontend lint: `npm run lint` -> passed.
+  - Frontend build: `npm run build` -> passed.
+  - Frontend audit: `npm audit` -> 0 vulnerabilities.
+  - Playwright fixture E2E: `npm run e2e` -> 1 passed.
+  - Diff hygiene: `git diff --check` and `git diff --check 1c68440` -> passed.
+  - Original Vivary suites:
+    - `python packages\tropo\tests\test_tropo.py` -> 46/46 passed.
+    - `python packages\ozone\tests\test_ozone.py` -> 7/7 passed.
+    - `python packages\exo\tests\test_exo.py` -> 4/4 passed.
+    - `python packages\create-vivary\tests\test_create_vivary.py` -> 11 tests passed.
+    - `python packages\create-vivary\tests\test_assets_parity.py` -> 2/2 passed.
+    - `node packages\create-vivary\tests\test_npm_launcher.js` -> 7 launcher tests passed.
+    - `python packages\tropo\tropo.py check --root packages\tropo\examples\vault` -> 0 errors, 0 warnings.
+- Remaining P2 / gated items:
+  - Real mid-run Codex approval is not wired; it remains blocked on protocol
+    request/response evidence.
+  - Real Codex reasoning streaming granularity remains inconclusive; live fixture emitted
+    no `reasoning` items.
+  - Project-scoped policy persistence and full policy settings UI are future tested
+    stories.
+  - Existing Meso worktree has dirty overlapping harness/UI files; no consolidation
+    should happen until Jeff/agents coordinate branches.
 
 ## Last Verified Matrix
 
@@ -414,16 +464,33 @@ deleting old evidence.
 - 2026-06-16 EB-OBS-060:
   - Canonical spec stale-claim scan: no high-risk matches.
   - `git diff --check`: passed.
+- 2026-06-16 EB-OBS-070:
+  - Backend GUI tests: 33 passed, 1 warning.
+  - Frontend tests: 2 files passed, 11 tests passed.
+  - Frontend lint/build: passed.
+  - `npm audit`: 0 vulnerabilities.
+  - Playwright fixture E2E: 1 passed.
+  - Visual Playwright pass: passed, no console errors.
+  - Original Vivary suites: tropo 46/46, ozone 7/7, exo 4/4, create-vivary 11 passed,
+    assets parity 2/2, npm launcher 7/7, tropo check clean.
+  - `git diff --check` and `git diff --check 1c68440`: passed.
 
 ## Handoff / Status For Other Agents
 
-- Current phase: EB-OBS-060 complete; next open story is EB-OBS-070 thermonuclear review and human-test handoff.
+- Current phase: EB-OBS-070 complete; epic is `human_test_pending`.
 - Coordination setup is complete; observability implementation is owned by
   `C:\Users\jeffk\dev\vivary-GUI-obs-loop`.
 - Do not edit observability paths from the coordination tree.
 - `.claude/settings.local.json` and `MESO-CANVAS-PLAN.md` are explicitly out of scope.
 - The Meso worktree and Meso files are out of scope for this epic.
+- Preview servers for human testing are currently running:
+  - Frontend: `http://127.0.0.1:15177`
+  - Backend: `http://127.0.0.1:18767`
+  - Fixture runtime is enabled for this preview only.
 
 ## Blockers
 
-- None yet.
+- Hard gate reached: human app testing is required before PR, push, merge, or branch
+  consolidation.
+- T3 preview browser is unavailable in this session due `Auth required`; Playwright was
+  used for browser verification.
