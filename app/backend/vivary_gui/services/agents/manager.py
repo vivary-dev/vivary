@@ -14,10 +14,29 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .. import gates
 from ..sandbox.local import LocalProvider, Sandbox
 from .base import RUNTIMES, AgentEvent, Runtime
 
 _SENTINEL = object()
+
+
+def _open_gate_ids(cwd: Path) -> set[str]:
+    """Ids of gates currently sitting at status `open` in this session's cwd."""
+    try:
+        return {g["id"] for g in gates.list_gates(cwd) if g["status"] == "open"}
+    except Exception:
+        return set()
+
+
+def _build_resume_note(decided: list[dict]) -> str:
+    """The follow-up prompt that tells a resumed agent what the human decided."""
+    rejected = [g for g in decided if g.get("status") == "rejected"]
+    if rejected:
+        names = ", ".join(g.get("gate") or g["id"] for g in rejected)
+        return f"The gate(s) were rejected: {names}. Do not perform the gated action; choose an alternative or stop."
+    names = ", ".join(g.get("gate") or g["id"] for g in decided) or "the pending gate"
+    return f"Approved: {names}. Proceed with the gated action."
 
 
 @dataclass
@@ -28,10 +47,12 @@ class Session:
     cwd: Path
     sandbox: Sandbox | None = None
     agent_session_id: str | None = None   # the runtime's own conversation id (for resume)
-    status: str = "idle"                  # idle | running | error
+    status: str = "idle"                  # idle | running | error | awaiting
     events: list[AgentEvent] = field(default_factory=list)
     queues: set[asyncio.Queue] = field(default_factory=set)
     proc: asyncio.subprocess.Process | None = None
+    awaiting_gates: set[str] = field(default_factory=set)  # gates this session raised, pending decision
+    _open_before: set[str] = field(default_factory=set)    # open-gate snapshot taken before the turn
 
     def summary(self) -> dict:
         return {"id": self.id, "runtime": self.runtime, "workspace": self.workspace_id, "status": self.status}
@@ -68,6 +89,8 @@ class Manager:
             raise RuntimeError("session is busy with the current turn")
         rt = RUNTIMES[sess.runtime]
         sess.status = "running"
+        sess.awaiting_gates = set()
+        sess._open_before = _open_gate_ids(sess.cwd)  # so we can spot gates this turn raises
         self._emit(sess, AgentEvent("user_msg", text))
 
         resume = sess.agent_session_id if rt.multi_turn else None
@@ -103,6 +126,15 @@ class Manager:
         finally:
             sess.proc = None
         sess.status = "error" if rc != 0 else "idle"
+        new_open = _open_gate_ids(sess.cwd) - sess._open_before
+        if new_open:  # the agent raised a gate and stopped — pause for human approval
+            try:
+                raised = [g for g in gates.list_gates(sess.cwd) if g["id"] in new_open]
+            except Exception:
+                raised = [{"id": gid} for gid in sorted(new_open)]
+            sess.awaiting_gates = set(new_open)
+            sess.status = "awaiting"
+            self._emit(sess, AgentEvent("gates_open", f"{len(new_open)} gate(s) awaiting approval", meta={"gates": raised}))
         self._emit(sess, AgentEvent("turn_end", f"exit {rc}"))
 
     async def subscribe(self, sid: str):
@@ -131,6 +163,28 @@ class Manager:
             subprocess.run(["taskkill", "/PID", str(sess.proc.pid), "/T", "/F"], capture_output=True)
         sess.status = "idle"
         return True
+
+    async def resume(self, sid: str) -> None:
+        """After a raised gate is decided in the UI, continue the agent's conversation."""
+        sess = self.sessions.get(sid)
+        if sess is None:
+            raise KeyError("session not found")
+        if sess.status == "running":
+            raise RuntimeError("session is busy with the current turn")
+        if not sess.awaiting_gates:
+            return  # nothing was awaiting (e.g. a duplicate resume) — no-op
+        rt = RUNTIMES[sess.runtime]
+        try:
+            decided = [g for g in gates.list_gates(sess.cwd) if g["id"] in sess.awaiting_gates]
+        except Exception:
+            decided = []
+        note = _build_resume_note(decided)
+        sess.awaiting_gates = set()
+        if not rt.multi_turn or not sess.agent_session_id:
+            sess.status = "idle"
+            self._emit(sess, AgentEvent("status", "gate decided — re-prompt the agent to continue (this runtime can't auto-resume)"))
+            return
+        await self.send(sid, note)  # reuses --resume plumbing + emits the note as the next turn
 
     async def end(self, sid: str) -> None:
         await self.cancel(sid)

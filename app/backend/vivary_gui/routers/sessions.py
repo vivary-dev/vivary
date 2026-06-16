@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from ..security import require_token
-from ..services import registry
+from ..services import gates, registry
 from ..services.agents import RUNTIMES, manager
 
 router = APIRouter(prefix="/api", tags=["sessions"], dependencies=[Depends(require_token)])
@@ -21,6 +21,17 @@ class CreateSession(BaseModel):
 
 class SendMessage(BaseModel):
     text: str
+
+
+class GateDecision(BaseModel):
+    approver: str | None = None
+
+
+def _session(sid: str):
+    sess = manager.sessions.get(sid)
+    if sess is None:
+        raise HTTPException(404, "session not found")
+    return sess
 
 
 @router.get("/runtimes")
@@ -63,3 +74,35 @@ async def cancel_session(sid: str) -> dict:
     if not await manager.cancel(sid):
         raise HTTPException(404, "session not found")
     return {"cancelled": sid}
+
+
+# Gates are decided against the session's own cwd (a git worktree under isolation), which
+# is where the agent raised them — the workspace-scoped gate routes would miss them.
+@router.get("/sessions/{sid}/gates")
+async def session_gates(sid: str) -> list[dict]:
+    return gates.list_gates(_session(sid).cwd)
+
+
+@router.post("/sessions/{sid}/gates/{gid}/{decision}")
+async def decide_session_gate(sid: str, gid: str, decision: str, body: GateDecision | None = None) -> dict:
+    status = {"approve": "approved", "reject": "rejected"}.get(decision)
+    if status is None:
+        raise HTTPException(400, "decision must be approve or reject")
+    try:
+        updated = gates.set_status(_session(sid).cwd, gid, status, body.approver if body else None)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    if updated is None:
+        raise HTTPException(404, "gate not found")
+    return updated
+
+
+@router.post("/sessions/{sid}/resume")
+async def resume_session(sid: str) -> dict:
+    try:
+        await manager.resume(sid)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
+    return {"resumed": sid}

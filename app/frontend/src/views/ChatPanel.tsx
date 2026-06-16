@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import {
   cancelSession,
   createSession,
-  decideGate,
-  getGates,
+  decideSessionGate,
   getRuntimes,
+  getSessionGates,
   openSessionWs,
+  resumeSession,
   sendMessage,
   type Gate,
   type RuntimeInfo,
@@ -51,6 +52,7 @@ export function ChatPanel({ wsid }: { wsid: string }) {
   const [items, setItems] = useState<Item[]>([])
   const [obs, setObs] = useState<Obs>(ZERO)
   const [gates, setGates] = useState<Gate[]>([])
+  const [awaiting, setAwaiting] = useState(false)
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -58,13 +60,12 @@ export function ChatPanel({ wsid }: { wsid: string }) {
   const stick = useRef(true)
 
   useEffect(() => { getRuntimes().then(setRuntimes).catch((e) => setError(String(e))) }, [])
-  const loadGates = () => getGates(wsid).then((g) => setGates(g.filter((x) => x.status === 'open'))).catch(() => {})
+  const loadGates = (s: string) => getSessionGates(s).then((g) => setGates(g.filter((x) => x.status === 'open'))).catch(() => {})
 
   useEffect(() => {
     let dead = false
-    setItems([]); setObs(ZERO); setSid(null)
+    setItems([]); setObs(ZERO); setSid(null); setGates([]); setAwaiting(false)
     wsRef.current?.close()
-    loadGates()
     createSession(wsid, runtime).then(({ id }) => {
       if (dead) return
       setSid(id)
@@ -76,6 +77,7 @@ export function ChatPanel({ wsid }: { wsid: string }) {
         if (ev.type === 'user_msg') setObs((o) => ({ ...o, status: 'running' }))
         else if (ev.type === 'result') setObs((o) => ({ ...o, cost: o.cost + (ev.meta?.cost ?? 0), inTok: o.inTok + (ev.meta?.input_tokens ?? 0), outTok: o.outTok + (ev.meta?.output_tokens ?? 0), turn: o.turn + 1 }))
         else if (ev.type === 'turn_end') setObs((o) => ({ ...o, status: 'idle' }))
+        else if (ev.type === 'gates_open') { loadGates(id); setAwaiting(true) }
       }
       ws.onerror = () => setError('websocket error')
     }).catch((e) => setError(String(e)))
@@ -91,11 +93,17 @@ export function ChatPanel({ wsid }: { wsid: string }) {
 
   const send = async () => {
     if (!input.trim() || !sid || obs.status === 'running') return
-    const text = input.trim(); setInput('')
+    const text = input.trim(); setInput(''); setAwaiting(false)
     try { await sendMessage(sid, text) } catch (e) { setError(String(e)) }
   }
-  const decide = async (id: string, d: 'approve' | 'reject') => {
-    try { await decideGate(wsid, id, d); loadGates() } catch (e) { setError(String(e)) }
+  const decide = async (gid: string, d: 'approve' | 'reject') => {
+    if (!sid) return
+    try {
+      await decideSessionGate(sid, gid, d)
+      const remaining = (await getSessionGates(sid)).filter((x) => x.status === 'open')
+      setGates(remaining)
+      if (awaiting && remaining.length === 0) { setAwaiting(false); await resumeSession(sid) }
+    } catch (e) { setError(String(e)) }
   }
 
   return (
@@ -115,6 +123,7 @@ export function ChatPanel({ wsid }: { wsid: string }) {
 
       <div ref={logRef} onScroll={onLogScroll} style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '24px 22px' }}>
         <div style={{ maxWidth: '60ch', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 15 }}>
+          {awaiting && gates.length > 0 && <div style={{ fontSize: 12.5, color: C.warn }}>The agent paused for approval — approving resumes it; rejecting tells it to stop.</div>}
           {gates.map((g) => (
             <div key={g.id} style={{ border: `1px solid ${C.warn}`, background: `linear-gradient(180deg, oklch(0.28 0.035 78 / .4), ${C.panel})`, borderRadius: 11, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 13px', fontFamily: FONT_MONO, fontSize: 12.5, color: C.warn }}>⚠ Gate <span style={{ color: C.text }}>{g.id}</span></div>

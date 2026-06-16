@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 # Event types:
-#   user_msg | text | tool_use | tool_result | result | status | error | turn_end
+#   user_msg | text | tool_use | tool_result | result | status | error | turn_end | gates_open
 @dataclass
 class AgentEvent:
     type: str

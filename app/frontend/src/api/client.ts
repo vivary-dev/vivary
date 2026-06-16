@@ -141,6 +141,16 @@ export const getGates = (wsid: string) => api<Gate[]>(`/workspaces/${wsid}/gates
 export const decideGate = (wsid: string, gid: string, decision: 'approve' | 'reject') =>
   api<Gate>(`/workspaces/${wsid}/gates/${gid}/${decision}`, { method: 'POST', body: '{}' })
 
+// Session-scoped gates: a running agent raises gates into its own sandbox cwd (a worktree),
+// so the chat decides them here — not against the workspace root.
+export const getSessionGates = (sid: string) => api<Gate[]>(`/sessions/${sid}/gates`)
+
+export const decideSessionGate = (sid: string, gid: string, decision: 'approve' | 'reject') =>
+  api<Gate>(`/sessions/${sid}/gates/${gid}/${decision}`, { method: 'POST', body: '{}' })
+
+export const resumeSession = (id: string) =>
+  api<{ resumed: string }>(`/sessions/${id}/resume`, { method: 'POST' })
+
 export interface Conflicts {
   active: string[]
   conflicts: { a: string; b: string; shared: string[] }[]
