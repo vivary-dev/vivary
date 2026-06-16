@@ -17,7 +17,7 @@ from pathlib import Path
 from .. import gates
 from .. import approval
 from ..sandbox.local import LocalProvider, Sandbox
-from .base import RUNTIMES, AgentEvent, Runtime
+from .base import RUNTIMES, AgentEvent, Runtime, validate_tool_mode
 
 _SENTINEL = object()
 
@@ -46,6 +46,7 @@ class Session:
     runtime: str
     workspace_id: str
     cwd: Path
+    tool_mode: str = "read-only"
     sandbox: Sandbox | None = None
     agent_session_id: str | None = None   # the runtime's own conversation id (for resume)
     status: str = "idle"                  # idle | running | error | awaiting
@@ -57,7 +58,13 @@ class Session:
     _open_before: set[str] = field(default_factory=set)    # open-gate snapshot taken before the turn
 
     def summary(self) -> dict:
-        return {"id": self.id, "runtime": self.runtime, "workspace": self.workspace_id, "status": self.status}
+        return {
+            "id": self.id,
+            "runtime": self.runtime,
+            "workspace": self.workspace_id,
+            "status": self.status,
+            "tool_mode": self.tool_mode,
+        }
 
 
 class Manager:
@@ -65,15 +72,29 @@ class Manager:
         self.sessions: dict[str, Session] = {}
         self.provider = LocalProvider()
 
-    def create(self, workspace_root: Path, workspace_id: str, runtime_name: str) -> str:
+    def create(
+        self,
+        workspace_root: Path,
+        workspace_id: str,
+        runtime_name: str,
+        tool_mode: str = "read-only",
+    ) -> str:
         rt: Runtime | None = RUNTIMES.get(runtime_name)
         if rt is None:
             raise KeyError(f"unknown runtime: {runtime_name}")
+        mode = validate_tool_mode(tool_mode)
         if not rt.available():
             raise RuntimeError(f"runtime '{runtime_name}' is not installed / on PATH")
         sid = secrets.token_hex(6)
         sandbox = self.provider.create(workspace_root, sid)
-        sess = Session(id=sid, runtime=runtime_name, workspace_id=workspace_id, cwd=sandbox.cwd, sandbox=sandbox)
+        sess = Session(
+            id=sid,
+            runtime=runtime_name,
+            workspace_id=workspace_id,
+            cwd=sandbox.cwd,
+            tool_mode=mode,
+            sandbox=sandbox,
+        )
         self.sessions[sid] = sess
         self._emit(sess, AgentEvent("status", "session created"))
         return sid
@@ -97,7 +118,7 @@ class Manager:
 
         resume = sess.agent_session_id if rt.multi_turn else None
         proc = await asyncio.create_subprocess_exec(
-            *rt.build_command(text, resume, sess.cwd),
+            *rt.build_command(text, resume, sess.cwd, sess.tool_mode),
             cwd=str(sess.cwd),
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,

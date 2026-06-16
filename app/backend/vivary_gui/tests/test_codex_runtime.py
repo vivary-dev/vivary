@@ -24,6 +24,21 @@ def test_codex_build_command_uses_json_and_cwd(tmp_path):
     assert cmd[-2:] == ["--", "read only please"]
 
 
+def test_codex_build_command_can_request_workspace_write(tmp_path):
+    cmd = CodexRuntime().build_command("write in workspace", cwd=tmp_path, tool_mode="workspace-write")
+    assert cmd[cmd.index("--sandbox") + 1] == "workspace-write"
+    assert "-C" in cmd and str(tmp_path) in cmd
+
+
+def test_codex_build_command_rejects_unknown_tool_mode(tmp_path):
+    try:
+        CodexRuntime().build_command("nope", cwd=tmp_path, tool_mode="danger-full-access")
+        raised = False
+    except ValueError:
+        raised = True
+    assert raised
+
+
 def test_codex_thread_id_is_captured_from_lifecycle_line():
     line = FIXTURE.read_text(encoding="utf-8").splitlines()[0]
     assert CodexRuntime().session_id_from(line) == "019ecodex-0000-7000-9000-fixture000001"

@@ -1,9 +1,9 @@
 # EBTASK Workspace Control Layer
 
-Epic: Vivary GUI Workspace Control Layer  
-Status: in_progress  
-Branch: `feat/gui-observability-loop`  
-Worktree: `C:\Users\jeffk\dev\vivary-GUI-obs-loop`  
+Epic: Vivary GUI Workspace Control Layer
+Status: in_progress
+Branch: `feat/gui-observability-loop`
+Worktree: `C:\Users\jeffk\dev\vivary-GUI-obs-loop`
 Created: 2026-06-16
 
 ## Objective
@@ -26,14 +26,14 @@ register it, run the normal workspace health probe, and index it.
 | Story | Owned files |
 | --- | --- |
 | EB-WC-010 | `app/backend/vivary_gui/bridge/loader.py`, `app/backend/vivary_gui/routers/workspaces.py`, `app/backend/vivary_gui/tests/test_workspaces.py` |
-| EB-WC-020 | Runtime-mode files TBD after frontend overlap clears |
+| EB-WC-020 | `app/backend/vivary_gui/services/agents/base.py`, `app/backend/vivary_gui/services/agents/manager.py`, `app/backend/vivary_gui/routers/sessions.py`, `app/backend/vivary_gui/tests/test_codex_runtime.py`, `app/backend/vivary_gui/tests/test_agents.py` |
 | Coordination | `todos/EBTASK-WORKSPACE-CONTROL.md` |
 
 ## Stories
 
 ### EB-WC-010 Backend Vivary Workspace Scaffold API
 
-Status: completed  
+Status: completed
 Dependencies: `create_vivary.scaffold_workspace` and `doctor_workspace`
 
 Acceptance criteria:
@@ -66,8 +66,24 @@ Evidence:
 
 ### EB-WC-020 Runtime Write Capability Contract
 
-Status: pending  
-Dependencies: frontend overlap cleared or coordinated.
+Status: completed
+Dependencies: frontend overlap cleared or coordinated for UI controls.
+
+Acceptance criteria:
+- Session creation accepts an optional `tool_mode`.
+- Default mode remains `read-only`.
+- `workspace-write` maps to Codex `--sandbox workspace-write`.
+- Unknown modes are rejected before a process is spawned.
+- Session summaries expose the chosen mode so frontend state can render it later.
+
+Tests planned before edits:
+- Add Codex command tests for default `read-only`, explicit `workspace-write`,
+  and invalid mode rejection.
+- Add manager tests proving default and explicit session `tool_mode` storage.
+- Add sessions API tests proving `POST /api/sessions` accepts and rejects
+  `tool_mode` values correctly.
+- Run `app\backend\.venv\Scripts\python.exe -m pytest -q app\backend\vivary_gui\tests`.
+- Run `git diff --check`.
 
 Notes:
 - The current Codex runtime uses `--sandbox read-only`, so failed file writes are
@@ -75,6 +91,20 @@ Notes:
 - The next contract should expose `read-only` versus `workspace-write` as an
   explicit user-visible runtime mode and route write/execute actions through the
   deterministic approval policy before claiming the agent can write.
+
+Evidence:
+- Added validated `tool_mode` session creation with default `read-only`.
+- Added `workspace-write` propagation from session manager to runtime command
+  construction.
+- Codex maps `workspace-write` to `codex exec --sandbox workspace-write`;
+  other runtimes accept the mode contract but ignore it for now.
+- Session summaries expose `tool_mode` for frontend rendering.
+- Unknown modes are rejected before a session is registered.
+- `POST /api/sessions` accepts explicit `tool_mode` and rejects unknown modes.
+- 2026-06-16: `app\backend\.venv\Scripts\python.exe -m pytest -q app\backend\vivary_gui\tests`
+  passed in the implementation worktree: `42 passed, 1 warning` (existing
+  Starlette/httpx deprecation warning).
+- 2026-06-16: `git diff --check` passed.
 
 ## Handoff For Other Agents
 

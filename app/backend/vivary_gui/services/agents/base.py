@@ -30,6 +30,17 @@ class AgentEvent:
         return {"type": self.type, "text": self.text, "tool": self.tool, "meta": self.meta}
 
 
+DEFAULT_TOOL_MODE = "read-only"
+TOOL_MODES = {"read-only", "workspace-write"}
+
+
+def validate_tool_mode(tool_mode: str | None) -> str:
+    mode = (tool_mode or DEFAULT_TOOL_MODE).strip()
+    if mode not in TOOL_MODES:
+        raise ValueError("tool_mode must be read-only or workspace-write")
+    return mode
+
+
 class Runtime:
     name: str = "base"
     label: str = "Base"
@@ -39,7 +50,13 @@ class Runtime:
     def available(self) -> str | None:
         raise NotImplementedError
 
-    def build_command(self, prompt: str, resume: str | None = None, cwd: Path | None = None) -> list[str]:
+    def build_command(
+        self,
+        prompt: str,
+        resume: str | None = None,
+        cwd: Path | None = None,
+        tool_mode: str = DEFAULT_TOOL_MODE,
+    ) -> list[str]:
         raise NotImplementedError
 
     def parse(self, line: str) -> list[AgentEvent]:
@@ -92,7 +109,13 @@ class EchoRuntime(Runtime):
     def available(self) -> str | None:
         return sys.executable
 
-    def build_command(self, prompt: str, resume: str | None = None, cwd: Path | None = None) -> list[str]:
+    def build_command(
+        self,
+        prompt: str,
+        resume: str | None = None,
+        cwd: Path | None = None,
+        tool_mode: str = DEFAULT_TOOL_MODE,
+    ) -> list[str]:
         # Safe from flag-smuggling: Python doesn't treat args after the script path as
         # interpreter flags, and _echo_agent.py reads sys.argv[1] literally.
         return [sys.executable, str(Path(__file__).parent / "_echo_agent.py"), prompt]
@@ -117,7 +140,13 @@ class ClaudeCodeRuntime(Runtime):
     def available(self) -> str | None:
         return shutil.which("claude")
 
-    def build_command(self, prompt: str, resume: str | None = None, cwd: Path | None = None) -> list[str]:
+    def build_command(
+        self,
+        prompt: str,
+        resume: str | None = None,
+        cwd: Path | None = None,
+        tool_mode: str = DEFAULT_TOOL_MODE,
+    ) -> list[str]:
         exe = shutil.which("claude") or "claude"
         cmd = [exe, "-p", "--output-format", "stream-json", "--verbose",
                "--permission-mode", "acceptEdits"]
@@ -172,15 +201,25 @@ class CodexRuntime(Runtime):
     def available(self) -> str | None:
         return shutil.which("codex")
 
-    def build_command(self, prompt: str, resume: str | None = None, cwd: Path | None = None) -> list[str]:
+    def build_command(
+        self,
+        prompt: str,
+        resume: str | None = None,
+        cwd: Path | None = None,
+        tool_mode: str = DEFAULT_TOOL_MODE,
+    ) -> list[str]:
         exe = shutil.which("codex") or "codex"
+        sandbox = {
+            "read-only": "read-only",
+            "workspace-write": "workspace-write",
+        }[validate_tool_mode(tool_mode)]
         cmd = [
             exe,
             "exec",
             "--json",
             "--skip-git-repo-check",
             "--sandbox",
-            "read-only",
+            sandbox,
         ]
         if cwd:
             cmd += ["-C", str(cwd)]
@@ -404,7 +443,13 @@ class FixtureRuntime(Runtime):
     def available(self) -> str | None:
         return sys.executable
 
-    def build_command(self, prompt: str, resume: str | None = None, cwd: Path | None = None) -> list[str]:
+    def build_command(
+        self,
+        prompt: str,
+        resume: str | None = None,
+        cwd: Path | None = None,
+        tool_mode: str = DEFAULT_TOOL_MODE,
+    ) -> list[str]:
         return [sys.executable, str(Path(__file__).parent / "_fixture_agent.py"), prompt]
 
     def parse(self, line: str) -> list[AgentEvent]:

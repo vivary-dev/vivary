@@ -37,6 +37,7 @@ def test_echo_conversation_turn(tmp_path):
     assert {"alpha", "beta"} <= set(texts)  # echoed tokens streamed as text
     assert types[-1] == "turn_end"        # turn completes, conversation stays open
     assert m.sessions[sid].status == "idle"  # ready for the next message
+    assert m.sessions[sid].summary()["tool_mode"] == "read-only"
 
 
 def test_unknown_runtime_rejected(tmp_path):
@@ -46,3 +47,23 @@ def test_unknown_runtime_rejected(tmp_path):
     except KeyError:
         raised = True
     assert raised
+
+
+def test_session_can_record_workspace_write_tool_mode(tmp_path):
+    m = Manager()
+    sid = m.create(tmp_path, "ws1", "echo", tool_mode="workspace-write")
+
+    assert m.sessions[sid].tool_mode == "workspace-write"
+    assert m.sessions[sid].summary()["tool_mode"] == "workspace-write"
+
+
+def test_unknown_tool_mode_rejected_before_session_created(tmp_path):
+    m = Manager()
+    try:
+        m.create(tmp_path, "ws1", "echo", tool_mode="danger-full-access")
+        raised = False
+    except ValueError:
+        raised = True
+
+    assert raised
+    assert m.sessions == {}
