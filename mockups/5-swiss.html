@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vivary — Swiss</title>
+<style>
+  /* Scene: a designer-engineer in a bright office who wants structure legible at a
+     glance. Off-white paper, strict modular grid, Bauhaus primaries used as
+     functional roles (blue = active, red = attention, yellow = one highlight).
+     Helvetica, big weight contrast, hard hairlines, generous air. A light departure. */
+  :root{
+    --paper: oklch(0.976 0.004 95);
+    --paper2: oklch(0.955 0.005 95);
+    --ink: oklch(0.205 0.012 260);
+    --soft: oklch(0.40 0.012 260);
+    --muted: oklch(0.55 0.010 260);
+    --line: oklch(0.20 0.012 260);
+    --hair: oklch(0.86 0.006 260);
+    --blue: oklch(0.50 0.165 256);
+    --red: oklch(0.575 0.205 27);
+    --yellow: oklch(0.86 0.155 92);
+    --sans: "Helvetica Neue", Helvetica, Arial, "Inter", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", Consolas, monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{font-family:var(--sans);color:var(--ink);background:var(--paper);height:100vh;overflow:hidden;-webkit-font-smoothing:antialiased;letter-spacing:-0.01em}
+  .app{display:grid;grid-template-columns:272px 1fr 256px;height:100vh}
+
+  aside{border-right:1px solid var(--line);display:flex;flex-direction:column;background:var(--paper2)}
+  .brand{padding:22px 20px;border-bottom:1px solid var(--line)}
+  .brand b{font-size:25px;font-weight:800;letter-spacing:-0.03em;display:block;line-height:1}
+  .brand span{font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-top:6px;display:block}
+  .sec{padding:20px 20px 10px;font-size:11px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+  .ws a{display:flex;align-items:center;gap:13px;padding:12px 20px;cursor:pointer;border-bottom:1px solid var(--hair)}
+  .ws a:hover{background:var(--paper)}
+  .ws a.on{background:var(--ink);color:var(--paper)}
+  .ws a.on .nm{color:var(--paper)} .ws a.on .n{color:oklch(0.75 0.01 260)}
+  .sq{width:12px;height:12px;flex:none}
+  .sq.b{background:var(--blue)} .sq.y{background:var(--yellow)} .sq.r{background:var(--red)}
+  .nm{font-size:15px;font-weight:600}
+  .n{margin-left:auto;font-size:12px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
+  .add{margin:14px 20px;padding:12px 14px;border:1.5px solid var(--ink);background:none;color:var(--ink);font:inherit;font-size:14px;font-weight:700;cursor:pointer;text-align:left}
+  .add:hover{background:var(--yellow)}
+  .mark{margin-top:auto;padding:20px;display:flex;gap:8px;align-items:center}
+  .mark i{display:block;width:22px;height:22px}
+  .tri{width:0;height:0;border-left:11px solid transparent;border-right:11px solid transparent;border-bottom:22px solid var(--red)}
+  .cir{border-radius:50%;background:var(--blue)}
+  .rec{background:var(--yellow)}
+
+  main{display:flex;flex-direction:column;min-width:0}
+  .tabs{display:flex;border-bottom:1px solid var(--line)}
+  .tabs button{font:inherit;font-size:14px;font-weight:600;color:var(--muted);background:none;border:none;padding:15px 16px;cursor:pointer;position:relative}
+  .tabs button:hover{color:var(--ink)}
+  .tabs button.on{color:var(--ink)}
+  .tabs button.on::after{content:"";position:absolute;left:16px;right:16px;bottom:-1px;height:3px;background:var(--blue)}
+  .thread{flex:1;overflow:auto;padding:36px 40px;display:flex;flex-direction:column;gap:28px}
+  .msg{max-width:76%}
+  .msg .hd{display:flex;align-items:center;gap:9px;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:9px}
+  .msg.you{align-self:flex-end;text-align:right}
+  .msg.you .hd{justify-content:flex-end}
+  .msg .t{font-size:16px;line-height:1.5;font-weight:450}
+  .msg.you .t{background:var(--ink);color:var(--paper);padding:13px 16px;font-weight:500}
+  .msg em{font-style:normal;box-shadow:inset 0 -0.5em 0 var(--yellow)}
+  .msg strong{color:var(--red);font-weight:800}
+  .ops{align-self:flex-start;display:flex;flex-direction:column;gap:9px}
+  .op{display:flex;align-items:center;gap:11px;font-family:var(--mono);font-size:13px;color:var(--soft)}
+  .op b{width:8px;height:8px;background:var(--blue);display:inline-block}
+  .op .p{color:var(--muted)}
+  .composer{border-top:1px solid var(--line);padding:18px 40px;display:flex;gap:0}
+  .field{flex:1;border:1.5px solid var(--ink);border-right:none;padding:14px 16px;color:var(--muted);font:inherit;font-size:15px}
+  .send{border:1.5px solid var(--ink);background:var(--blue);color:var(--paper);padding:14px 26px;font:inherit;font-size:15px;font-weight:800;cursor:pointer}
+
+  .obs{border-left:1px solid var(--line);background:var(--paper2);display:flex;flex-direction:column}
+  .obs h3{padding:22px 20px 0;font-size:11px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+  .tbl{margin-top:14px;border-top:1px solid var(--line)}
+  .tr{display:flex;justify-content:space-between;align-items:baseline;padding:13px 20px;border-bottom:1px solid var(--hair)}
+  .tr .k{font-size:13px;font-weight:600;color:var(--soft)}
+  .tr .v{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
+  .tr .v.ok{color:var(--blue)}
+  .tr.cost{border-bottom:none}
+  .tr.cost .v{color:var(--red);font-size:22px;font-weight:800;letter-spacing:-0.02em}
+  .foot{padding:18px 20px;margin-top:auto;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.9}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand"><b>Vivary</b><span>Agent Workspaces</span></div>
+    <div class="sec">Workspaces</div>
+    <div class="ws">
+      <a class="on"><span class="sq b"></span><span class="nm">gui-demo</span><span class="n">8</span></a>
+      <a><span class="sq b"></span><span class="nm">second-brain</span><span class="n">12</span></a>
+      <a><span class="sq r"></span><span class="nm">site-rewrite</span><span class="n">5</span></a>
+    </div>
+    <button class="add">+ Add workspace</button>
+    <div class="mark"><i class="tri"></i><i class="cir"></i><i class="rec"></i></div>
+  </aside>
+
+  <main>
+    <nav class="tabs">
+      <button>Search</button><button>Files</button><button>State</button>
+      <button>Graph</button><button class="on">Agent</button><button>Gates</button><button>Dashboard</button>
+    </nav>
+    <div class="thread">
+      <div class="msg you"><div class="hd">You</div><div class="t">Read STATE.md and summarize where this workspace stands. Remember the number 7.</div></div>
+      <div class="msg"><div class="hd"><span class="sq b" style="width:9px;height:9px"></span>Vivary</div><div class="t">I'll find and read the state surface first.</div></div>
+      <div class="ops">
+        <div class="op"><b></b>⚙ Glob<span class="p">**/STATE.md</span></div>
+        <div class="op"><b></b>⚙ Read<span class="p">sandboxes/gui-demo/STATE.md</span></div>
+      </div>
+      <div class="msg"><div class="hd"><span class="sq b" style="width:9px;height:9px"></span>Vivary</div><div class="t">First heading: <em>STATE, visible state</em>. Focus is the GUI experiment, status green, next slice is inline tool approval. Noted <strong>7</strong> for this conversation.</div></div>
+    </div>
+    <div class="composer">
+      <div class="field">Message the agent, or give it a task…</div>
+      <button class="send">Send</button>
+    </div>
+  </main>
+
+  <div class="obs">
+    <h3>Observability</h3>
+    <div class="tbl">
+      <div class="tr"><span class="k">Status</span><span class="v ok">Idle</span></div>
+      <div class="tr"><span class="k">Turns</span><span class="v">2</span></div>
+      <div class="tr"><span class="k">Tool calls</span><span class="v">2</span></div>
+      <div class="tr"><span class="k">Tokens in</span><span class="v">15,241</span></div>
+      <div class="tr"><span class="k">Tokens out</span><span class="v">570</span></div>
+      <div class="tr cost"><span class="k">Cost</span><span class="v">$0.48</span></div>
+    </div>
+    <div class="foot">runtime claude-opus-4-8<br>session 5459e2…92aa</div>
+  </div>
+</div>
+</body>
+</html>

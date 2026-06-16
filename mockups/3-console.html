@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vivary — Console</title>
+<style>
+  /* Scene: an engineer who lives in tmux, working at 1am, wants maximum signal
+     and zero chrome. Warm near-black, amber phosphor, one green for "good".
+     Monospace throughout, hard edges, dense. Refined brutalism, not parody:
+     hierarchy comes from weight and the single accent, not decoration. */
+  :root{
+    --bg: oklch(0.165 0.008 65);
+    --bg2: oklch(0.205 0.009 65);
+    --panel: oklch(0.235 0.010 65);
+    --ink: oklch(0.88 0.020 90);
+    --soft: oklch(0.70 0.018 80);
+    --muted: oklch(0.55 0.015 75);
+    --line: oklch(0.34 0.012 70);
+    --amber: oklch(0.82 0.135 78);
+    --green: oklch(0.80 0.150 145);
+    --red: oklch(0.68 0.150 30);
+    --mono: ui-monospace, "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{font-family:var(--mono);background:var(--bg);color:var(--ink);height:100vh;overflow:hidden;font-size:13px;line-height:1.5}
+  .app{display:grid;grid-template-columns:252px 1fr 244px;height:100vh}
+
+  aside{background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column}
+  .brand{padding:16px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+  .brand b{font-size:15px;font-weight:700;letter-spacing:1px;text-transform:uppercase}
+  .brand .v{margin-left:auto;color:var(--muted);font-size:11px}
+  .sec{padding:14px 16px 6px;color:var(--muted);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+  .ws a{display:flex;align-items:center;gap:10px;padding:8px 16px;cursor:pointer;color:var(--soft);border-left:2px solid transparent}
+  .ws a:hover{background:oklch(0.23 0.01 65)}
+  .ws a.on{background:oklch(0.25 0.012 65);color:var(--ink)}
+  .ws .g{color:var(--green)} .ws .gw{color:var(--amber)}
+  .ws .n{margin-left:auto;color:var(--muted);font-size:11px}
+  .add{margin:8px 16px;padding:8px 10px;border:1px solid var(--line);background:none;color:var(--soft);font:inherit;text-align:left;cursor:pointer}
+  .add:hover{border-color:var(--amber);color:var(--amber)}
+  .foot{margin-top:auto;padding:14px 16px;border-top:1px solid var(--line);color:var(--muted);font-size:11px;line-height:1.9}
+  .foot b{color:var(--soft);font-weight:700}
+
+  main{display:flex;flex-direction:column;min-width:0}
+  .tabs{display:flex;border-bottom:1px solid var(--line);background:var(--bg2)}
+  .tabs button{font:inherit;color:var(--muted);background:none;border:none;border-right:1px solid var(--line);padding:11px 14px;cursor:pointer}
+  .tabs button:hover{color:var(--soft)}
+  .tabs button.on{color:var(--bg);background:var(--amber);font-weight:700}
+  .thread{flex:1;overflow:auto;padding:18px 22px}
+  .line{display:grid;grid-template-columns:90px 1fr;gap:14px;padding:6px 0}
+  .tag{color:var(--muted);text-align:right;font-size:11px;padding-top:2px;text-transform:uppercase;letter-spacing:.06em}
+  .tag.you{color:var(--amber)} .tag.ai{color:var(--green)} .tag.run{color:var(--soft)}
+  .body{color:var(--ink);white-space:pre-wrap}
+  .body.run{color:var(--soft)} .body.run b{color:var(--amber);font-weight:700}
+  .body em{color:var(--amber);font-style:normal}
+  .body strong{color:var(--green)}
+  .rule{border:none;border-top:1px dashed var(--line);margin:14px 0}
+  .composer{border-top:1px solid var(--line);padding:14px 22px;display:flex;gap:0;background:var(--bg2)}
+  .prompt{color:var(--green);padding:11px 10px 11px 0}
+  .field{flex:1;background:var(--bg);border:1px solid var(--line);color:var(--muted);padding:11px 13px;font:inherit}
+  .send{background:var(--amber);color:var(--bg);border:1px solid var(--amber);padding:11px 18px;font:inherit;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:.05em}
+
+  .obs{background:var(--bg2);border-left:1px solid var(--line);padding:0}
+  .obs h3{padding:16px 16px 10px;color:var(--muted);font-size:11px;letter-spacing:.12em;text-transform:uppercase;border-bottom:1px solid var(--line)}
+  .m{display:flex;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--line)}
+  .m .k{color:var(--soft)} .m .v{color:var(--ink)}
+  .m .ok{color:var(--green);font-weight:700}
+  .m.big .v{color:var(--amber);font-weight:700;font-size:15px}
+  .obs .meta{padding:14px 16px;color:var(--muted);font-size:11px;line-height:1.9}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand"><b>Vivary</b><span class="v">0.1.0</span></div>
+    <div class="sec">workspaces</div>
+    <div class="ws">
+      <a class="on"><span class="g">●</span>gui-demo<span class="n">8</span></a>
+      <a><span class="g">●</span>second-brain<span class="n">12</span></a>
+      <a><span class="gw">●</span>site-rewrite<span class="n">5</span></a>
+    </div>
+    <button class="add">+ add workspace</button>
+    <div class="foot">
+      layers<br>
+      <b>tropo</b> · knowledge<br>
+      <b>strato</b> · the loop<br>
+      <b>ozone</b> · review<br>
+      <b>exo</b> · coordination
+    </div>
+  </aside>
+
+  <main>
+    <nav class="tabs">
+      <button>search</button><button>files</button><button>state</button>
+      <button>graph</button><button class="on">agent</button><button>gates</button><button>dashboard</button>
+    </nav>
+    <div class="thread">
+      <div class="line"><div class="tag you">you</div><div class="body">Read STATE.md and summarize where this workspace stands. Remember the number 7.</div></div>
+      <hr class="rule">
+      <div class="line"><div class="tag ai">vivary</div><div class="body">I'll find and read the state surface first.</div></div>
+      <div class="line"><div class="tag run">tool</div><div class="body run"><b>⚙ Glob</b>  **/STATE.md</div></div>
+      <div class="line"><div class="tag run">tool</div><div class="body run"><b>⚙ Read</b>  sandboxes/gui-demo/STATE.md</div></div>
+      <div class="line"><div class="tag ai">vivary</div><div class="body">First heading: <em>"STATE, visible state"</em>. Focus is the GUI experiment, status green, next slice is inline tool approval. Noted <strong>7</strong> for this conversation.</div></div>
+    </div>
+    <div class="composer">
+      <span class="prompt">vivary&nbsp;&gt;</span>
+      <div class="field">message the agent, or give it a task…</div>
+      <button class="send">run</button>
+    </div>
+  </main>
+
+  <div class="obs">
+    <h3>observability</h3>
+    <div class="m"><span class="k">status</span><span class="v ok">○ idle</span></div>
+    <div class="m"><span class="k">turns</span><span class="v">2</span></div>
+    <div class="m"><span class="k">tool calls</span><span class="v">2</span></div>
+    <div class="m"><span class="k">tokens in</span><span class="v">15,241</span></div>
+    <div class="m"><span class="k">tokens out</span><span class="v">570</span></div>
+    <div class="m big"><span class="k">cost</span><span class="v">$0.48</span></div>
+    <div class="meta">runtime claude-opus-4-8<br>session 5459e2…92aa<br>cwd sandboxes/gui-demo</div>
+  </div>
+</div>
+</body>
+</html>

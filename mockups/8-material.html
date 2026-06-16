@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vivary — Material</title>
+<style>
+  /* UX idea: the workspace's material is center stage and the agent is a co-author
+     that proposes changes inline (tracked, accept/reject = the gate). Medium-agnostic:
+     this is a writing / research workspace, prose not code. Observability is a quiet
+     strip; the agent's reasoning lives in the margin where the work is. */
+  :root{
+    --bg: oklch(0.205 0.012 250); --paper: oklch(0.255 0.012 250); --panel: oklch(0.235 0.013 250);
+    --raise: oklch(0.285 0.014 250); --ink: oklch(0.95 0.010 250); --read: oklch(0.90 0.012 250);
+    --soft: oklch(0.74 0.014 250); --muted: oklch(0.60 0.015 250); --line: oklch(0.33 0.012 250);
+    --mint: oklch(0.80 0.125 165); --amber: oklch(0.82 0.120 78); --rose: oklch(0.72 0.130 18);
+    --sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+    --serif: "Iowan Old Style", Georgia, "Times New Roman", serif;
+    --mono: ui-monospace, "SF Mono", Consolas, monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{font-family:var(--sans);background:var(--bg);color:var(--ink);height:100vh;overflow:hidden;font-size:14px;-webkit-font-smoothing:antialiased}
+  .top{display:flex;align-items:center;gap:16px;padding:12px 20px;border-bottom:1px solid var(--line)}
+  .logo{font-weight:700}.logo span{color:var(--mint)}
+  .crumb{color:var(--muted);font-size:13px}.crumb b{color:var(--soft)}
+  .amb{margin-left:auto;display:flex;gap:14px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .amb .live{color:var(--mint);font-weight:600}
+
+  .body{display:grid;grid-template-columns:210px 1fr 320px;height:calc(100vh - 50px)}
+  .nav{border-right:1px solid var(--line);padding:16px 10px;background:var(--panel)}
+  .nav .h{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);padding:0 8px 8px}
+  .nav a{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-radius:7px;color:var(--soft);cursor:pointer;font-size:13.5px}
+  .nav a:hover{background:var(--raise)} .nav a.on{background:var(--raise);color:var(--ink);font-weight:600}
+  .nav a .b{font-size:9px;font-weight:700;color:var(--amber);background:oklch(0.32 0.05 78 / .6);border-radius:10px;padding:1px 6px}
+
+  .doc{overflow:auto;display:flex;justify-content:center;padding:40px 32px}
+  .page{max-width:66ch;width:100%}
+  .kicker{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--mint);font-weight:600}
+  .page h1{font-family:var(--serif);font-size:30px;font-weight:600;letter-spacing:-0.01em;margin:8px 0 22px}
+  .page p{font-family:var(--serif);font-size:17.5px;line-height:1.7;color:var(--read);margin-bottom:18px}
+  ins{text-decoration:none;background:oklch(0.32 0.05 165 / .5);box-shadow:inset 0 -1px 0 var(--mint);color:var(--ink)}
+  del{text-decoration:line-through;text-decoration-color:var(--rose);color:var(--muted);opacity:.8}
+  .cmt{display:inline-block;vertical-align:super;font-size:10px;color:oklch(0.2 0.02 250);background:var(--amber);border-radius:50%;width:16px;height:16px;line-height:16px;text-align:center;font-weight:700;margin-left:3px;cursor:pointer}
+
+  .side{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
+  .review{padding:14px 16px;border-bottom:1px solid var(--line)}
+  .review .t{font-weight:650;font-size:13.5px}.review .s{font-size:12px;color:var(--muted);margin-top:2px}
+  .review .btns{display:flex;gap:8px;margin-top:11px}
+  .acc{flex:1;background:var(--mint);color:oklch(0.2 0.02 250);border:none;border-radius:8px;padding:8px;font:inherit;font-weight:650;font-size:12.5px;cursor:pointer}
+  .rej{background:none;border:1px solid var(--line);color:var(--soft);border-radius:8px;padding:8px 13px;font:inherit;font-size:12.5px;cursor:pointer}
+  .margin{flex:1;overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:13px}
+  .mh{font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+  .edit{font-size:12.5px;line-height:1.5;border:1px solid var(--line);border-radius:9px;padding:10px 12px;background:var(--bg)}
+  .edit .n{font-size:11px;color:var(--mint);font-weight:600;margin-bottom:4px}
+  .edit .why{color:var(--soft)}
+  .act{font-family:var(--mono);font-size:11.5px;color:var(--muted);display:flex;gap:8px;align-items:center}
+  .act b{color:var(--mint);font-weight:600}
+  .cmd{border-top:1px solid var(--line);padding:12px;display:flex;gap:8px}
+  .cmd input{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:10px 12px;color:var(--ink);font:inherit;font-size:13px}
+  .cmd input::placeholder{color:var(--muted)}
+  .cmd button{background:var(--raise);border:1px solid var(--line);color:var(--soft);border-radius:9px;padding:0 13px;cursor:pointer}
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="logo">Vivary<span>.</span></div>
+    <div class="crumb">second-brain / <b>Q3 Research</b> / Introduction</div>
+    <div class="amb"><span class="live">● agent revising</span><span>3 edits pending</span><span>$0.27</span></div>
+  </div>
+
+  <div class="body">
+    <nav class="nav">
+      <div class="h">Material</div>
+      <a>Abstract</a>
+      <a class="on">Introduction <span class="b">3</span></a>
+      <a>Methods</a>
+      <a>Open questions</a>
+      <a>Sources</a>
+      <a>MEMORY</a>
+    </nav>
+
+    <div class="doc">
+      <div class="page">
+        <div class="kicker">Draft, in revision</div>
+        <h1>Introduction</h1>
+        <p>The question this thread investigates is <del>kind of broad and</del> <ins>narrow by design:</ins> whether a self-improving loop over a typed knowledge graph changes how quickly a research practice compounds.<span class="cmt">1</span></p>
+        <p>Earlier work treated memory as <del>just a big pile of</del> <ins>flat,</ins> undifferentiated text. We take the opposite stance: structure first, retrieval second.<span class="cmt">2</span></p>
+        <p>Lema 2026 reports a similar effect in editorial settings, which we fold in here as a second data point<ins>, though their sample is small and we flag it as tentative</ins>.<span class="cmt">3</span></p>
+        <p>The remainder sketches the method, then the open questions that scope still leaves unresolved.</p>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="review">
+        <div class="t">Agent proposed 3 edits</div>
+        <div class="s">Approving an edit applies it to the file.</div>
+        <div class="btns"><button class="acc">Accept all</button><button class="rej">Reject all</button></div>
+      </div>
+      <div class="margin">
+        <div class="mh">Why these changes</div>
+        <div class="edit"><div class="n">1 · tightened the claim</div><div class="why">Replaced a hedge with a sharper framing of the research question.</div></div>
+        <div class="edit"><div class="n">2 · reduced vagueness</div><div class="why">“a big pile of” reads loose; “flat” is the precise contrast you set up later.</div></div>
+        <div class="edit"><div class="n">3 · added a caveat</div><div class="why">Lema 2026 has n=14; flagging it as tentative keeps the claim honest.</div></div>
+        <div class="mh" style="margin-top:6px">Activity</div>
+        <div class="act"><b>⚙ Read</b> sources/lema-2026.md</div>
+        <div class="act"><b>⚙ Search</b> memory: "compounding"</div>
+      </div>
+      <div class="cmd"><input placeholder="Ask for an expansion, a source, a rewrite…"><button>↵</button></div>
+    </div>
+  </div>
+</body>
+</html>

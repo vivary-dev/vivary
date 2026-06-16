@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vivary — Conversation Environment</title>
+<style>
+  /* UX idea: built AROUND the agent chat, but the chat is the development surface,
+     not a transcript. Tool calls, searches, edits and gates render as rich inline
+     blocks; approving happens in the flow. A contextual stage beside it shows the live
+     artifact the conversation is shaping. Medium-agnostic: a research workspace, no code. */
+  :root{
+    --bg: oklch(0.200 0.012 250); --panel: oklch(0.238 0.013 250); --raise: oklch(0.278 0.014 250);
+    --ink: oklch(0.95 0.010 250); --read: oklch(0.90 0.012 250); --soft: oklch(0.74 0.014 250);
+    --muted: oklch(0.60 0.015 250); --line: oklch(0.33 0.012 250); --line2: oklch(0.40 0.013 250);
+    --mint: oklch(0.80 0.125 165); --amber: oklch(0.82 0.120 78); --rose: oklch(0.72 0.130 18);
+    --blue: oklch(0.74 0.095 245);
+    --sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+    --serif: "Iowan Old Style", Georgia, serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{font-family:var(--sans);background:var(--bg);color:var(--ink);height:100vh;overflow:hidden;font-size:14px;-webkit-font-smoothing:antialiased}
+  .app{display:grid;grid-template-columns:58px 1fr 452px;height:100vh}
+
+  /* slim workspace rail */
+  .rail{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:14px 0;gap:10px}
+  .rail .v{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--mint),oklch(0.6 0.1 200));color:oklch(0.2 0.02 250);font-weight:800;display:flex;align-items:center;justify-content:center;font-size:16px}
+  .rail .w{width:34px;height:34px;border-radius:10px;background:var(--raise);border:1px solid var(--line);color:var(--soft);display:flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer;position:relative}
+  .rail .w.on{border-color:var(--mint);color:var(--ink)}
+  .rail .w.on::before{content:"";position:absolute;left:-14px;width:3px;height:20px;border-radius:2px;background:var(--mint)}
+  .rail .w .b{position:absolute;top:-3px;right:-3px;width:9px;height:9px;border-radius:50%;background:var(--amber);border:2px solid var(--panel)}
+  .rail .sp{flex:1}
+  .rail .add{width:34px;height:34px;border-radius:10px;border:1px dashed var(--line2);background:none;color:var(--muted);font-size:18px;cursor:pointer}
+
+  /* conversation */
+  main{display:flex;flex-direction:column;min-width:0}
+  .head{display:flex;align-items:center;gap:12px;padding:13px 22px;border-bottom:1px solid var(--line)}
+  .head .ws{font-weight:650} .head .fc{color:var(--muted);font-size:13px}.head .fc b{color:var(--soft)}
+  .head .st{margin-left:auto;display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--mint);font-weight:600}
+  .pulse{width:8px;height:8px;border-radius:50%;background:var(--mint);box-shadow:0 0 9px oklch(0.8 0.13 165/.8)}
+  .thread{flex:1;overflow:auto;padding:26px 22px}
+  .col{max-width:60ch;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+  .you{align-self:flex-end;max-width:85%;background:var(--raise);border:1px solid var(--line2);border-radius:14px 14px 4px 14px;padding:10px 14px;font-size:14.5px;line-height:1.5}
+  .ai{font-size:15px;line-height:1.6;color:var(--read)}
+  .ai b{color:var(--mint);font-weight:600}
+
+  /* inline work blocks */
+  .blk{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--panel)}
+  .blk .bh{display:flex;align-items:center;gap:9px;padding:9px 12px;font-family:var(--mono);font-size:12.5px;color:var(--soft)}
+  .blk .bh .ico{color:var(--mint)} .blk .bh .meta{margin-left:auto;color:var(--muted);font-size:11.5px}
+  .blk .bb{border-top:1px solid var(--line);padding:10px 12px;font-size:12.5px;color:var(--muted);line-height:1.55}
+  .hit{display:flex;gap:9px;padding:5px 0;font-size:12.5px;color:var(--soft)}
+  .hit .p{color:var(--muted);font-family:var(--mono);font-size:11px}
+  .diff{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--bg)}
+  .diff .del{color:var(--rose)} .diff .ins{color:var(--mint)}
+  .gate{border-color:oklch(0.5 0.08 78/.7);background:linear-gradient(180deg,oklch(0.28 0.035 78/.45),var(--panel))}
+  .gate .bh .ico{color:var(--amber)}
+  .actbar{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}
+  .accept{background:var(--mint);color:oklch(0.2 0.02 250);border:none;border-radius:7px;padding:7px 14px;font:inherit;font-weight:650;font-size:12.5px;cursor:pointer}
+  .gate .accept{background:var(--amber);color:oklch(0.22 0.03 78)}
+  .deny{background:none;border:1px solid var(--line2);color:var(--soft);border-radius:7px;padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer}
+  .actbar .why{margin-left:auto;align-self:center;font-size:11.5px;color:var(--muted)}
+
+  .composer{border-top:1px solid var(--line);padding:14px 22px 18px}
+  .cwrap{max-width:60ch;margin:0 auto}
+  .chips{display:flex;gap:7px;margin-bottom:9px}
+  .chip{font-size:11.5px;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:4px 9px;cursor:pointer;font-family:var(--mono)}
+  .field{display:flex;gap:9px;align-items:flex-end;background:var(--panel);border:1px solid var(--line2);border-radius:13px;padding:11px 13px}
+  .field .ta{flex:1;color:var(--muted);font-size:14.5px}
+  .send{background:var(--mint);color:oklch(0.2 0.02 250);border:none;border-radius:9px;width:34px;height:34px;font-weight:700;cursor:pointer}
+
+  /* contextual stage */
+  .stage{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
+  .sh{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .sh .lab{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+  .seg{margin-left:auto;display:flex;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:2px}
+  .seg button{font:inherit;font-size:12px;color:var(--muted);background:none;border:none;padding:5px 11px;border-radius:7px;cursor:pointer}
+  .seg button.on{background:var(--raise);color:var(--ink)}
+  .sbody{flex:1;overflow:auto;padding:22px 22px}
+  .sbody .kick{font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--mint);font-weight:600}
+  .sbody h2{font-family:var(--serif);font-size:21px;font-weight:600;margin:6px 0 16px}
+  .sbody p{font-family:var(--serif);font-size:15px;line-height:1.7;color:var(--read);margin-bottom:14px}
+  .sbody ins{text-decoration:none;background:oklch(0.32 0.05 165/.5);box-shadow:inset 0 -1px 0 var(--mint);color:var(--ink)}
+  .sbody del{text-decoration:line-through;text-decoration-color:var(--rose);color:var(--muted)}
+  .sfoot{border-top:1px solid var(--line);padding:11px 16px;display:flex;gap:16px;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .sfoot b{color:var(--soft)} .sfoot .ok{color:var(--mint)}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="rail">
+    <div class="v">V</div>
+    <div class="w on">sb</div>
+    <div class="w">gd<span class="b"></span></div>
+    <div class="w">sr</div>
+    <div class="sp"></div>
+    <button class="add">+</button>
+  </nav>
+
+  <main>
+    <div class="head">
+      <span class="ws">second-brain</span>
+      <span class="fc">focus: <b>Shape the Q3 research thread</b></span>
+      <span class="st"><span class="pulse"></span>working</span>
+    </div>
+    <div class="thread">
+      <div class="col">
+        <div class="you">Tighten the intro and link the new synthesis into the thesis.</div>
+        <div class="ai">On it. I'll read the current draft and check what the memory already says, then propose the edit.</div>
+
+        <div class="blk">
+          <div class="bh"><span class="ico">⚙</span> Read <span style="color:var(--ink)">draft-intro.md</span><span class="meta">42 lines</span></div>
+          <div class="bb">“The question this thread investigates is kind of broad and undirected…”</div>
+        </div>
+
+        <div class="blk">
+          <div class="bh"><span class="ico">🔎</span> Search memory <span style="color:var(--ink)">“compounding”</span><span class="meta">3 hits</span></div>
+          <div class="bb">
+            <div class="hit">structure-first beats flat memory <span class="p">memory/2026-05-30.md</span></div>
+            <div class="hit">Lema 2026 editorial effect <span class="p">sources/lema-2026.md</span></div>
+            <div class="hit">retrieval is downstream of typing <span class="p">MEMORY.md</span></div>
+          </div>
+        </div>
+
+        <div class="ai">Here's the tightening. It sharpens the question and folds the synthesis in:</div>
+
+        <div class="blk">
+          <div class="bh"><span class="ico">✎</span> Edit <span style="color:var(--ink)">draft-intro.md</span><span class="meta">1 deletion · 2 insertions</span></div>
+          <div class="bb diff"><span class="del">- is kind of broad and undirected:</span><br><span class="ins">+ is narrow by design: whether a self-improving loop changes how fast a practice compounds.</span></div>
+          <div class="actbar"><button class="accept">Accept edit</button><button class="deny">Reject</button><span class="why">applies to the file on accept</span></div>
+        </div>
+
+        <div class="ai">Linked <b>synthesis</b> into <b>thesis</b>. One action needs your approval before I run it:</div>
+
+        <div class="blk gate">
+          <div class="bh"><span class="ico">⚠</span> Graph write <span style="color:var(--ink)">prune reading-list</span><span class="meta">removes 3 stale refs</span></div>
+          <div class="bb">This deletes <span class="mono">refs: ashby-99, kern-12, vogt-20</span> from the reading-list node. A durable change, so I'm gating it.</div>
+          <div class="actbar"><button class="accept">Approve</button><button class="deny">Deny</button><span class="why">human gate · durable change</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="composer">
+      <div class="cwrap">
+        <div class="chips"><span class="chip">@material</span><span class="chip">@graph</span><span class="chip">/search</span><span class="chip">/state</span></div>
+        <div class="field"><div class="ta">Reply, or ask Vivary to act on the workspace…</div><button class="send">↑</button></div>
+      </div>
+    </div>
+  </main>
+
+  <aside class="stage">
+    <div class="sh">
+      <span class="lab">Working on</span>
+      <div class="seg"><button class="on">Draft</button><button>Graph</button><button>State</button></div>
+    </div>
+    <div class="sbody">
+      <div class="kick">draft-intro.md · live</div>
+      <h2>Introduction</h2>
+      <p>The question this thread investigates <del>is kind of broad and undirected</del><ins>is narrow by design</ins>: whether a self-improving loop over a typed knowledge graph changes how quickly a research practice compounds.</p>
+      <p>Earlier work treated memory as flat, undifferentiated text. We take the opposite stance: structure first, retrieval second.</p>
+      <p>Lema 2026 reports a similar effect in editorial settings<ins>, which the new synthesis folds in as a second, tentative data point</ins>.</p>
+    </div>
+    <div class="sfoot"><span class="ok">● working</span><span><b>18.2k</b> in</span><span><b>570</b> out</span><span><b>$0.38</b></span><span>turn 3</span></div>
+  </aside>
+</div>
+</body>
+</html>

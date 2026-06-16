@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vivary — Atelier</title>
+<style>
+  /* Scene: a developer at a sunlit desk mid-morning, reading a long agent
+     transcript like prose. Calm, literate, unhurried. Warm paper, ink, one
+     botanical green. Editorial serif for the conversation, clean sans for the UI. */
+  :root{
+    --paper: oklch(0.973 0.009 88);
+    --paper-2: oklch(0.955 0.012 88);
+    --raise: oklch(0.988 0.006 90);
+    --ink: oklch(0.30 0.02 70);
+    --ink-soft: oklch(0.46 0.02 72);
+    --muted: oklch(0.60 0.015 75);
+    --line: oklch(0.89 0.012 82);
+    --line-2: oklch(0.83 0.015 80);
+    --moss: oklch(0.50 0.10 150);
+    --moss-soft: oklch(0.93 0.03 150);
+    --amber: oklch(0.66 0.12 70);
+    --rust: oklch(0.55 0.13 40);
+    --sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{font-family:var(--sans);color:var(--ink);background:
+    radial-gradient(120% 80% at 0% 0%, oklch(0.98 0.012 92) 0%, transparent 60%),
+    var(--paper);height:100vh;overflow:hidden;-webkit-font-smoothing:antialiased}
+  .app{display:grid;grid-template-columns:264px 1fr 248px;height:100vh}
+
+  /* Sidebar */
+  aside{background:var(--paper-2);border-right:1px solid var(--line);padding:22px 16px;display:flex;flex-direction:column;gap:18px}
+  .brand{display:flex;align-items:baseline;gap:9px;padding:0 6px}
+  .brand b{font-family:var(--serif);font-size:21px;font-weight:600;letter-spacing:.2px}
+  .brand span{font-size:11px;color:var(--muted)}
+  .eyebrow{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);padding:0 6px}
+  .ws{display:flex;flex-direction:column;gap:3px}
+  .ws a{display:flex;align-items:center;justify-content:space-between;padding:9px 11px;border-radius:9px;border:1px solid transparent;text-decoration:none;color:var(--ink);transition:background .18s}
+  .ws a:hover{background:var(--raise)}
+  .ws a.on{background:var(--raise);border-color:var(--line-2)}
+  .ws .name{display:flex;align-items:center;gap:9px;font-size:13.5px}
+  .dot{width:7px;height:7px;border-radius:50%}
+  .dot.ok{background:var(--moss)} .dot.warn{background:var(--amber)}
+  .ws .n{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .add{margin-top:2px;padding:9px 11px;border:1px dashed var(--line-2);border-radius:9px;background:none;color:var(--ink-soft);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+  .add:hover{border-color:var(--moss);color:var(--moss)}
+  .strata{margin-top:auto;font-size:11px;color:var(--muted);line-height:1.7;padding:12px 6px 0;border-top:1px solid var(--line)}
+  .strata b{color:var(--ink-soft);font-weight:600}
+
+  /* Main */
+  main{display:flex;flex-direction:column;min-width:0}
+  .tabs{display:flex;gap:2px;padding:14px 28px 0;border-bottom:1px solid var(--line)}
+  .tabs button{font:inherit;font-size:13.5px;color:var(--muted);background:none;border:none;padding:9px 13px 14px;cursor:pointer;position:relative}
+  .tabs button:hover{color:var(--ink-soft)}
+  .tabs button.on{color:var(--ink);font-weight:600}
+  .tabs button.on::after{content:"";position:absolute;left:13px;right:13px;bottom:-1px;height:2px;background:var(--moss);border-radius:2px}
+  .thread{flex:1;overflow:auto;padding:34px 0}
+  .col{max-width:68ch;margin:0 auto;padding:0 28px;display:flex;flex-direction:column;gap:26px}
+  .turn-user{align-self:flex-end;max-width:80%;background:var(--moss-soft);border:1px solid oklch(0.86 0.04 150);border-radius:14px 14px 4px 14px;padding:11px 15px;font-size:14.5px;line-height:1.5}
+  .who{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+  .say{font-family:var(--serif);font-size:17px;line-height:1.62;color:var(--ink)}
+  .say + .say{margin-top:12px}
+  .act{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12.5px;color:var(--ink-soft)}
+  .act .g{color:var(--moss)}
+  .act .path{color:var(--muted)}
+  .acts{display:flex;flex-direction:column;gap:7px;padding-left:2px}
+  .composer{border-top:1px solid var(--line);padding:16px 28px 20px}
+  .composer .inner{max-width:68ch;margin:0 auto;display:flex;gap:10px;align-items:center}
+  .field{flex:1;display:flex;align-items:center;background:var(--raise);border:1px solid var(--line-2);border-radius:12px;padding:12px 15px;color:var(--muted);font-size:14.5px}
+  .send{background:var(--moss);color:oklch(0.98 0.01 150);border:none;border-radius:12px;padding:12px 20px;font:inherit;font-weight:600;font-size:14px;cursor:pointer}
+
+  /* Observability rail */
+  .obs{background:var(--paper-2);border-left:1px solid var(--line);padding:22px 18px;display:flex;flex-direction:column;gap:4px}
+  .obs h3{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:12px}
+  .row{display:flex;align-items:center;justify-content:space-between;padding:10px 2px;border-bottom:1px solid var(--line);font-size:13px}
+  .row .k{color:var(--ink-soft)}
+  .row .v{font-variant-numeric:tabular-nums;color:var(--ink)}
+  .stat{display:inline-flex;align-items:center;gap:7px;color:var(--moss);font-weight:600}
+  .cost{font-size:15px;font-weight:700}
+  .meta{margin-top:14px;font-size:11px;color:var(--muted);line-height:1.6}
+  .meta code{font-family:var(--mono);color:var(--ink-soft)}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand"><b>Vivary</b><span>atelier</span></div>
+    <div>
+      <div class="eyebrow">Workspaces</div>
+      <div class="ws" style="margin-top:10px">
+        <a class="on"><span class="name"><span class="dot ok"></span>gui-demo</span><span class="n">8</span></a>
+        <a><span class="name"><span class="dot ok"></span>second-brain</span><span class="n">12</span></a>
+        <a><span class="name"><span class="dot warn"></span>site-rewrite</span><span class="n">5</span></a>
+        <button class="add">+ Add workspace</button>
+      </div>
+    </div>
+    <div class="strata">
+      A workspace is a small, well formed world.<br>
+      <b>tropo</b> · <b>strato</b> · <b>ozone</b> · <b>exo</b>
+    </div>
+  </aside>
+
+  <main>
+    <nav class="tabs">
+      <button>Search</button><button>Files</button><button>State</button>
+      <button>Graph</button><button class="on">Agent</button><button>Gates</button><button>Dashboard</button>
+    </nav>
+    <div class="thread">
+      <div class="col">
+        <div class="turn-user">Read STATE.md and summarize where this workspace stands. Remember the number 7.</div>
+
+        <div>
+          <div class="who">Vivary</div>
+          <p class="say">I'll find and read the state surface first.</p>
+          <div class="acts" style="margin:14px 0">
+            <div class="act"><span class="g">⚙ Glob</span><span class="path">**/STATE.md</span></div>
+            <div class="act"><span class="g">⚙ Read</span><span class="path">sandboxes/gui-demo/STATE.md</span></div>
+          </div>
+          <p class="say">The first heading is <em>“STATE, visible state.”</em> Focus is the GUI experiment, status is green, and the next slice is inline tool approval.</p>
+          <p class="say">I've noted <strong>7</strong> for this conversation.</p>
+        </div>
+      </div>
+    </div>
+    <div class="composer">
+      <div class="inner">
+        <div class="field">Reply, or ask it to act on the workspace…</div>
+        <button class="send">Send</button>
+      </div>
+    </div>
+  </main>
+
+  <div class="obs">
+    <h3>Observability</h3>
+    <div class="row"><span class="k">status</span><span class="v"><span class="stat"><span class="dot ok"></span>idle</span></span></div>
+    <div class="row"><span class="k">turns</span><span class="v">2</span></div>
+    <div class="row"><span class="k">tool calls</span><span class="v">2</span></div>
+    <div class="row"><span class="k">tokens in</span><span class="v">15,241</span></div>
+    <div class="row"><span class="k">tokens out</span><span class="v">570</span></div>
+    <div class="row"><span class="k">cost</span><span class="v cost">$0.48</span></div>
+    <div class="meta">runtime <code>claude-opus-4-8</code><br>session <code>5459e2…92aa</code></div>
+  </div>
+</div>
+</body>
+</html>

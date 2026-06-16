@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vivary — Mission Control</title>
+<style>
+  /* UX idea: the home screen is NOT a single chat. It's air-traffic-control for
+     every agent across every workspace. You supervise a fleet, see what each one is
+     doing right now, and dive in only when one needs you. Serves "manage multiple
+     agents at a time" as the primary job. One calm slate palette, one mint accent. */
+  :root{
+    --bg: oklch(0.205 0.012 250); --panel: oklch(0.238 0.013 250); --raise: oklch(0.275 0.014 250);
+    --ink: oklch(0.94 0.010 250); --soft: oklch(0.74 0.014 250); --muted: oklch(0.60 0.015 250);
+    --line: oklch(0.33 0.012 250); --mint: oklch(0.80 0.125 165); --amber: oklch(0.82 0.120 78);
+    --red: oklch(0.70 0.150 25); --blue: oklch(0.74 0.090 245);
+    --sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{font-family:var(--sans);background:var(--bg);color:var(--ink);height:100vh;overflow:hidden;font-size:14px;-webkit-font-smoothing:antialiased}
+  .top{display:flex;align-items:center;gap:18px;padding:14px 22px;border-bottom:1px solid var(--line)}
+  .logo{font-size:17px;font-weight:700;letter-spacing:.2px}
+  .logo span{color:var(--mint)}
+  .glance{color:var(--soft);font-size:13px}
+  .glance b{color:var(--ink)} .glance .need{color:var(--amber)}
+  .search{margin-left:auto;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px 13px;color:var(--muted);font-size:13px;width:240px}
+  .new{background:var(--mint);color:oklch(0.20 0.02 250);border:none;border-radius:9px;padding:9px 15px;font:inherit;font-weight:650;font-size:13px;cursor:pointer}
+
+  .body{display:grid;grid-template-columns:188px 1fr;height:calc(100vh - 57px)}
+  .filters{border-right:1px solid var(--line);padding:18px 12px;display:flex;flex-direction:column;gap:3px}
+  .filters .h{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);padding:0 8px 8px}
+  .filters a{display:flex;justify-content:space-between;padding:8px 10px;border-radius:8px;color:var(--soft);cursor:pointer;font-size:13.5px}
+  .filters a:hover{background:var(--panel)} .filters a.on{background:var(--raise);color:var(--ink)}
+  .filters a .c{color:var(--muted);font-variant-numeric:tabular-nums}
+  .filters a.alert .c{color:var(--amber)}
+  .filters .h2{margin-top:16px}
+
+  .grid{padding:20px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;align-content:start}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:15px 16px;display:flex;flex-direction:column;gap:11px;cursor:pointer;transition:border-color .15s, transform .15s}
+  .card:hover{border-color:var(--soft);transform:translateY(-1px)}
+  .card.need{border-color:oklch(0.55 0.10 78);background:linear-gradient(180deg, oklch(0.27 0.03 78 / .5), var(--panel))}
+  .chead{display:flex;align-items:center;gap:9px}
+  .ws{font-weight:650}
+  .rt{font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--raise);padding:2px 7px;border-radius:5px}
+  .chip{margin-left:auto;font-size:11px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;padding:3px 9px;border-radius:20px;display:inline-flex;align-items:center;gap:6px}
+  .chip .d{width:7px;height:7px;border-radius:50%}
+  .chip.run{color:var(--mint);background:oklch(0.30 0.04 165 / .5)} .chip.run .d{background:var(--mint)}
+  .chip.idle{color:var(--muted);background:var(--raise)} .chip.idle .d{background:var(--muted)}
+  .chip.need{color:var(--amber);background:oklch(0.32 0.05 78 / .6)} .chip.need .d{background:var(--amber)}
+  .doing{font-family:var(--mono);font-size:12.5px;color:var(--soft);display:flex;align-items:center;gap:8px}
+  .doing .g{color:var(--mint)} .doing.act .g{color:var(--amber)}
+  .snip{font-size:12.5px;color:var(--muted);line-height:1.5;border-top:1px solid var(--line);padding-top:10px;min-height:34px}
+  .foot{display:flex;gap:16px;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .foot b{color:var(--soft);font-weight:600}
+  .approve{display:flex;gap:8px;border-top:1px solid oklch(0.45 0.06 78 / .5);padding-top:10px}
+  .ok{flex:1;background:var(--amber);color:oklch(0.22 0.03 78);border:none;border-radius:7px;padding:7px;font:inherit;font-weight:650;font-size:12.5px;cursor:pointer}
+  .no{background:none;border:1px solid var(--line);color:var(--soft);border-radius:7px;padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer}
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="logo">Vivary<span>.</span></div>
+    <div class="glance"><b>4</b> agents · <b>2</b> running · <span class="need"><b>1</b> needs you</span> · <b>$1.06</b> today</div>
+    <input class="search" placeholder="Search agents, workspaces…">
+    <button class="new">+ New agent</button>
+  </div>
+
+  <div class="body">
+    <nav class="filters">
+      <div class="h">View</div>
+      <a class="on"><span>All agents</span><span class="c">4</span></a>
+      <a><span>Running</span><span class="c">2</span></a>
+      <a class="alert"><span>Needs you</span><span class="c">1</span></a>
+      <a><span>Idle</span><span class="c">1</span></a>
+      <div class="h h2">Workspaces</div>
+      <a><span>gui-demo</span><span class="c">2</span></a>
+      <a><span>second-brain</span><span class="c">1</span></a>
+      <a><span>site-rewrite</span><span class="c">1</span></a>
+    </nav>
+
+    <div class="grid">
+      <div class="card">
+        <div class="chead"><span class="ws">gui-demo</span><span class="rt">claude</span><span class="chip run"><span class="d"></span>Running</span></div>
+        <div class="doing act"><span class="g">⚙</span> Editing app/backend/.../client.ts</div>
+        <div class="snip">“Wiring the subprotocol token so it never lands in the URL. Updating two call sites.”</div>
+        <div class="foot"><span><b>18.2k</b> tok</span><span><b>$0.41</b></span><span><b>2m 14s</b></span><span>turn 5</span></div>
+      </div>
+
+      <div class="card need">
+        <div class="chead"><span class="ws">gui-demo</span><span class="rt">codex</span><span class="chip need"><span class="d"></span>Needs you</span></div>
+        <div class="doing act"><span class="g">⚠</span> Bash: <span style="color:var(--ink)">npm test</span></div>
+        <div class="snip">Wants to run the test suite before committing. Approve to continue.</div>
+        <div class="approve"><button class="ok">Approve</button><button class="no">Deny</button></div>
+      </div>
+
+      <div class="card">
+        <div class="chead"><span class="ws">site-rewrite</span><span class="rt">claude</span><span class="chip run"><span class="d"></span>Running</span></div>
+        <div class="doing"><span class="g">⚙</span> Read docs/HOWTO.md</div>
+        <div class="snip">“Auditing the getting-started copy against the published CLI flags.”</div>
+        <div class="foot"><span><b>7.1k</b> tok</span><span><b>$0.12</b></span><span><b>44s</b></span><span>turn 2</span></div>
+      </div>
+
+      <div class="card">
+        <div class="chead"><span class="ws">second-brain</span><span class="rt">claude</span><span class="chip idle"><span class="d"></span>Idle</span></div>
+        <div class="doing"><span class="g">✓</span> Done · 3 turns</div>
+        <div class="snip">“Summarized 4 daily notes into MEMORY.md and flagged 1 stale folder.”</div>
+        <div class="foot"><span><b>22.0k</b> tok</span><span><b>$0.53</b></span><span>ended 6m ago</span></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
