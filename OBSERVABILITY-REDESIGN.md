@@ -51,12 +51,30 @@ Claude and echo remain secondary runtimes. Rationale (verified this session):
 - **`codex exec --json` emits structured JSONL events** — every command, reasoning step,
   file change, and final message is a discrete typed item, not a text blob. This is the
   cure for the wall-of-text, at the source.
-- **Native approval + sandbox model** — `--sandbox {read-only|workspace-write|danger-full-access}`
-  × `--ask-for-approval {untrusted|on-request|on-failure|never}`. Exactly the user-controlled
-  approval we want; no need to re-platform Claude onto the Agent SDK.
-- **Programmatic surfaces** — `codex app-server` (experimental JSON-RPC; what the IDE
-  extension uses), `codex mcp-server` (stdio MCP), and `codex resume` for multi-turn.
+- **Native sandbox model** — `--sandbox {read-only|workspace-write|danger-full-access}` is
+  present on `codex exec`. The older plan assumed an `--ask-for-approval` exec flag, but
+  `codex-cli 0.139.0` does not expose that flag on `exec`; live approval must use a
+  protocol surface, not bare non-interactive exec.
+- **Programmatic surfaces** — `codex app-server`, `codex exec-server`, `codex remote-control`,
+  `codex mcp-server`, and `codex exec resume` all exist locally and are the approval/resume
+  spike candidates.
 - The Claude-Agent-SDK re-platform is **off the table**.
+
+### Local Codex protocol evidence (2026-06-16)
+
+Verified on this machine with `codex-cli 0.139.0`:
+
+| Command | Evidence | Decision impact |
+|---|---|---|
+| `codex exec --help` | Non-interactive runner; supports `--json`, `--sandbox read-only/workspace-write/danger-full-access`, `-C/--cd`, `--skip-git-repo-check`, `resume`, and `--output-schema`. If stdin is piped and a prompt is provided, stdin is appended. | Phase A uses `exec --json`; fixture captures must close stdin explicitly. |
+| `codex app-server --help` | Experimental app-server with `daemon`, `proxy`, `generate-ts`, `generate-json-schema`, `stdio://`, Unix socket, and websocket transports with auth options. | Candidate for GUI live approval and generated protocol bindings. |
+| `codex exec-server --help` | Experimental standalone exec-server over websocket or stdio, with optional remote registration. | Candidate for non-interactive execution with an out-of-band service boundary. |
+| `codex remote-control --help` | Starts/stops the app-server daemon with remote control enabled and can emit JSON. | Candidate control plane, not yet proven for approval request/response. |
+| `codex mcp-server --help` | Starts Codex as a stdio MCP server. | Candidate integration surface, but approval semantics still need proof. |
+
+Decision: `exec --json` is accepted for observability. Real mid-run Codex approval is not
+claimed until one protocol path proves how the GUI receives an approval request and sends
+allow/deny back.
 
 ---
 
@@ -158,11 +176,12 @@ of this is parse + emit, plus typing.
 **CodexRuntime** (`services/agents/base.py`) — replace today's
 `["codex","exec","--",prompt]` (plain text) + line-as-text `parse()` with:
 - `build_command`: `codex exec --json --skip-git-repo-check -C <cwd> --sandbox <mode>
-  --ask-for-approval <policy> [resume <thread_id>] -- <prompt>`.
+  -- <prompt>`.
 - `parse(line)`: JSON-decode each line; map lifecycle + item events → the new `AgentEvent`
   types per §4. Track `item.id` to correlate `started → updated → completed`. Capture
   `thread_id` for resume; map `turn.completed.usage` → the token/cost meter.
-- `multi_turn = True` via `codex resume <thread_id>` (replaces the current single-turn).
+- `multi_turn` remains disabled until the resume/protocol spike proves the exact command
+  shape and GUI state contract.
 
 **Manager** (`services/agents/manager.py`) — the existing turn lifecycle (send / `_run_turn`
 / subscribe / cancel / resume, and the turn-boundary gate diff) mostly stands. Add the
@@ -187,12 +206,12 @@ error`, with the always-expanded tool card) with composable components:
 ### 5c. Approval system (the centerpiece)
 
 **Live interception (keystone — resolve first, see §6).** `codex exec` is one-shot and
-non-interactive; mid-run approval likely needs **`codex app-server`** (JSON-RPC, bidirectional
-— surfaces approval requests and accepts allow/deny) or **`codex mcp-server`**, not bare
-`exec`. Decision: observability can ship on `exec --json`; **live approval depends on the
-app-server/proto investigation.** ACP (Agent Client Protocol, `agentclientprotocol.com`) is
-the reference vocabulary (`ToolCall.{title,kind,status}`, `PermissionOption.{optionId,name,
-kind}`) — target it.
+non-interactive; mid-run approval needs a bidirectional protocol surface, not bare `exec`.
+Candidate surfaces are **`codex app-server`**, **`codex exec-server`**, **`codex
+remote-control`**, and **`codex mcp-server`**. Decision: observability can ship on
+`exec --json`; **live approval depends on the protocol investigation.** ACP (Agent Client
+Protocol, `agentclientprotocol.com`) is the reference vocabulary (`ToolCall.{title,kind,status}`,
+`PermissionOption.{optionId,name,kind}`) — target it.
 
 **Policy engine** (backend, new module e.g. `services/approval.py`):
 - **Mode**: `manual | auto | yolo` (default **auto**).
@@ -219,15 +238,15 @@ has no mid-run gate).
 
 ## 6. Keystone open questions (resolve before/early in build)
 
-1. **Live-approval protocol** — spike `codex app-server` (and `mcp-server`): how does the GUI
-   receive an approval request mid-run and send allow/deny? Does it expose ACP? This decides
-   the backend integration shape for the approval half. (Observability via `exec --json` does
-   **not** depend on this.)
+1. **Live-approval protocol** — spike `codex app-server`, `exec-server`, `remote-control`,
+   and `mcp-server`: how does the GUI receive an approval request mid-run and send allow/deny?
+   Does any surface expose ACP-like vocabulary? This decides the backend integration shape for
+   the approval half. (Observability via `exec --json` does **not** depend on this.)
 2. **Reasoning streaming granularity** — does `exec --json` emit `item.updated` deltas for
    `reasoning` (needed for the live one-line ticker), or only `item.completed`? Capture a real
    fixture and confirm.
-3. **Resume semantics** under the chosen protocol (`codex resume <thread_id>` for `exec`, vs
-   app-server thread continuation).
+3. **Resume semantics** under the chosen protocol (`codex exec resume <thread_id>` for exec,
+   vs app-server or exec-server thread continuation).
 4. **Policy persistence location** — `~/.vivary-gui/` vs per-workspace `.vivary/`.
 
 ---

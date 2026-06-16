@@ -179,7 +179,7 @@ Evidence:
 
 ### EB-OBS-020 Codex approval protocol spike
 
-Status: pending  
+Status: completed
 Dependencies: EB-OBS-000  
 Acceptance criteria:
 
@@ -201,7 +201,19 @@ Test plan before edits:
 
 Evidence:
 
-- Pending.
+- Verified local CLI version: `codex-cli 0.139.0`.
+- `codex exec --help` confirms non-interactive execution, `--json`, sandbox modes,
+  `-C/--cd`, `--skip-git-repo-check`, `resume`, and stdin append behavior.
+- `codex app-server --help` confirms experimental app-server with daemon/proxy,
+  TypeScript/schema generation, stdio, Unix socket, and websocket transports.
+- `codex exec-server --help` confirms experimental standalone exec-server over websocket
+  or stdio, with remote registration options.
+- `codex remote-control --help` confirms start/stop of app-server daemon with remote
+  control enabled and optional JSON output.
+- `codex mcp-server --help` confirms stdio MCP server mode.
+- Updated `OBSERVABILITY-REDESIGN.md` to remove the stale `--ask-for-approval` exec
+  assumption and record the decision: Phase A uses `exec --json`; real mid-run approval
+  remains gated on a proven protocol request/response path.
 
 ### EB-OBS-030 Deterministic approval policy and backend API
 
@@ -330,10 +342,14 @@ deleting old evidence.
   - Parser tests: 6 passed.
   - Backend GUI tests: 26 passed, 1 warning.
   - `git diff --check`: passed.
+- 2026-06-16 EB-OBS-020:
+  - `codex --version`: `codex-cli 0.139.0`.
+  - `codex exec/app-server/exec-server/remote-control/mcp-server --help`: passed.
+  - `git diff --check`: passed.
 
 ## Handoff / Status For Other Agents
 
-- Current phase: EB-OBS-010 complete; next open story is EB-OBS-020 protocol spike.
+- Current phase: EB-OBS-020 complete; next open story is EB-OBS-030 approval policy/API.
 - Coordination setup is complete; observability implementation is owned by
   `C:\Users\jeffk\dev\vivary-GUI-obs-loop`.
 - Do not edit observability paths from the coordination tree.
