@@ -1,6 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApprovalCard, FileChangeReceipt, PlanRail, ReasoningBox, ToolPill } from './receipts'
+
+afterEach(() => cleanup())
 
 describe('chat receipts', () => {
   it('collapses tool output until expanded', () => {
@@ -53,5 +55,21 @@ describe('chat receipts', () => {
     expect(screen.getByText('Allow once')).toBeInTheDocument()
     expect(screen.getByText('Allow always')).toBeInTheDocument()
     expect(screen.getByText('Deny')).toBeInTheDocument()
+  })
+
+  it('sends scoped approval decisions and deny steering text', () => {
+    const onDecide = vi.fn()
+    render(<ApprovalCard
+      item={{ kind: 'approval', id: 'a1', actionKind: 'execute', risk: 'danger', command: 'npm test', options: [], status: 'pending' }}
+      onDecide={onDecide}
+    />)
+
+    fireEvent.change(screen.getByLabelText('Approval scope'), { target: { value: 'command' } })
+    fireEvent.click(screen.getByText('Allow always'))
+    expect(onDecide).toHaveBeenLastCalledWith('a1', 'allow_always', { scope: 'command', pattern: 'npm test', steering: '' })
+
+    fireEvent.change(screen.getByLabelText('Deny steering'), { target: { value: 'Use npm run test instead.' } })
+    fireEvent.click(screen.getByText('Deny'))
+    expect(onDecide).toHaveBeenLastCalledWith('a1', 'reject_once', { scope: 'command', pattern: 'npm test', steering: 'Use npm run test instead.' })
   })
 })

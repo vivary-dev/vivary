@@ -9,15 +9,17 @@ only when the session is ended.
 from __future__ import annotations
 
 import asyncio
+import os
 import secrets
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import gates
 from .. import approval
 from ..sandbox.local import LocalProvider, Sandbox
-from .base import RUNTIMES, AgentEvent, Runtime
+from .base import RUNTIMES, AgentEvent, Runtime, validate_tool_mode
 
 _SENTINEL = object()
 
@@ -46,6 +48,7 @@ class Session:
     runtime: str
     workspace_id: str
     cwd: Path
+    tool_mode: str = "read-only"
     sandbox: Sandbox | None = None
     agent_session_id: str | None = None   # the runtime's own conversation id (for resume)
     status: str = "idle"                  # idle | running | error | awaiting
@@ -57,7 +60,37 @@ class Session:
     _open_before: set[str] = field(default_factory=set)    # open-gate snapshot taken before the turn
 
     def summary(self) -> dict:
-        return {"id": self.id, "runtime": self.runtime, "workspace": self.workspace_id, "status": self.status}
+        return {
+            "id": self.id,
+            "runtime": self.runtime,
+            "workspace": self.workspace_id,
+            "status": self.status,
+            "tool_mode": self.tool_mode,
+        }
+
+
+def _agent_env(sess: Session) -> dict[str, str]:
+    """Environment inherited by the spawned agent and its sandbox commands."""
+    env = os.environ.copy()
+    python_dir = str(Path(sys.executable).resolve().parent)
+    path_key = "PATH"
+    old_path = env.get(path_key, "")
+    old_parts = [part for part in old_path.split(os.pathsep) if part]
+    existing = {part.casefold() for part in old_parts}
+    path_parts = [python_dir]
+    if python_dir.casefold() in existing:
+        path_parts.extend(part for part in old_parts if part.casefold() != python_dir.casefold())
+    else:
+        path_parts.extend(old_parts)
+    env[path_key] = os.pathsep.join(path_parts)
+    env.setdefault("PYTHONUTF8", "1")
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env["VIVARY_GUI_SESSION_ID"] = sess.id
+    env["VIVARY_GUI_WORKSPACE_ID"] = sess.workspace_id
+    env["VIVARY_GUI_SANDBOX_CWD"] = str(sess.cwd)
+    env["VIVARY_GUI_SANDBOX_ISOLATION"] = sess.sandbox.isolation if sess.sandbox else "none"
+    env["VIVARY_GUI_TOOL_MODE"] = sess.tool_mode
+    return env
 
 
 class Manager:
@@ -65,15 +98,29 @@ class Manager:
         self.sessions: dict[str, Session] = {}
         self.provider = LocalProvider()
 
-    def create(self, workspace_root: Path, workspace_id: str, runtime_name: str) -> str:
+    def create(
+        self,
+        workspace_root: Path,
+        workspace_id: str,
+        runtime_name: str,
+        tool_mode: str = "read-only",
+    ) -> str:
         rt: Runtime | None = RUNTIMES.get(runtime_name)
         if rt is None:
             raise KeyError(f"unknown runtime: {runtime_name}")
+        mode = validate_tool_mode(tool_mode)
         if not rt.available():
             raise RuntimeError(f"runtime '{runtime_name}' is not installed / on PATH")
         sid = secrets.token_hex(6)
         sandbox = self.provider.create(workspace_root, sid)
-        sess = Session(id=sid, runtime=runtime_name, workspace_id=workspace_id, cwd=sandbox.cwd, sandbox=sandbox)
+        sess = Session(
+            id=sid,
+            runtime=runtime_name,
+            workspace_id=workspace_id,
+            cwd=sandbox.cwd,
+            tool_mode=mode,
+            sandbox=sandbox,
+        )
         self.sessions[sid] = sess
         self._emit(sess, AgentEvent("status", "session created"))
         return sid
@@ -97,8 +144,9 @@ class Manager:
 
         resume = sess.agent_session_id if rt.multi_turn else None
         proc = await asyncio.create_subprocess_exec(
-            *rt.build_command(text, resume, sess.cwd),
+            *rt.build_command(text, resume, sess.cwd, sess.tool_mode),
             cwd=str(sess.cwd),
+            env=_agent_env(sess),
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -204,22 +252,25 @@ class Manager:
             raise ValueError("invalid approval decision")
         status = "approved" if decision.startswith("allow") else "rejected"
         saved_rule = None
+        rule_scope = scope if scope in {"command", "project", "global"} else "global"
         if decision in {"allow_always", "reject_always"}:
             pol = approval.load_policy()
             rule_decision = "allow" if decision == "allow_always" else "deny"
-            saved_rule = approval.add_rule(
-                pol,
-                pattern or approval.safe_prefix(steering),
-                rule_decision,  # type: ignore[arg-type]
-                scope if scope in {"command", "project", "global"} else "global",  # type: ignore[arg-type]
-                steering,
-            )
-            approval.save_policy(pol)
+            rule_pattern = pattern or approval.safe_prefix(steering)
+            if rule_pattern.strip() and rule_scope != "project":
+                saved_rule = approval.add_rule(
+                    pol,
+                    rule_pattern,
+                    rule_decision,  # type: ignore[arg-type]
+                    rule_scope,  # type: ignore[arg-type]
+                    steering,
+                )
+                approval.save_policy(pol)
         meta = {
             "id": approval_id,
             "status": status,
             "decision": decision,
-            "scope": scope,
+            "scope": rule_scope,
             "pattern": pattern,
             "steering": steering,
             "saved_rule": saved_rule,

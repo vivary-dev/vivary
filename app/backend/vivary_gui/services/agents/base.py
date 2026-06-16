@@ -30,6 +30,17 @@ class AgentEvent:
         return {"type": self.type, "text": self.text, "tool": self.tool, "meta": self.meta}
 
 
+DEFAULT_TOOL_MODE = "read-only"
+TOOL_MODES = {"read-only", "workspace-write"}
+
+
+def validate_tool_mode(tool_mode: str | None) -> str:
+    mode = (tool_mode or DEFAULT_TOOL_MODE).strip()
+    if mode not in TOOL_MODES:
+        raise ValueError("tool_mode must be read-only or workspace-write")
+    return mode
+
+
 class Runtime:
     name: str = "base"
     label: str = "Base"
@@ -39,7 +50,13 @@ class Runtime:
     def available(self) -> str | None:
         raise NotImplementedError
 
-    def build_command(self, prompt: str, resume: str | None = None, cwd: Path | None = None) -> list[str]:
+    def build_command(
+        self,
+        prompt: str,
+        resume: str | None = None,
+        cwd: Path | None = None,
+        tool_mode: str = DEFAULT_TOOL_MODE,
+    ) -> list[str]:
         raise NotImplementedError
 
     def parse(self, line: str) -> list[AgentEvent]:
@@ -92,7 +109,13 @@ class EchoRuntime(Runtime):
     def available(self) -> str | None:
         return sys.executable
 
-    def build_command(self, prompt: str, resume: str | None = None, cwd: Path | None = None) -> list[str]:
+    def build_command(
+        self,
+        prompt: str,
+        resume: str | None = None,
+        cwd: Path | None = None,
+        tool_mode: str = DEFAULT_TOOL_MODE,
+    ) -> list[str]:
         # Safe from flag-smuggling: Python doesn't treat args after the script path as
         # interpreter flags, and _echo_agent.py reads sys.argv[1] literally.
         return [sys.executable, str(Path(__file__).parent / "_echo_agent.py"), prompt]
@@ -117,7 +140,13 @@ class ClaudeCodeRuntime(Runtime):
     def available(self) -> str | None:
         return shutil.which("claude")
 
-    def build_command(self, prompt: str, resume: str | None = None, cwd: Path | None = None) -> list[str]:
+    def build_command(
+        self,
+        prompt: str,
+        resume: str | None = None,
+        cwd: Path | None = None,
+        tool_mode: str = DEFAULT_TOOL_MODE,
+    ) -> list[str]:
         exe = shutil.which("claude") or "claude"
         cmd = [exe, "-p", "--output-format", "stream-json", "--verbose",
                "--permission-mode", "acceptEdits"]
@@ -172,15 +201,25 @@ class CodexRuntime(Runtime):
     def available(self) -> str | None:
         return shutil.which("codex")
 
-    def build_command(self, prompt: str, resume: str | None = None, cwd: Path | None = None) -> list[str]:
+    def build_command(
+        self,
+        prompt: str,
+        resume: str | None = None,
+        cwd: Path | None = None,
+        tool_mode: str = DEFAULT_TOOL_MODE,
+    ) -> list[str]:
         exe = shutil.which("codex") or "codex"
+        sandbox = {
+            "read-only": "read-only",
+            "workspace-write": "workspace-write",
+        }[validate_tool_mode(tool_mode)]
         cmd = [
             exe,
             "exec",
             "--json",
             "--skip-git-repo-check",
             "--sandbox",
-            "read-only",
+            sandbox,
         ]
         if cwd:
             cmd += ["-C", str(cwd)]
@@ -239,7 +278,7 @@ _NETWORK_COMMAND = re.compile(r"\b(?:curl|wget|Invoke-WebRequest|iwr|npm\s+insta
 
 
 def _command_kind(command: str) -> str:
-    cmd = " ".join(command.split())
+    cmd = _classifiable_command(command)
     if _DELETE_COMMAND.search(cmd):
         return "delete"
     if _NETWORK_COMMAND.search(cmd):
@@ -249,6 +288,23 @@ def _command_kind(command: str) -> str:
     if _READ_COMMAND.search(cmd):
         return "read"
     return "execute"
+
+
+def _classifiable_command(command: str) -> str:
+    """Prefer the inner command when Codex wraps a shell call.
+
+    On Windows, Codex often emits commands as a full powershell.exe invocation:
+    `"C:\\...\\powershell.exe" -Command 'Get-Content README.md'`. The wrapper is
+    execution machinery; risk/color should be derived from the inner command.
+    """
+    cmd = " ".join(command.split())
+    marker = re.search(r"\s-(?:Command|c)\s+(.+)$", cmd, re.IGNORECASE)
+    if marker and re.search(r"(?:powershell|pwsh)(?:\.exe)?", cmd[: marker.start()], re.IGNORECASE):
+        inner = marker.group(1).strip()
+        if len(inner) >= 2 and inner[0] == inner[-1] and inner[0] in {"'", '"'}:
+            inner = inner[1:-1]
+        return inner
+    return cmd
 
 
 def _status_from_item(event_type: str, item: dict) -> str:
@@ -355,7 +411,7 @@ def _tool_label(kind: str, command: str) -> str:
 
 
 def _command_target(command: str) -> str:
-    parts = command.split()
+    parts = _classifiable_command(command).split()
     if not parts:
         return ""
     return " ".join(parts[:4]) + (" …" if len(parts) > 4 else "")
@@ -387,7 +443,13 @@ class FixtureRuntime(Runtime):
     def available(self) -> str | None:
         return sys.executable
 
-    def build_command(self, prompt: str, resume: str | None = None, cwd: Path | None = None) -> list[str]:
+    def build_command(
+        self,
+        prompt: str,
+        resume: str | None = None,
+        cwd: Path | None = None,
+        tool_mode: str = DEFAULT_TOOL_MODE,
+    ) -> list[str]:
         return [sys.executable, str(Path(__file__).parent / "_fixture_agent.py"), prompt]
 
     def parse(self, line: str) -> list[AgentEvent]:

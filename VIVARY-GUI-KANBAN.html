@@ -1,0 +1,997 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vivary GUI Kanban and Roadmap</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: oklch(97% 0.012 93);
+      --panel: oklch(99% 0.006 93);
+      --panel-2: oklch(94.5% 0.014 93);
+      --ink: oklch(22% 0.028 245);
+      --muted: oklch(47% 0.022 245);
+      --line: oklch(85% 0.018 93);
+      --green: oklch(57% 0.12 158);
+      --green-soft: oklch(93% 0.045 158);
+      --amber: oklch(67% 0.14 72);
+      --amber-soft: oklch(94% 0.055 72);
+      --red: oklch(57% 0.15 24);
+      --red-soft: oklch(94% 0.045 24);
+      --violet: oklch(55% 0.11 295);
+      --violet-soft: oklch(94% 0.04 295);
+      --cyan: oklch(58% 0.095 210);
+      --cyan-soft: oklch(93% 0.04 210);
+      --shadow: 0 1px 2px oklch(25% 0.02 245 / 0.08), 0 8px 24px oklch(25% 0.02 245 / 0.06);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.48;
+      letter-spacing: 0;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    code {
+      font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+      font-size: 0.92em;
+      background: oklch(92% 0.013 245);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 0.06rem 0.28rem;
+    }
+
+    .shell {
+      max-width: 1520px;
+      margin: 0 auto;
+      padding: 28px 22px 44px;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: start;
+      margin-bottom: 24px;
+    }
+
+    h1, h2, h3, h4 {
+      margin: 0;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      font-size: 2.25rem;
+      line-height: 1.08;
+      max-width: 980px;
+    }
+
+    h2 {
+      font-size: 1.42rem;
+      line-height: 1.18;
+      margin-bottom: 12px;
+    }
+
+    h3 {
+      font-size: 1rem;
+      line-height: 1.22;
+    }
+
+    h4 {
+      font-size: 0.86rem;
+      line-height: 1.22;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 7px;
+    }
+
+    p {
+      margin: 0;
+      max-width: 75ch;
+    }
+
+    .lede {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 1.04rem;
+      max-width: 82ch;
+    }
+
+    .snapshot {
+      min-width: 310px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      padding: 14px;
+    }
+
+    .snapshot dl {
+      display: grid;
+      grid-template-columns: 90px minmax(0, 1fr);
+      gap: 8px 12px;
+      margin: 0;
+    }
+
+    dt {
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+
+    dd {
+      margin: 0;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      padding: 10px 0 16px;
+      background: color-mix(in oklch, var(--bg) 88%, transparent);
+      backdrop-filter: blur(8px);
+    }
+
+    .nav a {
+      text-decoration: none;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 999px;
+      padding: 7px 11px;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .nav a:hover {
+      color: var(--ink);
+      border-color: oklch(70% 0.04 245);
+    }
+
+    .section {
+      margin-top: 28px;
+    }
+
+    .band {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .span-3 { grid-column: span 3; }
+    .span-4 { grid-column: span 4; }
+    .span-5 { grid-column: span 5; }
+    .span-6 { grid-column: span 6; }
+    .span-7 { grid-column: span 7; }
+    .span-8 { grid-column: span 8; }
+    .span-12 { grid-column: 1 / -1; }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 13px;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 1.15rem;
+      line-height: 1.2;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .tagrow {
+      display: flex;
+      gap: 7px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 0.78rem;
+      white-space: nowrap;
+    }
+
+    .tag.done { background: var(--green-soft); color: oklch(31% 0.085 158); border-color: oklch(79% 0.07 158); }
+    .tag.next { background: var(--cyan-soft); color: oklch(32% 0.07 210); border-color: oklch(78% 0.06 210); }
+    .tag.blocked { background: var(--red-soft); color: oklch(35% 0.095 24); border-color: oklch(80% 0.06 24); }
+    .tag.review { background: var(--amber-soft); color: oklch(38% 0.09 72); border-color: oklch(80% 0.08 72); }
+    .tag.future { background: var(--violet-soft); color: oklch(34% 0.075 295); border-color: oklch(80% 0.055 295); }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(250px, 1fr));
+      gap: 12px;
+      align-items: start;
+      overflow-x: auto;
+      padding-bottom: 8px;
+    }
+
+    .lane {
+      min-width: 250px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: color-mix(in oklch, var(--panel) 70%, var(--panel-2));
+      padding: 12px;
+    }
+
+    .lane-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .count {
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+
+    .card:last-child {
+      margin-bottom: 0;
+    }
+
+    .card h3 {
+      margin-bottom: 7px;
+    }
+
+    .card p {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .card ul, .band ul, .band ol {
+      margin: 9px 0 0;
+      padding-left: 18px;
+    }
+
+    .card li, .band li {
+      margin: 4px 0;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .module-list {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .module {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      padding: 13px;
+    }
+
+    .module h3 {
+      margin-bottom: 6px;
+    }
+
+    .module p {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 760px;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-weight: 650;
+      font-size: 0.82rem;
+      background: var(--panel-2);
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(160px, 1fr));
+      gap: 10px;
+    }
+
+    .step {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 12px;
+    }
+
+    .step b {
+      display: block;
+      margin-bottom: 5px;
+    }
+
+    .step span {
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .callout {
+      border: 1px solid oklch(78% 0.07 72);
+      background: var(--amber-soft);
+      border-radius: 8px;
+      padding: 13px;
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 5px;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .mono-block {
+      border: 1px solid var(--line);
+      background: oklch(91% 0.011 245);
+      border-radius: 8px;
+      padding: 12px;
+      overflow-x: auto;
+      font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+      font-size: 0.84rem;
+      line-height: 1.5;
+      white-space: pre;
+    }
+
+    @media (max-width: 1100px) {
+      .topbar, .split {
+        grid-template-columns: 1fr;
+      }
+      .module-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .flow {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .span-3, .span-4, .span-5, .span-6, .span-7, .span-8 {
+        grid-column: span 6;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .shell {
+        padding: 18px 12px 32px;
+      }
+      h1 {
+        font-size: 1.72rem;
+      }
+      .snapshot dl, .module-list, .flow {
+        grid-template-columns: 1fr;
+      }
+      .span-3, .span-4, .span-5, .span-6, .span-7, .span-8 {
+        grid-column: 1 / -1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar" id="top">
+      <div>
+        <div class="tagrow" aria-label="board labels">
+          <span class="tag review">human_test_pending</span>
+          <span class="tag next">control layer roadmap</span>
+          <span class="tag done">backend contracts verified</span>
+        </div>
+        <h1>Vivary GUI Kanban, Architecture Map, and Roadmap</h1>
+        <p class="lede">
+          This board is the current coordination view for the GUI redesign. It shows what is already built, what is blocked, what should happen next, and how the codebase is shaped so an agent or human can pick up the next slice without guessing.
+        </p>
+      </div>
+      <aside class="snapshot" aria-label="live branch snapshot">
+        <h2>Live Snapshot</h2>
+        <dl>
+          <dt>Branch</dt>
+          <dd><code>feat/gui-observability-loop</code></dd>
+          <dt>Worktree</dt>
+          <dd><code>C:\Users\jeffk\dev\vivary-GUI-obs-loop</code></dd>
+          <dt>Head</dt>
+          <dd><code>df29e39</code></dd>
+          <dt>State</dt>
+          <dd>Implementation worktree clean after backend toolchain slice.</dd>
+          <dt>Gate</dt>
+          <dd>No push, PR, merge, publish, install, or destructive ops without Jeff.</dd>
+        </dl>
+      </aside>
+    </header>
+
+    <nav class="nav" aria-label="page sections">
+      <a href="#current">Current State</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#flows">Flows</a>
+      <a href="#kanban">Kanban</a>
+      <a href="#epics">Epics</a>
+      <a href="#guidelines">Guidelines</a>
+      <a href="#verification">Verification</a>
+      <a href="#handoff">Handoff</a>
+    </nav>
+
+    <section class="section" id="current">
+      <h2>Current State</h2>
+      <div class="grid">
+        <div class="metric span-3">
+          <strong>Observability built</strong>
+          <span>Codex JSONL parser, typed events, receipts, plan rail, density control, approval card path.</span>
+        </div>
+        <div class="metric span-3">
+          <strong>Workspace control started</strong>
+          <span>Scaffold API, Codex tool mode contract, and Vivary toolchain env are in place.</span>
+        </div>
+        <div class="metric span-3">
+          <strong>Backend tests</strong>
+          <span><code>45 passed, 1 warning</code> after the latest sandbox toolchain slice.</span>
+        </div>
+        <div class="metric span-3">
+          <strong>Final gate</strong>
+          <span>Human app testing comes before PR, push, merge, or consolidation.</span>
+        </div>
+      </div>
+      <div class="band" style="margin-top: 12px;">
+        <h3>What changed recently</h3>
+        <ul>
+          <li><code>POST /api/workspaces/scaffold</code> creates a real Vivary workspace with <code>create_vivary.scaffold_workspace</code>, registers it, doctors it, and indexes it.</li>
+          <li><code>POST /api/sessions</code> accepts <code>tool_mode</code>. Default is <code>read-only</code>; explicit <code>workspace-write</code> maps to <code>codex exec --sandbox workspace-write</code>.</li>
+          <li>Spawned agents inherit an environment that can import <code>tropo</code>, <code>ozone</code>, <code>exo</code>, and <code>create_vivary</code> from the GUI backend toolchain.</li>
+          <li>The State panel temp-workspace warning was handled in fixture setup by making the Playwright workspace include <code>tropo.toml</code> and <code>STATE.md</code>.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section" id="architecture">
+      <h2>Codebase Modules</h2>
+      <div class="module-list">
+        <article class="module">
+          <h3><code>packages/tropo</code></h3>
+          <p>Typed knowledge graph engine. Reads <code>tropo.toml</code>, checks typed markdown, builds graph and blast views. This is how Vivary knows the workspace structure is not just loose files.</p>
+          <div class="tagrow"><span class="tag done">core CLI</span><span class="tag done">verified 46/46</span></div>
+        </article>
+        <article class="module">
+          <h3><code>packages/ozone</code></h3>
+          <p>Review and risk layer. Used for workspace review gates, conflict checks, and CI strict review. This is the quality bar above raw file changes.</p>
+          <div class="tagrow"><span class="tag done">review gate</span><span class="tag done">verified 7/7</span></div>
+        </article>
+        <article class="module">
+          <h3><code>packages/exo</code></h3>
+          <p>Orchestration board layer. Reads workspace state and renders the board-style view. It needs a valid Vivary root, which is why temp folders without <code>tropo.toml</code> warned.</p>
+          <div class="tagrow"><span class="tag done">board</span><span class="tag done">verified 4/4</span></div>
+        </article>
+        <article class="module">
+          <h3><code>packages/create-vivary</code></h3>
+          <p>Workspace scaffold and doctor. The GUI should use this as the source of truth for creating a real Vivary workspace, not invent a separate demo shape.</p>
+          <div class="tagrow"><span class="tag done">scaffold</span><span class="tag done">doctor</span></div>
+        </article>
+        <article class="module">
+          <h3><code>packages/strato</code></h3>
+          <p>Agent OS contract and workspace templates. The scaffold copies the agent operating files, skills, and state surfaces that make the workspace agent-native.</p>
+          <div class="tagrow"><span class="tag done">agent contract</span></div>
+        </article>
+        <article class="module">
+          <h3><code>app/backend</code></h3>
+          <p>FastAPI control plane. Owns local auth, workspace registry, search index, state, graph, gates, sessions, runtime process spawning, approval policy, and sandbox creation.</p>
+          <div class="tagrow"><span class="tag done">FastAPI</span><span class="tag next">sandbox APIs next</span></div>
+        </article>
+        <article class="module">
+          <h3><code>app/backend/vivary_gui/bridge</code></h3>
+          <p>Adapters into Vivary engines. <code>cli.py</code> runs published CLIs; <code>loader.py</code> calls <code>create-vivary</code> directly for doctor and scaffold.</p>
+          <div class="tagrow"><span class="tag done">decoupled engines</span></div>
+        </article>
+        <article class="module">
+          <h3><code>services/agents</code></h3>
+          <p>Runtime abstraction. <code>base.py</code> maps Codex JSONL into stable events. <code>manager.py</code> creates sessions, spawns processes, streams events, tracks approvals, and now builds the sandbox environment.</p>
+          <div class="tagrow"><span class="tag done">Codex cornerstone</span><span class="tag next">live protocol spike</span></div>
+        </article>
+        <article class="module">
+          <h3><code>services/sandbox</code></h3>
+          <p>Local isolation. Creates a per-session git worktree when the workspace is its own repo root, otherwise falls back to in-place execution. Future providers can share this contract.</p>
+          <div class="tagrow"><span class="tag next">status API</span><span class="tag next">diff API</span></div>
+        </article>
+        <article class="module">
+          <h3><code>app/frontend/src/chat</code></h3>
+          <p>Reducer and receipts. Turns event streams into answer-first chat, collapsed tool pills, reasoning receipts, file-change receipts, plan rail, density control, and approval card UI.</p>
+          <div class="tagrow"><span class="tag done">11 frontend tests</span></div>
+        </article>
+        <article class="module">
+          <h3><code>app/frontend/src/views</code></h3>
+          <p>Main panels: chat, files, state, graph, gates, dashboard. Frontend wiring for scaffold and tool mode belongs here, but it overlaps the active Meso worktree today.</p>
+          <div class="tagrow"><span class="tag blocked">Meso overlap</span></div>
+        </article>
+        <article class="module">
+          <h3><code>.github/workflows/ci.yml</code></h3>
+          <p>CI runs core suites, review gate, site build, and GUI job. GUI job covers backend tests, frontend tests, lint, build, Chromium install, and Playwright fixture E2E.</p>
+          <div class="tagrow"><span class="tag done">portable gate</span></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="flows">
+      <h2>How The System Works</h2>
+      <div class="split">
+        <div class="band">
+          <h3>Workspace lifecycle</h3>
+          <div class="flow" style="margin-top: 12px;">
+            <div class="step"><b>1. Create</b><span>GUI calls <code>/api/workspaces/scaffold</code>.</span></div>
+            <div class="step"><b>2. Scaffold</b><span>Backend calls <code>create_vivary.scaffold_workspace</code>.</span></div>
+            <div class="step"><b>3. Doctor</b><span><code>create-vivary</code> validates required files and graph health.</span></div>
+            <div class="step"><b>4. Register</b><span>Registry stores a pointer, not a copy of workspace files.</span></div>
+            <div class="step"><b>5. Index</b><span>FTS5 indexes markdown, excluding identity and secret files.</span></div>
+          </div>
+        </div>
+        <div class="band">
+          <h3>Agent turn lifecycle</h3>
+          <div class="flow" style="margin-top: 12px;">
+            <div class="step"><b>1. Session</b><span>Manager creates sandbox and stores runtime plus tool mode.</span></div>
+            <div class="step"><b>2. Env</b><span>Agent gets Vivary Python toolchain and sandbox metadata.</span></div>
+            <div class="step"><b>3. Run</b><span>Codex runs <code>exec --json</code> in the sandbox cwd.</span></div>
+            <div class="step"><b>4. Parse</b><span>JSONL maps to typed <code>AgentEvent</code> records.</span></div>
+            <div class="step"><b>5. Render</b><span>Frontend reducer renders answer-first chat and receipts.</span></div>
+          </div>
+        </div>
+        <div class="band">
+          <h3>Approval lifecycle</h3>
+          <ol>
+            <li>Policy classifies risk deterministically from command, tool kind, target, and protected paths.</li>
+            <li>Reads can auto-allow in auto mode; writes, execute, network, and delete ask by default.</li>
+            <li>Approval card lets Jeff choose allow once, allow always, reject once, or reject always with steering.</li>
+            <li>Global policy persists at <code>~/.vivary-gui/policy.json</code>. Project policy is future work.</li>
+            <li>Real mid-run Codex approval is still gated on protocol proof from app-server, exec-server, remote-control, or MCP.</li>
+          </ol>
+        </div>
+        <div class="band">
+          <h3>Tool creation lifecycle target</h3>
+          <ol>
+            <li>Model proposes a project-local tool under <code>.vivary/tools/&lt;tool-id&gt;/</code>.</li>
+            <li>Manifest declares id, title, entrypoint, args schema, risk, creator, version, and hash.</li>
+            <li>Backend discovers and validates the manifest. Path traversal and global mutation are rejected.</li>
+            <li>First run of a new or modified tool requires approval, with hash-bound trust.</li>
+            <li>Execution happens inside the session sandbox and emits normal tool receipts.</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="kanban">
+      <h2>Kanban Board</h2>
+      <div class="board" aria-label="kanban board">
+        <section class="lane">
+          <div class="lane-head"><h3>Done</h3><span class="count">12 cards</span></div>
+          <article class="card">
+            <div class="tagrow"><span class="tag done">EB-OBS-010</span></div>
+            <h3>Codex JSONL parser and live fixture</h3>
+            <p>Codex now runs through <code>exec --json</code>. Parser maps lifecycle, command, file-change, plan, reasoning, and final-message items into stable events.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag done">EB-OBS-030</span></div>
+            <h3>Deterministic approval policy</h3>
+            <p>Risk classifier, protected paths, allow/deny rules, circuit breaker, persistence, and session approval events are tested.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag done">EB-OBS-040</span></div>
+            <h3>Reducer-driven chat receipts</h3>
+            <p>Answer-first rendering, collapsed tool pills, reasoning box, file changes, plan rail, density, and approval card are implemented.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag done">EB-OBS-050</span></div>
+            <h3>GUI CI and fixture E2E</h3>
+            <p>CI job covers backend, frontend, lint, build, Playwright fixture E2E, and Chromium install.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag done">EB-WC-010</span></div>
+            <h3>Vivary workspace scaffold API</h3>
+            <p><code>/api/workspaces/scaffold</code> creates, doctors, registers, and indexes a full Vivary workspace without force overwrite.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag done">EB-WC-020</span></div>
+            <h3>Codex tool mode contract</h3>
+            <p>Sessions accept <code>read-only</code> or <code>workspace-write</code>; Codex maps the setting to its sandbox flag.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag done">EB-WC-030</span></div>
+            <h3>Vivary toolchain in sandbox env</h3>
+            <p>Agent process environment exposes backend Python and verified Vivary modules to commands running inside the sandbox.</p>
+          </article>
+        </section>
+
+        <section class="lane">
+          <div class="lane-head"><h3>Human Test</h3><span class="count">4 cards</span></div>
+          <article class="card">
+            <div class="tagrow"><span class="tag review">HUMAN-010</span></div>
+            <h3>Manual app acceptance pass</h3>
+            <p>Jeff runs the app and validates add/open workspace, fixture runtime, collapsed receipts, expanded output, reasoning, file changes, density, approvals, and a real Codex read-only prompt.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag review">OBS-070</span></div>
+            <h3>Thermonuclear review handoff</h3>
+            <p>Review is complete for parser, policy, fixture gating, token/WebSocket security, answer-first UI, CI portability, audit state, and docs. P2 items remain documented.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag review">APP-010</span></div>
+            <h3>Launch and observe locally</h3>
+            <p>Run backend and frontend, open the app, and confirm no State panel <code>no tropo.toml</code> warnings for valid Vivary workspaces.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag review">DECIDE-010</span></div>
+            <h3>Decide branch path</h3>
+            <p>After human acceptance, decide whether to continue on this worktree, port to standalone GUI repo, or consolidate through PR. No merge before that decision.</p>
+          </article>
+        </section>
+
+        <section class="lane">
+          <div class="lane-head"><h3>Ready Next</h3><span class="count">8 cards</span></div>
+          <article class="card">
+            <div class="tagrow"><span class="tag next">GUI-010</span></div>
+            <h3>Create Vivary workspace UI</h3>
+            <p>Add explicit create flow beside add-existing workspace. Use scaffold endpoint. Show preset, target path, doctor result, and index result.</p>
+            <ul>
+              <li>Backend contract exists.</li>
+              <li>Frontend blocked by Meso overlap until coordinated.</li>
+            </ul>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag next">GUI-020</span></div>
+            <h3>Tool mode selector</h3>
+            <p>Expose <code>read-only</code> and <code>workspace-write</code> in session creation with plain risk language. Default remains read-only.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag next">EB-WC-050</span></div>
+            <h3>Sandbox status and diff API</h3>
+            <p>Add session endpoints for cwd, isolation, dirty state, tool mode, toolchain availability, and normalized changed files.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag next">EB-WC-040</span></div>
+            <h3>Model-authored local tools</h3>
+            <p>Implement manifest discovery under <code>.vivary/tools</code>, hash-bound approvals, sandboxed execution, and local tool receipts.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag next">POLICY-020</span></div>
+            <h3>Approval settings surface</h3>
+            <p>Show current mode, saved rules, protected path behavior, and circuit breaker state. Let Jeff revoke or edit global rules.</p>
+          </article>
+        </section>
+
+        <section class="lane">
+          <div class="lane-head"><h3>Blocked</h3><span class="count">5 cards</span></div>
+          <article class="card">
+            <div class="tagrow"><span class="tag blocked">FRONTEND-OVERLAP</span></div>
+            <h3>Meso worktree owns frontend files</h3>
+            <p><code>App.tsx</code>, <code>api/client.ts</code>, <code>ChatPanel.tsx</code>, frontend tests, Playwright config, and package files are dirty in the Meso worktree.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag blocked">CODEX-APPROVAL</span></div>
+            <h3>Real mid-run Codex approval</h3>
+            <p><code>exec --json</code> is non-interactive. Need proven request/response evidence from app-server, exec-server, remote-control, or mcp-server.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag blocked">CODEX-RESUME</span></div>
+            <h3>Codex resume semantics</h3>
+            <p><code>codex exec resume</code> exists, but GUI resume remains disabled until state and command contract are proven.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag blocked">PROJECT-POLICY</span></div>
+            <h3>Project-scoped policy persistence</h3>
+            <p>Current persistence is global only. Project scope must wait for tested project context and storage rules.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag blocked">NO-INSTALLS</span></div>
+            <h3>Automatic installs</h3>
+            <p>Installing new packages or running dependency setup is a hard gate. The board treats missing tools as diagnosable evidence until Jeff approves installs.</p>
+          </article>
+        </section>
+
+        <section class="lane">
+          <div class="lane-head"><h3>Future</h3><span class="count">7 cards</span></div>
+          <article class="card">
+            <div class="tagrow"><span class="tag future">PROVIDERS-010</span></div>
+            <h3>Docker or cloud sandbox provider</h3>
+            <p>Keep <code>LocalProvider</code> contract stable so later providers can implement stronger isolation without changing session UI.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag future">TOOLS-020</span></div>
+            <h3>Tool registry and reuse</h3>
+            <p>Promote proven project-local tools into reusable Vivary tool templates only after hash, approval, and tests exist.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag future">DIFF-020</span></div>
+            <h3>Per-hunk approvals</h3>
+            <p>Let Jeff approve or reject file hunks before write lands. This depends on real protocol wiring or a controlled write gateway.</p>
+          </article>
+          <article class="card">
+            <div class="tagrow"><span class="tag future">STANDALONE-010</span></div>
+            <h3>Standalone GUI repo sync</h3>
+            <p>Port the accepted GUI branch into the standalone public repo only after human testing and branch alignment.</p>
+          </article>
+        </section>
+      </div>
+    </section>
+
+    <section class="section" id="epics">
+      <h2>Epic Breakdown</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Epic</th>
+              <th>Status</th>
+              <th>Goal</th>
+              <th>Done</th>
+              <th>Next acceptance criteria</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>EB-OBS</code> Observability and Approval</td>
+              <td><span class="tag review">human_test_pending</span></td>
+              <td>Replace flat Codex stream with typed events and answer-first UI.</td>
+              <td>Parser, fixtures, receipts, approval policy, approval cards, CI, review.</td>
+              <td>Jeff validates in the real app before any PR, push, merge, or consolidation.</td>
+            </tr>
+            <tr>
+              <td><code>EB-WC</code> Workspace Control</td>
+              <td><span class="tag next">in_progress</span></td>
+              <td>Make GUI control real Vivary workspaces, not demo folders.</td>
+              <td>Scaffold API, tool mode backend, agent Vivary toolchain env.</td>
+              <td>Wire frontend create flow and tool mode selector after Meso overlap is cleared.</td>
+            </tr>
+            <tr>
+              <td><code>EB-SBX</code> Sandbox Inspection</td>
+              <td><span class="tag next">ready</span></td>
+              <td>Make sandbox state inspectable before trusting write mode.</td>
+              <td>Local provider exists with git worktree fallback.</td>
+              <td>Status API, diff API, dirty-state UI, and file-change receipts stay consistent.</td>
+            </tr>
+            <tr>
+              <td><code>EB-TOOLS</code> Model-Authored Tools</td>
+              <td><span class="tag future">planned</span></td>
+              <td>Let the model create project-local tools safely inside the workspace.</td>
+              <td>Contract drafted in EBTASK.</td>
+              <td>Manifest parser, discovery, hash-bound approval, sandboxed execution, receipts.</td>
+            </tr>
+            <tr>
+              <td><code>EB-CODEX</code> Live Approval Protocol</td>
+              <td><span class="tag blocked">blocked</span></td>
+              <td>Receive and answer real Codex approval requests mid-run.</td>
+              <td>Protocol help evidence recorded for app-server, exec-server, remote-control, MCP.</td>
+              <td>Prove one request/response path with captured evidence before claiming support.</td>
+            </tr>
+            <tr>
+              <td><code>EB-HUMAN</code> Acceptance and Branch Gate</td>
+              <td><span class="tag review">pending</span></td>
+              <td>Move from agent-verified to human-accepted.</td>
+              <td>Full automated matrix passed earlier; latest backend matrix passed after WC-030.</td>
+              <td>Run local app script, record pass/fail notes, then choose branch path.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" id="guidelines">
+      <h2>Roadmap Guidelines</h2>
+      <div class="grid">
+        <div class="band span-6">
+          <h3>Engineering rules</h3>
+          <ul>
+            <li>Plan tests before edits. Each story has owned files, acceptance criteria, and verification evidence.</li>
+            <li>Default to backend contracts when frontend files are owned by another worktree.</li>
+            <li>Never hide capability behind optimistic UI. If the backend cannot prove it, the frontend must show it as gated.</li>
+            <li>Read-only is the default agent mode. Workspace-write is explicit and visible.</li>
+            <li>Missing tools are evidence to report, not a reason to install without approval.</li>
+          </ul>
+        </div>
+        <div class="band span-6">
+          <h3>Product rules</h3>
+          <ul>
+            <li>The GUI is the control layer. Vivary workspaces remain plain files on disk.</li>
+            <li>Use <code>create-vivary</code> for workspace shape. Do not create a second demo-only schema.</li>
+            <li>Every agent action should leave a receipt: command, risk, status, output, file change, or approval decision.</li>
+            <li>Keep answer-first chat. Receipts support trust; they do not bury the answer.</li>
+            <li>Human testing is a release gate, not a courtesy check after merge.</li>
+          </ul>
+        </div>
+        <div class="band span-6">
+          <h3>Tool-authoring rules</h3>
+          <ul>
+            <li>Tools live in <code>.vivary/tools/&lt;tool-id&gt;/</code> and declare a manifest.</li>
+            <li>Tool source cannot escape its directory. Reject absolute paths and <code>..</code> traversal.</li>
+            <li>No global installs, profile edits, PATH writes, or host-level mutation from generated tools.</li>
+            <li>Trust binds to tool hash plus scope. Editing a tool invalidates prior allow-always approval.</li>
+            <li>Generated tool execution uses the same sandbox env as agent turns.</li>
+          </ul>
+        </div>
+        <div class="band span-6">
+          <h3>Branch and collaboration rules</h3>
+          <ul>
+            <li>Current implementation worktree is <code>vivary-GUI-obs-loop</code>; original <code>vivary-GUI</code> remains coordination/reference.</li>
+            <li>Do not edit files dirty in the Meso worktree unless the owner coordinates first.</li>
+            <li>Checkpoint locally after verified slices. Do not push, PR, merge, publish, or consolidate without Jeff.</li>
+            <li>Record stale claims as bugs. Docs and roadmaps must match implemented behavior.</li>
+            <li>Stop at hard gates instead of batching them for later.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="verification">
+      <h2>Verification Matrix</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Check</th>
+              <th>Latest known result</th>
+              <th>When to run</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Backend GUI tests</td>
+              <td><code>45 passed, 1 warning</code></td>
+              <td>Every backend story</td>
+              <td>Warning is existing Starlette/httpx deprecation noise.</td>
+            </tr>
+            <tr>
+              <td>Frontend unit tests</td>
+              <td><code>11 passed</code> in prior full matrix</td>
+              <td>Every frontend receipt or UI story</td>
+              <td>Run from <code>app/frontend</code>.</td>
+            </tr>
+            <tr>
+              <td>Frontend lint and build</td>
+              <td>Passed in prior full matrix</td>
+              <td>Any frontend or shared package change</td>
+              <td>Also catches generated Playwright output if ignore rules drift.</td>
+            </tr>
+            <tr>
+              <td>Playwright fixture E2E</td>
+              <td><code>1 passed</code> in prior full matrix</td>
+              <td>UI flow, runtime, workspace, or E2E harness changes</td>
+              <td>Fixture runtime must stay gated by <code>VIVARY_GUI_ENABLE_FIXTURE_RUNTIME=1</code>.</td>
+            </tr>
+            <tr>
+              <td><code>npm audit</code></td>
+              <td><code>0 vulnerabilities</code> in prior full matrix</td>
+              <td>Dependency or package-lock changes</td>
+              <td>No new installs without approval.</td>
+            </tr>
+            <tr>
+              <td>Original Vivary suites</td>
+              <td>All passed in thermonuclear review</td>
+              <td>When core packages or scaffold behavior are touched</td>
+              <td>Includes tropo, ozone, exo, create-vivary, launcher, assets parity, and strict tropo check.</td>
+            </tr>
+            <tr>
+              <td><code>git diff --check</code></td>
+              <td>Passed after latest HTML-board preflight</td>
+              <td>Every story</td>
+              <td>Run before commit and before handoff.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="band" style="margin-top: 12px;">
+        <h3>Useful commands</h3>
+        <div class="mono-block">app\backend\.venv\Scripts\python.exe -m pytest -q app\backend\vivary_gui\tests
+cd app\frontend; npm run test
+cd app\frontend; npm run lint
+cd app\frontend; npm run build
+cd app\frontend; npm run e2e
+cd app\frontend; npm audit
+git diff --check</div>
+      </div>
+    </section>
+
+    <section class="section" id="handoff">
+      <h2>Next Exact Slices</h2>
+      <div class="grid">
+        <div class="band span-4">
+          <h3>Slice A: Sandbox Status API</h3>
+          <p>Best next backend-only slice if frontend overlap remains. Add <code>GET /api/sessions/{sid}/sandbox</code> and tests.</p>
+          <ul>
+            <li>Owned files: sessions router, manager or sandbox service, backend tests.</li>
+            <li>Evidence: backend tests, diff hygiene.</li>
+            <li>Value: Jeff can inspect whether workspace-write touched anything.</li>
+          </ul>
+        </div>
+        <div class="band span-4">
+          <h3>Slice B: Create Workspace UI</h3>
+          <p>Best next product slice once Meso overlap is cleared. Add a create flow that uses the scaffold API.</p>
+          <ul>
+            <li>Owned files: <code>App.tsx</code>, <code>api/client.ts</code>, frontend tests, E2E.</li>
+            <li>Evidence: frontend tests, lint, build, E2E.</li>
+            <li>Value: temp folders become real Vivary workspaces from first click.</li>
+          </ul>
+        </div>
+        <div class="band span-4">
+          <h3>Slice C: Local Tool Manifest</h3>
+          <p>Best next autonomy slice. Implement manifest discovery before execution. Do not run model-authored tools until approval policy is wired.</p>
+          <ul>
+            <li>Owned files: new tool service, policy tests, backend tests, docs.</li>
+            <li>Evidence: parser, traversal rejection, hash behavior, no global mutation.</li>
+            <li>Value: model can create reusable project-local capabilities safely.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout" style="margin-top: 12px;">
+        <strong>Recommended order</strong>
+        <p>Run Slice A first if another agent still owns frontend files. Run Slice B first if the Meso overlap is cleared and Jeff wants a visible app improvement. Run Slice C only after the sandbox status surface exists, because generated tools need inspection and approval evidence.</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

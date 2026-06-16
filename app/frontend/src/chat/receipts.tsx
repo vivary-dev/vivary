@@ -140,7 +140,6 @@ export function ApprovalCard({
           <div style={{ display: 'flex', gap: 8 }}>
             <select value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Approval scope" style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.read, borderRadius: 6, fontSize: 12, padding: '5px 7px' }}>
               <option value="command">command</option>
-              <option value="project">project</option>
               <option value="global">global</option>
             </select>
             <input value={steering} onChange={(e) => setSteering(e.target.value)} aria-label="Deny steering" placeholder="Deny note or steering..." style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, color: C.read, borderRadius: 6, fontSize: 12, padding: '5px 7px' }} />

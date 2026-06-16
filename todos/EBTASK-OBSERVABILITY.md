@@ -1,8 +1,8 @@
 # EBTASK-OBSERVABILITY
 
-Epic: Vivary GUI Observability + Approval Redesign  
-Status: in_progress  
-Branch baseline: `feat/gui` at `1c68440`  
+Epic: Vivary GUI Observability + Approval Redesign
+Status: human_test_pending
+Branch baseline: `feat/gui` at `1c68440`
 Coordination worktree: `C:\Users\jeffk\dev\vivary-GUI`  
 Implementation worktree: `C:\Users\jeffk\dev\vivary-GUI-obs-loop`  
 Implementation branch: `feat/gui-observability-loop`  
@@ -90,7 +90,7 @@ Known baseline gap:
 | EB-OBS-010 | main agent | implementation | `app/backend/vivary_gui/services/agents/base.py`, `app/backend/vivary_gui/tests/test_codex_runtime.py`, `app/backend/vivary_gui/tests/fixtures/` |
 | EB-OBS-020 | main agent | implementation | `OBSERVABILITY-REDESIGN.md`, `todos/EBTASK-OBSERVABILITY.md` |
 | EB-OBS-030 | main agent | implementation | `app/backend/vivary_gui/services/approval.py`, `app/backend/vivary_gui/services/agents/manager.py`, `app/backend/vivary_gui/routers/sessions.py`, `app/backend/vivary_gui/config.py`, `app/backend/vivary_gui/tests/test_approval_policy.py` |
-| EB-OBS-040 | main agent | implementation | `app/frontend/src/chat/`, `app/frontend/src/views/ChatPanel.tsx`, `app/frontend/src/api/client.ts` |
+| EB-OBS-040 | main agent | implementation | `app/frontend/src/chat/`, `app/frontend/src/views/ChatPanel.tsx`, `app/frontend/src/api/client.ts`, lint-only compatibility fixes in `app/frontend/src/views/GraphPanel.tsx` and `app/frontend/src/views/StatePanel.tsx` |
 | EB-OBS-050 | main agent | implementation | `.github/workflows/ci.yml`, `.gitignore`, `app/frontend/package.json`, `app/frontend/package-lock.json`, `app/frontend/vite.config.ts`, `app/frontend/playwright.config.ts`, `app/frontend/e2e/`, `app/frontend/scripts/`, `app/frontend/src/test/`, `app/backend/pyproject.toml`, `app/backend/vivary_gui/services/agents/_fixture_agent.py` |
 | EB-OBS-060 | main agent | implementation | `OBSERVABILITY-REDESIGN.md`, `OBSERVABILITY-ATLAS.html` |
 | EB-OBS-070 | main agent | implementation | Review notes in this ledger plus P0/P1 fixes in owned files above |
@@ -101,7 +101,7 @@ Other agents: claim a disjoint story/path range in this table before editing.
 
 ### EB-OBS-000 Coordination checkpoint and worktree setup
 
-Status: completed  
+Status: completed
 Dependencies: none  
 Acceptance criteria:
 
@@ -134,7 +134,7 @@ Evidence:
 
 ### EB-OBS-010 Codex exec JSON parser and live fixture evidence
 
-Status: pending  
+Status: completed
 Dependencies: EB-OBS-000  
 Acceptance criteria:
 
@@ -154,11 +154,32 @@ Test plan before edits:
 
 Evidence:
 
-- Pending.
+- Captured real read-only Codex JSONL fixture:
+  `app/backend/vivary_gui/tests/fixtures/codex_jsonl_live_readonly.jsonl`.
+- First capture attempt timed out after 180s because Codex waited for stdin; process tree
+  was identified and terminated (`node` 37256, `codex` 7592, `node_repl` 39316).
+- Successful capture used an empty PowerShell pipeline to close stdin. Command exited 0,
+  wrote 12,310 bytes, and emitted `thread.started`, `turn.started`, command execution
+  item events, agent messages, and `turn.completed` usage.
+- Live fixture did not emit `reasoning` items, so reasoning delta granularity remains
+  inconclusive for real Codex runs. Synthetic fixture still covers `item.updated`
+  reasoning behavior.
+- Fixed parser command classification for Windows Codex shell wrappers such as
+  `powershell.exe -Command 'Get-Content README.md'`, so read-only wrapped commands render
+  as read receipts instead of danger/execute receipts.
+- Added live fixture parser test for Windows read commands, final answer text, usage, and
+  absence of file changes.
+- Verification:
+  - `PYTHONPATH=C:\Users\jeffk\dev\vivary-GUI-obs-loop\app\backend`
+    `C:\Users\jeffk\dev\vivary-GUI\app\backend\.venv\Scripts\python.exe -m pytest -q app\backend\vivary_gui\tests\test_codex_runtime.py`
+    -> 6 passed.
+  - Same Python/PYTHONPATH with `-m pytest -q app\backend\vivary_gui\tests`
+    -> 26 passed, 1 warning.
+  - `git diff --check` -> passed.
 
 ### EB-OBS-020 Codex approval protocol spike
 
-Status: pending  
+Status: completed
 Dependencies: EB-OBS-000  
 Acceptance criteria:
 
@@ -180,11 +201,23 @@ Test plan before edits:
 
 Evidence:
 
-- Pending.
+- Verified local CLI version: `codex-cli 0.139.0`.
+- `codex exec --help` confirms non-interactive execution, `--json`, sandbox modes,
+  `-C/--cd`, `--skip-git-repo-check`, `resume`, and stdin append behavior.
+- `codex app-server --help` confirms experimental app-server with daemon/proxy,
+  TypeScript/schema generation, stdio, Unix socket, and websocket transports.
+- `codex exec-server --help` confirms experimental standalone exec-server over websocket
+  or stdio, with remote registration options.
+- `codex remote-control --help` confirms start/stop of app-server daemon with remote
+  control enabled and optional JSON output.
+- `codex mcp-server --help` confirms stdio MCP server mode.
+- Updated `OBSERVABILITY-REDESIGN.md` to remove the stale `--ask-for-approval` exec
+  assumption and record the decision: Phase A uses `exec --json`; real mid-run approval
+  remains gated on a proven protocol request/response path.
 
 ### EB-OBS-030 Deterministic approval policy and backend API
 
-Status: pending  
+Status: completed
 Dependencies: EB-OBS-000  
 Acceptance criteria:
 
@@ -205,11 +238,22 @@ Test plan before edits:
 
 Evidence:
 
-- Pending.
+- Hardened approval classification to inspect the inner command of PowerShell wrappers.
+- Protected path detection now treats any dotfile/dot-directory segment as protected,
+  including `.env.local`, `.github/*`, and nested dotfiles.
+- Rule matching now normalizes whitespace and ignores empty patterns.
+- Policy save creates the policy parent directory when needed.
+- `allow_always` / `reject_always` manager decisions persist only non-empty rule patterns.
+- Added manager-level approval test proving persisted rule metadata and emitted
+  `approval_request` status updates.
+- Verification:
+  - Approval tests: 10 passed.
+  - Backend GUI tests: 30 passed, 1 warning.
+  - `git diff --check`: passed.
 
 ### EB-OBS-040 Reducer-driven chat UI receipts and density control
 
-Status: pending  
+Status: completed
 Dependencies: EB-OBS-000  
 Acceptance criteria:
 
@@ -229,11 +273,25 @@ Test plan before edits:
 
 Evidence:
 
-- Pending.
+- Added reducer coverage proving `approval_request` status updates preserve the original
+  approval action kind, risk, and command context.
+- Added receipt coverage proving ApprovalCard sends scoped `allow_always` decisions and
+  deny steering text.
+- Added test cleanup between React receipt tests to avoid stale approval cards leaking
+  across DOM assertions.
+- Applied the existing cross-worktree lint hygiene fix in `GraphPanel.tsx` and
+  `StatePanel.tsx` by removing synchronous state resets from effects. The hunks match
+  the dirty coordination and Meso worktrees exactly, so this is compatibility cleanup
+  rather than divergent feature work.
+- Verification:
+  - `npm run test` -> 2 files passed, 11 tests passed.
+  - `npm run lint` -> passed.
+  - `npm run build` -> passed.
+  - `git diff --check` -> passed.
 
 ### EB-OBS-050 Test harness and GUI CI job
 
-Status: pending  
+Status: completed
 Dependencies: EB-OBS-000  
 Acceptance criteria:
 
@@ -253,11 +311,26 @@ Test plan before edits:
 
 Evidence:
 
-- Pending.
+- Worktree audit found Meso dirty/untracked files overlapping several harness paths
+  (`.gitignore`, frontend package files, Playwright config, E2E scripts, and test
+  setup). This story was kept verification-only; no tracked harness source was edited.
+- Reviewed `.github/workflows/ci.yml`: GUI job installs backend dev extras, runs
+  backend tests, frontend tests, lint, build, installs Chromium, and runs fixture E2E.
+- Reviewed fixture runtime gating: `FixtureRuntime` is appended only when
+  `VIVARY_GUI_ENABLE_FIXTURE_RUNTIME=1`, and the Playwright web server sets that env
+  only for E2E.
+- Added an ignored local junction `app/backend/.venv` pointing to the coordination
+  venv so the worktree-local E2E backend launcher uses the verified backend
+  environment without a dependency install.
+- Verification:
+  - `npm run e2e` -> 1 passed. Playwright emitted a nonfatal Vite WebSocket proxy
+    `ECONNABORTED` during shutdown after the test passed.
+  - `npm audit` -> 0 vulnerabilities.
+  - `git diff --check` -> passed.
 
 ### EB-OBS-060 Canonical live spec update
 
-Status: pending  
+Status: completed
 Dependencies: EB-OBS-010, EB-OBS-020, EB-OBS-030, EB-OBS-040, EB-OBS-050  
 Acceptance criteria:
 
@@ -274,11 +347,23 @@ Test plan before edits:
 
 Evidence:
 
-- Pending.
+- Updated `OBSERVABILITY-REDESIGN.md` from a future plan into the canonical live spec.
+- Added live branch/worktree status, stable `AgentEvent` contract, implemented surfaces,
+  gated/non-claimed surfaces, protocol evidence, verification evidence, and human final
+  test gate.
+- Marked real mid-run Codex approval, Codex resume, real reasoning delta granularity,
+  project policy persistence, and policy settings UI as not yet claimed.
+- Updated `OBSERVABILITY-ATLAS.html` to identify it as an archived visual map and point
+  future readers to `OBSERVABILITY-REDESIGN.md` as the live source of truth.
+- Cleaned high-risk stale atlas claims that still described Phase A as future work.
+- Verification:
+  - Stale-claim scan for obsolete phrases (`Nothing here is implemented yet`, `untracked`,
+    `you'll replace`, future Phase A wording, and similar) -> no matches.
+  - `git diff --check` -> passed.
 
 ### EB-OBS-070 Thermonuclear review, P0/P1 fixes, and human test handoff
 
-Status: pending  
+Status: completed
 Dependencies: EB-OBS-060  
 Acceptance criteria:
 
@@ -298,22 +383,130 @@ Test plan before edits:
 
 Evidence:
 
-- Pending.
+- Review finding P1 fixed: protected-path detection previously depended on structured
+  `target` / `paths`. Commands such as `Get-Content .env.local` without a target could
+  be classified as read. `services/approval.py` now extracts command-token path
+  candidates, including PowerShell inner commands, before allowing reads. Regression
+  coverage added.
+- Review finding P1 fixed: `scope: "project"` could be saved in the global policy file
+  without project context, creating broader trust than the label implied. Project-scope
+  rules are now inert in global evaluation, project-scope `allow_always` does not write
+  a global rule, and the active UI selector exposes only command/global scopes until a
+  tested project-policy story exists.
+- Review finding fixed: the live Codex JSONL fixture was CRLF-captured and failed
+  branch-level `git diff --check`; fixture line endings were normalized to LF.
+- T3 preview was unavailable (`Auth required` from `preview_status` and `preview_open`).
+  Browser-level visual QA was completed with the repo Playwright browser against live
+  preview servers instead.
+- Visual QA evidence:
+  - Fixture-enabled backend on `127.0.0.1:18767`, PID 23244.
+  - Frontend on `127.0.0.1:15177`, PID 38796.
+  - Playwright manual flow added a temp workspace, selected Fixture runtime, sent
+    `approval proof`, confirmed tool output hidden before expand, expanded read output,
+    approved approval card, selected Compact density, and captured
+    `%TEMP%\vivary-gui-obs-preview\visual-pass.png`.
+  - Console errors: none.
+- Full verification matrix:
+  - Backend GUI tests:
+    `PYTHONPATH=C:\Users\jeffk\dev\vivary-GUI-obs-loop\app\backend`
+    `C:\Users\jeffk\dev\vivary-GUI\app\backend\.venv\Scripts\python.exe -m pytest -q app\backend\vivary_gui\tests`
+    -> 33 passed, 1 warning.
+  - Frontend unit tests: `npm run test` -> 2 files passed, 11 tests passed.
+  - Frontend lint: `npm run lint` -> passed.
+  - Frontend build: `npm run build` -> passed.
+  - Frontend audit: `npm audit` -> 0 vulnerabilities.
+  - Playwright fixture E2E: `npm run e2e` -> 1 passed.
+  - Diff hygiene: `git diff --check` and `git diff --check 1c68440` -> passed.
+  - Original Vivary suites:
+    - `python packages\tropo\tests\test_tropo.py` -> 46/46 passed.
+    - `python packages\ozone\tests\test_ozone.py` -> 7/7 passed.
+    - `python packages\exo\tests\test_exo.py` -> 4/4 passed.
+    - `python packages\create-vivary\tests\test_create_vivary.py` -> 11 tests passed.
+    - `python packages\create-vivary\tests\test_assets_parity.py` -> 2/2 passed.
+    - `node packages\create-vivary\tests\test_npm_launcher.js` -> 7 launcher tests passed.
+    - `python packages\tropo\tropo.py check --root packages\tropo\examples\vault` -> 0 errors, 0 warnings.
+- Remaining P2 / gated items:
+  - Real mid-run Codex approval is not wired; it remains blocked on protocol
+    request/response evidence.
+  - Real Codex reasoning streaming granularity remains inconclusive; live fixture emitted
+    no `reasoning` items.
+  - Project-scoped policy persistence and full policy settings UI are future tested
+    stories.
+  - Existing Meso worktree has dirty overlapping harness/UI files; no consolidation
+    should happen until Jeff/agents coordinate branches.
+- Follow-up after human visual review:
+  - Observed State panel warnings (`exo board` / `ozone review`: no `tropo.toml`) came
+    from the temp observability fixture workspace, not the chat observability pipeline.
+  - Updated Playwright fixture workspace setup to include `tropo.toml` and `STATE.md`,
+    and asserted the page does not show `no tropo.toml`.
+  - Added ESLint global ignores for Playwright/Vite output folders so lint remains
+    stable after E2E generates ignored artifacts.
+  - Verification: `npm run e2e` -> 1 passed; `npm run lint` -> passed after ignore fix;
+    `npm run test` -> 11 passed; `npm run build` -> passed; `git diff --check` -> passed.
+  - Manual browser rerun against `http://127.0.0.1:15177` with a valid temp fixture
+    workspace found `noTropoCount: 0`, no console errors, and saved
+    `%TEMP%\vivary-gui-obs-preview\valid-state-pass.png`.
 
 ## Last Verified Matrix
 
 See baseline table above. Future ticks must append newer evidence here instead of
 deleting old evidence.
 
+- 2026-06-16 EB-OBS-010:
+  - Parser tests: 6 passed.
+  - Backend GUI tests: 26 passed, 1 warning.
+  - `git diff --check`: passed.
+- 2026-06-16 EB-OBS-020:
+  - `codex --version`: `codex-cli 0.139.0`.
+  - `codex exec/app-server/exec-server/remote-control/mcp-server --help`: passed.
+  - `git diff --check`: passed.
+- 2026-06-16 EB-OBS-030:
+  - Approval policy tests: 10 passed.
+  - Backend GUI tests: 30 passed, 1 warning.
+  - `git diff --check`: passed.
+- 2026-06-16 EB-OBS-040:
+  - Frontend tests: 2 files passed, 11 tests passed.
+  - Frontend lint: passed.
+  - Frontend build: passed.
+  - `git diff --check`: passed.
+- 2026-06-16 EB-OBS-050:
+  - Playwright fixture E2E: 1 passed.
+  - `npm audit`: 0 vulnerabilities.
+  - `git diff --check`: passed.
+- 2026-06-16 EB-OBS-060:
+  - Canonical spec stale-claim scan: no high-risk matches.
+  - `git diff --check`: passed.
+- 2026-06-16 EB-OBS-070:
+  - Backend GUI tests: 33 passed, 1 warning.
+  - Frontend tests: 2 files passed, 11 tests passed.
+  - Frontend lint/build: passed.
+  - `npm audit`: 0 vulnerabilities.
+  - Playwright fixture E2E: 1 passed.
+  - Visual Playwright pass: passed, no console errors.
+  - Original Vivary suites: tropo 46/46, ozone 7/7, exo 4/4, create-vivary 11 passed,
+    assets parity 2/2, npm launcher 7/7, tropo check clean.
+  - `git diff --check` and `git diff --check 1c68440`: passed.
+- 2026-06-16 EB-OBS-070 follow-up:
+  - Fixture State warnings fixed in E2E fixture setup.
+  - E2E 1 passed; lint passed; frontend tests 11 passed; build passed; diff hygiene passed.
+  - Manual browser rerun: no `no tropo.toml` warning and no console errors.
+
 ## Handoff / Status For Other Agents
 
-- Current phase: setting up loop-safe coordination.
+- Current phase: EB-OBS-070 complete; epic is `human_test_pending`.
 - Coordination setup is complete; observability implementation is owned by
   `C:\Users\jeffk\dev\vivary-GUI-obs-loop`.
 - Do not edit observability paths from the coordination tree.
 - `.claude/settings.local.json` and `MESO-CANVAS-PLAN.md` are explicitly out of scope.
 - The Meso worktree and Meso files are out of scope for this epic.
+- Preview servers for human testing are currently running:
+  - Frontend: `http://127.0.0.1:15177`
+  - Backend: `http://127.0.0.1:18767`
+  - Fixture runtime is enabled for this preview only.
 
 ## Blockers
 
-- None yet.
+- Hard gate reached: human app testing is required before PR, push, merge, or branch
+  consolidation.
+- T3 preview browser is unavailable in this session due `Auth required`; Playwright was
+  used for browser verification.

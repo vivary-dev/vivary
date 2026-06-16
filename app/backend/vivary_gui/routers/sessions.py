@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api", tags=["sessions"], dependencies=[Depends(requi
 class CreateSession(BaseModel):
     workspace: str
     runtime: str
+    tool_mode: str = "read-only"
 
 
 class SendMessage(BaseModel):
@@ -56,8 +57,10 @@ async def create_session(body: CreateSession) -> dict:
     if not ws:
         raise HTTPException(404, "workspace not found")
     try:
-        sid = manager.create(Path(ws["path"]), body.workspace, body.runtime)
+        sid = manager.create(Path(ws["path"]), body.workspace, body.runtime, body.tool_mode)
     except KeyError as exc:
+        raise HTTPException(400, str(exc))
+    except ValueError as exc:
         raise HTTPException(400, str(exc))
     except RuntimeError as exc:
         raise HTTPException(409, str(exc))
