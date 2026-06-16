@@ -2,7 +2,7 @@
 
 Epic: Vivary GUI Observability + Approval Redesign  
 Status: in_progress  
-Branch baseline: `feat/gui` at `ddc84a6`  
+Branch baseline: `feat/gui` at `1c68440`  
 Coordination worktree: `C:\Users\jeffk\dev\vivary-GUI`  
 Implementation worktree: `C:\Users\jeffk\dev\vivary-GUI-obs-loop`  
 Implementation branch: `feat/gui-observability-loop`  
@@ -101,7 +101,7 @@ Other agents: claim a disjoint story/path range in this table before editing.
 
 ### EB-OBS-000 Coordination checkpoint and worktree setup
 
-Status: in_progress  
+Status: completed  
 Dependencies: none  
 Acceptance criteria:
 
@@ -120,7 +120,17 @@ Test plan before edits:
 
 Evidence:
 
-- Pending.
+- Created `todos/EBTASK-OBSERVABILITY.md` before implementation edits.
+- Created local no-push checkpoint commit `1c68440` on `feat/gui`.
+- Checkpoint deliberately excluded `.claude/settings.local.json`, `MESO-CANVAS-PLAN.md`,
+  Meso files, and unrelated `GraphPanel` / `StatePanel` edits from the coordination tree.
+- Created implementation worktree `C:\Users\jeffk\dev\vivary-GUI-obs-loop` on branch
+  `feat/gui-observability-loop` at `1c68440`.
+- Worktree audit after setup:
+  - `C:\Users\jeffk\dev\vivary-GUI` on `feat/gui`
+  - `C:\Users\jeffk\dev\vivary-GUI-meso` on `feat/meso-canvas`
+  - `C:\Users\jeffk\dev\vivary-GUI-obs-loop` on `feat/gui-observability-loop`
+  - no overlapping dirty observability paths in the implementation worktree.
 
 ### EB-OBS-010 Codex exec JSON parser and live fixture evidence
 
@@ -298,8 +308,11 @@ deleting old evidence.
 ## Handoff / Status For Other Agents
 
 - Current phase: setting up loop-safe coordination.
-- Do not edit observability paths until the checkpoint/worktree setup is complete.
+- Coordination setup is complete; observability implementation is owned by
+  `C:\Users\jeffk\dev\vivary-GUI-obs-loop`.
+- Do not edit observability paths from the coordination tree.
 - `.claude/settings.local.json` and `MESO-CANVAS-PLAN.md` are explicitly out of scope.
+- The Meso worktree and Meso files are out of scope for this epic.
 
 ## Blockers
 
