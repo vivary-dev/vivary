@@ -13,6 +13,7 @@ const GH = 'https://github.com/vivary-dev/vivary/blob/dev';
 
 // canonical doc -> [route slug, page title, meta description]
 const pages = [
+  ['CONCEPTS', 'concepts', 'What is Vivary?', 'Plain-language intro: what Vivary is, the core ideas, and a glossary. Start here.'],
   ['GETTING-STARTED', 'getting-started', 'Getting started', 'Install Vivary and run your first agent workspace.'],
   ['COMMANDS', 'commands', 'Command reference', 'Every CLI across the four layers: tropo, ozone, exo, create-vivary.'],
   ['SKILLS', 'skills', 'Agent skills', 'The strato, tropo, and loops skills that operate a Vivary workspace.'],
@@ -24,7 +25,8 @@ const pages = [
 
 // rewrite relative repo-doc links to site routes; off-site files to GitHub blobs
 const rewrite = (s) =>
-  s.replaceAll('](GETTING-STARTED.md)', '](/getting-started/)')
+  s.replaceAll('](CONCEPTS.md)', '](/concepts/)')
+   .replaceAll('](GETTING-STARTED.md)', '](/getting-started/)')
    .replaceAll('](COMMANDS.md)', '](/commands/)')
    .replaceAll('](SKILLS.md)', '](/skills/)')
    .replaceAll('](HOWTO.md)', '](/howto/)')

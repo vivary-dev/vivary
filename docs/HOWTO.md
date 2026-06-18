@@ -1,6 +1,9 @@
 # Vivary — how-to recipes
 
-Task-oriented recipes. Assumes the CLIs are installed (`pip install vivary-tropo
+Short, copy-paste recipes for common tasks. New to Vivary? Do the [getting started
+guide](/getting-started/) first, then use these when you hit a specific job.
+
+Each recipe assumes the CLIs are installed (`pip install vivary-tropo
 vivary-ozone vivary-exo create-vivary`) or run via `uvx`. Run commands from inside a
 workspace unless `--root` is given.
 

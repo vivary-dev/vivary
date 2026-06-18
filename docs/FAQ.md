@@ -1,9 +1,34 @@
 # Vivary — FAQ
 
+New to all of this? Read [Concepts](/concepts/) first; it defines every term in plain
+language. The quick beginner answers are right below.
+
+### New here
+
+**What does Vivary actually do?**
+It sets up your project folder so an AI agent (Claude Code, Codex, and the like) has a
+memory it can trust, a clear record of the current state, and guardrails before
+anything risky. One command, all in plain text files you can read yourself.
+
+**Do I need to be a programmer?**
+No. If you can run one command in a terminal, you can scaffold a workspace. The
+`coding` preset suits software projects, but `second-brain` and `writing` are for
+notes and manuscripts.
+
+**What's an "agent"? What's a "harness"?**
+An *agent* is an AI tool that reads and changes your files for you. A *harness* (Claude
+Code, Codex) is the program that runs it. See [harnesses,
+explained](/blog/harnesses-explained/).
+
+**Does my data leave my machine?**
+Vivary itself never contacts a model; it only reads and writes local files. You can run
+the whole thing with a [local model](/blog/run-vivary-with-local-models/) and keep
+everything offline.
+
 ### What is Vivary, in one sentence?
-A standard + scaffolder for agent-native workspaces — *a self-improving loop running
+A standard and scaffolder for agent-native workspaces: *a self-improving loop running
 over a typed, navigable knowledge graph, with one visible state surface and human
-gates.* Think `create-t3-app`, but for an agent's workspace instead of a web app.
+gates.* In short, it gives an AI agent a working memory you can inspect.
 
 ### What are the four layers?
 - **tropo** — the typed knowledge graph (what's true). The folder *is* the type.

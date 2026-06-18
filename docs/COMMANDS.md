@@ -1,5 +1,9 @@
 # Vivary — command reference
 
+This is the full, technical list of every command. If you're just starting, you only
+need a handful (`create-vivary init`, `doctor`, `tropo check`); the [getting started
+guide](/getting-started/) walks through those. Come back here for the details.
+
 Every CLI across the four layers. All engines are zero-dependency Python (3.11+);
 the CLI command names are `tropo` / `ozone` / `exo` / `create-vivary` regardless of
 how you install them.

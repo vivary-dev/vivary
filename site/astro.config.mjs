@@ -9,7 +9,7 @@ export default defineConfig({
 		starlight({
 			title: 'Vivary',
 			description:
-				'The create-t3-app for agent workspaces — a typed knowledge graph, a self-improving loop, and graph-aware review. Plain Markdown. Any editor. Any agent.',
+				'Typed memory and gates for AI-agent projects. Scaffold a workspace your agent can navigate, verify, and trust: typed project memory, visible state, reusable skills, private boundaries, and gates. Plain Markdown. Any editor. Any agent.',
 			logo: { src: './src/assets/vivary.svg', alt: 'Vivary' },
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/vivary-dev/vivary' },
@@ -23,7 +23,9 @@ export default defineConfig({
 					label: 'Start here',
 					items: [
 						{ label: 'Home', link: '/' },
+						{ label: 'What is Vivary?', slug: 'concepts' },
 						{ label: 'Getting started', slug: 'getting-started' },
+						{ label: 'Blog', link: '/blog/' },
 					],
 				},
 				{
