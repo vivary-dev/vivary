@@ -1,22 +1,47 @@
 # Vivary
 
-**The `create-t3-app` for agent workspaces.** A standard plus a scaffolder that
-wires up a normalized, agent-native workspace from standalone modules — whether
-the workspace is a second brain, a coding project, or a writing project.
+**Typed memory and gates for AI-agent projects.** A standard plus a scaffolder that
+wires up a normalized, agent-native workspace from standalone modules — typed project
+memory, visible state, reusable skills, private boundaries, and verification gates —
+whether the workspace is a second brain, a coding project, or a writing project. Think
+`create-t3-app`, but for an AI agent's workspace instead of a web app.
 
 A *vivary* is an archaic word for a vivarium: a self-contained world where living
 things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
-> Status: **all four layers built and installable; publishing in progress.**
-> `tropo` (typed knowledge graph), `strato` (agent OS contract/templates/skill),
-> `ozone` (graph-aware review), and `exo` (coordination) are all working packages,
-> composed by `create-vivary`. Every package builds + installs from a clean venv;
-> the npm `create vivary` wrapper works. Not yet on PyPI/npm — that's the remaining
-> step. See [HANDOFF.md](HANDOFF.md) to continue, and
-> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full model.
+> Status: **shipped and installable.** All four layers are published:
+> `vivary-tropo`, `vivary-ozone`, `vivary-exo` (0.1.0) and `create-vivary` (0.1.1)
+> on [PyPI](https://pypi.org/project/create-vivary/), and `@vivary/create` (0.1.1)
+> on [npm](https://www.npmjs.com/package/@vivary/create). `tropo` (typed knowledge
+> graph), `strato` (agent OS contract/templates/skill), `ozone` (graph-aware
+> review), and `exo` (coordination) are composed by `create-vivary`. Live site:
+> **[vivary.vercel.app](https://vivary.vercel.app/)**. See [HANDOFF.md](HANDOFF.md)
+> to continue, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full model.
 
-## Try it locally
+## Quickstart
+
+Scaffold a workspace in one command (nothing to install first):
+
+```bash
+npm create @vivary my-workspace        # pick: second brain · coding · writing
+```
+
+Or install the CLIs from PyPI (run on demand with `uvx`, no install needed):
+
+```bash
+pip install vivary-tropo vivary-ozone vivary-exo create-vivary
+create-vivary init my-workspace --preset coding
+create-vivary doctor my-workspace
+uvx vivary-tropo check --root my-workspace
+```
+
+The scaffolder writes a full workspace shell: `AGENTS.md`, `STATE.md`, `SOUL.md`,
+private `USER.md`/`MEMORY.md` boundaries, strato runtime skills for Claude/Codex-style
+agents, a `tropo.toml`, and a starter typed graph. `doctor` validates the shell,
+privacy ignores, and graph health after creation.
+
+<details><summary>Run from source (no install)</summary>
 
 ```bash
 python packages/create-vivary/create_vivary.py init sandboxes/coding-demo --preset coding
@@ -25,10 +50,7 @@ python packages/tropo/tropo.py check --root sandboxes/coding-demo
 python packages/tropo/tropo.py graph --root sandboxes/coding-demo --json
 ```
 
-The scaffolder writes a full workspace shell: `AGENTS.md`, `STATE.md`, `SOUL.md`,
-private `USER.md`/`MEMORY.md` boundaries, strato runtime skills for Claude/Codex-style
-agents, a `tropo.toml`, and a starter typed graph. `doctor` validates the shell,
-privacy ignores, and graph health after creation.
+</details>
 
 ## The irreducible baseline
 
@@ -60,19 +82,8 @@ Standalone packages, scoped `@vivary/*` (npm) / `vivary-*` (PyPI), composed by
 | **exo** | the outermost layer | coordination — conflict detection + role contracts | new ✓ |
 
 `create vivary` → pick a preset (**second brain · coding · writing**) → it lays
-down `tropo` + `strato` and whichever optional layers fit.
-
-Run it locally from the repo:
-
-```bash
-python packages/create-vivary/create_vivary.py init <dir> --preset coding
-```
-
-Install from PyPI (or run on demand with `uvx`):
-
-```bash
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary
-```
+down `tropo` + `strato` and whichever optional layers fit. See
+[Quickstart](#quickstart) above to install.
 
 ## Documentation
 

@@ -1,5 +1,35 @@
-/* Vivary brand — atmosphere greens/teals. Overrides Starlight's accent + grays. */
+/* Vivary docs theme — matched to the landing page: self-hosted fonts, Bricolage
+   display headings, accent greens/teals, a deep-space dark surface. */
+
+@font-face {
+	font-family: 'Bricolage Grotesque';
+	font-weight: 400 800;
+	font-display: swap;
+	src: url('/fonts/bricolage-grotesque-latin.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'Hanken Grotesk';
+	font-weight: 400 600;
+	font-display: swap;
+	src: url('/fonts/hanken-grotesk-latin.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'JetBrains Mono';
+	font-weight: 400 500;
+	font-display: swap;
+	src: url('/fonts/jetbrains-mono-latin.woff2') format('woff2');
+}
+
 :root {
+	--sl-font: 'Hanken Grotesk', system-ui, sans-serif;
+	--sl-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+	/* Louder display scale for headings */
+	--sl-text-h1: clamp(2.3rem, 1.4rem + 3vw, 3.4rem);
+	--sl-text-h2: clamp(1.6rem, 1.2rem + 1.6vw, 2.2rem);
+	--sl-text-h3: clamp(1.25rem, 1.05rem + 0.9vw, 1.6rem);
+
+	/* Accent — atmosphere greens. Overrides Starlight's accent. */
 	--sl-color-accent-low: #102b22;
 	--sl-color-accent: #1f9d72;
 	--sl-color-accent-high: #9fe7c9;
@@ -11,6 +41,15 @@
 	--sl-color-gray-5: #2a3a34;
 	--sl-color-gray-6: #1a2622;
 	--sl-color-black: #131c19;
+}
+
+/* Dark (default): deep-space surface to match the landing gradient. */
+:root[data-theme='dark'] {
+	--sl-color-bg: oklch(0.15 0.045 262);
+	--sl-color-bg-nav: oklch(0.15 0.045 262 / 0.82);
+	--sl-color-bg-sidebar: oklch(0.135 0.043 268);
+	--sl-color-text-accent: var(--sl-color-accent-high);
+	--sl-color-hairline-shade: oklch(0.7 0.04 185 / 0.14);
 }
 
 :root[data-theme='light'] {
@@ -26,5 +65,44 @@
 	--sl-color-gray-6: #eef3f1;
 	--sl-color-gray-7: #f6faf8;
 	--sl-color-black: #ffffff;
+	--sl-color-bg: #f6faf8;
 }
 
+/* A faint accent glow in the top corner — atmosphere, kept subtle for legibility. */
+:root[data-theme='dark'] body::before {
+	content: '';
+	position: fixed;
+	inset: 0;
+	z-index: 0;
+	pointer-events: none;
+	background:
+		radial-gradient(50% 32% at 84% -4%, oklch(0.84 0.16 168 / 0.08), transparent 70%),
+		radial-gradient(44% 30% at 8% 4%, oklch(0.7 0.14 250 / 0.06), transparent 72%);
+}
+
+/* Display headings: Bricolage, tighter tracking, a louder page title. */
+.sl-markdown-content :is(h1, h2, h3, h4),
+.site-title,
+h1#_top,
+.content-panel h1 {
+	font-family: 'Bricolage Grotesque', var(--sl-font);
+	letter-spacing: -0.022em;
+}
+.sl-markdown-content h1,
+.content-panel h1 {
+	font-weight: 800;
+	line-height: 1.02;
+}
+.sl-markdown-content h2 {
+	font-weight: 700;
+	margin-top: 2.2rem;
+}
+.site-title {
+	font-weight: 700;
+	font-size: 1.35rem;
+}
+
+/* Accent-tint the current sidebar item and inline links a touch louder. */
+.sl-markdown-content a {
+	text-underline-offset: 0.18em;
+}

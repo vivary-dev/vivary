@@ -1,26 +1,31 @@
 # Getting started with Vivary
 
-Vivary turns a folder into an **agent-native workspace**: a typed knowledge graph,
-an agent operating loop with visible state and memory, graph-aware review, and human
-gates. This page takes you from nothing to a working workspace an agent can operate.
+This page takes you from nothing to a working **agent-native workspace**: a project
+folder set up so an AI agent can navigate it, check its own work, and remember things
+between sessions. You don't need to be an expert. If a term is unfamiliar, the
+[concepts page](/concepts/) defines everything in plain language.
+
+What you'll end up with: a folder full of plain Markdown files (memory, state, skills,
+and gates) that any AI agent can operate.
 
 ## 1. Install
 
-You need **Python 3.11+**. Pick one:
+You need **Python 3.11 or newer**. Pick whichever line fits how you like to work:
 
 ```bash
-# A) install the CLIs
+# A) install the command-line tools
 pip install vivary-tropo vivary-ozone vivary-exo create-vivary
 
-# B) run on demand with uv (no install)
+# B) run on demand with uv, nothing installed permanently
 uvx vivary-tropo --version
 
-# C) scaffold via npm (the create-t3-app experience)
+# C) scaffold with one npm command (nothing to install first)
 npm create @vivary my-workspace        # or: npx @vivary/create my-workspace
 ```
 
-No editor is required. Vivary is plain Markdown + YAML; it works in Claude Code, Codex,
-vim, or nothing at all. (Like Obsidian? See [OBSIDIAN.md](OBSIDIAN.md).)
+No special editor is required. Vivary is plain Markdown and YAML, so it works in Claude
+Code, Codex, vim, or nothing at all. (Prefer Obsidian? See [the optional
+setup](/obsidian/).)
 
 ## 2. Create a workspace
 
@@ -29,60 +34,74 @@ create-vivary init my-workspace --preset coding
 cd my-workspace
 ```
 
-Presets: **`coding`** (a software project), **`second-brain`** (a knowledge base),
-**`writing`** (a manuscript/copy system). They share the same shell and differ only by
-starter graph. Add `--obsidian` for an optional Obsidian vault config.
+A **preset** just picks the starter content. Choose the one closest to your work:
 
-You now have:
+- **`coding`** — a software project.
+- **`second-brain`** — a personal knowledge base.
+- **`writing`** — a manuscript or copy system.
+
+They all share the same structure and differ only in the starter notes. Add
+`--obsidian` if you want an optional Obsidian vault config too.
+
+You now have a complete workspace:
 
 ```
-AGENTS.md          the per-session contract (the loop, gates, the graph)
-SOUL.md            the agent's personality/principles
-STATE.md           the one visible state surface (Focus/Status/Next/...)
-USER.md  MEMORY.md  private identity + durable memory (gitignored)
-STRATO.md          the agent-OS model
-tropo.toml         the typed-graph schema
-modules/ changes/ decisions/ verification/ gates/   the starter typed graph
-.claude/skills/  .agents/skills/   runtime skills (strato, loops) for Claude Code + Codex
+AGENTS.md          the contract the agent follows each turn (the loop and the gates)
+SOUL.md            the agent's personality and principles
+STATE.md           the one place that answers "where are we?" (Focus / Status / Next)
+USER.md  MEMORY.md  your private identity + durable memory (ignored by Git)
+STRATO.md          how the agent operating system works
+tropo.toml         the rules for the typed graph
+modules/ changes/ decisions/ verification/ gates/   the starter knowledge graph
+.claude/skills/  .agents/skills/   ready-made skills for Claude Code + Codex
 ```
 
-## 3. Verify it's healthy
+## 3. Check that it's healthy
+
+`doctor` confirms the workspace was created correctly. The other three commands are
+your everyday checks:
 
 ```bash
 create-vivary doctor my-workspace
 # doctor: ok (8 node(s), 24 edge(s), 0 broken)
 
-tropo check          # strict: validates every doc + the graph (warnings fail)
-ozone review         # relationship-level review of the graph
-exo board            # work items by status
+tropo check          # validates every note and the graph (strict: warnings fail too)
+ozone review         # reviews the relationships across the whole graph
+exo board            # lists work items by status
 ```
+
+If `tropo check` complains, that's the point: it tells you exactly what's missing or
+mistyped so your agent's memory can't quietly go stale.
 
 ## 4. See the graph
 
 ```bash
-tropo graph --json                 # the machine view
-tropo view --out graph.html        # a self-contained visual graph — open in any browser
-tropo blast human-gates            # what depends on the "human-gates" node
+tropo graph --json                 # the machine-readable view
+tropo view --out graph.html        # a self-contained visual graph; open it in any browser
+tropo blast human-gates            # everything that depends on the "human-gates" note
 ```
+
+That last one is **blast radius**: what a change to a note would touch. It's the kind
+of impact a plain text diff can't show you.
 
 ## 5. Operate the loop
 
 Open the workspace in your agent (Claude Code reads `.claude/skills/`; Codex reads
-`AGENTS.md` + `.agents/`). The contract (`AGENTS.md`) drives every turn:
+`AGENTS.md` and `.agents/`). The contract in `AGENTS.md` drives every turn:
 
 > **Ask → retrieve → act → verify → learn → gate.**
-> - *retrieve* with `tropo graph` / `tropo blast <id>` — the graph is the first source
+> - *retrieve* with `tropo graph` / `tropo blast <id>`: the graph is the first source
 >   of truth, notes second.
-> - *verify* with `tropo check` + `ozone review` before a gate.
-> - *gate* — name the blast radius (`ozone impact <id>`) for a risky change, and stop at
+> - *verify* with `tropo check` and `ozone review` before a gate.
+> - *gate*: name the blast radius (`ozone impact <id>`) for a risky change, and stop at
 >   the human gates (memory writes, publishing, installs, git push/PR, destructive ops).
 
-First time in a fresh workspace, ask the agent to **bootstrap** (the strato skill
-interviews you and fills SOUL/USER/STATE) — see [SKILLS.md](SKILLS.md).
+The first time you open a fresh workspace, ask the agent to **bootstrap**. The strato
+skill interviews you and fills in SOUL / USER / STATE. See [agent skills](/skills/).
 
 ## 6. Add your own work
 
-The graph is just typed folders. Add a module, a change, a decision:
+The graph is just typed folders. Add a module, a change, a decision by creating a file:
 
 ```bash
 mkdir -p modules
@@ -96,13 +115,14 @@ EOF
 tropo check        # tells you exactly what's missing or mistyped
 ```
 
-`tropo check` is your guardrail — it's opinionated, so it'll tell you when the graph is
-wrong. Run `tropo fix` to clear redundant frontmatter.
+`tropo check` is your guardrail. It's opinionated on purpose, so it'll tell you when the
+graph is wrong. Run `tropo fix` to clear redundant frontmatter.
 
 ## Next
 
-- [COMMANDS.md](COMMANDS.md) — full CLI reference
-- [HOWTO.md](HOWTO.md) — task recipes (review a change, multi-agent, CI, …)
-- [SKILLS.md](SKILLS.md) — the agent skills (bootstrap, heartbeat, self-improve, loops)
-- [ARCHITECTURE.md](ARCHITECTURE.md) — the layer model and the why
-- [FAQ.md](FAQ.md)
+- [Concepts](/concepts/) — what everything means, in plain language.
+- [Command reference](/commands/) — every CLI, flag, and exit code.
+- [How-to recipes](/howto/) — review a change, multi-agent, CI, and more.
+- [Agent skills](/skills/) — bootstrap, heartbeat, self-improve, loops.
+- [Architecture](/architecture/) — the layer model and the reasoning behind it.
+- [FAQ](/faq/)

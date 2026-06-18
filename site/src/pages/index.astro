@@ -2,10 +2,17 @@
 // Vivary — landing. Custom page (Starlight owns the /docs routes).
 const repo = 'https://github.com/vivary-dev/vivary';
 const layers = [
-  { id: 'exo',    name: 'exo',    alt: 'exosphere',   role: 'Coordination when one agent becomes many.', y: 0 },
-  { id: 'ozone',  name: 'ozone',  alt: 'the filter',  role: 'Graph-aware review, by blast radius.',       y: 1 },
+  { id: 'exo',    name: 'exo',    alt: 'exosphere',    role: 'Coordination when one agent becomes many.', y: 0 },
+  { id: 'ozone',  name: 'ozone',  alt: 'the filter',   role: 'Graph-aware review, by blast radius.',       y: 1 },
   { id: 'strato', name: 'strato', alt: 'stratosphere', role: 'The agent OS: loop, state, memory, gates.',  y: 2 },
-  { id: 'tropo',  name: 'tropo',  alt: 'troposphere', role: 'The typed knowledge graph. Ground truth.',   y: 3 },
+  { id: 'tropo',  name: 'tropo',  alt: 'troposphere',  role: 'The typed knowledge graph. Ground truth.',   y: 3 },
+];
+const creates = [
+  { t: 'Typed project memory', d: 'A validated knowledge graph, not a notes dump.', f: 'tropo.toml · changes/ · decisions/ · modules/' },
+  { t: 'Visible state',        d: 'One surface the agent reads and updates.',        f: 'STATE.md' },
+  { t: 'Reusable skills',      d: 'Runtime skills for Claude Code and Codex.',       f: '.claude/skills/ · .agents/skills/' },
+  { t: 'Private boundaries',   d: 'Personal context that never gets committed.',     f: 'USER.md · MEMORY.md · memory/  — gitignored' },
+  { t: 'Verification gates',   d: 'Human sign-off and graph checks before merge.',   f: 'gates/ · verification/ · tropo check' },
 ];
 ---
 
@@ -14,15 +21,17 @@ const layers = [
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Vivary — the create-t3-app for agent workspaces</title>
-  <meta name="description" content="A typed knowledge graph, a self-improving loop, and graph-aware review. Scaffold a structured workspace your AI agent can actually operate. Plain Markdown, any editor, any agent." />
+  <title>Vivary — typed memory and gates for AI-agent projects</title>
+  <meta name="description" content="Vivary scaffolds the missing layer around AI agents: typed project memory, visible state, reusable skills, private memory boundaries, and verification gates. One command. Plain Markdown. Any editor. Any agent. Live on PyPI and npm." />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <!-- Self-hosted fonts: no third-party request. Preload the latin variable subsets used above the fold. -->
+  <link rel="preload" href="/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/fonts/hanken-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin />
 </head>
 <body>
-  <div class="aurora" aria-hidden="true"></div>
+  <div class="sky" aria-hidden="true"></div>
+  <div class="stars" aria-hidden="true"></div>
 
   <header class="nav">
     <a class="brand" href="/">
@@ -38,66 +47,65 @@ const layers = [
     </a>
     <nav>
       <a href="/getting-started/">Docs</a>
+      <a href="/blog/">Blog</a>
       <a href="/commands/">Reference</a>
-      <a href={repo} class="ghost">GitHub ↗</a>
+      <a href={repo}>GitHub</a>
+      <a class="pill" href="/getting-started/">Get started →</a>
     </nav>
   </header>
 
   <main>
     <!-- HERO -->
     <section class="hero">
-      <div class="hero-copy">
-        <p class="kicker">the create-t3-app for agent workspaces</p>
-        <h1>Give your agents<br />a world to work in.</h1>
-        <p class="lede">
-          A typed knowledge graph, a self-improving loop, and review by blast radius.
-          Scaffold a structured, portable workspace your AI agent can actually navigate,
-          verify, and improve. Plain Markdown. Any editor. Any agent.
-        </p>
-        <div class="cmd">
-          <span class="prompt">$</span><span class="typed">npm create @vivary my-workspace</span>
-          <button class="copy" data-copy="npm create @vivary my-workspace" aria-label="Copy">copy</button>
-        </div>
-        <div class="cta">
-          <a class="btn primary" href="/getting-started/">Get started</a>
-          <a class="btn" href={repo}>Star on GitHub</a>
-        </div>
-        <p class="meta">MIT · Python 3.11+ · zero dependencies · on PyPI &amp; npm</p>
+      <p class="kicker">Typed memory and gates for AI-agent projects</p>
+      <h1>A working memory<br />your agents can <span class="grad">inspect.</span></h1>
+      <p class="lede">
+        Vivary scaffolds the missing layer around AI agents: typed project memory, visible
+        state, reusable skills, private memory boundaries, and verification gates. One
+        command. Plain Markdown. Any editor. Any agent.
+      </p>
+      <div class="cmd">
+        <span class="p">$</span><span class="typed">npm create @vivary my-workspace</span>
+        <button class="copy" data-copy="npm create @vivary my-workspace" aria-label="Copy">copy</button>
       </div>
 
-      <!-- HERO GRAPH: a typed graph with one node's blast radius lit -->
+      <!-- big central glowing graph: one node's blast radius lit -->
       <figure class="graphwrap" aria-label="A typed knowledge graph; changing the 'billing' node lights up everything that depends on it.">
-        <svg viewBox="0 0 360 360" class="graph" role="img">
+        <svg viewBox="0 0 880 380" class="graph" role="img">
           <defs>
             <radialGradient id="glow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="oklch(0.82 0.16 168 / .55)" />
-              <stop offset="100%" stop-color="oklch(0.82 0.16 168 / 0)" />
+              <stop offset="0%" stop-color="oklch(0.84 0.16 168 / .5)" />
+              <stop offset="100%" stop-color="oklch(0.84 0.16 168 / 0)" />
             </radialGradient>
-            <filter id="soft"><feGaussianBlur stdDeviation="1.1" /></filter>
           </defs>
-          <!-- edges -->
+          <circle class="halo" cx="440" cy="210" r="128" fill="url(#glow)" />
           <g class="edges" stroke-linecap="round" fill="none">
-            <path d="M180 196 L96 108" />
-            <path d="M180 196 L286 116" />
-            <path d="M180 196 L262 250" />
-            <path d="M96 108 L120 250" />
-            <path class="hot" d="M180 196 L120 250" />
-            <path class="hot" d="M180 196 L96 108" />
-            <path class="hot" d="M96 108 L70 60" />
+            <path d="M440 210 L250 86" />
+            <path d="M440 210 L662 116" />
+            <path d="M440 210 L724 262" />
+            <path d="M440 210 L304 322" />
+            <path class="hot" d="M440 210 L304 322" />
+            <path class="hot" d="M440 210 L250 86" />
+            <path class="hot" d="M250 86 L150 44" />
           </g>
-          <circle class="halo" cx="180" cy="196" r="64" fill="url(#glow)" />
-          <!-- nodes: hot = in the blast radius -->
           <g class="nodes">
-            <g class="node hot src" transform="translate(180 196)"><circle r="9" /><text y="26">billing</text></g>
-            <g class="node hot" transform="translate(120 250)"><circle r="6.5" /><text y="22">invoice</text></g>
-            <g class="node hot" transform="translate(96 108)"><circle r="6.5" /><text y="-14">checkout</text></g>
-            <g class="node hot" transform="translate(70 60)"><circle r="5.5" /><text y="-12">receipt</text></g>
-            <g class="node" transform="translate(286 116)"><circle r="6.5" /><text y="-14">auth</text></g>
-            <g class="node" transform="translate(262 250)"><circle r="6.5" /><text y="22">emails</text></g>
+            <g class="node hot src" transform="translate(440 210)"><circle r="13" /><text y="34">billing</text></g>
+            <g class="node hot" transform="translate(304 322)"><circle r="8" /><text y="28">invoice</text></g>
+            <g class="node hot" transform="translate(250 86)"><circle r="8" /><text y="-16">checkout</text></g>
+            <g class="node hot" transform="translate(150 44)"><circle r="6.5" /><text y="-14">receipt</text></g>
+            <g class="node" transform="translate(662 116)"><circle r="8" /><text y="-16">auth</text></g>
+            <g class="node" transform="translate(724 262)"><circle r="8" /><text y="28">emails</text></g>
           </g>
         </svg>
-        <figcaption><code>tropo blast billing</code> &nbsp;→&nbsp; 4 things depend on it. See impact before you touch it.</figcaption>
+        <figcaption><code>ozone impact billing</code> &nbsp;→&nbsp; 4 things depend on it. See it before you touch it.</figcaption>
       </figure>
+
+      <ul class="strip" aria-label="Where to get Vivary">
+        <a href="https://pypi.org/project/create-vivary/"><li><b>PyPI</b><span>create-vivary 0.1.1</span></li></a>
+        <a href="https://www.npmjs.com/package/@vivary/create"><li><b>npm</b><span>@vivary/create 0.1.1</span></li></a>
+        <a href={repo}><li><b>GitHub</b><span>public · MIT</span></li></a>
+        <li><b>Runtime</b><span>Claude Code + Codex</span></li>
+      </ul>
     </section>
 
     <!-- PITCH -->
@@ -114,12 +122,36 @@ const layers = [
       </blockquote>
     </section>
 
-    <!-- STRATA: the four layers as the atmosphere -->
+    <!-- WHAT IT CREATES -->
+    <section class="band creates">
+      <div class="creates-head">
+        <h2>One command. Five things every agent project reinvents.</h2>
+        <p><code>npm create @vivary</code> lays down a complete, agent-native workspace, then
+          <code>doctor</code> verifies it. Here's what lands, and the files that prove it on disk.</p>
+      </div>
+      <div class="creates-grid">
+        <ol class="creates-list">
+          {creates.map((c) => (
+            <li><b>{c.t}</b><span>{c.d}</span><code>{c.f}</code></li>
+          ))}
+        </ol>
+        <pre class="term"><span class="g">$ npm create @vivary my-workspace</span>   <span class="dim"># preset: coding</span>
+create-vivary: wrote 36 file(s) to my-workspace
+
+<span class="g">$ create-vivary doctor my-workspace</span>
+doctor: ok (8 node(s), 24 edge(s), 0 broken)
+
+<span class="g">$ tropo check --root my-workspace</span>
+tropo: 8 document(s), 0 error(s), 0 warning(s)  →  exit 0</pre>
+      </div>
+    </section>
+
+    <!-- STRATA -->
     <section class="band strata">
       <div class="strata-head">
-        <h2>Four layers, named for the sky.</h2>
-        <p>A <em>vivary</em> is a small self-contained world with stacked layers. Each
-          one is a standalone, zero-dependency CLI. The baseline is the bottom two;
+        <h2>Four layers,<br />named for the sky.</h2>
+        <p>A <em>vivary</em> is a small self-contained world with stacked layers. Each one is
+          a standalone CLI on the Python standard library. The baseline is the bottom two;
           the rest snap on when you need them.</p>
       </div>
       <ol class="column">
@@ -134,16 +166,16 @@ const layers = [
       </ol>
     </section>
 
-    <!-- WHY: feature rows with a real terminal, not cards -->
+    <!-- WHY -->
     <section class="band why">
       <h2>Not just a folder of Markdown.</h2>
       <div class="rows">
         <div class="row">
           <div class="rtext">
             <h3>The graph is validated, opinionated.</h3>
-            <p><code>tropo check</code> is a gate, not a linter. Untyped docs, typo'd
-              fields, and broken links <em>fail</em>. Your agent's context stays
-              trustworthy instead of quietly rotting.</p>
+            <p><code>tropo check</code> is a gate, not a linter. Untyped docs, typo'd fields,
+              and broken links <em>fail</em>. Your agent's context stays trustworthy instead
+              of quietly rotting.</p>
           </div>
           <pre class="term"><span class="g">$ tropo check</span>
 changes/billing.md:3 error E101: missing required field 'status'
@@ -155,8 +187,8 @@ modules/auth.md:5 warning W220: ref 'sessoin' matches no document id
           <div class="rtext">
             <h3>Review by blast radius.</h3>
             <p>See what a change <em>touches</em>, not just what lines changed.
-              <code>ozone review</code> reads the whole graph; <code>impact</code>
-              walks the dependents. The thing a text diff can't show.</p>
+              <code>ozone review</code> reads the whole graph; <code>impact</code> walks the
+              dependents. The thing a text diff can't show.</p>
           </div>
           <pre class="term"><span class="g">$ ozone impact billing</span>
 billing  →  4 node(s) depend on it
@@ -169,11 +201,11 @@ billing  →  4 node(s) depend on it
       <ul class="trio">
         <li><b>Medium-agnostic.</b> The same graph and review serve code <em>and</em> prose.</li>
         <li><b>No lock-in.</b> Plain Markdown, any editor or none, Claude Code <em>and</em> Codex.</li>
-        <li><b>Tiny by law.</b> Zero third-party dependencies. The framework costs almost nothing to load.</li>
+        <li><b>Tiny by law.</b> No third-party dependencies, <code>tropo</code> runs on the standard library.</li>
       </ul>
     </section>
 
-    <!-- INSTALL / CTA -->
+    <!-- CLOSER -->
     <section class="band closer">
       <h2>Start in one command.</h2>
       <pre class="term big"><span class="g">$ npm create @vivary my-workspace</span>   <span class="dim"># pick: coding · second-brain · writing</span>
@@ -187,9 +219,10 @@ billing  →  4 node(s) depend on it
   </main>
 
   <footer class="foot">
-    <span>Vivary · MIT · 0.1.0</span>
+    <span>Vivary · MIT · published on PyPI &amp; npm</span>
     <nav>
       <a href="/getting-started/">Docs</a>
+      <a href="/blog/">Blog</a>
       <a href={repo}>GitHub</a>
       <a href="https://pypi.org/project/vivary-tropo/">PyPI</a>
       <a href="https://www.npmjs.com/package/@vivary/create">npm</a>
@@ -205,36 +238,49 @@ billing  →  4 node(s) depend on it
   </script>
 
   <style is:global>
+    /* Self-hosted variable fonts (latin subset). font-display: swap keeps text visible instantly. */
+    @font-face { font-family: 'Bricolage Grotesque'; font-style: normal; font-weight: 400 800; font-display: swap; src: url('/fonts/bricolage-grotesque-latin.woff2') format('woff2'); }
+    @font-face { font-family: 'Hanken Grotesk'; font-style: normal; font-weight: 400 600; font-display: swap; src: url('/fonts/hanken-grotesk-latin.woff2') format('woff2'); }
+    @font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 400 500; font-display: swap; src: url('/fonts/jetbrains-mono-latin.woff2') format('woff2'); }
+
     :root {
-      --bg-top: oklch(0.16 0.045 258);
-      --bg-bot: oklch(0.215 0.05 165);
-      --ink: oklch(0.96 0.012 160);
-      --muted: oklch(0.74 0.028 178);
-      --faint: oklch(0.6 0.025 180);
-      --accent: oklch(0.82 0.16 168);
-      --accent-2: oklch(0.76 0.12 238);
-      --panel: oklch(0.26 0.03 188 / 0.42);
+      --ink: oklch(0.97 0.012 165);
+      --muted: oklch(0.75 0.03 180);
+      --faint: oklch(0.62 0.025 185);
+      --accent: oklch(0.84 0.16 168);
+      --accent-2: oklch(0.74 0.13 240);
+      --panel: oklch(0.26 0.03 200 / 0.45);
       --line: oklch(0.7 0.04 185 / 0.16);
-      --line-strong: oklch(0.8 0.08 175 / 0.34);
+      --line-strong: oklch(0.8 0.08 175 / 0.32);
       --serif: 'Bricolage Grotesque', system-ui, sans-serif;
       --sans: 'Hanken Grotesk', system-ui, sans-serif;
       --mono: 'JetBrains Mono', ui-monospace, monospace;
     }
     * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
-    html { background: oklch(0.165 0.044 252); }
+    html { scroll-behavior: smooth; background: oklch(0.13 0.045 280); }
     body {
       margin: 0; color: var(--ink); font-family: var(--sans);
-      font-size: clamp(15px, 1vw + 13px, 18px); line-height: 1.65;
-      background: linear-gradient(180deg, oklch(0.165 0.045 258) 0%, oklch(0.182 0.043 220) 560px, oklch(0.2 0.046 192) 100%);
-      min-height: 100vh; overflow-x: hidden;
+      font-size: clamp(15px, 1vw + 13px, 18px); line-height: 1.65; min-height: 100vh; overflow-x: hidden;
+      background: linear-gradient(180deg, oklch(0.13 0.045 280) 0%, oklch(0.155 0.05 240) 38%, oklch(0.185 0.055 198) 70%, oklch(0.225 0.06 166) 100%);
+      background-attachment: fixed;
     }
-    .aurora {
-      position: fixed; inset: -20% -10% auto -10%; height: 70vh; z-index: 0; pointer-events: none;
+    .sky {
+      position: fixed; inset: -30% -10% auto -10%; height: 95vh; z-index: 0; pointer-events: none;
       background:
-        radial-gradient(60% 50% at 78% 8%, oklch(0.82 0.16 168 / .14), transparent 70%),
-        radial-gradient(50% 40% at 12% 22%, oklch(0.7 0.13 238 / .12), transparent 70%);
-      filter: blur(8px);
+        radial-gradient(58% 50% at 72% 0%, oklch(0.84 0.16 168 / .2), transparent 70%),
+        radial-gradient(50% 44% at 14% 16%, oklch(0.7 0.14 250 / .15), transparent 72%);
+      filter: blur(10px);
+    }
+    .stars {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: .5;
+      background-image:
+        radial-gradient(1.2px 1.2px at 20% 22%, #fff, transparent),
+        radial-gradient(1px 1px at 70% 12%, #fff, transparent),
+        radial-gradient(1px 1px at 45% 9%, #fff, transparent),
+        radial-gradient(1.4px 1.4px at 85% 30%, #fff, transparent),
+        radial-gradient(1px 1px at 32% 6%, #fff, transparent),
+        radial-gradient(1.1px 1.1px at 58% 26%, #fff, transparent);
+      background-repeat: no-repeat;
     }
     main, .nav, .foot { position: relative; z-index: 1; }
     a { color: inherit; text-decoration: none; }
@@ -244,99 +290,121 @@ billing  →  4 node(s) depend on it
 
     /* nav */
     .nav { display: flex; align-items: center; justify-content: space-between;
-      max-width: 1140px; margin: 0 auto; padding: 22px clamp(20px, 5vw, 40px); }
+      max-width: 1200px; margin: 0 auto; padding: 22px clamp(20px, 5vw, 44px); }
     .brand { display: flex; align-items: center; gap: 10px; font-family: var(--serif);
       font-weight: 700; font-size: 19px; letter-spacing: -0.01em; }
-    .nav nav { display: flex; gap: clamp(14px, 3vw, 30px); align-items: center; font-size: 15px; color: var(--muted); }
+    .nav nav { display: flex; gap: clamp(14px, 2.6vw, 28px); align-items: center; font-size: 15px; color: var(--muted); }
     .nav nav a:hover { color: var(--ink); }
-    .nav .ghost { color: var(--ink); }
+    .nav .pill { color: var(--ink); border: 1px solid var(--line-strong); border-radius: 999px; padding: 8px 16px; transition: border-color .2s, background .2s; }
+    .nav .pill:hover { border-color: var(--accent); background: oklch(0.84 0.16 168 / 0.12); }
 
-    main { max-width: 1140px; margin: 0 auto; padding: 0 clamp(20px, 5vw, 40px); }
+    main { max-width: 1200px; margin: 0 auto; padding: 0 clamp(20px, 5vw, 44px); }
 
     /* hero */
-    .hero { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: clamp(24px, 4vw, 56px);
-      align-items: center; padding: clamp(40px, 7vw, 92px) 0 clamp(36px, 5vw, 64px); }
-    .kicker { font-family: var(--mono); font-size: 13px; letter-spacing: 0.02em;
-      color: var(--accent); margin: 0 0 18px; }
-    h1 { font-family: var(--serif); font-weight: 700; letter-spacing: -0.025em;
-      font-size: clamp(38px, 6.4vw, 76px); line-height: 0.98; margin: 0 0 22px; color: var(--ink); }
-    .lede { max-width: 30ch; color: var(--muted); font-size: clamp(16px, 1.1vw, 19px); margin: 0 0 26px; }
-    .cmd { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 15px;
-      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-      padding: 13px 14px; max-width: 30rem; backdrop-filter: blur(6px); }
-    .cmd .prompt { color: var(--accent); } .cmd .typed { color: var(--ink); flex: 1; white-space: nowrap; overflow: hidden; }
+    .hero { text-align: center; padding: clamp(34px, 6vw, 76px) 0 clamp(40px, 6vw, 80px); }
+    .kicker { font-family: var(--mono); font-size: 13.5px; letter-spacing: 0.04em; color: var(--accent); margin: 0 0 26px; }
+    h1 { font-family: var(--serif); font-weight: 800; letter-spacing: -0.035em; line-height: 0.9;
+      font-size: clamp(46px, 9.4vw, 132px); margin: 0; color: var(--ink); }
+    .grad { color: var(--accent); }
+    .lede { max-width: 54ch; color: var(--muted); font-size: clamp(16px, 1.3vw, 21px); margin: 30px auto 30px; line-height: 1.5; }
+    .cmd { display: inline-flex; align-items: center; gap: 12px; font-family: var(--mono); font-size: 15px;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 13px;
+      padding: 14px 16px; backdrop-filter: blur(8px); }
+    .cmd .p { color: var(--accent); } .cmd .typed { color: var(--ink); }
     .copy { font-family: var(--mono); font-size: 12px; color: var(--faint); background: none;
       border: 1px solid var(--line); border-radius: 7px; padding: 4px 9px; cursor: pointer; transition: color .2s, border-color .2s; }
     .copy:hover { color: var(--accent); border-color: var(--line-strong); }
-    .cta { display: flex; gap: 12px; margin: 26px 0 16px; flex-wrap: wrap; }
-    .btn { font-weight: 600; font-size: 15px; padding: 11px 20px; border-radius: 10px;
-      border: 1px solid var(--line-strong); color: var(--ink); transition: transform .2s cubic-bezier(.2,.8,.2,1), background .2s, border-color .2s; }
-    .btn:hover { transform: translateY(-2px); border-color: var(--accent); }
-    .btn.primary { background: var(--accent); color: oklch(0.2 0.05 168); border-color: transparent; }
-    .btn.primary:hover { background: oklch(0.86 0.16 168); }
-    .meta { font-family: var(--mono); font-size: 12.5px; color: var(--faint); margin: 0; }
 
     /* hero graph */
-    .graphwrap { margin: 0; }
-    .graph { width: 100%; height: auto; max-width: 440px; display: block; margin-inline: auto; }
-    .graph .edges path { stroke: var(--line-strong); stroke-width: 1.4;
-      stroke-dasharray: 220; stroke-dashoffset: 220; animation: draw 1.4s cubic-bezier(.2,.8,.2,1) forwards; }
-    .graph .edges .hot { stroke: var(--accent); stroke-width: 1.8; }
-    .graph .halo { animation: pulse 3.4s ease-in-out infinite; }
+    .graphwrap { margin: clamp(28px, 5vw, 56px) 0 0; }
+    .graph { width: 100%; max-width: 880px; height: auto; display: block; margin-inline: auto; }
+    .graph .halo { animation: pulse 3.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    .graph .edges path { stroke: var(--line-strong); stroke-width: 1.5;
+      stroke-dasharray: 360; stroke-dashoffset: 360; animation: draw 1.5s cubic-bezier(.2,.8,.2,1) forwards; }
+    .graph .edges .hot { stroke: var(--accent); stroke-width: 2; }
     .graph .node circle { fill: oklch(0.5 0.04 200); stroke: oklch(0.8 0.05 190 / .5); stroke-width: 1; }
-    .graph .node.hot circle { fill: var(--accent); stroke: oklch(0.9 0.12 168); filter: drop-shadow(0 0 6px oklch(0.82 0.16 168 / .7)); }
-    .graph .node.src circle { fill: oklch(0.9 0.14 168); }
-    .graph .node text { fill: var(--muted); font-family: var(--mono); font-size: 11px; text-anchor: middle; }
+    .graph .node.hot circle { fill: var(--accent); stroke: oklch(0.9 0.12 168); filter: drop-shadow(0 0 8px oklch(0.84 0.16 168 / .7)); }
+    .graph .node.src circle { fill: oklch(0.92 0.14 168); }
+    .graph .node text { fill: var(--muted); font-family: var(--mono); font-size: 12.5px; text-anchor: middle; }
     .graph .node.hot text { fill: var(--ink); }
-    figcaption { text-align: center; color: var(--faint); font-size: 13.5px; margin-top: 14px; }
+    figcaption { text-align: center; color: var(--faint); font-size: 14px; margin-top: 16px; }
     figcaption code { color: var(--accent); }
 
+    .strip { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin: 50px 0 0; padding: 0; }
+    .strip a { display: block; }
+    .strip li { display: flex; flex-direction: column; gap: 1px; padding: 9px 16px; border-radius: 12px;
+      border: 1px solid var(--line); background: var(--panel); backdrop-filter: blur(6px); transition: border-color .2s, transform .2s; }
+    .strip a:hover li { border-color: var(--accent); transform: translateY(-2px); }
+    .strip b { font-family: var(--serif); font-size: 14px; color: var(--ink); }
+    .strip span { font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
+
     /* bands */
-    .band { padding: clamp(48px, 7vw, 96px) 0; border-top: 1px solid var(--line); }
-    .pitch p { font-size: clamp(19px, 1.7vw, 26px); max-width: 46ch; line-height: 1.5; color: var(--ink); margin: 0 0 26px; }
-    .pitch blockquote { margin: 0; padding-left: 20px; border-left: 2px solid var(--accent);
-      font-family: var(--serif); font-size: clamp(17px, 1.4vw, 21px); color: var(--muted); max-width: 40ch; line-height: 1.45; }
+    .band { padding: clamp(54px, 8vw, 104px) 0; border-top: 1px solid var(--line); }
+    .pitch p { font-size: clamp(20px, 1.9vw, 28px); max-width: 46ch; line-height: 1.5; color: var(--ink); margin: 0 auto 26px; text-align: center; }
+    .pitch blockquote { margin: 0 auto; padding-top: 4px; max-width: 44ch; text-align: center;
+      font-family: var(--serif); font-size: clamp(17px, 1.5vw, 22px); color: var(--accent); line-height: 1.4; }
+
+    /* creates */
+    .creates-head { text-align: center; }
+    .creates-head h2 { font-family: var(--serif); font-size: clamp(28px, 4vw, 52px); letter-spacing: -0.025em; line-height: 1.04; margin: 0 auto 14px; max-width: 20ch; }
+    .creates-head p { color: var(--muted); max-width: 56ch; margin: 0 auto 44px; }
+    .creates-grid { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(24px, 4vw, 48px); align-items: start; }
+    .creates-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; counter-reset: c; }
+    .creates-list li { display: grid; grid-template-columns: auto 1fr; column-gap: 14px; row-gap: 2px;
+      padding: 16px 18px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); }
+    .creates-list li::before { counter-increment: c; content: counter(c); grid-row: 1 / span 3; align-self: start;
+      font-family: var(--mono); font-size: 12px; color: oklch(0.2 0.05 168); background: var(--accent);
+      width: 23px; height: 23px; border-radius: 7px; display: grid; place-items: center; font-weight: 600; }
+    .creates-list b { font-family: var(--serif); font-size: 17px; color: var(--ink); }
+    .creates-list span { color: var(--muted); font-size: 14.5px; }
+    .creates-list code { grid-column: 2; font-size: 12px; color: var(--accent); display: block; margin-top: 3px; }
+    .creates-grid .term { position: sticky; top: 24px; }
 
     /* strata */
     .strata { display: grid; grid-template-columns: 0.85fr 1.15fr; gap: clamp(28px, 5vw, 64px); align-items: center; }
-    .strata-head h2 { font-family: var(--serif); font-size: clamp(28px, 3.4vw, 44px); letter-spacing: -0.02em; line-height: 1.04; margin: 0 0 16px; }
+    .strata-head h2 { font-family: var(--serif); font-size: clamp(30px, 4vw, 52px); letter-spacing: -0.025em; line-height: 1; margin: 0 0 16px; }
     .strata-head p { color: var(--muted); max-width: 34ch; margin: 0; }
     .strata-head em { font-style: italic; color: var(--ink); }
     .column { list-style: none; margin: 0; padding: 0; position: relative; display: grid; gap: 10px; }
     .stratum { display: grid; grid-template-columns: auto 1fr; column-gap: 16px; align-items: baseline;
-      padding: 18px 20px; border-radius: 14px; border: 1px solid var(--line);
-      background: linear-gradient(100deg, var(--lc, oklch(0.3 0.05 200 / .4)), transparent 90%);
-      opacity: 0; transform: translateY(10px); animation: rise .6s cubic-bezier(.2,.8,.2,1) forwards; animation-delay: calc(var(--i) * 90ms); }
-    .s-exo    { --lc: oklch(0.4 0.09 262 / .5); }
-    .s-ozone  { --lc: oklch(0.5 0.1 210 / .5); }
-    .s-strato { --lc: oklch(0.52 0.1 180 / .5); }
-    .s-tropo  { --lc: oklch(0.5 0.11 162 / .55); }
+      padding: 18px 22px; border-radius: 14px; border: 1px solid var(--line);
+      background: linear-gradient(100deg, var(--lc, oklch(0.3 0.05 200 / .4)), transparent 92%);
+      opacity: 0; transform: translateY(12px); animation: rise .6s cubic-bezier(.2,.8,.2,1) forwards; animation-delay: calc(var(--i) * 90ms); }
+    .s-exo    { --lc: oklch(0.42 0.1 264 / .5); }
+    .s-ozone  { --lc: oklch(0.5 0.1 212 / .5); }
+    .s-strato { --lc: oklch(0.53 0.1 182 / .5); }
+    .s-tropo  { --lc: oklch(0.52 0.12 162 / .55); }
     .alt { font-family: var(--mono); font-size: 11.5px; color: var(--faint); grid-row: 2; }
-    .lname { font-family: var(--serif); font-weight: 700; font-size: 22px; letter-spacing: -0.01em; }
+    .lname { font-family: var(--serif); font-weight: 700; font-size: 23px; letter-spacing: -0.01em; }
     .lrole { grid-column: 2; color: var(--muted); font-size: 15px; }
-    .axis { position: absolute; left: -22px; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: space-between;
+    .axis { position: absolute; left: -24px; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: space-between;
       writing-mode: vertical-rl; font-family: var(--mono); font-size: 10.5px; color: var(--faint); letter-spacing: 0.1em; }
 
     /* why */
-    .why h2, .closer h2 { font-family: var(--serif); font-size: clamp(28px, 3.6vw, 46px); letter-spacing: -0.02em; margin: 0 0 36px; }
+    .why h2, .closer h2 { font-family: var(--serif); font-size: clamp(30px, 4.2vw, 54px); letter-spacing: -0.025em; margin: 0 0 40px; text-align: center; }
     .rows { display: grid; gap: clamp(28px, 4vw, 52px); }
     .row { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: clamp(20px, 4vw, 48px); align-items: center; }
     .row.reverse { grid-template-columns: 1.1fr 0.9fr; }
     .row.reverse .rtext { order: 2; }
-    .rtext h3 { font-family: var(--serif); font-size: clamp(20px, 1.8vw, 26px); margin: 0 0 10px; letter-spacing: -0.01em; }
+    .rtext h3 { font-family: var(--serif); font-size: clamp(21px, 1.9vw, 28px); margin: 0 0 10px; letter-spacing: -0.01em; }
     .rtext p { color: var(--muted); margin: 0; max-width: 40ch; }
     .term { font-family: var(--mono); font-size: 13px; line-height: 1.75; color: var(--muted);
-      background: oklch(0.15 0.03 210 / .6); border: 1px solid var(--line); border-radius: 14px;
-      padding: 18px 20px; overflow-x: auto; margin: 0; }
+      background: oklch(0.13 0.035 220 / .66); border: 1px solid var(--line); border-radius: 14px;
+      padding: 18px 20px; overflow-x: auto; margin: 0; backdrop-filter: blur(6px); }
     .term .g { color: var(--accent); } .term .r { color: oklch(0.78 0.15 30); } .term .dim { color: var(--faint); }
     .term.big { font-size: 14px; max-width: 44rem; margin: 0 auto 30px; }
-    .trio { list-style: none; margin: 44px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 22px 36px; border-top: 1px solid var(--line); padding-top: 36px; }
+    .trio { list-style: none; margin: 48px 0 0; padding: 36px 0 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 22px 36px; border-top: 1px solid var(--line); }
     .trio li { color: var(--muted); font-size: 15.5px; } .trio b { display: block; color: var(--ink); font-family: var(--serif); font-size: 17px; margin-bottom: 3px; }
 
     /* closer + footer */
     .closer { text-align: center; }
-    .closer .cta { justify-content: center; }
-    .foot { max-width: 1140px; margin: 0 auto; padding: 30px clamp(20px, 5vw, 40px) 60px;
+    .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .btn { font-weight: 600; font-size: 15px; padding: 12px 22px; border-radius: 11px;
+      border: 1px solid var(--line-strong); color: var(--ink); transition: transform .2s cubic-bezier(.2,.8,.2,1), background .2s, border-color .2s; }
+    .btn:hover { transform: translateY(-2px); border-color: var(--accent); }
+    .btn.primary { background: var(--accent); color: oklch(0.2 0.05 168); border-color: transparent; }
+    .btn.primary:hover { background: oklch(0.88 0.16 168); }
+    .foot { max-width: 1200px; margin: 0 auto; padding: 30px clamp(20px, 5vw, 44px) 60px;
       display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;
       border-top: 1px solid var(--line); font-family: var(--mono); font-size: 13px; color: var(--faint); }
     .foot nav { display: flex; gap: 22px; } .foot a:hover { color: var(--accent); }
@@ -346,10 +414,11 @@ billing  →  4 node(s) depend on it
     @keyframes pulse { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
 
     @media (max-width: 880px) {
-      .hero, .strata, .row, .row.reverse { grid-template-columns: 1fr; }
+      .strata, .row, .row.reverse, .creates-grid { grid-template-columns: 1fr; }
+      .creates-grid .term { position: static; }
       .row.reverse .rtext { order: 0; }
-      .graphwrap { order: -1; } h1 br { display: none; }
       .axis { display: none; }
+      h1 { font-size: clamp(44px, 13vw, 76px); }
     }
     @media (prefers-reduced-motion: reduce) {
       *, .graph .edges path, .stratum, .graph .halo { animation: none !important; opacity: 1 !important; transform: none !important; stroke-dashoffset: 0 !important; }

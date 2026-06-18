@@ -1,0 +1,160 @@
+---
+import { getCollection, render } from 'astro:content';
+
+export async function getStaticPaths() {
+  const posts = await getCollection('blog');
+  return posts.map((post) => ({ params: { slug: post.id }, props: { post } }));
+}
+
+const repo = 'https://github.com/vivary-dev/vivary';
+const { post } = Astro.props;
+const { Content } = await render(post);
+const fmt = (d) => d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+---
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{post.data.title} — Vivary</title>
+  <meta name="description" content={post.data.description} />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preload" href="/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/fonts/hanken-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin />
+</head>
+<body>
+  <div class="sky" aria-hidden="true"></div>
+  <div class="stars" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="/">
+      <svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect width="32" height="32" rx="8" fill="url(#g)" />
+        <path d="M6 22.5c3-2 7-2 10 0s7 2 10 0" stroke="#fff" stroke-width="1.6" stroke-linecap="round" opacity=".55" />
+        <path d="M6 17c3-2 7-2 10 0s7 2 10 0" stroke="#fff" stroke-width="1.7" stroke-linecap="round" opacity=".78" />
+        <path d="M6 11.5c3-2 7-2 10 0s7 2 10 0" stroke="#fff" stroke-width="1.8" stroke-linecap="round" />
+        <circle cx="16" cy="8.5" r="1.7" fill="#fff" />
+        <defs><linearGradient id="g" x1="0" y1="0" x2="32" y2="32"><stop stop-color="#1f9d72" /><stop offset="1" stop-color="#1b6fa8" /></linearGradient></defs>
+      </svg>
+      <span>Vivary</span>
+    </a>
+    <nav>
+      <a href="/getting-started/">Docs</a>
+      <a href="/blog/">Blog</a>
+      <a href={repo}>GitHub</a>
+      <a class="pill" href="/getting-started/">Get started →</a>
+    </nav>
+  </header>
+
+  <main>
+    <a class="back" href="/blog/">← All posts</a>
+    <article>
+      <header class="ahead">
+        <div class="line">
+          <time datetime={post.data.date.toISOString()}>{fmt(post.data.date)}</time>
+          <span class="dot">·</span>
+          <span>{post.data.author}</span>
+        </div>
+        <h1>{post.data.title}</h1>
+        <p class="standfirst">{post.data.description}</p>
+        {post.data.tags.length > 0 && (
+          <div class="tags">{post.data.tags.map((t) => <span class="tag">{t}</span>)}</div>
+        )}
+      </header>
+
+      <div class="prose">
+        <Content />
+      </div>
+    </article>
+
+    <div class="endcta">
+      <a class="btn" href="/blog/">← More field notes</a>
+      <a class="btn primary" href="/getting-started/">Try Vivary →</a>
+    </div>
+  </main>
+
+  <footer class="foot">
+    <span>Vivary · MIT · published on PyPI &amp; npm</span>
+    <nav>
+      <a href="/getting-started/">Docs</a>
+      <a href="/blog/">Blog</a>
+      <a href={repo}>GitHub</a>
+    </nav>
+  </footer>
+
+  <style is:global>
+    @font-face { font-family: 'Bricolage Grotesque'; font-weight: 400 800; font-display: swap; src: url('/fonts/bricolage-grotesque-latin.woff2') format('woff2'); }
+    @font-face { font-family: 'Hanken Grotesk'; font-weight: 400 600; font-display: swap; src: url('/fonts/hanken-grotesk-latin.woff2') format('woff2'); }
+    @font-face { font-family: 'JetBrains Mono'; font-weight: 400 500; font-display: swap; src: url('/fonts/jetbrains-mono-latin.woff2') format('woff2'); }
+    :root {
+      --ink: oklch(0.97 0.012 165); --muted: oklch(0.76 0.03 180); --faint: oklch(0.62 0.025 185);
+      --accent: oklch(0.84 0.16 168); --panel: oklch(0.26 0.03 200 / 0.45);
+      --line: oklch(0.7 0.04 185 / 0.16); --line-strong: oklch(0.8 0.08 175 / 0.32);
+      --serif: 'Bricolage Grotesque', system-ui, sans-serif; --sans: 'Hanken Grotesk', system-ui, sans-serif; --mono: 'JetBrains Mono', ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; }
+    html { background: oklch(0.13 0.045 280); scroll-behavior: smooth; }
+    body { margin: 0; color: var(--ink); font-family: var(--sans); font-size: clamp(16px,0.5vw + 15px,19px); line-height: 1.7;
+      min-height: 100vh; overflow-x: hidden;
+      background: linear-gradient(180deg, oklch(0.13 0.045 280) 0%, oklch(0.155 0.05 240) 45%, oklch(0.19 0.055 190) 100%); background-attachment: fixed; }
+    .sky { position: fixed; inset: -30% -10% auto -10%; height: 90vh; z-index: 0; pointer-events: none;
+      background: radial-gradient(56% 48% at 74% 0%, oklch(0.84 0.16 168 / .16), transparent 70%); filter: blur(10px); }
+    .stars { position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: .45;
+      background-image: radial-gradient(1.2px 1.2px at 18% 18%, #fff, transparent), radial-gradient(1px 1px at 72% 10%, #fff, transparent), radial-gradient(1.3px 1.3px at 88% 26%, #fff, transparent); background-repeat: no-repeat; }
+    main, .nav, .foot { position: relative; z-index: 1; }
+    a { color: inherit; text-decoration: none; }
+
+    .nav { display: flex; align-items: center; justify-content: space-between; max-width: 1100px; margin: 0 auto; padding: 22px clamp(20px,5vw,44px); }
+    .brand { display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-weight: 700; font-size: 19px; }
+    .nav nav { display: flex; gap: clamp(14px,2.6vw,28px); align-items: center; font-size: 15px; color: var(--muted); }
+    .nav nav a:hover { color: var(--ink); }
+    .nav .pill { color: var(--ink); border: 1px solid var(--line-strong); border-radius: 999px; padding: 8px 16px; }
+    .nav .pill:hover { border-color: var(--accent); }
+
+    main { max-width: 720px; margin: 0 auto; padding: 0 clamp(20px,5vw,32px); }
+    .back { display: inline-block; font-family: var(--mono); font-size: 13px; color: var(--faint); margin: clamp(20px,3vw,40px) 0 0; }
+    .back:hover { color: var(--accent); }
+
+    .ahead { padding: 26px 0 30px; border-bottom: 1px solid var(--line); margin-bottom: 36px; }
+    .ahead .line { font-family: var(--mono); font-size: 13px; color: var(--faint); display: flex; gap: 10px; align-items: center; }
+    .ahead .dot { opacity: .6; }
+    .ahead h1 { font-family: var(--serif); font-weight: 800; letter-spacing: -0.03em; line-height: 0.98;
+      font-size: clamp(36px,5.4vw,60px); margin: 18px 0 0; }
+    .standfirst { color: var(--muted); font-size: clamp(18px,1.4vw,22px); line-height: 1.45; margin: 20px 0 0; max-width: 48ch; }
+    .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+    .tag { font-family: var(--mono); font-size: 11.5px; color: var(--faint); border: 1px solid var(--line); border-radius: 999px; padding: 3px 11px; }
+
+    /* prose */
+    .prose { color: oklch(0.88 0.018 175); }
+    .prose > * + * { margin-top: 1.15em; }
+    .prose h2 { font-family: var(--serif); font-weight: 700; letter-spacing: -0.02em; font-size: clamp(24px,2.6vw,32px); color: var(--ink); margin-top: 1.9em; line-height: 1.12; }
+    .prose h3 { font-family: var(--serif); font-weight: 700; font-size: clamp(19px,1.8vw,23px); color: var(--ink); margin-top: 1.6em; }
+    .prose p, .prose li { max-width: 68ch; }
+    .prose a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: oklch(0.84 0.16 168 / .4); }
+    .prose a:hover { text-decoration-color: var(--accent); }
+    .prose strong { color: var(--ink); font-weight: 600; }
+    .prose em { font-style: italic; color: oklch(0.9 0.05 168); }
+    .prose ul, .prose ol { padding-left: 1.3em; } .prose li + li { margin-top: 0.4em; }
+    .prose ul li::marker { color: var(--accent); } .prose ol li::marker { color: var(--faint); font-family: var(--mono); font-size: .9em; }
+    .prose blockquote { border-left: 2px solid var(--accent); margin: 1.6em 0; padding: 2px 0 2px 20px;
+      font-family: var(--serif); font-size: 1.1em; color: oklch(0.86 0.04 170); }
+    .prose code { font-family: var(--mono); font-size: 0.86em; color: var(--accent);
+      background: oklch(0.3 0.04 200 / .4); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+    .prose pre { font-family: var(--mono); font-size: 13.5px; line-height: 1.7; background: oklch(0.13 0.035 220 / .7);
+      border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; overflow-x: auto; }
+    .prose pre code { background: none; border: none; padding: 0; color: oklch(0.85 0.02 175); }
+    .prose hr { border: none; border-top: 1px solid var(--line); margin: 2.4em 0; }
+    .prose h2 code, .prose h3 code { font-size: 0.82em; }
+
+    .endcta { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; max-width: 720px; margin: 56px auto 0; padding: 28px clamp(20px,5vw,32px) 0; border-top: 1px solid var(--line); }
+    .btn { font-weight: 600; font-size: 15px; padding: 12px 20px; border-radius: 11px; border: 1px solid var(--line-strong); color: var(--ink); transition: transform .2s, border-color .2s; }
+    .btn:hover { transform: translateY(-2px); border-color: var(--accent); }
+    .btn.primary { background: var(--accent); color: oklch(0.2 0.05 168); border-color: transparent; }
+
+    .foot { max-width: 1100px; margin: 60px auto 0; padding: 30px clamp(20px,5vw,44px) 60px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 13px; color: var(--faint); }
+    .foot nav { display: flex; gap: 22px; } .foot a:hover { color: var(--accent); }
+  </style>
+</body>
+</html>

@@ -3,6 +3,9 @@ title: "Architecture"
 description: "The four-layer model and the principles behind Vivary."
 ---
 
+This page explains how Vivary is put together and why. It's the deep version; for the
+plain-language overview, read [Concepts](/concepts/) first.
+
 ## 1. What Vivary is
 
 Vivary is a **standard + scaffolder for agent-native workspaces**. Like
