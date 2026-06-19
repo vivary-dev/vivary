@@ -13,6 +13,7 @@ import {
 } from '../api/client'
 import { C, FONT_MONO } from '../theme'
 import { Markdown } from '../markdown'
+import type { MesoSelectionContext } from '../meso/types'
 
 // The persistent agent conversation: the app's centerpiece, present on every page.
 // Talk drives the workspace; the views to the right are the stage it acts on.
@@ -45,7 +46,7 @@ function apply(prev: Item[], ev: Ev): Item[] {
   }
 }
 
-export function ChatPanel({ wsid }: { wsid: string }) {
+export function ChatPanel({ wsid, mesoContext, onMesoContextUsed }: { wsid: string; mesoContext?: MesoSelectionContext | null; onMesoContextUsed?: () => void }) {
   const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([])
   const [runtime, setRuntime] = useState('claude')
   const [sid, setSid] = useState<string | null>(null)
@@ -64,7 +65,15 @@ export function ChatPanel({ wsid }: { wsid: string }) {
 
   useEffect(() => {
     let dead = false
-    setItems([]); setObs(ZERO); setSid(null); setGates([]); setAwaiting(false)
+    Promise.resolve().then(() => {
+      if (!dead) {
+        setItems([])
+        setObs(ZERO)
+        setSid(null)
+        setGates([])
+        setAwaiting(false)
+      }
+    })
     wsRef.current?.close()
     createSession(wsid, runtime).then(({ id }) => {
       if (dead) return
@@ -95,6 +104,11 @@ export function ChatPanel({ wsid }: { wsid: string }) {
     if (!input.trim() || !sid || obs.status === 'running') return
     const text = input.trim(); setInput(''); setAwaiting(false)
     try { await sendMessage(sid, text) } catch (e) { setError(String(e)) }
+  }
+  const useMesoContext = () => {
+    if (!mesoContext) return
+    setInput(formatMesoPrompt(mesoContext))
+    onMesoContextUsed?.()
   }
   const decide = async (gid: string, d: 'approve' | 'reject') => {
     if (!sid) return
@@ -142,6 +156,16 @@ export function ChatPanel({ wsid }: { wsid: string }) {
       {error && <div style={{ color: C.err, fontSize: 13, padding: '0 22px 8px' }}>{error}</div>}
       <div style={{ borderTop: `1px solid ${C.border}`, padding: '14px 22px 18px' }}>
         <div style={{ maxWidth: '60ch', margin: '0 auto', display: 'flex', gap: 9, alignItems: 'center' }}>
+          {mesoContext && (
+            <button
+              type="button"
+              onClick={useMesoContext}
+              style={{ border: `1px solid ${C.warn}`, color: C.warn, background: C.panel, borderRadius: 10, padding: '9px 11px', cursor: 'pointer', fontSize: 12.5, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              title={mesoContext.summary}
+            >
+              Meso context ready
+            </button>
+          )}
           <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()}
             placeholder={obs.status === 'running' ? 'agent is working…' : 'Reply, or ask Vivary to act on the workspace…'}
             disabled={obs.status === 'running' || !sid}
@@ -183,4 +207,17 @@ function btn(bg: string): React.CSSProperties {
 }
 function ghost(color: string = C.muted): React.CSSProperties {
   return { background: 'none', border: `1px solid ${C.border}`, color, borderRadius: 9, padding: '8px 14px', font: 'inherit', fontSize: 13, cursor: 'pointer' }
+}
+
+function formatMesoPrompt(context: MesoSelectionContext): string {
+  const parts = [
+    'Use this Meso Canvas selection as explicit context.',
+    context.summary,
+    context.paths.length ? `Paths: ${context.paths.join(', ')}` : '',
+    context.graphIds.length ? `Graph IDs: ${context.graphIds.join(', ')}` : '',
+    context.sessionIds.length ? `Session IDs: ${context.sessionIds.join(', ')}` : '',
+    '',
+    'Task: ',
+  ].filter((part) => part !== '')
+  return parts.join('\n')
 }

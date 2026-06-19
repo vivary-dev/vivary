@@ -2,6 +2,8 @@
 // Protected routes need the per-launch token (from ~/.vivary-gui/runtime.json),
 // supplied via VITE_VIVARY_TOKEN in .env.local. /api/health is open.
 
+import type { MesoModel, MesoSelectionContext, MesoPosition } from '../meso/types'
+
 const TOKEN = import.meta.env.VITE_VIVARY_TOKEN as string | undefined
 
 async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
@@ -88,6 +90,39 @@ export const getBlast = (id: string, node: string) =>
   api<{ target: string; impacted: Impacted[] }>(`/workspaces/${id}/blast?node=${encodeURIComponent(node)}`)
 
 export const getGraphView = (id: string) => apiText(`/workspaces/${id}/graph/view`)
+
+export const getMeso = (id: string) => api<MesoModel>(`/workspaces/${id}/meso`)
+
+export const saveMesoLayout = (
+  id: string,
+  positions: Record<string, MesoPosition>,
+  viewport?: { x: number; y: number; zoom: number } | null,
+) =>
+  api<{ saved: number; viewport?: unknown }>(`/workspaces/${id}/meso/layout`, {
+    method: 'PUT',
+    body: JSON.stringify({ positions, viewport }),
+  })
+
+export const buildMesoContext = (id: string, nodes: string[], edges: string[] = []) =>
+  api<MesoSelectionContext>(`/workspaces/${id}/meso/context`, {
+    method: 'POST',
+    body: JSON.stringify({ nodes, edges }),
+  })
+
+export const addMesoNode = (
+  id: string,
+  node: { kind: 'note' | 'flow'; id?: string; title?: string; text?: string; summary?: string; position?: MesoPosition },
+) =>
+  api(`/workspaces/${id}/meso/nodes`, {
+    method: 'POST',
+    body: JSON.stringify(node),
+  })
+
+export const runMesoFlow = (id: string, flowId: string, nodes: string[] = []) =>
+  api(`/workspaces/${id}/meso/flows/${encodeURIComponent(flowId)}/run`, {
+    method: 'POST',
+    body: JSON.stringify({ nodes }),
+  })
 
 export interface RuntimeInfo {
   name: string

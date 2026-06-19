@@ -15,12 +15,14 @@ import { GraphPanel } from './views/GraphPanel'
 import { ChatPanel } from './views/ChatPanel'
 import { GatesPanel } from './views/GatesPanel'
 import { DashboardPanel } from './views/DashboardPanel'
+import { MesoPanel } from './meso/MesoPanel'
+import type { MesoSelectionContext } from './meso/types'
 
 // The agent conversation is the persistent centerpiece (center column). The right
 // column is the stage: whichever workspace view you're looking at while you keep
 // chatting. Switching the stage never interrupts the conversation.
-type Stage = 'state' | 'graph' | 'files' | 'search' | 'gates' | 'dashboard'
-const STAGES: Stage[] = ['state', 'graph', 'files', 'search', 'gates', 'dashboard']
+type Stage = 'state' | 'graph' | 'meso' | 'files' | 'search' | 'gates' | 'dashboard'
+const STAGES: Stage[] = ['state', 'graph', 'meso', 'files', 'search', 'gates', 'dashboard']
 
 function Snippet({ text }: { text: string }) {
   const parts = text.split(/(\[[^\]]*\])/g)
@@ -88,6 +90,7 @@ function App() {
   const [active, setActive] = useState<string>('')
   const [addPath, setAddPath] = useState('')
   const [stage, setStage] = useState<Stage>('state')
+  const [mesoContext, setMesoContext] = useState<MesoSelectionContext | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -106,10 +109,11 @@ function App() {
   const stageView = !active ? null
     : stage === 'state' ? <StatePanel key={active} wsid={active} />
       : stage === 'graph' ? <GraphPanel key={active} wsid={active} />
-        : stage === 'files' ? <FilesPanel key={active} wsid={active} />
-          : stage === 'search' ? <SearchPanel key={active} wsid={active} />
-            : stage === 'gates' ? <GatesPanel key={active} wsid={active} />
-              : <DashboardPanel workspaces={workspaces} />
+        : stage === 'meso' ? <MesoPanel key={active} wsid={active} onSendContext={setMesoContext} />
+          : stage === 'files' ? <FilesPanel key={active} wsid={active} />
+            : stage === 'search' ? <SearchPanel key={active} wsid={active} />
+              : stage === 'gates' ? <GatesPanel key={active} wsid={active} />
+                : <DashboardPanel workspaces={workspaces} />
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '236px minmax(440px, 1.1fr) minmax(400px, 1fr)', gridTemplateRows: 'minmax(0, 1fr)', height: '100vh', overflow: 'hidden' }}>
@@ -134,7 +138,7 @@ function App() {
       </aside>
 
       {/* Agent: the persistent centerpiece */}
-      {active ? <ChatPanel key={active} wsid={active} /> : <div style={{ color: C.muted, padding: 24 }}>Add a workspace to begin.</div>}
+      {active ? <ChatPanel key={active} wsid={active} mesoContext={mesoContext} onMesoContextUsed={() => setMesoContext(null)} /> : <div style={{ color: C.muted, padding: 24 }}>Add a workspace to begin.</div>}
 
       {/* Stage: the view you navigate while you keep chatting */}
       <aside style={{ borderLeft: `1px solid ${C.border}`, background: C.panel, display: 'flex', flexDirection: 'column', minWidth: 0 }}>

@@ -9,8 +9,6 @@ export function GraphPanel({ wsid }: { wsid: string }) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setHtml('')
-    setImpacted(null)
     getGraphView(wsid).then(setHtml).catch((e) => setError(String(e)))
   }, [wsid])
 

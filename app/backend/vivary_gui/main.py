@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import config
-from .routers import files, gates, graph, search, sessions, state, workspaces, ws
+from .routers import files, gates, graph, meso, search, sessions, state, workspaces, ws
 from .security import AUTH_TOKEN, require_token
 from .services.agents import manager
 
@@ -50,6 +50,7 @@ def create_app() -> FastAPI:
     app.include_router(files.router)
     app.include_router(state.router)
     app.include_router(graph.router)
+    app.include_router(meso.router)
     app.include_router(sessions.router)
     app.include_router(gates.router)
     app.include_router(ws.router)

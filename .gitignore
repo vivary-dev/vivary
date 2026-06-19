@@ -8,6 +8,8 @@ build/
 
 # Node
 node_modules/
+app/frontend/test-results/
+app/frontend/playwright-report/
 
 # Editor / OS
 .DS_Store
