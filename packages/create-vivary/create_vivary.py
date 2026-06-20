@@ -13,6 +13,8 @@ from pathlib import Path
 
 PRESETS = ("coding", "second-brain", "writing")
 
+ACTIVE_CONTEXTS = ("cocoindex-code",)
+
 SUBCOMMANDS = ("init", "doctor")
 
 REQUIRED_WORKSPACE_FILES = (
@@ -26,6 +28,8 @@ REQUIRED_WORKSPACE_FILES = (
     "bug-risk-playbook.md",
     "tropo.toml",
     ".gitignore",
+    "modules/index.md",
+    "modules/agent-workspace/index.md",
     "templates/AGENTS.md",
     ".claude/skills/strato/SKILL.md",
     ".claude/skills/loops/SKILL.md",
@@ -96,6 +100,7 @@ def scaffold_workspace(
     preset: str = "coding",
     force: bool = False,
     obsidian: bool = False,
+    active_context: str | None = None,
     repo_root: str | Path | None = None,
 ) -> list[Path]:
     """Lay down a full Vivary workspace scaffold.
@@ -107,6 +112,16 @@ def scaffold_workspace(
     """
     if preset not in PRESETS:
         raise ScaffoldError(f"unknown preset {preset!r}; expected one of {', '.join(PRESETS)}")
+    if active_context is not None:
+        if active_context not in ACTIVE_CONTEXTS:
+            raise ScaffoldError(
+                f"unknown active context {active_context!r}; expected one of "
+                f"{', '.join(ACTIVE_CONTEXTS)}"
+            )
+        if active_context == "cocoindex-code" and preset != "coding":
+            raise ScaffoldError(
+                "active context 'cocoindex-code' currently requires the coding preset"
+            )
 
     root = Path(repo_root) if repo_root is not None else default_repo_root()
     root = root.resolve()
@@ -120,11 +135,27 @@ def scaffold_workspace(
     project = target.name or "vivary-workspace"
     today = date.today().isoformat()
 
+    preserve_cocoindex_ignore = (
+        active_context != "cocoindex-code"
+        and force
+        and (target / ".cocoindex_code").exists()
+    )
+
     writes: list[tuple[Path, str]] = [
-        (target / "README.md", _workspace_readme(project, preset)),
-        (target / ".gitignore", _workspace_gitignore()),
+        (target / "README.md", _workspace_readme(project, preset, active_context)),
+        (
+            target / ".gitignore",
+            _workspace_gitignore(
+                active_context,
+                preserve_cocoindex_ignore=preserve_cocoindex_ignore,
+            ),
+        ),
         (target / "tropo.toml", _workspace_tropo_config()),
-        (target / "modules" / "agent-workspace.md", _module_doc(project)),
+        (
+            target / "modules" / "index.md",
+            _modules_index_doc(project, PRESET_STARTERS[preset], active_context),
+        ),
+        (_module_index_path(target, "agent-workspace"), _module_doc(project)),
         (target / "changes" / "scaffold-init.md", _change_doc(project)),
         (target / "decisions" / "0001-vivary-baseline.md", _decision_doc(project, today)),
         (target / "verification" / "scaffold-smoke.md", _verification_doc(project)),
@@ -133,11 +164,15 @@ def scaffold_workspace(
         (target / "heartbeat-reports" / ".gitkeep", ""),
     ]
     writes.extend(_preset_writes(target, project, PRESET_STARTERS[preset]))
+    if active_context == "cocoindex-code":
+        writes.extend(_cocoindex_active_context_writes(target, project))
     if obsidian:
         writes.extend(_obsidian_writes(target))
 
-    copies = _copy_plan(target, sources)
+    copies = _copy_plan(target, sources, active_context=active_context)
     _ensure_no_conflicts([p for p, _ in writes] + [dst for _, dst in copies], force)
+    if force:
+        _cleanup_stale_scaffold_state(target, active_context=active_context)
 
     created: list[Path] = []
     for dst, text in writes:
@@ -177,6 +212,7 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
             for pattern in ("USER.md", "MEMORY.md", "memory/*"):
                 if pattern not in txt:
                     errors.append(f"privacy ignore missing: {pattern}")
+        errors.extend(_module_index_errors(target))
 
     graph = {"nodes": 0, "edges": 0, "broken": 0}
     findings: list[str] = []
@@ -242,6 +278,9 @@ def _source_paths(root: Path) -> dict[str, Path]:
         "strato": root / "packages" / "strato" / "STRATO.md",
         "strato_templates": root / "packages" / "strato" / "templates",
         "strato_skill": root / "packages" / "strato" / ".claude" / "skills" / "strato",
+        "active_context_skill": (
+            root / "packages" / "strato" / ".claude" / "skills" / "active-context"
+        ),
         "claude_loops_skill": root / ".claude" / "skills" / "loops",
         "agents_loops_skill": root / ".agents" / "skills" / "loops",
     }
@@ -252,6 +291,7 @@ def _source_paths(root: Path) -> dict[str, Path]:
         "strato": assets / "STRATO.md",
         "strato_templates": assets / "templates",
         "strato_skill": assets / "strato-skill",
+        "active_context_skill": assets / "active-context-skill",
         "claude_loops_skill": assets / "loops-skill",
         "agents_loops_skill": assets / "loops-skill",
     }
@@ -275,7 +315,12 @@ def _load_tropo(root: Path):
     return module
 
 
-def _copy_plan(target: Path, sources: dict[str, Path]) -> list[tuple[Path, Path]]:
+def _copy_plan(
+    target: Path,
+    sources: dict[str, Path],
+    *,
+    active_context: str | None = None,
+) -> list[tuple[Path, Path]]:
     copies: list[tuple[Path, Path]] = []
 
     def copy_file(src: Path, dst: Path) -> None:
@@ -304,10 +349,39 @@ def _copy_plan(target: Path, sources: dict[str, Path]) -> list[tuple[Path, Path]
     copy_tree(sources["strato_skill"], target / ".agents" / "skills" / "strato")
     copy_tree(sources["claude_loops_skill"], target / ".claude" / "skills" / "loops")
     copy_tree(sources["agents_loops_skill"], target / ".agents" / "skills" / "loops")
+    if active_context == "cocoindex-code":
+        copy_tree(
+            sources["active_context_skill"],
+            target / ".claude" / "skills" / "active-context",
+        )
+        copy_tree(
+            sources["active_context_skill"],
+            target / ".agents" / "skills" / "active-context",
+        )
     return copies
 
 
 def _ensure_no_conflicts(paths: list[Path], force: bool) -> None:
+    ancestor_conflicts = sorted(
+        {
+            parent
+            for path in paths
+            for parent in path.parents
+            if parent.is_file()
+        }
+    )
+    if ancestor_conflicts:
+        preview = "\n".join(f"  - {p}" for p in ancestor_conflicts[:20])
+        extra = (
+            ""
+            if len(ancestor_conflicts) <= 20
+            else f"\n  ... and {len(ancestor_conflicts) - 20} more"
+        )
+        raise ScaffoldError(
+            "refusing to scaffold because destination parent path(s) are files:\n"
+            f"{preview}{extra}"
+        )
+
     existing = sorted({p for p in paths if p.exists()})
     if existing and not force:
         preview = "\n".join(f"  - {p}" for p in existing[:20])
@@ -318,8 +392,81 @@ def _ensure_no_conflicts(paths: list[Path], force: bool) -> None:
         )
 
 
-def _workspace_readme(project: str, preset: str) -> str:
+def _cleanup_stale_scaffold_state(target: Path, *, active_context: str | None) -> None:
+    """Remove generated artifacts that old scaffold shapes can leave behind.
+
+    `--force` means "make this target match the selected scaffold", but it should not
+    delete arbitrary user content. Keep cleanup limited to paths Vivary itself has
+    generated in older or optional profiles.
+    """
+    for path in _legacy_module_files(target):
+        _remove_path(path)
+
+    if active_context != "cocoindex-code":
+        for path in _cocoindex_active_context_stale_paths(target):
+            _remove_path(path)
+
+
+def _legacy_module_files(target: Path) -> list[Path]:
+    module_ids = {
+        "agent-workspace",
+        "active-context",
+        *(starter["module_id"] for starter in PRESET_STARTERS.values()),
+    }
+    return [target / "modules" / f"{module_id}.md" for module_id in sorted(module_ids)]
+
+
+def _cocoindex_active_context_stale_paths(target: Path) -> list[Path]:
+    return [
+        target / "docs" / "active-context.md",
+        target / "modules" / "active-context",
+        target / "decisions" / "0002-cocoindex-code-sidecar.md",
+        target / "verification" / "active-context-smoke.md",
+        target / ".claude" / "skills" / "active-context",
+        target / ".agents" / "skills" / "active-context",
+    ]
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    elif path.exists() or path.is_symlink():
+        path.unlink()
+
+
+def _module_index_path(target: Path, module_id: str) -> Path:
+    return target / "modules" / module_id / "index.md"
+
+
+def _module_index_errors(target: Path) -> list[str]:
+    modules = target / "modules"
+    if not modules.exists():
+        return []
+    errors: list[str] = []
+    for child in sorted(modules.iterdir()):
+        if child.is_dir() and not child.name.startswith(".") and not (child / "index.md").exists():
+            rel = child.relative_to(target).as_posix()
+            errors.append(f"module directory missing index.md: {rel}")
+        if child.is_file() and child.suffix == ".md" and child.name != "index.md":
+            paired_index = modules / child.stem / "index.md"
+            if paired_index.exists():
+                rel = child.relative_to(target).as_posix()
+                errors.append(f"legacy module file coexists with module index: {rel}")
+    return errors
+
+
+def _workspace_readme(project: str, preset: str, active_context: str | None = None) -> str:
     starter = PRESET_STARTERS[preset]
+    active_context_section = ""
+    if active_context == "cocoindex-code":
+        active_context_section = """
+
+Optional active context:
+
+- CocoIndex-code guidance lives in `docs/active-context.md`.
+- The active-context skill asks before installing, initializing, indexing, or enabling
+  MCP, then combines `tropo graph` truth with `ccc search` semantic candidates.
+"""
     return f"""# {project}
 
 Vivary agent workspace scaffold.
@@ -330,23 +477,37 @@ Start here:
 
 1. Read `AGENTS.md` for the workspace contract.
 2. Read `STATE.md` for current truth.
-3. Fill `USER.md` and `MEMORY.md` locally; they are private and gitignored.
-4. Use `tropo check --root .` to validate the typed workspace graph.
+3. Use `modules/index.md` to choose the one module index relevant to the task.
+4. Fill `USER.md` and `MEMORY.md` locally; they are private and gitignored.
+5. Use `tropo check --root .` to validate the typed workspace graph.
 
 The scaffold includes tropo for typed workspace knowledge, strato for the agent OS,
 runtime skills for Claude/Codex-style agents, and a starter graph under
 `modules/`, `changes/`, `decisions/`, `verification/`, and `gates/`.
+
+Module rule: each generated module is a directory with one `index.md`. The index is
+the lightweight router; put deeper context behind links instead of duplicating it.
 
 Preset starter:
 
 - Module: `{starter["module_id"]}`
 - First slice: `{starter["change_id"]}`
 - Verification: `{starter["verification_id"]}`
+{active_context_section}"""
+
+
+def _workspace_gitignore(
+    active_context: str | None = None,
+    *,
+    preserve_cocoindex_ignore: bool = False,
+) -> str:
+    active_context_ignores = ""
+    if active_context == "cocoindex-code" or preserve_cocoindex_ignore:
+        active_context_ignores = """
+# Optional active context sidecars
+.cocoindex_code/
 """
-
-
-def _workspace_gitignore() -> str:
-    return """# Strato private context
+    return f"""# Strato private context
 USER.md
 MEMORY.md
 memory/*
@@ -370,7 +531,7 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
-"""
+{active_context_ignores}"""
 
 
 def _workspace_tropo_config() -> str:
@@ -379,6 +540,7 @@ exclude = [
   ".git",
   ".claude",
   ".agents",
+  "docs",
   "templates",
   "memory",
   "heartbeat-reports",
@@ -435,15 +597,54 @@ gates: [human-gates]
 ---
 # Agent Workspace
 
-The root agent workspace shell: state surface, human contract, private memory,
-runtime skills, and typed graph folders.
+## Purpose
+
+The root agent workspace shell: state surface, human contract, private memory, runtime
+skills, and typed graph folders.
+
+## Read Next
+
+- Root contract: `AGENTS.md`
+- Current state: `STATE.md`
+- Module router: `modules/index.md`
+
+Keep this index small. Link to deeper files instead of copying their contents here.
+"""
+
+
+def _modules_index_doc(project: str, starter: dict[str, str], active_context: str | None) -> str:
+    module_ids = ["agent-workspace", starter["module_id"]]
+    if active_context == "cocoindex-code":
+        module_ids.append("active-context")
+    refs = ", ".join(module_ids)
+    rows = "\n".join(
+        f"- `{module_id}` -> `modules/{module_id}/index.md`" for module_id in module_ids
+    )
+    return f"""---
+project: {project}
+status: active
+module_area: progressive disclosure router
+related_modules: [{refs}]
+verification: [scaffold-smoke]
+gates: [human-gates]
+---
+# Modules
+
+Use this file to choose what to open next. Do not load every module by default.
+
+{rows}
+
+## DRY Rule
+
+Each fact gets one owner. Put the short routing summary in the module index, keep
+canonical detail in the owning file, and link instead of copying.
 """
 
 
 def _preset_writes(target: Path, project: str, starter: dict[str, str]) -> list[tuple[Path, str]]:
     return [
         (
-            target / "modules" / f'{starter["module_id"]}.md',
+            _module_index_path(target, starter["module_id"]),
             _preset_module_doc(project, starter),
         ),
         (
@@ -455,6 +656,131 @@ def _preset_writes(target: Path, project: str, starter: dict[str, str]) -> list[
             _preset_verification_doc(project, starter),
         ),
     ]
+
+
+def _cocoindex_active_context_writes(target: Path, project: str) -> list[tuple[Path, str]]:
+    return [
+        (target / "docs" / "active-context.md", _cocoindex_active_context_doc(project)),
+        (
+            _module_index_path(target, "active-context"),
+            _cocoindex_active_context_module_doc(project),
+        ),
+        (
+            target / "decisions" / "0002-cocoindex-code-sidecar.md",
+            _cocoindex_active_context_decision_doc(project),
+        ),
+        (
+            target / "verification" / "active-context-smoke.md",
+            _cocoindex_active_context_verification_doc(project),
+        ),
+    ]
+
+
+def _cocoindex_active_context_doc(project: str) -> str:
+    return f"""# Active Context
+
+This workspace can use CocoIndex-code as an optional active-context sidecar for
+semantic code search. Vivary core stays plain Markdown/YAML plus the zero-dependency
+graph tools; CocoIndex-code is engaged only when the agent and human agree it will
+improve retrieval.
+
+Project: `{project}`
+
+## Agent Policy
+
+1. Ask before installing `cocoindex-code`, running `ccc init`, indexing code, enabling
+   MCP, or sending source text to an external embedding provider.
+2. Lead with Vivary truth: `tropo graph`, `tropo blast <id>`, and `ozone impact <id>`.
+3. Use `ccc search --refresh "<query>"` for semantic candidates when exact names are
+   unknown or `rg` is too noisy.
+4. Read matched files directly before editing; semantic search finds candidates, not
+   final truth.
+5. Report the query, refresh status, file paths, line ranges, and whether the semantic
+   hits confirmed or changed the graph-based understanding.
+
+## Setup Options
+
+Native install, local embeddings:
+
+```bash
+uv tool install --python 3.11 --upgrade "cocoindex-code[full]"
+ccc init -f
+ccc doctor
+ccc index
+ccc status
+ccc search --refresh "where is authentication handled"
+```
+
+On non-interactive Windows agent runs, use `cmd /c "echo. | ccc init -f"` so the CLI
+chooses its local sentence-transformers default instead of opening an interactive
+prompt.
+
+MCP integration, after approval:
+
+```bash
+codex mcp add cocoindex-code -- ccc mcp
+```
+
+Index state belongs in `.cocoindex_code/`, which this scaffold gitignores.
+"""
+
+
+def _cocoindex_active_context_module_doc(project: str) -> str:
+    return f"""---
+project: {project}
+status: active
+module_area: optional semantic code search sidecar
+related_modules: [agent-workspace, codebase]
+verification: [active-context-smoke]
+gates: [human-gates]
+---
+# Active Context
+
+## Purpose
+
+Optional CocoIndex-code sidecar for active semantic code retrieval in a Vivary-backed
+codebase. It supplements tropo's explicit graph with fresh semantic code candidates
+when the agent asks and the human approves the indexing/install gate.
+
+## Read Next
+
+- Policy: `docs/active-context.md`
+- Verification: `verification/active-context-smoke.md`
+- Decision: `decisions/0002-cocoindex-code-sidecar.md`
+"""
+
+
+def _cocoindex_active_context_decision_doc(project: str) -> str:
+    return f"""---
+project: {project}
+status: accepted
+date: {date.today().isoformat()}
+related_modules: [active-context, codebase, agent-workspace]
+rationale: active semantic search should be a sidecar, not part of the deterministic tropo core
+---
+# CocoIndex-code Sidecar
+
+CocoIndex-code may be used as an optional active-context sidecar for coding
+workspaces. The sidecar can refresh a semantic code index and answer fuzzy code
+questions, but Vivary keeps the default scaffold lean: no install, no index, no daemon,
+and no MCP configuration happens until the human approves it.
+"""
+
+
+def _cocoindex_active_context_verification_doc(project: str) -> str:
+    return f"""---
+project: {project}
+status: planned
+target: cocoindex-code active-context sidecar
+command: ccc doctor && ccc search --refresh "where is the main entrypoint"
+related_modules: [active-context, codebase]
+---
+# Active Context Smoke
+
+After the user approves using CocoIndex-code, verify the sidecar by running
+`ccc doctor`, refreshing the index with one semantic query, and reading at least one
+returned file path directly before acting on it.
+"""
 
 
 def _preset_module_doc(project: str, starter: dict[str, str]) -> str:
@@ -469,7 +795,16 @@ gates: [human-gates]
 ---
 # {starter["module_title"]}
 
+## Purpose
+
 {starter["module_body"]}
+
+## Read Next
+
+- First slice: `changes/{starter["change_id"]}.md`
+- Verification: `verification/{starter["verification_id"]}.md`
+
+Keep canonical details in the linked files. This index is the routing surface.
 """
 
 
@@ -583,6 +918,15 @@ def build_parser() -> argparse.ArgumentParser:
                       help="also drop an optional Obsidian vault config (graph coloured "
                            "by type); never required — see docs/OBSIDIAN.md")
     init.add_argument(
+        "--active-context",
+        choices=ACTIVE_CONTEXTS,
+        default=None,
+        help=(
+            "add an optional active-context sidecar profile; currently "
+            "'cocoindex-code' for coding workspaces"
+        ),
+    )
+    init.add_argument(
         "--repo-root",
         default=None,
         help="Vivary source checkout root (mainly for local development/tests)",
@@ -633,6 +977,7 @@ def main(argv: list[str] | None = None) -> int:
             preset=args.preset,
             force=args.force,
             obsidian=args.obsidian,
+            active_context=args.active_context,
             repo_root=args.repo_root,
         )
     except ScaffoldError as exc:

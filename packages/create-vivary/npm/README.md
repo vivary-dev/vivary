@@ -2,10 +2,12 @@
 
 **The `create-t3-app` for agent-native workspaces.** Scaffold a complete Vivary
 workspace — typed knowledge graph (tropo), agent OS (strato), and starter graph — in
-one command.
+one command. Generated modules use `modules/<id>/index.md` routers so agents load
+context progressively.
 
 ```bash
 npm create @vivary my-workspace -- --preset coding
+npm create @vivary my-codebase -- --preset coding --active-context cocoindex-code
 # or
 npx @vivary/create my-workspace --preset coding
 ```
@@ -25,6 +27,10 @@ point. **Python 3.11+ and uv (or pipx) must be installed.**
 Prefer Python directly? `uvx create-vivary my-workspace --preset coding` — a bare
 target defaults to `init` there too (the PyPI `create-vivary` is versioned in lockstep
 with this launcher) — or `pip install create-vivary`.
+
+For coding workspaces, `--active-context cocoindex-code` scaffolds optional
+CocoIndex-code guidance and ignored sidecar state. It does not auto-install, index, or
+enable MCP; the generated docs give the approved `ccc init` / `ccc index` path.
 
 ## License
 

@@ -3,10 +3,13 @@
 The contract every agent session in **this workspace** runs. Lean by law; the full
 model is strato's `STRATO.md`. Read this on startup.
 
-## Startup ritual (don't ask permission to read)
+## Startup ritual (progressive disclosure; don't ask permission to read)
 
 1. `SOUL.md` → 2. `USER.md` → 3. `STATE.md` → 4. today's & yesterday's
 `memory/YYYY-MM-DD.md` → 5. `MEMORY.md`
+
+Stop there unless the task needs more. Do not bulk-read `docs/`, `modules/`, or the
+whole repo on startup.
 
 ## The loop (per turn)
 
@@ -17,6 +20,9 @@ This workspace **is a typed knowledge graph** — work it, don't just take notes
 
 - **retrieve** — see the graph with `tropo graph`; what depends on a node with
   `tropo blast <id>`. The graph is the first source of truth; grep notes second.
+- **progressive disclosure** — use `modules/index.md` to choose the relevant module,
+  then open only that module's `modules/<id>/index.md` before following deeper links.
+  Every module directory needs an `index.md`; keep it small.
 - **verify** — `tropo check` (strict — warnings fail) on what you touched, and
   `ozone review` for relationship gaps (an unverified change, a broken link) before a
   gate.
@@ -37,6 +43,13 @@ Sources / Updated) on the chosen cadence.
   decisions, blockers, checks.
 - Promote durable items to `MEMORY.md`. Write things down — mental notes don't survive
   a session restart.
+
+## DRY law
+
+One fact gets one owner. Put routing summaries in `AGENTS.md`, `STATE.md`, and
+`modules/**/index.md`; put durable detail in the owning typed file; link instead of
+copying. When a note repeats another source, either replace it with a link or promote
+the repeated workflow into a skill.
 
 ## 🚦 Gates — ask first, one per item (never batched)
 

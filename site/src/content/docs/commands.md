@@ -160,27 +160,32 @@ exo roles                 # the role grammar
 
 ```
 create-vivary init <target> [--preset coding|second-brain|writing] [--force] [--obsidian]
+                           [--active-context cocoindex-code]
 create-vivary doctor <target> [--json]
 ```
 
 | Command | What it does |
 |---|---|
 | `init <target>` | Lay down a complete workspace: the agent contract, the strato shell (SOUL/USER/STATE/MEMORY), runtime skills, a `tropo.toml`, and a starter typed graph. |
-| `doctor <target>` | Validate a workspace: required files, privacy ignores, and tropo graph health (no broken edges). |
+| `doctor <target>` | Validate a workspace: required files, privacy ignores, module directory indexes, and tropo graph health (no broken edges). |
 
 | Flag | Effect |
 |---|---|
 | `--preset coding\|second-brain\|writing` | Which starter graph to seed (default `coding`). |
 | `--force` | Overwrite existing scaffold files. |
 | `--obsidian` | Also drop an opt-in Obsidian vault config (graph coloured by type). Never required — see [OBSIDIAN.md](/obsidian/). |
+| `--active-context cocoindex-code` | For `coding` workspaces, add an optional CocoIndex-code sidecar profile: an active-context skill, docs, graph nodes, and `.cocoindex_code/` gitignore. It does **not** auto-install, index, or enable MCP; the generated docs include the approved `ccc init` / `ccc index` path. |
 
 ```bash
 create-vivary init my-workspace --preset writing
+create-vivary init my-codebase --preset coding --active-context cocoindex-code
 create-vivary doctor my-workspace
-# expected: doctor: ok (8 node(s), 24 edge(s), 0 broken)
+# expected for a plain coding workspace: doctor: ok (9 node(s), 28 edge(s), 0 broken)
 ```
 
-The three presets share the same agent-OS shell and differ only by starter graph:
+The three presets share the same agent-OS shell and differ only by starter graph. Each
+starter module is a directory index (`modules/<id>/index.md`) so AGENTS can route to a
+small surface before deeper context:
 
 | Preset | Module | First change | Verification |
 |---|---|---|---|

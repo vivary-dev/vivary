@@ -41,7 +41,18 @@ A **preset** just picks the starter content. Choose the one closest to your work
 - **`writing`** — a manuscript or copy system.
 
 They all share the same structure and differ only in the starter notes. Add
-`--obsidian` if you want an optional Obsidian vault config too.
+`--obsidian` if you want an optional Obsidian vault config too. For coding
+workspaces, add `--active-context cocoindex-code` if you want the agent to ask when
+CocoIndex-code semantic search would help:
+
+```bash
+create-vivary init my-codebase --preset coding --active-context cocoindex-code
+```
+
+That option writes guidance and graph nodes only. It does not auto-install
+CocoIndex-code, build an index, enable MCP, or send source text anywhere. After the
+user approves active context, follow [Active context](/active-context/) for the
+verified `ccc init` / `ccc doctor` / `ccc index` path.
 
 You now have a complete workspace:
 
@@ -52,9 +63,14 @@ STATE.md           the one place that answers "where are we?" (Focus / Status / 
 USER.md  MEMORY.md  your private identity + durable memory (ignored by Git)
 STRATO.md          how the agent operating system works
 tropo.toml         the rules for the typed graph
-modules/ changes/ decisions/ verification/ gates/   the starter knowledge graph
+modules/index.md   the router that tells agents which module index to open
+modules/<id>/index.md  lightweight module routers; deep context lives behind links
+changes/ decisions/ verification/ gates/   the starter knowledge graph
 .claude/skills/  .agents/skills/   ready-made skills for Claude Code + Codex
 ```
+
+With `--active-context cocoindex-code`, the workspace also includes
+`docs/active-context.md` and an `active-context` skill.
 
 ## 3. Check that it's healthy
 
@@ -63,7 +79,7 @@ your everyday checks:
 
 ```bash
 create-vivary doctor my-workspace
-# doctor: ok (8 node(s), 24 edge(s), 0 broken)
+# doctor: ok (9 node(s), 28 edge(s), 0 broken)
 
 tropo check          # validates every note and the graph (strict: warnings fail too)
 ozone review         # reviews the relationships across the whole graph
@@ -91,7 +107,8 @@ Open the workspace in your agent (Claude Code reads `.claude/skills/`; Codex rea
 
 > **Ask → retrieve → act → verify → learn → gate.**
 > - *retrieve* with `tropo graph` / `tropo blast <id>`: the graph is the first source
->   of truth, notes second.
+>   of truth, notes second. Use `modules/index.md` to pick one module index instead of
+>   loading the whole tree.
 > - *verify* with `tropo check` and `ozone review` before a gate.
 > - *gate*: name the blast radius (`ozone impact <id>`) for a risky change, and stop at
 >   the human gates (memory writes, publishing, installs, git push/PR, destructive ops).
@@ -105,7 +122,8 @@ The graph is just typed folders. Add a module, a change, a decision by creating 
 
 ```bash
 mkdir -p modules
-cat > modules/billing.md <<'EOF'
+mkdir -p modules/billing
+cat > modules/billing/index.md <<'EOF'
 ---
 project: my-workspace
 status: active
@@ -124,5 +142,6 @@ graph is wrong. Run `tropo fix` to clear redundant frontmatter.
 - [Command reference](/commands/) — every CLI, flag, and exit code.
 - [How-to recipes](/howto/) — review a change, multi-agent, CI, and more.
 - [Agent skills](/skills/) — bootstrap, heartbeat, self-improve, loops.
+- [Active context](/active-context/) — optional CocoIndex-code sidecar for code search.
 - [Architecture](/architecture/) — the layer model and the reasoning behind it.
 - [FAQ](/faq/)

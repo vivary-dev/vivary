@@ -32,14 +32,23 @@ Or install the CLIs from PyPI (run on demand with `uvx`, no install needed):
 ```bash
 pip install vivary-tropo vivary-ozone vivary-exo create-vivary
 create-vivary init my-workspace --preset coding
+create-vivary init my-codebase --preset coding --active-context cocoindex-code
 create-vivary doctor my-workspace
 uvx vivary-tropo check --root my-workspace
 ```
 
 The scaffolder writes a full workspace shell: `AGENTS.md`, `STATE.md`, `SOUL.md`,
 private `USER.md`/`MEMORY.md` boundaries, strato runtime skills for Claude/Codex-style
-agents, a `tropo.toml`, and a starter typed graph. `doctor` validates the shell,
-privacy ignores, and graph health after creation.
+agents, a `tropo.toml`, and a starter typed graph. Generated modules are directories
+with `index.md` routers (`modules/<id>/index.md`) so agents load the smallest useful
+context first. `doctor` validates the shell, privacy ignores, graph health, and module
+index coverage after creation.
+
+For coding workspaces that need richer source retrieval, `--active-context
+cocoindex-code` adds optional CocoIndex-code guidance and graph nodes. It does not
+auto-install, index, enable MCP, or send source text anywhere; the generated skill asks
+before those gates, then gives the approved `ccc init` / `ccc index` / `ccc search`
+path. See [docs/ACTIVE-CONTEXT.md](docs/ACTIVE-CONTEXT.md).
 
 <details><summary>Run from source (no install)</summary>
 
@@ -62,6 +71,10 @@ Every agent workspace, regardless of stack or task, needs the same small core:
 Everything Vivary ships is a facet of that one sentence. The design law (inherited
 from [throughline](https://github.com/Jeff-Kazzee/throughline)): *the framework
 must cost almost nothing to load, or it steals the context the work needs.*
+
+That means Vivary is deliberately DRY: one fact gets one owner, while `AGENTS.md`,
+`STATE.md`, and module `index.md` files route to deeper context instead of duplicating
+it. Full context management is valuable only when it keeps the active context small.
 
 **No lock-in.** A workspace is plain Markdown + YAML and a few CLIs — it works in any
 editor, or none, and on any agent runtime (Claude Code reads `.claude/skills/`, Codex

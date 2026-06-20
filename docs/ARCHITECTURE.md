@@ -35,11 +35,23 @@ competes with the user's task for context. The framework must cost almost nothin
 to load. Fewer files, fewer words, more room for the work. This is the constraint
 that keeps Vivary from bloating into a heavy harness.
 
+**DRY and progressive disclosure:** context management only works if it lowers the
+active load. `AGENTS.md`, `STATE.md`, and `modules/**/index.md` are routing surfaces;
+canonical detail lives once in the owning typed file or skill. Agents choose a module
+through `modules/index.md`, open that module's `index.md`, and follow deeper links only
+when the task proves they are relevant.
+
 **No lock-in (corollary):** a workspace is plain Markdown + YAML plus a few
 zero-dependency CLIs. It works in any editor or none and on any agent runtime
 (Claude Code via `.claude/`, Codex via `AGENTS.md` + `.agents/`). tropo even ignores
 `.obsidian/`, `.vscode/`, etc. — no editor, plugin, or single-vendor agent is ever
 required.
+
+**Active context is a sidecar.** For codebases, a workspace may opt into
+CocoIndex-code guidance (`--active-context cocoindex-code`) so agents can ask before
+using semantic code search. This does not move embeddings or indexing into the tropo
+core; it keeps the deterministic graph as truth and treats semantic search as
+candidate retrieval.
 
 ## 3. The layer model
 

@@ -8,6 +8,7 @@ Start here.
 | [COMMANDS.md](COMMANDS.md) | Full CLI reference for `tropo` · `ozone` · `exo` · `create-vivary`. |
 | [HOWTO.md](HOWTO.md) | Task recipes: add a type, see blast radius, review, CI, multi-agent, … |
 | [SKILLS.md](SKILLS.md) | The agent skills: strato (bootstrap/heartbeat/self-improve), tropo, loops. |
+| [ACTIVE-CONTEXT.md](ACTIVE-CONTEXT.md) | Optional CocoIndex-code sidecar for active semantic code context. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The layer model (tropo → strato → ozone → exo) and the why. |
 | [OBSIDIAN.md](OBSIDIAN.md) | Optional Obsidian setup for fans (never required). |
 | [FAQ.md](FAQ.md) | Common questions. |
@@ -22,5 +23,7 @@ is the folder it lives in (`tropo`), and typed frontmatter fields become a navig
 graph. An agent operates it with a per-turn loop — *Ask → retrieve → act → verify →
 learn → gate* (`strato`) — retrieving from the graph, verifying with `tropo check` +
 `ozone review`, naming blast radius before risky changes, and stopping at human gates.
-When one agent becomes many, `exo` coordinates them. Everything is plain Markdown +
-zero-dependency CLIs — no editor, no vendor, no lock-in.
+`AGENTS.md` and module `index.md` files route progressively so durable detail lives
+once instead of being copied everywhere. When one agent becomes many, `exo` coordinates
+them. Everything is plain Markdown + zero-dependency CLIs — no editor, no vendor, no
+lock-in.

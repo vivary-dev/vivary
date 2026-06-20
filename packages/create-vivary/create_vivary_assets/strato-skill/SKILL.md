@@ -21,6 +21,7 @@ improvement. Read [`../../../STRATO.md`](../../../STRATO.md) for the model.
 
 It never re-embeds file contents: the workspace's starter files live in strato's
 [`templates/`](../../../templates/) directory and are the single source of truth.
+Module `index.md` files are routers, not second copies of the module detail.
 
 Three modes — pick by the workspace state and the request.
 

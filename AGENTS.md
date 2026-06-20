@@ -18,6 +18,12 @@ gates.* Modules: **tropo** (knowledge), **strato** (agent OS), **ozone**
 layer or file that is expensive to load is *wrong*. Fewer files, fewer words, more
 room for the work. This file obeys its own law — keep it that way.
 
+**DRY + progressive disclosure.** One fact gets one owner. Root contracts and
+`index.md` files route; deeper files carry detail. Do not duplicate durable truth
+across README/docs/templates/skills when a link will do, and do not bulk-load a tree
+when `tropo graph`, `modules/index.md`, or a module's `index.md` can choose the next
+file.
+
 ## The operating loop (per turn)
 
 `Ask → retrieve → act → verify → learn → gate.` State known / inferred / unknown
