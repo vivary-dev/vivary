@@ -254,6 +254,87 @@ class CreateVivaryTests(unittest.TestCase):
                 (target / "AGENTS.md").read_text(encoding="utf-8"),
             )
 
+    def test_force_removes_legacy_module_files_for_generated_modules(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            (target / "modules").mkdir(parents=True)
+            (target / "modules" / "agent-workspace.md").write_text(
+                "---\nproject: old\nstatus: active\nmodule_area: old\n---\n",
+                encoding="utf-8",
+            )
+            (target / "modules" / "codebase.md").write_text(
+                "---\nproject: old\nstatus: active\nmodule_area: old\n---\n",
+                encoding="utf-8",
+            )
+
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=True, repo_root=ROOT
+            )
+
+            self.assertFalse((target / "modules" / "agent-workspace.md").exists())
+            self.assertFalse((target / "modules" / "codebase.md").exists())
+            self.assertTrue((target / "modules" / "agent-workspace" / "index.md").exists())
+            self.assertTrue((target / "modules" / "codebase" / "index.md").exists())
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            self.assertTrue(report["ok"], report)
+
+    def test_force_plain_prunes_active_context_artifacts_but_keeps_existing_index_ignored(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="coding",
+                active_context="cocoindex-code",
+                repo_root=ROOT,
+            )
+            index_dir = target / ".cocoindex_code"
+            index_dir.mkdir()
+            (index_dir / "target_sqlite.db").write_text("local index\n", encoding="utf-8")
+
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=True, repo_root=ROOT
+            )
+
+            stale_paths = [
+                "docs/active-context.md",
+                "modules/active-context/index.md",
+                "decisions/0002-cocoindex-code-sidecar.md",
+                "verification/active-context-smoke.md",
+                ".claude/skills/active-context/SKILL.md",
+                ".agents/skills/active-context/SKILL.md",
+            ]
+            self.assertEqual([p for p in stale_paths if (target / p).exists()], [])
+            self.assertTrue((index_dir / "target_sqlite.db").exists())
+            self.assertIn(
+                ".cocoindex_code/",
+                (target / ".gitignore").read_text(encoding="utf-8"),
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            self.assertTrue(report["ok"], report)
+
+    def test_init_refuses_file_ancestor_before_writing_partial_scaffold(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            (target / "modules").mkdir(parents=True)
+            (target / "modules" / "agent-workspace").write_text(
+                "blocks nested module index\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(create_vivary.ScaffoldError, "parent path"):
+                create_vivary.scaffold_workspace(
+                    target, preset="coding", force=False, repo_root=ROOT
+                )
+
+            self.assertFalse((target / "README.md").exists())
+            self.assertFalse((target / "tropo.toml").exists())
+            self.assertEqual(
+                (target / "modules" / "agent-workspace").read_text(encoding="utf-8"),
+                "blocks nested module index\n",
+            )
+
     def test_cli_init(self):
         with temp_workspace() as td:
             target = Path(td) / "agent-workspace"
@@ -337,6 +418,25 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertFalse(report["ok"])
             self.assertIn(
                 "module directory missing index.md: modules/codebase",
+                report["errors"],
+            )
+
+    def test_doctor_reports_legacy_module_file_duplicate(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / "modules" / "codebase.md").write_text(
+                "---\nproject: old\nstatus: active\nmodule_area: old\n---\n",
+                encoding="utf-8",
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertFalse(report["ok"])
+            self.assertIn(
+                "legacy module file coexists with module index: modules/codebase.md",
                 report["errors"],
             )
 

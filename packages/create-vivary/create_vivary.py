@@ -135,9 +135,21 @@ def scaffold_workspace(
     project = target.name or "vivary-workspace"
     today = date.today().isoformat()
 
+    preserve_cocoindex_ignore = (
+        active_context != "cocoindex-code"
+        and force
+        and (target / ".cocoindex_code").exists()
+    )
+
     writes: list[tuple[Path, str]] = [
         (target / "README.md", _workspace_readme(project, preset, active_context)),
-        (target / ".gitignore", _workspace_gitignore(active_context)),
+        (
+            target / ".gitignore",
+            _workspace_gitignore(
+                active_context,
+                preserve_cocoindex_ignore=preserve_cocoindex_ignore,
+            ),
+        ),
         (target / "tropo.toml", _workspace_tropo_config()),
         (
             target / "modules" / "index.md",
@@ -159,6 +171,8 @@ def scaffold_workspace(
 
     copies = _copy_plan(target, sources, active_context=active_context)
     _ensure_no_conflicts([p for p, _ in writes] + [dst for _, dst in copies], force)
+    if force:
+        _cleanup_stale_scaffold_state(target, active_context=active_context)
 
     created: list[Path] = []
     for dst, text in writes:
@@ -348,6 +362,26 @@ def _copy_plan(
 
 
 def _ensure_no_conflicts(paths: list[Path], force: bool) -> None:
+    ancestor_conflicts = sorted(
+        {
+            parent
+            for path in paths
+            for parent in path.parents
+            if parent.is_file()
+        }
+    )
+    if ancestor_conflicts:
+        preview = "\n".join(f"  - {p}" for p in ancestor_conflicts[:20])
+        extra = (
+            ""
+            if len(ancestor_conflicts) <= 20
+            else f"\n  ... and {len(ancestor_conflicts) - 20} more"
+        )
+        raise ScaffoldError(
+            "refusing to scaffold because destination parent path(s) are files:\n"
+            f"{preview}{extra}"
+        )
+
     existing = sorted({p for p in paths if p.exists()})
     if existing and not force:
         preview = "\n".join(f"  - {p}" for p in existing[:20])
@@ -356,6 +390,48 @@ def _ensure_no_conflicts(paths: list[Path], force: bool) -> None:
             "refusing to overwrite existing scaffold file(s); rerun with --force:\n"
             f"{preview}{extra}"
         )
+
+
+def _cleanup_stale_scaffold_state(target: Path, *, active_context: str | None) -> None:
+    """Remove generated artifacts that old scaffold shapes can leave behind.
+
+    `--force` means "make this target match the selected scaffold", but it should not
+    delete arbitrary user content. Keep cleanup limited to paths Vivary itself has
+    generated in older or optional profiles.
+    """
+    for path in _legacy_module_files(target):
+        _remove_path(path)
+
+    if active_context != "cocoindex-code":
+        for path in _cocoindex_active_context_stale_paths(target):
+            _remove_path(path)
+
+
+def _legacy_module_files(target: Path) -> list[Path]:
+    module_ids = {
+        "agent-workspace",
+        "active-context",
+        *(starter["module_id"] for starter in PRESET_STARTERS.values()),
+    }
+    return [target / "modules" / f"{module_id}.md" for module_id in sorted(module_ids)]
+
+
+def _cocoindex_active_context_stale_paths(target: Path) -> list[Path]:
+    return [
+        target / "docs" / "active-context.md",
+        target / "modules" / "active-context",
+        target / "decisions" / "0002-cocoindex-code-sidecar.md",
+        target / "verification" / "active-context-smoke.md",
+        target / ".claude" / "skills" / "active-context",
+        target / ".agents" / "skills" / "active-context",
+    ]
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    elif path.exists() or path.is_symlink():
+        path.unlink()
 
 
 def _module_index_path(target: Path, module_id: str) -> Path:
@@ -371,6 +447,11 @@ def _module_index_errors(target: Path) -> list[str]:
         if child.is_dir() and not child.name.startswith(".") and not (child / "index.md").exists():
             rel = child.relative_to(target).as_posix()
             errors.append(f"module directory missing index.md: {rel}")
+        if child.is_file() and child.suffix == ".md" and child.name != "index.md":
+            paired_index = modules / child.stem / "index.md"
+            if paired_index.exists():
+                rel = child.relative_to(target).as_posix()
+                errors.append(f"legacy module file coexists with module index: {rel}")
     return errors
 
 
@@ -415,9 +496,13 @@ Preset starter:
 {active_context_section}"""
 
 
-def _workspace_gitignore(active_context: str | None = None) -> str:
+def _workspace_gitignore(
+    active_context: str | None = None,
+    *,
+    preserve_cocoindex_ignore: bool = False,
+) -> str:
     active_context_ignores = ""
-    if active_context == "cocoindex-code":
+    if active_context == "cocoindex-code" or preserve_cocoindex_ignore:
         active_context_ignores = """
 # Optional active context sidecars
 .cocoindex_code/

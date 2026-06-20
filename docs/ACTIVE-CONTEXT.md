@@ -74,7 +74,7 @@ cmd /c "echo. | ccc init -f"
 
 Verified on the Vivary repo on 2026-06-20: `cocoindex-code==0.2.36` installed with
 local embeddings, `ccc doctor` passed model and file-walk checks, `ccc index` indexed
-95 files into 886 chunks, and `ccc search --refresh "active context cocoindex sidecar
+95 files into 897 chunks, and `ccc search --refresh "active context cocoindex sidecar
 create-vivary scaffold"` returned the active-context docs and `create_vivary.py`
 implementation.
 

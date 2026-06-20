@@ -51,7 +51,7 @@ Mobile:
 
 > Active-context branch proof, 2026-06-20: plain coding scaffold writes 37 files and
 > doctors clean at 9 nodes / 28 edges; `--active-context cocoindex-code` writes 43
-> files and doctors clean at 12 nodes / 49 edges. `cocoindex-code==0.2.36` was
+> files and doctors clean at 12 nodes / 38 edges. `cocoindex-code==0.2.36` was
 > installed with local embeddings, initialized against this repo, indexed 95 files into
-> 886 chunks, and `ccc search --refresh` returned the active-context docs plus the
+> 897 chunks, and `ccc search --refresh` returned the active-context docs plus the
 > `create_vivary.py` implementation.
