@@ -33,6 +33,7 @@ export default defineConfig({
 					items: [
 						{ label: 'How-to recipes', slug: 'howto' },
 						{ label: 'Agent skills', slug: 'skills' },
+						{ label: 'Active context', slug: 'active-context' },
 					],
 				},
 				{

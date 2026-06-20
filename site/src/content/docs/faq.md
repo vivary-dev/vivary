@@ -63,6 +63,12 @@ and it's retyped, no edit needed. A `type:` that just repeats the folder is nois
 three ways to set one fact is harder to enforce, not easier. (There's a decision doc on
 this in tropo's example vault.)
 
+### How does Vivary avoid context bloat?
+Root files and `index.md` files route; they do not store everything. Generated modules
+live at `modules/<id>/index.md`, and the agent uses `modules/index.md` plus the graph
+to choose which one to open. Durable detail should live once in the owning typed file,
+skill, source file, or test.
+
 ### What's the difference between `tropo check` and `ozone review`?
 `tropo check` validates **each document** (required fields, types, that refs resolve).
 `ozone review` looks at the **relationships across the whole graph** — a change with
@@ -79,6 +85,14 @@ No, deliberately. tropo owns the **typed** graph (explicit links). Semantic
 ("organize by meaning") clustering is a separate, future job — a graphify-style layer
 that *consumes* tropo's clean graph. Keeping embeddings out keeps the core zero-dependency
 and deterministic.
+
+### Can Vivary use CocoIndex?
+Yes, as an optional sidecar for coding workspaces. Scaffold it with
+`create-vivary init my-codebase --preset coding --active-context cocoindex-code`.
+That adds an active-context skill, docs, graph nodes, and `.cocoindex_code/` to
+`.gitignore`. It does not install CocoIndex-code, build an index, enable MCP, or send
+source text anywhere. The generated skill asks before crossing those gates, then uses
+`ccc search` alongside `tropo graph` / `tropo blast`.
 
 ### Why are there package names like `vivary-tropo` but the command is `tropo`?
 PyPI has no scopes and the bare names `tropo`/`ozone`/`exo` were taken, so the

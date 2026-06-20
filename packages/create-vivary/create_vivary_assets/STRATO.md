@@ -9,6 +9,10 @@ Lean by law (the minimalism hypothesis): every always-on file competes with the
 user's task for context. This model is the only always-on strato file. Procedures
 load on demand from the skill; templates load once, at bootstrap.
 
+DRY by law: one fact gets one owner. `AGENTS.md`, `STATE.md`, and
+`modules/**/index.md` are routing surfaces; deeper files own durable detail. Link
+instead of copying, and load the next file only after the task proves it is relevant.
+
 ## FW vs WS — what strato is
 
 - **strato is the FW** (framework): this model + the `templates/` a workspace starts
@@ -43,6 +47,9 @@ workspace *compound* — each session adds momentum the next inherits.
 - **Ask** — state known / inferred / unknown; interview when unclear, don't guess.
 - **Retrieve** — load the smallest useful context. Search finds *candidates*; sources
   + checks + the human are truth.
+- **Progressive disclosure** — route through `modules/index.md` and the relevant
+  `modules/<id>/index.md` before opening deeper files. Never read a whole tree just
+  because it exists.
 - **Act** — one useful slice. Plan before edits; define checks before implementing.
 - **Verify** — code: tests/build. research: sources. docs: privacy, links, readability.
 - **Learn** — distill repeated lessons; keep the source trail; promote only reusable

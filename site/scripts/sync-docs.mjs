@@ -17,6 +17,7 @@ const pages = [
   ['GETTING-STARTED', 'getting-started', 'Getting started', 'Install Vivary and run your first agent workspace.'],
   ['COMMANDS', 'commands', 'Command reference', 'Every CLI across the four layers: tropo, ozone, exo, create-vivary.'],
   ['SKILLS', 'skills', 'Agent skills', 'The strato, tropo, and loops skills that operate a Vivary workspace.'],
+  ['ACTIVE-CONTEXT', 'active-context', 'Active context', 'Optional CocoIndex-code sidecar guidance for semantic code retrieval.'],
   ['HOWTO', 'howto', 'How-to recipes', 'Task recipes: add a type, see blast radius, review, CI, multi-agent.'],
   ['FAQ', 'faq', 'FAQ', 'Common questions about Vivary.'],
   ['ARCHITECTURE', 'architecture', 'Architecture', 'The four-layer model and the principles behind Vivary.'],
@@ -29,6 +30,7 @@ const rewrite = (s) =>
    .replaceAll('](GETTING-STARTED.md)', '](/getting-started/)')
    .replaceAll('](COMMANDS.md)', '](/commands/)')
    .replaceAll('](SKILLS.md)', '](/skills/)')
+   .replaceAll('](ACTIVE-CONTEXT.md)', '](/active-context/)')
    .replaceAll('](HOWTO.md)', '](/howto/)')
    .replaceAll('](FAQ.md)', '](/faq/)')
    .replaceAll('](ARCHITECTURE.md)', '](/architecture/)')

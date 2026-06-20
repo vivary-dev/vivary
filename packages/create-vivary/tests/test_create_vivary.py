@@ -55,17 +55,27 @@ class CreateVivaryTests(unittest.TestCase):
                 ".claude/skills/loops/SKILL.md",
                 ".agents/skills/strato/SKILL.md",
                 ".agents/skills/loops/SKILL.md",
-                "modules/agent-workspace.md",
+                "modules/index.md",
+                "modules/agent-workspace/index.md",
                 "changes/scaffold-init.md",
                 "decisions/0001-vivary-baseline.md",
                 "verification/scaffold-smoke.md",
                 "gates/human-gates.md",
-                "modules/codebase.md",
+                "modules/codebase/index.md",
                 "changes/local-ci-baseline.md",
                 "verification/local-checks.md",
             ]
             missing = [p for p in expected if not (target / p).exists()]
             self.assertEqual(missing, [])
+            self.assertFalse((target / "modules" / "codebase.md").exists())
+
+            agents = (target / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn("progressive disclosure", agents)
+            self.assertIn("modules/index.md", agents)
+            module_index = (
+                target / "modules" / "codebase" / "index.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn("Keep canonical details in the linked files", module_index)
 
             gitignore = (target / ".gitignore").read_text(encoding="utf-8")
             self.assertIn("USER.md", gitignore)
@@ -79,6 +89,7 @@ class CreateVivaryTests(unittest.TestCase):
 
             nodes, edges = tropo.build_graph(docs)
             for node in [
+                "modules",
                 "agent-workspace",
                 "codebase",
                 "scaffold-init",
@@ -111,6 +122,71 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertIn("path:modules/", queries)
             self.assertIn("path:gates/", queries)
             self.assertTrue((vault / "AGENTS.md").exists())  # still a real workspace
+
+    def test_cocoindex_active_context_is_opt_in(self):
+        with temp_workspace() as td:
+            plain = Path(td) / "plain"
+            create_vivary.scaffold_workspace(plain, preset="coding", repo_root=ROOT)
+            self.assertFalse((plain / ".agents" / "skills" / "active-context").exists())
+            self.assertNotIn(
+                ".cocoindex_code/",
+                (plain / ".gitignore").read_text(encoding="utf-8"),
+            )
+
+            active = Path(td) / "active"
+            create_vivary.scaffold_workspace(
+                active,
+                preset="coding",
+                active_context="cocoindex-code",
+                repo_root=ROOT,
+            )
+
+            expected = [
+                "docs/active-context.md",
+                "modules/active-context/index.md",
+                "decisions/0002-cocoindex-code-sidecar.md",
+                "verification/active-context-smoke.md",
+                ".claude/skills/active-context/SKILL.md",
+                ".agents/skills/active-context/SKILL.md",
+            ]
+            missing = [p for p in expected if not (active / p).exists()]
+            self.assertEqual(missing, [])
+
+            skill = (
+                active / ".agents" / "skills" / "active-context" / "SKILL.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn("Ask before installing, initializing, indexing", skill)
+            self.assertIn("ccc search", skill)
+            self.assertIn("tropo graph", skill)
+
+            gitignore = (active / ".gitignore").read_text(encoding="utf-8")
+            self.assertIn(".cocoindex_code/", gitignore)
+
+            resolver = tropo.ConfigResolver(str(active), str(TROPO))
+            docs = tropo.analyze(str(active), [], resolver)
+            findings = [f.render() for d in docs for f in d.findings]
+            self.assertEqual(findings, [])
+
+            nodes, edges = tropo.build_graph(docs)
+            for node in [
+                "active-context",
+                "0002-cocoindex-code-sidecar",
+                "active-context-smoke",
+            ]:
+                self.assertIn(node, nodes)
+            self.assertTrue(all(not e["broken"] for e in edges))
+
+    def test_cocoindex_active_context_requires_coding_preset(self):
+        with temp_workspace() as td:
+            target = Path(td) / "writing-workspace"
+
+            with self.assertRaisesRegex(create_vivary.ScaffoldError, "coding preset"):
+                create_vivary.scaffold_workspace(
+                    target,
+                    preset="writing",
+                    active_context="cocoindex-code",
+                    repo_root=ROOT,
+                )
 
     def test_presets_write_distinct_starter_graphs(self):
         cases = {
@@ -211,6 +287,28 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertTrue((target / "AGENTS.md").exists())
 
+    def test_cli_active_context_flag(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            rc = create_vivary.main(
+                [
+                    "init",
+                    str(target),
+                    "--preset",
+                    "coding",
+                    "--active-context",
+                    "cocoindex-code",
+                    "--repo-root",
+                    str(ROOT),
+                ]
+            )
+
+            self.assertEqual(rc, 0)
+            self.assertTrue((target / "docs" / "active-context.md").exists())
+            self.assertTrue(
+                (target / ".agents" / "skills" / "active-context" / "SKILL.md").exists()
+            )
+
     def test_doctor_accepts_generated_workspace(self):
         with temp_workspace() as td:
             target = Path(td) / "agent-workspace"
@@ -223,7 +321,23 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertTrue(report["ok"], report)
             self.assertEqual(report["errors"], [])
             self.assertEqual(report["graph"]["broken"], 0)
-            self.assertGreaterEqual(report["graph"]["nodes"], 8)
+            self.assertGreaterEqual(report["graph"]["nodes"], 9)
+
+    def test_doctor_reports_missing_module_index(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / "modules" / "codebase" / "index.md").unlink()
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertFalse(report["ok"])
+            self.assertIn(
+                "module directory missing index.md: modules/codebase",
+                report["errors"],
+            )
 
     def test_doctor_reports_missing_contract_file(self):
         with temp_workspace() as td:

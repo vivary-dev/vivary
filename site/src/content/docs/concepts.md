@@ -46,11 +46,13 @@ project the five things every serious agent project ends up needing:
    knows, instead of a single `notes.md` that drifts out of date.
 2. **Visible state** — one file, `STATE.md`, that always answers "where are we?" The
    agent reads it first and updates it last.
-3. **Reusable skills** — the procedures the agent runs, written down once instead of
+3. **Progressive disclosure** — module `index.md` files route the agent to the one
+   slice of context it needs instead of loading the whole project.
+4. **Reusable skills** — the procedures the agent runs, written down once instead of
    re-explained every time.
-4. **Private boundaries** — your personal context and durable memory, kept in files
+5. **Private boundaries** — your personal context and durable memory, kept in files
    that are ignored by Git so they never end up in a public commit.
-5. **Verification gates** — checks the agent must pass, and a human sign-off before
+6. **Verification gates** — checks the agent must pass, and a human sign-off before
    anything risky.
 
 ## Why the "typed graph" part matters
@@ -60,6 +62,8 @@ graph* instead of flat notes, three good things follow:
 
 - The agent can **retrieve** the few things relevant to the task instead of re-reading
   everything and hoping. Cheaper, and far less error-prone.
+- Module `index.md` files keep retrieval **DRY**: the index routes, while the owning
+  note, source file, test, or skill carries the real detail once.
 - A checker (`tropo check`) can **fail** on broken or mistyped notes, so the memory
   can't quietly rot.
 - Review can show you a change's **blast radius**: not just the lines that changed, but

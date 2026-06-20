@@ -16,7 +16,9 @@ speeds:
   occurrence; audit workspace hygiene.
 
 **Design law:** strato must be *tiny to load*. The only always-on file is `STRATO.md`;
-templates load once at bootstrap, and the procedures load on demand from the skill.
+templates load once at bootstrap, module `index.md` files route progressively, and
+the procedures load on demand from the skill. One fact gets one owner; links beat
+copies.
 
 ## Layout
 
@@ -25,6 +27,7 @@ templates load once at bootstrap, and the procedures load on demand from the ski
 | [`STRATO.md`](STRATO.md) | The compressed model — the always-on agent OS (read this) |
 | [`templates/`](templates/) | A workspace's starters: `AGENTS.md`, `SOUL.md`, `USER`/`MEMORY`/`STATE` templates, `bug-risk-playbook.md` |
 | [`.claude/skills/strato/`](.claude/skills/strato/) | The executable: `bootstrap` / `heartbeat` / `self-improve` modes |
+| [`.claude/skills/active-context/`](.claude/skills/active-context/) | Optional CocoIndex-code sidecar decision/retrieval policy |
 
 ## How it's used
 

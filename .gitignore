@@ -19,5 +19,11 @@ node_modules/
 sandboxes/*
 !sandboxes/README.md
 
+# Canonical Strato skills are source files even if a global ignore hides .claude/
+!packages/strato/.claude/
+!packages/strato/.claude/skills/
+!packages/strato/.claude/skills/active-context/
+!packages/strato/.claude/skills/active-context/**
+
 # Local drafts
 drafts/

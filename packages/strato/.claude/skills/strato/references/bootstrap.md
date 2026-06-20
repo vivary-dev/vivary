@@ -9,8 +9,11 @@ contents here — `templates/` is the single source of truth.
 Read what's there before assuming anything is missing:
 
 - Workspace root: `SOUL.md`, `USER.md`, `AGENTS.md`, `MEMORY.md`, `STATE.md`, `README.md`
+- Progressive routers: `modules/index.md`, then only the relevant
+  `modules/<id>/index.md`
 - `memory/` — daily notes? an `agents/` subfolder?
-- `docs/`, `.claude/skills/` (or `.agents/skills/`), `heartbeat-reports/`
+- Inventory only: `docs/`, `.claude/skills/` (or `.agents/skills/`),
+  `heartbeat-reports/`; do not bulk-read them
 - `git remote -v` — is this a repo, and where does it push?
 
 Note what exists vs. missing. Don't write yet.
