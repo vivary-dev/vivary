@@ -156,6 +156,7 @@ class CreateVivaryTests(unittest.TestCase):
                 active / ".agents" / "skills" / "active-context" / "SKILL.md"
             ).read_text(encoding="utf-8")
             self.assertIn("Ask before installing, initializing, indexing", skill)
+            self.assertIn("ccc init -f", skill)
             self.assertIn("ccc search", skill)
             self.assertIn("tropo graph", skill)
 

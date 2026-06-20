@@ -87,9 +87,10 @@ and deterministic.
 Yes, as an optional sidecar for coding workspaces. Scaffold it with
 `create-vivary init my-codebase --preset coding --active-context cocoindex-code`.
 That adds an active-context skill, docs, graph nodes, and `.cocoindex_code/` to
-`.gitignore`. It does not install CocoIndex-code, build an index, enable MCP, or send
-source text anywhere. The generated skill asks before crossing those gates, then uses
-`ccc search` alongside `tropo graph` / `tropo blast`.
+`.gitignore`. It does not auto-install CocoIndex-code, build an index, enable MCP, or
+send source text anywhere. The generated skill asks before crossing those gates, then
+uses the approved `ccc init` / `ccc index` / `ccc search --refresh` path alongside
+`tropo graph` / `tropo blast`.
 
 ### Why are there package names like `vivary-tropo` but the command is `tropo`?
 PyPI has no scopes and the bare names `tropo`/`ozone`/`exo` were taken, so the

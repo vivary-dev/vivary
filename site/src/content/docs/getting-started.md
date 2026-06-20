@@ -52,8 +52,10 @@ CocoIndex-code semantic search would help:
 create-vivary init my-codebase --preset coding --active-context cocoindex-code
 ```
 
-That option writes guidance and graph nodes only. It does not install CocoIndex-code,
-build an index, enable MCP, or send source text anywhere.
+That option writes guidance and graph nodes only. It does not auto-install
+CocoIndex-code, build an index, enable MCP, or send source text anywhere. After the
+user approves active context, follow [Active context](/active-context/) for the
+verified `ccc init` / `ccc doctor` / `ccc index` path.
 
 You now have a complete workspace:
 

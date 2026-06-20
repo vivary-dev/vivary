@@ -27,3 +27,5 @@ sandboxes/*
 
 # Local drafts
 drafts/
+# CocoIndex Code (ccc)
+/.cocoindex_code/

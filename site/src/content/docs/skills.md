@@ -109,9 +109,11 @@ external embedding provider. Those are Vivary gates. Once approved, it retrieves
 this order:
 
 1. `tropo graph` / `tropo blast <id>` / `ozone impact <id>` for workspace truth.
-2. `ccc search --refresh "<query>"` for semantic code candidates.
-3. Direct file reads around returned line ranges.
-4. Project tests plus `tropo check` / `ozone review` before a gate.
+2. `uv tool install --python 3.11 --upgrade "cocoindex-code[full]"`, then
+   `ccc init -f`, `ccc doctor`, and `ccc index` if the sidecar is not already ready.
+3. `ccc search --refresh "<query>"` for semantic code candidates.
+4. Direct file reads around returned line ranges.
+5. Project tests plus `tropo check` / `ozone review` before a gate.
 
 **Triggers:** "CocoIndex", "ccc", "active context", "semantic code search", "find
 where this is implemented", "search the codebase", or code work where grep is too

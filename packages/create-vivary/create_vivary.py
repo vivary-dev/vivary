@@ -618,11 +618,17 @@ Project: `{project}`
 Native install, local embeddings:
 
 ```bash
-uv tool install --upgrade "cocoindex-code[full]"
+uv tool install --python 3.11 --upgrade "cocoindex-code[full]"
+ccc init -f
 ccc doctor
 ccc index
+ccc status
 ccc search --refresh "where is authentication handled"
 ```
+
+On non-interactive Windows agent runs, use `cmd /c "echo. | ccc init -f"` so the CLI
+chooses its local sentence-transformers default instead of opening an interactive
+prompt.
 
 MCP integration, after approval:
 

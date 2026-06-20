@@ -42,7 +42,8 @@ git, push, publish, or enable hooks.
 For coding workspaces, `--active-context cocoindex-code` adds an optional
 CocoIndex-code sidecar profile: active-context skills for Claude/Codex-style agents,
 local policy docs, graph nodes, and `.cocoindex_code/` in `.gitignore`. It does not
-install CocoIndex-code, create an index, or enable MCP.
+auto-install CocoIndex-code, create an index, or enable MCP; the generated docs give
+the approved `ccc init` / `ccc index` path.
 
 `doctor` validates the generated shell, privacy ignores, module directory indexes, and
 typed graph:

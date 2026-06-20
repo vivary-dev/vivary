@@ -62,12 +62,17 @@ Skip it when:
 ## Useful Commands
 
 ```bash
+uv tool install --python 3.11 --upgrade "cocoindex-code[full]"
+ccc init -f
 ccc doctor
 ccc index
 ccc status
 ccc search --refresh "authentication flow"
 ccc search --lang python --path "src/*" "database connection pool"
 ```
+
+For non-interactive Windows agent runs, use `cmd /c "echo. | ccc init -f"` so `ccc`
+uses the default local embedding model without opening an interactive prompt.
 
 For MCP-backed agents, use the `search` tool with `refresh_index=true` on the first
 query of a session or after code changes.

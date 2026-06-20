@@ -46,8 +46,9 @@ index coverage after creation.
 
 For coding workspaces that need richer source retrieval, `--active-context
 cocoindex-code` adds optional CocoIndex-code guidance and graph nodes. It does not
-install, index, enable MCP, or send source text anywhere; the generated skill asks
-before those gates.
+auto-install, index, enable MCP, or send source text anywhere; the generated skill asks
+before those gates, then gives the approved `ccc init` / `ccc index` / `ccc search`
+path. See [docs/ACTIVE-CONTEXT.md](docs/ACTIVE-CONTEXT.md).
 
 <details><summary>Run from source (no install)</summary>
 

@@ -171,7 +171,7 @@ create-vivary doctor <target> [--json]
 | `--preset coding\|second-brain\|writing` | Which starter graph to seed (default `coding`). |
 | `--force` | Overwrite existing scaffold files. |
 | `--obsidian` | Also drop an opt-in Obsidian vault config (graph coloured by type). Never required — see [OBSIDIAN.md](OBSIDIAN.md). |
-| `--active-context cocoindex-code` | For `coding` workspaces, add an optional CocoIndex-code sidecar profile: an active-context skill, docs, graph nodes, and `.cocoindex_code/` gitignore. It does **not** install, index, or enable MCP. |
+| `--active-context cocoindex-code` | For `coding` workspaces, add an optional CocoIndex-code sidecar profile: an active-context skill, docs, graph nodes, and `.cocoindex_code/` gitignore. It does **not** auto-install, index, or enable MCP; the generated docs include the approved `ccc init` / `ccc index` path. |
 
 ```bash
 create-vivary init my-workspace --preset writing

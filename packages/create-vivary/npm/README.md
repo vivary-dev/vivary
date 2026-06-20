@@ -29,8 +29,8 @@ target defaults to `init` there too (the PyPI `create-vivary` is versioned in lo
 with this launcher) — or `pip install create-vivary`.
 
 For coding workspaces, `--active-context cocoindex-code` scaffolds optional
-CocoIndex-code guidance and ignored sidecar state. It does not install, index, or
-enable MCP.
+CocoIndex-code guidance and ignored sidecar state. It does not auto-install, index, or
+enable MCP; the generated docs give the approved `ccc init` / `ccc index` path.
 
 ## License
 
