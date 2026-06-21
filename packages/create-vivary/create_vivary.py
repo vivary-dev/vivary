@@ -1069,12 +1069,15 @@ def _run_wizard(args) -> dict:
         except EOFError:
             cloud_choice = "1"
         if cloud_choice == "2":
-            return {"storage": "cloud", "provider": "astra"}
+            return {"storage": "cloud", "provider": "astra", "installed": []}
         if cloud_choice == "3":
-            return {"storage": "file", "provider": "lancedb"}
-        return {"storage": "cloud", "provider": "qdrant"}
+            return {"storage": "file", "provider": "lancedb", "installed": []}
+        return {"storage": "cloud", "provider": "qdrant", "installed": []}
 
-    return {"storage": "embedded", "provider": "lancedb"}
+    # User picked "on this computer" — install LanceDB now, wizard is the consent step
+    print("\n  Setting up LanceDB for local search...", file=sys.stderr)
+    installed = _ensure_backend_installed("lancedb", yes=True)
+    return {"storage": "embedded", "provider": "lancedb", "installed": installed}
 
 
 def _write_vivary_dir(target: Path, storage: str, provider: str, dry_run: bool) -> list[Path]:
@@ -1189,7 +1192,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "wizard":
         target = Path(args.target).resolve()
         decisions = _run_wizard(args)
-        installed = _ensure_backend_installed(decisions["provider"], getattr(args, "yes", False))
+        _yes = getattr(args, "yes", False) or getattr(args, "auto", False)
+        installed = decisions.get("installed") or _ensure_backend_installed(decisions["provider"], _yes)
         vivary_paths = _write_vivary_dir(target, decisions["storage"], decisions["provider"],
                                          getattr(args, "dry_run", False))
         if getattr(args, "json", False):
@@ -1213,14 +1217,17 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- init ---
     dry_run = getattr(args, "dry_run", False)
-    yes = getattr(args, "yes", False)
+    # --auto means fully unattended: no prompts anywhere, including installs
+    yes = getattr(args, "yes", False) or getattr(args, "auto", False)
 
     # Determine storage configuration via wizard or flags
     decisions = _run_wizard(args)
     storage = decisions["storage"]
     provider = decisions["provider"]
 
-    installed = _ensure_backend_installed(provider, yes) if storage != "file" else []
+    # If the interactive wizard already installed (user picked embedded), don't prompt again
+    _prior = decisions.get("installed", [])
+    installed = _prior + (_ensure_backend_installed(provider, yes) if storage != "file" else [])
 
     try:
         created = scaffold_workspace(
