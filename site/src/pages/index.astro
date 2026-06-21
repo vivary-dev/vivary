@@ -21,8 +21,8 @@ const creates = [
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Vivary — typed memory and gates for AI-agent projects</title>
-  <meta name="description" content="Vivary scaffolds the missing layer around AI agents: typed project memory, visible state, reusable skills, private memory boundaries, and verification gates. One command. Plain Markdown. Any editor. Any agent. Live on PyPI and npm." />
+  <title>Vivary — typed memory, search, and gates for AI agents</title>
+  <meta name="description" content="Vivary scaffolds the missing infrastructure for AI agents: typed project memory, search, visible state, reusable skills, and verification gates. One command from a human, zero prompts for an agent. Plain Markdown. Any agent. Live on PyPI and npm." />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <!-- Self-hosted fonts: no third-party request. Preload the latin variable subsets used above the fold. -->
   <link rel="preload" href="/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin />
@@ -57,12 +57,12 @@ const creates = [
   <main>
     <!-- HERO -->
     <section class="hero">
-      <p class="kicker">Typed memory and gates for AI-agent projects</p>
-      <h1>A working memory<br />your agents can <span class="grad">inspect.</span></h1>
+      <p class="kicker">Typed memory · search · gates — for AI-agent workspaces</p>
+      <h1>The workspace your<br />agents can <span class="grad">navigate.</span></h1>
       <p class="lede">
-        Vivary scaffolds the missing layer around AI agents: typed project memory, visible
-        state, reusable skills, private memory boundaries, and verification gates. One
-        command. Plain Markdown. Any editor. Any agent.
+        Vivary scaffolds the missing infrastructure for AI agents: typed project memory,
+        graph search, visible state, reusable skills, and verification gates. One command
+        from a human — or zero prompts from an agent. Plain Markdown. Any editor. Any agent.
       </p>
       <div class="cmd">
         <span class="p">$</span><span class="typed">npm create @vivary my-workspace</span>
@@ -101,10 +101,10 @@ const creates = [
       </figure>
 
       <ul class="strip" aria-label="Where to get Vivary">
-        <a href="https://pypi.org/project/create-vivary/"><li><b>PyPI</b><span>create-vivary 0.1.1</span></li></a>
-        <a href="https://www.npmjs.com/package/@vivary/create"><li><b>npm</b><span>@vivary/create 0.1.1</span></li></a>
+        <a href="https://pypi.org/project/create-vivary/"><li><b>PyPI</b><span>create-vivary 0.2.1</span></li></a>
+        <a href="https://www.npmjs.com/package/@vivary/create"><li><b>npm</b><span>@vivary/create 0.2.1</span><img src="https://img.shields.io/npm/dm/%40vivary%2Fcreate?style=flat-square&color=84e7c0&label=" alt="monthly downloads" class="dl-badge" /></li></a>
         <a href={repo}><li><b>GitHub</b><span>public · MIT</span></li></a>
-        <li><b>Runtime</b><span>Claude Code + Codex</span></li>
+        <li><b>Runtime</b><span>Claude Code · Codex</span></li>
       </ul>
     </section>
 
@@ -143,6 +143,42 @@ doctor: ok (8 node(s), 24 edge(s), 0 broken)
 
 <span class="g">$ tropo check --root my-workspace</span>
 tropo: 8 document(s), 0 error(s), 0 warning(s)  →  exit 0</pre>
+      </div>
+    </section>
+
+    <!-- SEARCH + AGENT MODE -->
+    <section class="band search">
+      <div class="search-head">
+        <h2>Your workspace knows<br />what it knows.</h2>
+        <p>In 0.2 the graph gained search and agent self-configuration. <code>tropo query</code>
+          finds typed nodes by content. Agents scaffold and configure themselves with zero prompts — including
+          auto-installing the storage backend.</p>
+      </div>
+      <div class="search-grid">
+        <div>
+          <p class="search-label">Search the knowledge graph</p>
+          <pre class="term"><span class="g">$ tropo query "auth module"</span>
+  1  auth        module   score 0.94
+  2  checkout    module   score 0.78
+  3  session-fix change   score 0.61
+
+<span class="g">$ tropo migrate --from file --to embedded</span>
+<span class="dim">migrated 9 nodes  →  exit 0</span></pre>
+        </div>
+        <div>
+          <p class="search-label">Agents self-configure — no prompts</p>
+          <pre class="term"><span class="g">$ create-vivary init . \
+    --auto --size large \
+    --yes --json</span>
+
+<span class="dim">{</span>
+  <span class="acc">"ok"</span>: true,
+  <span class="acc">"storage"</span>: <span class="g">"embedded"</span>,
+  <span class="acc">"provider"</span>: <span class="g">"lancedb"</span>,
+  <span class="acc">"installed"</span>: [<span class="g">"lancedb"</span>],
+  <span class="acc">"files"</span>: 44
+<span class="dim">}</span></pre>
+        </div>
       </div>
     </section>
 
@@ -208,9 +244,10 @@ billing  →  4 node(s) depend on it
     <!-- CLOSER -->
     <section class="band closer">
       <h2>Start in one command.</h2>
-      <pre class="term big"><span class="g">$ npm create @vivary my-workspace</span>   <span class="dim"># pick: coding · second-brain · writing</span>
+      <pre class="term big"><span class="g">$ npm create @vivary my-workspace</span>   <span class="dim"># wizard picks your storage tier</span>
 <span class="g">$ pip install vivary-tropo vivary-ozone vivary-exo create-vivary</span>
-<span class="g">$ uvx vivary-tropo check</span>   <span class="dim"># or run without installing</span></pre>
+<span class="g">$ tropo query "what changed last sprint"</span>   <span class="dim"># search the graph</span>
+<span class="g">$ create-vivary init . --auto --yes --json</span>   <span class="dim"># agent-mode: zero prompts</span></pre>
       <div class="cta">
         <a class="btn primary" href="/getting-started/">Read the docs</a>
         <a class="btn" href={repo}>GitHub</a>
@@ -408,6 +445,18 @@ billing  →  4 node(s) depend on it
       display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;
       border-top: 1px solid var(--line); font-family: var(--mono); font-size: 13px; color: var(--faint); }
     .foot nav { display: flex; gap: 22px; } .foot a:hover { color: var(--accent); }
+
+    /* dl-badge: shields.io inline in strip */
+    .strip .dl-badge { display: block; height: 16px; margin-top: 3px; }
+
+    /* search section */
+    .search-head { text-align: center; margin-bottom: clamp(28px, 4vw, 48px); }
+    .search-head h2 { font-family: var(--serif); font-size: clamp(30px, 4.2vw, 54px); letter-spacing: -0.025em; margin: 0 0 16px; }
+    .search-head p { color: var(--muted); max-width: 50ch; margin: 0 auto; }
+    .search-grid { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(18px, 3vw, 40px); }
+    .search-label { font-family: var(--mono); font-size: 12px; color: var(--faint); letter-spacing: 0.05em; text-transform: uppercase; margin: 0 0 10px; }
+    .term .acc { color: oklch(0.78 0.12 240); }
+    @media (max-width: 640px) { .search-grid { grid-template-columns: 1fr; } }
 
     @keyframes draw { to { stroke-dashoffset: 0; } }
     @keyframes rise { to { opacity: 1; transform: none; } }

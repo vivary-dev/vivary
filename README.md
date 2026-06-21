@@ -1,5 +1,10 @@
 # Vivary
 
+[![npm/mo](https://img.shields.io/npm/dm/%40vivary%2Fcreate?style=flat-square&color=1f9d72&label=npm%2Fmo)](https://www.npmjs.com/package/@vivary/create)
+[![PyPI/mo](https://img.shields.io/pypi/dm/create-vivary?style=flat-square&color=1f9d72&label=PyPI%2Fmo)](https://pypi.org/project/create-vivary/)
+[![GitHub stars](https://img.shields.io/github/stars/vivary-dev/vivary?style=flat-square&color=1f9d72)](https://github.com/vivary-dev/vivary/stargazers)
+[![MIT](https://img.shields.io/badge/license-MIT-1f9d72?style=flat-square)](LICENSE)
+
 **Typed memory and gates for AI-agent projects.** A standard plus a scaffolder that
 wires up a normalized, agent-native workspace from standalone modules — typed project
 memory, visible state, reusable skills, private boundaries, and verification gates —

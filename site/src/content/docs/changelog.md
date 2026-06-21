@@ -8,8 +8,19 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current versions:** `vivary-tropo` / `create-vivary` **0.2.0** · `vivary-ozone` / `vivary-exo` **0.1.0**.
-npm `@vivary/create` lockstep with `create-vivary`.
+**Current versions:** `vivary-tropo` **0.2.0** · `create-vivary` / `@vivary/create` **0.2.1** · `vivary-ozone` / `vivary-exo` **0.1.0**.
+
+## [0.2.1] — 2026-06-21
+
+Affects `create-vivary` (PyPI) and `@vivary/create` (npm) only.
+
+### Fixed
+
+- **Wizard installs LanceDB inline** — the interactive wizard now installs LanceDB immediately
+  when the user picks "on this computer." Previously a second standalone prompt appeared after
+  the wizard ended; the wizard IS the consent step.
+- **`--auto` implies `--yes` for installs** — `create-vivary init . --auto --size large` no
+  longer hangs on the install prompt. Agents don't need to pass both `--auto` and `--yes`.
 
 ## [0.2.0] — 2026-06-21
 
