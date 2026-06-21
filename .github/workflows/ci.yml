@@ -51,7 +51,7 @@ jobs:
           python-version: "3.11"
       - run: mkdir -p sandboxes
       - name: scaffold a workspace
-        run: python packages/create-vivary/create_vivary.py init sandboxes/ci-ws --preset coding --force
+        run: python packages/create-vivary/create_vivary.py init sandboxes/ci-ws --preset coding --force --no-wizard
       - name: doctor
         run: python packages/create-vivary/create_vivary.py doctor sandboxes/ci-ws
       - name: tropo check (strict)
