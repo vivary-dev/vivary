@@ -10,12 +10,12 @@ A *vivary* is an archaic word for a vivarium: a self-contained world where livin
 things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
-> Status: **shipped and installable.** All four layers are published:
-> `vivary-tropo`, `vivary-ozone`, `vivary-exo` (0.1.0) and `create-vivary` (0.1.1)
-> on [PyPI](https://pypi.org/project/create-vivary/), and `@vivary/create` (0.1.1)
-> on [npm](https://www.npmjs.com/package/@vivary/create). `tropo` (typed knowledge
-> graph), `strato` (agent OS contract/templates/skill), `ozone` (graph-aware
-> review), and `exo` (coordination) are composed by `create-vivary`. Live site:
+> Status: **shipped and installable.** `vivary-tropo` and `create-vivary` are at **0.2.0**;
+> `vivary-ozone` and `vivary-exo` are at 0.1.0 — all on
+> [PyPI](https://pypi.org/project/create-vivary/). `@vivary/create` (npm, in lockstep
+> with `create-vivary`) is at **0.2.0** on [npm](https://www.npmjs.com/package/@vivary/create).
+> `tropo` (typed knowledge graph + search + storage), `strato` (agent OS), `ozone`
+> (graph-aware review), and `exo` (coordination) are composed by `create-vivary`. Live site:
 > **[vivary.vercel.app](https://vivary.vercel.app/)**. See [HANDOFF.md](HANDOFF.md)
 > to continue, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full model.
 
@@ -31,18 +31,23 @@ Or install the CLIs from PyPI (run on demand with `uvx`, no install needed):
 
 ```bash
 pip install vivary-tropo vivary-ozone vivary-exo create-vivary
-create-vivary init my-workspace --preset coding
+create-vivary init my-workspace --preset coding     # interactive wizard on a TTY
 create-vivary init my-codebase --preset coding --active-context cocoindex-code
 create-vivary doctor my-workspace
 uvx vivary-tropo check --root my-workspace
+
+# Agent-mode — fully non-interactive, outputs JSON:
+create-vivary init . --preset coding --auto --size large --yes --json
 ```
 
 The scaffolder writes a full workspace shell: `AGENTS.md`, `STATE.md`, `SOUL.md`,
 private `USER.md`/`MEMORY.md` boundaries, strato runtime skills for Claude/Codex-style
-agents, a `tropo.toml`, and a starter typed graph. Generated modules are directories
-with `index.md` routers (`modules/<id>/index.md`) so agents load the smallest useful
-context first. `doctor` validates the shell, privacy ignores, graph health, and module
-index coverage after creation.
+agents, a `tropo.toml`, a starter typed graph, and (optionally) a `.vivary/storage.toml`
+for LanceDB or cloud storage. Generated modules are directories with `index.md` routers
+(`modules/<id>/index.md`) so agents load the smallest useful context first. `doctor`
+validates the shell, privacy ignores, graph health, storage backend, and module index
+coverage after creation. `tropo query` and `tropo migrate` power graph search and
+backend switching.
 
 For coding workspaces that need richer source retrieval, `--active-context
 cocoindex-code` adds optional CocoIndex-code guidance and graph nodes. It does not
@@ -114,6 +119,7 @@ down `tropo` + `strato` and whichever optional layers fit. See
 2. Every change shows its **blast radius** — before and after — beyond a text diff.
 3. It's **medium-agnostic**: the same graph + review serves code and prose.
 4. It **standardizes the agent workspace** — which nobody has done.
+5. **Agents can self-configure from scratch** — `--auto --yes --json` gives a zero-prompt, machine-readable setup path for storage, installs, and scaffolding.
 
 ## License
 

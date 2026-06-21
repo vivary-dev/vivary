@@ -524,6 +524,131 @@ def test_cmd_plan_missing_file_exits(tmp_path):
         pass
 
 
+# --- storage layer ------------------------------------------------------------
+
+def _minimal_vault(tmp_path):
+    """Scaffold a tiny tropo.toml + two .md files in tmp_path."""
+    (tmp_path / "tropo.toml").write_text(
+        "[base]\nderive = ['id', 'title']\nallow_untyped = true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "notes").mkdir()
+    (tmp_path / "notes" / "alpha.md").write_text("# Alpha\nSome content about auth.\n", encoding="utf-8")
+    (tmp_path / "notes" / "beta.md").write_text("# Beta\nUnrelated content.\n", encoding="utf-8")
+
+
+def test_file_backend_query_returns_matches(tmp_path):
+    _minimal_vault(tmp_path)
+    backend = tropo._FileBackend(str(tmp_path))
+    results = backend.query("auth")
+    assert len(results) >= 1
+    assert any("alpha" in r["path"] for r in results)
+
+
+def test_file_backend_query_no_match(tmp_path):
+    _minimal_vault(tmp_path)
+    backend = tropo._FileBackend(str(tmp_path))
+    results = backend.query("zzznomatch123")
+    assert results == []
+
+
+def test_file_backend_upsert_is_noop(tmp_path):
+    _minimal_vault(tmp_path)
+    backend = tropo._FileBackend(str(tmp_path))
+    backend.upsert([{"id": "x", "type": "note", "path": "x.md", "title": "X", "content": ""}])
+    # No error; FS unchanged
+    assert not (tmp_path / "x.md").exists()
+
+
+def test_lance_backend_raises_clear_error_when_not_installed(tmp_path):
+    import importlib.util
+    if importlib.util.find_spec("lancedb") is not None:
+        return  # lancedb is installed — skip this test
+    try:
+        tropo._LanceBackend(str(tmp_path / "db"))
+        assert False, "expected ConfigError"
+    except tropo.ConfigError as e:
+        assert "pip install vivary-tropo[embedded]" in str(e)
+
+
+def test_get_backend_defaults_to_file(tmp_path):
+    _minimal_vault(tmp_path)
+    backend = tropo.get_backend(str(tmp_path))
+    assert isinstance(backend, tropo._FileBackend)
+
+
+def test_get_backend_auto_without_lancedb_falls_back(tmp_path):
+    import importlib.util
+    if importlib.util.find_spec("lancedb") is not None:
+        return  # lancedb installed; auto would succeed — skip
+    _minimal_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage]\nbackend = \"auto\"\n", encoding="utf-8"
+    )
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stderr(buf):
+        backend = tropo.get_backend(str(tmp_path))
+    assert isinstance(backend, tropo._FileBackend)
+    assert "lancedb not installed" in buf.getvalue()
+
+
+def test_cmd_migrate_dry_run(tmp_path):
+    _minimal_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage]\nbackend = \"file\"\n", encoding="utf-8"
+    )
+    rc, out = _capture_rc(
+        tropo.cmd_migrate,
+        argparse.Namespace(from_backend="file", to_backend="embedded",
+                           dry_run=True, json=True, yes=False,
+                           paths=[], strict=False, lenient=False,
+                           quiet=False, config=None),
+        res(str(tmp_path)),
+    )
+    assert rc == 0
+    assert out["dry_run"] is True
+    assert out["migrated"] >= 1
+    assert out["from"] == "file"
+    assert out["to"] == "embedded"
+
+
+def test_cmd_query_file_backend(tmp_path):
+    _minimal_vault(tmp_path)
+    rc, out = _capture_rc(
+        tropo.cmd_query,
+        argparse.Namespace(paths=["auth"], json=True, k=10,
+                           root=str(tmp_path), config=None,
+                           strict=False, lenient=False, quiet=False,
+                           dry_run=False, yes=False,
+                           from_backend=None, to_backend=None),
+        res(str(tmp_path)),
+    )
+    assert rc == 0
+    assert "results" in out
+    assert out["query"] == "auth"
+    assert len(out["results"]) >= 1
+
+
+def test_cmd_query_no_results(tmp_path):
+    _minimal_vault(tmp_path)
+    rc, out = _capture_rc(
+        tropo.cmd_query,
+        argparse.Namespace(paths=["zzznomatch123"], json=True, k=10,
+                           root=str(tmp_path), config=None,
+                           strict=False, lenient=False, quiet=False,
+                           dry_run=False, yes=False,
+                           from_backend=None, to_backend=None),
+        res(str(tmp_path)),
+    )
+    assert rc == 0
+    assert out["results"] == []
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

@@ -1,6 +1,6 @@
 # Vivary — fresh-chat handoff
 
-_Updated 2026-06-14._
+_Updated 2026-06-21._
 
 This is the starting point for a fresh chat. Read this first, then
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), then inspect live git state before
@@ -13,10 +13,11 @@ Use this prompt in a new window:
 ```text
 We are in C:\Users\jeffk\dev\vivary (repo: github.com/vivary-dev/vivary). Read
 HANDOFF.md, docs/README.md, and docs/ARCHITECTURE.md. Verify git status/branch/
-remotes before making claims. Vivary 0.1.0 is SHIPPED — all four layers are
-published to PyPI + npm and merged to `dev`. Continue from `dev` with a branch per
-change. Tests must be planned before edits. Do not push, open PRs, merge, publish,
-create orgs/repos, install dependencies, or delete files without explicit approval.
+remotes before making claims. Vivary 0.2.0 is ready to ship — tropo + create-vivary
+bumped to 0.2.0 on branch feat/data-layer-0.2.0, pending PR merge and PyPI/npm
+publish. Continue from `dev` with a branch per change. Tests must be planned before
+edits. Do not push, open PRs, merge, publish, create orgs/repos, install dependencies,
+or delete files without explicit approval.
 ```
 
 ## Current Truth
@@ -41,7 +42,8 @@ tropo    typed knowledge graph: what is true        baseline
 Design law: **minimalism**. Always-on context must be tiny. Expensive-to-load
 framework files are wrong.
 
-**Shipped (0.1.0).** Anyone can install it:
+**Shipped (0.1.0 → 0.2.0 in progress).** Published at 0.1.x; 0.2.0 ready on branch
+`feat/data-layer-0.2.0` pending PR + publish:
 
 ```bash
 npm create @vivary my-workspace                          # the scaffolder UX
@@ -50,27 +52,23 @@ uvx vivary-tropo check                                   # run without installin
 ```
 
 PyPI: `vivary-tropo` · `vivary-ozone` · `vivary-exo` · `create-vivary`. npm:
-`@vivary/create`. Tagged **`v0.1.0`**. Website: **https://vivary.vercel.app/**. Full
+`@vivary/create`. Website: **https://vivary.vercel.app/**. Full
 docs in [docs/](docs/) (start at [docs/README.md](docs/README.md)); the site is
 generated from `docs/` (`cd site && npm run sync-docs`).
 
-**Package versions — read this before touching a version number.** The suite is the
-`v0.1.0` line; **the only package past 0.1.0 is `create-vivary`, now at 0.1.1 on both
-registries.** `create-vivary` ships as two entry points to the *same* scaffolder — the
-PyPI package `create-vivary` and the npm launcher `@vivary/create` — and they are
-**kept in lockstep** (same version, same behavior).
+**Package versions — read this before touching a version number.**
 
-| Package | PyPI | npm | At |
-|---|---|---|---|
-| `vivary-tropo` | `vivary-tropo` | — | 0.1.0 |
-| `vivary-ozone` | `vivary-ozone` | — | 0.1.0 |
-| `vivary-exo`   | `vivary-exo`   | — | 0.1.0 |
-| `create-vivary` | `create-vivary` | `@vivary/create` | **0.1.1** |
+| Package | PyPI | npm | Published | Branch |
+|---|---|---|---|---|
+| `vivary-tropo` | `vivary-tropo` | — | 0.1.0 | 0.2.0 ready |
+| `vivary-ozone` | `vivary-ozone` | — | 0.1.0 | unchanged |
+| `vivary-exo`   | `vivary-exo`   | — | 0.1.0 | unchanged |
+| `create-vivary` | `create-vivary` | `@vivary/create` | 0.1.1 | 0.2.0 ready |
 
-The **0.1.1** bump affects **only `create-vivary`** (both its PyPI package and its npm
-launcher): a bare target now defaults to the `init` subcommand, so `create-vivary
-<name>` and `npm create @vivary <name>` both work like `… init <name>`. `tropo` /
-`ozone` / `exo` are **untouched at 0.1.0**. Per-release history lives in
+The **0.2.0** bump affects `vivary-tropo` and `create-vivary` (both PyPI + npm for
+create-vivary). Adds: storage layer (`file`/`embedded`/`cloud`), `tropo query`,
+`tropo migrate`, agent-mode init flags (`--auto` `--yes` `--json` `--dry-run`),
+`create-vivary wizard`, interactive setup wizard. Per-release history in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## Live Repo State
@@ -109,19 +107,21 @@ All four layers are working, tested, **published** packages (`tropo` / `ozone` /
 `tropo`/`ozone`/`exo`/`create-vivary`), proven in a clean venv.
 
 ```text
-packages/tropo/        vivary-tropo   — knowledge-graph CLI (check/signal/types/stats/
-                       graph/blast/view/plan/fix/init). check is STRICT by default
-                       (--lenient / [base] strict to relax). Tests: 46/46.
+packages/tropo/        vivary-tropo 0.2.0 — knowledge-graph CLI (check/signal/types/
+                       stats/graph/blast/view/plan/fix/init/query/migrate). check is
+                       STRICT by default. Storage layer: file/embedded(LanceDB)/cloud.
+                       Optional extras: [embedded] [cloud] [astra]. Tests: 55/55.
 packages/strato/       (vivary-strato source) — agent OS: STRATO.md model + templates
                        + bootstrap/heartbeat/self-improve skill. Docs/templates only.
-packages/ozone/        vivary-ozone   — review layer: `review` (structure pack) +
+packages/ozone/        vivary-ozone 0.1.0 — review layer: `review` (structure pack) +
                        `impact <id>` (blast radius) + `packs`. Tests: 7/7.
-packages/exo/          vivary-exo     — coordination layer: `conflicts` + `board` +
+packages/exo/          vivary-exo 0.1.0 — coordination layer: `conflicts` + `board` +
                        `roles`. Read-only, graph-native. Tests: 4/4.
-packages/create-vivary/ create-vivary — scaffolder: init --preset coding|second-brain|
-                       writing, doctor. Bundles strato/loops assets for installed use
-                       (tools/sync_assets.py + parity test). npm wrapper in npm/.
-                       Tests: 8/8 + parity 2/2.
+packages/create-vivary/ create-vivary 0.2.0 — scaffolder: init/wizard/doctor --preset
+                       coding|second-brain|writing + agent flags (--auto/--yes/--json/
+                       --dry-run/--storage/--provider/--size/--privacy). Bundles
+                       strato/loops assets for installed use. npm wrapper in npm/.
+                       Tests: 27/27 + parity 2/2.
 
 .github/workflows/ci.yml  CI: runs FREE (public repo) — all 4 suites + parity +
                        tropo check + `ozone review --strict` gate + site build,
@@ -174,8 +174,8 @@ the source repos from this workspace.
 Run these before claiming a branch is healthy:
 
 ```powershell
-python packages\tropo\tests\test_tropo.py              # 46/46
-python packages\create-vivary\tests\test_create_vivary.py   # 8/8
+python packages\tropo\tests\test_tropo.py              # 55/55
+python packages\create-vivary\tests\test_create_vivary.py   # 27/27
 python packages\create-vivary\tests\test_assets_parity.py   # 2/2
 python packages\ozone\tests\test_ozone.py              # 7/7
 python packages\exo\tests\test_exo.py                  # 4/4
@@ -185,19 +185,21 @@ git diff --check
 Smoke a generated workspace:
 
 ```powershell
-python packages\create-vivary\create_vivary.py init sandboxes\coding-demo --preset coding --force
+python packages\create-vivary\create_vivary.py init sandboxes\coding-demo --preset coding --force --no-wizard
 python packages\create-vivary\create_vivary.py doctor sandboxes\coding-demo
 python packages\tropo\tropo.py check --root sandboxes\coding-demo
 python packages\tropo\tropo.py graph --root sandboxes\coding-demo --json
+
+# Agent self-configure (new in 0.2.0):
+python packages\create-vivary\create_vivary.py init sandboxes\agent-demo --auto --size large --yes --json
+python packages\tropo\tropo.py migrate --from file --to embedded --root sandboxes\agent-demo --yes
+python packages\tropo\tropo.py query "CI baseline" --root sandboxes\agent-demo --json
 ```
 
-Expected current smoke result for `coding-demo`:
+Expected smoke result for `coding-demo`:
 
 ```text
-doctor: ok
-8 nodes
-24 edges
-0 broken
+doctor: ok (9 node(s), 28 edge(s), 0 broken)
 ```
 
 ## Open Decisions
@@ -232,19 +234,14 @@ release cut.
 
 ## Remaining Work
 
-The four layers are built, packaged, **published (0.1.0)**, and documented. What's
-left is the release marker and the next wave of value. The full roadmap is the open
-issues **#15–#24**; the near-term:
+The four layers are built, tested, and **0.2.0 is ready to publish** on branch
+`feat/data-layer-0.2.0`. The full roadmap is open issues **#15–#24**; the near-term:
 
-- **Released.** `v0.1.0` is tagged + pushed; the site is live at vivary.vercel.app
-  (Vercel, root dir `site`). Old `vivary-landing-page` repo archived. A GitHub Release
-  is still optional (a publishing gate).
-- **`create-vivary 0.1.1` (both registries).** npm `@vivary/create@0.1.1` shipped the
-  launcher `init`-default fix (PR #33); the PyPI `create-vivary` parity bump (same
-  `init`-default in the Python CLI) keeps the two in lockstep — **republish to PyPI is
-  the only remaining manual step** (2FA, owner-run). A separate metadata-only bump for
-  `tropo`/`ozone`/`exo` would make their pages show the site URL (0.1.0 metadata is
-  frozen) — still optional.
+- **Publish 0.2.0.** Merge `feat/data-layer-0.2.0` → `dev`, then publish:
+  - `vivary-tropo 0.2.0` to PyPI (`python -m build && twine upload`)
+  - `create-vivary 0.2.0` to PyPI
+  - `@vivary/create 0.2.0` to npm (`npm publish` from `packages/create-vivary/npm/`)
+  - Tag `v0.2.0` on the merge commit. Site redeploys automatically on Vercel.
 - **Launch.** Launch copy (Twitter thread + GitHub release) and the website brief were
   drafted but kept private (not committed to the public repo). Posting is a per-item
   gate.

@@ -8,13 +8,19 @@ typed graph.
 
 ```bash
 pip install create-vivary                     # or run without installing: uvx create-vivary …
-create-vivary my-workspace --preset coding    # bare target defaults to `init`
+create-vivary my-workspace --preset coding    # interactive wizard on a TTY
 create-vivary my-codebase --preset coding --active-context cocoindex-code
 create-vivary doctor my-workspace
+
+# Agent-mode (no prompts, machine-readable output):
+create-vivary init . --preset coding --auto --size large --yes --json
+
+# Reconfigure storage on an existing workspace:
+create-vivary wizard my-workspace --auto --storage embedded --yes --json
 ```
 
-`create-vivary <name>` is shorthand for `create-vivary init <name>` (since 0.1.1);
-pass `init` / `doctor` explicitly whenever you prefer. The same UX is available on npm
+`create-vivary <name>` is shorthand for `create-vivary init <name>`;
+pass `init` / `doctor` / `wizard` explicitly whenever you prefer. The same UX is available on npm
 via the `@vivary/create` launcher (`npm create @vivary my-workspace`), versioned in
 lockstep.
 
@@ -36,8 +42,10 @@ module index before opening deeper context:
 | `second-brain` | `knowledge-base` | `capture-routine` | `retrieval-smoke` |
 | `writing` | `manuscript-system` | `draft-review-loop` | `editorial-review` |
 
-The command is local-only and zero-dependency. It does not install packages, initialize
-git, push, publish, or enable hooks.
+The command is local-only. With `--storage embedded` or `--auto` on a large workspace, it
+self-installs `vivary-tropo[embedded]` (LanceDB) with a confirmation prompt, or silently
+with `--yes`. Use `--dry-run` to simulate without writing anything. Use `--no-wizard` to
+skip interactive prompts entirely.
 
 For coding workspaces, `--active-context cocoindex-code` adds an optional
 CocoIndex-code sidecar profile: active-context skills for Claude/Codex-style agents,
