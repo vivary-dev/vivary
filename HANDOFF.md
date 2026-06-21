@@ -13,8 +13,8 @@ Use this prompt in a new window:
 ```text
 We are in C:\Users\jeffk\dev\vivary (repo: github.com/vivary-dev/vivary). Read
 HANDOFF.md, docs/README.md, and docs/ARCHITECTURE.md. Verify git status/branch/
-remotes before making claims. Vivary 0.2.0 is ready to ship — tropo + create-vivary
-has shipped, and create-vivary / @vivary/create are now at 0.2.1. Continue from
+remotes before making claims. Vivary 0.2.2 is the current release line — tropo 0.2.0
+has shipped, and create-vivary / @vivary/create are now at 0.2.2. Continue from
 `dev` by cutting a feature branch per change. Tests must be planned before edits.
 Do not push, open PRs, merge, publish, create orgs/repos, install dependencies, or
 delete files without explicit approval.
@@ -42,9 +42,9 @@ tropo    typed knowledge graph: what is true        baseline
 Design law: **minimalism**. Always-on context must be tiny. Expensive-to-load
 framework files are wrong.
 
-**Shipped through 0.2.1.** 0.2.0 shipped the tropo storage/search layer and
-agent-mode scaffolder work. 0.2.1 is a create-vivary / @vivary/create patch that
-fixes the wizard LanceDB install flow and makes `--auto` imply `--yes`.
+**Shipped through 0.2.2.** 0.2.0 shipped the tropo storage/search layer and
+agent-mode scaffolder work. 0.2.1 fixed the wizard LanceDB install flow and made
+`--auto` imply `--yes`; 0.2.2 supersedes 0.2.1 as the clean release-provenance hotfix.
 
 ```bash
 npm create @vivary my-workspace                          # the scaffolder UX
@@ -64,13 +64,13 @@ generated from `docs/` (`cd site && npm run sync-docs`).
 | `vivary-tropo` | `vivary-tropo` | — | 0.2.0 | current |
 | `vivary-ozone` | `vivary-ozone` | — | 0.1.0 | unchanged |
 | `vivary-exo`   | `vivary-exo`   | — | 0.1.0 | unchanged |
-| `create-vivary` | `create-vivary` | `@vivary/create` | 0.2.1 | current |
+| `create-vivary` | `create-vivary` | `@vivary/create` | 0.2.2 | current |
 
 The **0.2.0** bump affected `vivary-tropo` and `create-vivary` (both PyPI + npm for
 create-vivary). It added: storage layer (`file`/`embedded`/`cloud`), `tropo query`,
 `tropo migrate`, agent-mode init flags (`--auto` `--yes` `--json` `--dry-run`),
-`create-vivary wizard`, and the interactive setup wizard. The **0.2.1** bump affects
-`create-vivary` / `@vivary/create` only. Per-release history lives in
+`create-vivary wizard`, and the interactive setup wizard. The **0.2.2** bump affects
+`create-vivary` / `@vivary/create` only and supersedes 0.2.1. Per-release history lives in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## Live Repo State
@@ -89,15 +89,15 @@ default branch: dev
 visibility: public
 ```
 
-Current integration branch: `dev`. Cut a feature branch before edits. `prod` exists
-and points at the `v0.2.1` release cut. Verify live state (`git status --short
+Current integration branch: `dev`. Cut a feature branch before edits. `prod` is the
+release branch. Verify live state (`git status --short
 --branch`, `gh pr list`, `gh issue list`) before acting; older notes in this file may
 lag active GitHub issues.
 
 ## What Exists
 
 All four layers are working, tested, **published** packages (`tropo` at 0.2.0,
-`ozone` / `exo` at 0.1.0; `create-vivary` at 0.2.1 on PyPI + npm; CLI commands stay
+`ozone` / `exo` at 0.1.0; `create-vivary` at 0.2.2 on PyPI + npm; CLI commands stay
 `tropo`/`ozone`/`exo`/`create-vivary`), proven in a clean venv.
 
 ```text
@@ -111,7 +111,7 @@ packages/ozone/        vivary-ozone 0.1.0 — review layer: `review` (structure 
                        `impact <id>` (blast radius) + `packs`. Tests: 7/7.
 packages/exo/          vivary-exo 0.1.0 — coordination layer: `conflicts` + `board` +
                        `roles`. Read-only, graph-native. Tests: 4/4.
-packages/create-vivary/ create-vivary 0.2.1 — scaffolder: init/wizard/doctor --preset
+packages/create-vivary/ create-vivary 0.2.2 — scaffolder: init/wizard/doctor --preset
                        coding|second-brain|writing + agent flags (--auto/--yes/--json/
                        --dry-run/--storage/--provider/--size/--privacy). Bundles
                        strato/loops assets for installed use. npm wrapper in npm/.

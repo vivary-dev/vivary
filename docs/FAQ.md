@@ -133,7 +133,7 @@ installs, enabling hooks, destructive ops, and sending data of unknown sensitivi
 agent is bold *inside* the work and careful at the *edges*.
 
 ### Is it stable? What's the version?
-`vivary-tropo` is at **0.2.0**, `create-vivary` / `@vivary/create` are at **0.2.1**, and `vivary-ozone` / `vivary-exo` remain at 0.1.0. See the [CHANGELOG](https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md) for details. It's young — APIs may move before `1.0`. File issues for rough edges.
+`vivary-tropo` is at **0.2.0**, `create-vivary` / `@vivary/create` are at **0.2.2**, and `vivary-ozone` / `vivary-exo` remain at 0.1.0. Use 0.2.2 instead of 0.2.1; 0.2.1 was superseded by a clean release-provenance hotfix. See the [CHANGELOG](https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md) for details. It's young — APIs may move before `1.0`. File issues for rough edges.
 
 ### Where do I report bugs or ask for features?
 GitHub: [github.com/vivary-dev/vivary](https://github.com/vivary-dev/vivary). See the
