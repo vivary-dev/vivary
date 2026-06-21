@@ -80,11 +80,31 @@ Everything that (transitively) depends on a node — what a change to it could t
 `tropo blast <id>` / `ozone impact <id>`. It's the impact reasoning a text diff cannot
 give, and it's the moat: review by *what it touches*, not just *what lines changed*.
 
+### Does tropo support search?
+Yes. `tropo query "auth module"` searches the knowledge graph. The default **file backend** does a grep-style text match over your Markdown files with no extra dependencies. The **embedded backend** (LanceDB) does BM25 full-text search over indexed node content:
+
+```bash
+pip install vivary-tropo[embedded]
+tropo migrate --from file --to embedded --root my-workspace --yes
+tropo query "auth module" --root my-workspace --k 5
+```
+
+Semantic/vector embeddings are not in scope for tropo — those belong to a graphify-style layer that consumes the clean typed graph.
+
 ### Does tropo do semantic search / embeddings?
 No, deliberately. tropo owns the **typed** graph (explicit links). Semantic
 ("organize by meaning") clustering is a separate, future job — a graphify-style layer
 that *consumes* tropo's clean graph. Keeping embeddings out keeps the core zero-dependency
 and deterministic.
+
+### What is the wizard?
+When you run `create-vivary init` on a terminal that supports input, it prompts you in plain English — no database jargon — to pick a storage tier (local file, local LanceDB, or cloud). Skip it with `--no-wizard` to use defaults, or use `--auto` to let Vivary pick based on hints like `--size` and `--privacy`. Use `create-vivary wizard <target>` to reconfigure an existing workspace without re-scaffolding.
+
+### How do agents self-configure a workspace?
+```bash
+create-vivary init . --preset coding --auto --size large --yes --json
+```
+`--auto` picks the best storage tier from available signals, `--yes` auto-confirms any installs, `--json` outputs machine-readable results. No prompts, no human needed. Dry-run first with `--dry-run --json` to preview without writing anything.
 
 ### Can Vivary use CocoIndex?
 Yes, as an optional sidecar for coding workspaces. Scaffold it with
@@ -116,10 +136,7 @@ installs, enabling hooks, destructive ops, and sending data of unknown sensitivi
 agent is bold *inside* the work and careful at the *edges*.
 
 ### Is it stable? What's the version?
-The four layers are published and proven from a clean install: `create-vivary` is at
-`0.1.1` (PyPI and npm `@vivary/create`, in lockstep); `tropo` / `ozone` / `exo` are at
-`0.1.0`. See the [CHANGELOG](https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md)
-for details. It's young — APIs may move before `1.0`. File issues for rough edges.
+`vivary-tropo` is at **0.2.0**, `create-vivary` / `@vivary/create` are at **0.2.1**, and `vivary-ozone` / `vivary-exo` remain at 0.1.0. See the [CHANGELOG](https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md) for details. It's young — APIs may move before `1.0`. File issues for rough edges.
 
 ### Where do I report bugs or ask for features?
 GitHub: [github.com/vivary-dev/vivary](https://github.com/vivary-dev/vivary). See the

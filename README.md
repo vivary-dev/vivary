@@ -15,10 +15,10 @@ A *vivary* is an archaic word for a vivarium: a self-contained world where livin
 things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
-> Status: **shipped and installable.** `vivary-tropo` and `create-vivary` are at **0.2.0**;
-> `vivary-ozone` and `vivary-exo` are at 0.1.0 — all on
+> Status: **shipped and installable.** `vivary-tropo` is at **0.2.0**,
+> `create-vivary` is at **0.2.1**, and `vivary-ozone` / `vivary-exo` are at 0.1.0 — all on
 > [PyPI](https://pypi.org/project/create-vivary/). `@vivary/create` (npm, in lockstep
-> with `create-vivary`) is at **0.2.0** on [npm](https://www.npmjs.com/package/@vivary/create).
+> with `create-vivary`) is at **0.2.1** on [npm](https://www.npmjs.com/package/@vivary/create).
 > `tropo` (typed knowledge graph + search + storage), `strato` (agent OS), `ozone`
 > (graph-aware review), and `exo` (coordination) are composed by `create-vivary`. Live site:
 > **[vivary.vercel.app](https://vivary.vercel.app/)**. See [HANDOFF.md](HANDOFF.md)
