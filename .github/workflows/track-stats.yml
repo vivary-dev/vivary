@@ -7,12 +7,15 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   snapshot:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: fetch and record
         run: |
@@ -52,18 +55,31 @@ jobs:
               json.dump(latest, f, indent=2)
               f.write("\n")
 
+          header = ["date", "npm_weekly", "pypi_weekly", "github_stars", "github_forks"]
           history = "stats/history.csv"
-          new_file = not os.path.exists(history)
-          with open(history, "a", newline="") as f:
+          rows = []
+          if os.path.exists(history):
+              with open(history, newline="") as f:
+                  rows = [row for row in csv.DictReader(f) if row.get("date") != today]
+          rows.append({
+              "date": today,
+              "npm_weekly": npm_dl,
+              "pypi_weekly": pypi_dl,
+              "github_stars": stars,
+              "github_forks": forks,
+          })
+          with open(history, "w", newline="") as f:
               w = csv.writer(f)
-              if new_file:
-                  w.writerow(["date", "npm_weekly", "pypi_weekly", "github_stars", "github_forks"])
-              w.writerow([today, npm_dl, pypi_dl, stars, forks])
+              w.writerow(header)
+              for row in rows:
+                  w.writerow([row[key] for key in header])
 
           print(f"npm/wk:{npm_dl}  pypi/wk:{pypi_dl}  ★{stars}  forks:{forks}")
           PYEOF
 
-      - name: commit
+      - name: open stats update PR
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -75,6 +91,20 @@ jobs:
             NPM=$(python3 -c "import json; d=json.load(open('stats/latest.json')); print(d['npm_weekly'])")
             PYPI=$(python3 -c "import json; d=json.load(open('stats/latest.json')); print(d['pypi_weekly'])")
             STARS=$(python3 -c "import json; d=json.load(open('stats/latest.json')); print(d['github_stars'])")
+            BRANCH="chore/stats-$DATE"
+            BODY="Automated stats snapshot.\n\n- npm weekly downloads: $NPM\n- PyPI weekly downloads: $PYPI\n- GitHub stars: $STARS"
+            git switch -c "$BRANCH"
             git commit -m "chore(stats): $DATE — npm/wk:$NPM pypi/wk:$PYPI ★$STARS"
-            git push
+            git push --force-with-lease origin "$BRANCH"
+            if gh pr view "$BRANCH" --json number --jq .number >/dev/null 2>&1; then
+              gh pr edit "$BRANCH" \
+                --title "chore(stats): $DATE snapshot" \
+                --body "$BODY"
+            else
+              gh pr create \
+                --base dev \
+                --head "$BRANCH" \
+                --title "chore(stats): $DATE snapshot" \
+                --body "$BODY"
+            fi
           fi

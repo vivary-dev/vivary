@@ -115,6 +115,52 @@ exo conflicts       # active changes that touch the same node (collision risk)
 exo roles           # the bounded contracts to hand workers
 ```
 
+## Set up LanceDB search (embedded backend)
+
+Install the embedded extra and migrate your existing workspace:
+
+```bash
+pip install vivary-tropo[embedded]
+tropo migrate --from file --to embedded --root my-workspace --dry-run   # preview
+tropo migrate --from file --to embedded --root my-workspace --yes        # run
+tropo query "billing module" --root my-workspace --k 5                   # search
+```
+
+Or configure storage at init time:
+
+```bash
+create-vivary init my-workspace --preset coding --storage embedded --yes
+```
+
+## Query the knowledge graph
+
+```bash
+tropo query "CI baseline" --root .                   # text search, top-10 results
+tropo query "auth" --root . --k 3 --json             # top-3, machine-readable
+```
+
+With the default file backend, this is a grep-style text match. With the embedded
+backend (LanceDB), it uses BM25 full-text search over migrated node content.
+
+## Agent self-configure a workspace
+
+Agents can scaffold and configure a workspace without any human interaction:
+
+```bash
+# Fully non-interactive: auto picks embedded storage, installs LanceDB, outputs JSON
+create-vivary init . --preset coding --auto --size large --yes --json
+
+# Dry run first (inspect without writing anything)
+create-vivary init my-workspace --auto --dry-run --json
+
+# Reconfigure storage on an existing workspace
+create-vivary wizard my-workspace --auto --storage embedded --yes --json
+```
+
+The `--auto` flag picks storage from `--size`/`--privacy` hints (or defaults to
+`embedded` for medium/large). `--yes` auto-confirms installs. `--json` gives
+machine-readable output. Combine all three for zero-prompt agent use.
+
 ## Use Vivary in CI
 
 CI is just the gate, run on the exit code:

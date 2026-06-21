@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .venv/
 dist/
+dist_*/
 build/
 *.egg-info/
 
