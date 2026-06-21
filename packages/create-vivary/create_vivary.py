@@ -6,6 +6,7 @@ import argparse
 import importlib.util
 import json
 import shutil
+import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -15,7 +16,7 @@ PRESETS = ("coding", "second-brain", "writing")
 
 ACTIVE_CONTEXTS = ("cocoindex-code",)
 
-SUBCOMMANDS = ("init", "doctor")
+SUBCOMMANDS = ("init", "doctor", "wizard")
 
 REQUIRED_WORKSPACE_FILES = (
     "README.md",
@@ -102,6 +103,9 @@ def scaffold_workspace(
     obsidian: bool = False,
     active_context: str | None = None,
     repo_root: str | Path | None = None,
+    storage: str = "file",
+    provider: str = "lancedb",
+    dry_run: bool = False,
 ) -> list[Path]:
     """Lay down a full Vivary workspace scaffold.
 
@@ -175,15 +179,21 @@ def scaffold_workspace(
         _cleanup_stale_scaffold_state(target, active_context=active_context)
 
     created: list[Path] = []
-    for dst, text in writes:
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        dst.write_text(text, encoding="utf-8", newline="\n")
-        created.append(dst)
+    if not dry_run:
+        for dst, text in writes:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_text(text, encoding="utf-8", newline="\n")
+            created.append(dst)
 
-    for src, dst in copies:
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        created.append(dst)
+        for src, dst in copies:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            created.append(dst)
+    else:
+        created = [dst for dst, _ in writes] + [dst for _, dst in copies]
+
+    if storage != "file":
+        created.extend(_write_vivary_dir(target, storage, provider, dry_run))
 
     return created
 
@@ -237,12 +247,25 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         except Exception as exc:  # keep doctor a report, not a traceback
             errors.append(f"tropo validation failed: {exc}")
 
+    # Check storage backend
+    storage_cfg_path = target / _STORAGE_DIR / _STORAGE_CONFIG_NAME
+    backend_name = "file"
+    if storage_cfg_path.exists():
+        try:
+            import tomllib as _toml
+            with open(storage_cfg_path, "rb") as _fh:
+                _data = _toml.load(_fh)
+            backend_name = _data.get("storage", {}).get("backend", "file")
+        except Exception:
+            backend_name = "unknown"
+
     return {
         "ok": not errors,
         "root": str(target),
         "errors": errors,
         "warnings": warnings,
         "graph": graph,
+        "backend": backend_name,
     }
 
 
@@ -513,6 +536,9 @@ MEMORY.md
 memory/*
 !memory/.gitkeep
 .strato/private/
+
+# Vivary runtime data (storage.toml is committed; data/ is not)
+.vivary/data/
 
 # Local secrets and tool state
 .env
@@ -903,6 +929,170 @@ destructive operation.
 """
 
 
+# ---------------------------------------------------------------------------
+# Storage helpers
+# ---------------------------------------------------------------------------
+
+_STORAGE_DIR = ".vivary"
+_STORAGE_CONFIG_NAME = "storage.toml"
+_STORAGE_DATA_DIR = ".vivary/data"
+
+_STORAGE_TOML_TEMPLATES = {
+    "file": """\
+[storage]
+backend = "file"
+""",
+    "embedded": """\
+[storage]
+backend = "embedded"
+
+[storage.embedded]
+path = ".vivary/data"
+provider = "lancedb"
+""",
+    "cloud-qdrant": """\
+[storage]
+backend = "cloud"
+
+[storage.cloud]
+provider = "qdrant"
+url = "${VIVARY_CLOUD_URL}"
+api_key = "${VIVARY_CLOUD_API_KEY}"
+collection = "my-workspace"
+""",
+    "cloud-astra": """\
+[storage]
+backend = "cloud"
+
+[storage.cloud]
+provider = "astra"
+api_key = "${VIVARY_CLOUD_API_KEY}"
+endpoint = "${VIVARY_CLOUD_ENDPOINT}"
+collection = "my-workspace"
+""",
+}
+
+
+def _auto_pick_storage(args) -> tuple[str, str]:
+    """Return (storage_tier, provider) based on --auto signals."""
+    privacy = getattr(args, "privacy", None)
+    size = getattr(args, "size", None)
+    storage = getattr(args, "storage", None)
+    provider = getattr(args, "provider", None)
+
+    if storage and storage != "auto":
+        return storage, provider or "lancedb"
+    if privacy == "cloud":
+        return "cloud", provider or "qdrant"
+    if size == "small":
+        return "file", provider or "lancedb"
+    # medium, large, or not-sure → embedded (safe local default)
+    return "embedded", provider or "lancedb"
+
+
+def _is_importable(module: str) -> bool:
+    import importlib.util
+    return importlib.util.find_spec(module) is not None
+
+
+def _ensure_backend_installed(provider: str, yes: bool) -> list[str]:
+    """Install the pip extra for provider if not already present. Returns installed names."""
+    extras = {"lancedb": "embedded", "qdrant-client": "cloud", "astrapy": "astra"}
+    pkg_map = {"lancedb": "lancedb", "qdrant": "qdrant-client", "astra": "astrapy"}
+    pkg = pkg_map.get(provider)
+    if pkg is None or _is_importable(pkg.replace("-", "_")):
+        return []
+    if not yes:
+        try:
+            sys.stderr.write(f"  Install {pkg} for {provider} support? [Y/n] ")
+            sys.stderr.flush()
+            ans = sys.stdin.readline().strip().lower()
+        except EOFError:
+            ans = "y"
+        if ans not in ("", "y", "yes"):
+            return []
+    extra = extras.get(pkg, "embedded")
+    print(f"  Installing vivary-tropo[{extra}]…", file=sys.stderr)
+    subprocess.check_call([sys.executable, "-m", "pip", "install",
+                           f"vivary-tropo[{extra}]"],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return [pkg]
+
+
+def _run_wizard(args) -> dict:
+    """Return storage decisions from interactive prompts or auto-pick."""
+    auto = getattr(args, "auto", False) or getattr(args, "no_wizard", False)
+    interactive = not auto and sys.stdin.isatty()
+
+    if not interactive:
+        storage, provider = _auto_pick_storage(args)
+        return {"storage": storage, "provider": provider}
+
+    # Interactive flow — plain English, no jargon (all prompts to stderr so JSON stdout stays clean)
+    print("\nWelcome to Vivary! Let's set up your workspace.\n", file=sys.stderr)
+
+    size_map = {"1": "small", "2": "medium", "3": "large", "": "medium"}
+    print("  How large do you expect this workspace to get?", file=sys.stderr)
+    print("  1) Just starting out (a few files or notes)", file=sys.stderr)
+    print("  2) Growing — hundreds of files (recommended)", file=sys.stderr)
+    print("  3) Large — huge codebase or years of notes", file=sys.stderr)
+    try:
+        sys.stderr.write("  Your choice [2]: ")
+        sys.stderr.flush()
+        size_choice = sys.stdin.readline().strip()
+    except EOFError:
+        size_choice = ""
+    size = size_map.get(size_choice, "medium")
+
+    if size == "small":
+        return {"storage": "file", "provider": "lancedb"}
+
+    print("\n  Where should your data live?", file=sys.stderr)
+    print("  1) On this computer — private, no accounts needed (recommended)", file=sys.stderr)
+    print("  2) In the cloud — sync across machines, scales to any size", file=sys.stderr)
+    try:
+        sys.stderr.write("  Your choice [1]: ")
+        sys.stderr.flush()
+        loc_choice = sys.stdin.readline().strip()
+    except EOFError:
+        loc_choice = "1"
+
+    if loc_choice == "2":
+        print("\n  Which cloud service?", file=sys.stderr)
+        print("  1) Qdrant — free tier, open source, easiest setup (recommended)", file=sys.stderr)
+        print("  2) Astra DB — DataStax, enterprise scale", file=sys.stderr)
+        print("  3) I'll set this up later", file=sys.stderr)
+        try:
+            sys.stderr.write("  Your choice [1]: ")
+            sys.stderr.flush()
+            cloud_choice = sys.stdin.readline().strip()
+        except EOFError:
+            cloud_choice = "1"
+        if cloud_choice == "2":
+            return {"storage": "cloud", "provider": "astra"}
+        if cloud_choice == "3":
+            return {"storage": "file", "provider": "lancedb"}
+        return {"storage": "cloud", "provider": "qdrant"}
+
+    return {"storage": "embedded", "provider": "lancedb"}
+
+
+def _write_vivary_dir(target: Path, storage: str, provider: str, dry_run: bool) -> list[Path]:
+    """Write .vivary/storage.toml. Returns list of paths written."""
+    vivary_dir = target / _STORAGE_DIR
+    cfg_path = vivary_dir / _STORAGE_CONFIG_NAME
+
+    key = storage if storage != "cloud" else f"cloud-{provider}"
+    toml_text = _STORAGE_TOML_TEMPLATES.get(key, _STORAGE_TOML_TEMPLATES["file"])
+
+    if dry_run:
+        return [cfg_path]
+
+    vivary_dir.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(toml_text, encoding="utf-8", newline="\n")
+    return [cfg_path]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="create-vivary",
@@ -931,6 +1121,34 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Vivary source checkout root (mainly for local development/tests)",
     )
+    init.add_argument("--json", action="store_true", help="machine-readable output")
+    init.add_argument("--dry-run", action="store_true", help="simulate without writing")
+    init.add_argument("--auto", action="store_true",
+                      help="skip prompts; pick best config from available signals")
+    init.add_argument("--yes", action="store_true", help="auto-confirm installs and prompts")
+    init.add_argument("--no-wizard", action="store_true", dest="no_wizard",
+                      help="skip wizard; use flag values or defaults directly")
+    init.add_argument("--storage", choices=["auto", "file", "embedded", "cloud"], default=None,
+                      help="storage backend (auto=LanceDB locally)")
+    init.add_argument("--provider", choices=["lancedb", "sqlite-vec", "qdrant", "astra"],
+                      default=None, help="storage provider (default: lancedb)")
+    init.add_argument("--size", choices=["small", "medium", "large"], default=None,
+                      help="workspace size hint for --auto decisions")
+    init.add_argument("--privacy", choices=["local", "cloud"], default=None,
+                      help="data locality hint for --auto decisions")
+
+    wizard = sub.add_parser("wizard", help="reconfigure storage for an existing workspace")
+    wizard.add_argument("target", help="workspace directory to reconfigure")
+    wizard.add_argument("--auto", action="store_true")
+    wizard.add_argument("--yes", action="store_true")
+    wizard.add_argument("--no-wizard", action="store_true", dest="no_wizard")
+    wizard.add_argument("--storage", choices=["auto", "file", "embedded", "cloud"], default=None)
+    wizard.add_argument("--provider", choices=["lancedb", "sqlite-vec", "qdrant", "astra"], default=None)
+    wizard.add_argument("--size", choices=["small", "medium", "large"], default=None)
+    wizard.add_argument("--privacy", choices=["local", "cloud"], default=None)
+    wizard.add_argument("--json", action="store_true")
+    wizard.add_argument("--dry-run", action="store_true")
+    wizard.add_argument("--repo-root", default=None)
 
     doctor = sub.add_parser("doctor", help="validate a Vivary workspace scaffold")
     doctor.add_argument("target", help="workspace directory to validate")
@@ -959,6 +1177,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = with_default_command(argv)
     parser = build_parser()
     args = parser.parse_args(argv)
+
     if args.command == "doctor":
         report = doctor_workspace(args.target, repo_root=args.repo_root)
         if args.json:
@@ -967,9 +1186,41 @@ def main(argv: list[str] | None = None) -> int:
             _print_doctor_report(report)
         return 0 if report["ok"] else 1
 
+    if args.command == "wizard":
+        target = Path(args.target).resolve()
+        decisions = _run_wizard(args)
+        installed = _ensure_backend_installed(decisions["provider"], getattr(args, "yes", False))
+        vivary_paths = _write_vivary_dir(target, decisions["storage"], decisions["provider"],
+                                         getattr(args, "dry_run", False))
+        if getattr(args, "json", False):
+            print(json.dumps({
+                "ok": True,
+                "root": str(target),
+                "storage": decisions["storage"],
+                "provider": decisions["provider"],
+                "installed": installed,
+                "config": str(target / _STORAGE_DIR / _STORAGE_CONFIG_NAME),
+                "dry_run": getattr(args, "dry_run", False),
+            }, indent=2))
+        else:
+            verb = "would write" if getattr(args, "dry_run", False) else "wrote"
+            print(f"create-vivary wizard: {verb} {target / _STORAGE_DIR / _STORAGE_CONFIG_NAME}")
+        return 0
+
     if args.command != "init":
         parser.print_help()
         return 2
+
+    # --- init ---
+    dry_run = getattr(args, "dry_run", False)
+    yes = getattr(args, "yes", False)
+
+    # Determine storage configuration via wizard or flags
+    decisions = _run_wizard(args)
+    storage = decisions["storage"]
+    provider = decisions["provider"]
+
+    installed = _ensure_backend_installed(provider, yes) if storage != "file" else []
 
     try:
         created = scaffold_workspace(
@@ -979,12 +1230,35 @@ def main(argv: list[str] | None = None) -> int:
             obsidian=args.obsidian,
             active_context=args.active_context,
             repo_root=args.repo_root,
+            storage=storage,
+            provider=provider,
+            dry_run=dry_run,
         )
     except ScaffoldError as exc:
-        print(f"create-vivary: {exc}", file=sys.stderr)
+        if getattr(args, "json", False):
+            print(json.dumps({"ok": False, "error": str(exc)}))
+        else:
+            print(f"create-vivary: {exc}", file=sys.stderr)
         return 1
 
-    print(f"create-vivary: wrote {len(created)} file(s) to {Path(args.target).resolve()}")
+    root = Path(args.target).resolve()
+    vivary_cfg = str(root / _STORAGE_DIR / _STORAGE_CONFIG_NAME) if storage != "file" else None
+
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "ok": True,
+            "root": str(root),
+            "preset": args.preset,
+            "storage": storage,
+            "provider": provider,
+            "installed": installed,
+            "files": len(created),
+            "config": vivary_cfg,
+            "dry_run": dry_run,
+        }, indent=2))
+    else:
+        verb = "would write" if dry_run else "wrote"
+        print(f"create-vivary: {verb} {len(created)} file(s) to {root}")
     return 0
 
 

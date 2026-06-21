@@ -8,8 +8,31 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current versions:** `create-vivary` **0.1.1** (PyPI *and* npm `@vivary/create`, kept
-in lockstep) · `vivary-tropo` / `vivary-ozone` / `vivary-exo` **0.1.0**.
+**Current versions:** `vivary-tropo` / `create-vivary` **0.2.0** · `vivary-ozone` / `vivary-exo` **0.1.0**.
+npm `@vivary/create` lockstep with `create-vivary`.
+
+## [0.2.0] — 2026-06-21
+
+Affects `vivary-tropo` and `create-vivary`. `vivary-ozone` and `vivary-exo` are unchanged at 0.1.0.
+
+### Added
+
+- **Storage layer in tropo** — tiered storage abstraction: `file` (default, no new deps),
+  `embedded` (LanceDB on disk, `pip install vivary-tropo[embedded]`), and `cloud` adapter
+  interface (0.3.x). Config lives in `.vivary/storage.toml`. Optional extras:
+  `vivary-tropo[embedded]`, `vivary-tropo[cloud]`, `vivary-tropo[astra]`.
+- **`tropo migrate`** — move graph nodes between backends
+  (`--from file --to embedded [--dry-run] [--json] [--yes]`).
+- **`tropo query`** — text search over the workspace knowledge graph
+  (`tropo query "auth module" [--k N] [--json]`). File backend = text grep; embedded = BM25.
+- **Agent-mode flags on `create-vivary init`** — `--json`, `--dry-run`, `--auto`,
+  `--yes`, `--no-wizard`, `--storage`, `--provider`, `--size`, `--privacy`.
+  Agents can self-configure a workspace end-to-end without human interaction.
+- **`create-vivary wizard` subcommand** — reconfigure storage on an existing workspace.
+- **Interactive setup wizard** — `create-vivary init` now prompts interactively when
+  run from a TTY (human-friendly, no database jargon). `--no-wizard` or `--auto` skips it.
+- **`.vivary/data/` in scaffolded `.gitignore`** — runtime storage data is always ignored.
+- **`doctor` reports `backend` field** — JSON output now includes `"backend": "file|embedded|cloud"`.
 
 ## [create-vivary 0.1.1] — 2026-06-14
 

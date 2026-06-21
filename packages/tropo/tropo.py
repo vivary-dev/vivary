@@ -980,6 +980,201 @@ _HTML_SHELL = """<!doctype html>
 
 
 # ---------------------------------------------------------------------------
+# Storage layer
+# ---------------------------------------------------------------------------
+
+STORAGE_DIR = ".vivary"
+STORAGE_CONFIG_NAME = "storage.toml"
+_CONTENT_PREVIEW_CHARS = 1000
+
+
+def _load_storage_config(root):
+    path = os.path.join(root, STORAGE_DIR, STORAGE_CONFIG_NAME)
+    if not os.path.isfile(path):
+        return {"backend": "file"}
+    try:
+        with open(path, "rb") as fh:
+            data = tomllib.load(fh)
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        raise ConfigError(f"{path}: {e}")
+    return data.get("storage", {"backend": "file"})
+
+
+def _file_body(full_path):
+    try:
+        text = open(full_path, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return ""
+    m = FM_RE.match(text)
+    body = text[m.end():] if m else text
+    return body[:_CONTENT_PREVIEW_CHARS]
+
+
+def _doc_to_node(d):
+    return {
+        "id":      d.derived.get("id", ""),
+        "type":    d.type or "",
+        "path":    d.rel.replace("\\", "/"),
+        "title":   d.derived.get("title", ""),
+        "content": _file_body(d.full),
+    }
+
+
+class _FileBackend:
+    """Default: file-system graph is the store. query() is a text grep over .md files."""
+    def __init__(self, root):
+        self._root = root
+
+    def upsert(self, nodes):
+        pass  # FS is the source of truth
+
+    def get(self, node_id):
+        return None
+
+    def delete(self, node_id):
+        pass
+
+    def query(self, text, k=10, filters=None):
+        results = []
+        text_lower = text.lower()
+        for dirpath, dirs, filenames in os.walk(self._root):
+            dirs[:] = [d for d in dirs if d not in (".git", ".vivary", "__pycache__")]
+            for fname in filenames:
+                if not fname.endswith((".md", ".markdown")):
+                    continue
+                full = os.path.join(dirpath, fname)
+                body = _file_body(full)
+                body_lower = body.lower()
+                if text_lower not in body_lower:
+                    continue
+                rel = os.path.relpath(full, self._root).replace("\\", "/")
+                score = body_lower.count(text_lower)
+                results.append({
+                    "id":    os.path.splitext(fname)[0].lower(),
+                    "type":  None,
+                    "path":  rel,
+                    "title": os.path.splitext(fname)[0],
+                    "score": score,
+                })
+        results.sort(key=lambda r: -r["score"])
+        return results[:k]
+
+    def close(self):
+        pass
+
+
+class _LanceBackend:
+    """Embedded backend (LanceDB on disk, no server). Requires vivary-tropo[embedded]."""
+    def __init__(self, path):
+        try:
+            import lancedb as _ldb  # noqa: PLC0415
+            self._ldb = _ldb
+        except ImportError:
+            raise ConfigError(
+                "LanceDB is not installed. Run: pip install vivary-tropo[embedded]"
+            )
+        os.makedirs(path, exist_ok=True)
+        self._db = self._ldb.connect(path)
+        self._tbl = None
+
+    def _table(self):
+        if self._tbl is not None:
+            return self._tbl
+        try:
+            self._tbl = self._db.open_table("nodes")
+        except Exception:
+            pass
+        return self._tbl
+
+    def upsert(self, nodes):
+        if not nodes:
+            return
+        tbl = self._table()
+        if tbl is None:
+            self._tbl = self._db.create_table("nodes", data=nodes)
+            return
+        try:
+            (tbl.merge_insert("id")
+                .when_matched_update_all()
+                .when_not_matched_insert_all()
+                .execute(nodes))
+        except AttributeError:
+            tbl.add(nodes, mode="overwrite")
+
+    def get(self, node_id):
+        tbl = self._table()
+        if tbl is None:
+            return None
+        rows = tbl.search().where(f"id = '{node_id}'").limit(1).to_list()
+        return rows[0] if rows else None
+
+    def delete(self, node_id):
+        tbl = self._table()
+        if tbl:
+            tbl.delete(f"id = '{node_id}'")
+
+    def query(self, text, k=10, filters=None):
+        tbl = self._table()
+        if tbl is None:
+            return []
+        text_lower = text.lower()
+        try:
+            rows = tbl.search(text, query_type="fts").limit(k).to_list()
+        except Exception:
+            rows = [
+                r for r in tbl.to_arrow().to_pylist()
+                if text_lower in (r.get("content") or "").lower()
+                or text_lower in (r.get("title") or "").lower()
+            ][:k]
+        return [
+            {
+                "id":    r.get("id", ""),
+                "type":  r.get("type") or None,
+                "path":  r.get("path", ""),
+                "title": r.get("title", ""),
+                "score": r.get("_relevance_score", 1.0),
+            }
+            for r in rows
+        ]
+
+    def close(self):
+        self._tbl = None
+        self._db = None
+
+
+def get_backend(root):
+    """Return the configured StorageBackend for the workspace at root."""
+    cfg = _load_storage_config(root)
+    backend = cfg.get("backend", "file")
+
+    if backend == "file":
+        return _FileBackend(root)
+
+    if backend in ("embedded", "auto"):
+        emb = cfg.get("embedded", {})
+        raw_path = emb.get("path", os.path.join(STORAGE_DIR, "data"))
+        path = raw_path if os.path.isabs(raw_path) else os.path.join(root, raw_path)
+        provider = emb.get("provider", "lancedb")
+        if provider == "lancedb":
+            try:
+                return _LanceBackend(path)
+            except ConfigError:
+                if backend == "auto":
+                    print("tropo: lancedb not installed, falling back to file backend",
+                          file=sys.stderr)
+                    return _FileBackend(root)
+                raise
+        raise ConfigError(f"unknown embedded provider: {provider!r}")
+
+    if backend == "cloud":
+        raise ConfigError(
+            "cloud backend not yet implemented — configure a cloud adapter in 0.3.x"
+        )
+
+    raise ConfigError(f"unknown storage backend: {backend!r}")
+
+
+# ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
@@ -1317,26 +1512,112 @@ def cmd_init(args):
     return 0
 
 
+def cmd_migrate(args, resolver):
+    """Move graph nodes from one storage backend to another."""
+    import time as _time
+    from_name = getattr(args, "from_backend", None) or "file"
+    to_name = getattr(args, "to_backend", None) or "embedded"
+
+    if from_name == to_name:
+        sys.exit("tropo migrate: --from and --to must be different backends")
+    if from_name != "file":
+        sys.exit(f"tropo migrate: --from {from_name!r} not yet supported; only 'file' is the supported source")
+
+    vivary_cfg = os.path.join(resolver.root, STORAGE_DIR, STORAGE_CONFIG_NAME)
+    if not os.path.isfile(vivary_cfg) and not args.dry_run:
+        sys.exit(
+            "tropo migrate: no .vivary/storage.toml found — "
+            "run `create-vivary wizard` to configure a storage backend first"
+        )
+
+    docs = analyze(resolver.root, [], resolver)
+    nodes = [_doc_to_node(d) for d in docs]
+    n = len(nodes)
+
+    if args.dry_run:
+        if args.json:
+            print(json.dumps({"migrated": n, "failed": 0, "duration_ms": 0,
+                              "from": from_name, "to": to_name, "dry_run": True}, indent=2))
+        else:
+            print(f"tropo migrate: would migrate {n} node(s) from {from_name} to {to_name} (dry run)")
+        return 0
+
+    t0 = _time.monotonic()
+    try:
+        dst = get_backend(resolver.root)
+        dst.upsert(nodes)
+        dst.close()
+    except ConfigError as e:
+        if args.json:
+            print(json.dumps({"migrated": 0, "failed": n, "error": str(e),
+                              "from": from_name, "to": to_name}, indent=2))
+        else:
+            print(f"tropo migrate: {e}", file=sys.stderr)
+        return 1
+    elapsed = int((_time.monotonic() - t0) * 1000)
+
+    if args.json:
+        print(json.dumps({"migrated": n, "failed": 0, "duration_ms": elapsed,
+                          "from": from_name, "to": to_name, "dry_run": False}, indent=2))
+    else:
+        print(f"tropo migrate: {n} node(s) migrated from {from_name} to {to_name} ({elapsed}ms)")
+    return 0
+
+
+def cmd_query(args, resolver):
+    """Search the workspace knowledge graph by text."""
+    if not args.paths:
+        sys.exit("tropo query: provide a search query — e.g. tropo query \"auth module\"")
+    text = " ".join(args.paths)
+    k = getattr(args, "k", 10) or 10
+
+    try:
+        backend = get_backend(resolver.root)
+    except ConfigError as e:
+        sys.exit(f"tropo query: {e}")
+
+    results = backend.query(text, k=k)
+    backend.close()
+
+    if args.json:
+        print(json.dumps({"query": text, "k": k, "results": results}, indent=2))
+        return 0
+
+    if not results:
+        print(f"tropo query: no results for {text!r}")
+        return 0
+    for i, r in enumerate(results, 1):
+        typ = f"[{r['type']}] " if r.get("type") else ""
+        print(f"{i:2}. {typ}{r['id']} — {r['path']}")
+    return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="tropo", description="The filesystem is the schema.")
     p.add_argument("--version", action="version", version=f"tropo {__version__}")
     p.add_argument("command", nargs="?", default="check",
                    choices=["check", "signal", "types", "stats", "graph", "blast",
-                            "view", "plan", "fix", "init"])
+                            "view", "plan", "fix", "init", "migrate", "query"])
     p.add_argument("paths", nargs="*",
-                   help="files or folders (default: whole tree); for blast, the target id")
+                   help="files or folders (default: whole tree); for blast/query, the target id/text")
     p.add_argument("--strict", action="store_true",
                    help="check: force warnings to fail (the default; overrides a lenient config)")
     p.add_argument("--lenient", action="store_true",
                    help="check: allow warnings without failing (relax the opinionated default)")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument("--quiet", action="store_true", help="hide warnings")
-    p.add_argument("--dry-run", action="store_true", help="fix: preview without writing")
+    p.add_argument("--dry-run", action="store_true", help="fix/migrate: preview without writing")
     p.add_argument("--depth", type=int, default=None, help="blast: max hops (default: unlimited)")
     p.add_argument("--out", default=None, help="view: write HTML here (default: stdout)")
     p.add_argument("--packs", default=None, help="init: comma-separated pack names")
     p.add_argument("--root", default=None, help="tree root (default: walk up for tropo.toml)")
     p.add_argument("--config", default=None, help="explicit tropo.toml path")
+    p.add_argument("--from", dest="from_backend", choices=["file", "embedded", "cloud"],
+                   default=None, help="migrate: source backend (default: file)")
+    p.add_argument("--to", dest="to_backend", choices=["file", "embedded", "cloud"],
+                   default=None, help="migrate: destination backend (default: embedded)")
+    p.add_argument("--yes", action="store_true", help="auto-confirm prompts (agent/CI use)")
+    p.add_argument("--k", type=int, default=10, help="query: number of results (default: 10)")
     args = p.parse_args(argv)
 
     if args.command == "init":
@@ -1346,7 +1627,7 @@ def main(argv=None):
     if args.config:
         root = args.root or os.path.dirname(os.path.abspath(args.config))
     else:
-        start = args.root or (args.paths[0] if args.paths else os.getcwd())
+        start = args.root or (args.paths[0] if args.paths and args.command not in ("migrate", "query") else os.getcwd())
         root = find_root(start)
         if root is None:
             sys.exit(f"tropo: no {CONFIG_NAME} found walking up from {os.path.abspath(start)}")
@@ -1357,7 +1638,8 @@ def main(argv=None):
 
     return {"check": cmd_check, "signal": cmd_signal, "types": cmd_types,
             "stats": cmd_stats, "graph": cmd_graph, "blast": cmd_blast,
-            "view": cmd_view, "plan": cmd_plan, "fix": cmd_fix}[args.command](args, resolver)
+            "view": cmd_view, "plan": cmd_plan, "fix": cmd_fix,
+            "migrate": cmd_migrate, "query": cmd_query}[args.command](args, resolver)
 
 
 if __name__ == "__main__":

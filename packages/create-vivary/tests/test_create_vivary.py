@@ -471,5 +471,143 @@ class CreateVivaryTests(unittest.TestCase):
             )
 
 
+class TestAgentFlags(unittest.TestCase):
+    """Tests for --json, --auto, --dry-run, --storage and the wizard subcommand."""
+
+    def test_init_json_flag_returns_valid_json(self):
+        with temp_workspace() as td:
+            target = Path(td) / "json-demo"
+            import io, contextlib, json
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "init", str(target),
+                    "--preset", "coding",
+                    "--no-wizard",
+                    "--json",
+                    "--repo-root", str(ROOT),
+                ])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["preset"], "coding")
+            self.assertIn("files", out)
+            self.assertGreater(out["files"], 0)
+            self.assertFalse(out["dry_run"])
+
+    def test_init_storage_file_does_not_write_vivary_dir(self):
+        with temp_workspace() as td:
+            target = Path(td) / "file-storage"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", storage="file", repo_root=ROOT
+            )
+            self.assertFalse((target / ".vivary").exists())
+
+    def test_init_storage_embedded_writes_vivary_storage_toml(self):
+        with temp_workspace() as td:
+            target = Path(td) / "embedded-demo"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", storage="embedded", provider="lancedb",
+                repo_root=ROOT,
+            )
+            cfg = target / ".vivary" / "storage.toml"
+            self.assertTrue(cfg.exists(), ".vivary/storage.toml should be created")
+            text = cfg.read_text(encoding="utf-8")
+            self.assertIn("embedded", text)
+            self.assertIn("lancedb", text)
+
+    def test_init_dry_run_writes_nothing(self):
+        with temp_workspace() as td:
+            target = Path(td) / "dry-run-demo"
+            self.assertFalse(target.exists())
+            import io, contextlib, json
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "init", str(target),
+                    "--no-wizard",
+                    "--dry-run",
+                    "--json",
+                    "--repo-root", str(ROOT),
+                ])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertTrue(out["dry_run"])
+            self.assertFalse(target.exists(), "dry-run must not create any files")
+
+    def test_init_auto_flag_skips_prompts(self):
+        with temp_workspace() as td:
+            target = Path(td) / "auto-demo"
+            import io, contextlib, json
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "init", str(target),
+                    "--auto",
+                    "--size", "small",
+                    "--json",
+                    "--repo-root", str(ROOT),
+                ])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertTrue(out["ok"])
+            # size=small → file backend → no .vivary/ dir
+            self.assertEqual(out["storage"], "file")
+            self.assertFalse((target / ".vivary").exists())
+
+    def test_wizard_subcommand_writes_storage_toml(self):
+        with temp_workspace() as td:
+            target = Path(td) / "wizard-demo"
+            # First scaffold a bare workspace
+            create_vivary.scaffold_workspace(
+                target, preset="coding", storage="file", repo_root=ROOT
+            )
+            # Now run wizard to reconfigure to embedded
+            import io, contextlib, json
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "wizard", str(target),
+                    "--auto",
+                    "--storage", "embedded",
+                    "--provider", "lancedb",
+                    "--json",
+                    "--repo-root", str(ROOT),
+                ])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["storage"], "embedded")
+            cfg = target / ".vivary" / "storage.toml"
+            self.assertTrue(cfg.exists())
+
+    def test_doctor_reports_backend_field(self):
+        with temp_workspace() as td:
+            target = Path(td) / "doctor-backend"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", storage="embedded", provider="lancedb",
+                repo_root=ROOT,
+            )
+            import io, contextlib, json
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "doctor", str(target), "--json", "--repo-root", str(ROOT)
+                ])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertIn("backend", out)
+            self.assertEqual(out["backend"], "embedded")
+
+    def test_vivary_dir_data_in_gitignore(self):
+        with temp_workspace() as td:
+            target = Path(td) / "gitignore-check"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", storage="file", repo_root=ROOT
+            )
+            gitignore = (target / ".gitignore").read_text(encoding="utf-8")
+            self.assertIn(".vivary/data/", gitignore)
+
+
 if __name__ == "__main__":
     unittest.main()

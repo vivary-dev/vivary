@@ -17,6 +17,12 @@ Exit codes are uniform: **`0`** success · **`1`** findings/errors · **`2`** us
 error. Gate CI on the exit code; don't parse text. Every command takes `--json` for
 machine-readable output.
 
+**The CLI is the agent API.** Every command an agent needs to run Vivary is here — no
+MCP server, no special protocol. Commands that interact or install also accept `--yes`
+(auto-confirm all prompts), `--auto` (agent selects best option from available signals),
+and `--dry-run` (inspect without side effects). See [SPEC-data-layer.md](SPEC-data-layer.md)
+for the full agent CLI contract and the new storage/migration commands.
+
 ---
 
 ## tropo — the typed knowledge graph
@@ -42,6 +48,8 @@ says. `tropo.toml` declares the types.
 | `plan <change.toml>` | Simulate a change (remove/retype/break/add) and show the semantic delta. |
 | `fix [--dry-run]` | Strip redundant frontmatter (`W210` — a field equal to its derived value). The only mechanical edit tropo makes. |
 | `init [DIR] [--packs a,b]` | Scaffold a `tropo.toml` (optionally composing reusable type packs). |
+| `query <text> [--k N] [--type TYPE] [--json]` | Semantic search over the workspace graph. Returns the top-k typed nodes by meaning. Requires embedded or cloud backend. |
+| `migrate --from X --to Y [--yes] [--dry-run] [--json]` | Move graph data between storage backends (e.g. `file` → `embedded`). Idempotent. Installs the target backend if needed (with `--yes`). Writes `migrated_at` to `.vivary/storage.toml` on completion. |
 
 ### Strictness (the `check` gate)
 
@@ -158,22 +166,47 @@ exo roles                 # the role grammar
 ```
 create-vivary init <target> [--preset coding|second-brain|writing] [--force] [--obsidian]
                            [--active-context cocoindex-code]
+                           [--storage auto|file|embedded|cloud] [--provider lancedb|sqlite-vec|qdrant|astra]
+                           [--auto] [--yes] [--dry-run] [--json]
+                           [--size small|medium|large] [--privacy local|cloud]
+create-vivary wizard <target> [--yes] [--dry-run] [--json]
 create-vivary doctor <target> [--json]
 ```
 
 | Command | What it does |
 |---|---|
-| `init <target>` | Lay down a complete workspace: the agent contract, the strato shell (SOUL/USER/STATE/MEMORY), runtime skills, a `tropo.toml`, and a starter typed graph. |
-| `doctor <target>` | Validate a workspace: required files, privacy ignores, module directory indexes, and tropo graph health (no broken edges). |
+| `init <target>` | Lay down a complete workspace: the agent contract, the strato shell (SOUL/USER/STATE/MEMORY), runtime skills, a `tropo.toml`, a starter typed graph, and (based on flags or wizard answers) a `.vivary/storage.toml`. |
+| `wizard <target>` | Re-run the setup wizard on an existing workspace to reconfigure storage, preset, or active-context options. |
+| `doctor <target>` | Validate a workspace: required files, privacy ignores, module directory indexes, tropo graph health, and backend reachability. |
 
 | Flag | Effect |
 |---|---|
 | `--preset coding\|second-brain\|writing` | Which starter graph to seed (default `coding`). |
 | `--force` | Overwrite existing scaffold files. |
-| `--obsidian` | Also drop an opt-in Obsidian vault config (graph coloured by type). Never required — see [OBSIDIAN.md](OBSIDIAN.md). |
-| `--active-context cocoindex-code` | For `coding` workspaces, add an optional CocoIndex-code sidecar profile: an active-context skill, docs, graph nodes, and `.cocoindex_code/` gitignore. It does **not** auto-install, index, or enable MCP; the generated docs include the approved `ccc init` / `ccc index` path. |
+| `--obsidian` | Also drop an opt-in Obsidian vault config (graph coloured by type). |
+| `--active-context cocoindex-code` | For `coding` workspaces, add CocoIndex-code sidecar profile (skill, docs, graph nodes, gitignore). Does not auto-install or enable MCP. |
+| `--storage auto\|file\|embedded\|cloud` | Storage backend to configure. `auto` = LanceDB locally. Default: `file` (no new deps). |
+| `--provider lancedb\|sqlite-vec\|qdrant\|astra` | Which implementation to use for `embedded` or `cloud` tier. |
+| `--auto` | **Agent mode.** Skip all interactive prompts; pick the best option from available signals (`--size`, `--privacy`, file count). |
+| `--yes` | Auto-confirm installs and confirmations. Safe to combine with `--auto` for fully non-interactive agent use. |
+| `--dry-run` | Print what would be scaffolded and installed; do nothing. |
+| `--json` | Machine-readable output. Reports `preset`, `storage`, `provider`, `installed`, `config_path`, `status`. |
+| `--size small\|medium\|large` | Hint for `--auto` storage decisions. Agents can pass this after inspecting the repo. |
+| `--privacy local\|cloud` | Hint for `--auto` storage decisions. |
+
+When `--storage embedded` (or `auto`) is selected and `vivary-tropo[embedded]` is not yet installed, `init` installs it via `pip` before continuing. In `--json` mode, `"installed": ["lancedb"]` reports what was added. Without `--yes`, a single confirmation prompt fires before any pip install.
 
 ```bash
+# Human flow — interactive wizard:
+create-vivary init my-workspace
+
+# Agent flow — fully non-interactive:
+create-vivary init . --preset coding --auto --size large --privacy local --yes --json
+
+# Inspect without doing anything:
+create-vivary init my-workspace --auto --dry-run --json
+
+# Existing examples:
 create-vivary init my-workspace --preset writing
 create-vivary init my-codebase --preset coding --active-context cocoindex-code
 create-vivary doctor my-workspace

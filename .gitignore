@@ -29,3 +29,6 @@ sandboxes/*
 drafts/
 # CocoIndex Code (ccc)
 /.cocoindex_code/
+
+# Vivary runtime data (storage.toml is committed; data/ is not)
+/.vivary/data/

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vivary-tropo"
-version = "0.1.0"
+version = "0.2.0"
 description = "The filesystem is the schema: a folder-as-type typed-knowledge layer for Markdown."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -20,6 +20,11 @@ classifiers = [
     "Topic :: Text Processing :: Markup :: Markdown",
 ]
 dependencies = []
+
+[project.optional-dependencies]
+embedded = ["lancedb>=0.14.0"]
+cloud    = ["qdrant-client>=2.12.0"]
+astra    = ["astrapy>=1.3.0"]
 
 [project.urls]
 Homepage = "https://vivary.vercel.app/"

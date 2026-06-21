@@ -10,11 +10,12 @@ model made every file pay a ceremony tax — `type:`, `created:`, `updated:`,
 write down only the irreducible signal. A clean note can have **zero
 frontmatter** and still be fully typed and valid.
 
-> Status: **working engine (v0.1).** `tropo.py` implements spec v1 end-to-end —
+> Status: **working engine (v0.2).** `tropo.py` implements spec v1 end-to-end —
 > folder-as-type resolution, derivation, validation, packs, **overlays**, the
-> `signal` report, **`fix`** (de-noise), **`init`**, and the graph layer
-> (`graph`/`blast`/`view`/`plan`). An agent can drive the whole thing via
-> [.claude/skills/tropo/SKILL.md](.claude/skills/tropo/SKILL.md).
+> `signal` report, **`fix`** (de-noise), **`init`**, the graph layer
+> (`graph`/`blast`/`view`/`plan`), and the data layer (`query`/`migrate` with
+> file, embedded LanceDB, and cloud backends). An agent can drive the whole
+> thing via [.claude/skills/tropo/SKILL.md](.claude/skills/tropo/SKILL.md).
 > See [SPEC.md](SPEC.md).
 
 ## Quickstart
@@ -27,10 +28,14 @@ python tropo.py signal --root examples/vault    # print ONLY the irreducible met
 python tropo.py graph  --root examples/vault    # emit typed nodes + edges
 python tropo.py view   --root examples/vault --out graph.html
 python tropo.py fix    --dry-run                 # preview redundant-frontmatter removal
+python tropo.py query "meeting notes" --root examples/vault   # search the graph
+python tropo.py migrate --from file --to embedded --root my-vault --yes  # switch to LanceDB
 python tests/test_tropo.py                       # run the test suite
 ```
 
-Requires Python 3.11+ (stdlib `tomllib`), zero third-party dependencies.
+Requires Python 3.11+ (stdlib `tomllib`), zero third-party dependencies for the core.
+Optional extras: `pip install vivary-tropo[embedded]` for LanceDB full-text search,
+`vivary-tropo[cloud]` for Qdrant, `vivary-tropo[astra]` for Astra DB.
 
 ## Overlays — tighten a subtree
 

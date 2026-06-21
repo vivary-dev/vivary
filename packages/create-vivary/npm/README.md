@@ -10,12 +10,21 @@ npm create @vivary my-workspace -- --preset coding
 npm create @vivary my-codebase -- --preset coding --active-context cocoindex-code
 # or
 npx @vivary/create my-workspace --preset coding
+
+# Agent-mode (no prompts, machine-readable output):
+npx @vivary/create init . --preset coding --auto --size large --yes --json
+
+# Reconfigure storage on an existing workspace:
+npx @vivary/create wizard my-workspace --auto --storage embedded --yes --json
 ```
 
 Presets: `coding` · `second-brain` · `writing`.
 
 A bare `npm create @vivary <name>` maps to the `init` subcommand; you can also pass
-`init` / `doctor` explicitly (e.g. `npm create @vivary doctor my-workspace`).
+`init` / `doctor` / `wizard` explicitly (e.g. `npm create @vivary doctor my-workspace`).
+
+On a terminal that supports input, `init` runs a short wizard to pick a storage tier.
+Skip it with `--no-wizard`, or use `--auto` for fully non-interactive agent use.
 
 ## How it works
 

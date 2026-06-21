@@ -40,7 +40,9 @@ A **preset** just picks the starter content. Choose the one closest to your work
 - **`second-brain`** — a personal knowledge base.
 - **`writing`** — a manuscript or copy system.
 
-They all share the same structure and differ only in the starter notes. Add
+They all share the same structure and differ only in the starter notes.
+
+On a terminal that supports input, `init` runs a short wizard to ask about storage (how large your workspace will be, local vs cloud). Skip it with `--no-wizard` to use defaults, or let an agent self-configure with `--auto --yes`. Add
 `--obsidian` if you want an optional Obsidian vault config too. For coding
 workspaces, add `--active-context cocoindex-code` if you want the agent to ask when
 CocoIndex-code semantic search would help:
@@ -139,8 +141,8 @@ graph is wrong. Run `tropo fix` to clear redundant frontmatter.
 ## Next
 
 - [Concepts](/concepts/) — what everything means, in plain language.
-- [Command reference](/commands/) — every CLI, flag, and exit code.
-- [How-to recipes](/howto/) — review a change, multi-agent, CI, and more.
+- [Command reference](/commands/) — every CLI, flag, exit code, and data storage options.
+- [How-to recipes](/howto/) — review a change, multi-agent, CI, LanceDB search, and more.
 - [Agent skills](/skills/) — bootstrap, heartbeat, self-improve, loops.
 - [Active context](/active-context/) — optional CocoIndex-code sidecar for code search.
 - [Architecture](/architecture/) — the layer model and the reasoning behind it.
