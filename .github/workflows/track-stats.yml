@@ -1,0 +1,80 @@
+name: track-stats
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'   # Every Monday 09:00 UTC
+  workflow_dispatch:        # Also runnable manually
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: fetch and record
+        run: |
+          mkdir -p stats
+          python3 << 'PYEOF'
+          import urllib.request, json, csv, os
+          from datetime import date
+
+          def fetch(url):
+              try:
+                  req = urllib.request.Request(url, headers={"User-Agent": "vivary-stats/1.0"})
+                  with urllib.request.urlopen(req, timeout=10) as r:
+                      return json.loads(r.read())
+              except Exception as e:
+                  print(f"  warn: {url} → {e}")
+                  return {}
+
+          npm  = fetch("https://api.npmjs.org/downloads/point/last-week/%40vivary%2Fcreate")
+          pypi = fetch("https://pypistats.org/api/packages/create-vivary/recent")
+          gh   = fetch("https://api.github.com/repos/vivary-dev/vivary")
+
+          today     = str(date.today())
+          npm_dl    = npm.get("downloads", 0)
+          pypi_dl   = (pypi.get("data") or {}).get("last_week", 0)
+          stars     = gh.get("stargazers_count", 0)
+          forks     = gh.get("forks_count", 0)
+
+          latest = {
+              "date":         today,
+              "npm_weekly":   npm_dl,
+              "pypi_weekly":  pypi_dl,
+              "github_stars": stars,
+              "github_forks": forks,
+          }
+
+          with open("stats/latest.json", "w") as f:
+              json.dump(latest, f, indent=2)
+              f.write("\n")
+
+          history = "stats/history.csv"
+          new_file = not os.path.exists(history)
+          with open(history, "a", newline="") as f:
+              w = csv.writer(f)
+              if new_file:
+                  w.writerow(["date", "npm_weekly", "pypi_weekly", "github_stars", "github_forks"])
+              w.writerow([today, npm_dl, pypi_dl, stars, forks])
+
+          print(f"npm/wk:{npm_dl}  pypi/wk:{pypi_dl}  ★{stars}  forks:{forks}")
+          PYEOF
+
+      - name: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add stats/
+          if git diff --staged --quiet; then
+            echo "no changes to commit"
+          else
+            DATE=$(date -u +%Y-%m-%d)
+            NPM=$(python3 -c "import json; d=json.load(open('stats/latest.json')); print(d['npm_weekly'])")
+            PYPI=$(python3 -c "import json; d=json.load(open('stats/latest.json')); print(d['pypi_weekly'])")
+            STARS=$(python3 -c "import json; d=json.load(open('stats/latest.json')); print(d['github_stars'])")
+            git commit -m "chore(stats): $DATE — npm/wk:$NPM pypi/wk:$PYPI ★$STARS"
+            git push
+          fi
