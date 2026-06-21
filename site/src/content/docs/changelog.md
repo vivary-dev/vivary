@@ -16,11 +16,15 @@ Affects `create-vivary` (PyPI) and `@vivary/create` (npm) only.
 
 ### Fixed
 
-- **Wizard installs LanceDB inline** — the interactive wizard now installs LanceDB immediately
-  when the user picks "on this computer." Previously a second standalone prompt appeared after
-  the wizard ended; the wizard IS the consent step.
-- **`--auto` implies `--yes` for installs** — `create-vivary init . --auto --size large` no
-  longer hangs on the install prompt. Agents don't need to pass both `--auto` and `--yes`.
+- **Wizard installs LanceDB inline** — when the interactive wizard's user picks "on this
+  computer" (embedded storage), LanceDB now installs immediately as part of the wizard
+  conversation. Previously, a second standalone "Install lancedb? [Y/n]" prompt appeared
+  after the wizard ended, which was jarring and broke the mental model (the wizard IS the
+  consent step).
+- **`--auto` implies `--yes` for installs** — `create-vivary init . --auto --size large`
+  no longer hangs on the install prompt. `--auto` means fully unattended; it now implies
+  `yes=True` for every install step, so agents don't need to pass both `--auto` and `--yes`.
+- **`wizard` subcommand** has the same two fixes applied.
 
 ## [0.2.0] — 2026-06-21
 
@@ -35,15 +39,22 @@ Affects `vivary-tropo` and `create-vivary`. `vivary-ozone` and `vivary-exo` are 
 - **`tropo migrate`** — move graph nodes between backends
   (`--from file --to embedded [--dry-run] [--json] [--yes]`).
 - **`tropo query`** — text search over the workspace knowledge graph
-  (`tropo query "auth module" [--k N] [--json]`). File backend = text grep; embedded = BM25.
+  (`tropo query "auth module" [--k N] [--json]`).
 - **Agent-mode flags on `create-vivary init`** — `--json`, `--dry-run`, `--auto`,
   `--yes`, `--no-wizard`, `--storage`, `--provider`, `--size`, `--privacy`.
-  Agents can self-configure a workspace end-to-end without human interaction.
+  Agents can now self-configure a workspace end-to-end without human interaction.
 - **`create-vivary wizard` subcommand** — reconfigure storage on an existing workspace.
 - **Interactive setup wizard** — `create-vivary init` now prompts interactively when
   run from a TTY (human-friendly, no database jargon). `--no-wizard` or `--auto` skips it.
 - **`.vivary/data/` in scaffolded `.gitignore`** — runtime storage data is always ignored.
 - **`doctor` reports `backend` field** — JSON output now includes `"backend": "file|embedded|cloud"`.
+- **Spec:** `docs/SPEC-data-layer.md` — full architecture rationale and agent CLI contract.
+
+### Changed
+
+- `create-vivary init` with `--storage embedded` self-installs `vivary-tropo[embedded]`
+  (with confirmation unless `--yes`).
+- `--dry-run` on `init` simulates the full scaffold without writing any files.
 
 ## [create-vivary 0.1.1] — 2026-06-14
 

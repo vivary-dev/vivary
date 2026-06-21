@@ -14,10 +14,10 @@ Use this prompt in a new window:
 We are in C:\Users\jeffk\dev\vivary (repo: github.com/vivary-dev/vivary). Read
 HANDOFF.md, docs/README.md, and docs/ARCHITECTURE.md. Verify git status/branch/
 remotes before making claims. Vivary 0.2.0 is ready to ship — tropo + create-vivary
-bumped to 0.2.0 on branch feat/data-layer-0.2.0, pending PR merge and PyPI/npm
-publish. Continue from `dev` with a branch per change. Tests must be planned before
-edits. Do not push, open PRs, merge, publish, create orgs/repos, install dependencies,
-or delete files without explicit approval.
+has shipped, and create-vivary / @vivary/create are now at 0.2.1. Continue from
+`dev` by cutting a feature branch per change. Tests must be planned before edits.
+Do not push, open PRs, merge, publish, create orgs/repos, install dependencies, or
+delete files without explicit approval.
 ```
 
 ## Current Truth
@@ -42,8 +42,9 @@ tropo    typed knowledge graph: what is true        baseline
 Design law: **minimalism**. Always-on context must be tiny. Expensive-to-load
 framework files are wrong.
 
-**Shipped (0.1.0 → 0.2.0 in progress).** Published at 0.1.x; 0.2.0 ready on branch
-`feat/data-layer-0.2.0` pending PR + publish:
+**Shipped through 0.2.1.** 0.2.0 shipped the tropo storage/search layer and
+agent-mode scaffolder work. 0.2.1 is a create-vivary / @vivary/create patch that
+fixes the wizard LanceDB install flow and makes `--auto` imply `--yes`.
 
 ```bash
 npm create @vivary my-workspace                          # the scaffolder UX
@@ -60,15 +61,16 @@ generated from `docs/` (`cd site && npm run sync-docs`).
 
 | Package | PyPI | npm | Published | Branch |
 |---|---|---|---|---|
-| `vivary-tropo` | `vivary-tropo` | — | 0.1.0 | 0.2.0 ready |
+| `vivary-tropo` | `vivary-tropo` | — | 0.2.0 | current |
 | `vivary-ozone` | `vivary-ozone` | — | 0.1.0 | unchanged |
 | `vivary-exo`   | `vivary-exo`   | — | 0.1.0 | unchanged |
-| `create-vivary` | `create-vivary` | `@vivary/create` | 0.1.1 | 0.2.0 ready |
+| `create-vivary` | `create-vivary` | `@vivary/create` | 0.2.1 | current |
 
-The **0.2.0** bump affects `vivary-tropo` and `create-vivary` (both PyPI + npm for
-create-vivary). Adds: storage layer (`file`/`embedded`/`cloud`), `tropo query`,
+The **0.2.0** bump affected `vivary-tropo` and `create-vivary` (both PyPI + npm for
+create-vivary). It added: storage layer (`file`/`embedded`/`cloud`), `tropo query`,
 `tropo migrate`, agent-mode init flags (`--auto` `--yes` `--json` `--dry-run`),
-`create-vivary wizard`, interactive setup wizard. Per-release history in
+`create-vivary wizard`, and the interactive setup wizard. The **0.2.1** bump affects
+`create-vivary` / `@vivary/create` only. Per-release history lives in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## Live Repo State
@@ -87,23 +89,15 @@ default branch: dev
 visibility: public
 ```
 
-Current local branch: `dev` (no active feature branch between phases).
-
-Everything is merged to `dev` via PRs **#3–#14** (each its own plan + gate): the four
-layers (A–D), packaging (E1+E2), doc reframe (F1), org transfer to `vivary-dev` +
-URL update, the agentic-loop wiring, Obsidian-optional, and the comprehensive docs.
-Feature branches are deleted after merge; only `dev` + `main` remain (`main` is the
-vestigial tropo+strato baseline). **Published:** `vivary-tropo` / `vivary-ozone` /
-`vivary-exo` at 0.1.0 (PyPI); **`create-vivary` at 0.1.1 on both PyPI and npm
-(`@vivary/create`), in lockstep** — bare target defaults to `init` (see the version
-table above). **No `prod` branch or release tag yet** — `v0.1.0` is the
-next step (see Remaining Work). Ten roadmap issues are open: **#15–#24**. Verify live
-state (`git status --short --branch`, `gh pr list`, `gh issue list`) before acting.
+Current integration branch: `dev`. Cut a feature branch before edits. `prod` exists
+and points at the `v0.2.1` release cut. Verify live state (`git status --short
+--branch`, `gh pr list`, `gh issue list`) before acting; older notes in this file may
+lag active GitHub issues.
 
 ## What Exists
 
-All four layers are working, tested, **published** packages (`tropo` / `ozone` /
-`exo` at 0.1.0; `create-vivary` at 0.1.1 on PyPI + npm; CLI commands stay
+All four layers are working, tested, **published** packages (`tropo` at 0.2.0,
+`ozone` / `exo` at 0.1.0; `create-vivary` at 0.2.1 on PyPI + npm; CLI commands stay
 `tropo`/`ozone`/`exo`/`create-vivary`), proven in a clean venv.
 
 ```text
@@ -117,7 +111,7 @@ packages/ozone/        vivary-ozone 0.1.0 — review layer: `review` (structure 
                        `impact <id>` (blast radius) + `packs`. Tests: 7/7.
 packages/exo/          vivary-exo 0.1.0 — coordination layer: `conflicts` + `board` +
                        `roles`. Read-only, graph-native. Tests: 4/4.
-packages/create-vivary/ create-vivary 0.2.0 — scaffolder: init/wizard/doctor --preset
+packages/create-vivary/ create-vivary 0.2.1 — scaffolder: init/wizard/doctor --preset
                        coding|second-brain|writing + agent flags (--auto/--yes/--json/
                        --dry-run/--storage/--provider/--size/--privacy). Bundles
                        strato/loops assets for installed use. npm wrapper in npm/.
@@ -208,13 +202,11 @@ doctor: ok (9 node(s), 28 edge(s), 0 broken)
    plan+alignment, explicit approval, then PR + merge. **CI runs free on the public
    repo** (the old "billing-locked" note was a Jeff-Kazzee account artifact) and gates
    on the suites + `ozone review`; verify locally too.
-2. **Publishing.** _Done 2026-06-14:_ published to **both PyPI and npm**. PyPI
+2. **Publishing.** Published to **both PyPI and npm**. PyPI
    `vivary-tropo` / `vivary-ozone` / `vivary-exo` / `create-vivary`; npm scoped
    `@vivary/create` (CLI commands stay `tropo`/`ozone`/`exo`/`create-vivary`).
-   `tropo`/`ozone`/`exo` at 0.1.0. **`create-vivary` at 0.1.1 on both registries**
-   (_2026-06-14:_ a bare target defaults to `init` on both the Python CLI and the npm
-   launcher — PR #33 shipped the npm side; the PyPI side is the parity follow-up). PyPI
-   `create-vivary` and npm `@vivary/create` are versioned in lockstep.
+   Current versions are listed above; PyPI `create-vivary` and npm `@vivary/create`
+   are versioned in lockstep.
 3. **npm 2FA.** npm enforces 2FA on publish; the granular tokens tried did *not*
    bypass it, so `@vivary/create` was published by Jeff running `npm publish` with his
    passkey. For automation, set up **OIDC trusted publishing** (issue #15/#22) — it
@@ -234,14 +226,15 @@ release cut.
 
 ## Remaining Work
 
-The four layers are built, tested, and **0.2.0 is ready to publish** on branch
-`feat/data-layer-0.2.0`. The full roadmap is open issues **#15–#24**; the near-term:
+The four layers are built, tested, and published through the current versions listed
+above. The near-term work is now post-0.2 hardening:
 
-- **Publish 0.2.0.** Merge `feat/data-layer-0.2.0` → `dev`, then publish:
-  - `vivary-tropo 0.2.0` to PyPI (`python -m build && twine upload`)
-  - `create-vivary 0.2.0` to PyPI
-  - `@vivary/create 0.2.0` to npm (`npm publish` from `packages/create-vivary/npm/`)
-  - Tag `v0.2.0` on the merge commit. Site redeploys automatically on Vercel.
+- **Stats workflow repair.** Keep popularity snapshots out of direct `dev` pushes:
+  automated stats should update a feature branch and open a PR.
+- **Starter pack packaging (#43).** Ship tropo starter packs in the installed wheel
+  with `importlib.resources`.
+- **npm publish automation (#42).** Fix npm automation without bypassing npm's
+  security model.
 - **Launch.** Launch copy (Twitter thread + GitHub release) and the website brief were
   drafted but kept private (not committed to the public repo). Posting is a per-item
   gate.
