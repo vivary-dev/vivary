@@ -8,11 +8,27 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current versions:** `vivary-tropo` **0.2.0** · `create-vivary` / `@vivary/create` **0.2.1** · `vivary-ozone` / `vivary-exo` **0.1.0**.
+**Current versions:** `vivary-tropo` **0.2.0** · `create-vivary` / `@vivary/create` **0.2.2** · `vivary-ozone` / `vivary-exo` **0.1.0**.
+
+## [0.2.2] — 2026-06-21
+
+Affects `create-vivary` (PyPI) and `@vivary/create` (npm) only.
+
+### Fixed
+
+- **Supersedes 0.2.1** — use 0.2.2 for new installs. PyPI 0.2.1 was installable,
+  but it was cut from unreviewed direct commits and a dirty source snapshot that
+  included generated build artifacts. 0.2.2 is the clean, PR-gated hotfix release.
+- **Clean release provenance** — the repository source tree no longer includes the
+  generated 0.2.1 wheel/sdist artifacts, and the release was re-cut after branch
+  protection and CI-gated PR flow were restored.
+
+No runtime API changes are expected for users already on 0.2.1; this is a source
+and release-hygiene hotfix.
 
 ## [0.2.1] — 2026-06-21
 
-Affects `create-vivary` (PyPI) and `@vivary/create` (npm) only.
+Affects `create-vivary` (PyPI) and the `@vivary/create` npm package metadata only.
 
 ### Fixed
 

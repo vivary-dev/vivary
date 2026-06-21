@@ -10,11 +10,11 @@ can be scaffolded and checked in minutes.
 
 - **Live site:** https://vivary.vercel.app/
 - **GitHub:** https://github.com/vivary-dev/vivary (public · MIT)
-- **PyPI:** [`create-vivary`](https://pypi.org/project/create-vivary/) 0.1.1 ·
+- **PyPI:** [`create-vivary`](https://pypi.org/project/create-vivary/) 0.2.2 ·
   [`vivary-tropo`](https://pypi.org/project/vivary-tropo/) ·
   [`vivary-ozone`](https://pypi.org/project/vivary-ozone/) ·
   [`vivary-exo`](https://pypi.org/project/vivary-exo/) (0.1.0)
-- **npm:** [`@vivary/create`](https://www.npmjs.com/package/@vivary/create) 0.1.1
+- **npm:** [`@vivary/create`](https://www.npmjs.com/package/@vivary/create) 0.2.2
 
 ## Proof
 
@@ -45,7 +45,7 @@ Mobile:
 - **Restraint:** no third-party dependencies; the framework costs almost nothing
   to load. Plain Markdown, any editor, Claude Code *and* Codex.
 
-> Release snapshot verified 2026-06-18: `create-vivary` 0.1.1 (PyPI), `@vivary/create` 0.1.1 (npm).
+> Current release line verified 2026-06-21: `create-vivary` 0.2.2 (PyPI), `@vivary/create` 0.2.2 (npm).
 > Scaffold output captured from a real run — 36 files, doctor ok (8 nodes, 24
 > edges, 0 broken), `tropo check` 0 errors.
 
