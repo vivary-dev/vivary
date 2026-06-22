@@ -58,8 +58,10 @@ candidate retrieval.
 
 ## 3. The layer model
 
-A vertical column. Each layer is a standalone package that reads/writes the same
-graph and obeys the same convention.
+A vertical column. Each layer is a standalone module that reads/writes the same graph
+and obeys the same convention. The published CLIs are thin; `strato` is bundled
+agent-OS source/templates inside the repo and generated workspaces, not a separate
+npm/PyPI package today.
 
 ```
         exo      ── multi-agent orchestration            (outermost, optional)
@@ -96,15 +98,15 @@ Vivary's differentiators:
 
 ## 5. Naming & namespace
 
-The brand owns the namespace; modules are scoped under it, so globally-taken bare
-words (ozone, tropo) stop mattering:
+The brand owns the namespace; current package truth is:
 
-- npm: `@vivary/tropo`, `@vivary/strato`, …
-- PyPI: `vivary-tropo`, `vivary-strato`, …  (PyPI has no scopes — prefix instead)
-- one GitHub org holds every module repo
+- npm: `@vivary/create` — the launcher for the scaffolder.
+- PyPI: `vivary-tropo`, `vivary-ozone`, `vivary-exo`, and `create-vivary`.
+- `strato` is bundled source/templates, not a published npm or PyPI package.
+- GitHub: `vivary-dev/vivary` holds the public repo.
 
-`vivary` is free on npm and PyPI. The bare `github.com/vivary` login is a dead
-account, so the org needs a handle variant (e.g. `vivary-dev`). See HANDOFF.
+Future packages can still use the Vivary namespace, but public docs should only name
+packages that are actually published.
 
 ## 6. Module naming = atmosphere strata
 

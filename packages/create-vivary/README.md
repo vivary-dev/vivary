@@ -4,6 +4,9 @@ Scaffold a complete Vivary agent workspace: tropo config, strato workspace files
 runtime skills, private-memory boundaries, progressive module indexes, and a starter
 typed graph.
 
+**Current release:** 0.2.2. Use 0.2.2 instead of 0.2.1 for new installs; no
+migration is expected from 0.2.1.
+
 ## Install & scaffold
 
 ```bash
@@ -23,14 +26,6 @@ create-vivary wizard my-workspace --auto --storage embedded --yes --json
 pass `init` / `doctor` / `wizard` explicitly whenever you prefer. The same UX is available on npm
 via the `@vivary/create` launcher (`npm create @vivary my-workspace`), versioned in
 lockstep.
-
-## Local use
-
-```bash
-python packages/create-vivary/create_vivary.py init sandboxes/coding-demo --preset coding
-python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo
-python packages/tropo/tropo.py check --root sandboxes/coding-demo
-```
 
 Presets share the same agent OS shell, then seed a different starter graph. Each
 starter module is generated as `modules/<id>/index.md` so agents route through a small
@@ -58,6 +53,14 @@ typed graph:
 
 ```bash
 python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo --json
+```
+
+## Developing from source
+
+```bash
+python packages/create-vivary/create_vivary.py init sandboxes/coding-demo --preset coding
+python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo
+python packages/tropo/tropo.py check --root sandboxes/coding-demo
 ```
 
 ---

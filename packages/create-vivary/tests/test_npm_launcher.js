@@ -1,7 +1,7 @@
 // Tests for the npm launcher arg-mapping (packages/create-vivary/npm/index.js).
 // The launcher defaults a bare target to the `init` subcommand so the documented
 // `npm create @vivary my-workspace` UX reaches the Python CLI, which requires an
-// explicit `init`/`doctor` subcommand.
+// explicit `init`/`doctor`/`wizard` subcommand.
 "use strict";
 
 const assert = require("node:assert");
@@ -19,6 +19,7 @@ const cases = [
   ],
   [["init", "ws"], ["init", "ws"], "explicit init unchanged"],
   [["doctor", "ws"], ["doctor", "ws"], "explicit doctor unchanged"],
+  [["wizard", "ws"], ["wizard", "ws"], "explicit wizard unchanged"],
   [["-h"], ["-h"], "leading short help flag unchanged"],
   [["--help"], ["--help"], "leading long help flag unchanged"],
   [[], [], "no args unchanged"],

@@ -1,9 +1,12 @@
 # Vivary
 
+[![CI](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/vivary-dev/vivary?style=flat-square&label=release)](https://github.com/vivary-dev/vivary/releases/latest)
 [![npm/mo](https://img.shields.io/npm/dm/%40vivary%2Fcreate?style=flat-square&color=1f9d72&label=npm%2Fmo)](https://www.npmjs.com/package/@vivary/create)
 [![PyPI/mo](https://img.shields.io/pypi/dm/create-vivary?style=flat-square&color=1f9d72&label=PyPI%2Fmo)](https://pypi.org/project/create-vivary/)
 [![GitHub stars](https://img.shields.io/github/stars/vivary-dev/vivary?style=flat-square&color=1f9d72)](https://github.com/vivary-dev/vivary/stargazers)
-[![MIT](https://img.shields.io/badge/license-MIT-1f9d72?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/github/license/vivary-dev/vivary?style=flat-square&color=1f9d72)](LICENSE)
+[![Docs](https://img.shields.io/website?url=https%3A%2F%2Fvivary.vercel.app%2F&style=flat-square&label=docs)](https://vivary.vercel.app/)
 
 **Typed memory and gates for AI-agent projects.** A standard plus a scaffolder that
 wires up a normalized, agent-native workspace from standalone modules — typed project
@@ -15,15 +18,25 @@ A *vivary* is an archaic word for a vivarium: a self-contained world where livin
 things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
-> Status: **shipped and installable.** `vivary-tropo` is at **0.2.0**,
-> `create-vivary` is at **0.2.2**, and `vivary-ozone` / `vivary-exo` are at 0.1.0 — all on
-> [PyPI](https://pypi.org/project/create-vivary/). `@vivary/create` (npm, in lockstep
-> with `create-vivary`) is at **0.2.2** on [npm](https://www.npmjs.com/package/@vivary/create).
-> Use 0.2.2 instead of 0.2.1; 0.2.1 was superseded by a clean release-provenance hotfix.
-> `tropo` (typed knowledge graph + search + storage), `strato` (agent OS), `ozone`
-> (graph-aware review), and `exo` (coordination) are composed by `create-vivary`. Live site:
-> **[vivary.vercel.app](https://vivary.vercel.app/)**. See [HANDOFF.md](HANDOFF.md)
-> to continue, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full model.
+> Release status: **0.2.2 is current** for the scaffolder (`create-vivary` /
+> `@vivary/create`). **0.2.1 is superseded** by the clean release-provenance hotfix;
+> use 0.2.2 for new installs.
+
+| Surface | Current | Link |
+|---|---:|---|
+| `create-vivary` (PyPI) | 0.2.2 | [PyPI](https://pypi.org/project/create-vivary/) |
+| `@vivary/create` (npm) | 0.2.2 | [npm](https://www.npmjs.com/package/@vivary/create) |
+| `vivary-tropo` | 0.2.0 | [PyPI](https://pypi.org/project/vivary-tropo/) |
+| `vivary-ozone` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
+| `vivary-exo` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-exo/) |
+| Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
+| CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
+
+`tropo` (typed knowledge graph + search + storage), `strato` (agent OS), `ozone`
+(graph-aware review), and `exo` (coordination) are composed by `create-vivary`. See
+[HANDOFF.md](HANDOFF.md) to continue, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+for the full model, and [docs/PORTFOLIO.md](docs/PORTFOLIO.md) for proof and
+case-study material.
 
 ## Quickstart
 
@@ -95,8 +108,8 @@ opt-in setup (`create-vivary init … --obsidian`) — see [docs/OBSIDIAN.md](do
 
 ## Modules
 
-Standalone packages, scoped `@vivary/*` (npm) / `vivary-*` (PyPI), composed by
-`create vivary`:
+Standalone Python packages (`vivary-*` on PyPI), plus the npm scaffolder
+`@vivary/create`, composed by `create-vivary`:
 
 | Package | Layer | Job | Source |
 |---|---|---|---|
@@ -118,6 +131,7 @@ down `tropo` + `strato` and whichever optional layers fit. See
 - [Command reference](docs/COMMANDS.md) — every CLI, flag, and exit code
 - [How-to recipes](docs/HOWTO.md) · [Agent skills](docs/SKILLS.md) · [FAQ](docs/FAQ.md)
 - [Architecture](docs/ARCHITECTURE.md) · [Obsidian (optional)](docs/OBSIDIAN.md)
+- [Portfolio proof](docs/PORTFOLIO.md) — shipped surfaces, screenshots, and case-study notes
 
 ## The value-add (why this isn't another harness)
 

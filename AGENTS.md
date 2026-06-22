@@ -106,4 +106,6 @@ python packages/create-vivary/tests/test_create_vivary.py  # 8/8  (+ test_assets
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # clean
 ```
 
-Vivary 0.1.0 is published (PyPI + npm); full guides live in [docs/](docs/).
+Current release truth lives in [README.md](README.md) and [CHANGELOG.md](CHANGELOG.md):
+`create-vivary` / `@vivary/create` 0.2.2, `vivary-tropo` 0.2.0, and
+`vivary-ozone` / `vivary-exo` 0.1.0. Full guides live in [docs/](docs/).

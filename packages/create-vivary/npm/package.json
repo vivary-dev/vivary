@@ -25,7 +25,11 @@
   "homepage": "https://vivary.vercel.app/",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vivary-dev/vivary.git"
+    "url": "git+https://github.com/vivary-dev/vivary.git",
+    "directory": "packages/create-vivary/npm"
+  },
+  "bugs": {
+    "url": "https://github.com/vivary-dev/vivary/issues"
   },
   "files": [
     "index.js",

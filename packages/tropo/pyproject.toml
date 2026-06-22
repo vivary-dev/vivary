@@ -35,9 +35,8 @@ tropo = "tropo:main"
 
 [tool.setuptools]
 py-modules = ["tropo"]
-# NOTE: the bundled starter packs (packs/*.toml) are a repo convenience and do not
-# ship in the wheel (v0.1.0). All core commands work without them; per-vault packs in
-# `.tropo/packs/` are still resolved. Bundling starter packs is a v0.2 follow-up.
+# NOTE: bundled starter packs (packs/*.toml) are a repo convenience and are not
+# included in the wheel. Per-vault packs in `.tropo/packs/` are still resolved.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

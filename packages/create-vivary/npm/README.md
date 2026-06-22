@@ -5,6 +5,9 @@ workspace — typed knowledge graph (tropo), agent OS (strato), and starter grap
 one command. Generated modules use `modules/<id>/index.md` routers so agents load
 context progressively.
 
+**Current release:** 0.2.2. Use 0.2.2 instead of 0.2.1 for new installs; no
+migration is expected from 0.2.1.
+
 ```bash
 npm create @vivary my-workspace -- --preset coding
 npm create @vivary my-codebase -- --preset coding --active-context cocoindex-code

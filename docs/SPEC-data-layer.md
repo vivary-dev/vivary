@@ -1,18 +1,22 @@
 # Spec: Vivary Data Layer + Setup Wizard
 
-_Status: in-progress (0.2.0 branch — plan approved 2026-06-21, implementation underway)._
+_Status: shipped in 0.2.0; retained as the implementation record plus future notes._
 
 ---
 
 ## Problem
 
-Vivary's file-system knowledge graph (`tropo`) works well for small workspaces but hits a ceiling for:
+Vivary's file-system knowledge graph (`tropo`) worked well for small workspaces but
+hit a ceiling for:
 
 - Large codebases (tens of thousands of nodes)
 - Long-running projects (graph grows indefinitely)
 - Huge second brains (millions of notes, cross-linked)
 
-There's no semantic/vector search, no cloud sync, and no guided onboarding for users who don't know what any of this means. And agents cannot self-configure a workspace — there's no machine-readable init path.
+Before 0.2.0 there was no storage configuration, migration command, guided onboarding
+for users who do not know the primitives, or machine-readable init path for agents.
+0.2.0 shipped the storage layer, text/BM25-style graph search, migration, setup
+wizard, and agent-mode flags. Cloud adapters and vector retrieval remain future work.
 
 ---
 
@@ -55,7 +59,7 @@ When a wizard or migration command decides it needs `vivary-tropo[embedded]` (or
 
 If `--yes` is not set and the install would be the first time a new dep is added, the command prompts for confirmation before calling pip. In `--yes` mode, install is automatic.
 
-### Existing command gaps (to be closed in Phase 1/2)
+### Shipped command surface (0.2.0)
 
 | Command | Has `--json` | Has `--yes` | Has `--auto` | Has `--dry-run` |
 |---|---|---|---|---|
@@ -65,11 +69,9 @@ If `--yes` is not set and the install would be the first time a new dep is added
 | `ozone review` | ✓ | n/a | n/a | n/a |
 | `exo conflicts` | ✓ | n/a | n/a | n/a |
 | `create-vivary doctor` | ✓ | n/a | n/a | n/a |
-| `create-vivary init` | **✗ gap** | **✗ gap** | **✗ gap** | **✗ gap** |
-| `tropo migrate` (new) | must ship | must ship | must ship | must ship |
-| `create-vivary wizard` (new) | must ship | must ship | must ship | must ship |
-
-`create-vivary init` closing its gaps is part of Phase 2 work.
+| `create-vivary init` | ✓ | ✓ | ✓ | ✓ |
+| `tropo migrate` | ✓ | ✓ | n/a | ✓ |
+| `create-vivary wizard` | ✓ | ✓ | ✓ | ✓ |
 
 ### Example: agent bootstrapping a workspace end-to-end
 
@@ -91,38 +93,50 @@ tropo check --root . --json
 tropo migrate --from file --to embedded --yes --json
 # → { "migrated": 312, "failed": 0, "duration_ms": 4200, "backend": "lancedb" }
 
-# Agent queries the knowledge graph semantically:
+# Agent queries the knowledge graph by text:
 tropo query "what decisions affect the auth module" --json
-# → { "results": [ { "id": "...", "type": "decision", "score": 0.91, ... } ] }
+# → { "results": [ { "id": "...", "type": "decision", "score": 2, ... } ] }
 ```
 
 ---
 
 ## Architecture: why NOT naive RAG
 
-Before describing the storage model, it's worth being precise about what this layer is and is not.
+The shipped 0.2.0 layer is storage/search infrastructure, not a chunked-RAG system.
+If Vivary adds vector retrieval later, it should preserve this boundary.
 
 **This is NOT chunked-text RAG.** Naive RAG = chunk arbitrary documents into ~500-token blobs, embed each chunk, retrieve top-k at query time. This throws away all the structure in a knowledge graph — relationships, types, hierarchy — and produces chunking artifacts that hurt retrieval quality.
 
-**This IS semantic graph search.** Vivary already has a typed knowledge graph (tropo: folder-as-type, each node is a typed entity). The data layer adds vector embeddings *on graph nodes* — preserving the graph structure, enabling semantic traversal. Retrieval returns typed graph nodes (not arbitrary text chunks), with their relationships intact for agents to follow.
+**Future vector retrieval should be graph-shaped.** Vivary already has a typed
+knowledge graph (tropo: folder-as-type, each node is a typed entity). Any future
+embedding layer should operate on graph nodes, preserve relationships and types, and
+return typed graph nodes for agents to follow.
 
-**For code specifically:** CocoIndex (already in Vivary as of PR #40) provides structured active-context indexing — ASTs, call graphs, import graphs, hot context. That's strictly better than RAG for code. The LanceDB layer is complementary: it adds semantic search over the workspace's typed graph (docs, decisions, architecture nodes), not over raw source code. These are different retrieval layers for different purposes.
+**For code specifically:** CocoIndex (already in Vivary as of PR #40) provides
+structured active-context indexing — ASTs, call graphs, import graphs, hot context.
+That's strictly better than RAG for code. The shipped `tropo query` command is
+text/BM25-style graph search; semantic code retrieval belongs to the active-context
+CocoIndex sidecar.
 
-**For second brain / writing:** The tropo graph IS the index. Embedding graph nodes and searching them semantically is more powerful than chunked RAG because the agent retrieves structured entities and can traverse their typed relationships — not orphaned text fragments.
+**For second brain / writing:** The tropo graph is the index. Future embeddings, if
+added, should embed graph nodes rather than arbitrary chunks so the agent retrieves
+structured entities and can traverse typed relationships.
 
-**Verdict per workspace type (validated by research):**
+**Future retrieval notes by workspace type:**
 
 | Workspace | Retrieval approach | Role of LanceDB |
 |---|---|---|
-| Coding | CocoIndex (AST/call-graph, primary) + typed-node embeddings (docs/decisions) | **The store CocoIndex writes into** — not a parallel pipeline |
-| Second brain | Graph traversal (tropo edges) + per-node embeddings | Primary retrieval surface; graph+vector hybrid yields ~31 P@5 lift over vector-only |
-| Writing | Per-node vector search | Sufficient initially; graph layer adds value only at corpus scale |
+| Coding | CocoIndex active context first; tropo graph search for docs/decisions | Future persistence target for structured code context |
+| Second brain | Graph traversal (tropo edges), with possible typed-node embeddings later | Future local index for graph-node retrieval |
+| Writing | Text graph search now; typed-node vectors later if corpus scale needs it | Future local index for graph-node retrieval |
 
-**Critical nuance for coding:** For coding workspaces, LanceDB is the persistence store that CocoIndex writes into — one backend, CocoIndex's indexing pipeline on top. Don't add a separate tropo-to-LanceDB pipeline for code. For second-brain and writing presets, the tropo graph nodes are embedded directly into LanceDB.
+**Critical nuance for coding:** For coding workspaces, avoid a separate
+tropo-to-vector pipeline for source code. CocoIndex owns structured code indexing;
+tropo owns the typed workspace graph.
 
-Naive chunked-text RAG on code achieves ~2% task accuracy vs. 50–80% for AST-based structured indexing (SWE-bench class). Tropo typed-node embeddings are materially better than naive RAG because node type is preserved as a filter dimension — a `decision` node and a `reference` node don't collapse into identical-looking text chunks.
+Naive chunked-text RAG on code achieves ~2% task accuracy vs. 50–80% for AST-based structured indexing (SWE-bench class). Future tropo typed-node embeddings would be materially better than naive RAG because node type is preserved as a filter dimension — a `decision` node and a `reference` node don't collapse into identical-looking text chunks.
 
-Full GraphRAG (Microsoft-style community summarization) is overkill for local workspaces. The tropo graph + LanceDB node embeddings gives the same structural benefit without the cost.
+Full GraphRAG (Microsoft-style community summarization) is overkill for local workspaces. A future tropo graph + LanceDB node-embedding layer can provide the same structural benefit without the cost.
 
 ---
 
@@ -132,7 +146,7 @@ Three tiers, one interface. Users never think about tiers — the wizard maps th
 
 ```
 file (default)  →  tropo's existing file-system graph. No new deps. Works for small workspaces.
-embedded        →  LanceDB. In-process, disk-file, zero server. Unlocks semantic graph search.
+embedded        →  LanceDB. In-process, disk-file, zero server. Unlocks indexed graph search now and future local vector retrieval.
 cloud           →  Qdrant Cloud (primary) or Astra DB (enterprise). Requires account + API key.
 ```
 
@@ -158,7 +172,10 @@ cloud           →  Qdrant Cloud (primary) or Astra DB (enterprise). Requires a
 
 ## Backend migration
 
-"Migration" = when a user switches storage backends, their existing graph data needs to move. Example: workspace starts on `file` backend, grows to 10k nodes, user wants semantic search — they switch to `embedded` (LanceDB). Without migration, the LanceDB index starts empty and agents can't find anything.
+"Migration" = when a user switches storage backends, their existing graph data needs
+to move. Example: workspace starts on `file` backend, grows to 10k nodes, and switches
+to `embedded` (LanceDB) for indexed local search. Without migration, the LanceDB index
+starts empty and agents can't find anything.
 
 **Solution: `tropo migrate` command.**
 
@@ -351,9 +368,9 @@ Welcome to Vivary! Let's set up your workspace.
 
 ---
 
-## Phased implementation
+## Shipped implementation and future work
 
-### Phase 1 — Storage abstraction + LanceDB (0.2.0)
+### Shipped in 0.2.0 — Storage abstraction + LanceDB
 
 - `StorageBackend` protocol in `tropo/storage.py`
 - `FileBackend` wrapping existing logic
@@ -362,7 +379,7 @@ Welcome to Vivary! Let's set up your workspace.
 - `auto` resolves to `LanceBackend`
 - Unit tests for backend protocol compliance
 
-### Phase 2 — Wizard + agent mode (0.2.0, same milestone)
+### Shipped in 0.2.0 — Wizard + agent mode
 
 - `create-vivary init` replaces existing prompts
 - `--auto`, `--json`, `--dry-run`, `--no-wizard` flags
@@ -371,14 +388,14 @@ Welcome to Vivary! Let's set up your workspace.
 - `doctor` validates backend connectivity
 - `--auto` decision logic tested with simulated contexts
 
-### Phase 3 — Migration command (0.2.0 or fast-follow)
+### Shipped in 0.2.0 — Migration command
 
 - `tropo migrate --from X --to Y`
 - Idempotent, reports stats
 - `migrated_at` written to `.vivary/storage.toml`
 - Embedding provider config in `[embedding]`
 
-### Phase 4 — Cloud adapters (0.3.x)
+### Future — Cloud adapters (0.3.x)
 
 - `QdrantBackend` (gated on `vivary-tropo[cloud]`)
 - `AstraBackend` (gated on `vivary-tropo[astra]`)
@@ -394,8 +411,10 @@ Welcome to Vivary! Let's set up your workspace.
 - Automatic migration on install — migration is always explicit via `tropo migrate`.
 - Multi-backend writes simultaneously.
 - Embeddings model ownership — tropo delegates; the graphify semantic layer (#16) owns the embedding strategy long-term.
-- Chunked-text RAG — not this product. Vivary does semantic graph search over typed nodes.
+- Chunked-text RAG — not this product. Future semantic retrieval should operate over
+  typed nodes or active-context sidecars, not arbitrary chunks.
 
 ---
 
-_This spec requires plan+alignment approval (AGENTS.md gate) before any code is written._
+_Historical note: this plan was approved and shipped as the 0.2.0 data-layer slice.
+Future cloud/vector work still requires fresh plan+alignment before implementation._

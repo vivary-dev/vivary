@@ -1,4 +1,4 @@
-# @vivary/exo
+# vivary-exo
 
 > Status: **working** (first slice — read-only coordination). The optional, outermost layer.
 
