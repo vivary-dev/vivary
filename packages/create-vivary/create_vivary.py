@@ -1075,8 +1075,12 @@ def _run_wizard(args) -> dict:
         return {"storage": "cloud", "provider": "qdrant", "installed": []}
 
     # User picked "on this computer" — install LanceDB now, wizard is the consent step
-    print("\n  Setting up LanceDB for local search...", file=sys.stderr)
-    installed = _ensure_backend_installed("lancedb", yes=True)
+    if getattr(args, "dry_run", False):
+        print("\n  Would set up LanceDB for local search (dry run).", file=sys.stderr)
+        installed = []
+    else:
+        print("\n  Setting up LanceDB for local search...", file=sys.stderr)
+        installed = _ensure_backend_installed("lancedb", yes=True)
     return {"storage": "embedded", "provider": "lancedb", "installed": installed}
 
 
@@ -1193,7 +1197,11 @@ def main(argv: list[str] | None = None) -> int:
         target = Path(args.target).resolve()
         decisions = _run_wizard(args)
         _yes = getattr(args, "yes", False) or getattr(args, "auto", False)
-        installed = decisions.get("installed") or _ensure_backend_installed(decisions["provider"], _yes)
+        installed = decisions.get("installed") or (
+            []
+            if getattr(args, "dry_run", False) or decisions["storage"] == "file"
+            else _ensure_backend_installed(decisions["provider"], _yes)
+        )
         vivary_paths = _write_vivary_dir(target, decisions["storage"], decisions["provider"],
                                          getattr(args, "dry_run", False))
         if getattr(args, "json", False):
@@ -1227,7 +1235,11 @@ def main(argv: list[str] | None = None) -> int:
 
     # If the interactive wizard already installed (user picked embedded), don't prompt again
     _prior = decisions.get("installed", [])
-    installed = _prior + (_ensure_backend_installed(provider, yes) if storage != "file" else [])
+    installed = _prior + (
+        []
+        if dry_run or storage == "file"
+        else _ensure_backend_installed(provider, yes)
+    )
 
     try:
         created = scaffold_workspace(

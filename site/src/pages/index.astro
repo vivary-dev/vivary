@@ -122,6 +122,21 @@ const creates = [
       </blockquote>
     </section>
 
+    <!-- SIGNALS -->
+    <section class="band signals">
+      <div class="signals-copy">
+        <p class="search-label">Public signals</p>
+        <h2>Distribution, not vibes.</h2>
+        <p>
+          Vivary tracks npm, PyPI, and GitHub signals from public APIs through reviewed
+          weekly PR snapshots. Early numbers are not a traction claim; they are a
+          heartbeat that the package surfaces are live.
+        </p>
+        <a href="/signals/">How signals are tracked →</a>
+      </div>
+      <img src="/usage-snapshot.svg" alt="Vivary public usage snapshot chart" loading="lazy" />
+    </section>
+
     <!-- WHAT IT CREATES -->
     <section class="band creates">
       <div class="creates-head">
@@ -151,8 +166,8 @@ tropo: 8 document(s), 0 error(s), 0 warning(s)  →  exit 0</pre>
       <div class="search-head">
         <h2>Your workspace knows<br />what it knows.</h2>
         <p>In 0.2 the graph gained search and agent self-configuration. <code>tropo query</code>
-          finds typed nodes by content. Agents scaffold and configure themselves with zero prompts — including
-          auto-installing the storage backend.</p>
+          finds typed nodes by content. Agents can scaffold and configure themselves with zero prompts,
+          with explicit flags for storage and installs.</p>
       </div>
       <div class="search-grid">
         <div>
@@ -171,13 +186,13 @@ tropo: 8 document(s), 0 error(s), 0 warning(s)  →  exit 0</pre>
     --auto --size large \
     --yes --json</span>
 
-<span class="dim">{</span>
+<span class="dim">&#123;</span>
   <span class="acc">"ok"</span>: true,
   <span class="acc">"storage"</span>: <span class="g">"embedded"</span>,
   <span class="acc">"provider"</span>: <span class="g">"lancedb"</span>,
   <span class="acc">"installed"</span>: [<span class="g">"lancedb"</span>],
   <span class="acc">"files"</span>: 44
-<span class="dim">}</span></pre>
+<span class="dim">&#125;</span></pre>
         </div>
       </div>
     </section>
@@ -186,9 +201,10 @@ tropo: 8 document(s), 0 error(s), 0 warning(s)  →  exit 0</pre>
     <section class="band strata">
       <div class="strata-head">
         <h2>Four layers,<br />named for the sky.</h2>
-        <p>A <em>vivary</em> is a small self-contained world with stacked layers. Each one is
-          a standalone CLI on the Python standard library. The baseline is the bottom two;
-          the rest snap on when you need them.</p>
+        <p>A <em>vivary</em> is a small self-contained world with stacked layers. The
+          published CLIs are small Python tools; <code>strato</code> ships as bundled
+          templates and skills. The baseline is the bottom two; the rest snap on when
+          you need them.</p>
       </div>
       <ol class="column">
         {layers.map((l) => (
@@ -381,6 +397,13 @@ billing  →  4 node(s) depend on it
     .pitch blockquote { margin: 0 auto; padding-top: 4px; max-width: 44ch; text-align: center;
       font-family: var(--serif); font-size: clamp(17px, 1.5vw, 22px); color: var(--accent); line-height: 1.4; }
 
+    /* signals */
+    .signals { display: grid; grid-template-columns: 0.85fr 1.15fr; gap: clamp(22px, 4vw, 52px); align-items: center; }
+    .signals h2 { font-family: var(--serif); font-size: clamp(28px, 3.5vw, 46px); letter-spacing: -0.025em; line-height: 1.03; margin: 0 0 14px; }
+    .signals p:not(.search-label) { color: var(--muted); margin: 0 0 16px; max-width: 38ch; }
+    .signals a { color: var(--accent); font-weight: 600; }
+    .signals img { display: block; width: 100%; height: auto; border-radius: 16px; border: 1px solid var(--line); background: oklch(0.13 0.035 220 / .66); }
+
     /* creates */
     .creates-head { text-align: center; }
     .creates-head h2 { font-family: var(--serif); font-size: clamp(28px, 4vw, 52px); letter-spacing: -0.025em; line-height: 1.04; margin: 0 auto 14px; max-width: 20ch; }
@@ -463,7 +486,7 @@ billing  →  4 node(s) depend on it
     @keyframes pulse { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
 
     @media (max-width: 880px) {
-      .strata, .row, .row.reverse, .creates-grid { grid-template-columns: 1fr; }
+      .strata, .row, .row.reverse, .creates-grid, .signals { grid-template-columns: 1fr; }
       .creates-grid .term { position: static; }
       .row.reverse .rtext { order: 0; }
       .axis { display: none; }

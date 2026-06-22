@@ -95,13 +95,13 @@ that *consumes* tropo's clean graph. Keeping embeddings out keeps the core zero-
 and deterministic.
 
 ### What is the wizard?
-When you run `create-vivary init` on a terminal that supports input, it prompts you in plain English — no database jargon — to pick a storage tier (local file, local LanceDB, or cloud). Skip it with `--no-wizard` to use defaults, or use `--auto` to let Vivary pick based on hints like `--size` and `--privacy`. Use `create-vivary wizard <target>` to reconfigure an existing workspace without re-scaffolding.
+When you run `create-vivary init` on a terminal that supports input, it prompts you in plain English — no database jargon — to pick a storage tier (local file, local LanceDB, or cloud config). For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use `--auto`; in human mode, the wizard asks and its answers drive storage. Use `create-vivary wizard <target>` to reconfigure an existing workspace without re-scaffolding.
 
 ### How do agents self-configure a workspace?
 ```bash
 create-vivary init . --preset coding --auto --size large --yes --json
 ```
-`--auto` picks the best storage tier from available signals, `--yes` auto-confirms any installs, `--json` outputs machine-readable results. No prompts, no human needed. Dry-run first with `--dry-run --json` to preview without writing anything.
+`--auto` picks the best storage tier from explicit `--storage`, `--privacy`, and `--size` hints, `--yes` auto-confirms any installs, and `--json` outputs machine-readable results. No prompts, no human needed. Dry-run first with `--dry-run --json` to preview without writing or installing anything.
 
 ### Can Vivary use CocoIndex?
 Yes, as an optional sidecar for coding workspaces. Scaffold it with

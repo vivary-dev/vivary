@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,13 +8,13 @@ version = "0.2.0"
 description = "The filesystem is the schema: a folder-as-type typed-knowledge layer for Markdown."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Jeff Kazzee" }]
 keywords = ["markdown", "frontmatter", "knowledge-base", "second-brain", "typechecker"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Software Development :: Documentation",
     "Topic :: Text Processing :: Markup :: Markdown",
@@ -28,7 +28,10 @@ astra    = ["astrapy>=1.3.0"]
 
 [project.urls]
 Homepage = "https://vivary.vercel.app/"
+Documentation = "https://vivary.vercel.app/"
 Repository = "https://github.com/vivary-dev/vivary"
+Issues = "https://github.com/vivary-dev/vivary/issues"
+Changelog = "https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md"
 
 [project.scripts]
 tropo = "tropo:main"

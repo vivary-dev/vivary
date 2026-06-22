@@ -49,13 +49,17 @@ Exit codes are already uniform: `0` success · `1` findings/errors · `2` usage/
 | Flag | Meaning |
 |---|---|
 | `--yes` | Auto-confirm all prompts. Combined with `--json`, fully non-interactive. |
-| `--auto` | Agent picks the best option based on available signals (file count, workspace type, hints). No questions asked. |
+| `--auto` | Agent picks the best option from explicit storage/privacy/size hints. No questions asked. |
 | `--size small\|medium\|large` | Hint for `--auto` decisions. Agents can inspect a codebase and pass this. |
 | `--privacy local\|cloud` | Hint for `--auto` storage decisions. |
 
 ### Self-install
 
-When a wizard or migration command decides it needs `vivary-tropo[embedded]` (or another extra), it **installs it** during execution if not already present — `pip install vivary-tropo[embedded]` via subprocess. The agent does not have to know about pip extras. In `--json` mode the output reports `"installed": ["lancedb"]` so the agent knows what changed.
+When the wizard or `create-vivary init` decides it needs `vivary-tropo[embedded]`,
+it **installs it** during execution if not already present — `pip install
+vivary-tropo[embedded]` via subprocess. The agent does not have to know about pip
+extras. In `--json` mode the output reports `"installed": ["lancedb"]` so the agent
+knows what changed. `--dry-run` previews without writing or installing anything.
 
 If `--yes` is not set and the install would be the first time a new dep is added, the command prompts for confirmation before calling pip. In `--yes` mode, install is automatic.
 
@@ -78,12 +82,12 @@ If `--yes` is not set and the install would be the first time a new dep is added
 ```bash
 # Agent inspects the repo, decides it's a large coding workspace, scaffolds and configures:
 create-vivary init . --preset coding --auto --size large --privacy local --yes --json
-# → { "preset": "coding", "storage": "embedded", "provider": "lancedb",
-#     "installed": ["lancedb"], "config": ".vivary/storage.toml", "status": "ok" }
+# → { "ok": true, "preset": "coding", "storage": "embedded", "provider": "lancedb",
+#     "installed": ["lancedb"], "config": ".vivary/storage.toml", "dry_run": false }
 
 # Agent checks workspace health:
 create-vivary doctor . --json
-# → { "status": "ok", "nodes": 9, "edges": 28, "broken": 0, "backend": "embedded" }
+# → { "ok": true, "graph": { "nodes": 9, "edges": 28, "broken": 0 }, "backend": "embedded" }
 
 # Agent validates the graph:
 tropo check --root . --json
@@ -91,7 +95,7 @@ tropo check --root . --json
 
 # Agent runs migration after adding embedded backend to existing workspace:
 tropo migrate --from file --to embedded --yes --json
-# → { "migrated": 312, "failed": 0, "duration_ms": 4200, "backend": "lancedb" }
+# → { "migrated": 312, "failed": 0, "duration_ms": 4200, "from": "file", "to": "embedded" }
 
 # Agent queries the knowledge graph by text:
 tropo query "what decisions affect the auth module" --json
@@ -182,17 +186,18 @@ starts empty and agents can't find anything.
 ```bash
 tropo migrate --from file --to embedded
 # Reads all nodes from the file-system graph
-# Embeds them (requires an embedding model — either local or API)
-# Writes to LanceDB at .vivary/data/
+# Writes node content to the configured embedded backend
 # Reports: N nodes migrated, M failed
-
-tropo migrate --from embedded --to cloud --provider qdrant
-# Reads from LanceDB, writes to Qdrant Cloud
 ```
 
-**No automatic migration on install.** Migration is explicit and user-triggered. The command is idempotent (safe to re-run). Migration status is tracked in `.vivary/storage.toml` (a `migrated_at` timestamp).
+**No automatic migration on install.** Migration is explicit and user-triggered. In
+0.2.0, `tropo migrate` supports `--from file` into the configured embedded backend.
+Non-file sources, cloud targets, automatic backend installation, and `migrated_at`
+tracking are future 0.3.x work.
 
-**Embedding model for migration:** tropo delegates this to a configurable embedding function (default: local sentence-transformers or OpenAI API if key is set). This is a new `[embedding]` section in `.vivary/storage.toml`.
+**No embeddings in tropo migration.** The embedded backend uses indexed node content
+for BM25-style text search. Semantic/vector embeddings remain future graphify or
+active-context-sidecar work, outside the deterministic tropo core.
 
 ---
 
@@ -253,7 +258,6 @@ astra    = ["astrapy>=1.0"]
 
 [storage]
 backend = "auto"            # auto | file | embedded | cloud
-migrated_at = ""            # set by `tropo migrate` on completion
 
 # For backend = "embedded" (or auto):
 [storage.embedded]
@@ -267,10 +271,10 @@ provider = "lancedb"        # lancedb | sqlite-vec
 # api_key = "${VIVARY_CLOUD_API_KEY}"
 # collection = "my-workspace"
 
-[embedding]
-provider = "local"          # local | openai | anthropic
-# model = "all-MiniLM-L6-v2"         # for local
-# api_key = "${OPENAI_API_KEY}"       # for openai
+# Future 0.3.x:
+# migrated_at = ""          # set by `tropo migrate` on completion
+# [embedding]               # owned by future graphify/semantic layer, not tropo 0.2
+# provider = "local"
 ```
 
 `.vivary/` should be in `.gitignore` by default (contains runtime data + secrets). The scaffold adds it.
@@ -305,20 +309,22 @@ create-vivary init my-workspace --preset coding --storage embedded --no-wizard
 
 # Machine-readable output for agent consumption:
 create-vivary init my-workspace --auto --json
-# → { "preset": "coding", "storage": "embedded", "provider": "lancedb",
-#     "installed": ["lancedb"], "config_path": ".vivary/storage.toml" }
+# → { "ok": true, "preset": "coding", "storage": "embedded", "provider": "lancedb",
+#     "installed": ["lancedb"], "config": ".vivary/storage.toml", "dry_run": false }
 ```
 
 **`--auto` decision logic (agent-callable, no human required):**
 
 ```
-if size hint is "large" or file count > 5000   → embedded (LanceDB)
-elif size hint is "small" or no signal          → file (no new deps)
-elif privacy = "cloud"                          → cloud (Qdrant)
-else                                            → embedded (LanceDB, safest default)
+if explicit --storage is set and not "auto"     → that storage tier
+elif privacy = "cloud"                          → cloud config (backend future 0.3.x)
+elif size hint is "small"                       → file (no new deps)
+else                                            → embedded (LanceDB, local default)
 ```
 
-Agents inspecting a codebase can count files, detect languages, read existing STRATO.md, and pass `--size` / `--privacy` flags. The wizard outputs JSON so the calling agent can read back what was decided.
+Agents inspecting a codebase can count files, detect languages, read existing
+`STRATO.md`, and pass explicit `--size` / `--privacy` flags. The wizard outputs JSON
+so the calling agent can read back what was decided.
 
 **Human wizard question flow (plain English, no jargon):**
 
@@ -386,20 +392,22 @@ Welcome to Vivary! Let's set up your workspace.
 - `create-vivary wizard` as re-configuration alias
 - `.vivary/storage.toml` scaffolded by wizard
 - `doctor` validates backend connectivity
-- `--auto` decision logic tested with simulated contexts
+- `--auto` decision logic tested with explicit size/privacy/storage hints
 
 ### Shipped in 0.2.0 — Migration command
 
-- `tropo migrate --from X --to Y`
-- Idempotent, reports stats
-- `migrated_at` written to `.vivary/storage.toml`
-- Embedding provider config in `[embedding]`
+- `tropo migrate --from file --to embedded`
+- Reports migrated/failed counts and duration
+- `--dry-run` preview mode
+- Uses indexed node content; no embeddings in tropo migration
 
 ### Future — Cloud adapters (0.3.x)
 
 - `QdrantBackend` (gated on `vivary-tropo[cloud]`)
 - `AstraBackend` (gated on `vivary-tropo[astra]`)
 - Env var interpolation in `storage.toml`
+- Non-file migration sources and cloud migration targets
+- `migrated_at` tracking in `.vivary/storage.toml`
 
 ---
 

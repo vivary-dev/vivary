@@ -147,16 +147,16 @@ Agents can scaffold and configure a workspace without any human interaction:
 # Fully non-interactive: auto picks embedded storage, installs LanceDB, outputs JSON
 create-vivary init . --preset coding --auto --size large --yes --json
 
-# Dry run first (inspect without writing anything)
+# Dry run first (inspect without writing or installing anything)
 create-vivary init my-workspace --auto --dry-run --json
 
 # Reconfigure storage on an existing workspace
 create-vivary wizard my-workspace --auto --storage embedded --yes --json
 ```
 
-The `--auto` flag picks storage from `--size`/`--privacy` hints (or defaults to
-`embedded` for medium/large). `--yes` auto-confirms installs. `--json` gives
-machine-readable output. Combine all three for zero-prompt agent use.
+The `--auto` flag picks storage from explicit `--storage`, `--size`, and `--privacy`
+hints (or defaults to `embedded` for medium/large). `--yes` auto-confirms installs.
+`--json` gives machine-readable output. Combine all three for zero-prompt agent use.
 
 ## Use Vivary in CI
 
