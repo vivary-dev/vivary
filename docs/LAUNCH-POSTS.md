@@ -1,26 +1,24 @@
-# Vivary 0.2.2 launch posts
+# Vivary 0.2.3 launch posts
 
 Use these after verifying the live package pages, latest GitHub release, docs site, and
 CI status.
 
 ## X / Twitter
 
-Vivary 0.2.2 is out: typed memory, visible state, reusable skills, and verification
-gates for AI-agent workspaces.
+Vivary 0.2.3 is out.
 
-Scaffold with:
+Typed memory, graph search, visible state, reusable skills, human gates, and a setup
+wizard for AI-agent workspaces.
 
-```bash
-npm create @vivary my-workspace
-```
+npm create @vivary@latest my-workspace
 
-Prefer 0.2.2 over 0.2.1; 0.2.2 is the clean npm/PyPI lockstep hotfix.
+Use 0.2.3 for new installs.
 
-https://github.com/vivary-dev/vivary
+https://vivary.vercel.app/
 
 ## X / Twitter thread
 
-1. Vivary 0.2.2 is out.
+1. Vivary 0.2.3 is out.
 
 It is a standard + scaffolder for agent-native workspaces: typed project memory,
 visible state, reusable skills, private boundaries, and verification gates.
@@ -30,38 +28,34 @@ visible state, reusable skills, private boundaries, and verification gates.
 Start with:
 
 ```bash
-npm create @vivary my-workspace
+npm create @vivary@latest my-workspace
 ```
 
 3. The 0.2 line adds graph search, storage configuration, migration, a setup wizard,
 and agent-mode flags like `--auto --yes --json`.
 
-4. Version note: use 0.2.2 instead of 0.2.1 for new installs.
+4. Version note: use 0.2.3 for new installs.
 
-0.2.2 is the clean npm/PyPI lockstep release. No runtime migration is expected for
-existing PyPI 0.2.1 users.
+0.2.3 pins the npm launcher to the matching PyPI scaffolder so cached tools do not
+serve an older CLI without the wizard. No runtime migration is expected for existing
+PyPI 0.2.1 or 0.2.2 users.
 
 ## Bluesky
 
-Vivary 0.2.2 is live.
+Vivary 0.2.3 is live.
 
-Typed memory, graph search, visible state, reusable skills, and verification gates for
-AI-agent workspaces. Plain Markdown. Any editor. Claude Code, Codex, or whatever comes
-next.
+Typed memory, graph search, visible state, reusable skills, and a setup wizard for
+AI-agent workspaces. Plain Markdown. Any editor.
 
-Start:
+npm create @vivary@latest my-workspace
 
-```bash
-npm create @vivary my-workspace
-```
-
-Use 0.2.2 over 0.2.1 for new installs.
+Use 0.2.3 for new installs.
 
 https://vivary.vercel.app/
 
 ## LinkedIn
 
-Vivary 0.2.2 is live.
+Vivary 0.2.3 is live.
 
 Vivary is my open-source standard and scaffolder for agent-native workspaces: typed
 project memory, graph search, visible state, reusable skills, private memory boundaries,
@@ -73,11 +67,12 @@ web app.
 Install with:
 
 ```bash
-npm create @vivary my-workspace
+npm create @vivary@latest my-workspace
 ```
 
-Version note: if you saw 0.2.1, use 0.2.2 for new installs. 0.2.2 is the clean npm/PyPI
-lockstep hotfix, and no runtime migration is expected for existing PyPI 0.2.1 users.
+Version note: use 0.2.3 for new installs. It keeps npm and PyPI in lockstep and pins
+the npm launcher to the matching PyPI scaffolder, so the setup wizard is current. No
+runtime migration is expected for existing PyPI 0.2.1 or 0.2.2 users.
 
 Docs: https://vivary.vercel.app/
 Repo: https://github.com/vivary-dev/vivary

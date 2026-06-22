@@ -8,7 +8,24 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current versions:** `vivary-tropo` **0.2.0** · `create-vivary` / `@vivary/create` **0.2.2** · `vivary-ozone` / `vivary-exo` **0.1.0**.
+**Current versions:** `vivary-tropo` **0.2.0** · `create-vivary` / `@vivary/create` **0.2.3** · `vivary-ozone` / `vivary-exo` **0.1.0**.
+
+## [0.2.3] — 2026-06-22
+
+Affects `create-vivary` (PyPI) and `@vivary/create` (npm) only.
+
+### Fixed
+
+- **npm launcher pins the matching PyPI scaffolder** — `npm create @vivary@latest`
+  now invokes `create-vivary@0.2.3` instead of leaving `uvx create-vivary` or
+  `pipx run create-vivary` to resolve an unversioned package. This prevents stale
+  tool caches from serving an older CLI without the `wizard` subcommand.
+- **Launch copy uses the explicit latest npm form** — public install examples now
+  prefer `npm create @vivary@latest my-workspace`, with direct Python usage shown as
+  `uvx create-vivary@0.2.3 ...` or `pip install create-vivary==0.2.3`.
+
+Use 0.2.3 for new installs. Existing PyPI 0.2.2 installs already include the wizard;
+the hotfix is primarily for npm launcher provenance and fresh public onboarding.
 
 ## [0.2.2] — 2026-06-21
 
@@ -82,7 +99,7 @@ lockstep. The other three packages are unchanged at 0.1.0.
 ### Fixed
 
 - A bare target now defaults to the `init` subcommand, so the documented
-  `npm create @vivary <name>` and `uvx create-vivary <name>` scaffold a workspace
+  `npm create @vivary@latest <name>` and `uvx create-vivary@0.2.3 <name>` scaffold a workspace
   without an explicit `init` (previously failed with argparse `invalid choice: …`).
   Explicit `init` / `doctor` and leading flags (`-h` / `--help`) pass through unchanged.
   npm launcher: [#33](https://github.com/vivary-dev/vivary/pull/33). Python CLI parity:

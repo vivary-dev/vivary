@@ -4,13 +4,13 @@ Scaffold a complete Vivary agent workspace: tropo config, strato workspace files
 runtime skills, private-memory boundaries, progressive module indexes, and a starter
 typed graph.
 
-**Current release:** 0.2.2. Use 0.2.2 instead of 0.2.1 for new installs; no
-migration is expected from 0.2.1.
+**Current release:** 0.2.3. Use 0.2.3 for new installs; no migration is expected
+from 0.2.1 or 0.2.2.
 
 ## Install & scaffold
 
 ```bash
-pip install create-vivary                     # or run without installing: uvx create-vivary …
+pip install create-vivary==0.2.3              # or: uvx create-vivary@0.2.3 ...
 create-vivary my-workspace --preset coding    # interactive wizard on a TTY
 create-vivary my-codebase --preset coding --active-context cocoindex-code
 create-vivary doctor my-workspace
@@ -24,7 +24,7 @@ create-vivary wizard my-workspace --auto --storage embedded --yes --json
 
 `create-vivary <name>` is shorthand for `create-vivary init <name>`;
 pass `init` / `doctor` / `wizard` explicitly whenever you prefer. The same UX is available on npm
-via the `@vivary/create` launcher (`npm create @vivary my-workspace`), versioned in
+via the `@vivary/create` launcher (`npm create @vivary@latest my-workspace`), versioned in
 lockstep.
 
 Presets share the same agent OS shell, then seed a different starter graph. Each
