@@ -18,16 +18,16 @@ things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
 > Release status: **0.2.3 is current** for the scaffolder (`create-vivary` /
-> `@vivary/create`), **0.2.1** for `vivary-tropo`, **0.2.0** for `vivary-exo`,
+> `@vivary/create`), **0.2.2** for `vivary-tropo`, **0.2.1** for `vivary-exo`,
 > and **0.1.0** for `vivary-ozone`. Use 0.2.3 for new scaffolds.
 
 | Surface | Current | Link |
 |---|---:|---|
 | `create-vivary` (PyPI) | 0.2.3 | [PyPI](https://pypi.org/project/create-vivary/) |
 | `@vivary/create` (npm) | 0.2.3 | [npm](https://www.npmjs.com/package/@vivary/create) |
-| `vivary-tropo` | 0.2.1 | [PyPI](https://pypi.org/project/vivary-tropo/) |
+| `vivary-tropo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-tropo/) |
 | `vivary-ozone` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
-| `vivary-exo` | 0.2.0 | [PyPI](https://pypi.org/project/vivary-exo/) |
+| `vivary-exo` | 0.2.1 | [PyPI](https://pypi.org/project/vivary-exo/) |
 | Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 

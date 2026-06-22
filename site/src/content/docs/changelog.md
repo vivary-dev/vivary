@@ -8,7 +8,31 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current versions:** `vivary-tropo` **0.2.1** · `vivary-exo` **0.2.0** · `create-vivary` / `@vivary/create` **0.2.3** · `vivary-ozone` **0.1.0**.
+**Current versions:** `vivary-tropo` **0.2.2** · `vivary-exo` **0.2.1** · `create-vivary` / `@vivary/create` **0.2.3** · `vivary-ozone` **0.1.0**.
+
+## [vivary-tropo 0.2.2 / vivary-exo 0.2.1] — 2026-06-22
+
+Affects `vivary-tropo` and `vivary-exo` only. `create-vivary` / `@vivary/create`
+remain at 0.2.3, and `vivary-ozone` remains at 0.1.0.
+
+### Fixed
+
+- **UTF-8 BOM hardening** — tropo now treats a single leading UTF-8 BOM as a
+  file-encoding artifact in both `tropo.toml` and Markdown frontmatter, so files
+  produced by Windows PowerShell `Set-Content -Encoding UTF8` load normally.
+- **`exo claim` no longer duplicates BOM-prefixed frontmatter** — claims update the
+  existing frontmatter block, normalize the rewritten file to plain UTF-8, and still
+  reject malformed frontmatter instead of guessing.
+
+### Changed
+
+- `vivary-exo` now depends on `vivary-tropo>=0.2.2` so installed claim workflows use
+  the BOM-aware parser.
+
+### Release note
+
+Publishing remains a manual human gate after CI/review: publish `vivary-tropo==0.2.2`
+and `vivary-exo==0.2.1`; do not publish npm for this release.
 
 ## [vivary-tropo 0.2.1 / vivary-exo 0.2.0] — 2026-06-22
 
@@ -38,8 +62,8 @@ remain at 0.2.3, and `vivary-ozone` remains at 0.1.0.
 
 ### Release note
 
-Publishing remains a manual human gate after CI/review: publish `vivary-tropo==0.2.1`
-and `vivary-exo==0.2.0`; do not publish npm for this release.
+Released through the manual human gate as `vivary-tropo==0.2.1` and
+`vivary-exo==0.2.0`; no npm publish was needed for this release.
 
 ## [0.2.3] — 2026-06-22
 

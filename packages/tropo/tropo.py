@@ -33,7 +33,7 @@ import sys
 import tomllib
 from collections import Counter, deque
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 # ---------------------------------------------------------------------------
 # Minimal YAML-subset parser for frontmatter (zero-dependency).
@@ -205,17 +205,27 @@ def strip_meta(obj):
     return obj
 
 
+UTF8_BOM = "\ufeff"
 FM_RE = re.compile(r"^---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(\r?\n|$)", re.S)
+
+
+def _strip_leading_bom(text):
+    return text[len(UTF8_BOM):] if text.startswith(UTF8_BOM) else text
+
+
+def _frontmatter_match(text):
+    normalized = _strip_leading_bom(text)
+    return FM_RE.match(normalized), normalized
 
 
 def extract_frontmatter(text):
     """Return (yaml_text, body) or (None, whole_text) when no block is present."""
-    if not text.startswith("---"):
-        return None, text
-    m = FM_RE.match(text)
+    m, normalized = _frontmatter_match(text)
+    if not normalized.startswith("---"):
+        return None, normalized
     if not m:
-        return None, text
-    return m.group(1), text[m.end():]
+        return None, normalized
+    return m.group(1), normalized[m.end():]
 
 
 # ---------------------------------------------------------------------------
@@ -485,8 +495,8 @@ def _merge_config(base, add):
 def _read_toml(path):
     try:
         with open(path, "rb") as fh:
-            return tomllib.load(fh)
-    except (OSError, tomllib.TOMLDecodeError) as e:
+            return tomllib.loads(fh.read().decode("utf-8-sig"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as e:
         raise ConfigError(f"{path}: {e}")
 
 
@@ -1131,7 +1141,7 @@ def _file_body(full_path):
         text = open(full_path, encoding="utf-8", errors="replace").read()
     except OSError:
         return ""
-    m = FM_RE.match(text)
+    m, text = _frontmatter_match(text)
     body = text[m.end():] if m else text
     return body[:_CONTENT_PREVIEW_CHARS]
 
@@ -1583,7 +1593,7 @@ def cmd_fix(args, resolver):
         if not d.noise:
             continue
         text = open(d.full, encoding="utf-8", errors="replace").read()
-        m = FM_RE.match(text)
+        m, text = _frontmatter_match(text)
         if not m:
             continue
         kept = [ln for ln in m.group(1).split("\n")

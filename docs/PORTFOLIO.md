@@ -11,9 +11,9 @@ launcher; a generated workspace can be scaffolded and checked in minutes.
 - **Live site:** https://vivary.vercel.app/
 - **GitHub:** https://github.com/vivary-dev/vivary (public · MIT)
 - **PyPI:** [`create-vivary`](https://pypi.org/project/create-vivary/) 0.2.3 ·
-  [`vivary-tropo`](https://pypi.org/project/vivary-tropo/) 0.2.1 ·
+  [`vivary-tropo`](https://pypi.org/project/vivary-tropo/) 0.2.2 ·
   [`vivary-ozone`](https://pypi.org/project/vivary-ozone/) ·
-  [`vivary-exo`](https://pypi.org/project/vivary-exo/) 0.2.0
+  [`vivary-exo`](https://pypi.org/project/vivary-exo/) 0.2.1
 - **npm:** [`@vivary/create`](https://www.npmjs.com/package/@vivary/create) 0.2.3
 
 ## Proof
@@ -45,7 +45,7 @@ Mobile:
 - **Restraint:** no third-party dependencies; the framework costs almost nothing
   to load. Plain Markdown, any editor, Claude Code *and* Codex.
 
-> Current release line verified 2026-06-22: `create-vivary` 0.2.3 (PyPI), `@vivary/create` 0.2.3 (npm), `vivary-tropo` 0.2.1, `vivary-exo` 0.2.0.
+> Current release line verified 2026-06-22: `create-vivary` 0.2.3 (PyPI), `@vivary/create` 0.2.3 (npm), `vivary-tropo` 0.2.2, `vivary-exo` 0.2.1.
 > Scaffold output captured from a real run — 36 files, doctor ok (8 nodes, 24
 > edges, 0 broken), `tropo check` 0 errors.
 

@@ -27,7 +27,7 @@ import os
 import re
 import sys
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 # Work items live under changes/ (folder-as-type); a node's coordination role is its
 # top-level folder, independent of the resolved type name.
@@ -192,7 +192,7 @@ def _write_assignee(tropo, doc, assignee):
         text = fh.read()
     yaml_text, body = tropo.extract_frontmatter(text)
     if yaml_text is None:
-        if text.startswith("---"):
+        if body.startswith("---"):
             raise ExoError(f"{doc.rel}: malformed frontmatter")
         previous = None
         with open(doc.full, "w", encoding="utf-8", newline="\n") as fh:

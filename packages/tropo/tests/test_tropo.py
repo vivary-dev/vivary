@@ -82,6 +82,18 @@ def test_alias_collision_is_config_error(tmp_path):
         pass
 
 
+def test_config_accepts_leading_utf8_bom(tmp_path):
+    (tmp_path / "tropo.toml").write_text(
+        '\ufeff[types.change]\nfolder="changes"\nrequired={status="string"}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "changes").mkdir()
+    (tmp_path / "changes" / "x.md").write_text("---\nstatus: active\n---\n# X\n", encoding="utf-8")
+    docs = tropo.analyze(str(tmp_path), [], res(str(tmp_path)))
+    assert [d.rel.replace("\\", "/") for d in docs] == ["changes/x.md"]
+    assert docs[0].findings == []
+
+
 # --- derivation ------------------------------------------------------------
 
 def test_id_from_filename():
@@ -123,6 +135,12 @@ def test_derived_value_in_frontmatter_is_noise(tmp_path):
     docs = tropo.analyze(str(tmp_path), [], res(str(tmp_path)))
     codes = {f.code for d in docs for f in d.findings}
     assert "W210" in codes  # id: n equals the derived id
+
+
+def test_extract_frontmatter_accepts_leading_utf8_bom():
+    yaml_text, body = tropo.extract_frontmatter("\ufeff---\nstatus: active\n---\n# A\n")
+    assert yaml_text == "status: active"
+    assert body == "# A\n"
 
 
 # --- overlays (SPEC §5.5) ---------------------------------------------------

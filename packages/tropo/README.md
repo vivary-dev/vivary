@@ -41,6 +41,9 @@ Built-in packs are embedded in the single-file engine, so installed wheels can r
 starter packs without a repo-local `packs/` directory. Workspace-local
 `.tropo/packs/<name>.toml` files still take precedence.
 
+TOML config and frontmatter parsing tolerate a single leading UTF-8 BOM, which keeps
+Windows-created files from failing to load or being misread as body-only documents.
+
 ## Overlays — tighten a subtree
 
 Drop a `tropo.toml` in any subdirectory to add stricter rules for that subtree
