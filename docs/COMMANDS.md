@@ -49,7 +49,7 @@ says. `tropo.toml` declares the types.
 | `plan <change.toml>` | Simulate a change (remove/retype/break/add) and show the graph delta. |
 | `fix [--dry-run]` | Strip redundant frontmatter (`W210` — a field equal to its derived value). The only mechanical edit tropo makes. |
 | `init [DIR] [--packs a,b]` | Scaffold a `tropo.toml` (optionally composing reusable type packs). |
-| `query <text> [--k N] [--json]` | Text/BM25-style graph search over the workspace. Returns top-k typed nodes by text relevance; no type filter ships in 0.2.0. The file backend falls back to simple text matching. |
+| `query <text> [--k N] [--json]` | Text/BM25-style graph search over the workspace. Returns top-k typed nodes by text relevance; no type filter ships yet. The file backend falls back to simple text matching. |
 | `migrate --from file --to embedded [--dry-run] [--json]` | Move file-backed graph data into the configured embedded backend. Cloud migration, non-file sources, backend installation, and `migrated_at` tracking are future 0.3.x work. |
 
 `tropo query` is graph/text retrieval, not the CocoIndex active-context sidecar. Use
@@ -108,6 +108,14 @@ optional = { supersedes = "ref", related_modules = "ref-list" }
 Field specs: `string`, `slug`, `date`, `datetime`, `url`, `string-list`, `any`,
 `enum:a|b|c`, and the graph types **`ref`** / **`ref-list`** (these become edges).
 
+Built-in packs: `dev-project`, `repo-graph`, and `coordination`. Local
+`.tropo/packs/<name>.toml` files take precedence over bundled packs. Use
+`coordination` when exo should be allowed to write `assignee`:
+
+```toml
+packs = ["repo-graph", "coordination"]
+```
+
 ---
 
 ## ozone — the review layer
@@ -146,23 +154,30 @@ ozone impact human-gates --root . --json
 ## exo — the coordination layer
 
 ```
-exo [conflicts | board | roles] [--root DIR] [--json]
+exo [conflicts | board | claim <id> --agent <handle> | roles] [--root DIR] [--json]
 ```
 
-The outermost, thinnest layer — engaged only when one agent becomes many. Read-only and
-graph-native; it doesn't run agents, it coordinates them.
+The outermost, thinnest layer — engaged only when one agent becomes many. Graph-native
+and deterministic; it doesn't run agents, it coordinates them. `claim` is the only
+writer, and it refuses to write unless the workspace declares `assignee` through
+`packs = ["coordination"]`.
 
 | Command | What it does |
 |---|---|
 | `conflicts` | Among **active** work items (changes with `status: active`), flags pairs that share an outbound target — two in-flight changes touching the same node. |
 | `board` | Work items grouped by `status` (and `@assignee` if the workspace declares one). |
+| `claim <id> --agent <handle>` | Claim a work item under `changes/` by setting top-level `assignee`; optional leading `@` is accepted and stripped before storage. |
 | `roles` | The bounded worker contracts: Orchestrator · Scout · Researcher · Builder · Verifier · Reviewer · Archivist. |
 
 ```bash
 exo conflicts --root .    # who would collide
 exo board --root .        # what's in flight
+exo claim local-ci-baseline --agent connie --root .
 exo roles                 # the role grammar
 ```
+
+JSON output for `claim` includes `id`, `path`, `assignee`, `previous_assignee`, and
+`changed`.
 
 ---
 

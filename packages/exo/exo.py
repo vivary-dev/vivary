@@ -7,24 +7,27 @@ shared tropo graph and hands workers their role contracts:
 
   - `exo conflicts`  who would collide — active work items that touch the same node
   - `exo board`      what's in flight — work items grouped by status
+  - `exo claim`      claim ownership of a work item in the graph
   - `exo roles`      the bounded worker contracts (strato's role grammar)
 
-Read-only and deterministic: it reads tropo's graph in-process (no fork, no second
-state store, no new schema) and uses the existing `status` field. Most workspaces
-never need exo; single-agent workspaces stop at tropo + strato.
+Graph-native and deterministic: it reads tropo's graph in-process (no fork, no second
+state store) and writes only explicit coordination fields that the workspace opts into.
+Most workspaces never need exo; single-agent workspaces stop at tropo + strato.
 
 Usage:
   exo [conflicts] [--root DIR] [--json]
   exo board [--root DIR] [--json]
+  exo claim <id> --agent <handle> [--root DIR] [--json]
   exo roles [--json]
 """
 import argparse
 import importlib.util
 import json
 import os
+import re
 import sys
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # Work items live under changes/ (folder-as-type); a node's coordination role is its
 # top-level folder, independent of the resolved type name.
@@ -41,6 +44,7 @@ ROLES = [
     ("Reviewer", "findings first"),
     ("Archivist", "notes, handoffs; PRIV kept separate"),
 ]
+AGENT_RE = re.compile(r"^@?[A-Za-z0-9._-]+$")
 
 
 class ExoError(Exception):
@@ -67,9 +71,7 @@ def _load_tropo():
     return module, os.path.dirname(os.path.abspath(module.__file__))
 
 
-def workspace_state(root):
-    """Resolve the graph and enrich nodes with `status`/`assignee` from frontmatter.
-    Returns (tropo, info, edges) where info maps id -> {id,type,path,status,assignee}."""
+def _workspace_docs(root):
     tropo, tropo_dir = _load_tropo()
     start = root or os.getcwd()
     found = tropo.find_root(start)
@@ -77,6 +79,13 @@ def workspace_state(root):
         raise ExoError(f"no tropo.toml found walking up from {os.path.abspath(start)}")
     resolver = tropo.ConfigResolver(found, tropo_dir)
     docs = tropo.analyze(resolver.root, [], resolver)
+    return tropo, resolver, docs
+
+
+def workspace_state(root):
+    """Resolve the graph and enrich nodes with `status`/`assignee` from frontmatter.
+    Returns (tropo, info, edges) where info maps id -> {id,type,path,status,assignee}."""
+    tropo, _resolver, docs = _workspace_docs(root)
     _nodes, edges = tropo.build_graph(docs)
     info = {}
     for d in docs:
@@ -156,6 +165,95 @@ def cmd_board(args):
     return 0
 
 
+def _normalize_agent(agent):
+    if not agent or not AGENT_RE.match(agent):
+        raise ExoError(
+            f"invalid agent handle {agent!r}; use letters, numbers, '.', '_', '-' and optional leading @")
+    return agent[1:] if agent.startswith("@") else agent
+
+
+def _doc_by_id(docs, target_id):
+    for doc in docs:
+        if doc.derived.get("id") == target_id:
+            return doc
+    return None
+
+
+def _ensure_assignee_declared(tropo, resolver, doc):
+    config = resolver.for_dir(os.path.dirname(doc.full))
+    _required, known = config.fields_for(doc.type)
+    if "assignee" not in known:
+        raise ExoError(
+            'assignee is not declared for this workspace; add packs = ["coordination"] to tropo.toml')
+
+
+def _write_assignee(tropo, doc, assignee):
+    with open(doc.full, encoding="utf-8") as fh:
+        text = fh.read()
+    yaml_text, body = tropo.extract_frontmatter(text)
+    if yaml_text is None:
+        if text.startswith("---"):
+            raise ExoError(f"{doc.rel}: malformed frontmatter")
+        previous = None
+        with open(doc.full, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(f"---\nassignee: {assignee}\n---\n{body}")
+        return previous, True
+
+    try:
+        data = tropo.parse_yaml(yaml_text)
+    except tropo.YamlError as e:
+        raise ExoError(f"{doc.rel}: frontmatter is not valid YAML: {e}")
+    if not isinstance(data, dict):
+        raise ExoError(f"{doc.rel}: frontmatter must be a mapping")
+
+    fields = tropo.strip_meta(data)
+    previous = fields.get("assignee")
+    if previous == assignee:
+        return previous, False
+
+    lines = yaml_text.splitlines()
+    line_map = data.get("__lines__", {})
+    if "assignee" in line_map:
+        lines[line_map["assignee"] - 1] = f"assignee: {assignee}"
+    else:
+        lines.append(f"assignee: {assignee}")
+    new_yaml = "\n".join(lines).rstrip()
+    with open(doc.full, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(f"---\n{new_yaml}\n---\n{body}")
+    return previous, True
+
+
+def cmd_claim(args):
+    try:
+        assignee = _normalize_agent(args.agent)
+        tropo, resolver, docs = _workspace_docs(args.root)
+        doc = _doc_by_id(docs, args.target)
+        if doc is None:
+            raise ExoError(f"no work item with id {args.target!r}")
+        node = {"path": doc.rel.replace("\\", "/")}
+        if role_of(node) != "change":
+            raise ExoError(f"{args.target!r} is not a work item under changes/")
+        _ensure_assignee_declared(tropo, resolver, doc)
+        previous, changed = _write_assignee(tropo, doc, assignee)
+    except ExoError as e:
+        sys.exit(f"exo: {e}")
+
+    result = {
+        "id": args.target,
+        "path": doc.rel.replace("\\", "/"),
+        "assignee": assignee,
+        "previous_assignee": previous,
+        "changed": changed,
+    }
+    if args.json:
+        print(json.dumps(result, indent=2))
+    elif changed:
+        print(f"exo: claimed {args.target} for @{assignee}")
+    else:
+        print(f"exo: {args.target} already claimed by @{assignee}")
+    return 0
+
+
 def cmd_roles(args):
     if args.json:
         print(json.dumps({"roles": [{"role": r, "contract": c} for r, c in ROLES]}, indent=2))
@@ -171,12 +269,24 @@ def main(argv=None):
                                 description="The coordination layer over the tropo graph.")
     p.add_argument("--version", action="version", version=f"exo {__version__}")
     p.add_argument("command", nargs="?", default="conflicts",
-                   choices=["conflicts", "board", "roles"])
+                   choices=["conflicts", "board", "claim", "roles"])
+    p.add_argument("target", nargs="?", help="claim: work item id")
+    p.add_argument("--agent", default=None, help="claim: agent handle")
     p.add_argument("--root", default=None,
                    help="workspace root (default: walk up for tropo.toml)")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     args = p.parse_args(argv)
-    return {"conflicts": cmd_conflicts, "board": cmd_board, "roles": cmd_roles}[args.command](args)
+    if args.command == "claim":
+        if not args.target:
+            p.error("claim requires a work item id")
+        if not args.agent:
+            p.error("claim requires --agent <handle>")
+    return {
+        "conflicts": cmd_conflicts,
+        "board": cmd_board,
+        "claim": cmd_claim,
+        "roles": cmd_roles,
+    }[args.command](args)
 
 
 if __name__ == "__main__":

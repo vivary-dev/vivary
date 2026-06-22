@@ -5,7 +5,38 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current versions:** `vivary-tropo` **0.2.0** · `create-vivary` / `@vivary/create` **0.2.3** · `vivary-ozone` / `vivary-exo` **0.1.0**.
+**Current versions:** `vivary-tropo` **0.2.1** · `vivary-exo` **0.2.0** · `create-vivary` / `@vivary/create` **0.2.3** · `vivary-ozone` **0.1.0**.
+
+## [vivary-tropo 0.2.1 / vivary-exo 0.2.0] — 2026-06-22
+
+Affects `vivary-tropo` and `vivary-exo` only. `create-vivary` / `@vivary/create`
+remain at 0.2.3, and `vivary-ozone` remains at 0.1.0.
+
+### Added
+
+- **Graph-native work claiming** — `exo claim <id> --agent <handle>` writes a
+  top-level `assignee` onto a work item under `changes/`, reports JSON with the
+  previous assignee and whether the file changed, and leaves same-assignee claims as
+  no-op success.
+- **Opt-in coordination pack** — `packs = ["coordination"]` declares
+  `assignee = "string"` as a base optional field, so exo can write claims without
+  bloating every default workspace schema.
+- **Embedded starter packs** — built-in tropo packs are embedded in the single-file
+  engine so installed wheels can resolve `dev-project`, `repo-graph`, and
+  `coordination` without relying on a repo-local `packs/` directory.
+- **Pack parity tests** — tracked built-in pack TOML files are checked against the
+  embedded values, and workspace-local `.tropo/packs/<name>.toml` files still take
+  precedence over bundled packs.
+
+### Changed
+
+- `vivary-exo` now depends on `vivary-tropo>=0.2.1` so installed users get the
+  bundled `coordination` pack required by `exo claim`.
+
+### Release note
+
+Publishing remains a manual human gate after CI/review: publish `vivary-tropo==0.2.1`
+and `vivary-exo==0.2.0`; do not publish npm for this release.
 
 ## [0.2.3] — 2026-06-22
 

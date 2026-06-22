@@ -37,6 +37,10 @@ Requires Python 3.11+ (stdlib `tomllib`), zero third-party dependencies for the 
 Optional extras: `pip install vivary-tropo[embedded]` for LanceDB full-text search.
 Cloud extras are reserved for the 0.3.x adapter work.
 
+Built-in packs are embedded in the single-file engine, so installed wheels can resolve
+starter packs without a repo-local `packs/` directory. Workspace-local
+`.tropo/packs/<name>.toml` files still take precedence.
+
 ## Overlays — tighten a subtree
 
 Drop a `tropo.toml` in any subdirectory to add stricter rules for that subtree
@@ -115,6 +119,16 @@ It defines folder-backed types for `modules/`, `changes/`, `decisions/`,
 `id`, `related_modules`, `related_changes`, and `verification`. This is a
 deliberate bridge: Tropo validates the node shape, Markdown/wiki links remain
 human-readable, and Graphify can index the relationships.
+
+For multi-agent coordination, add the opt-in `coordination` pack:
+
+```toml
+packs = ["repo-graph", "coordination"]
+```
+
+It declares top-level `assignee = "string"` without changing the default workspace
+schema. `exo claim <id> --agent <handle>` uses that field for graph-native work
+ownership.
 
 ## Design tenets
 
