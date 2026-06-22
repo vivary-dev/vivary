@@ -200,6 +200,22 @@ def test_claim_appends_to_existing_frontmatter():
         assert _tropo_check_ok(td)
 
 
+def test_claim_updates_bom_prefixed_frontmatter():
+    with temp_workspace() as td:
+        _claim_vault(td)
+        path = Path(td, "changes", "status-bom.md")
+        path.write_text("\ufeff---\nstatus: active\nrelated_modules: [core]\n---\n# Status BOM\n", encoding="utf-8")
+        rc, data = _run_json(["claim", "status-bom", "--agent", "connie", "--root", str(td), "--json"])
+        assert rc == 0
+        assert data["previous_assignee"] is None
+        assert data["changed"] is True
+        text = path.read_text(encoding="utf-8")
+        assert text.startswith("---\nstatus: active\nrelated_modules: [core]\nassignee: connie\n---\n")
+        assert text.count("---") == 2
+        assert "\ufeff" not in text
+        assert _tropo_check_ok(td)
+
+
 def test_claim_same_assignee_is_noop():
     with temp_workspace() as td:
         _claim_vault(td)
@@ -234,6 +250,17 @@ def test_claim_rejects_malformed_frontmatter():
         malformed, _ = _run_exit(["claim", "bad", "--agent", "connie", "--root", str(td)])
         assert "malformed frontmatter" in str(malformed)
         assert Path(td, "changes", "bad.md").read_text() == before
+
+
+def test_claim_rejects_bom_prefixed_malformed_frontmatter():
+    with temp_workspace() as td:
+        _claim_vault(td)
+        path = Path(td, "changes", "bad-bom.md")
+        path.write_text("\ufeff---\nstatus: active\n# Bad BOM\n", encoding="utf-8")
+        before = path.read_text(encoding="utf-8")
+        malformed, _ = _run_exit(["claim", "bad-bom", "--agent", "connie", "--root", str(td)])
+        assert "malformed frontmatter" in str(malformed)
+        assert path.read_text(encoding="utf-8") == before
 
 
 if __name__ == "__main__":

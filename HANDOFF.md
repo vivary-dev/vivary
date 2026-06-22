@@ -14,7 +14,7 @@ Use this prompt in a new window:
 We are in C:\Users\jeffk\dev\vivary (repo: github.com/vivary-dev/vivary). Read
 HANDOFF.md, docs/README.md, and docs/ARCHITECTURE.md. Verify git status/branch/
 remotes before making claims. The current release target is create-vivary /
-@vivary/create 0.2.3, vivary-tropo 0.2.1, vivary-exo 0.2.0, and vivary-ozone
+@vivary/create 0.2.3, vivary-tropo 0.2.2, vivary-exo 0.2.1, and vivary-ozone
 0.1.0. Continue from `dev` by cutting a feature branch per change. Tests must be
 planned before edits. Do not push, open PRs, merge, publish, create orgs/repos,
 install dependencies, or delete files without explicit approval.
@@ -43,9 +43,10 @@ Design law: **minimalism**. Always-on context must be tiny. Expensive-to-load
 framework files are wrong.
 
 **Release target through 2026-06-22.** 0.2.0 shipped the tropo storage/search layer
-and agent-mode scaffolder work. 0.2.3 is the clean npm/PyPI scaffolder line. The
-next PyPI-only usability release is `vivary-tropo` 0.2.1 and `vivary-exo` 0.2.0:
-embedded starter packs, opt-in `coordination`, and `exo claim`.
+and agent-mode scaffolder work. 0.2.3 is the clean npm/PyPI scaffolder line.
+`vivary-tropo` 0.2.1 and `vivary-exo` 0.2.0 shipped embedded starter packs,
+opt-in `coordination`, and `exo claim`. The 0.2.2 / 0.2.1 patch hardens UTF-8
+BOM-prefixed config and frontmatter so Windows-created files remain valid claim targets.
 
 ```bash
 npm create @vivary my-workspace                          # the scaffolder UX
@@ -62,9 +63,9 @@ generated from `docs/` (`cd site && npm run sync-docs`).
 
 | Package | PyPI | npm | Published | Branch |
 |---|---|---|---|---|
-| `vivary-tropo` | `vivary-tropo` | — | 0.2.1 | release target |
+| `vivary-tropo` | `vivary-tropo` | — | 0.2.2 | release target |
 | `vivary-ozone` | `vivary-ozone` | — | 0.1.0 | unchanged |
-| `vivary-exo`   | `vivary-exo`   | — | 0.2.0 | release target |
+| `vivary-exo`   | `vivary-exo`   | — | 0.2.1 | release target |
 | `create-vivary` | `create-vivary` | `@vivary/create` | 0.2.3 | current |
 
 The **0.2.0** bump affected `vivary-tropo` and `create-vivary` (both PyPI + npm for
@@ -72,8 +73,10 @@ create-vivary). It added: storage layer (`file`/`embedded`/`cloud`), `tropo quer
 `tropo migrate`, agent-mode init flags (`--auto` `--yes` `--json` `--dry-run`),
 `create-vivary wizard`, and the interactive setup wizard. The **0.2.3** bump affects
 `create-vivary` / `@vivary/create` only and pins the npm launcher to the matching PyPI
-scaffolder. The **tropo 0.2.1 / exo 0.2.0** release target adds bundled pack
-reliability and graph-native claims. Per-release history lives in [CHANGELOG.md](CHANGELOG.md).
+scaffolder. The **tropo 0.2.1 / exo 0.2.0** release added bundled pack
+reliability and graph-native claims. The **tropo 0.2.2 / exo 0.2.1** patch hardens
+Windows BOM config and frontmatter handling for `exo claim`. Per-release history lives in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Live Repo State
 
@@ -98,29 +101,31 @@ lag active GitHub issues.
 
 ## What Exists
 
-All four layers are working, tested packages (`tropo` targeted at 0.2.1, `exo`
-targeted at 0.2.0, `ozone` at 0.1.0; `create-vivary` at 0.2.3 on PyPI + npm; CLI
+All four layers are working, tested packages (`tropo` targeted at 0.2.2, `exo`
+targeted at 0.2.1, `ozone` at 0.1.0; `create-vivary` at 0.2.3 on PyPI + npm; CLI
 commands stay `tropo`/`ozone`/`exo`/`create-vivary`). PyPI publishing for the
 tropo/exo target is a separate human gate after CI/review.
 
 ```text
-packages/tropo/        vivary-tropo 0.2.1 — knowledge-graph CLI (check/signal/types/
+packages/tropo/        vivary-tropo 0.2.2 — knowledge-graph CLI (check/signal/types/
                        stats/graph/blast/view/plan/fix/init/query/migrate). check is
                        STRICT by default. Storage layer: file/embedded(LanceDB)/cloud.
                        Optional extras: [embedded] [cloud] [astra]. Built-in packs:
-                       dev-project, repo-graph, coordination. Tests: 59/59.
+                       dev-project, repo-graph, coordination. BOM-prefixed config and
+                       frontmatter are normalized before parsing. Tests: 61/61.
 packages/strato/       strato source/templates — agent OS: STRATO.md model + templates
                        + bootstrap/heartbeat/self-improve skill. Docs/templates only.
 packages/ozone/        vivary-ozone 0.1.0 — review layer: `review` (structure pack) +
                        `impact <id>` (blast radius) + `packs`. Tests: 7/7.
-packages/exo/          vivary-exo 0.2.0 — coordination layer: `conflicts` + `board` +
+packages/exo/          vivary-exo 0.2.1 — coordination layer: `conflicts` + `board` +
                        `claim` + `roles`. `claim` is the only writer and requires the
-                       opt-in coordination pack. Tests: 10/10.
+                       opt-in coordination pack; it rejects malformed BOM-prefixed
+                       frontmatter. Tests: 12/12.
 packages/create-vivary/ create-vivary 0.2.3 — scaffolder: init/wizard/doctor --preset
                        coding|second-brain|writing + agent flags (--auto/--yes/--json/
                        --dry-run/--storage/--provider/--size/--privacy). Bundles
                        strato/loops assets for installed use. npm wrapper in npm/.
-                       Tests: 27/27 + parity 2/2.
+                       Tests: 29/29 + parity 2/2.
 
 .github/workflows/ci.yml  CI: runs FREE (public repo) — all 4 suites + parity +
                        tropo check + `ozone review --strict` gate + site build,
@@ -173,11 +178,11 @@ the source repos from this workspace.
 Run these before claiming a branch is healthy:
 
 ```powershell
-python packages\tropo\tests\test_tropo.py              # 59/59
-python packages\create-vivary\tests\test_create_vivary.py   # 27/27
+python packages\tropo\tests\test_tropo.py              # 61/61
+python packages\create-vivary\tests\test_create_vivary.py   # 29/29
 python packages\create-vivary\tests\test_assets_parity.py   # 2/2
 python packages\ozone\tests\test_ozone.py              # 7/7
-python packages\exo\tests\test_exo.py                  # 10/10
+python packages\exo\tests\test_exo.py                  # 12/12
 git diff --check
 ```
 
@@ -236,9 +241,9 @@ near-term work is now post-usability-release hardening:
 
 - **Stats workflow repair.** Keep popularity snapshots out of direct `dev` pushes:
   automated stats should update a feature branch and open a PR.
-- **Publish the usability release.** After PR CI/review and human approval, publish
-  `vivary-tropo==0.2.1` and `vivary-exo==0.2.0`, then smoke with
-  `uvx vivary-tropo@0.2.1 --version` and `uvx vivary-exo@0.2.0 --version`.
+- **Publish the BOM hardening release.** After PR CI/review and human approval, publish
+  `vivary-tropo==0.2.2` and `vivary-exo==0.2.1`, then smoke with
+  `uvx vivary-tropo@0.2.2 --version` and `uvx vivary-exo@0.2.1 --version`.
 - **npm publish automation (#42).** Fix npm automation without bypassing npm's
   security model.
 - **Launch.** Launch copy (Twitter thread + GitHub release) and the website brief were

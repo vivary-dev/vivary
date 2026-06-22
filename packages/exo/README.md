@@ -29,6 +29,8 @@ python exo.py roles                          # the bounded worker contracts
 - **`claim <id> --agent <handle>`** — claim a work item under `changes/` by setting
   top-level `assignee`. Agent handles may have an optional leading `@` and then
   letters, digits, `.`, `_`, or `-`; the stored value omits the leading `@`.
+  BOM-prefixed frontmatter is updated in place, and malformed frontmatter is rejected
+  instead of guessed through.
 - **`roles`** — strato's role grammar as bounded contracts: Orchestrator · Scout ·
   Researcher · Builder · Verifier · Reviewer · Archivist. Workers get a bounded
   contract; they never become product owners.
