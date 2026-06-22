@@ -65,8 +65,8 @@ const creates = [
         from a human — or zero prompts from an agent. Plain Markdown. Any editor. Any agent.
       </p>
       <div class="cmd">
-        <span class="p">$</span><span class="typed">npm create @vivary my-workspace</span>
-        <button class="copy" data-copy="npm create @vivary my-workspace" aria-label="Copy">copy</button>
+        <span class="p">$</span><span class="typed">npm create @vivary@latest my-workspace</span>
+        <button class="copy" data-copy="npm create @vivary@latest my-workspace" aria-label="Copy">copy</button>
       </div>
 
       <!-- big central glowing graph: one node's blast radius lit -->
@@ -101,8 +101,8 @@ const creates = [
       </figure>
 
       <ul class="strip" aria-label="Where to get Vivary">
-        <a href="https://pypi.org/project/create-vivary/"><li><b>PyPI</b><span>create-vivary 0.2.2</span></li></a>
-        <a href="https://www.npmjs.com/package/@vivary/create"><li><b>npm</b><span>@vivary/create 0.2.2</span><img src="https://img.shields.io/npm/dm/%40vivary%2Fcreate?style=flat-square&color=84e7c0&label=" alt="monthly downloads" class="dl-badge" /></li></a>
+        <a href="https://pypi.org/project/create-vivary/"><li><b>PyPI</b><span>create-vivary 0.2.3</span></li></a>
+        <a href="https://www.npmjs.com/package/@vivary/create"><li><b>npm</b><span>@vivary/create 0.2.3</span><img src="https://img.shields.io/npm/dm/%40vivary%2Fcreate?style=flat-square&color=84e7c0&label=" alt="monthly downloads" class="dl-badge" /></li></a>
         <a href={repo}><li><b>GitHub</b><span>public · MIT</span></li></a>
         <li><b>Runtime</b><span>Claude Code · Codex</span></li>
       </ul>
@@ -141,7 +141,7 @@ const creates = [
     <section class="band creates">
       <div class="creates-head">
         <h2>One command. Five things every agent project reinvents.</h2>
-        <p><code>npm create @vivary</code> lays down a complete, agent-native workspace, then
+        <p><code>npm create @vivary@latest</code> lays down a complete, agent-native workspace, then
           <code>doctor</code> verifies it. Here's what lands, and the files that prove it on disk.</p>
       </div>
       <div class="creates-grid">
@@ -150,7 +150,7 @@ const creates = [
             <li><b>{c.t}</b><span>{c.d}</span><code>{c.f}</code></li>
           ))}
         </ol>
-        <pre class="term"><span class="g">$ npm create @vivary my-workspace</span>   <span class="dim"># preset: coding</span>
+          <pre class="term"><span class="g">$ npm create @vivary@latest my-workspace</span>   <span class="dim"># preset: coding</span>
 create-vivary: wrote 36 file(s) to my-workspace
 
 <span class="g">$ create-vivary doctor my-workspace</span>
@@ -260,8 +260,8 @@ billing  →  4 node(s) depend on it
     <!-- CLOSER -->
     <section class="band closer">
       <h2>Start in one command.</h2>
-      <pre class="term big"><span class="g">$ npm create @vivary my-workspace</span>   <span class="dim"># wizard picks your storage tier</span>
-<span class="g">$ pip install vivary-tropo vivary-ozone vivary-exo create-vivary</span>
+      <pre class="term big"><span class="g">$ npm create @vivary@latest my-workspace</span>   <span class="dim"># wizard picks your storage tier</span>
+<span class="g">$ pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.3</span>
 <span class="g">$ tropo query "what changed last sprint"</span>   <span class="dim"># search the graph</span>
 <span class="g">$ create-vivary init . --auto --yes --json</span>   <span class="dim"># agent-mode: zero prompts</span></pre>
       <div class="cta">

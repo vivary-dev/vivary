@@ -17,14 +17,14 @@ A *vivary* is an archaic word for a vivarium: a self-contained world where livin
 things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
-> Release status: **0.2.2 is current** for the scaffolder (`create-vivary` /
+> Release status: **0.2.3 is current** for the scaffolder (`create-vivary` /
 > `@vivary/create`). **0.2.1 is superseded** by the clean release-provenance hotfix;
-> use 0.2.2 for new installs.
+> use 0.2.3 for new installs.
 
 | Surface | Current | Link |
 |---|---:|---|
-| `create-vivary` (PyPI) | 0.2.2 | [PyPI](https://pypi.org/project/create-vivary/) |
-| `@vivary/create` (npm) | 0.2.2 | [npm](https://www.npmjs.com/package/@vivary/create) |
+| `create-vivary` (PyPI) | 0.2.3 | [PyPI](https://pypi.org/project/create-vivary/) |
+| `@vivary/create` (npm) | 0.2.3 | [npm](https://www.npmjs.com/package/@vivary/create) |
 | `vivary-tropo` | 0.2.0 | [PyPI](https://pypi.org/project/vivary-tropo/) |
 | `vivary-ozone` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
 | `vivary-exo` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-exo/) |
@@ -52,13 +52,13 @@ Scaffold a workspace in one npm command. No Python package install first; the la
 needs Python 3.11+ and `uv` or `pipx` available:
 
 ```bash
-npm create @vivary my-workspace        # pick: second brain · coding · writing
+npm create @vivary@latest my-workspace        # pick: second brain · coding · writing
 ```
 
 Or install the CLIs from PyPI (run on demand with `uvx`, no install needed):
 
 ```bash
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary
+pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.3
 create-vivary init my-workspace --preset coding     # interactive wizard on a TTY
 create-vivary init my-codebase --preset coding --active-context cocoindex-code
 create-vivary doctor my-workspace
