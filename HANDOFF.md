@@ -13,7 +13,7 @@ Use this prompt in a new window:
 ```text
 We are in C:\Users\jeffk\dev\vivary (repo: github.com/vivary-dev/vivary). Read
 HANDOFF.md, docs/README.md, and docs/ARCHITECTURE.md. Verify git status/branch/
-remotes before making claims. The current release target is create-vivary /
+remotes before making claims. The current release line is create-vivary /
 @vivary/create 0.2.3, vivary-tropo 0.2.2, vivary-exo 0.2.1, and vivary-ozone
 0.1.0. Continue from `dev` by cutting a feature branch per change. Tests must be
 planned before edits. Do not push, open PRs, merge, publish, create orgs/repos,
@@ -58,14 +58,16 @@ PyPI: `vivary-tropo` · `vivary-ozone` · `vivary-exo` · `create-vivary`. npm:
 `@vivary/create`. Website: **https://vivary.vercel.app/**. Full
 docs in [docs/](docs/) (start at [docs/README.md](docs/README.md)); the site is
 generated from `docs/` (`cd site && npm run sync-docs`).
+Every behavior/package/public-copy update ends with
+[docs/RELEASE-WORKFLOW.md](docs/RELEASE-WORKFLOW.md).
 
 **Package versions — read this before touching a version number.**
 
 | Package | PyPI | npm | Published | Branch |
 |---|---|---|---|---|
-| `vivary-tropo` | `vivary-tropo` | — | 0.2.2 | release target |
+| `vivary-tropo` | `vivary-tropo` | — | 0.2.2 | current |
 | `vivary-ozone` | `vivary-ozone` | — | 0.1.0 | unchanged |
-| `vivary-exo`   | `vivary-exo`   | — | 0.2.1 | release target |
+| `vivary-exo`   | `vivary-exo`   | — | 0.2.1 | current |
 | `create-vivary` | `create-vivary` | `@vivary/create` | 0.2.3 | current |
 
 The **0.2.0** bump affected `vivary-tropo` and `create-vivary` (both PyPI + npm for
@@ -101,10 +103,10 @@ lag active GitHub issues.
 
 ## What Exists
 
-All four layers are working, tested packages (`tropo` targeted at 0.2.2, `exo`
-targeted at 0.2.1, `ozone` at 0.1.0; `create-vivary` at 0.2.3 on PyPI + npm; CLI
-commands stay `tropo`/`ozone`/`exo`/`create-vivary`). PyPI publishing for the
-tropo/exo target is a separate human gate after CI/review.
+All four layers are working, tested packages (`tropo` 0.2.2, `exo` 0.2.1, `ozone`
+0.1.0; `create-vivary` 0.2.3 on PyPI + npm; CLI commands stay
+`tropo`/`ozone`/`exo`/`create-vivary`). The current tropo/exo patch was published
+and verified from public PyPI plus fresh `pip` and `uvx` smokes on 2026-06-22.
 
 ```text
 packages/tropo/        vivary-tropo 0.2.2 — knowledge-graph CLI (check/signal/types/
@@ -241,9 +243,8 @@ near-term work is now post-usability-release hardening:
 
 - **Stats workflow repair.** Keep popularity snapshots out of direct `dev` pushes:
   automated stats should update a feature branch and open a PR.
-- **Publish the BOM hardening release.** After PR CI/review and human approval, publish
-  `vivary-tropo==0.2.2` and `vivary-exo==0.2.1`, then smoke with
-  `uvx vivary-tropo@0.2.2 --version` and `uvx vivary-exo@0.2.1 --version`.
+- **Portability CI matrix.** Add Linux/macOS/Windows CI coverage for the core Python
+  suites and wheel install smokes so platform-specific bugs are caught before publish.
 - **npm publish automation (#42).** Fix npm automation without bypassing npm's
   security model.
 - **Launch.** Launch copy (Twitter thread + GitHub release) and the website brief were

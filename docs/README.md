@@ -12,6 +12,7 @@ Start here.
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The layer model (tropo → strato → ozone → exo) and the why. |
 | [OBSIDIAN.md](OBSIDIAN.md) | Optional Obsidian setup for fans (never required). |
 | [SIGNALS.md](SIGNALS.md) | Public npm, PyPI, and GitHub metrics snapshots. |
+| [RELEASE-WORKFLOW.md](RELEASE-WORKFLOW.md) | End-of-update release truth, docs/site sync, publishing, and post-copy checklist. |
 | [FAQ.md](FAQ.md) | Common questions. |
 
 Deeper, per-package: [tropo SPEC](../packages/tropo/SPEC.md) (the normative

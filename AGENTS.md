@@ -95,6 +95,11 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
   are a bug). Source of truth is `docs/`; the website under `site/` is generated from
   it (`cd site && npm run sync-docs`, also auto-run on build). Touch the package
   READMEs and `HANDOFF.md` too when relevant. Every merge's verification includes it.
+- **Every update ends with release truth.** For any behavior, packaging, version, or
+  public-copy change, run [docs/RELEASE-WORKFLOW.md](docs/RELEASE-WORKFLOW.md):
+  update changelog/docs/site/package copy, sync generated site docs, verify install
+  surfaces after publish, and keep launch/social posts in ignored local storage or the
+  Second Brain, not the public repo.
 
 ## Verify
 
