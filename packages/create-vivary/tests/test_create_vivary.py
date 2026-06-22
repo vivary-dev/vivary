@@ -6,6 +6,7 @@ import unittest
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 PKG = ROOT / "packages" / "create-vivary"
@@ -535,6 +536,32 @@ class TestAgentFlags(unittest.TestCase):
             self.assertTrue(out["dry_run"])
             self.assertFalse(target.exists(), "dry-run must not create any files")
 
+    def test_init_dry_run_does_not_install_embedded_backend(self):
+        with temp_workspace() as td:
+            target = Path(td) / "dry-run-embedded"
+            import io, contextlib, json
+            buf = io.StringIO()
+
+            with mock.patch.object(create_vivary, "_ensure_backend_installed") as ensure:
+                with contextlib.redirect_stdout(buf):
+                    rc = create_vivary.main([
+                        "init", str(target),
+                        "--preset", "coding",
+                        "--no-wizard",
+                        "--storage", "embedded",
+                        "--dry-run",
+                        "--json",
+                        "--repo-root", str(ROOT),
+                    ])
+
+            self.assertEqual(rc, 0)
+            ensure.assert_not_called()
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["storage"], "embedded")
+            self.assertEqual(out["installed"], [])
+            self.assertTrue(out["dry_run"])
+            self.assertFalse(target.exists(), "dry-run must not create any files")
+
     def test_init_auto_flag_skips_prompts(self):
         with temp_workspace() as td:
             target = Path(td) / "auto-demo"
@@ -580,6 +607,34 @@ class TestAgentFlags(unittest.TestCase):
             self.assertEqual(out["storage"], "embedded")
             cfg = target / ".vivary" / "storage.toml"
             self.assertTrue(cfg.exists())
+
+    def test_wizard_dry_run_does_not_install_backend(self):
+        with temp_workspace() as td:
+            target = Path(td) / "wizard-dry-run"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", storage="file", repo_root=ROOT
+            )
+
+            import io, contextlib, json
+            buf = io.StringIO()
+            with mock.patch.object(create_vivary, "_ensure_backend_installed") as ensure:
+                with contextlib.redirect_stdout(buf):
+                    rc = create_vivary.main([
+                        "wizard", str(target),
+                        "--auto",
+                        "--storage", "embedded",
+                        "--dry-run",
+                        "--json",
+                        "--repo-root", str(ROOT),
+                    ])
+
+            self.assertEqual(rc, 0)
+            ensure.assert_not_called()
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["storage"], "embedded")
+            self.assertEqual(out["installed"], [])
+            self.assertTrue(out["dry_run"])
+            self.assertFalse((target / ".vivary" / "storage.toml").exists())
 
     def test_doctor_reports_backend_field(self):
         with temp_workspace() as td:

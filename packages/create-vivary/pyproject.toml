@@ -22,7 +22,10 @@ dependencies = ["vivary-tropo>=0.2.0"]
 
 [project.urls]
 Homepage = "https://vivary.vercel.app/"
+Documentation = "https://vivary.vercel.app/"
 Repository = "https://github.com/vivary-dev/vivary"
+Issues = "https://github.com/vivary-dev/vivary/issues"
+Changelog = "https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md"
 
 [project.scripts]
 create-vivary = "create_vivary:main"

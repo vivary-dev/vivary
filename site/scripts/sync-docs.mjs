@@ -19,6 +19,7 @@ const pages = [
   ['SKILLS', 'skills', 'Agent skills', 'The strato, tropo, and loops skills that operate a Vivary workspace.'],
   ['ACTIVE-CONTEXT', 'active-context', 'Active context', 'Optional CocoIndex-code sidecar guidance for semantic code retrieval.'],
   ['HOWTO', 'howto', 'How-to recipes', 'Task recipes: add a type, see blast radius, review, CI, multi-agent.'],
+  ['SIGNALS', 'signals', 'Public signals', 'Public npm, PyPI, and GitHub metrics snapshots.'],
   ['FAQ', 'faq', 'FAQ', 'Common questions about Vivary.'],
   ['ARCHITECTURE', 'architecture', 'Architecture', 'The four-layer model and the principles behind Vivary.'],
   ['OBSIDIAN', 'obsidian', 'Obsidian (optional)', 'Optional Obsidian setup for fans, never required.'],
@@ -32,10 +33,12 @@ const rewrite = (s) =>
    .replaceAll('](SKILLS.md)', '](/skills/)')
    .replaceAll('](ACTIVE-CONTEXT.md)', '](/active-context/)')
    .replaceAll('](HOWTO.md)', '](/howto/)')
+   .replaceAll('](SIGNALS.md)', '](/signals/)')
    .replaceAll('](FAQ.md)', '](/faq/)')
    .replaceAll('](ARCHITECTURE.md)', '](/architecture/)')
    .replaceAll('](OBSIDIAN.md)', '](/obsidian/)')
    .replaceAll('](README.md)', '](/)')
+   .replaceAll('](../stats/usage-snapshot.svg)', '](/usage-snapshot.svg)')
    .replaceAll('](../packages/tropo/SPEC.md)', `](${GH}/packages/tropo/SPEC.md)`)
    .replaceAll('](../HANDOFF.md)', `](${GH}/HANDOFF.md)`);
 

@@ -30,10 +30,12 @@ Then set the production domain. To enable the sitemap/canonical URLs, set
 
 ```
 src/
-  content/docs/      one .md/.mdx per route (index = landing)
+  content/docs/      generated docs routes; edit ../docs/ and run sync-docs
   assets/vivary.svg  logo
   styles/theme.css   brand colours (atmosphere greens/teals)
 astro.config.mjs     title, sidebar, social, theme
 ```
 
-Content is plain Markdown — edit a page in `src/content/docs/` and the route updates.
+Docs routes are generated from `../docs/`; edit canonical docs and run
+`npm run sync-docs`. The landing page and blog posts are edited directly under
+`src/pages/` and `src/content/blog/`.

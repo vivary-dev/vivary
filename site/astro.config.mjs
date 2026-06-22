@@ -34,6 +34,7 @@ export default defineConfig({
 						{ label: 'How-to recipes', slug: 'howto' },
 						{ label: 'Agent skills', slug: 'skills' },
 						{ label: 'Active context', slug: 'active-context' },
+						{ label: 'Public signals', slug: 'signals' },
 					],
 				},
 				{

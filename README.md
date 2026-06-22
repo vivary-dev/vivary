@@ -2,9 +2,8 @@
 
 [![CI](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/vivary-dev/vivary?style=flat-square&label=release)](https://github.com/vivary-dev/vivary/releases/latest)
-[![npm/mo](https://img.shields.io/npm/dm/%40vivary%2Fcreate?style=flat-square&color=1f9d72&label=npm%2Fmo)](https://www.npmjs.com/package/@vivary/create)
-[![PyPI/mo](https://img.shields.io/pypi/dm/create-vivary?style=flat-square&color=1f9d72&label=PyPI%2Fmo)](https://pypi.org/project/create-vivary/)
-[![GitHub stars](https://img.shields.io/github/stars/vivary-dev/vivary?style=flat-square&color=1f9d72)](https://github.com/vivary-dev/vivary/stargazers)
+[![npm](https://img.shields.io/npm/v/%40vivary%2Fcreate?style=flat-square&color=1f9d72&label=npm)](https://www.npmjs.com/package/@vivary/create)
+[![PyPI](https://img.shields.io/pypi/v/create-vivary?style=flat-square&color=1f9d72&label=PyPI)](https://pypi.org/project/create-vivary/)
 [![License](https://img.shields.io/github/license/vivary-dev/vivary?style=flat-square&color=1f9d72)](LICENSE)
 [![Docs](https://img.shields.io/website?url=https%3A%2F%2Fvivary.vercel.app%2F&style=flat-square&label=docs)](https://vivary.vercel.app/)
 
@@ -32,6 +31,15 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 | Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
+## Public Signals
+
+![Vivary public usage snapshot](stats/usage-snapshot.svg)
+
+Vivary tracks public npm, PyPI, and GitHub signals through reviewed weekly PR
+snapshots. The chart is generated from [`stats/latest.json`](stats/latest.json) and
+[`stats/history.csv`](stats/history.csv); see [docs/SIGNALS.md](docs/SIGNALS.md) for
+sources and caveats.
+
 `tropo` (typed knowledge graph + search + storage), `strato` (agent OS), `ozone`
 (graph-aware review), and `exo` (coordination) are composed by `create-vivary`. See
 [HANDOFF.md](HANDOFF.md) to continue, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
@@ -40,7 +48,8 @@ case-study material.
 
 ## Quickstart
 
-Scaffold a workspace in one command (nothing to install first):
+Scaffold a workspace in one npm command. No Python package install first; the launcher
+needs Python 3.11+ and `uv` or `pipx` available:
 
 ```bash
 npm create @vivary my-workspace        # pick: second brain · coding · writing

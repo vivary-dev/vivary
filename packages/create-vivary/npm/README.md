@@ -27,14 +27,15 @@ A bare `npm create @vivary <name>` maps to the `init` subcommand; you can also p
 `init` / `doctor` / `wizard` explicitly (e.g. `npm create @vivary doctor my-workspace`).
 
 On a terminal that supports input, `init` runs a short wizard to pick a storage tier.
-Skip it with `--no-wizard`, or use `--auto` for fully non-interactive agent use.
+For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use
+`--auto`; in human mode, the wizard asks and its answers drive storage.
 
 ## How it works
 
 This package is a thin launcher: it runs the Python `create-vivary` scaffolder via
 [uv](https://docs.astral.sh/uv/) (`uvx`) or [pipx](https://pipx.pypa.io/), so the
 scaffolder stays one source of truth in Python while you get a Node-native entry
-point. **Python 3.11+ and uv (or pipx) must be installed.**
+point. **Python 3.11+ and uv (or pipx) must already be installed.**
 
 Prefer Python directly? `uvx create-vivary my-workspace --preset coding` — a bare
 target defaults to `init` there too (the PyPI `create-vivary` is versioned in lockstep
