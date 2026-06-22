@@ -37,7 +37,7 @@ runs your local model with the same tools it always had.
 **3. A workspace.** Scaffold one the usual way:
 
 ```bash
-npm create @vivary my-workspace        # or: create-vivary init my-workspace --preset coding
+npm create @vivary@latest my-workspace # or: create-vivary init my-workspace --preset coding
 create-vivary doctor my-workspace      # verify it's healthy
 ```
 

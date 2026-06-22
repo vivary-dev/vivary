@@ -121,8 +121,8 @@ PyPI has no scopes and the bare names `tropo`/`ozone`/`exo` were taken, so the
 stay `tropo` / `ozone` / `exo`. On npm the scaffolder is `@vivary/create`.
 
 ### How do I install / run it?
-`pip install vivary-tropo vivary-ozone vivary-exo create-vivary`, or run on demand with
-`uvx vivary-tropo …`, or scaffold with `npm create @vivary`. Python 3.11+ only;
+`pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.3`, or run on demand with
+`uvx vivary-tropo ...`, or scaffold with `npm create @vivary@latest`. Python 3.11+ only;
 zero third-party dependencies.
 
 ### Can I use just tropo (the graph), without the rest?
@@ -136,7 +136,7 @@ installs, enabling hooks, destructive ops, and sending data of unknown sensitivi
 agent is bold *inside* the work and careful at the *edges*.
 
 ### Is it stable? What's the version?
-`vivary-tropo` is at **0.2.0**, `create-vivary` / `@vivary/create` are at **0.2.2**, and `vivary-ozone` / `vivary-exo` remain at 0.1.0. Use 0.2.2 instead of 0.2.1; 0.2.1 was superseded by a clean release-provenance hotfix. See the [CHANGELOG](https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md) for details. It's young — APIs may move before `1.0`. File issues for rough edges.
+`vivary-tropo` is at **0.2.0**, `create-vivary` / `@vivary/create` are at **0.2.3**, and `vivary-ozone` / `vivary-exo` remain at 0.1.0. Use 0.2.3 for new installs; 0.2.1 and 0.2.2 were superseded by clean release-provenance and npm-launcher hotfixes. See the [CHANGELOG](https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md) for details. It's young — APIs may move before `1.0`. File issues for rough edges.
 
 ### Where do I report bugs or ask for features?
 GitHub: [github.com/vivary-dev/vivary](https://github.com/vivary-dev/vivary). See the

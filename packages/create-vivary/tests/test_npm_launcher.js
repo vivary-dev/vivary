@@ -1,13 +1,14 @@
 // Tests for the npm launcher arg-mapping (packages/create-vivary/npm/index.js).
 // The launcher defaults a bare target to the `init` subcommand so the documented
-// `npm create @vivary my-workspace` UX reaches the Python CLI, which requires an
+// `npm create @vivary@latest my-workspace` UX reaches the Python CLI, which requires an
 // explicit `init`/`doctor`/`wizard` subcommand.
 "use strict";
 
 const assert = require("node:assert");
 const path = require("node:path");
 
-const { mapArgs } = require(path.join(__dirname, "..", "npm", "index.js"));
+const { mapArgs, pipxArgs, uvxArgs } = require(path.join(__dirname, "..", "npm", "index.js"));
+const { version } = require(path.join(__dirname, "..", "npm", "package.json"));
 
 const cases = [
   // [input, expected, description]
@@ -45,3 +46,21 @@ if (failed) {
   process.exit(1);
 }
 console.log(`\nall ${cases.length} launcher tests passed`);
+
+assert.deepStrictEqual(
+  uvxArgs(["--help"], ""),
+  [`create-vivary@${version}`, "--help"],
+);
+assert.deepStrictEqual(
+  pipxArgs(["--help"], ""),
+  ["run", `create-vivary==${version}`, "--help"],
+);
+assert.deepStrictEqual(
+  uvxArgs(["doctor", "ws"], "C:/tmp/create-vivary.whl"),
+  ["--from", "C:/tmp/create-vivary.whl", "create-vivary", "doctor", "ws"],
+);
+assert.deepStrictEqual(
+  pipxArgs(["doctor", "ws"], "C:/tmp/create-vivary.whl"),
+  ["run", "--spec", "C:/tmp/create-vivary.whl", "create-vivary", "doctor", "ws"],
+);
+console.log("ok - launcher pins PyPI package to npm package version");

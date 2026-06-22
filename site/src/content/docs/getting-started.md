@@ -17,14 +17,14 @@ You need **Python 3.11 or newer**. Pick whichever line fits how you like to work
 
 ```bash
 # A) install the command-line tools
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary
+pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.3
 
 # B) run on demand with uv, nothing installed permanently
 uvx vivary-tropo --version
 
-# C) scaffold with one npm command
+# C) scaffold with one npm command, pinned to the latest npm tag
 #    Requires Python 3.11+ and uv or pipx; no Python package install first.
-npm create @vivary my-workspace        # or: npx @vivary/create my-workspace
+npm create @vivary@latest my-workspace # or: npx @vivary/create@latest my-workspace
 ```
 
 No special editor is required. Vivary is plain Markdown and YAML, so it works in Claude
