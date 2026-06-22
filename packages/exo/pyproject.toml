@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vivary-exo"
-version = "0.1.0"
-description = "The coordination layer: graph-aware conflict detection and role contracts over a tropo knowledge graph."
+version = "0.2.0"
+description = "The coordination layer: graph-aware conflict detection, work claiming, and role contracts over a tropo knowledge graph."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -18,7 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Software Development :: Quality Assurance",
 ]
-dependencies = ["vivary-tropo>=0.1.0"]
+dependencies = ["vivary-tropo>=0.2.1"]
 
 [project.urls]
 Homepage = "https://vivary.vercel.app/"

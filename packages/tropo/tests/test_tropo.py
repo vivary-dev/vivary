@@ -283,6 +283,45 @@ def test_pack_composes():
         assert "runbook" in c.types and "spec" in c.types
 
 
+def test_pack_composes_without_repo_packs_directory():
+    with temp_workspace() as td:
+        with open(os.path.join(td, "tropo.toml"), "w") as fh:
+            fh.write('packs = ["dev-project"]\n')
+        fake_script_dir = os.path.join(td, "installed-wheel")
+        os.mkdir(fake_script_dir)
+        c = tropo.load_config(td, fake_script_dir)
+        assert "runbook" in c.types and "spec" in c.types
+
+
+def test_workspace_pack_overrides_bundled_pack():
+    with temp_workspace() as td:
+        pack_dir = os.path.join(td, ".tropo", "packs")
+        os.makedirs(pack_dir)
+        with open(os.path.join(pack_dir, "dev-project.toml"), "w") as fh:
+            fh.write('[types.local]\nfolder = "local"\nrequired = { owner = "string" }\n')
+        with open(os.path.join(td, "tropo.toml"), "w") as fh:
+            fh.write('packs = ["dev-project"]\n')
+        c = tropo.load_config(td, SCRIPT_DIR)
+        assert "local" in c.types and "runbook" not in c.types
+
+
+def test_coordination_pack_declares_assignee():
+    with temp_workspace() as td:
+        with open(os.path.join(td, "tropo.toml"), "w") as fh:
+            fh.write('packs = ["coordination"]\n')
+        c = tropo.load_config(td, SCRIPT_DIR)
+        assert c.base_optional["assignee"] == "string"
+
+
+def test_bundled_packs_match_tracked_toml_files():
+    for pack_path in Path(SCRIPT_DIR, "packs").glob("*.toml"):
+        name = pack_path.stem
+        assert name in tropo.BUNDLED_PACKS
+        bundled = tropo.tomllib.loads(tropo.BUNDLED_PACKS[name])
+        tracked = tropo._read_toml(str(pack_path))
+        assert bundled == tracked
+
+
 def test_repo_graph_pack_composes():
     with temp_workspace() as td:
         with open(os.path.join(td, "tropo.toml"), "w") as fh:

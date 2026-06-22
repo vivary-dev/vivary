@@ -202,12 +202,20 @@ A type with no `required` table accepts zero-frontmatter documents.
 `packs = [...]` names bundles resolved in this order, first match wins:
 
 1. `./.tropo/packs/<name>.toml` (project-local packs)
-2. packs shipped with the tropo distribution (`packs/<name>.toml`)
+2. bundled built-in packs embedded in the tropo engine
+3. packs shipped with a source checkout (`packs/<name>.toml`)
 
 A pack file is a partial config containing only `[types.*]` (and optionally
 `[base]` additions). Composition merges packs left-to-right, then merges the
 local config last. **Later definitions may add or tighten; they may not loosen**
 (see §5.6) — a violation is `E120` at config-load time and aborts with exit `2`.
+
+The built-in pack set is intentionally small:
+
+- `dev-project` — decisions, runbooks, and specs for ordinary project docs.
+- `repo-graph` — modules, changes, decisions, verification, and gates for
+  Graphify-friendly repository maps.
+- `coordination` — opt-in base field `assignee = "string"` for multi-agent claims.
 
 ### 5.5 Overlays
 

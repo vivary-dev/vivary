@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vivary-tropo"
-version = "0.2.0"
+version = "0.2.1"
 description = "The filesystem is the schema: a folder-as-type typed-knowledge layer for Markdown."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -38,8 +38,8 @@ tropo = "tropo:main"
 
 [tool.setuptools]
 py-modules = ["tropo"]
-# NOTE: bundled starter packs (packs/*.toml) are a repo convenience and are not
-# included in the wheel. Per-vault packs in `.tropo/packs/` are still resolved.
+# NOTE: starter packs are embedded in tropo.py so the single-file wheel can resolve
+# them without package data. Per-vault packs in `.tropo/packs/` still take precedence.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -33,7 +33,7 @@ import sys
 import tomllib
 from collections import Counter, deque
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 # ---------------------------------------------------------------------------
 # Minimal YAML-subset parser for frontmatter (zero-dependency).
@@ -279,6 +279,125 @@ CONFIG_NAME = "tropo.toml"
 DERIVED_SPECS = {"id": "slug", "slug": "slug", "title": "string",
                  "created": "date", "updated": "date"}
 DEFAULT_EXCLUDE = [".git", ".tropo", ".claude", "node_modules", ".obsidian"]
+BUNDLED_PACKS = {
+    "coordination": """
+[base.optional]
+assignee = "string"
+""",
+    "dev-project": """
+[types.decision]
+folder   = "decisions"
+required = { status = "enum:proposed|accepted|superseded", date = "date" }
+optional = { supersedes = "ref", superseded_by = "ref", deciders = "string-list" }
+
+[types.runbook]
+folder   = "runbooks"
+required = { owner = "string" }
+optional = { severity = "enum:low|medium|high|critical", last_drill = "date" }
+
+[types.spec]
+folder   = "specs"
+required = { status = "enum:draft|review|stable|deprecated" }
+optional = { supersedes = "ref" }
+""",
+    "repo-graph": """
+[base]
+allow_untyped = true
+
+[base.optional]
+id = "slug"
+type = "string"
+project = "string"
+status = "enum:active|closed-local|closed|blocked|deferred|superseded|draft"
+created = "date"
+updated = "date"
+tags = "string-list"
+aliases = "string-list"
+related = "string-list"
+source_of_truth = "string-list"
+
+[types.module]
+folder = "modules"
+
+[types.module.required]
+project = "string"
+status = "enum:active|closed-local|closed|blocked|deferred|superseded|draft"
+module_area = "string"
+
+[types.module.optional]
+app_repo_path = "string"
+source_files = "string-list"
+test_files = "string-list"
+related_modules = "string-list"
+related_changes = "string-list"
+verification = "any"
+gates = "string-list"
+
+[types.implementation_slice]
+folder = "changes"
+
+[types.implementation_slice.required]
+project = "string"
+status = "enum:active|closed-local|closed|blocked|deferred|superseded|draft"
+slice = "string"
+
+[types.implementation_slice.optional]
+branch = "string"
+app_repo_path = "string"
+local_base_sha = "string"
+remote_dev_sha_at_graph_creation = "string"
+provider_spend = "string"
+push_or_merge = "string"
+related_modules = "string-list"
+related_changes = "string-list"
+verification = "any"
+gates = "string-list"
+
+[types.decision]
+folder = "decisions"
+
+[types.decision.required]
+project = "string"
+status = "enum:proposed|accepted|superseded|deferred"
+date = "date"
+
+[types.decision.optional]
+supersedes = "string"
+superseded_by = "string"
+related_modules = "string-list"
+related_changes = "string-list"
+rationale = "string"
+
+[types.verification]
+folder = "verification"
+
+[types.verification.required]
+project = "string"
+status = "enum:planned|passed|failed|blocked|deferred"
+target = "string"
+
+[types.verification.optional]
+command = "string"
+evidence = "any"
+related_modules = "string-list"
+related_changes = "string-list"
+
+[types.gate]
+folder = "gates"
+
+[types.gate.required]
+project = "string"
+status = "enum:open|approved|rejected|deferred"
+gate = "string"
+
+[types.gate.optional]
+approver = "string"
+approved_at = "datetime"
+command_intent = "string"
+related_modules = "string-list"
+related_changes = "string-list"
+""",
+}
 
 
 class ConfigError(Exception):
@@ -371,11 +490,18 @@ def _read_toml(path):
         raise ConfigError(f"{path}: {e}")
 
 
-def _resolve_pack(name, root, script_dir):
-    for cand in (os.path.join(root, ".tropo", "packs", name + ".toml"),
-                 os.path.join(script_dir, "packs", name + ".toml")):
-        if os.path.isfile(cand):
-            return cand
+def _read_pack(name, root, script_dir):
+    local_pack = os.path.join(root, ".tropo", "packs", name + ".toml")
+    if os.path.isfile(local_pack):
+        return _read_toml(local_pack)
+    if name in BUNDLED_PACKS:
+        try:
+            return tomllib.loads(BUNDLED_PACKS[name])
+        except tomllib.TOMLDecodeError as e:
+            raise ConfigError(f"bundled pack {name!r}: {e}")
+    repo_pack = os.path.join(script_dir, "packs", name + ".toml")
+    if os.path.isfile(repo_pack):
+        return _read_toml(repo_pack)
     raise ConfigError(f"pack {name!r} not found (looked in .tropo/packs and bundled packs)")
 
 
@@ -430,7 +556,7 @@ def _compose(root, script_dir, config_path=None):
     raw = _read_toml(config_path or os.path.join(root, CONFIG_NAME))
     composed = {"base": {}, "types": {}, "exclude": []}
     for pack in raw.get("packs", []):
-        _merge_config(composed, _read_toml(_resolve_pack(pack, root, script_dir)))
+        _merge_config(composed, _read_pack(pack, root, script_dir))
     _merge_config(composed, raw)  # _merge_config normalizes each type's raw `folder`
     return composed
 

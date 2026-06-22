@@ -122,6 +122,21 @@ Open the workspace in your agent (Claude Code reads `.claude/skills/`; Codex rea
 The first time you open a fresh workspace, ask the agent to **bootstrap**. The strato
 skill interviews you and fills in SOUL / USER / STATE. See [agent skills](/skills/).
 
+When multiple agents share one workspace, opt into coordination fields:
+
+```toml
+packs = ["repo-graph", "coordination"]
+```
+
+Then claim work before editing:
+
+```bash
+exo claim local-ci-baseline --agent connie
+exo board
+exo conflicts
+tropo check
+```
+
 ## 6. Add your own work
 
 The graph is just typed folders. Add a module, a change, a decision by creating a file:
