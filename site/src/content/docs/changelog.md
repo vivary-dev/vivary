@@ -31,8 +31,9 @@ remain at 0.2.3, and `vivary-ozone` remains at 0.1.0.
 
 ### Release note
 
-Publishing remains a manual human gate after CI/review: publish `vivary-tropo==0.2.2`
-and `vivary-exo==0.2.1`; do not publish npm for this release.
+Published through the manual human gate as `vivary-tropo==0.2.2` and
+`vivary-exo==0.2.1`; no npm publish was needed. Verified from public PyPI pages plus
+fresh `pip` and `uvx --no-cache --index-url https://pypi.org/simple` install smokes.
 
 ## [vivary-tropo 0.2.1 / vivary-exo 0.2.0] — 2026-06-22
 

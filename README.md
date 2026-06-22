@@ -147,6 +147,7 @@ down `tropo` + `strato` and whichever optional layers fit. See
 - [Command reference](docs/COMMANDS.md) — every CLI, flag, and exit code
 - [How-to recipes](docs/HOWTO.md) · [Agent skills](docs/SKILLS.md) · [FAQ](docs/FAQ.md)
 - [Architecture](docs/ARCHITECTURE.md) · [Obsidian (optional)](docs/OBSIDIAN.md)
+- [Release workflow](docs/RELEASE-WORKFLOW.md) — end-of-update release truth, docs/site sync, and publish checks
 - [Portfolio proof](docs/PORTFOLIO.md) — shipped surfaces, screenshots, and case-study notes
 
 ## The value-add (why this isn't another harness)

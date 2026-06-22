@@ -20,6 +20,7 @@ const pages = [
   ['ACTIVE-CONTEXT', 'active-context', 'Active context', 'Optional CocoIndex-code sidecar guidance for semantic code retrieval.'],
   ['HOWTO', 'howto', 'How-to recipes', 'Task recipes: add a type, see blast radius, review, CI, multi-agent.'],
   ['SIGNALS', 'signals', 'Public signals', 'Public npm, PyPI, and GitHub metrics snapshots.'],
+  ['RELEASE-WORKFLOW', 'release-workflow', 'Release workflow', 'End-of-update checklist for Vivary release truth, docs, publishing, and post copy.'],
   ['FAQ', 'faq', 'FAQ', 'Common questions about Vivary.'],
   ['ARCHITECTURE', 'architecture', 'Architecture', 'The four-layer model and the principles behind Vivary.'],
   ['OBSIDIAN', 'obsidian', 'Obsidian (optional)', 'Optional Obsidian setup for fans, never required.'],
@@ -34,6 +35,7 @@ const rewrite = (s) =>
    .replaceAll('](ACTIVE-CONTEXT.md)', '](/active-context/)')
    .replaceAll('](HOWTO.md)', '](/howto/)')
    .replaceAll('](SIGNALS.md)', '](/signals/)')
+   .replaceAll('](RELEASE-WORKFLOW.md)', '](/release-workflow/)')
    .replaceAll('](FAQ.md)', '](/faq/)')
    .replaceAll('](ARCHITECTURE.md)', '](/architecture/)')
    .replaceAll('](OBSIDIAN.md)', '](/obsidian/)')
