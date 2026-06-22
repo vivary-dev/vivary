@@ -40,19 +40,19 @@ You'll see a few terms a lot. Here's what they actually mean.
 ## The five things Vivary creates
 
 Run one command and Vivary lays down a complete workspace. Underneath, it gives your
-project the five things every serious agent project ends up needing:
+project the five primitives every serious agent project ends up needing. They are
+progressively disclosed: module `index.md` files route the agent to the one slice of
+context it needs instead of loading the whole project.
 
 1. **Typed project memory** — a small, validated knowledge graph of what the project
    knows, instead of a single `notes.md` that drifts out of date.
 2. **Visible state** — one file, `STATE.md`, that always answers "where are we?" The
    agent reads it first and updates it last.
-3. **Progressive disclosure** — module `index.md` files route the agent to the one
-   slice of context it needs instead of loading the whole project.
-4. **Reusable skills** — the procedures the agent runs, written down once instead of
+3. **Reusable skills** — the procedures the agent runs, written down once instead of
    re-explained every time.
-5. **Private boundaries** — your personal context and durable memory, kept in files
+4. **Private boundaries** — your personal context and durable memory, kept in files
    that are ignored by Git so they never end up in a public commit.
-6. **Verification gates** — checks the agent must pass, and a human sign-off before
+5. **Verification gates** — checks the agent must pass, and a human sign-off before
    anything risky.
 
 ## Why the "typed graph" part matters

@@ -1,0 +1,46 @@
+name: Docs or copy
+description: Report stale docs, unclear copy, or public-surface polish.
+title: "[Docs]: "
+labels: ["documentation"]
+body:
+  - type: textarea
+    id: location
+    attributes:
+      label: Location
+      description: Link the page or name the file and section.
+      placeholder: "README.md -> Quickstart"
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: What is wrong or unclear?
+      description: Include the stale claim, confusing wording, or missing proof.
+    validations:
+      required: true
+  - type: textarea
+    id: desired
+    attributes:
+      label: Desired change
+      description: What should the docs or copy say instead?
+    validations:
+      required: true
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact
+      options:
+        - install/getting started
+        - command reference
+        - release/package truth
+        - website copy
+        - portfolio/proof
+        - internal contributor docs
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: Links, commands, package pages, or screenshots that support the requested change.

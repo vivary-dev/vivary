@@ -1,0 +1,57 @@
+name: Feature request
+description: Propose a new capability or workflow slice.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: intent
+    attributes:
+      label: Intent
+      description: What should Vivary make possible, and for whom?
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What current friction or missing capability does this address?
+    validations:
+      required: true
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Layer
+      options:
+        - create-vivary
+        - tropo
+        - strato
+        - ozone
+        - exo
+        - docs/site
+        - release/package metadata
+        - cross-layer
+        - unknown
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed shape
+      description: Describe the smallest useful slice, command, file, API, or docs change.
+    validations:
+      required: true
+  - type: textarea
+    id: blast_radius
+    attributes:
+      label: Expected blast radius
+      description: Files, packages, docs, graph surfaces, generated assets, or downstream users touched.
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification idea
+      description: What tests, examples, or sandbox run would prove this works?
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: What should this request deliberately not include?

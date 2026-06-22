@@ -35,7 +35,8 @@ Always self-verify and cap; a loop still stops at the hard gates.
 (drives the graph CLI); `strato` and `loops` ship with generated workspaces. Full
 reference — every command, skill, how-to, and FAQ — lives in
 [docs/](docs/) ([SKILLS](docs/SKILLS.md) · [COMMANDS](docs/COMMANDS.md) ·
-[HOWTO](docs/HOWTO.md) · [FAQ](docs/FAQ.md)). Vivary 0.1.0 is published (PyPI + npm).
+[HOWTO](docs/HOWTO.md) · [FAQ](docs/FAQ.md)). Current release truth lives in
+[README.md](README.md) and [CHANGELOG.md](CHANGELOG.md).
 
 ## Keep it lean
 

@@ -1,0 +1,70 @@
+name: Bug report
+description: Report broken behavior, install failures, or incorrect docs.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: What broke?
+      description: Describe the user-visible failure in one or two paragraphs.
+      placeholder: "create-vivary doctor reports..."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: List the smallest commands or actions that reproduce the bug.
+      placeholder: |
+        1. Run `npm create @vivary my-workspace`
+        2. Run `create-vivary doctor my-workspace`
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include exact error text, command output, screenshots, or logs when useful.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - create-vivary
+        - tropo
+        - strato
+        - ozone
+        - exo
+        - docs/site
+        - release/package metadata
+        - unknown
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: "create-vivary 0.2.2, vivary-tropo 0.2.0, or commit SHA"
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, shell, Python/Node versions, package manager, and install method.
+      placeholder: "Windows 11, PowerShell, Python 3.11, Node 22, npm create @vivary..."
+  - type: textarea
+    id: verification
+    attributes:
+      label: Checks already run
+      description: Commands you ran before filing, if any.
+      placeholder: "`python packages/tropo/tests/test_tropo.py`"

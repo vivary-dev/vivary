@@ -3,8 +3,8 @@
 Vivary is my open-source baseline for agent-native workspaces. It packages the
 stuff every serious AI-agent project eventually invents by hand: typed project
 memory, visible state, reusable skills, private memory boundaries, and
-verification gates. The CLI is published on PyPI and npm; a generated workspace
-can be scaffolded and checked in minutes.
+verification gates. Four PyPI CLIs are published, plus the npm `@vivary/create`
+launcher; a generated workspace can be scaffolded and checked in minutes.
 
 ## Links
 
@@ -40,8 +40,8 @@ Mobile:
 
 - **Product framing:** named the irreducible layer agent projects keep
   rebuilding, and shipped it as a one-command scaffolder.
-- **Distribution:** four standalone CLIs published across two registries (PyPI +
-  npm), composed by `create-vivary`.
+- **Distribution:** four PyPI CLIs, plus the npm `@vivary/create` launcher,
+  composed by `create-vivary`.
 - **Restraint:** no third-party dependencies; the framework costs almost nothing
   to load. Plain Markdown, any editor, Claude Code *and* Codex.
 

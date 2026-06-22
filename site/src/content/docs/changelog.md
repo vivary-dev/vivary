@@ -18,7 +18,8 @@ Affects `create-vivary` (PyPI) and `@vivary/create` (npm) only.
 
 - **Supersedes 0.2.1** — use 0.2.2 for new installs. PyPI 0.2.1 was installable,
   but it was cut from unreviewed direct commits and a dirty source snapshot that
-  included generated build artifacts. 0.2.2 is the clean, PR-gated hotfix release.
+  included generated build artifacts. npm 0.2.1 was not live; 0.2.2 is the npm/PyPI
+  lockstep release users should install.
 - **Clean release provenance** — the repository source tree no longer includes the
   generated 0.2.1 wheel/sdist artifacts, and the release was re-cut after branch
   protection and CI-gated PR flow were restored.
@@ -28,7 +29,8 @@ and release-hygiene hotfix.
 
 ## [0.2.1] — 2026-06-21
 
-Affects `create-vivary` (PyPI) and the `@vivary/create` npm package metadata only.
+Affects `create-vivary` (PyPI) only; no live `@vivary/create` npm 0.2.1 release was
+published.
 
 ### Fixed
 
