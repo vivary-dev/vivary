@@ -13,8 +13,8 @@ frontmatter** and still be fully typed and valid.
 > Status: **working engine (v0.2).** `tropo.py` implements spec v1 end-to-end —
 > folder-as-type resolution, derivation, validation, packs, **overlays**, the
 > `signal` report, **`fix`** (de-noise), **`init`**, the graph layer
-> (`graph`/`blast`/`view`/`plan`), and the data layer (`query`/`migrate` with
-> file, embedded LanceDB, and cloud backends). An agent can drive the whole
+> (`graph`/`blast`/`view`/`plan`), and the data layer (`query` plus file →
+> embedded migration). Cloud adapters are future 0.3.x work. An agent can drive the whole
 > thing via [.claude/skills/tropo/SKILL.md](.claude/skills/tropo/SKILL.md).
 > See [SPEC.md](SPEC.md).
 
@@ -34,8 +34,8 @@ python tests/test_tropo.py                       # run the test suite
 ```
 
 Requires Python 3.11+ (stdlib `tomllib`), zero third-party dependencies for the core.
-Optional extras: `pip install vivary-tropo[embedded]` for LanceDB full-text search,
-`vivary-tropo[cloud]` for Qdrant, `vivary-tropo[astra]` for Astra DB.
+Optional extras: `pip install vivary-tropo[embedded]` for LanceDB full-text search.
+Cloud extras are reserved for the 0.3.x adapter work.
 
 ## Overlays — tighten a subtree
 

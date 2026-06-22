@@ -19,7 +19,8 @@ pip install vivary-tropo vivary-ozone vivary-exo create-vivary
 # B) run on demand with uv, nothing installed permanently
 uvx vivary-tropo --version
 
-# C) scaffold with one npm command (nothing to install first)
+# C) scaffold with one npm command
+#    Requires Python 3.11+ and uv or pipx; no Python package install first.
 npm create @vivary my-workspace        # or: npx @vivary/create my-workspace
 ```
 
@@ -42,7 +43,7 @@ A **preset** just picks the starter content. Choose the one closest to your work
 
 They all share the same structure and differ only in the starter notes.
 
-On a terminal that supports input, `init` runs a short wizard to ask about storage (how large your workspace will be, local vs cloud). Skip it with `--no-wizard` to use defaults, or let an agent self-configure with `--auto --yes`. Add
+On a terminal that supports input, `init` runs a short wizard to ask about storage (how large your workspace will be, local vs cloud). For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use `--auto`; in human mode, the wizard asks and its answers drive storage. Add
 `--obsidian` if you want an optional Obsidian vault config too. For coding
 workspaces, add `--active-context cocoindex-code` if you want the agent to ask when
 CocoIndex-code semantic search would help:
