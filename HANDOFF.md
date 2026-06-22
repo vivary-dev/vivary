@@ -105,7 +105,7 @@ packages/tropo/        vivary-tropo 0.2.0 — knowledge-graph CLI (check/signal/
                        stats/graph/blast/view/plan/fix/init/query/migrate). check is
                        STRICT by default. Storage layer: file/embedded(LanceDB)/cloud.
                        Optional extras: [embedded] [cloud] [astra]. Tests: 55/55.
-packages/strato/       (vivary-strato source) — agent OS: STRATO.md model + templates
+packages/strato/       strato source/templates — agent OS: STRATO.md model + templates
                        + bootstrap/heartbeat/self-improve skill. Docs/templates only.
 packages/ozone/        vivary-ozone 0.1.0 — review layer: `review` (structure pack) +
                        `impact <id>` (blast radius) + `packs`. Tests: 7/7.
@@ -159,9 +159,9 @@ the source repos from this workspace.
 | Repo | Role | Vivary layer |
 |---|---|---|
 | `braincheck` | frontmatter typechecker ancestor | retired ancestor of tropo |
-| `loam` | folder-as-type typed knowledge graph | `@vivary/tropo` |
-| `throughline` | tiny agent OS, visible state, gates | `@vivary/strato` |
-| `flywheel` | bootstrap, heartbeat, self-improvement | `@vivary/strato` |
+| `loam` | folder-as-type typed knowledge graph | `vivary-tropo` |
+| `throughline` | tiny agent OS, visible state, gates | `strato` bundled templates |
+| `flywheel` | bootstrap, heartbeat, self-improvement | `strato` bundled templates |
 
 ## Verification Commands
 

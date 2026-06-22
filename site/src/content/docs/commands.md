@@ -48,11 +48,15 @@ says. `tropo.toml` declares the types.
 | `graph [--json]` | Emit the typed graph: nodes (`id`,`type`,`path`) + edges (`from`,`field`,`to`,`broken`). |
 | `blast <id> [--depth N]` | The **blast radius** of `<id>`: everything that (transitively) refs it — what a change could touch. |
 | `view [graph \| blast <id>] [--out FILE]` | Render the graph (or one radius) as a single self-contained HTML file. |
-| `plan <change.toml>` | Simulate a change (remove/retype/break/add) and show the semantic delta. |
+| `plan <change.toml>` | Simulate a change (remove/retype/break/add) and show the graph delta. |
 | `fix [--dry-run]` | Strip redundant frontmatter (`W210` — a field equal to its derived value). The only mechanical edit tropo makes. |
 | `init [DIR] [--packs a,b]` | Scaffold a `tropo.toml` (optionally composing reusable type packs). |
-| `query <text> [--k N] [--type TYPE] [--json]` | Semantic search over the workspace graph. Returns the top-k typed nodes by meaning. Requires embedded or cloud backend. |
+| `query <text> [--k N] [--type TYPE] [--json]` | Text/BM25-style graph search over the workspace. Returns top-k typed nodes by text relevance; the file backend falls back to simple text matching. |
 | `migrate --from X --to Y [--yes] [--dry-run] [--json]` | Move graph data between storage backends (e.g. `file` → `embedded`). Idempotent. Installs the target backend if needed (with `--yes`). Writes `migrated_at` to `.vivary/storage.toml` on completion. |
+
+`tropo query` is graph/text retrieval, not the CocoIndex active-context sidecar. Use
+`create-vivary init ... --active-context cocoindex-code` when a coding workspace needs
+semantic code candidates.
 
 ### Strictness (the `check` gate)
 

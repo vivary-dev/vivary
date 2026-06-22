@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // create-vivary (npm): a thin launcher for the Python `create-vivary` scaffolder.
-// `npm create vivary` / `npx create-vivary` -> runs the published PyPI package via
+// `npm create @vivary` / `npx @vivary/create` -> runs the published PyPI package via
 // uv (uvx) or pipx, so users get the create-t3-app experience without a manual
 // `pip install`. The scaffolder itself is one source of truth in Python.
 "use strict";
@@ -11,7 +11,7 @@ const { spawnSync } = require("node:child_process");
 // but the Python CLI expects an explicit `init`/`doctor` subcommand. Default a
 // bare target to `init` so the documented form works; an explicit subcommand or a
 // leading flag (e.g. `-h`/`--help`) passes through unchanged.
-const SUBCOMMANDS = new Set(["init", "doctor"]);
+const SUBCOMMANDS = new Set(["init", "doctor", "wizard"]);
 
 function mapArgs(args) {
   const first = args[0];
@@ -48,7 +48,7 @@ function main() {
   if (result.error && result.error.code === "ENOENT") {
     console.error(
       "create-vivary needs Python tooling to run the scaffolder.\n" +
-      "Install uv (https://docs.astral.sh/uv/) or pipx, then re-run `npm create vivary`."
+      "Install uv (https://docs.astral.sh/uv/) or pipx, then re-run `npm create @vivary` or `npx @vivary/create`."
     );
     process.exit(1);
   }
