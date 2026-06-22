@@ -1,4 +1,4 @@
-# @vivary/ozone
+# vivary-ozone
 
 > Status: **working** (first slice — deterministic review). The optional review layer.
 

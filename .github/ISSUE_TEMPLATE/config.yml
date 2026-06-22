@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Vivary docs
+    url: https://vivary.vercel.app/
+    about: Start with the published docs and guides.
+  - name: Package status
+    url: https://github.com/vivary-dev/vivary/blob/dev/README.md
+    about: Current package versions and release notes are linked from the README.

@@ -1,4 +1,4 @@
-# @vivary/strato
+# strato
 
 **The agent OS** — the stratosphere layer, the stable contract above tropo's churn.
 If tropo is *what's true*, strato is *how an agent works over it*: a per-turn loop,
