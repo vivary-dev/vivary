@@ -1,40 +1,44 @@
-<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 760 280">
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 760 300">
   <title id="title">Vivary public usage snapshot</title>
-  <desc id="desc">Weekly npm and PyPI downloads plus GitHub stars and forks, generated from public package and GitHub APIs.</desc>
+  <desc id="desc">Weekly npm and PyPI downloads plus GitHub repo signals, generated from public package and GitHub APIs.</desc>
   <style>
     .bg { fill: #101923; }
     .panel { fill: #162532; stroke: #2b4655; stroke-width: 1; }
     .muted { fill: #9fb3bd; font: 14px system-ui, -apple-system, Segoe UI, sans-serif; }
     .small { fill: #9fb3bd; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .label { fill: #eef8f3; font: 600 15px system-ui, -apple-system, Segoe UI, sans-serif; }
-    .value { fill: #eef8f3; font: 700 28px system-ui, -apple-system, Segoe UI, sans-serif; }
+    .value { fill: #eef8f3; font: 700 26px system-ui, -apple-system, Segoe UI, sans-serif; }
     .bar-npm { fill: #43d69d; }
     .bar-pypi { fill: #6eb6ff; }
     .axis { stroke: #395463; stroke-width: 1; }
   </style>
-  <rect class="bg" width="760" height="280" rx="16" />
+  <rect class="bg" width="760" height="300" rx="16" />
   <text x="28" y="40" class="label">Vivary public signals</text>
   <text x="28" y="64" class="muted">Latest weekly package downloads and GitHub repo signals</text>
-  <text x="600" y="40" class="small">snapshot 2026-06-22</text>
+  <text x="578" y="40" class="small">snapshot 2026-06-23</text>
+  <text x="578" y="60" class="small">status ok</text>
 
-  <rect class="panel" x="28" y="88" width="500" height="150" rx="12" />
-  <line class="axis" x1="88" y1="197" x2="488" y2="197" />
+  <rect class="panel" x="28" y="88" width="500" height="162" rx="12" />
+  <line class="axis" x1="88" y1="202" x2="488" y2="202" />
   <text x="52" y="123" class="small">npm</text>
-  <rect class="bar-npm" x="88" y="104" width="241" height="28" rx="6" />
-  <text x="341" y="124" class="label">259</text>
+  <rect class="bar-npm" x="88" y="104" width="127" height="28" rx="6" />
+  <text x="227" y="124" class="label">446</text>
   <text x="52" y="171" class="small">PyPI</text>
   <rect class="bar-pypi" x="88" y="152" width="420" height="28" rx="6" />
-  <text x="498" y="172" class="label">452</text>
-  <text x="88" y="220" class="small">@vivary/create weekly</text>
-  <text x="302" y="220" class="small">create-vivary weekly</text>
+  <text x="498" y="172" class="label">1479</text>
+  <text x="88" y="226" class="small">all package downloads last week: 1925</text>
 
-  <rect class="panel" x="552" y="88" width="180" height="68" rx="12" />
+  <rect class="panel" x="552" y="88" width="180" height="48" rx="12" />
   <text x="572" y="116" class="small">GitHub stars</text>
-  <text x="572" y="145" class="value">1</text>
+  <text x="668" y="120" class="value">1</text>
 
-  <rect class="panel" x="552" y="170" width="180" height="68" rx="12" />
-  <text x="572" y="198" class="small">Forks</text>
-  <text x="572" y="227" class="value">0</text>
+  <rect class="panel" x="552" y="148" width="180" height="48" rx="12" />
+  <text x="572" y="176" class="small">Open issues</text>
+  <text x="668" y="180" class="value">7</text>
 
-  <text x="28" y="260" class="small">Tracked by .github/workflows/track-stats.yml through reviewed PR snapshots. History rows: 2.</text>
+  <rect class="panel" x="552" y="208" width="180" height="48" rx="12" />
+  <text x="572" y="236" class="small">Release assets</text>
+  <text x="668" y="240" class="value">0</text>
+
+  <text x="28" y="278" class="small">Tracked daily by .github/workflows/track-stats.yml through reviewed PR snapshots. History rows: 3.</text>
 </svg>
