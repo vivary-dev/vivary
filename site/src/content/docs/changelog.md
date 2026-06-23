@@ -14,9 +14,11 @@ the `v0.1.0` line.
 
 ### Fixed
 
-- **create-vivary symlink hardening** — scaffold writes now refuse symlinked
-  destination paths and paths that resolve outside the selected workspace, including
-  when `--force` is used.
+- **create-vivary symlink hardening** — scaffold writes, storage config writes, and
+  stale generated cleanup now refuse symlinked destination parents and paths that
+  resolve outside the selected workspace, including when `--force` is used.
+- **create-vivary dry-run cleanup guard** — `--dry-run --force` previews the scaffold
+  without removing stale generated files.
 
 ## [vivary-tropo 0.2.2 / vivary-exo 0.2.1] — 2026-06-22
 

@@ -97,6 +97,24 @@ def default_repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _resolve_scaffold_target(target: str | Path) -> Path:
+    requested = Path(target)
+    absolute = requested if requested.is_absolute() else Path.cwd() / requested
+    current = Path(absolute.anchor) if absolute.anchor else Path()
+    parts = absolute.parts[1:] if absolute.anchor else absolute.parts
+    for part in parts:
+        current = current / part
+        if current.exists() or current.is_symlink():
+            if current.is_symlink():
+                raise ScaffoldError(
+                    "refusing to scaffold through symlinked target path: "
+                    f"{current}"
+                )
+        else:
+            break
+    return absolute.resolve(strict=False)
+
+
 def scaffold_workspace(
     target: str | Path,
     *,
@@ -131,7 +149,7 @@ def scaffold_workspace(
 
     root = Path(repo_root) if repo_root is not None else default_repo_root()
     root = root.resolve()
-    target = Path(target).resolve()
+    target = _resolve_scaffold_target(target)
 
     sources = _source_paths(root)
     for label, src in sources.items():
@@ -177,8 +195,12 @@ def scaffold_workspace(
 
     copies = _copy_plan(target, sources, active_context=active_context)
     planned_paths = [p for p, _ in writes] + [dst for _, dst in copies]
+    if storage != "file":
+        planned_paths.append(target / _STORAGE_DIR / _STORAGE_CONFIG_NAME)
     _ensure_safe_destinations(target, planned_paths, force)
-    if force:
+    cleanup_paths = _stale_scaffold_paths(target, active_context) if force and not dry_run else []
+    _ensure_safe_cleanup_targets(target, cleanup_paths)
+    if force and not dry_run:
         _cleanup_stale_scaffold_state(target, active_context=active_context)
 
     created: list[Path] = []
@@ -509,12 +531,15 @@ def _cleanup_stale_scaffold_state(target: Path, *, active_context: str | None) -
     delete arbitrary user content. Keep cleanup limited to paths Vivary itself has
     generated in older or optional profiles.
     """
-    for path in _legacy_module_files(target):
-        _remove_path(path)
+    for path in _stale_scaffold_paths(target, active_context):
+        _remove_path(target, path)
 
+
+def _stale_scaffold_paths(target: Path, active_context: str | None) -> list[Path]:
+    paths = _legacy_module_files(target)
     if active_context != "cocoindex-code":
-        for path in _cocoindex_active_context_stale_paths(target):
-            _remove_path(path)
+        paths = [*paths, *_cocoindex_active_context_stale_paths(target)]
+    return paths
 
 
 def _legacy_module_files(target: Path) -> list[Path]:
@@ -537,11 +562,38 @@ def _cocoindex_active_context_stale_paths(target: Path) -> list[Path]:
     ]
 
 
-def _remove_path(path: Path) -> None:
+def _ensure_safe_cleanup_targets(root: Path, paths: list[Path]) -> None:
+    unsafe = [path for path in paths if not _is_safe_cleanup_target(root, path)]
+    if unsafe:
+        preview = "\n".join(f"  - {p}" for p in unsafe[:20])
+        extra = "" if len(unsafe) <= 20 else f"\n  ... and {len(unsafe) - 20} more"
+        raise ScaffoldError(
+            "refusing to clean stale scaffold path(s) through symlinked or "
+            f"out-of-workspace parent path(s):\n{preview}{extra}"
+        )
+
+
+def _remove_path(root: Path, path: Path) -> None:
+    if not _is_safe_cleanup_target(root, path):
+        raise ScaffoldError(f"refusing to clean unsafe scaffold path: {path}")
     if path.is_dir() and not path.is_symlink():
         shutil.rmtree(path)
     elif path.exists() or path.is_symlink():
         path.unlink()
+
+
+def _is_safe_cleanup_target(root: Path, path: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+
+    for parent in path.parents:
+        if parent == root:
+            return True
+        if parent.is_symlink():
+            return False
+    return False
 
 
 def _module_index_path(target: Path, module_id: str) -> Path:
@@ -1283,7 +1335,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if report["ok"] else 1
 
     if args.command == "wizard":
-        target = Path(args.target).resolve()
+        try:
+            target = _resolve_scaffold_target(args.target)
+        except ScaffoldError as exc:
+            if getattr(args, "json", False):
+                print(json.dumps({"ok": False, "error": str(exc)}))
+            else:
+                print(f"create-vivary wizard: {exc}", file=sys.stderr)
+            return 1
         decisions = _run_wizard(args)
         _yes = getattr(args, "yes", False) or getattr(args, "auto", False)
         installed = decisions.get("installed") or (
@@ -1291,13 +1350,20 @@ def main(argv: list[str] | None = None) -> int:
             if getattr(args, "dry_run", False) or decisions["storage"] == "file"
             else _ensure_backend_installed(decisions["provider"], _yes)
         )
-        vivary_paths = _write_vivary_dir(
-            target,
-            decisions["storage"],
-            decisions["provider"],
-            getattr(args, "dry_run", False),
-            force=True,
-        )
+        try:
+            vivary_paths = _write_vivary_dir(
+                target,
+                decisions["storage"],
+                decisions["provider"],
+                getattr(args, "dry_run", False),
+                force=True,
+            )
+        except ScaffoldError as exc:
+            if getattr(args, "json", False):
+                print(json.dumps({"ok": False, "error": str(exc)}))
+            else:
+                print(f"create-vivary wizard: {exc}", file=sys.stderr)
+            return 1
         if getattr(args, "json", False):
             print(json.dumps({
                 "ok": True,
