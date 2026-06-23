@@ -6,9 +6,12 @@ import csv
 import html
 import json
 import os
+import time
+import urllib.error
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +20,24 @@ LATEST_PATH = STATS_DIR / "latest.json"
 HISTORY_PATH = STATS_DIR / "history.csv"
 SVG_PATH = STATS_DIR / "usage-snapshot.svg"
 SITE_SVG_PATH = ROOT / "site" / "public" / "usage-snapshot.svg"
-HEADER = ["date", "npm_weekly", "pypi_weekly", "github_stars", "github_forks"]
+
+NPM_PACKAGES = ["@vivary/create"]
+PYPI_PACKAGES = ["create-vivary", "vivary-tropo", "vivary-ozone", "vivary-exo"]
+HEADER = [
+    "date",
+    "npm_weekly",
+    "pypi_weekly",
+    "package_weekly",
+    "github_stars",
+    "github_forks",
+    "github_open_issues",
+    "github_release_downloads",
+    "stale_sources",
+]
+
+
+class FetchError(RuntimeError):
+    pass
 
 
 def write_text_lf(path: Path, text: str) -> None:
@@ -26,60 +46,202 @@ def write_text_lf(path: Path, text: str) -> None:
         handle.write(text)
 
 
-def fetch_json(url: str) -> dict | None:
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "vivary-stats/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            return json.loads(response.read())
-    except Exception as exc:  # pragma: no cover - defensive for CI/network flake
-        print(f"warn: {url} -> {exc}")
-        return None
+def fetch_json(url: str, *, attempts: int = 3) -> dict[str, Any]:
+    delay = 2.0
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            request = urllib.request.Request(
+                url,
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "vivary-stats/2.0 (+https://github.com/vivary-dev/vivary)",
+                },
+            )
+            with urllib.request.urlopen(request, timeout=20) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if exc.code not in {429, 500, 502, 503, 504}:
+                break
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            last_error = exc
+        if attempt < attempts:
+            time.sleep(delay)
+            delay *= 2
+    raise FetchError(f"{url} -> {last_error}")
 
 
-def previous_snapshot() -> dict:
+def previous_snapshot() -> dict[str, Any]:
     if not LATEST_PATH.exists():
         return {}
     try:
         return json.loads(LATEST_PATH.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         return {}
 
 
-def fallback_int(previous: dict, key: str) -> int:
+def lookup_previous(previous: dict[str, Any], *path: str) -> Any:
+    cursor: Any = previous
+    for part in path:
+        if not isinstance(cursor, dict):
+            return None
+        cursor = cursor.get(part)
+    return cursor
+
+
+def previous_int(previous: dict[str, Any], fallback_key: str, *path: str) -> int | None:
+    value = lookup_previous(previous, *path)
+    if value is None and fallback_key:
+        value = previous.get(fallback_key)
     try:
-        return int(previous.get(key, 0) or 0)
+        return int(value)
     except (TypeError, ValueError):
-        return 0
+        return None
 
 
-def current_snapshot() -> dict[str, int | str]:
+def source_warning(warnings: list[str], name: str, error: Exception, previous_value: int | None) -> int:
+    if previous_value is None:
+        raise FetchError(f"{name} failed and no previous value exists: {error}") from error
+    warnings.append(f"{name}: stale previous value used after fetch failure ({error})")
+    return previous_value
+
+
+def npm_snapshot(previous: dict[str, Any], warnings: list[str]) -> dict[str, Any]:
+    packages: dict[str, Any] = {}
+    total = 0
+    for package in NPM_PACKAGES:
+        encoded = package.replace("/", "%2F")
+        source = f"npm:{package}"
+        try:
+            point = fetch_json(f"https://api.npmjs.org/downloads/point/last-week/{encoded}")
+            versions = fetch_json(f"https://api.npmjs.org/versions/{encoded}/last-week")
+            downloads = int(point["downloads"])
+            stale = False
+        except Exception as exc:
+            downloads = source_warning(
+                warnings,
+                source,
+                exc,
+                previous_int(previous, "npm_weekly", "npm", "packages", package, "last_week"),
+            )
+            point = {}
+            versions = {"downloads": lookup_previous(previous, "npm", "packages", package, "versions_last_week") or {}}
+            stale = True
+        total += downloads
+        packages[package] = {
+            "last_week": downloads,
+            "start": point.get("start"),
+            "end": point.get("end"),
+            "versions_last_week": versions.get("downloads") or {},
+            "stale": stale,
+        }
+    return {"weekly_total": total, "packages": packages}
+
+
+def pypi_snapshot(previous: dict[str, Any], warnings: list[str]) -> dict[str, Any]:
+    packages: dict[str, Any] = {}
+    total = 0
+    for index, package in enumerate(PYPI_PACKAGES):
+        if index:
+            time.sleep(1.0)
+        source = f"pypi:{package}"
+        try:
+            data = fetch_json(f"https://pypistats.org/api/packages/{package}/recent")["data"]
+            last_week = int(data["last_week"])
+            package_data = {
+                "last_day": int(data["last_day"]),
+                "last_week": last_week,
+                "last_month": int(data["last_month"]),
+                "stale": False,
+            }
+        except Exception as exc:
+            last_week = source_warning(
+                warnings,
+                source,
+                exc,
+                previous_int(previous, "", "pypi", "packages", package, "last_week"),
+            )
+            package_data = {
+                "last_day": previous_int(previous, "", "pypi", "packages", package, "last_day"),
+                "last_week": last_week,
+                "last_month": previous_int(previous, "", "pypi", "packages", package, "last_month"),
+                "stale": True,
+            }
+        total += last_week
+        packages[package] = package_data
+    return {"weekly_total": total, "packages": packages}
+
+
+def github_snapshot(previous: dict[str, Any], warnings: list[str]) -> dict[str, Any]:
+    try:
+        repo = fetch_json("https://api.github.com/repos/vivary-dev/vivary")
+        releases = fetch_json("https://api.github.com/repos/vivary-dev/vivary/releases?per_page=100")
+        assets = []
+        for release in releases if isinstance(releases, list) else []:
+            for asset in release.get("assets", []):
+                assets.append(
+                    {
+                        "release": release.get("tag_name"),
+                        "name": asset.get("name"),
+                        "download_count": int(asset.get("download_count") or 0),
+                        "url": asset.get("browser_download_url"),
+                    }
+                )
+        return {
+            "stars": int(repo.get("stargazers_count") or 0),
+            "forks": int(repo.get("forks_count") or 0),
+            "watchers": int(repo.get("subscribers_count") or 0),
+            "open_issues": int(repo.get("open_issues_count") or 0),
+            "pushed_at": repo.get("pushed_at"),
+            "release_count": len(releases) if isinstance(releases, list) else 0,
+            "release_asset_downloads": sum(asset["download_count"] for asset in assets),
+            "release_assets": assets,
+            "stale": False,
+        }
+    except Exception as exc:
+        stars = source_warning(warnings, "github:repo", exc, previous_int(previous, "github_stars", "github", "stars"))
+        forks = previous_int(previous, "github_forks", "github", "forks")
+        return {
+            "stars": stars,
+            "forks": forks if forks is not None else 0,
+            "watchers": previous_int(previous, "", "github", "watchers"),
+            "open_issues": previous_int(previous, "", "github", "open_issues"),
+            "pushed_at": lookup_previous(previous, "github", "pushed_at"),
+            "release_count": previous_int(previous, "", "github", "release_count"),
+            "release_asset_downloads": previous_int(previous, "", "github", "release_asset_downloads") or 0,
+            "release_assets": lookup_previous(previous, "github", "release_assets") or [],
+            "stale": True,
+        }
+
+
+def current_snapshot() -> dict[str, Any]:
     previous = previous_snapshot()
-    npm = fetch_json("https://api.npmjs.org/downloads/point/last-week/%40vivary%2Fcreate")
-    pypi = fetch_json("https://pypistats.org/api/packages/create-vivary/recent")
-    github = fetch_json("https://api.github.com/repos/vivary-dev/vivary")
+    warnings: list[str] = []
+    generated_at = datetime.now(UTC).replace(microsecond=0)
+    npm = npm_snapshot(previous, warnings)
+    pypi = pypi_snapshot(previous, warnings)
+    github = github_snapshot(previous, warnings)
+    package_weekly = npm["weekly_total"] + pypi["weekly_total"]
 
     return {
-        "date": datetime.now(UTC).date().isoformat(),
-        "npm_weekly": (
-            int(npm.get("downloads", 0) or 0)
-            if npm is not None
-            else fallback_int(previous, "npm_weekly")
-        ),
-        "pypi_weekly": (
-            int((pypi.get("data") or {}).get("last_week", 0) or 0)
-            if pypi is not None
-            else fallback_int(previous, "pypi_weekly")
-        ),
-        "github_stars": (
-            int(github.get("stargazers_count", 0) or 0)
-            if github is not None
-            else fallback_int(previous, "github_stars")
-        ),
-        "github_forks": (
-            int(github.get("forks_count", 0) or 0)
-            if github is not None
-            else fallback_int(previous, "github_forks")
-        ),
+        "date": generated_at.date().isoformat(),
+        "generated_at": generated_at.isoformat().replace("+00:00", "Z"),
+        "status": "stale" if warnings else "ok",
+        "warnings": warnings,
+        "npm": npm,
+        "pypi": pypi,
+        "github": github,
+        "totals": {
+            "npm_weekly": npm["weekly_total"],
+            "pypi_weekly": pypi["weekly_total"],
+            "package_weekly": package_weekly,
+            "github_release_downloads": github["release_asset_downloads"],
+        },
+        "npm_weekly": npm["weekly_total"],
+        "pypi_weekly": pypi["weekly_total"],
+        "github_stars": github["stars"],
+        "github_forks": github["forks"],
     }
 
 
@@ -90,12 +252,26 @@ def read_history() -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
-def write_stats(snapshot: dict[str, int | str]) -> list[dict[str, str]]:
+def history_row(snapshot: dict[str, Any]) -> dict[str, str]:
+    return {
+        "date": snapshot["date"],
+        "npm_weekly": str(snapshot["totals"]["npm_weekly"]),
+        "pypi_weekly": str(snapshot["totals"]["pypi_weekly"]),
+        "package_weekly": str(snapshot["totals"]["package_weekly"]),
+        "github_stars": str(snapshot["github"]["stars"]),
+        "github_forks": str(snapshot["github"]["forks"]),
+        "github_open_issues": str(snapshot["github"]["open_issues"]),
+        "github_release_downloads": str(snapshot["github"]["release_asset_downloads"]),
+        "stale_sources": ";".join(snapshot["warnings"]),
+    }
+
+
+def write_stats(snapshot: dict[str, Any]) -> list[dict[str, str]]:
     STATS_DIR.mkdir(exist_ok=True)
-    write_text_lf(LATEST_PATH, json.dumps(snapshot, indent=2) + "\n")
+    write_text_lf(LATEST_PATH, json.dumps(snapshot, indent=2, sort_keys=True) + "\n")
 
     rows = [row for row in read_history() if row.get("date") != snapshot["date"]]
-    rows.append({key: str(snapshot[key]) for key in HEADER})
+    rows.append(history_row(snapshot))
     rows.sort(key=lambda row: row["date"])
 
     with HISTORY_PATH.open("w", newline="", encoding="utf-8") as handle:
@@ -111,57 +287,64 @@ def bar(width: int, value: int, scale: int) -> int:
     return max(2, round(width * value / scale))
 
 
-def render_svg(snapshot: dict[str, int | str], rows: list[dict[str, str]]) -> str:
-    npm = int(snapshot["npm_weekly"])
-    pypi = int(snapshot["pypi_weekly"])
-    stars = int(snapshot["github_stars"])
-    forks = int(snapshot["github_forks"])
+def render_svg(snapshot: dict[str, Any], rows: list[dict[str, str]]) -> str:
+    npm = int(snapshot["totals"]["npm_weekly"])
+    pypi = int(snapshot["totals"]["pypi_weekly"])
+    package_weekly = int(snapshot["totals"]["package_weekly"])
+    stars = int(snapshot["github"]["stars"])
+    issues = int(snapshot["github"]["open_issues"] or 0)
+    release_downloads = int(snapshot["github"]["release_asset_downloads"] or 0)
     scale = max(npm, pypi, 1)
     max_width = 420
     npm_width = bar(max_width, npm, scale)
     pypi_width = bar(max_width, pypi, scale)
     history_count = len(rows)
     date = html.escape(str(snapshot["date"]))
+    status = html.escape(str(snapshot["status"]))
 
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 760 280">
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 760 300">
   <title id="title">Vivary public usage snapshot</title>
-  <desc id="desc">Weekly npm and PyPI downloads plus GitHub stars and forks, generated from public package and GitHub APIs.</desc>
+  <desc id="desc">Weekly npm and PyPI downloads plus GitHub repo signals, generated from public package and GitHub APIs.</desc>
   <style>
     .bg {{ fill: #101923; }}
     .panel {{ fill: #162532; stroke: #2b4655; stroke-width: 1; }}
     .muted {{ fill: #9fb3bd; font: 14px system-ui, -apple-system, Segoe UI, sans-serif; }}
     .small {{ fill: #9fb3bd; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }}
     .label {{ fill: #eef8f3; font: 600 15px system-ui, -apple-system, Segoe UI, sans-serif; }}
-    .value {{ fill: #eef8f3; font: 700 28px system-ui, -apple-system, Segoe UI, sans-serif; }}
+    .value {{ fill: #eef8f3; font: 700 26px system-ui, -apple-system, Segoe UI, sans-serif; }}
     .bar-npm {{ fill: #43d69d; }}
     .bar-pypi {{ fill: #6eb6ff; }}
     .axis {{ stroke: #395463; stroke-width: 1; }}
   </style>
-  <rect class="bg" width="760" height="280" rx="16" />
+  <rect class="bg" width="760" height="300" rx="16" />
   <text x="28" y="40" class="label">Vivary public signals</text>
   <text x="28" y="64" class="muted">Latest weekly package downloads and GitHub repo signals</text>
-  <text x="600" y="40" class="small">snapshot {date}</text>
+  <text x="578" y="40" class="small">snapshot {date}</text>
+  <text x="578" y="60" class="small">status {status}</text>
 
-  <rect class="panel" x="28" y="88" width="500" height="150" rx="12" />
-  <line class="axis" x1="88" y1="197" x2="488" y2="197" />
+  <rect class="panel" x="28" y="88" width="500" height="162" rx="12" />
+  <line class="axis" x1="88" y1="202" x2="488" y2="202" />
   <text x="52" y="123" class="small">npm</text>
   <rect class="bar-npm" x="88" y="104" width="{npm_width}" height="28" rx="6" />
   <text x="{min(498, 100 + npm_width)}" y="124" class="label">{npm}</text>
   <text x="52" y="171" class="small">PyPI</text>
   <rect class="bar-pypi" x="88" y="152" width="{pypi_width}" height="28" rx="6" />
   <text x="{min(498, 100 + pypi_width)}" y="172" class="label">{pypi}</text>
-  <text x="88" y="220" class="small">@vivary/create weekly</text>
-  <text x="302" y="220" class="small">create-vivary weekly</text>
+  <text x="88" y="226" class="small">all package downloads last week: {package_weekly}</text>
 
-  <rect class="panel" x="552" y="88" width="180" height="68" rx="12" />
+  <rect class="panel" x="552" y="88" width="180" height="48" rx="12" />
   <text x="572" y="116" class="small">GitHub stars</text>
-  <text x="572" y="145" class="value">{stars}</text>
+  <text x="668" y="120" class="value">{stars}</text>
 
-  <rect class="panel" x="552" y="170" width="180" height="68" rx="12" />
-  <text x="572" y="198" class="small">Forks</text>
-  <text x="572" y="227" class="value">{forks}</text>
+  <rect class="panel" x="552" y="148" width="180" height="48" rx="12" />
+  <text x="572" y="176" class="small">Open issues</text>
+  <text x="668" y="180" class="value">{issues}</text>
 
-  <text x="28" y="260" class="small">Tracked by .github/workflows/track-stats.yml through reviewed PR snapshots. History rows: {history_count}.</text>
+  <rect class="panel" x="552" y="208" width="180" height="48" rx="12" />
+  <text x="572" y="236" class="small">Release assets</text>
+  <text x="668" y="240" class="value">{release_downloads}</text>
+
+  <text x="28" y="278" class="small">Tracked daily by .github/workflows/track-stats.yml through reviewed PR snapshots. History rows: {history_count}.</text>
 </svg>
 """
 
@@ -173,10 +356,18 @@ def main() -> None:
     write_text_lf(SVG_PATH, svg)
     write_text_lf(SITE_SVG_PATH, svg)
     print(
-        "npm/wk:{npm_weekly} pypi/wk:{pypi_weekly} stars:{github_stars} forks:{github_forks}".format(
-            **snapshot
+        "npm/wk:{npm_weekly} pypi/wk:{pypi_weekly} package/wk:{package_weekly} "
+        "stars:{github_stars} forks:{github_forks} status:{status}".format(
+            npm_weekly=snapshot["totals"]["npm_weekly"],
+            pypi_weekly=snapshot["totals"]["pypi_weekly"],
+            package_weekly=snapshot["totals"]["package_weekly"],
+            github_stars=snapshot["github"]["stars"],
+            github_forks=snapshot["github"]["forks"],
+            status=snapshot["status"],
         )
     )
+    for warning in snapshot["warnings"]:
+        print(f"warn: {warning}")
 
 
 if __name__ == "__main__":
