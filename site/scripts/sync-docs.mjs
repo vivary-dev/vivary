@@ -12,6 +12,11 @@ const docsDir = path.join(repoRoot, 'docs');
 const outDir = path.resolve(here, '..', 'src', 'content', 'docs');
 const GH = 'https://github.com/vivary-dev/vivary/blob/dev';
 
+const normalizeForCompare = (p) => {
+  const normalized = path.normalize(p);
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+};
+
 // canonical doc -> [route slug, page title, meta description]
 const pages = [
   ['CONCEPTS', 'concepts', 'What is Vivary?', 'Plain-language intro: what Vivary is, the core ideas, and a glossary. Start here.'],
@@ -65,6 +70,24 @@ const assertRegularFileInside = (root, filePath, label) => {
   }
 };
 
+const assertRegularDirectory = (dirPath, label) => {
+  const resolved = path.resolve(dirPath);
+  const linkStat = fs.lstatSync(resolved);
+  if (linkStat.isSymbolicLink()) {
+    throw new Error(`${label} must not be a symlink: ${resolved}`);
+  }
+
+  const stat = fs.statSync(resolved);
+  if (!stat.isDirectory()) {
+    throw new Error(`${label} must be a directory: ${resolved}`);
+  }
+
+  const real = fs.realpathSync(resolved);
+  if (normalizeForCompare(real) !== normalizeForCompare(resolved)) {
+    throw new Error(`${label} must not resolve through a symlink: ${resolved} -> ${real}`);
+  }
+};
+
 const readCanonicalMarkdown = (root, relativePath, label) => {
   const filePath = path.join(root, relativePath);
   assertRegularFileInside(root, filePath, label);
@@ -80,6 +103,8 @@ const render = (raw, title, desc) => {
   const body = rewrite(lines.join('\n')).replace(/^\n+/, '');
   return `---\ntitle: ${JSON.stringify(title)}\ndescription: ${JSON.stringify(desc)}\n---\n\n${body}`;
 };
+
+assertRegularDirectory(docsDir, 'docs/');
 
 fs.mkdirSync(outDir, { recursive: true });
 for (const [src, slug, title, desc] of pages) {
