@@ -146,6 +146,10 @@ Published packages are `vivary-tropo` **0.2.3**, `vivary-exo` **0.2.2**,
 0.2.5 for new scaffolds. It's young — APIs may move before `1.0`. File issues for
 rough edges.
 
+The versions differ on purpose: the layers are independently versioned. This security
+batch changed scaffolding, graph output, and claim writes; it did not change ozone's
+review CLI.
+
 ### Where do I report bugs or ask for features?
 GitHub: [github.com/vivary-dev/vivary](https://github.com/vivary-dev/vivary). See the
 open issues for what's planned next.

@@ -33,6 +33,11 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 | Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
+Versions are intentionally independent across the four layers: `create-vivary` moved
+the most because it owns the scaffold and npm launcher, `tropo` and `exo` took the
+security write-boundary patches, and `ozone` stayed at 0.1.0 because this release did
+not change the review CLI.
+
 ## Public Signals
 
 ![Vivary public usage snapshot](stats/usage-snapshot.svg)

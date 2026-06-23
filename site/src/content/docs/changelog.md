@@ -59,11 +59,12 @@ ships the merged security-hardening batch from the June 23 security scan review.
 
 ### Release note
 
-PyPI `vivary-tropo==0.2.3`, `vivary-exo==0.2.2`, and `create-vivary==0.2.4`
-were uploaded during release validation; `create-vivary==0.2.5` supersedes the
-scaffolder upload with the `uvx` embedded-install fallback. npm publishing and
-final public registry smoke verification remain the manual gate before this line
-is promoted.
+Published through the manual human gate as `vivary-tropo==0.2.3`,
+`vivary-exo==0.2.2`, `create-vivary==0.2.5`, and `@vivary/create@0.2.5`.
+`create-vivary==0.2.4` was uploaded during release validation, then superseded by
+0.2.5 after the public `uvx` smoke exposed the embedded-install fallback bug.
+Verified from public PyPI/npm registries plus fresh `uvx` and `npm exec` scaffold
+smokes.
 
 ## [vivary-tropo 0.2.2 / vivary-exo 0.2.1] — 2026-06-22
 
