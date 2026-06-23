@@ -3,7 +3,9 @@ import { getCollection, render } from 'astro:content';
 
 export async function getStaticPaths() {
   const posts = await getCollection('blog');
-  return posts.map((post) => ({ params: { slug: post.id }, props: { post } }));
+  return posts
+    .filter((post) => import.meta.env.PROD ? !post.data.draft : true)
+    .map((post) => ({ params: { slug: post.id }, props: { post } }));
 }
 
 const repo = 'https://github.com/vivary-dev/vivary';
