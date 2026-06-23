@@ -4,7 +4,7 @@ Short, copy-paste recipes for common tasks. New to Vivary? Do the [getting start
 guide](/getting-started/) first, then use these when you hit a specific job.
 
 Each recipe assumes the CLIs are installed (`pip install vivary-tropo
-vivary-ozone vivary-exo create-vivary==0.2.3`) or run via `uvx`. Run commands from
+vivary-ozone vivary-exo create-vivary==0.2.4`) or run via `uvx`. Run commands from
 inside a workspace unless `--root` is given.
 
 ## Scaffold a new workspace
@@ -120,11 +120,10 @@ tropo check
 ```
 
 `exo claim` writes only to work items under `changes/`. It refuses to run unless
-`assignee` is declared by the effective tropo config. The current `dev` line also
-rejects symlinked or out-of-workspace work item files and rewrites the workspace file
-without mutating hard-linked targets outside it; that hardening remains unreleased
-until the next package cut. Single-agent workspaces stay free of coordination fields
-they do not use. `exo roles` still lists the bounded contracts to hand workers.
+`assignee` is declared by the effective tropo config, rejects symlinked or
+out-of-workspace work item files, and rewrites the workspace file without mutating
+hard-linked targets outside it. Single-agent workspaces stay free of coordination
+fields they do not use. `exo roles` still lists the bounded contracts to hand workers.
 
 ## Set up LanceDB search (embedded backend)
 

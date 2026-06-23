@@ -112,7 +112,7 @@ python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # cl
 ```
 
 Current release truth lives in [README.md](README.md) and [CHANGELOG.md](CHANGELOG.md):
-`create-vivary` / `@vivary/create` 0.2.3, `vivary-tropo` 0.2.2,
-`vivary-exo` 0.2.1, and `vivary-ozone` 0.1.0. The `dev` branch may contain
-Unreleased security hardening that is not published yet; check [CHANGELOG.md](CHANGELOG.md)
-before making package claims. Full guides live in [docs/](docs/).
+`create-vivary` / `@vivary/create` 0.2.4, `vivary-tropo` 0.2.3,
+`vivary-exo` 0.2.2, and `vivary-ozone` 0.1.0. The June 23 package set carries
+the security-hardening batch for privacy ignores, symlink/out-of-root writes,
+hard-link-safe rewrites, and private heartbeat reports. Full guides live in [docs/](docs/).

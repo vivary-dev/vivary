@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "create-vivary"
-version = "0.2.3"
+version = "0.2.4"
 description = "Scaffold a complete Vivary agent workspace — the create-t3-app for agent-native workspaces."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,7 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Software Development :: Code Generators",
 ]
-dependencies = ["vivary-tropo>=0.2.0"]
+dependencies = ["vivary-tropo>=0.2.3"]
 
 [project.urls]
 Homepage = "https://vivary.vercel.app/"

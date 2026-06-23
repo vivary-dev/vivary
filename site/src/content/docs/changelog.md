@@ -8,13 +8,13 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current versions:** `vivary-tropo` **0.2.2** · `vivary-exo` **0.2.1** · `create-vivary` / `@vivary/create` **0.2.3** · `vivary-ozone` **0.1.0**.
+**Current versions:** `vivary-tropo` **0.2.3** · `vivary-exo` **0.2.2** · `create-vivary` / `@vivary/create` **0.2.4** · `vivary-ozone` **0.1.0**.
 
-## [Unreleased]
+## [vivary-tropo 0.2.3 / vivary-exo 0.2.2 / create-vivary 0.2.4] — 2026-06-23
 
 Affects `vivary-tropo`, `vivary-exo`, `create-vivary` / `@vivary/create`,
-`strato` workspace assets, and public docs/site release surfaces. These fixes are
-merged to `dev`; publishing remains a manual human gate.
+`strato` workspace assets, and public docs/site release surfaces. This package set
+ships the merged security-hardening batch from the June 23 security scan review.
 
 ### Security
 
@@ -41,9 +41,21 @@ merged to `dev`; publishing remains a manual human gate.
 ### Documentation
 
 - **Security-hardening release truth** — README, FAQ, command docs, package READMEs,
-  `SECURITY.md`, `HANDOFF.md`, and the website now call out the pending dev-line
-  hardening batch without implying that new package versions have already been
-  published.
+  `SECURITY.md`, `HANDOFF.md`, and the website now identify the package versions that
+  carry the hardening batch.
+
+### Changed
+
+- `vivary-exo` now depends on `vivary-tropo>=0.2.3` so installed claim workflows use
+  the hard-link-safe write behavior.
+- `create-vivary` now depends on `vivary-tropo>=0.2.3`, and the npm launcher
+  version `@vivary/create@0.2.4` pins the matching `create-vivary==0.2.4` PyPI
+  scaffolder.
+
+### Release note
+
+Publishing and public registry verification are part of this release goal; update
+this note with the final PyPI/npm smoke commands after the package uploads complete.
 
 ## [vivary-tropo 0.2.2 / vivary-exo 0.2.1] — 2026-06-22
 

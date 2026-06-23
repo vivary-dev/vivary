@@ -17,20 +17,19 @@ A *vivary* is an archaic word for a vivarium: a self-contained world where livin
 things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
-> Release status: **0.2.3 is current** for the scaffolder (`create-vivary` /
-> `@vivary/create`), **0.2.2** for `vivary-tropo`, **0.2.1** for `vivary-exo`,
-> and **0.1.0** for `vivary-ozone`. Use 0.2.3 for new scaffolds.
-> The current `dev` line also contains an unreleased security-hardening batch for
-> scaffold privacy ignores, symlink/out-of-root writes, hard-link-safe rewrites, and
-> private heartbeat reports; see [CHANGELOG.md](CHANGELOG.md) before cutting packages.
+> Release status: **0.2.4 is current** for the scaffolder (`create-vivary` /
+> `@vivary/create`), **0.2.3** for `vivary-tropo`, **0.2.2** for `vivary-exo`,
+> and **0.1.0** for `vivary-ozone`. Use 0.2.4 for new scaffolds.
+> This package set carries the security-hardening batch for scaffold privacy ignores,
+> symlink/out-of-root writes, hard-link-safe rewrites, and private heartbeat reports.
 
 | Surface | Current | Link |
 |---|---:|---|
-| `create-vivary` (PyPI) | 0.2.3 | [PyPI](https://pypi.org/project/create-vivary/) |
-| `@vivary/create` (npm) | 0.2.3 | [npm](https://www.npmjs.com/package/@vivary/create) |
-| `vivary-tropo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-tropo/) |
+| `create-vivary` (PyPI) | 0.2.4 | [PyPI](https://pypi.org/project/create-vivary/) |
+| `@vivary/create` (npm) | 0.2.4 | [npm](https://www.npmjs.com/package/@vivary/create) |
+| `vivary-tropo` | 0.2.3 | [PyPI](https://pypi.org/project/vivary-tropo/) |
 | `vivary-ozone` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
-| `vivary-exo` | 0.2.1 | [PyPI](https://pypi.org/project/vivary-exo/) |
+| `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
 | Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
@@ -68,7 +67,7 @@ npm create @vivary@latest my-workspace        # pick: second brain · coding · 
 Or install the CLIs from PyPI (run on demand with `uvx`, no install needed):
 
 ```bash
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.3
+pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.4
 create-vivary init my-workspace --preset coding     # interactive wizard on a TTY
 create-vivary init my-codebase --preset coding --active-context cocoindex-code
 create-vivary doctor my-workspace

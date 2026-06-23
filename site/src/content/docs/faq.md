@@ -121,7 +121,7 @@ PyPI has no scopes and the bare names `tropo`/`ozone`/`exo` were taken, so the
 stay `tropo` / `ozone` / `exo`. On npm the scaffolder is `@vivary/create`.
 
 ### How do I install / run it?
-`pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.3`, or run on demand with
+`pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.4`, or run on demand with
 `uvx vivary-tropo ...`, or scaffold with `npm create @vivary@latest`. Python 3.11+ only;
 zero third-party dependencies.
 
@@ -136,21 +136,18 @@ installs, enabling hooks, destructive ops, and sending data of unknown sensitivi
 agent is bold *inside* the work and careful at the *edges*.
 
 ### What did the latest security-hardening batch cover?
-The current `dev` line, not the currently published packages, hardens local file
-boundaries before the next package cut:
+The June 23 package set hardens local file boundaries:
 `create-vivary` refuses symlinked or out-of-workspace scaffold destinations, `doctor`
 checks active `.gitignore` rules for private files and heartbeat reports,
 `tropo view --out` keeps generated HTML writes inside the tropo root, and `exo claim`
 rewrites the workspace file without mutating hard-linked files outside it. See the
-changelog's Unreleased section for the exact package surfaces.
+changelog for the exact package surfaces.
 
 ### Is it stable? What's the version?
-Published packages are still `vivary-tropo` **0.2.2**, `vivary-exo` **0.2.1**,
-`create-vivary` / `@vivary/create` **0.2.3**, and `vivary-ozone` **0.1.0**. Use
-0.2.3 for new scaffolds. The current `dev` branch has additional unreleased
-security-hardening fixes; the [CHANGELOG](https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md)
-is the release-truth surface until those package versions are cut. It's young — APIs
-may move before `1.0`. File issues for rough edges.
+Published packages are `vivary-tropo` **0.2.3**, `vivary-exo` **0.2.2**,
+`create-vivary` / `@vivary/create` **0.2.4**, and `vivary-ozone` **0.1.0**. Use
+0.2.4 for new scaffolds. It's young — APIs may move before `1.0`. File issues for
+rough edges.
 
 ### Where do I report bugs or ask for features?
 GitHub: [github.com/vivary-dev/vivary](https://github.com/vivary-dev/vivary). See the

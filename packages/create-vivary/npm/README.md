@@ -5,14 +5,13 @@ workspace — typed knowledge graph (tropo), agent OS (strato), and starter grap
 one command. Generated modules use `modules/<id>/index.md` routers so agents load
 context progressively.
 
-**Current release:** 0.2.3. Use 0.2.3 for new installs; no migration is expected
-from 0.2.1 or 0.2.2.
+**Current release:** 0.2.4. Use 0.2.4 for new installs; no migration is expected
+from 0.2.1, 0.2.2, or 0.2.3.
 
-**Dev-line hardening:** the current `dev` branch adds unreleased scaffold/privacy
-hardening: active `.gitignore` validation for `USER.md`, `MEMORY.md`, `memory/*`, and
-`heartbeat-reports/*`; private heartbeat report scaffolding; and stronger refusal of
-symlinked or out-of-workspace scaffold/storage/cleanup paths. Do not claim these are in
-the published 0.2.3 npm launcher until the next package cut lands.
+**Security hardening:** 0.2.4 validates active `.gitignore` rules for `USER.md`,
+`MEMORY.md`, `memory/*`, and `heartbeat-reports/*`; scaffolds private heartbeat report
+storage; and refuses symlinked or out-of-workspace scaffold, storage, and cleanup
+paths.
 
 ```bash
 npm create @vivary@latest my-workspace -- --preset coding
@@ -43,9 +42,9 @@ This package is a thin launcher: it runs the Python `create-vivary` scaffolder v
 scaffolder stays one source of truth in Python while you get a Node-native entry
 point. **Python 3.11+ and uv (or pipx) must already be installed.**
 
-Prefer Python directly? `uvx create-vivary@0.2.3 my-workspace --preset coding` — a bare
+Prefer Python directly? `uvx create-vivary@0.2.4 my-workspace --preset coding` — a bare
 target defaults to `init` there too (the PyPI `create-vivary` is versioned in lockstep
-with this launcher) — or `pip install create-vivary==0.2.3`.
+with this launcher) — or `pip install create-vivary==0.2.4`.
 
 For coding workspaces, `--active-context cocoindex-code` scaffolds optional
 CocoIndex-code guidance and ignored sidecar state. It does not auto-install, index, or

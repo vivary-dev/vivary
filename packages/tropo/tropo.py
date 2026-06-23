@@ -34,7 +34,7 @@ import tempfile
 import tomllib
 from collections import Counter, deque
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 # ---------------------------------------------------------------------------
 # Minimal YAML-subset parser for frontmatter (zero-dependency).
