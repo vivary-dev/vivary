@@ -39,8 +39,11 @@ module index before opening deeper context:
 
 The command is local-only. With `--storage embedded` or `--auto` on a large workspace, it
 self-installs `vivary-tropo[embedded]` (LanceDB) with a confirmation prompt, or silently
-with `--yes`. Use `--dry-run` to simulate without writing or installing anything. For
-scripted storage selection, pass `--no-wizard --storage embedded --yes` or use `--auto`;
+with `--yes`. Scaffold writes, storage config writes, and stale generated cleanup
+refuse symlinked destination parents, including when `--force` is used, so output
+stays inside the selected target. Use `--dry-run` to simulate without writing,
+installing, or cleaning stale files. For scripted storage selection, pass
+`--no-wizard --storage embedded --yes` or use `--auto`;
 in human mode, the wizard asks and its answers drive storage.
 
 For coding workspaces, `--active-context cocoindex-code` adds an optional

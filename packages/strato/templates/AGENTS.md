@@ -65,5 +65,5 @@ and memory mirror it). Run a heartbeat on the chosen cadence — see the strato 
 
 ## Privacy
 
-PRIV lives only in `USER.md` / `MEMORY.md` / `memory/*` (gitignored). Never commit
-secrets, private names, credentials, or machine paths.
+PRIV lives only in `USER.md` / `MEMORY.md` / `memory/*` / `heartbeat-reports/*`
+(gitignored). Never commit secrets, private names, credentials, or machine paths.

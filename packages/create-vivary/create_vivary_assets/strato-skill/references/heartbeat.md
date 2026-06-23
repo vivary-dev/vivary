@@ -29,9 +29,11 @@ confirmation.
 
 ## Report
 
-Write one file, `heartbeat-reports/YYYY-MM-DD-heartbeat.md`, with sections in the order
-above (run summary first). Then summarize in chat in three lines max: how many things
-need attention, how many were resolved (deep), what to look at first.
+Write one private, gitignored file, `heartbeat-reports/YYYY-MM-DD-heartbeat.md`, with
+sections in the order above (run summary first). Treat it as PRIV because it may
+contain memory-derived findings; do not copy report content into public files, PRs, or
+external tools. Then summarize in chat in three lines max: how many things need
+attention, how many were resolved (deep), what to look at first.
 
 ## Boundaries
 

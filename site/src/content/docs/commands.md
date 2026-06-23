@@ -169,7 +169,7 @@ writer, and it refuses to write unless the workspace declares `assignee` through
 |---|---|
 | `conflicts` | Among **active** work items (changes with `status: active`), flags pairs that share an outbound target — two in-flight changes touching the same node. |
 | `board` | Work items grouped by `status` (and `@assignee` if the workspace declares one). |
-| `claim <id> --agent <handle>` | Claim a work item under `changes/` by setting top-level `assignee`; optional leading `@` is accepted and stripped before storage. |
+| `claim <id> --agent <handle>` | Claim a work item under `changes/` by setting top-level `assignee`; optional leading `@` is accepted and stripped before storage. Refuses symlinked or out-of-workspace work item files and replaces the workspace file instead of truncating hard-linked targets. |
 | `roles` | The bounded worker contracts: Orchestrator · Scout · Researcher · Builder · Verifier · Reviewer · Archivist. |
 
 ```bash
@@ -205,14 +205,14 @@ create-vivary doctor <target> [--json]
 | Flag | Effect |
 |---|---|
 | `--preset coding\|second-brain\|writing` | Which starter graph to seed (default `coding`). |
-| `--force` | Overwrite existing scaffold files. |
+| `--force` | Overwrite existing scaffold files and remove stale generated files, but still refuses symlinked destination parents or paths that resolve outside the target workspace. |
 | `--obsidian` | Also drop an opt-in Obsidian vault config (graph coloured by type). |
 | `--active-context cocoindex-code` | For `coding` workspaces, add CocoIndex-code sidecar profile (skill, docs, graph nodes, gitignore). Does not auto-install or enable MCP. |
 | `--storage auto\|file\|embedded\|cloud` | Storage backend to configure. `auto` = LanceDB locally. Default: `file` (no new deps). Cloud writes config only; the tropo cloud backend is future 0.3.x work. |
 | `--provider lancedb\|sqlite-vec\|qdrant\|astra` | Which implementation to use for the selected tier. `lancedb` is the shipped embedded provider. |
 | `--auto` | **Agent mode.** Skip all interactive prompts; pick the best option from explicit `--storage`, `--privacy`, and `--size` hints. |
 | `--yes` | Auto-confirm installs and confirmations. Safe to combine with `--auto` for fully non-interactive agent use. |
-| `--dry-run` | Print what would be scaffolded and installed; do nothing. |
+| `--dry-run` | Print what would be scaffolded and installed; do not write, install, or clean stale files. |
 | `--json` | Machine-readable output. Reports `ok`, `root`, `preset`, `storage`, `provider`, `installed`, `files`, `config`, and `dry_run`. |
 | `--size small\|medium\|large` | Hint for `--auto` storage decisions. Agents can pass this after inspecting the repo. |
 | `--privacy local\|cloud` | Hint for `--auto` storage decisions. |
