@@ -30,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import tomllib
 from collections import Counter, deque
 
@@ -1507,15 +1508,29 @@ def _write_workspace_file(root, path, text):
         if not _is_within(root_real, os.path.realpath(target_abs)):
             raise ConfigError(f"output path must stay inside tropo root: {path}")
 
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{os.path.basename(target_abs)}.",
+        suffix=".tropo-tmp",
+        dir=os.path.dirname(target_abs) or os.curdir,
+    )
     try:
-        fd = os.open(target_abs, flags, 0o666)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        if os.path.lexists(target_abs):
+            if os.path.islink(target_abs):
+                raise ConfigError(f"output path must not be a symlink: {path}")
+            if not os.path.isfile(target_abs):
+                raise ConfigError(f"output path must be a regular file: {path}")
+            if not _is_within(root_real, os.path.realpath(target_abs)):
+                raise ConfigError(f"output path must stay inside tropo root: {path}")
+        if not _is_within(root_real, os.path.realpath(os.path.dirname(target_abs) or os.curdir)):
+            raise ConfigError(f"output path must stay inside tropo root: {path}")
+        os.replace(tmp_name, target_abs)
     except OSError as e:
         raise ConfigError(f"could not write output {path}: {e.strerror}") from e
-    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(text)
+    finally:
+        if os.path.lexists(tmp_name):
+            os.unlink(tmp_name)
 
 
 def cmd_view(args, resolver):

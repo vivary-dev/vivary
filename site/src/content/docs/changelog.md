@@ -10,6 +10,14 @@ the `v0.1.0` line.
 
 **Current versions:** `vivary-tropo` **0.2.2** · `vivary-exo` **0.2.1** · `create-vivary` / `@vivary/create` **0.2.3** · `vivary-ozone` **0.1.0**.
 
+## Unreleased
+
+### Fixed
+
+- **`tropo view --out` output hardening** — rendered HTML writes must stay inside
+  the tropo root, refuse symlink output paths, and replace the output path instead
+  of truncating existing hard-linked files.
+
 ## [vivary-tropo 0.2.2 / vivary-exo 0.2.1] — 2026-06-22
 
 Affects `vivary-tropo` and `vivary-exo` only. `create-vivary` / `@vivary/create`

@@ -505,6 +505,28 @@ def test_view_out_rejects_outside_root(tmp_path):
     assert not out.exists()
 
 
+def test_view_out_replaces_hard_link_without_mutating_outside_file(tmp_path):
+    _graph_tree(tmp_path, {"a.md": "# A\n"})
+    outside = tmp_path.parent / f"outside-{uuid.uuid4().hex}.html"
+    outside_text = "<!doctype html><title>outside</title>"
+    outside.write_text(outside_text, encoding="utf-8")
+    out = tmp_path / "g.html"
+    try:
+        os.link(outside, out)
+    except (AttributeError, NotImplementedError, OSError):
+        outside.unlink(missing_ok=True)
+        return
+
+    try:
+        tropo.cmd_view(argparse.Namespace(paths=["graph"], depth=None, out=str(out)),
+                       res(str(tmp_path)))
+        assert outside.read_text(encoding="utf-8") == outside_text
+        _assert_self_contained(out.read_text(encoding="utf-8"))
+    finally:
+        out.unlink(missing_ok=True)
+        outside.unlink(missing_ok=True)
+
+
 def test_view_blast_subgraph_only_radius(tmp_path):
     _graph_tree(tmp_path, {"a.md": "---\ndepends_on: b\n---\n# A\n",
                            "b.md": "---\ndepends_on: c\n---\n# B\n",

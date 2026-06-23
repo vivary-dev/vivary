@@ -26,7 +26,7 @@ python tropo.py types  --root examples/vault    # the resolved type registry
 python tropo.py check  --root examples/vault    # validate — opinionated: warnings fail too (--lenient to relax)
 python tropo.py signal --root examples/vault    # print ONLY the irreducible metadata
 python tropo.py graph  --root examples/vault    # emit typed nodes + edges
-python tropo.py view   --root examples/vault --out graph.html
+python tropo.py view   --root examples/vault --out examples/vault/graph.html
 python tropo.py fix    --dry-run                 # preview redundant-frontmatter removal
 python tropo.py query "meeting notes" --root examples/vault   # search the graph
 python tropo.py migrate --from file --to embedded --root my-vault --yes  # switch to LanceDB
