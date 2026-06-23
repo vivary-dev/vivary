@@ -7,7 +7,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const docsDir = path.resolve(here, '..', '..', 'docs');
+const repoRoot = path.resolve(here, '..', '..');
+const docsDir = path.join(repoRoot, 'docs');
 const outDir = path.resolve(here, '..', 'src', 'content', 'docs');
 const GH = 'https://github.com/vivary-dev/vivary/blob/dev';
 
@@ -44,6 +45,32 @@ const rewrite = (s) =>
    .replaceAll('](../packages/tropo/SPEC.md)', `](${GH}/packages/tropo/SPEC.md)`)
    .replaceAll('](../HANDOFF.md)', `](${GH}/HANDOFF.md)`);
 
+const assertRegularFileInside = (root, filePath, label) => {
+  const rootReal = fs.realpathSync(root);
+  const fileReal = fs.realpathSync(filePath);
+  const rel = path.relative(rootReal, fileReal);
+
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`${label} resolves outside ${rootReal}: ${fileReal}`);
+  }
+
+  const linkStat = fs.lstatSync(filePath);
+  if (linkStat.isSymbolicLink()) {
+    throw new Error(`${label} must not be a symlink: ${filePath}`);
+  }
+
+  const stat = fs.statSync(filePath);
+  if (!stat.isFile()) {
+    throw new Error(`${label} must be a regular file: ${filePath}`);
+  }
+};
+
+const readCanonicalMarkdown = (root, relativePath, label) => {
+  const filePath = path.join(root, relativePath);
+  assertRegularFileInside(root, filePath, label);
+  return fs.readFileSync(filePath, 'utf8');
+};
+
 // Render a canonical Markdown doc into a Starlight content page: drop the leading H1
 // (Starlight renders the frontmatter title), rewrite links, prepend frontmatter.
 // JSON.stringify gives a valid double-quoted YAML scalar (handles ':' etc.)
@@ -56,14 +83,14 @@ const render = (raw, title, desc) => {
 
 fs.mkdirSync(outDir, { recursive: true });
 for (const [src, slug, title, desc] of pages) {
-  const raw = fs.readFileSync(path.join(docsDir, `${src}.md`), 'utf8');
+  const raw = readCanonicalMarkdown(docsDir, `${src}.md`, `docs/${src}.md`);
   fs.writeFileSync(path.join(outDir, `${slug}.md`), render(raw, title, desc));
   console.log(`  synced docs/${src}.md -> ${slug}.md`);
 }
 
 // The changelog is canonical at the repo root (CHANGELOG.md), not under docs/. Surface
 // it as a site page so it refreshes on every build whenever CHANGELOG.md is updated.
-const changelog = fs.readFileSync(path.resolve(here, '..', '..', 'CHANGELOG.md'), 'utf8');
+const changelog = readCanonicalMarkdown(repoRoot, 'CHANGELOG.md', 'CHANGELOG.md');
 fs.writeFileSync(
   path.join(outDir, 'changelog.md'),
   render(changelog, 'Changelog', 'Release history for the Vivary packages.'),
