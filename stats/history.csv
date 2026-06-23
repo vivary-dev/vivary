@@ -1,3 +1,4 @@
-date,npm_weekly,pypi_weekly,github_stars,github_forks
-2026-06-21,259,279,1,0
-2026-06-22,259,452,1,0
+date,npm_weekly,pypi_weekly,package_weekly,github_stars,github_forks,github_open_issues,github_release_downloads,stale_sources
+2026-06-21,259,279,,1,0,,,
+2026-06-22,259,452,,1,0,,,
+2026-06-23,446,1479,1925,1,0,7,0,

@@ -42,7 +42,7 @@ not change the review CLI.
 
 ![Vivary public usage snapshot](stats/usage-snapshot.svg)
 
-Vivary tracks public npm, PyPI, and GitHub signals through reviewed weekly PR
+Vivary tracks public npm, PyPI, and GitHub signals through reviewed daily PR
 snapshots. The chart is generated from [`stats/latest.json`](stats/latest.json) and
 [`stats/history.csv`](stats/history.csv); see [docs/SIGNALS.md](docs/SIGNALS.md) for
 sources and caveats.

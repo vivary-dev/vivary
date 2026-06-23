@@ -2,7 +2,7 @@ name: track-stats
 
 on:
   schedule:
-    - cron: '0 9 * * 1'   # Every Monday 09:00 UTC
+    - cron: '17 9 * * *'   # Every day 09:17 UTC
   workflow_dispatch:        # Also runnable manually
 
 permissions:
@@ -22,27 +22,49 @@ jobs:
       - name: fetch and record
         run: python3 tools/update_stats.py
 
+      - name: verify stats snapshot
+        run: |
+          python3 - <<'PY'
+          import csv
+          import json
+          from pathlib import Path
+
+          latest = json.loads(Path("stats/latest.json").read_text())
+          assert latest["date"], "latest snapshot needs date"
+          assert latest["status"] in {"ok", "stale"}, latest["status"]
+          assert latest["totals"]["npm_weekly"] > 0, latest["totals"]
+          assert latest["totals"]["pypi_weekly"] > 0, latest["totals"]
+          assert latest["totals"]["package_weekly"] == latest["totals"]["npm_weekly"] + latest["totals"]["pypi_weekly"]
+          assert "@vivary/create" in latest["npm"]["packages"]
+          for package in ["create-vivary", "vivary-tropo", "vivary-ozone", "vivary-exo"]:
+              assert package in latest["pypi"]["packages"], package
+          rows = list(csv.DictReader(Path("stats/history.csv").open(newline="", encoding="utf-8")))
+          assert rows and rows[-1]["date"] == latest["date"], "history must include latest row"
+          PY
+
       - name: open stats update PR
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add stats/
+          git add stats/ site/public/usage-snapshot.svg
           if git diff --staged --quiet; then
             echo "no changes to commit"
           else
             DATE=$(date -u +%Y-%m-%d)
             NPM=$(python3 -c "import json; d=json.load(open('stats/latest.json')); print(d['npm_weekly'])")
             PYPI=$(python3 -c "import json; d=json.load(open('stats/latest.json')); print(d['pypi_weekly'])")
+            PACKAGE=$(python3 -c "import json; d=json.load(open('stats/latest.json')); print(d['totals']['package_weekly'])")
             STARS=$(python3 -c "import json; d=json.load(open('stats/latest.json')); print(d['github_stars'])")
+            STATUS=$(python3 -c "import json; d=json.load(open('stats/latest.json')); print(d['status'])")
             BRANCH="chore/stats-$DATE"
-            BODY="Automated stats snapshot.\n\n- npm weekly downloads: $NPM\n- PyPI weekly downloads: $PYPI\n- GitHub stars: $STARS"
+            BODY="Automated daily stats snapshot.\n\n- npm weekly downloads: $NPM\n- PyPI weekly downloads: $PYPI\n- all package weekly downloads: $PACKAGE\n- GitHub stars: $STARS\n- snapshot status: $STATUS"
             if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
               BRANCH="chore/stats-$DATE-${GITHUB_RUN_ID}"
             fi
             git switch -c "$BRANCH"
-            git commit -m "chore(stats): $DATE — npm/wk:$NPM pypi/wk:$PYPI ★$STARS"
+            git commit -m "chore(stats): $DATE daily snapshot"
             gh auth setup-git
             git push --set-upstream origin "$BRANCH"
             if gh pr view "$BRANCH" --json number --jq .number >/dev/null 2>&1; then

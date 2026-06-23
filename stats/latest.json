@@ -1,7 +1,74 @@
 {
-  "date": "2026-06-22",
-  "npm_weekly": 259,
-  "pypi_weekly": 452,
+  "date": "2026-06-23",
+  "generated_at": "2026-06-23T14:58:33Z",
+  "github": {
+    "forks": 0,
+    "open_issues": 7,
+    "pushed_at": "2026-06-23T12:50:42Z",
+    "release_asset_downloads": 0,
+    "release_assets": [],
+    "release_count": 5,
+    "stale": false,
+    "stars": 1,
+    "watchers": 0
+  },
+  "github_forks": 0,
   "github_stars": 1,
-  "github_forks": 0
+  "npm": {
+    "packages": {
+      "@vivary/create": {
+        "end": "2026-06-22",
+        "last_week": 446,
+        "stale": false,
+        "start": "2026-06-16",
+        "versions_last_week": {
+          "0.1.0": 11,
+          "0.1.1": 27,
+          "0.2.0": 137,
+          "0.2.2": 137,
+          "0.2.3": 134
+        }
+      }
+    },
+    "weekly_total": 446
+  },
+  "npm_weekly": 446,
+  "pypi": {
+    "packages": {
+      "create-vivary": {
+        "last_day": 155,
+        "last_month": 712,
+        "last_week": 464,
+        "stale": false
+      },
+      "vivary-exo": {
+        "last_day": 207,
+        "last_month": 339,
+        "last_week": 227,
+        "stale": false
+      },
+      "vivary-ozone": {
+        "last_day": 0,
+        "last_month": 154,
+        "last_week": 19,
+        "stale": false
+      },
+      "vivary-tropo": {
+        "last_day": 540,
+        "last_month": 1003,
+        "last_week": 769,
+        "stale": false
+      }
+    },
+    "weekly_total": 1479
+  },
+  "pypi_weekly": 1479,
+  "status": "ok",
+  "totals": {
+    "github_release_downloads": 0,
+    "npm_weekly": 446,
+    "package_weekly": 1925,
+    "pypi_weekly": 1479
+  },
+  "warnings": []
 }

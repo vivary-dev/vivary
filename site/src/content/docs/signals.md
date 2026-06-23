@@ -10,9 +10,9 @@ distribution signals without a private analytics dashboard.
 
 | Signal | Source | Notes |
 |---|---|---|
-| npm weekly downloads | `https://api.npmjs.org/downloads/point/last-week/%40vivary%2Fcreate` | Public weekly downloads for `@vivary/create`. |
-| PyPI weekly downloads | `https://pypistats.org/api/packages/create-vivary/recent` | Public recent downloads for `create-vivary`. PyPI stats can lag and filter mirrors/bots. |
-| GitHub stars/forks | `https://api.github.com/repos/vivary-dev/vivary` | Public repository signals only. |
+| npm weekly downloads | `https://api.npmjs.org/downloads/point/last-week/%40vivary%2Fcreate` and `https://api.npmjs.org/versions/%40vivary%2Fcreate/last-week` | Public weekly and per-version downloads for `@vivary/create`. |
+| PyPI weekly downloads | `https://pypistats.org/api/packages/<package>/recent` | Public recent downloads for `create-vivary`, `vivary-tropo`, `vivary-ozone`, and `vivary-exo`. PyPI stats can lag, rate-limit, and filter mirrors/bots. |
+| GitHub repo/release signals | `https://api.github.com/repos/vivary-dev/vivary` and `/releases` | Public repository stars, forks, issues, pushed time, release count, and release asset download counts. |
 
 The latest checked-in values live in [`stats/latest.json`](../stats/latest.json). The
 history lives in [`stats/history.csv`](../stats/history.csv).
@@ -21,7 +21,7 @@ history lives in [`stats/history.csv`](../stats/history.csv).
 
 ## Workflow
 
-`.github/workflows/track-stats.yml` runs weekly and on manual dispatch. It calls
+`.github/workflows/track-stats.yml` runs daily and on manual dispatch. It calls
 `tools/update_stats.py`, which updates:
 
 - `stats/latest.json`
@@ -32,6 +32,11 @@ history lives in [`stats/history.csv`](../stats/history.csv).
 The workflow opens a PR against `dev`; it does not write directly to `dev` or `prod`.
 If the normal daily stats branch already exists, the workflow creates a unique branch
 for that run instead of force-pushing over it.
+
+The updater retries transient registry failures. If a source fails but a previous
+value exists, the snapshot is marked `stale` and records the warning in
+`stats/latest.json` and `stats/history.csv`. If a source fails with no previous value,
+the workflow fails instead of writing fake zeroes.
 
 ## How to read the chart
 
