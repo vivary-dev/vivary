@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 from datetime import date
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 
@@ -216,9 +217,8 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
             if not (target / rel).exists():
                 errors.append(f"missing required file: {rel}")
 
-        gitignore = target / ".gitignore"
-        if gitignore.exists():
-            missing = _missing_privacy_ignores(gitignore)
+        if (target / ".gitignore").exists():
+            missing = _missing_privacy_ignores(target)
             errors.extend(f"privacy ignore missing: {pattern}" for pattern in missing)
         errors.extend(_module_index_errors(target))
 
@@ -268,33 +268,94 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
 
 
 
-def _missing_privacy_ignores(gitignore: Path) -> list[str]:
+def _missing_privacy_ignores(target: Path) -> list[str]:
     """Return privacy ignore patterns that are not active .gitignore rules.
 
     Doctor should reject comments, negated patterns, and larger unrelated patterns that
-    merely contain the sensitive filenames as substrings. The generated workspace uses
-    root-relative private files and a private memory directory, so accept only active
-    rules that match those boundaries directly.
+    merely contain the sensitive filenames as substrings. It also accounts for later
+    broad negations and nested memory/.gitignore files, since Git gives lower-level
+    ignore files precedence over parent rules.
     """
-    expected = {
-        "USER.md": {"USER.md", "/USER.md"},
-        "MEMORY.md": {"MEMORY.md", "/MEMORY.md"},
-        "memory/*": {"memory/*", "/memory/*"},
-    }
-    active = dict.fromkeys(expected, False)
+    rules = _privacy_ignore_rules(target / ".gitignore", base="")
+    memory_gitignore = target / "memory" / ".gitignore"
+    if memory_gitignore.exists():
+        rules.extend(_privacy_ignore_rules(memory_gitignore, base="memory"))
 
+    probes = {
+        "USER.md": ("USER.md",),
+        "MEMORY.md": ("MEMORY.md",),
+        "memory/*": ("memory/private.md", "memory/private.txt", "memory/secret.md"),
+    }
+
+    missing = [
+        required
+        for required, paths in probes.items()
+        if not all(_ignored_by_rules(rules, path) for path in paths)
+    ]
+    if "memory/*" not in missing and _has_unsafe_memory_exception(rules):
+        missing.append("memory/*")
+    return missing
+
+
+def _privacy_ignore_rules(gitignore: Path, *, base: str) -> list[tuple[str, bool, str]]:
+    rules: list[tuple[str, bool, str]] = []
     for raw_line in gitignore.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = raw_line.strip()
+        line = raw_line.rstrip(" ")
         if not line or line.startswith("#"):
             continue
 
         negated = line.startswith("!")
-        pattern = line[1:].strip() if negated else line
-        for required, accepted in expected.items():
-            if pattern in accepted:
-                active[required] = not negated
+        pattern = line[1:] if negated else line
+        if pattern:
+            rules.append((base, negated, pattern.replace("\\", "/")))
+    return rules
 
-    return [pattern for pattern, is_active in active.items() if not is_active]
+
+def _ignored_by_rules(rules: list[tuple[str, bool, str]], rel_path: str) -> bool:
+    ignored = False
+    for base, negated, pattern in rules:
+        if _ignore_rule_matches(base, pattern, rel_path):
+            ignored = not negated
+    return ignored
+
+
+def _ignore_rule_matches(base: str, pattern: str, rel_path: str) -> bool:
+    rel_path = rel_path.replace("\\", "/")
+    if base:
+        prefix = f"{base}/"
+        if not rel_path.startswith(prefix):
+            return False
+        scoped = rel_path[len(prefix):]
+    else:
+        scoped = rel_path
+
+    pattern = pattern.rstrip("/")
+    if pattern.startswith("/"):
+        pattern = pattern[1:]
+
+    if "/" not in pattern:
+        return fnmatchcase(Path(scoped).name, pattern)
+    return fnmatchcase(scoped, pattern)
+
+
+def _has_unsafe_memory_exception(rules: list[tuple[str, bool, str]]) -> bool:
+    allowed = {"memory/.gitkeep", "/memory/.gitkeep", ".gitkeep", "/.gitkeep"}
+    for base, negated, pattern in rules:
+        if not negated:
+            continue
+        normalized = pattern.lstrip("/")
+        if base == "memory":
+            if normalized not in {".gitkeep"}:
+                return True
+            continue
+        if normalized in {"memory/.gitkeep"}:
+            continue
+        if normalized.startswith("memory/"):
+            return True
+        if "/" not in normalized and normalized not in allowed:
+            return True
+
+    return False
 
 
 def _obsidian_writes(target: Path) -> list[tuple[Path, str]]:

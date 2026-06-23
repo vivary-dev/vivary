@@ -447,6 +447,69 @@ class CreateVivaryTests(unittest.TestCase):
 
             self.assertTrue(report["ok"], report)
 
+    def test_doctor_rejects_broad_privacy_negations(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / ".gitignore").write_text(
+                "/USER.md\n"
+                "/MEMORY.md\n"
+                "/memory/*\n"
+                "!memory/.gitkeep\n"
+                "!*.md\n"
+                "!memory/*.md\n",
+                encoding="utf-8",
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertFalse(report["ok"])
+            self.assertIn("privacy ignore missing: USER.md", report["errors"])
+            self.assertIn("privacy ignore missing: MEMORY.md", report["errors"])
+            self.assertIn("privacy ignore missing: memory/*", report["errors"])
+
+    def test_doctor_rejects_indented_privacy_ignores(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / ".gitignore").write_text(
+                " USER.md\n"
+                " MEMORY.md\n"
+                " memory/*\n",
+                encoding="utf-8",
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertFalse(report["ok"])
+            self.assertIn("privacy ignore missing: USER.md", report["errors"])
+            self.assertIn("privacy ignore missing: MEMORY.md", report["errors"])
+            self.assertIn("privacy ignore missing: memory/*", report["errors"])
+
+    def test_doctor_rejects_nested_memory_gitignore_negation(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / ".gitignore").write_text(
+                "/USER.md\n"
+                "/MEMORY.md\n"
+                "/memory/*\n"
+                "!memory/.gitkeep\n",
+                encoding="utf-8",
+            )
+            (target / "memory" / ".gitignore").write_text("!secret.md\n", encoding="utf-8")
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertFalse(report["ok"])
+            self.assertIn("privacy ignore missing: memory/*", report["errors"])
+
     def test_doctor_reports_missing_module_index(self):
         with temp_workspace() as td:
             target = Path(td) / "agent-workspace"
