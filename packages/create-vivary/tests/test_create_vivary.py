@@ -280,6 +280,26 @@ class CreateVivaryTests(unittest.TestCase):
             report = create_vivary.doctor_workspace(target, repo_root=ROOT)
             self.assertTrue(report["ok"], report)
 
+    def test_force_cleanup_does_not_follow_symlinked_parent_directories(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            target.mkdir()
+            outside = Path(td) / "outside-skills"
+            victim = outside / "active-context"
+            victim.mkdir(parents=True)
+            (victim / "sentinel.txt").write_text("do not delete\n", encoding="utf-8")
+            skills_parent = target / ".claude" / "skills"
+            skills_parent.parent.mkdir(parents=True)
+            skills_parent.symlink_to(outside, target_is_directory=True)
+
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=True, repo_root=ROOT
+            )
+
+            self.assertTrue(victim.exists())
+            self.assertTrue((victim / "sentinel.txt").exists())
+            self.assertTrue(skills_parent.is_symlink())
+
     def test_force_plain_prunes_active_context_artifacts_but_keeps_existing_index_ignored(self):
         with temp_workspace() as td:
             target = Path(td) / "agent-workspace"

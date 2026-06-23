@@ -175,7 +175,7 @@ def scaffold_workspace(
 
     copies = _copy_plan(target, sources, active_context=active_context)
     _ensure_no_conflicts([p for p, _ in writes] + [dst for _, dst in copies], force)
-    if force:
+    if force and not dry_run:
         _cleanup_stale_scaffold_state(target, active_context=active_context)
 
     created: list[Path] = []
@@ -423,11 +423,11 @@ def _cleanup_stale_scaffold_state(target: Path, *, active_context: str | None) -
     generated in older or optional profiles.
     """
     for path in _legacy_module_files(target):
-        _remove_path(path)
+        _remove_path(target, path)
 
     if active_context != "cocoindex-code":
         for path in _cocoindex_active_context_stale_paths(target):
-            _remove_path(path)
+            _remove_path(target, path)
 
 
 def _legacy_module_files(target: Path) -> list[Path]:
@@ -450,11 +450,29 @@ def _cocoindex_active_context_stale_paths(target: Path) -> list[Path]:
     ]
 
 
-def _remove_path(path: Path) -> None:
+def _remove_path(root: Path, path: Path) -> None:
+    root = root.resolve()
+    if not _is_safe_cleanup_target(root, path):
+        return
     if path.is_dir() and not path.is_symlink():
         shutil.rmtree(path)
     elif path.exists() or path.is_symlink():
         path.unlink()
+
+
+def _is_safe_cleanup_target(root: Path, path: Path) -> bool:
+    try:
+        path.relative_to(root)
+        path.resolve(strict=False).relative_to(root)
+    except ValueError:
+        return False
+
+    for parent in path.parents:
+        if parent == root:
+            return True
+        if parent.is_symlink():
+            return False
+    return False
 
 
 def _module_index_path(target: Path, module_id: str) -> Path:
