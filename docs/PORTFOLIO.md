@@ -46,8 +46,9 @@ Mobile:
   to load. Plain Markdown, any editor, Claude Code *and* Codex.
 
 > Current published release line verified 2026-06-22: `create-vivary` 0.2.3 (PyPI), `@vivary/create` 0.2.3 (npm), `vivary-tropo` 0.2.2, `vivary-exo` 0.2.1. The current `dev` line adds an unreleased security-hardening batch for private scaffold boundaries, hard-link-safe writes, and generated output paths.
-> Scaffold output captured from a real run — 39 files, doctor ok (9 nodes, 28
-> edges, 0 broken), `tropo check` 0 errors.
+> Published 0.2.3 scaffold output, verified from the `v0.2.3` tag: 38 files,
+> doctor ok (9 nodes, 28 edges), `tropo check` clean. Current `dev` writes 39
+> files with the same doctor counts.
 
 > Active-context branch proof, refreshed 2026-06-23: plain coding scaffold writes 39 files and
 > doctors clean at 9 nodes / 28 edges; `--active-context cocoindex-code` writes 45

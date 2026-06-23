@@ -133,7 +133,8 @@ installs, enabling hooks, destructive ops, and sending data of unknown sensitivi
 agent is bold *inside* the work and careful at the *edges*.
 
 ### What did the latest security-hardening batch cover?
-The current `dev` line hardens local file boundaries before the next package cut:
+The current `dev` line, not the currently published packages, hardens local file
+boundaries before the next package cut:
 `create-vivary` refuses symlinked or out-of-workspace scaffold destinations, `doctor`
 checks active `.gitignore` rules for private files and heartbeat reports,
 `tropo view --out` keeps generated HTML writes inside the tropo root, and `exo claim`

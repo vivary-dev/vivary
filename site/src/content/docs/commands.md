@@ -16,6 +16,12 @@ how you install them.
 - **Scaffold (npm):** `npm create @vivary@latest my-workspace` / `npx @vivary/create@latest my-workspace`
 - **From a repo checkout:** `python packages/tropo/tropo.py check`, etc.
 
+Security notes in this reference describe the current `dev` line when they mention
+symlink refusal, hard-link-safe rewrites, or active heartbeat-report ignore
+validation. Those hardening fixes are merged but remain **unreleased** until the next
+package cut; see the changelog's Unreleased section before relying on them from
+PyPI/npm packages.
+
 Exit codes are uniform: **`0`** success · **`1`** findings/errors · **`2`** usage/config
 error. Gate CI on the exit code; don't parse text. Every command takes `--json` for
 machine-readable output.
@@ -48,7 +54,7 @@ says. `tropo.toml` declares the types.
 | `stats` | Document counts per type + a health summary. |
 | `graph [--json]` | Emit the typed graph: nodes (`id`,`type`,`path`) + edges (`from`,`field`,`to`,`broken`). |
 | `blast <id> [--depth N]` | The **blast radius** of `<id>`: everything that (transitively) refs it — what a change could touch. |
-| `view [graph \| blast <id>] [--out FILE]` | Render the graph (or one radius) as a single self-contained HTML file. `--out` must stay inside the tropo root, refuse symlink targets, and rewrite the workspace output path without mutating hard-linked files outside the workspace. |
+| `view [graph \| blast <id>] [--out FILE]` | Render the graph (or one radius) as a single self-contained HTML file. **Current dev only:** `--out` must stay inside the tropo root, refuse symlink targets, and rewrite the workspace output path without mutating hard-linked files outside the workspace. |
 | `plan <change.toml>` | Simulate a change (remove/retype/break/add) and show the graph delta. |
 | `fix [--dry-run]` | Strip redundant frontmatter (`W210` — a field equal to its derived value). The only mechanical edit tropo makes. |
 | `init [DIR] [--packs a,b]` | Scaffold a `tropo.toml` (optionally composing reusable type packs). |
@@ -169,7 +175,7 @@ writer, and it refuses to write unless the workspace declares `assignee` through
 |---|---|
 | `conflicts` | Among **active** work items (changes with `status: active`), flags pairs that share an outbound target — two in-flight changes touching the same node. |
 | `board` | Work items grouped by `status` (and `@assignee` if the workspace declares one). |
-| `claim <id> --agent <handle>` | Claim a work item under `changes/` by setting top-level `assignee`; optional leading `@` is accepted and stripped before storage. Refuses symlinked or out-of-workspace work item files and replaces the workspace file instead of truncating hard-linked targets. |
+| `claim <id> --agent <handle>` | Claim a work item under `changes/` by setting top-level `assignee`; optional leading `@` is accepted and stripped before storage. **Current dev only:** refuses symlinked or out-of-workspace work item files and replaces the workspace file instead of truncating hard-linked targets. |
 | `roles` | The bounded worker contracts: Orchestrator · Scout · Researcher · Builder · Verifier · Reviewer · Archivist. |
 
 ```bash
@@ -205,7 +211,7 @@ create-vivary doctor <target> [--json]
 | Flag | Effect |
 |---|---|
 | `--preset coding\|second-brain\|writing` | Which starter graph to seed (default `coding`). |
-| `--force` | Overwrite existing scaffold files and remove stale generated files, but still refuses symlinked destination parents or paths that resolve outside the target workspace. |
+| `--force` | Overwrite existing scaffold files and remove stale generated files. **Current dev only:** still refuses symlinked destination parents or paths that resolve outside the target workspace. |
 | `--obsidian` | Also drop an opt-in Obsidian vault config (graph coloured by type). |
 | `--active-context cocoindex-code` | For `coding` workspaces, add CocoIndex-code sidecar profile (skill, docs, graph nodes, gitignore). Does not auto-install or enable MCP. |
 | `--storage auto\|file\|embedded\|cloud` | Storage backend to configure. `auto` = LanceDB locally. Default: `file` (no new deps). Cloud writes config only; the tropo cloud backend is future 0.3.x work. |
@@ -217,8 +223,9 @@ create-vivary doctor <target> [--json]
 | `--size small\|medium\|large` | Hint for `--auto` storage decisions. Agents can pass this after inspecting the repo. |
 | `--privacy local\|cloud` | Hint for `--auto` storage decisions. |
 
-`doctor` checks that `USER.md`, `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`
-are actively ignored. Comments, negations, and unrelated patterns that merely contain
+`doctor` checks that private context files are ignored. **Current dev only:** it also
+requires active ignore rules for `USER.md`, `MEMORY.md`, `memory/*`, and
+`heartbeat-reports/*`; comments, negations, and unrelated patterns that merely contain
 those names do not count.
 
 When `--storage embedded` (or `auto`) is selected and `vivary-tropo[embedded]` is not yet installed, `init` installs it via `pip` before continuing unless `--dry-run` is set. In `--json` mode, `"installed": ["lancedb"]` reports what was added. Without `--yes`, a single confirmation prompt fires before any pip install. For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use `--auto`; in human mode, the wizard asks and its answers drive storage.
