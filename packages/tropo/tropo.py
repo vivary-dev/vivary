@@ -1484,6 +1484,40 @@ def cmd_blast(args, resolver):
     return 0
 
 
+def _is_within(root, path):
+    try:
+        return os.path.commonpath([os.path.abspath(root), os.path.abspath(path)]) == os.path.abspath(root)
+    except ValueError:
+        return False
+
+
+def _write_workspace_file(root, path, text):
+    """Write text only to a regular, non-symlink file inside root."""
+    root_real = os.path.realpath(root)
+    target_abs = os.path.abspath(path)
+    parent_real = os.path.realpath(os.path.dirname(target_abs) or os.curdir)
+    if not _is_within(root_real, parent_real):
+        raise ConfigError(f"output path must stay inside tropo root: {path}")
+
+    if os.path.lexists(target_abs):
+        if os.path.islink(target_abs):
+            raise ConfigError(f"output path must not be a symlink: {path}")
+        if not os.path.isfile(target_abs):
+            raise ConfigError(f"output path must be a regular file: {path}")
+        if not _is_within(root_real, os.path.realpath(target_abs)):
+            raise ConfigError(f"output path must stay inside tropo root: {path}")
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(target_abs, flags, 0o666)
+    except OSError as e:
+        raise ConfigError(f"could not write output {path}: {e.strerror}") from e
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+
+
 def cmd_view(args, resolver):
     """Render the graph (or a blast radius) as one self-contained HTML file.
     `tropo view` → whole graph; `tropo view blast <id>` → that node's radius.
@@ -1512,8 +1546,10 @@ def cmd_view(args, resolver):
 
     html = render_graph_html(title, sub_nodes, sub_edges, ranks)
     if args.out:
-        with open(args.out, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(html)
+        try:
+            _write_workspace_file(resolver.root, args.out, html)
+        except ConfigError as e:
+            sys.exit(f"tropo: {e}")
         print(f"tropo: wrote {args.out}  ({len(sub_nodes)} node(s), {len(sub_edges)} edge(s))")
     else:
         print(html)
