@@ -45,11 +45,11 @@ says. `tropo.toml` declares the types.
 | `stats` | Document counts per type + a health summary. |
 | `graph [--json]` | Emit the typed graph: nodes (`id`,`type`,`path`) + edges (`from`,`field`,`to`,`broken`). |
 | `blast <id> [--depth N]` | The **blast radius** of `<id>`: everything that (transitively) refs it — what a change could touch. |
-| `view [graph \| blast <id>] [--out FILE]` | Render the graph (or one radius) as a single self-contained HTML file. |
+| `view [graph \| blast <id>] [--out FILE]` | Render the graph (or one radius) as a single self-contained HTML file. `--out` must stay inside the tropo root, refuse symlink targets, and rewrite the workspace output path without mutating hard-linked files outside the workspace. |
 | `plan <change.toml>` | Simulate a change (remove/retype/break/add) and show the graph delta. |
 | `fix [--dry-run]` | Strip redundant frontmatter (`W210` — a field equal to its derived value). The only mechanical edit tropo makes. |
 | `init [DIR] [--packs a,b]` | Scaffold a `tropo.toml` (optionally composing reusable type packs). |
-| `query <text> [--k N] [--json]` | Text/BM25-style graph search over the workspace. Returns top-k typed nodes by text relevance; no type filter ships in 0.2.0. The file backend falls back to simple text matching. |
+| `query <text> [--k N] [--json]` | Text/BM25-style graph search over the workspace. Returns top-k typed nodes by text relevance; no type filter ships yet. The file backend falls back to simple text matching. |
 | `migrate --from file --to embedded [--dry-run] [--json]` | Move file-backed graph data into the configured embedded backend. Cloud migration, non-file sources, backend installation, and `migrated_at` tracking are future 0.3.x work. |
 
 `tropo query` is graph/text retrieval, not the CocoIndex active-context sidecar. Use
@@ -108,6 +108,14 @@ optional = { supersedes = "ref", related_modules = "ref-list" }
 Field specs: `string`, `slug`, `date`, `datetime`, `url`, `string-list`, `any`,
 `enum:a|b|c`, and the graph types **`ref`** / **`ref-list`** (these become edges).
 
+Built-in packs: `dev-project`, `repo-graph`, and `coordination`. Local
+`.tropo/packs/<name>.toml` files take precedence over bundled packs. Use
+`coordination` when exo should be allowed to write `assignee`:
+
+```toml
+packs = ["repo-graph", "coordination"]
+```
+
 ---
 
 ## ozone — the review layer
@@ -146,23 +154,30 @@ ozone impact human-gates --root . --json
 ## exo — the coordination layer
 
 ```
-exo [conflicts | board | roles] [--root DIR] [--json]
+exo [conflicts | board | claim <id> --agent <handle> | roles] [--root DIR] [--json]
 ```
 
-The outermost, thinnest layer — engaged only when one agent becomes many. Read-only and
-graph-native; it doesn't run agents, it coordinates them.
+The outermost, thinnest layer — engaged only when one agent becomes many. Graph-native
+and deterministic; it doesn't run agents, it coordinates them. `claim` is the only
+writer, and it refuses to write unless the workspace declares `assignee` through
+`packs = ["coordination"]`.
 
 | Command | What it does |
 |---|---|
 | `conflicts` | Among **active** work items (changes with `status: active`), flags pairs that share an outbound target — two in-flight changes touching the same node. |
 | `board` | Work items grouped by `status` (and `@assignee` if the workspace declares one). |
+| `claim <id> --agent <handle>` | Claim a work item under `changes/` by setting top-level `assignee`; optional leading `@` is accepted and stripped before storage. Refuses symlinked or out-of-workspace work item files and replaces the workspace file instead of truncating hard-linked targets. |
 | `roles` | The bounded worker contracts: Orchestrator · Scout · Researcher · Builder · Verifier · Reviewer · Archivist. |
 
 ```bash
 exo conflicts --root .    # who would collide
 exo board --root .        # what's in flight
+exo claim local-ci-baseline --agent connie --root .
 exo roles                 # the role grammar
 ```
+
+JSON output for `claim` includes `id`, `path`, `assignee`, `previous_assignee`, and
+`changed`.
 
 ---
 
@@ -182,22 +197,26 @@ create-vivary doctor <target> [--json]
 |---|---|
 | `init <target>` | Lay down a complete workspace: the agent contract, the strato shell (SOUL/USER/STATE/MEMORY), runtime skills, a `tropo.toml`, a starter typed graph, and (based on flags or wizard answers) a `.vivary/storage.toml`. |
 | `wizard <target>` | Re-run the setup wizard on an existing workspace to reconfigure storage, preset, or active-context options. |
-| `doctor <target>` | Validate a workspace: required files, privacy ignores, module directory indexes, tropo graph health, and backend reachability. |
+| `doctor <target>` | Validate a workspace: required files, active privacy ignore rules, module directory indexes, tropo graph health, and backend reachability. |
 
 | Flag | Effect |
 |---|---|
 | `--preset coding\|second-brain\|writing` | Which starter graph to seed (default `coding`). |
-| `--force` | Overwrite existing scaffold files. |
+| `--force` | Overwrite existing scaffold files and remove stale generated files, but still refuses symlinked destination parents or paths that resolve outside the target workspace. |
 | `--obsidian` | Also drop an opt-in Obsidian vault config (graph coloured by type). |
 | `--active-context cocoindex-code` | For `coding` workspaces, add CocoIndex-code sidecar profile (skill, docs, graph nodes, gitignore). Does not auto-install or enable MCP. |
 | `--storage auto\|file\|embedded\|cloud` | Storage backend to configure. `auto` = LanceDB locally. Default: `file` (no new deps). Cloud writes config only; the tropo cloud backend is future 0.3.x work. |
 | `--provider lancedb\|sqlite-vec\|qdrant\|astra` | Which implementation to use for the selected tier. `lancedb` is the shipped embedded provider. |
 | `--auto` | **Agent mode.** Skip all interactive prompts; pick the best option from explicit `--storage`, `--privacy`, and `--size` hints. |
 | `--yes` | Auto-confirm installs and confirmations. Safe to combine with `--auto` for fully non-interactive agent use. |
-| `--dry-run` | Print what would be scaffolded and installed; do nothing. |
+| `--dry-run` | Print what would be scaffolded and installed; do not write, install, or clean stale files. |
 | `--json` | Machine-readable output. Reports `ok`, `root`, `preset`, `storage`, `provider`, `installed`, `files`, `config`, and `dry_run`. |
 | `--size small\|medium\|large` | Hint for `--auto` storage decisions. Agents can pass this after inspecting the repo. |
 | `--privacy local\|cloud` | Hint for `--auto` storage decisions. |
+
+`doctor` checks that `USER.md`, `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`
+are actively ignored. Comments, negations, and unrelated patterns that merely contain
+those names do not count.
 
 When `--storage embedded` (or `auto`) is selected and `vivary-tropo[embedded]` is not yet installed, `init` installs it via `pip` before continuing unless `--dry-run` is set. In `--json` mode, `"installed": ["lancedb"]` reports what was added. Without `--yes`, a single confirmation prompt fires before any pip install. For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use `--auto`; in human mode, the wizard asks and its answers drive storage.
 

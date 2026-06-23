@@ -95,17 +95,24 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
   are a bug). Source of truth is `docs/`; the website under `site/` is generated from
   it (`cd site && npm run sync-docs`, also auto-run on build). Touch the package
   READMEs and `HANDOFF.md` too when relevant. Every merge's verification includes it.
+- **Every update ends with release truth.** For any behavior, packaging, version, or
+  public-copy change, run [docs/RELEASE-WORKFLOW.md](docs/RELEASE-WORKFLOW.md):
+  update changelog/docs/site/package copy, sync generated site docs, verify install
+  surfaces after publish, and keep launch/social posts in ignored local storage or the
+  Second Brain, not the public repo.
 
 ## Verify
 
 ```bash
-python packages/tropo/tests/test_tropo.py                  # 46/46
+python packages/tropo/tests/test_tropo.py                  # 64/64
 python packages/ozone/tests/test_ozone.py                  # 7/7
-python packages/exo/tests/test_exo.py                      # 4/4
-python packages/create-vivary/tests/test_create_vivary.py  # 8/8  (+ test_assets_parity 2/2)
+python packages/exo/tests/test_exo.py                      # 14/14
+python packages/create-vivary/tests/test_create_vivary.py  # 44/44  (+ test_assets_parity 3/3)
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # clean
 ```
 
 Current release truth lives in [README.md](README.md) and [CHANGELOG.md](CHANGELOG.md):
-`create-vivary` / `@vivary/create` 0.2.2, `vivary-tropo` 0.2.0, and
-`vivary-ozone` / `vivary-exo` 0.1.0. Full guides live in [docs/](docs/).
+`create-vivary` / `@vivary/create` 0.2.3, `vivary-tropo` 0.2.2,
+`vivary-exo` 0.2.1, and `vivary-ozone` 0.1.0. The `dev` branch may contain
+Unreleased security hardening that is not published yet; check [CHANGELOG.md](CHANGELOG.md)
+before making package claims. Full guides live in [docs/](docs/).

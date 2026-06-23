@@ -7,6 +7,12 @@ typed graph.
 **Current release:** 0.2.3. Use 0.2.3 for new installs; no migration is expected
 from 0.2.1 or 0.2.2.
 
+**Dev-line hardening:** the current `dev` branch adds unreleased scaffold/privacy
+hardening: active `.gitignore` validation for `USER.md`, `MEMORY.md`, `memory/*`, and
+`heartbeat-reports/*`; private heartbeat report scaffolding; and stronger refusal of
+symlinked or out-of-workspace scaffold/storage/cleanup paths. Do not claim these are in
+the published 0.2.3 package until the next package cut lands.
+
 ## Install & scaffold
 
 ```bash
@@ -39,8 +45,11 @@ module index before opening deeper context:
 
 The command is local-only. With `--storage embedded` or `--auto` on a large workspace, it
 self-installs `vivary-tropo[embedded]` (LanceDB) with a confirmation prompt, or silently
-with `--yes`. Use `--dry-run` to simulate without writing or installing anything. For
-scripted storage selection, pass `--no-wizard --storage embedded --yes` or use `--auto`;
+with `--yes`. Scaffold writes, storage config writes, and stale generated cleanup
+refuse symlinked destination parents, including when `--force` is used, so output
+stays inside the selected target. Use `--dry-run` to simulate without writing,
+installing, or cleaning stale files. For scripted storage selection, pass
+`--no-wizard --storage embedded --yes` or use `--auto`;
 in human mode, the wizard asks and its answers drive storage.
 
 For coding workspaces, `--active-context cocoindex-code` adds an optional
@@ -49,8 +58,8 @@ local policy docs, graph nodes, and `.cocoindex_code/` in `.gitignore`. It does 
 auto-install CocoIndex-code, create an index, or enable MCP; the generated docs give
 the approved `ccc init` / `ccc index` path.
 
-`doctor` validates the generated shell, privacy ignores, module directory indexes, and
-typed graph:
+`doctor` validates the generated shell, active privacy ignore rules, module directory
+indexes, and typed graph:
 
 ```bash
 python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo --json

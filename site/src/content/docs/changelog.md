@@ -8,7 +8,98 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current versions:** `vivary-tropo` **0.2.0** · `create-vivary` / `@vivary/create` **0.2.3** · `vivary-ozone` / `vivary-exo` **0.1.0**.
+**Current versions:** `vivary-tropo` **0.2.2** · `vivary-exo` **0.2.1** · `create-vivary` / `@vivary/create` **0.2.3** · `vivary-ozone` **0.1.0**.
+
+## [Unreleased]
+
+Affects `vivary-tropo`, `vivary-exo`, `create-vivary` / `@vivary/create`,
+`strato` workspace assets, and public docs/site release surfaces. These fixes are
+merged to `dev`; publishing remains a manual human gate.
+
+### Security
+
+- **`tropo view --out` output hardening** — rendered HTML writes must stay inside
+  the tropo root, refuse symlink output paths, and replace the output path instead
+  of truncating existing hard-linked files.
+- **Heartbeat reports stay private** — scaffolded workspaces now gitignore
+  `heartbeat-reports/*` (while keeping `.gitkeep`), the doctor flags missing report
+  ignores, and strato's heartbeat procedure treats reports as PRIV because they may
+  summarize private memory.
+- **Doctor privacy ignore validation hardening** — `create-vivary doctor` now
+  validates active `.gitignore` rules for `USER.md`, `MEMORY.md`, `memory/*`, and
+  `heartbeat-reports/*` instead of accepting comments, negations, or unrelated
+  substring matches as proof that private context files are ignored.
+- **`exo claim` hard-link hardening** — claim writes now replace the workspace work
+  item file instead of truncating an existing inode, so a hard-linked file outside
+  the workspace is not mutated.
+- **create-vivary symlink hardening** — scaffold writes, storage config writes, and
+  stale generated cleanup now refuse symlinked destination parents and paths that
+  resolve outside the selected workspace, including when `--force` is used.
+- **create-vivary dry-run cleanup guard** — `--dry-run --force` previews the scaffold
+  without removing stale generated files.
+
+### Documentation
+
+- **Security-hardening release truth** — README, FAQ, command docs, package READMEs,
+  `SECURITY.md`, `HANDOFF.md`, and the website now call out the pending dev-line
+  hardening batch without implying that new package versions have already been
+  published.
+
+## [vivary-tropo 0.2.2 / vivary-exo 0.2.1] — 2026-06-22
+
+Affects `vivary-tropo` and `vivary-exo` only. `create-vivary` / `@vivary/create`
+remain at 0.2.3, and `vivary-ozone` remains at 0.1.0.
+
+### Fixed
+
+- **UTF-8 BOM hardening** — tropo now treats a single leading UTF-8 BOM as a
+  file-encoding artifact in both `tropo.toml` and Markdown frontmatter, so files
+  produced by Windows PowerShell `Set-Content -Encoding UTF8` load normally.
+- **`exo claim` no longer duplicates BOM-prefixed frontmatter** — claims update the
+  existing frontmatter block, normalize the rewritten file to plain UTF-8, and still
+  reject malformed frontmatter instead of guessing.
+
+### Changed
+
+- `vivary-exo` now depends on `vivary-tropo>=0.2.2` so installed claim workflows use
+  the BOM-aware parser.
+
+### Release note
+
+Published through the manual human gate as `vivary-tropo==0.2.2` and
+`vivary-exo==0.2.1`; no npm publish was needed. Verified from public PyPI pages plus
+fresh `pip` and `uvx --no-cache --index-url https://pypi.org/simple` install smokes.
+
+## [vivary-tropo 0.2.1 / vivary-exo 0.2.0] — 2026-06-22
+
+Affects `vivary-tropo` and `vivary-exo` only. `create-vivary` / `@vivary/create`
+remain at 0.2.3, and `vivary-ozone` remains at 0.1.0.
+
+### Added
+
+- **Graph-native work claiming** — `exo claim <id> --agent <handle>` writes a
+  top-level `assignee` onto a work item under `changes/`, reports JSON with the
+  previous assignee and whether the file changed, and leaves same-assignee claims as
+  no-op success.
+- **Opt-in coordination pack** — `packs = ["coordination"]` declares
+  `assignee = "string"` as a base optional field, so exo can write claims without
+  bloating every default workspace schema.
+- **Embedded starter packs** — built-in tropo packs are embedded in the single-file
+  engine so installed wheels can resolve `dev-project`, `repo-graph`, and
+  `coordination` without relying on a repo-local `packs/` directory.
+- **Pack parity tests** — tracked built-in pack TOML files are checked against the
+  embedded values, and workspace-local `.tropo/packs/<name>.toml` files still take
+  precedence over bundled packs.
+
+### Changed
+
+- `vivary-exo` now depends on `vivary-tropo>=0.2.1` so installed users get the
+  bundled `coordination` pack required by `exo claim`.
+
+### Release note
+
+Released through the manual human gate as `vivary-tropo==0.2.1` and
+`vivary-exo==0.2.0`; no npm publish was needed for this release.
 
 ## [0.2.3] — 2026-06-22
 

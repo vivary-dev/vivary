@@ -82,6 +82,18 @@ def test_alias_collision_is_config_error(tmp_path):
         pass
 
 
+def test_config_accepts_leading_utf8_bom(tmp_path):
+    (tmp_path / "tropo.toml").write_text(
+        '\ufeff[types.change]\nfolder="changes"\nrequired={status="string"}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "changes").mkdir()
+    (tmp_path / "changes" / "x.md").write_text("---\nstatus: active\n---\n# X\n", encoding="utf-8")
+    docs = tropo.analyze(str(tmp_path), [], res(str(tmp_path)))
+    assert [d.rel.replace("\\", "/") for d in docs] == ["changes/x.md"]
+    assert docs[0].findings == []
+
+
 # --- derivation ------------------------------------------------------------
 
 def test_id_from_filename():
@@ -123,6 +135,12 @@ def test_derived_value_in_frontmatter_is_noise(tmp_path):
     docs = tropo.analyze(str(tmp_path), [], res(str(tmp_path)))
     codes = {f.code for d in docs for f in d.findings}
     assert "W210" in codes  # id: n equals the derived id
+
+
+def test_extract_frontmatter_accepts_leading_utf8_bom():
+    yaml_text, body = tropo.extract_frontmatter("\ufeff---\nstatus: active\n---\n# A\n")
+    assert yaml_text == "status: active"
+    assert body == "# A\n"
 
 
 # --- overlays (SPEC §5.5) ---------------------------------------------------
@@ -283,6 +301,45 @@ def test_pack_composes():
         assert "runbook" in c.types and "spec" in c.types
 
 
+def test_pack_composes_without_repo_packs_directory():
+    with temp_workspace() as td:
+        with open(os.path.join(td, "tropo.toml"), "w") as fh:
+            fh.write('packs = ["dev-project"]\n')
+        fake_script_dir = os.path.join(td, "installed-wheel")
+        os.mkdir(fake_script_dir)
+        c = tropo.load_config(td, fake_script_dir)
+        assert "runbook" in c.types and "spec" in c.types
+
+
+def test_workspace_pack_overrides_bundled_pack():
+    with temp_workspace() as td:
+        pack_dir = os.path.join(td, ".tropo", "packs")
+        os.makedirs(pack_dir)
+        with open(os.path.join(pack_dir, "dev-project.toml"), "w") as fh:
+            fh.write('[types.local]\nfolder = "local"\nrequired = { owner = "string" }\n')
+        with open(os.path.join(td, "tropo.toml"), "w") as fh:
+            fh.write('packs = ["dev-project"]\n')
+        c = tropo.load_config(td, SCRIPT_DIR)
+        assert "local" in c.types and "runbook" not in c.types
+
+
+def test_coordination_pack_declares_assignee():
+    with temp_workspace() as td:
+        with open(os.path.join(td, "tropo.toml"), "w") as fh:
+            fh.write('packs = ["coordination"]\n')
+        c = tropo.load_config(td, SCRIPT_DIR)
+        assert c.base_optional["assignee"] == "string"
+
+
+def test_bundled_packs_match_tracked_toml_files():
+    for pack_path in Path(SCRIPT_DIR, "packs").glob("*.toml"):
+        name = pack_path.stem
+        assert name in tropo.BUNDLED_PACKS
+        bundled = tropo.tomllib.loads(tropo.BUNDLED_PACKS[name])
+        tracked = tropo._read_toml(str(pack_path))
+        assert bundled == tracked
+
+
 def test_repo_graph_pack_composes():
     with temp_workspace() as td:
         with open(os.path.join(td, "tropo.toml"), "w") as fh:
@@ -411,12 +468,63 @@ def _assert_self_contained(txt):
 
 
 def test_view_writes_self_contained_html(tmp_path):
+    _graph_tree(tmp_path, {"a.md": "---\ndepends_on: b\n---\n# A\n", "b.md": "# B\n"})
     out = tmp_path / "g.html"
-    tropo.cmd_view(argparse.Namespace(paths=["graph"], depth=None, out=str(out)), res())
+    tropo.cmd_view(argparse.Namespace(paths=["graph"], depth=None, out=str(out)),
+                   res(str(tmp_path)))
     txt = out.read_text(encoding="utf-8")
     _assert_self_contained(txt)
-    for nid in ("tropo", "jeff", "2026-06-12-kickoff", "0001-folder-as-type"):
+    for nid in ("a", "b"):
         assert f'data-id="{nid}"' in txt
+
+
+def test_view_out_rejects_symlink(tmp_path):
+    _graph_tree(tmp_path, {"a.md": "# A\n"})
+    victim = tmp_path.parent / f"victim-{uuid.uuid4().hex}.txt"
+    victim.write_text("keep", encoding="utf-8")
+    out = tmp_path / "g.html"
+    out.symlink_to(victim)
+    try:
+        tropo.cmd_view(argparse.Namespace(paths=["graph"], depth=None, out=str(out)),
+                       res(str(tmp_path)))
+        assert False, "expected SystemExit for symlink output"
+    except SystemExit as e:
+        assert "must not be a symlink" in str(e)
+    assert victim.read_text(encoding="utf-8") == "keep"
+
+
+def test_view_out_rejects_outside_root(tmp_path):
+    _graph_tree(tmp_path, {"a.md": "# A\n"})
+    out = tmp_path.parent / f"outside-{uuid.uuid4().hex}.html"
+    try:
+        tropo.cmd_view(argparse.Namespace(paths=["graph"], depth=None, out=str(out)),
+                       res(str(tmp_path)))
+        assert False, "expected SystemExit for outside output"
+    except SystemExit as e:
+        assert "must stay inside tropo root" in str(e)
+    assert not out.exists()
+
+
+def test_view_out_replaces_hard_link_without_mutating_outside_file(tmp_path):
+    _graph_tree(tmp_path, {"a.md": "# A\n"})
+    outside = tmp_path.parent / f"outside-{uuid.uuid4().hex}.html"
+    outside_text = "<!doctype html><title>outside</title>"
+    outside.write_text(outside_text, encoding="utf-8")
+    out = tmp_path / "g.html"
+    try:
+        os.link(outside, out)
+    except (AttributeError, NotImplementedError, OSError):
+        outside.unlink(missing_ok=True)
+        return
+
+    try:
+        tropo.cmd_view(argparse.Namespace(paths=["graph"], depth=None, out=str(out)),
+                       res(str(tmp_path)))
+        assert outside.read_text(encoding="utf-8") == outside_text
+        _assert_self_contained(out.read_text(encoding="utf-8"))
+    finally:
+        out.unlink(missing_ok=True)
+        outside.unlink(missing_ok=True)
 
 
 def test_view_blast_subgraph_only_radius(tmp_path):

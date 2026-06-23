@@ -28,6 +28,7 @@ sandboxes/*
 
 # Local drafts
 drafts/
+.release/private/
 # CocoIndex Code (ccc)
 /.cocoindex_code/
 

@@ -26,7 +26,7 @@ python tropo.py types  --root examples/vault    # the resolved type registry
 python tropo.py check  --root examples/vault    # validate — opinionated: warnings fail too (--lenient to relax)
 python tropo.py signal --root examples/vault    # print ONLY the irreducible metadata
 python tropo.py graph  --root examples/vault    # emit typed nodes + edges
-python tropo.py view   --root examples/vault --out graph.html
+python tropo.py view   --root examples/vault --out examples/vault/graph.html
 python tropo.py fix    --dry-run                 # preview redundant-frontmatter removal
 python tropo.py query "meeting notes" --root examples/vault   # search the graph
 python tropo.py migrate --from file --to embedded --root my-vault --yes  # switch to LanceDB
@@ -36,6 +36,17 @@ python tests/test_tropo.py                       # run the test suite
 Requires Python 3.11+ (stdlib `tomllib`), zero third-party dependencies for the core.
 Optional extras: `pip install vivary-tropo[embedded]` for LanceDB full-text search.
 Cloud extras are reserved for the 0.3.x adapter work.
+
+Built-in packs are embedded in the single-file engine, so installed wheels can resolve
+starter packs without a repo-local `packs/` directory. Workspace-local
+`.tropo/packs/<name>.toml` files still take precedence.
+
+TOML config and frontmatter parsing tolerate a single leading UTF-8 BOM, which keeps
+Windows-created files from failing to load or being misread as body-only documents.
+The current `dev` line also hardens `tropo view --out`: generated HTML must stay under
+the tropo root, symlink targets are rejected, and hard-linked files outside the
+workspace are not mutated by output writes. That hardening is unreleased until the next
+package cut.
 
 ## Overlays — tighten a subtree
 
@@ -115,6 +126,16 @@ It defines folder-backed types for `modules/`, `changes/`, `decisions/`,
 `id`, `related_modules`, `related_changes`, and `verification`. This is a
 deliberate bridge: Tropo validates the node shape, Markdown/wiki links remain
 human-readable, and Graphify can index the relationships.
+
+For multi-agent coordination, add the opt-in `coordination` pack:
+
+```toml
+packs = ["repo-graph", "coordination"]
+```
+
+It declares top-level `assignee = "string"` without changing the default workspace
+schema. `exo claim <id> --agent <handle>` uses that field for graph-native work
+ownership.
 
 ## Design tenets
 

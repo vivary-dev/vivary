@@ -5,10 +5,13 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import date
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 
@@ -95,6 +98,24 @@ def default_repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _resolve_scaffold_target(target: str | Path) -> Path:
+    requested = Path(target)
+    absolute = requested if requested.is_absolute() else Path.cwd() / requested
+    current = Path(absolute.anchor) if absolute.anchor else Path()
+    parts = absolute.parts[1:] if absolute.anchor else absolute.parts
+    for part in parts:
+        current = current / part
+        if current.exists() or current.is_symlink():
+            if current.is_symlink():
+                raise ScaffoldError(
+                    "refusing to scaffold through symlinked target path: "
+                    f"{current}"
+                )
+        else:
+            break
+    return absolute.resolve(strict=False)
+
+
 def scaffold_workspace(
     target: str | Path,
     *,
@@ -129,7 +150,7 @@ def scaffold_workspace(
 
     root = Path(repo_root) if repo_root is not None else default_repo_root()
     root = root.resolve()
-    target = Path(target).resolve()
+    target = _resolve_scaffold_target(target)
 
     sources = _source_paths(root)
     for label, src in sources.items():
@@ -174,26 +195,29 @@ def scaffold_workspace(
         writes.extend(_obsidian_writes(target))
 
     copies = _copy_plan(target, sources, active_context=active_context)
-    _ensure_no_conflicts([p for p, _ in writes] + [dst for _, dst in copies], force)
-    if force:
+    planned_paths = [p for p, _ in writes] + [dst for _, dst in copies]
+    if storage != "file":
+        planned_paths.append(target / _STORAGE_DIR / _STORAGE_CONFIG_NAME)
+    _ensure_safe_destinations(target, planned_paths, force)
+    cleanup_paths = _stale_scaffold_paths(target, active_context) if force and not dry_run else []
+    _ensure_safe_cleanup_targets(target, cleanup_paths)
+    if force and not dry_run:
         _cleanup_stale_scaffold_state(target, active_context=active_context)
 
     created: list[Path] = []
     if not dry_run:
         for dst, text in writes:
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            dst.write_text(text, encoding="utf-8", newline="\n")
+            _write_text_no_follow(target, dst, text)
             created.append(dst)
 
         for src, dst in copies:
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dst)
+            _copy_file_no_follow(target, src, dst)
             created.append(dst)
     else:
         created = [dst for dst, _ in writes] + [dst for _, dst in copies]
 
     if storage != "file":
-        created.extend(_write_vivary_dir(target, storage, provider, dry_run))
+        created.extend(_write_vivary_dir(target, storage, provider, dry_run, force=force))
 
     return created
 
@@ -216,12 +240,9 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
             if not (target / rel).exists():
                 errors.append(f"missing required file: {rel}")
 
-        gitignore = target / ".gitignore"
-        if gitignore.exists():
-            txt = gitignore.read_text(encoding="utf-8", errors="replace")
-            for pattern in ("USER.md", "MEMORY.md", "memory/*"):
-                if pattern not in txt:
-                    errors.append(f"privacy ignore missing: {pattern}")
+        if (target / ".gitignore").exists():
+            missing = _missing_privacy_ignores(target)
+            errors.extend(f"privacy ignore missing: {pattern}" for pattern in missing)
         errors.extend(_module_index_errors(target))
 
     graph = {"nodes": 0, "edges": 0, "broken": 0}
@@ -267,6 +288,102 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         "graph": graph,
         "backend": backend_name,
     }
+
+
+
+def _missing_privacy_ignores(target: Path) -> list[str]:
+    """Return privacy ignore patterns that are not active .gitignore rules.
+
+    Doctor should reject comments, negated patterns, and larger unrelated patterns that
+    merely contain the sensitive filenames as substrings. It also accounts for later
+    broad negations and nested memory/.gitignore files, since Git gives lower-level
+    ignore files precedence over parent rules.
+    """
+    rules = _privacy_ignore_rules(target / ".gitignore", base="")
+    memory_gitignore = target / "memory" / ".gitignore"
+    if memory_gitignore.exists():
+        rules.extend(_privacy_ignore_rules(memory_gitignore, base="memory"))
+
+    probes = {
+        "USER.md": ("USER.md",),
+        "MEMORY.md": ("MEMORY.md",),
+        "memory/*": ("memory/private.md", "memory/private.txt", "memory/secret.md"),
+        "heartbeat-reports/*": (
+            "heartbeat-reports/private.md",
+            "heartbeat-reports/private.txt",
+            "heartbeat-reports/summary.json",
+        ),
+    }
+
+    missing = [
+        required
+        for required, paths in probes.items()
+        if not all(_ignored_by_rules(rules, path) for path in paths)
+    ]
+    if "memory/*" not in missing and _has_unsafe_memory_exception(rules):
+        missing.append("memory/*")
+    return missing
+
+
+def _privacy_ignore_rules(gitignore: Path, *, base: str) -> list[tuple[str, bool, str]]:
+    rules: list[tuple[str, bool, str]] = []
+    for raw_line in gitignore.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.rstrip(" ")
+        if not line or line.startswith("#"):
+            continue
+
+        negated = line.startswith("!")
+        pattern = line[1:] if negated else line
+        if pattern:
+            rules.append((base, negated, pattern.replace("\\", "/")))
+    return rules
+
+
+def _ignored_by_rules(rules: list[tuple[str, bool, str]], rel_path: str) -> bool:
+    ignored = False
+    for base, negated, pattern in rules:
+        if _ignore_rule_matches(base, pattern, rel_path):
+            ignored = not negated
+    return ignored
+
+
+def _ignore_rule_matches(base: str, pattern: str, rel_path: str) -> bool:
+    rel_path = rel_path.replace("\\", "/")
+    if base:
+        prefix = f"{base}/"
+        if not rel_path.startswith(prefix):
+            return False
+        scoped = rel_path[len(prefix):]
+    else:
+        scoped = rel_path
+
+    pattern = pattern.rstrip("/")
+    if pattern.startswith("/"):
+        pattern = pattern[1:]
+
+    if "/" not in pattern:
+        return fnmatchcase(Path(scoped).name, pattern)
+    return fnmatchcase(scoped, pattern)
+
+
+def _has_unsafe_memory_exception(rules: list[tuple[str, bool, str]]) -> bool:
+    allowed = {"memory/.gitkeep", "/memory/.gitkeep", ".gitkeep", "/.gitkeep"}
+    for base, negated, pattern in rules:
+        if not negated:
+            continue
+        normalized = pattern.lstrip("/")
+        if base == "memory":
+            if normalized not in {".gitkeep"}:
+                return True
+            continue
+        if normalized in {"memory/.gitkeep"}:
+            continue
+        if normalized.startswith("memory/"):
+            return True
+        if "/" not in normalized and normalized not in allowed:
+            return True
+
+    return False
 
 
 def _obsidian_writes(target: Path) -> list[tuple[Path, str]]:
@@ -384,7 +501,24 @@ def _copy_plan(
     return copies
 
 
-def _ensure_no_conflicts(paths: list[Path], force: bool) -> None:
+def _ensure_safe_destinations(target: Path, paths: list[Path], force: bool) -> None:
+    _ensure_within_target(target, paths)
+    symlinks = sorted(
+        {
+            component
+            for path in paths
+            for component in _existing_components(target, path)
+            if component.is_symlink()
+        }
+    )
+    if symlinks:
+        preview = "\n".join(f"  - {p}" for p in symlinks[:20])
+        extra = "" if len(symlinks) <= 20 else f"\n  ... and {len(symlinks) - 20} more"
+        raise ScaffoldError(
+            "refusing to scaffold through symlinked destination path(s):\n"
+            f"{preview}{extra}"
+        )
+
     ancestor_conflicts = sorted(
         {
             parent
@@ -415,6 +549,75 @@ def _ensure_no_conflicts(paths: list[Path], force: bool) -> None:
         )
 
 
+def _ensure_within_target(target: Path, paths: list[Path]) -> None:
+    escaped = []
+    for path in paths:
+        try:
+            path.relative_to(target)
+            path.resolve(strict=False).relative_to(target)
+        except ValueError:
+            escaped.append(path)
+    if escaped:
+        preview = "\n".join(f"  - {p}" for p in escaped[:20])
+        extra = "" if len(escaped) <= 20 else f"\n  ... and {len(escaped) - 20} more"
+        raise ScaffoldError(
+            "refusing to scaffold outside the selected target directory:\n"
+            f"{preview}{extra}"
+        )
+
+
+def _existing_components(target: Path, path: Path) -> list[Path]:
+    try:
+        relative = path.relative_to(target)
+    except ValueError:
+        return [path] if path.exists() or path.is_symlink() else []
+
+    components: list[Path] = []
+    current = target
+    if current.exists() or current.is_symlink():
+        components.append(current)
+    for part in relative.parts:
+        current = current / part
+        if current.exists() or current.is_symlink():
+            components.append(current)
+        else:
+            break
+    return components
+
+
+def _write_text_no_follow(target: Path, dst: Path, text: str) -> None:
+    _ensure_safe_destinations(target, [dst], force=True)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{dst.name}.", suffix=".vivary-tmp", dir=dst.parent
+    )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        os.replace(tmp, dst)
+    finally:
+        if tmp.exists() or tmp.is_symlink():
+            tmp.unlink()
+
+
+def _copy_file_no_follow(target: Path, src: Path, dst: Path) -> None:
+    _ensure_safe_destinations(target, [dst], force=True)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{dst.name}.", suffix=".vivary-tmp", dir=dst.parent
+    )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as out, src.open("rb") as inp:
+            shutil.copyfileobj(inp, out)
+        shutil.copystat(src, tmp)
+        os.replace(tmp, dst)
+    finally:
+        if tmp.exists() or tmp.is_symlink():
+            tmp.unlink()
+
+
 def _cleanup_stale_scaffold_state(target: Path, *, active_context: str | None) -> None:
     """Remove generated artifacts that old scaffold shapes can leave behind.
 
@@ -422,12 +625,15 @@ def _cleanup_stale_scaffold_state(target: Path, *, active_context: str | None) -
     delete arbitrary user content. Keep cleanup limited to paths Vivary itself has
     generated in older or optional profiles.
     """
-    for path in _legacy_module_files(target):
-        _remove_path(path)
+    for path in _stale_scaffold_paths(target, active_context):
+        _remove_path(target, path)
 
+
+def _stale_scaffold_paths(target: Path, active_context: str | None) -> list[Path]:
+    paths = _legacy_module_files(target)
     if active_context != "cocoindex-code":
-        for path in _cocoindex_active_context_stale_paths(target):
-            _remove_path(path)
+        paths = [*paths, *_cocoindex_active_context_stale_paths(target)]
+    return paths
 
 
 def _legacy_module_files(target: Path) -> list[Path]:
@@ -450,11 +656,38 @@ def _cocoindex_active_context_stale_paths(target: Path) -> list[Path]:
     ]
 
 
-def _remove_path(path: Path) -> None:
+def _ensure_safe_cleanup_targets(root: Path, paths: list[Path]) -> None:
+    unsafe = [path for path in paths if not _is_safe_cleanup_target(root, path)]
+    if unsafe:
+        preview = "\n".join(f"  - {p}" for p in unsafe[:20])
+        extra = "" if len(unsafe) <= 20 else f"\n  ... and {len(unsafe) - 20} more"
+        raise ScaffoldError(
+            "refusing to clean stale scaffold path(s) through symlinked or "
+            f"out-of-workspace parent path(s):\n{preview}{extra}"
+        )
+
+
+def _remove_path(root: Path, path: Path) -> None:
+    if not _is_safe_cleanup_target(root, path):
+        raise ScaffoldError(f"refusing to clean unsafe scaffold path: {path}")
     if path.is_dir() and not path.is_symlink():
         shutil.rmtree(path)
     elif path.exists() or path.is_symlink():
         path.unlink()
+
+
+def _is_safe_cleanup_target(root: Path, path: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+
+    for parent in path.parents:
+        if parent == root:
+            return True
+        if parent.is_symlink():
+            return False
+    return False
 
 
 def _module_index_path(target: Path, module_id: str) -> Path:
@@ -535,6 +768,8 @@ USER.md
 MEMORY.md
 memory/*
 !memory/.gitkeep
+heartbeat-reports/*
+!heartbeat-reports/.gitkeep
 .strato/private/
 
 # Vivary runtime data (storage.toml is committed; data/ is not)
@@ -996,9 +1231,13 @@ def _is_importable(module: str) -> bool:
 
 
 def _ensure_backend_installed(provider: str, yes: bool) -> list[str]:
-    """Install the pip extra for provider if not already present. Returns installed names."""
-    extras = {"lancedb": "embedded", "qdrant-client": "cloud", "astrapy": "astra"}
-    pkg_map = {"lancedb": "lancedb", "qdrant": "qdrant-client", "astra": "astrapy"}
+    """Install the embedded pip extra for provider if not already present.
+
+    Cloud backends are config-only for now, so only the shipped embedded
+    provider is eligible for self-install. Returns installed package names.
+    """
+    extras = {"lancedb": "embedded"}
+    pkg_map = {"lancedb": "lancedb"}
     pkg = pkg_map.get(provider)
     if pkg is None or _is_importable(pkg.replace("-", "_")):
         return []
@@ -1084,7 +1323,9 @@ def _run_wizard(args) -> dict:
     return {"storage": "embedded", "provider": "lancedb", "installed": installed}
 
 
-def _write_vivary_dir(target: Path, storage: str, provider: str, dry_run: bool) -> list[Path]:
+def _write_vivary_dir(
+    target: Path, storage: str, provider: str, dry_run: bool, *, force: bool
+) -> list[Path]:
     """Write .vivary/storage.toml. Returns list of paths written."""
     vivary_dir = target / _STORAGE_DIR
     cfg_path = vivary_dir / _STORAGE_CONFIG_NAME
@@ -1092,11 +1333,11 @@ def _write_vivary_dir(target: Path, storage: str, provider: str, dry_run: bool) 
     key = storage if storage != "cloud" else f"cloud-{provider}"
     toml_text = _STORAGE_TOML_TEMPLATES.get(key, _STORAGE_TOML_TEMPLATES["file"])
 
+    _ensure_safe_destinations(target, [cfg_path], force)
     if dry_run:
         return [cfg_path]
 
-    vivary_dir.mkdir(parents=True, exist_ok=True)
-    cfg_path.write_text(toml_text, encoding="utf-8", newline="\n")
+    _write_text_no_follow(target, cfg_path, toml_text)
     return [cfg_path]
 
 
@@ -1194,16 +1435,35 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if report["ok"] else 1
 
     if args.command == "wizard":
-        target = Path(args.target).resolve()
+        try:
+            target = _resolve_scaffold_target(args.target)
+        except ScaffoldError as exc:
+            if getattr(args, "json", False):
+                print(json.dumps({"ok": False, "error": str(exc)}))
+            else:
+                print(f"create-vivary wizard: {exc}", file=sys.stderr)
+            return 1
         decisions = _run_wizard(args)
         _yes = getattr(args, "yes", False) or getattr(args, "auto", False)
         installed = decisions.get("installed") or (
             []
-            if getattr(args, "dry_run", False) or decisions["storage"] == "file"
+            if getattr(args, "dry_run", False) or decisions["storage"] != "embedded"
             else _ensure_backend_installed(decisions["provider"], _yes)
         )
-        vivary_paths = _write_vivary_dir(target, decisions["storage"], decisions["provider"],
-                                         getattr(args, "dry_run", False))
+        try:
+            vivary_paths = _write_vivary_dir(
+                target,
+                decisions["storage"],
+                decisions["provider"],
+                getattr(args, "dry_run", False),
+                force=True,
+            )
+        except ScaffoldError as exc:
+            if getattr(args, "json", False):
+                print(json.dumps({"ok": False, "error": str(exc)}))
+            else:
+                print(f"create-vivary wizard: {exc}", file=sys.stderr)
+            return 1
         if getattr(args, "json", False):
             print(json.dumps({
                 "ok": True,
@@ -1237,7 +1497,7 @@ def main(argv: list[str] | None = None) -> int:
     _prior = decisions.get("installed", [])
     installed = _prior + (
         []
-        if dry_run or storage == "file"
+        if dry_run or storage != "embedded"
         else _ensure_backend_installed(provider, yes)
     )
 

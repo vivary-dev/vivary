@@ -4,8 +4,8 @@ Short, copy-paste recipes for common tasks. New to Vivary? Do the [getting start
 guide](/getting-started/) first, then use these when you hit a specific job.
 
 Each recipe assumes the CLIs are installed (`pip install vivary-tropo
-vivary-ozone vivary-exo create-vivary`) or run via `uvx`. Run commands from inside a
-workspace unless `--root` is given.
+vivary-ozone vivary-exo create-vivary==0.2.3`) or run via `uvx`. Run commands from
+inside a workspace unless `--root` is given.
 
 ## Scaffold a new workspace
 
@@ -104,13 +104,26 @@ Open the HTML in any browser — no editor, no server, no plugin. (Obsidian fans
 
 ## Coordinate multiple agents
 
-Mark in-flight work `status: active` on its change doc, then:
+Opt into the coordination field in `tropo.toml`:
+
+```toml
+packs = ["repo-graph", "coordination"]
+```
+
+Claim a work item before editing, then inspect the board and conflict surface:
 
 ```bash
-exo board           # who's working on what
-exo conflicts       # active changes that touch the same node (collision risk)
-exo roles           # the bounded contracts to hand workers
+exo claim local-ci-baseline --agent connie
+exo board
+exo conflicts
+tropo check
 ```
+
+`exo claim` writes only to work items under `changes/`. It refuses to run unless
+`assignee` is declared by the effective tropo config, rejects symlinked or
+out-of-workspace work item files, and rewrites the workspace file without mutating
+hard-linked targets outside it. Single-agent workspaces stay free of coordination
+fields they do not use. `exo roles` still lists the bounded contracts to hand workers.
 
 ## Set up LanceDB search (embedded backend)
 

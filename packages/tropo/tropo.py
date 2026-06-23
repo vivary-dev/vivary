@@ -30,10 +30,11 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import tomllib
 from collections import Counter, deque
 
-__version__ = "0.2.0"
+__version__ = "0.2.2"
 
 # ---------------------------------------------------------------------------
 # Minimal YAML-subset parser for frontmatter (zero-dependency).
@@ -205,17 +206,27 @@ def strip_meta(obj):
     return obj
 
 
+UTF8_BOM = "\ufeff"
 FM_RE = re.compile(r"^---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(\r?\n|$)", re.S)
+
+
+def _strip_leading_bom(text):
+    return text[len(UTF8_BOM):] if text.startswith(UTF8_BOM) else text
+
+
+def _frontmatter_match(text):
+    normalized = _strip_leading_bom(text)
+    return FM_RE.match(normalized), normalized
 
 
 def extract_frontmatter(text):
     """Return (yaml_text, body) or (None, whole_text) when no block is present."""
-    if not text.startswith("---"):
-        return None, text
-    m = FM_RE.match(text)
+    m, normalized = _frontmatter_match(text)
+    if not normalized.startswith("---"):
+        return None, normalized
     if not m:
-        return None, text
-    return m.group(1), text[m.end():]
+        return None, normalized
+    return m.group(1), normalized[m.end():]
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +290,125 @@ CONFIG_NAME = "tropo.toml"
 DERIVED_SPECS = {"id": "slug", "slug": "slug", "title": "string",
                  "created": "date", "updated": "date"}
 DEFAULT_EXCLUDE = [".git", ".tropo", ".claude", "node_modules", ".obsidian"]
+BUNDLED_PACKS = {
+    "coordination": """
+[base.optional]
+assignee = "string"
+""",
+    "dev-project": """
+[types.decision]
+folder   = "decisions"
+required = { status = "enum:proposed|accepted|superseded", date = "date" }
+optional = { supersedes = "ref", superseded_by = "ref", deciders = "string-list" }
+
+[types.runbook]
+folder   = "runbooks"
+required = { owner = "string" }
+optional = { severity = "enum:low|medium|high|critical", last_drill = "date" }
+
+[types.spec]
+folder   = "specs"
+required = { status = "enum:draft|review|stable|deprecated" }
+optional = { supersedes = "ref" }
+""",
+    "repo-graph": """
+[base]
+allow_untyped = true
+
+[base.optional]
+id = "slug"
+type = "string"
+project = "string"
+status = "enum:active|closed-local|closed|blocked|deferred|superseded|draft"
+created = "date"
+updated = "date"
+tags = "string-list"
+aliases = "string-list"
+related = "string-list"
+source_of_truth = "string-list"
+
+[types.module]
+folder = "modules"
+
+[types.module.required]
+project = "string"
+status = "enum:active|closed-local|closed|blocked|deferred|superseded|draft"
+module_area = "string"
+
+[types.module.optional]
+app_repo_path = "string"
+source_files = "string-list"
+test_files = "string-list"
+related_modules = "string-list"
+related_changes = "string-list"
+verification = "any"
+gates = "string-list"
+
+[types.implementation_slice]
+folder = "changes"
+
+[types.implementation_slice.required]
+project = "string"
+status = "enum:active|closed-local|closed|blocked|deferred|superseded|draft"
+slice = "string"
+
+[types.implementation_slice.optional]
+branch = "string"
+app_repo_path = "string"
+local_base_sha = "string"
+remote_dev_sha_at_graph_creation = "string"
+provider_spend = "string"
+push_or_merge = "string"
+related_modules = "string-list"
+related_changes = "string-list"
+verification = "any"
+gates = "string-list"
+
+[types.decision]
+folder = "decisions"
+
+[types.decision.required]
+project = "string"
+status = "enum:proposed|accepted|superseded|deferred"
+date = "date"
+
+[types.decision.optional]
+supersedes = "string"
+superseded_by = "string"
+related_modules = "string-list"
+related_changes = "string-list"
+rationale = "string"
+
+[types.verification]
+folder = "verification"
+
+[types.verification.required]
+project = "string"
+status = "enum:planned|passed|failed|blocked|deferred"
+target = "string"
+
+[types.verification.optional]
+command = "string"
+evidence = "any"
+related_modules = "string-list"
+related_changes = "string-list"
+
+[types.gate]
+folder = "gates"
+
+[types.gate.required]
+project = "string"
+status = "enum:open|approved|rejected|deferred"
+gate = "string"
+
+[types.gate.optional]
+approver = "string"
+approved_at = "datetime"
+command_intent = "string"
+related_modules = "string-list"
+related_changes = "string-list"
+""",
+}
 
 
 class ConfigError(Exception):
@@ -366,16 +496,23 @@ def _merge_config(base, add):
 def _read_toml(path):
     try:
         with open(path, "rb") as fh:
-            return tomllib.load(fh)
-    except (OSError, tomllib.TOMLDecodeError) as e:
+            return tomllib.loads(fh.read().decode("utf-8-sig"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as e:
         raise ConfigError(f"{path}: {e}")
 
 
-def _resolve_pack(name, root, script_dir):
-    for cand in (os.path.join(root, ".tropo", "packs", name + ".toml"),
-                 os.path.join(script_dir, "packs", name + ".toml")):
-        if os.path.isfile(cand):
-            return cand
+def _read_pack(name, root, script_dir):
+    local_pack = os.path.join(root, ".tropo", "packs", name + ".toml")
+    if os.path.isfile(local_pack):
+        return _read_toml(local_pack)
+    if name in BUNDLED_PACKS:
+        try:
+            return tomllib.loads(BUNDLED_PACKS[name])
+        except tomllib.TOMLDecodeError as e:
+            raise ConfigError(f"bundled pack {name!r}: {e}")
+    repo_pack = os.path.join(script_dir, "packs", name + ".toml")
+    if os.path.isfile(repo_pack):
+        return _read_toml(repo_pack)
     raise ConfigError(f"pack {name!r} not found (looked in .tropo/packs and bundled packs)")
 
 
@@ -430,7 +567,7 @@ def _compose(root, script_dir, config_path=None):
     raw = _read_toml(config_path or os.path.join(root, CONFIG_NAME))
     composed = {"base": {}, "types": {}, "exclude": []}
     for pack in raw.get("packs", []):
-        _merge_config(composed, _read_toml(_resolve_pack(pack, root, script_dir)))
+        _merge_config(composed, _read_pack(pack, root, script_dir))
     _merge_config(composed, raw)  # _merge_config normalizes each type's raw `folder`
     return composed
 
@@ -1005,7 +1142,7 @@ def _file_body(full_path):
         text = open(full_path, encoding="utf-8", errors="replace").read()
     except OSError:
         return ""
-    m = FM_RE.match(text)
+    m, text = _frontmatter_match(text)
     body = text[m.end():] if m else text
     return body[:_CONTENT_PREVIEW_CHARS]
 
@@ -1348,6 +1485,54 @@ def cmd_blast(args, resolver):
     return 0
 
 
+def _is_within(root, path):
+    try:
+        return os.path.commonpath([os.path.abspath(root), os.path.abspath(path)]) == os.path.abspath(root)
+    except ValueError:
+        return False
+
+
+def _write_workspace_file(root, path, text):
+    """Write text only to a regular, non-symlink file inside root."""
+    root_real = os.path.realpath(root)
+    target_abs = os.path.abspath(path)
+    parent_real = os.path.realpath(os.path.dirname(target_abs) or os.curdir)
+    if not _is_within(root_real, parent_real):
+        raise ConfigError(f"output path must stay inside tropo root: {path}")
+
+    if os.path.lexists(target_abs):
+        if os.path.islink(target_abs):
+            raise ConfigError(f"output path must not be a symlink: {path}")
+        if not os.path.isfile(target_abs):
+            raise ConfigError(f"output path must be a regular file: {path}")
+        if not _is_within(root_real, os.path.realpath(target_abs)):
+            raise ConfigError(f"output path must stay inside tropo root: {path}")
+
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{os.path.basename(target_abs)}.",
+        suffix=".tropo-tmp",
+        dir=os.path.dirname(target_abs) or os.curdir,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        if os.path.lexists(target_abs):
+            if os.path.islink(target_abs):
+                raise ConfigError(f"output path must not be a symlink: {path}")
+            if not os.path.isfile(target_abs):
+                raise ConfigError(f"output path must be a regular file: {path}")
+            if not _is_within(root_real, os.path.realpath(target_abs)):
+                raise ConfigError(f"output path must stay inside tropo root: {path}")
+        if not _is_within(root_real, os.path.realpath(os.path.dirname(target_abs) or os.curdir)):
+            raise ConfigError(f"output path must stay inside tropo root: {path}")
+        os.replace(tmp_name, target_abs)
+    except OSError as e:
+        raise ConfigError(f"could not write output {path}: {e.strerror}") from e
+    finally:
+        if os.path.lexists(tmp_name):
+            os.unlink(tmp_name)
+
+
 def cmd_view(args, resolver):
     """Render the graph (or a blast radius) as one self-contained HTML file.
     `tropo view` → whole graph; `tropo view blast <id>` → that node's radius.
@@ -1376,8 +1561,10 @@ def cmd_view(args, resolver):
 
     html = render_graph_html(title, sub_nodes, sub_edges, ranks)
     if args.out:
-        with open(args.out, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(html)
+        try:
+            _write_workspace_file(resolver.root, args.out, html)
+        except ConfigError as e:
+            sys.exit(f"tropo: {e}")
         print(f"tropo: wrote {args.out}  ({len(sub_nodes)} node(s), {len(sub_edges)} edge(s))")
     else:
         print(html)
@@ -1457,7 +1644,7 @@ def cmd_fix(args, resolver):
         if not d.noise:
             continue
         text = open(d.full, encoding="utf-8", errors="replace").read()
-        m = FM_RE.match(text)
+        m, text = _frontmatter_match(text)
         if not m:
             continue
         kept = [ln for ln in m.group(1).split("\n")

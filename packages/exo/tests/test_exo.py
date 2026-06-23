@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import os
+import argparse
 import shutil
 import sys
 import uuid
@@ -56,6 +57,27 @@ def _vault(td):
         "---\nstatus: planned\nrelated_modules: [core]\n---\n# D\n")
 
 
+def _claim_vault(td, coordination=True):
+    packs = 'packs = ["coordination"]\n' if coordination else ""
+    Path(td, "tropo.toml").write_text(
+        packs +
+        '[base]\nallow_untyped = true\n'
+        '[types.module]\nfolder = "modules"\n'
+        '[types.change]\nfolder = "changes"\n'
+        '[types.change.optional]\nstatus = "enum:active|done|planned"\n'
+        'related_modules = "ref-list"\n')
+    Path(td, "modules").mkdir()
+    Path(td, "changes").mkdir()
+    Path(td, "modules", "core.md").write_text("# Core\n")
+    Path(td, "changes", "empty.md").write_text("# Empty\n")
+    Path(td, "changes", "claimed.md").write_text(
+        "---\nstatus: active\nassignee: ada\nrelated_modules: [core]\n---\n# Claimed\n")
+    Path(td, "changes", "status-only.md").write_text(
+        "---\nstatus: active\nrelated_modules: [core]\n---\n# Status Only\n")
+    Path(td, "changes", "bad.md").write_text(
+        "---\nstatus: active\n# Bad\n")
+
+
 def _run(argv):
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -66,6 +88,25 @@ def _run(argv):
 def _run_json(argv):
     rc, out = _run(argv)
     return rc, json.loads(out)
+
+
+def _run_exit(argv):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        try:
+            rc = exo.main(argv)
+        except SystemExit as e:
+            return e.code, buf.getvalue()
+    return rc, buf.getvalue()
+
+
+def _tropo_check_ok(root):
+    tropo, tropo_dir = exo._load_tropo()
+    resolver = tropo.ConfigResolver(str(root), tropo_dir)
+    args = argparse.Namespace(paths=[], strict=False, lenient=True,
+                              json=False, quiet=False)
+    with contextlib.redirect_stdout(io.StringIO()):
+        return tropo.cmd_check(args, resolver) == 0
 
 
 def test_roles_lists_seven():
@@ -112,6 +153,157 @@ def test_conflicts_empty_when_no_overlap():
         assert rc == 0
         assert data["conflicts"] == []
         assert set(data["active"]) == {"x", "y"}
+
+
+def test_claim_creates_frontmatter_and_board_shows_assignee():
+    with temp_workspace() as td:
+        _claim_vault(td)
+        rc, data = _run_json(["claim", "empty", "--agent", "@connie", "--root", str(td), "--json"])
+        assert rc == 0
+        assert data == {
+            "id": "empty",
+            "path": "changes/empty.md",
+            "assignee": "connie",
+            "previous_assignee": None,
+            "changed": True,
+        }
+        text = Path(td, "changes", "empty.md").read_text()
+        assert text.startswith("---\nassignee: connie\n---\n# Empty\n")
+        _, board = _run_json(["board", "--root", str(td), "--json"])
+        by_id = {i["id"]: i for i in board["items"]}
+        assert by_id["empty"]["assignee"] == "connie"
+        assert _tropo_check_ok(td)
+
+
+def test_claim_updates_existing_assignee():
+    with temp_workspace() as td:
+        _claim_vault(td)
+        rc, data = _run_json(["claim", "claimed", "--agent", "bea", "--root", str(td), "--json"])
+        assert rc == 0
+        assert data["previous_assignee"] == "ada"
+        assert data["assignee"] == "bea"
+        assert data["changed"] is True
+        text = Path(td, "changes", "claimed.md").read_text()
+        assert "assignee: bea\n" in text
+        assert "assignee: ada\n" not in text
+
+
+def test_claim_appends_to_existing_frontmatter():
+    with temp_workspace() as td:
+        _claim_vault(td)
+        rc, data = _run_json(["claim", "status-only", "--agent", "bea", "--root", str(td), "--json"])
+        assert rc == 0
+        assert data["previous_assignee"] is None
+        assert data["changed"] is True
+        text = Path(td, "changes", "status-only.md").read_text()
+        assert text.startswith("---\nstatus: active\nrelated_modules: [core]\nassignee: bea\n---\n")
+        assert _tropo_check_ok(td)
+
+
+def test_claim_updates_bom_prefixed_frontmatter():
+    with temp_workspace() as td:
+        _claim_vault(td)
+        path = Path(td, "changes", "status-bom.md")
+        path.write_text("\ufeff---\nstatus: active\nrelated_modules: [core]\n---\n# Status BOM\n", encoding="utf-8")
+        rc, data = _run_json(["claim", "status-bom", "--agent", "connie", "--root", str(td), "--json"])
+        assert rc == 0
+        assert data["previous_assignee"] is None
+        assert data["changed"] is True
+        text = path.read_text(encoding="utf-8")
+        assert text.startswith("---\nstatus: active\nrelated_modules: [core]\nassignee: connie\n---\n")
+        assert text.count("---") == 2
+        assert "\ufeff" not in text
+        assert _tropo_check_ok(td)
+
+
+def test_claim_same_assignee_is_noop():
+    with temp_workspace() as td:
+        _claim_vault(td)
+        before = Path(td, "changes", "claimed.md").read_text()
+        rc, data = _run_json(["claim", "claimed", "--agent", "ada", "--root", str(td), "--json"])
+        assert rc == 0
+        assert data["previous_assignee"] == "ada"
+        assert data["changed"] is False
+        assert Path(td, "changes", "claimed.md").read_text() == before
+
+
+def test_claim_rejects_missing_non_change_invalid_and_unconfigured():
+    with temp_workspace() as td:
+        _claim_vault(td)
+        missing, _ = _run_exit(["claim", "missing", "--agent", "connie", "--root", str(td)])
+        assert "no work item with id 'missing'" in str(missing)
+        non_change, _ = _run_exit(["claim", "core", "--agent", "connie", "--root", str(td)])
+        assert "is not a work item under changes/" in str(non_change)
+        invalid, _ = _run_exit(["claim", "empty", "--agent", "bad name", "--root", str(td)])
+        assert "invalid agent handle" in str(invalid)
+
+    with temp_workspace() as td:
+        _claim_vault(td, coordination=False)
+        unconfigured, _ = _run_exit(["claim", "empty", "--agent", "connie", "--root", str(td)])
+        assert 'add packs = ["coordination"]' in str(unconfigured)
+
+
+def test_claim_rejects_symlinked_work_item_outside_workspace():
+    with temp_workspace() as td:
+        _claim_vault(td)
+        outside = Path(td).parent / f"outside-{uuid.uuid4().hex}.md"
+        outside.write_text("# Outside\n", encoding="utf-8")
+        link = Path(td, "changes", "evil.md")
+        try:
+            link.symlink_to(outside)
+        except (AttributeError, NotImplementedError, OSError):
+            outside.unlink(missing_ok=True)
+            return
+        try:
+            blocked, _ = _run_exit(["claim", "evil", "--agent", "connie", "--root", str(td)])
+            assert "refusing to claim symlinked or out-of-workspace file" in str(blocked)
+            assert outside.read_text(encoding="utf-8") == "# Outside\n"
+        finally:
+            outside.unlink(missing_ok=True)
+
+
+def test_claim_replaces_hard_link_without_mutating_outside_file():
+    with temp_workspace() as td:
+        _claim_vault(td)
+        outside = Path(td).parent / f"outside-{uuid.uuid4().hex}.md"
+        outside_text = "---\nstatus: active\nrelated_modules: [core]\n---\n# Outside\n"
+        outside.write_text(outside_text, encoding="utf-8")
+        linked = Path(td, "changes", "hard-link.md")
+        try:
+            os.link(outside, linked)
+        except (AttributeError, NotImplementedError, OSError):
+            outside.unlink(missing_ok=True)
+            return
+
+        try:
+            rc, data = _run_json(["claim", "hard-link", "--agent", "connie", "--root", str(td), "--json"])
+            assert rc == 0
+            assert data["changed"] is True
+            assert outside.read_text(encoding="utf-8") == outside_text
+            assert "assignee: connie\n" in linked.read_text(encoding="utf-8")
+        finally:
+            linked.unlink(missing_ok=True)
+            outside.unlink(missing_ok=True)
+
+
+def test_claim_rejects_malformed_frontmatter():
+    with temp_workspace() as td:
+        _claim_vault(td)
+        before = Path(td, "changes", "bad.md").read_text()
+        malformed, _ = _run_exit(["claim", "bad", "--agent", "connie", "--root", str(td)])
+        assert "malformed frontmatter" in str(malformed)
+        assert Path(td, "changes", "bad.md").read_text() == before
+
+
+def test_claim_rejects_bom_prefixed_malformed_frontmatter():
+    with temp_workspace() as td:
+        _claim_vault(td)
+        path = Path(td, "changes", "bad-bom.md")
+        path.write_text("\ufeff---\nstatus: active\n# Bad BOM\n", encoding="utf-8")
+        before = path.read_text(encoding="utf-8")
+        malformed, _ = _run_exit(["claim", "bad-bom", "--agent", "connie", "--root", str(td)])
+        assert "malformed frontmatter" in str(malformed)
+        assert path.read_text(encoding="utf-8") == before
 
 
 if __name__ == "__main__":

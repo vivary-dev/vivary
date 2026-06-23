@@ -18,16 +18,19 @@ things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
 > Release status: **0.2.3 is current** for the scaffolder (`create-vivary` /
-> `@vivary/create`). **0.2.1 is superseded** by the clean release-provenance hotfix;
-> use 0.2.3 for new installs.
+> `@vivary/create`), **0.2.2** for `vivary-tropo`, **0.2.1** for `vivary-exo`,
+> and **0.1.0** for `vivary-ozone`. Use 0.2.3 for new scaffolds.
+> The current `dev` line also contains an unreleased security-hardening batch for
+> scaffold privacy ignores, symlink/out-of-root writes, hard-link-safe rewrites, and
+> private heartbeat reports; see [CHANGELOG.md](CHANGELOG.md) before cutting packages.
 
 | Surface | Current | Link |
 |---|---:|---|
 | `create-vivary` (PyPI) | 0.2.3 | [PyPI](https://pypi.org/project/create-vivary/) |
 | `@vivary/create` (npm) | 0.2.3 | [npm](https://www.npmjs.com/package/@vivary/create) |
-| `vivary-tropo` | 0.2.0 | [PyPI](https://pypi.org/project/vivary-tropo/) |
+| `vivary-tropo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-tropo/) |
 | `vivary-ozone` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
-| `vivary-exo` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-exo/) |
+| `vivary-exo` | 0.2.1 | [PyPI](https://pypi.org/project/vivary-exo/) |
 | Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
@@ -45,6 +48,13 @@ sources and caveats.
 [HANDOFF.md](HANDOFF.md) to continue, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 for the full model, and [docs/PORTFOLIO.md](docs/PORTFOLIO.md) for proof and
 case-study material.
+
+Current command surface:
+
+- `create-vivary init` / `doctor` / `wizard`
+- `tropo check` / `graph` / `query` / `migrate` / `init --packs`
+- `ozone review` / `impact`
+- `exo board` / `conflicts` / `claim` / `roles`
 
 ## Quickstart
 
@@ -69,13 +79,13 @@ create-vivary init . --preset coding --auto --size large --yes --json
 ```
 
 The scaffolder writes a full workspace shell: `AGENTS.md`, `STATE.md`, `SOUL.md`,
-private `USER.md`/`MEMORY.md` boundaries, strato runtime skills for Claude/Codex-style
-agents, a `tropo.toml`, a starter typed graph, and (optionally) a `.vivary/storage.toml`
-for LanceDB or cloud storage. Generated modules are directories with `index.md` routers
-(`modules/<id>/index.md`) so agents load the smallest useful context first. `doctor`
-validates the shell, privacy ignores, graph health, storage backend, and module index
-coverage after creation. `tropo query` and `tropo migrate` power graph search and
-backend switching.
+private `USER.md`/`MEMORY.md` boundaries, private heartbeat report storage, strato
+runtime skills for Claude/Codex-style agents, a `tropo.toml`, a starter typed graph,
+and (optionally) a `.vivary/storage.toml` for LanceDB or cloud storage. Generated
+modules are directories with `index.md` routers (`modules/<id>/index.md`) so agents
+load the smallest useful context first. `doctor` validates the shell, active privacy
+ignore rules, graph health, storage backend, and module index coverage after creation.
+`tropo query` and `tropo migrate` power graph search and backend switching.
 
 For coding workspaces that need richer source retrieval, `--active-context
 cocoindex-code` adds optional CocoIndex-code guidance and graph nodes. It does not
@@ -125,7 +135,7 @@ Standalone Python packages (`vivary-*` on PyPI), plus the npm scaffolder
 | **tropo** | troposphere — the living foundation | typed knowledge graph: what the workspace *knows* | loam ✓ |
 | **strato** | stratosphere — the stable layer | agent OS: state surface, memory, the loop, gates, self-improvement | throughline + flywheel |
 | **ozone** | the protective filter | review — graph-aware, code *and* editorial | new ✓ |
-| **exo** | the outermost layer | coordination — conflict detection + role contracts | new ✓ |
+| **exo** | the outermost layer | coordination — conflict detection, work claiming, role contracts | new ✓ |
 
 `create vivary` → pick a preset (**second brain · coding · writing**) → it lays
 down `tropo` + `strato` and whichever optional layers fit. See
@@ -140,6 +150,7 @@ down `tropo` + `strato` and whichever optional layers fit. See
 - [Command reference](docs/COMMANDS.md) — every CLI, flag, and exit code
 - [How-to recipes](docs/HOWTO.md) · [Agent skills](docs/SKILLS.md) · [FAQ](docs/FAQ.md)
 - [Architecture](docs/ARCHITECTURE.md) · [Obsidian (optional)](docs/OBSIDIAN.md)
+- [Release workflow](docs/RELEASE-WORKFLOW.md) — end-of-update release truth, docs/site sync, and publish checks
 - [Portfolio proof](docs/PORTFOLIO.md) — shipped surfaces, screenshots, and case-study notes
 
 ## The value-add (why this isn't another harness)

@@ -1,6 +1,6 @@
 # Vivary — fresh-chat handoff
 
-_Updated 2026-06-21._
+_Updated 2026-06-23._
 
 This is the starting point for a fresh chat. Read this first, then
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), then inspect live git state before
@@ -13,11 +13,13 @@ Use this prompt in a new window:
 ```text
 We are in C:\Users\jeffk\dev\vivary (repo: github.com/vivary-dev/vivary). Read
 HANDOFF.md, docs/README.md, and docs/ARCHITECTURE.md. Verify git status/branch/
-remotes before making claims. Vivary 0.2.2 is the current release line — tropo 0.2.0
-has shipped, and create-vivary / @vivary/create are now at 0.2.2. Continue from
-`dev` by cutting a feature branch per change. Tests must be planned before edits.
-Do not push, open PRs, merge, publish, create orgs/repos, install dependencies, or
-delete files without explicit approval.
+remotes before making claims. The current release line is create-vivary /
+@vivary/create 0.2.3, vivary-tropo 0.2.2, vivary-exo 0.2.1, and vivary-ozone
+0.1.0. The `dev` branch includes an Unreleased security-hardening batch; do not
+claim it is published until the package cut happens. Continue from `dev` by cutting a
+feature branch per change. Tests must be planned before edits. Do not push, open PRs,
+merge, publish, create orgs/repos, install dependencies, or delete files without
+explicit approval.
 ```
 
 ## Current Truth
@@ -42,9 +44,14 @@ tropo    typed knowledge graph: what is true        baseline
 Design law: **minimalism**. Always-on context must be tiny. Expensive-to-load
 framework files are wrong.
 
-**Shipped through 0.2.2.** 0.2.0 shipped the tropo storage/search layer and
-agent-mode scaffolder work. 0.2.1 fixed the wizard LanceDB install flow and made
-`--auto` imply `--yes`; 0.2.2 supersedes 0.2.1 as the clean release-provenance hotfix.
+**Release target through 2026-06-23.** 0.2.0 shipped the tropo storage/search layer
+and agent-mode scaffolder work. 0.2.3 is the clean npm/PyPI scaffolder line.
+`vivary-tropo` 0.2.1 and `vivary-exo` 0.2.0 shipped embedded starter packs,
+opt-in `coordination`, and `exo claim`. The 0.2.2 / 0.2.1 patch hardens UTF-8
+BOM-prefixed config and frontmatter so Windows-created files remain valid claim targets.
+The current `dev` line additionally contains an Unreleased security-hardening batch
+for symlink/out-of-root scaffold writes, hard-link-safe `tropo view --out` and
+`exo claim` rewrites, active privacy-ignore validation, and private heartbeat reports.
 
 ```bash
 npm create @vivary my-workspace                          # the scaffolder UX
@@ -56,22 +63,28 @@ PyPI: `vivary-tropo` · `vivary-ozone` · `vivary-exo` · `create-vivary`. npm:
 `@vivary/create`. Website: **https://vivary.vercel.app/**. Full
 docs in [docs/](docs/) (start at [docs/README.md](docs/README.md)); the site is
 generated from `docs/` (`cd site && npm run sync-docs`).
+Every behavior/package/public-copy update ends with
+[docs/RELEASE-WORKFLOW.md](docs/RELEASE-WORKFLOW.md).
 
 **Package versions — read this before touching a version number.**
 
 | Package | PyPI | npm | Published | Branch |
 |---|---|---|---|---|
-| `vivary-tropo` | `vivary-tropo` | — | 0.2.0 | current |
+| `vivary-tropo` | `vivary-tropo` | — | 0.2.2 | current |
 | `vivary-ozone` | `vivary-ozone` | — | 0.1.0 | unchanged |
-| `vivary-exo`   | `vivary-exo`   | — | 0.1.0 | unchanged |
-| `create-vivary` | `create-vivary` | `@vivary/create` | 0.2.2 | current |
+| `vivary-exo`   | `vivary-exo`   | — | 0.2.1 | current |
+| `create-vivary` | `create-vivary` | `@vivary/create` | 0.2.3 | current |
 
 The **0.2.0** bump affected `vivary-tropo` and `create-vivary` (both PyPI + npm for
 create-vivary). It added: storage layer (`file`/`embedded`/`cloud`), `tropo query`,
 `tropo migrate`, agent-mode init flags (`--auto` `--yes` `--json` `--dry-run`),
-`create-vivary wizard`, and the interactive setup wizard. The **0.2.2** bump affects
-`create-vivary` / `@vivary/create` only and supersedes 0.2.1. Per-release history lives in
-[CHANGELOG.md](CHANGELOG.md).
+`create-vivary wizard`, and the interactive setup wizard. The **0.2.3** bump affects
+`create-vivary` / `@vivary/create` only and pins the npm launcher to the matching PyPI
+scaffolder. The **tropo 0.2.1 / exo 0.2.0** release added bundled pack
+reliability and graph-native claims. The **tropo 0.2.2 / exo 0.2.1** patch hardens
+Windows BOM config and frontmatter handling for `exo claim`. The next package cut must
+carry the Unreleased security hardening from [CHANGELOG.md](CHANGELOG.md) before any
+public release copy claims it is live.
 
 ## Live Repo State
 
@@ -96,26 +109,36 @@ lag active GitHub issues.
 
 ## What Exists
 
-All four layers are working, tested, **published** packages (`tropo` at 0.2.0,
-`ozone` / `exo` at 0.1.0; `create-vivary` at 0.2.2 on PyPI + npm; CLI commands stay
-`tropo`/`ozone`/`exo`/`create-vivary`), proven in a clean venv.
+All four layers are working, tested packages (`tropo` 0.2.2, `exo` 0.2.1, `ozone`
+0.1.0; `create-vivary` 0.2.3 on PyPI + npm; CLI commands stay
+`tropo`/`ozone`/`exo`/`create-vivary`). The current tropo/exo patch was published
+and verified from public PyPI plus fresh `pip` and `uvx` smokes on 2026-06-22.
 
 ```text
-packages/tropo/        vivary-tropo 0.2.0 — knowledge-graph CLI (check/signal/types/
+packages/tropo/        vivary-tropo 0.2.2 — knowledge-graph CLI (check/signal/types/
                        stats/graph/blast/view/plan/fix/init/query/migrate). check is
                        STRICT by default. Storage layer: file/embedded(LanceDB)/cloud.
-                       Optional extras: [embedded] [cloud] [astra]. Tests: 55/55.
+                       Optional extras: [embedded] [cloud] [astra]. Built-in packs:
+                       dev-project, repo-graph, coordination. BOM-prefixed config and
+                       frontmatter are normalized before parsing. `view --out` is
+                       hardened against symlink/out-of-root targets and hard-linked
+                       outside files. Tests: 64/64.
 packages/strato/       strato source/templates — agent OS: STRATO.md model + templates
                        + bootstrap/heartbeat/self-improve skill. Docs/templates only.
 packages/ozone/        vivary-ozone 0.1.0 — review layer: `review` (structure pack) +
                        `impact <id>` (blast radius) + `packs`. Tests: 7/7.
-packages/exo/          vivary-exo 0.1.0 — coordination layer: `conflicts` + `board` +
-                       `roles`. Read-only, graph-native. Tests: 4/4.
-packages/create-vivary/ create-vivary 0.2.2 — scaffolder: init/wizard/doctor --preset
+packages/exo/          vivary-exo 0.2.1 — coordination layer: `conflicts` + `board` +
+                       `claim` + `roles`. `claim` is the only writer and requires the
+                       opt-in coordination pack; it rejects malformed BOM-prefixed
+                       frontmatter, symlink/out-of-workspace work items, and hard-link
+                       truncation. Tests: 14/14.
+packages/create-vivary/ create-vivary 0.2.3 — scaffolder: init/wizard/doctor --preset
                        coding|second-brain|writing + agent flags (--auto/--yes/--json/
                        --dry-run/--storage/--provider/--size/--privacy). Bundles
                        strato/loops assets for installed use. npm wrapper in npm/.
-                       Tests: 27/27 + parity 2/2.
+                       Current dev hardening covers active privacy ignore validation,
+                       private heartbeat reports, and symlink/out-of-root scaffold
+                       writes. Tests: 44/44 + parity 3/3.
 
 .github/workflows/ci.yml  CI: runs FREE (public repo) — all 4 suites + parity +
                        tropo check + `ozone review --strict` gate + site build,
@@ -168,11 +191,11 @@ the source repos from this workspace.
 Run these before claiming a branch is healthy:
 
 ```powershell
-python packages\tropo\tests\test_tropo.py              # 55/55
-python packages\create-vivary\tests\test_create_vivary.py   # 27/27
-python packages\create-vivary\tests\test_assets_parity.py   # 2/2
+python packages\tropo\tests\test_tropo.py              # 64/64
+python packages\create-vivary\tests\test_create_vivary.py   # 44/44
+python packages\create-vivary\tests\test_assets_parity.py   # 3/3
 python packages\ozone\tests\test_ozone.py              # 7/7
-python packages\exo\tests\test_exo.py                  # 4/4
+python packages\exo\tests\test_exo.py                  # 14/14
 git diff --check
 ```
 
@@ -226,13 +249,17 @@ release cut.
 
 ## Remaining Work
 
-The four layers are built, tested, and published through the current versions listed
-above. The near-term work is now post-0.2 hardening:
+The four layers are built and tested through the current versions listed above. The
+near-term work is now post-usability-release hardening:
 
+- **Security hardening release cut.** The Unreleased dev-line hardening is merged and
+  documented, but package publication is still a human gate. Cut package versions,
+  publish, then update the release truth from "merged to dev" to "published and
+  verified."
 - **Stats workflow repair.** Keep popularity snapshots out of direct `dev` pushes:
   automated stats should update a feature branch and open a PR.
-- **Starter pack packaging (#43).** Ship tropo starter packs in the installed wheel
-  with `importlib.resources`.
+- **Portability CI matrix.** Add Linux/macOS/Windows CI coverage for the core Python
+  suites and wheel install smokes so platform-specific bugs are caught before publish.
 - **npm publish automation (#42).** Fix npm automation without bypassing npm's
   security model.
 - **Launch.** Launch copy (Twitter thread + GitHub release) and the website brief were
@@ -244,9 +271,8 @@ above. The near-term work is now post-0.2 hardening:
 - **Release automation (#15/#22).** A `.github/workflows/release.yml` that publishes
   npm + PyPI via **OIDC trusted publishing** on a version tag — tokenless, but needs
   Actions billing unlocked to run.
-- **Other roadmap (#16–#23):** ship tropo starter packs in the wheel · exo `claim`
-  write · ozone LLM packs + a prose pack · graphify semantic layer · a multi-agent
-  preset · move the `loops` skill into strato.
+- **Other roadmap (#16–#23):** ozone LLM packs + a prose pack · graphify semantic
+  layer · a multi-agent preset · move the `loops` skill into strato.
 
 (The original type-inference ladder was dropped in favour of making `tropo check`
 opinionated — folder-as-type stays the single source of truth.)

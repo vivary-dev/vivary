@@ -64,6 +64,7 @@ AGENTS.md          the contract the agent follows each turn (the loop and the ga
 SOUL.md            the agent's personality and principles
 STATE.md           the one place that answers "where are we?" (Focus / Status / Next)
 USER.md  MEMORY.md  your private identity + durable memory (ignored by Git)
+memory/  heartbeat-reports/  private memory and heartbeat output (ignored by Git)
 STRATO.md          how the agent operating system works
 tropo.toml         the rules for the typed graph
 modules/index.md   the router that tells agents which module index to open
@@ -77,8 +78,9 @@ With `--active-context cocoindex-code`, the workspace also includes
 
 ## 3. Check that it's healthy
 
-`doctor` confirms the workspace was created correctly. The other three commands are
-your everyday checks:
+`doctor` confirms the workspace was created correctly, including that private context
+and heartbeat output are actively ignored by Git. The other three commands are your
+everyday checks:
 
 ```bash
 create-vivary doctor my-workspace
@@ -118,6 +120,21 @@ Open the workspace in your agent (Claude Code reads `.claude/skills/`; Codex rea
 
 The first time you open a fresh workspace, ask the agent to **bootstrap**. The strato
 skill interviews you and fills in SOUL / USER / STATE. See [agent skills](/skills/).
+
+When multiple agents share one workspace, opt into coordination fields:
+
+```toml
+packs = ["repo-graph", "coordination"]
+```
+
+Then claim work before editing:
+
+```bash
+exo claim local-ci-baseline --agent connie
+exo board
+exo conflicts
+tropo check
+```
 
 ## 6. Add your own work
 

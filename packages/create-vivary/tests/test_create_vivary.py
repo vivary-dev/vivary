@@ -82,6 +82,7 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertIn("USER.md", gitignore)
             self.assertIn("MEMORY.md", gitignore)
             self.assertIn("memory/*", gitignore)
+            self.assertIn("heartbeat-reports/*", gitignore)
 
             resolver = tropo.ConfigResolver(str(target), str(TROPO))
             docs = tropo.analyze(str(target), [], resolver)
@@ -336,6 +337,139 @@ class CreateVivaryTests(unittest.TestCase):
                 "blocks nested module index\n",
             )
 
+    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
+    def test_init_refuses_symlinked_destination_parent(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            target.mkdir()
+            (target / "modules").symlink_to(outside, target_is_directory=True)
+
+            with self.assertRaisesRegex(create_vivary.ScaffoldError, "symlinked|outside"):
+                create_vivary.scaffold_workspace(
+                    target, preset="coding", force=False, repo_root=ROOT
+                )
+
+            self.assertFalse((outside / "agent-workspace" / "index.md").exists())
+
+    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
+    def test_force_refuses_symlinked_destination_leaf(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            target.mkdir()
+            victim = outside / "victim.txt"
+            victim.write_text("keep me\n", encoding="utf-8")
+            (target / "README.md").symlink_to(victim)
+
+            with self.assertRaisesRegex(create_vivary.ScaffoldError, "symlinked|outside"):
+                create_vivary.scaffold_workspace(
+                    target, preset="coding", force=True, repo_root=ROOT
+                )
+
+            self.assertEqual(victim.read_text(encoding="utf-8"), "keep me\n")
+
+    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
+    def test_init_refuses_symlinked_workspace_root(self):
+        with temp_workspace() as td:
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            target = Path(td) / "agent-workspace"
+            try:
+                target.symlink_to(outside, target_is_directory=True)
+            except OSError:
+                return
+
+            with self.assertRaisesRegex(create_vivary.ScaffoldError, "symlinked target"):
+                create_vivary.scaffold_workspace(
+                    target, preset="coding", force=True, repo_root=ROOT
+                )
+
+            self.assertFalse((outside / "README.md").exists())
+
+    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
+    def test_storage_safety_is_checked_before_scaffold_writes(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            outside = Path(td) / "outside"
+            target.mkdir()
+            outside.mkdir()
+            try:
+                (target / ".vivary").symlink_to(outside, target_is_directory=True)
+            except OSError:
+                return
+
+            with self.assertRaisesRegex(create_vivary.ScaffoldError, "symlinked|outside"):
+                create_vivary.scaffold_workspace(
+                    target,
+                    preset="coding",
+                    storage="embedded",
+                    provider="lancedb",
+                    repo_root=ROOT,
+                )
+
+            self.assertFalse((target / "README.md").exists())
+            self.assertFalse((outside / "storage.toml").exists())
+
+    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
+    def test_force_refuses_symlinked_stale_cleanup_parent_before_writes(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            outside = Path(td) / "outside"
+            target.mkdir()
+            outside.mkdir()
+            (outside / "active-context.md").write_text("keep me\n", encoding="utf-8")
+            try:
+                (target / "docs").symlink_to(outside, target_is_directory=True)
+            except OSError:
+                return
+
+            with self.assertRaisesRegex(create_vivary.ScaffoldError, "stale scaffold"):
+                create_vivary.scaffold_workspace(
+                    target, preset="coding", force=True, repo_root=ROOT
+                )
+
+            self.assertEqual((outside / "active-context.md").read_text(encoding="utf-8"), "keep me\n")
+            self.assertFalse((target / "README.md").exists())
+
+    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
+    def test_force_cleanup_unlinks_stale_leaf_symlink_only(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            outside = Path(td) / "outside-active-context"
+            outside.mkdir()
+            skill_parent = target / ".claude" / "skills"
+            skill_parent.mkdir(parents=True)
+            stale = skill_parent / "active-context"
+            try:
+                stale.symlink_to(outside, target_is_directory=True)
+            except OSError:
+                return
+
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=True, repo_root=ROOT
+            )
+
+            self.assertFalse(stale.exists() or stale.is_symlink())
+            self.assertTrue(outside.exists())
+            self.assertTrue((skill_parent / "strato").exists())
+
+    def test_force_dry_run_does_not_cleanup_stale_state(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            stale_parent = target / "modules"
+            stale_parent.mkdir(parents=True)
+            stale = stale_parent / "codebase.md"
+            stale.write_text("keep me\n", encoding="utf-8")
+
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=True, dry_run=True, repo_root=ROOT
+            )
+
+            self.assertEqual(stale.read_text(encoding="utf-8"), "keep me\n")
+
     def test_cli_init(self):
         with temp_workspace() as td:
             target = Path(td) / "agent-workspace"
@@ -405,6 +539,121 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertEqual(report["errors"], [])
             self.assertEqual(report["graph"]["broken"], 0)
             self.assertGreaterEqual(report["graph"]["nodes"], 9)
+
+    def test_doctor_rejects_commented_or_negated_privacy_ignores(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / ".gitignore").write_text(
+                "# misleading privacy comments only\n"
+                "# USER.md\n"
+                "!MEMORY.md\n"
+                "not-USER.md-backup\n"
+                "docs/memory/*-example\n"
+                "# heartbeat-reports/*\n",
+                encoding="utf-8",
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertFalse(report["ok"])
+            self.assertIn("privacy ignore missing: USER.md", report["errors"])
+            self.assertIn("privacy ignore missing: MEMORY.md", report["errors"])
+            self.assertIn("privacy ignore missing: memory/*", report["errors"])
+            self.assertIn("privacy ignore missing: heartbeat-reports/*", report["errors"])
+
+    def test_doctor_accepts_root_privacy_ignores_with_gitkeep_exception(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / ".gitignore").write_text(
+                "# Strato private context\n"
+                "/USER.md\n"
+                "/MEMORY.md\n"
+                "/memory/*\n"
+                "!memory/.gitkeep\n"
+                "/heartbeat-reports/*\n"
+                "!heartbeat-reports/.gitkeep\n",
+                encoding="utf-8",
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertTrue(report["ok"], report)
+
+    def test_doctor_rejects_broad_privacy_negations(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / ".gitignore").write_text(
+                "/USER.md\n"
+                "/MEMORY.md\n"
+                "/memory/*\n"
+                "!memory/.gitkeep\n"
+                "/heartbeat-reports/*\n"
+                "!heartbeat-reports/.gitkeep\n"
+                "!*.md\n"
+                "!memory/*.md\n",
+                encoding="utf-8",
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertFalse(report["ok"])
+            self.assertIn("privacy ignore missing: USER.md", report["errors"])
+            self.assertIn("privacy ignore missing: MEMORY.md", report["errors"])
+            self.assertIn("privacy ignore missing: memory/*", report["errors"])
+            self.assertIn("privacy ignore missing: heartbeat-reports/*", report["errors"])
+
+    def test_doctor_rejects_indented_privacy_ignores(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / ".gitignore").write_text(
+                " USER.md\n"
+                " MEMORY.md\n"
+                " memory/*\n"
+                " heartbeat-reports/*\n",
+                encoding="utf-8",
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertFalse(report["ok"])
+            self.assertIn("privacy ignore missing: USER.md", report["errors"])
+            self.assertIn("privacy ignore missing: MEMORY.md", report["errors"])
+            self.assertIn("privacy ignore missing: memory/*", report["errors"])
+            self.assertIn("privacy ignore missing: heartbeat-reports/*", report["errors"])
+
+    def test_doctor_rejects_nested_memory_gitignore_negation(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / ".gitignore").write_text(
+                "/USER.md\n"
+                "/MEMORY.md\n"
+                "/memory/*\n"
+                "!memory/.gitkeep\n"
+                "/heartbeat-reports/*\n"
+                "!heartbeat-reports/.gitkeep\n",
+                encoding="utf-8",
+            )
+            (target / "memory" / ".gitignore").write_text("!secret.md\n", encoding="utf-8")
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertFalse(report["ok"])
+            self.assertIn("privacy ignore missing: memory/*", report["errors"])
 
     def test_doctor_reports_missing_module_index(self):
         with temp_workspace() as td:
@@ -582,6 +831,30 @@ class TestAgentFlags(unittest.TestCase):
             self.assertEqual(out["storage"], "file")
             self.assertFalse((target / ".vivary").exists())
 
+    def test_init_auto_cloud_config_does_not_install_backend(self):
+        with temp_workspace() as td:
+            target = Path(td) / "auto-cloud-demo"
+            import io, contextlib, json
+            buf = io.StringIO()
+
+            with mock.patch.object(create_vivary, "_ensure_backend_installed") as ensure:
+                with contextlib.redirect_stdout(buf):
+                    rc = create_vivary.main([
+                        "init", str(target),
+                        "--auto",
+                        "--privacy", "cloud",
+                        "--json",
+                        "--repo-root", str(ROOT),
+                    ])
+
+            self.assertEqual(rc, 0)
+            ensure.assert_not_called()
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["storage"], "cloud")
+            self.assertEqual(out["provider"], "qdrant")
+            self.assertEqual(out["installed"], [])
+            self.assertTrue((target / ".vivary" / "storage.toml").exists())
+
     def test_wizard_subcommand_writes_storage_toml(self):
         with temp_workspace() as td:
             target = Path(td) / "wizard-demo"
@@ -607,6 +880,33 @@ class TestAgentFlags(unittest.TestCase):
             self.assertEqual(out["storage"], "embedded")
             cfg = target / ".vivary" / "storage.toml"
             self.assertTrue(cfg.exists())
+
+    def test_wizard_cloud_config_does_not_install_backend(self):
+        with temp_workspace() as td:
+            target = Path(td) / "wizard-cloud-demo"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", storage="file", repo_root=ROOT
+            )
+
+            import io, contextlib, json
+            buf = io.StringIO()
+            with mock.patch.object(create_vivary, "_ensure_backend_installed") as ensure:
+                with contextlib.redirect_stdout(buf):
+                    rc = create_vivary.main([
+                        "wizard", str(target),
+                        "--auto",
+                        "--storage", "cloud",
+                        "--provider", "qdrant",
+                        "--json",
+                        "--repo-root", str(ROOT),
+                    ])
+
+            self.assertEqual(rc, 0)
+            ensure.assert_not_called()
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["storage"], "cloud")
+            self.assertEqual(out["provider"], "qdrant")
+            self.assertEqual(out["installed"], [])
 
     def test_wizard_dry_run_does_not_install_backend(self):
         with temp_workspace() as td:
@@ -635,6 +935,37 @@ class TestAgentFlags(unittest.TestCase):
             self.assertEqual(out["installed"], [])
             self.assertTrue(out["dry_run"])
             self.assertFalse((target / ".vivary" / "storage.toml").exists())
+
+    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
+    def test_wizard_json_reports_storage_safety_error(self):
+        with temp_workspace() as td:
+            target = Path(td) / "wizard-symlink"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", storage="file", repo_root=ROOT
+            )
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            try:
+                (target / ".vivary").symlink_to(outside, target_is_directory=True)
+            except OSError:
+                return
+
+            import io, contextlib, json
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "wizard", str(target),
+                    "--auto",
+                    "--storage", "embedded",
+                    "--json",
+                    "--repo-root", str(ROOT),
+                ])
+
+            self.assertEqual(rc, 1)
+            out = json.loads(buf.getvalue())
+            self.assertFalse(out["ok"])
+            self.assertRegex(out["error"], "symlinked|outside")
+            self.assertFalse((outside / "storage.toml").exists())
 
     def test_doctor_reports_backend_field(self):
         with temp_workspace() as td:
