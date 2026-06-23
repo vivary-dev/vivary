@@ -1,13 +1,10 @@
 {
   "date": "2026-06-23",
-  "generated_at": "2026-06-23T14:58:33Z",
+  "generated_at": "2026-06-23T15:36:04Z",
   "github": {
     "forks": 0,
     "open_issues": 7,
-    "pushed_at": "2026-06-23T12:50:42Z",
-    "release_asset_downloads": 0,
-    "release_assets": [],
-    "release_count": 5,
+    "pushed_at": "2026-06-23T15:05:08Z",
     "stale": false,
     "stars": 1,
     "watchers": 0
@@ -65,7 +62,6 @@
   "pypi_weekly": 1479,
   "status": "ok",
   "totals": {
-    "github_release_downloads": 0,
     "npm_weekly": 446,
     "package_weekly": 1925,
     "pypi_weekly": 1479
