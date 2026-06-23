@@ -1,0 +1,6 @@
+# Strato private context
+USER.md
+MEMORY.md
+memory/*
+!memory/.gitkeep
+.strato/private/
