@@ -12,9 +12,29 @@ the `v0.1.0` line.
 
 ## [Unreleased]
 
+Affects `vivary-tropo`, `create-vivary` / `@vivary/create`, and `strato` workspace assets.
+
 ### Fixed
 
-- **Doctor privacy ignore validation hardening** — `create-vivary doctor` now validates active `.gitignore` rules for `USER.md`, `MEMORY.md`, and `memory/*` instead of accepting comments, negations, or unrelated substring matches as proof that private context files are ignored.
+- **`tropo view --out` output hardening** — rendered HTML writes must stay inside
+  the tropo root, refuse symlink output paths, and replace the output path instead
+  of truncating existing hard-linked files.
+- **Heartbeat reports stay private** — scaffolded workspaces now gitignore
+  `heartbeat-reports/*` (while keeping `.gitkeep`), the doctor flags missing report
+  ignores, and strato's heartbeat procedure treats reports as PRIV because they may
+  summarize private memory.
+- **Doctor privacy ignore validation hardening** — `create-vivary doctor` now
+  validates active `.gitignore` rules for `USER.md`, `MEMORY.md`, `memory/*`, and
+  `heartbeat-reports/*` instead of accepting comments, negations, or unrelated
+  substring matches as proof that private context files are ignored.
+- **`exo claim` hard-link hardening** — claim writes now replace the workspace work
+  item file instead of truncating an existing inode, so a hard-linked file outside
+  the workspace is not mutated.
+- **create-vivary symlink hardening** — scaffold writes, storage config writes, and
+  stale generated cleanup now refuse symlinked destination parents and paths that
+  resolve outside the selected workspace, including when `--force` is used.
+- **create-vivary dry-run cleanup guard** — `--dry-run --force` previews the scaffold
+  without removing stale generated files.
 
 ## [vivary-tropo 0.2.2 / vivary-exo 0.2.1] — 2026-06-22
 

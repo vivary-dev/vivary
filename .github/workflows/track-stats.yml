@@ -13,9 +13,11 @@ jobs:
   snapshot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      # actions/checkout v4.2.2 pinned to an immutable commit SHA.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: fetch and record
         run: python3 tools/update_stats.py
@@ -41,6 +43,7 @@ jobs:
             fi
             git switch -c "$BRANCH"
             git commit -m "chore(stats): $DATE — npm/wk:$NPM pypi/wk:$PYPI ★$STARS"
+            gh auth setup-git
             git push --set-upstream origin "$BRANCH"
             if gh pr view "$BRANCH" --json number --jq .number >/dev/null 2>&1; then
               gh pr edit "$BRANCH" \

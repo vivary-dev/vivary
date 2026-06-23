@@ -468,12 +468,63 @@ def _assert_self_contained(txt):
 
 
 def test_view_writes_self_contained_html(tmp_path):
+    _graph_tree(tmp_path, {"a.md": "---\ndepends_on: b\n---\n# A\n", "b.md": "# B\n"})
     out = tmp_path / "g.html"
-    tropo.cmd_view(argparse.Namespace(paths=["graph"], depth=None, out=str(out)), res())
+    tropo.cmd_view(argparse.Namespace(paths=["graph"], depth=None, out=str(out)),
+                   res(str(tmp_path)))
     txt = out.read_text(encoding="utf-8")
     _assert_self_contained(txt)
-    for nid in ("tropo", "jeff", "2026-06-12-kickoff", "0001-folder-as-type"):
+    for nid in ("a", "b"):
         assert f'data-id="{nid}"' in txt
+
+
+def test_view_out_rejects_symlink(tmp_path):
+    _graph_tree(tmp_path, {"a.md": "# A\n"})
+    victim = tmp_path.parent / f"victim-{uuid.uuid4().hex}.txt"
+    victim.write_text("keep", encoding="utf-8")
+    out = tmp_path / "g.html"
+    out.symlink_to(victim)
+    try:
+        tropo.cmd_view(argparse.Namespace(paths=["graph"], depth=None, out=str(out)),
+                       res(str(tmp_path)))
+        assert False, "expected SystemExit for symlink output"
+    except SystemExit as e:
+        assert "must not be a symlink" in str(e)
+    assert victim.read_text(encoding="utf-8") == "keep"
+
+
+def test_view_out_rejects_outside_root(tmp_path):
+    _graph_tree(tmp_path, {"a.md": "# A\n"})
+    out = tmp_path.parent / f"outside-{uuid.uuid4().hex}.html"
+    try:
+        tropo.cmd_view(argparse.Namespace(paths=["graph"], depth=None, out=str(out)),
+                       res(str(tmp_path)))
+        assert False, "expected SystemExit for outside output"
+    except SystemExit as e:
+        assert "must stay inside tropo root" in str(e)
+    assert not out.exists()
+
+
+def test_view_out_replaces_hard_link_without_mutating_outside_file(tmp_path):
+    _graph_tree(tmp_path, {"a.md": "# A\n"})
+    outside = tmp_path.parent / f"outside-{uuid.uuid4().hex}.html"
+    outside_text = "<!doctype html><title>outside</title>"
+    outside.write_text(outside_text, encoding="utf-8")
+    out = tmp_path / "g.html"
+    try:
+        os.link(outside, out)
+    except (AttributeError, NotImplementedError, OSError):
+        outside.unlink(missing_ok=True)
+        return
+
+    try:
+        tropo.cmd_view(argparse.Namespace(paths=["graph"], depth=None, out=str(out)),
+                       res(str(tmp_path)))
+        assert outside.read_text(encoding="utf-8") == outside_text
+        _assert_self_contained(out.read_text(encoding="utf-8"))
+    finally:
+        out.unlink(missing_ok=True)
+        outside.unlink(missing_ok=True)
 
 
 def test_view_blast_subgraph_only_radius(tmp_path):
