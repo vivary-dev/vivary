@@ -10,6 +10,12 @@ the `v0.1.0` line.
 
 **Current versions:** `vivary-tropo` **0.2.2** · `vivary-exo` **0.2.1** · `create-vivary` / `@vivary/create` **0.2.3** · `vivary-ozone` **0.1.0**.
 
+## [Unreleased]
+
+### Fixed
+
+- **Doctor privacy ignore validation hardening** — `create-vivary doctor` now validates active `.gitignore` rules for `USER.md`, `MEMORY.md`, and `memory/*` instead of accepting comments, negations, or unrelated substring matches as proof that private context files are ignored.
+
 ## [vivary-tropo 0.2.2 / vivary-exo 0.2.1] — 2026-06-22
 
 Affects `vivary-tropo` and `vivary-exo` only. `create-vivary` / `@vivary/create`

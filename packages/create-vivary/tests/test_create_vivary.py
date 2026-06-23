@@ -406,6 +406,47 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertEqual(report["graph"]["broken"], 0)
             self.assertGreaterEqual(report["graph"]["nodes"], 9)
 
+    def test_doctor_rejects_commented_or_negated_privacy_ignores(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / ".gitignore").write_text(
+                "# misleading privacy comments only\n"
+                "# USER.md\n"
+                "!MEMORY.md\n"
+                "not-USER.md-backup\n"
+                "docs/memory/*-example\n",
+                encoding="utf-8",
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertFalse(report["ok"])
+            self.assertIn("privacy ignore missing: USER.md", report["errors"])
+            self.assertIn("privacy ignore missing: MEMORY.md", report["errors"])
+            self.assertIn("privacy ignore missing: memory/*", report["errors"])
+
+    def test_doctor_accepts_root_privacy_ignores_with_gitkeep_exception(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / ".gitignore").write_text(
+                "# Strato private context\n"
+                "/USER.md\n"
+                "/MEMORY.md\n"
+                "/memory/*\n"
+                "!memory/.gitkeep\n",
+                encoding="utf-8",
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertTrue(report["ok"], report)
+
     def test_doctor_reports_missing_module_index(self):
         with temp_workspace() as td:
             target = Path(td) / "agent-workspace"

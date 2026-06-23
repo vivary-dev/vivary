@@ -218,10 +218,8 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
 
         gitignore = target / ".gitignore"
         if gitignore.exists():
-            txt = gitignore.read_text(encoding="utf-8", errors="replace")
-            for pattern in ("USER.md", "MEMORY.md", "memory/*"):
-                if pattern not in txt:
-                    errors.append(f"privacy ignore missing: {pattern}")
+            missing = _missing_privacy_ignores(gitignore)
+            errors.extend(f"privacy ignore missing: {pattern}" for pattern in missing)
         errors.extend(_module_index_errors(target))
 
     graph = {"nodes": 0, "edges": 0, "broken": 0}
@@ -267,6 +265,36 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         "graph": graph,
         "backend": backend_name,
     }
+
+
+
+def _missing_privacy_ignores(gitignore: Path) -> list[str]:
+    """Return privacy ignore patterns that are not active .gitignore rules.
+
+    Doctor should reject comments, negated patterns, and larger unrelated patterns that
+    merely contain the sensitive filenames as substrings. The generated workspace uses
+    root-relative private files and a private memory directory, so accept only active
+    rules that match those boundaries directly.
+    """
+    expected = {
+        "USER.md": {"USER.md", "/USER.md"},
+        "MEMORY.md": {"MEMORY.md", "/MEMORY.md"},
+        "memory/*": {"memory/*", "/memory/*"},
+    }
+    active = dict.fromkeys(expected, False)
+
+    for raw_line in gitignore.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        negated = line.startswith("!")
+        pattern = line[1:].strip() if negated else line
+        for required, accepted in expected.items():
+            if pattern in accepted:
+                active[required] = not negated
+
+    return [pattern for pattern, is_active in active.items() if not is_active]
 
 
 def _obsidian_writes(target: Path) -> list[tuple[Path, str]]:
