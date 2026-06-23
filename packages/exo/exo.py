@@ -28,7 +28,7 @@ import re
 import sys
 import tempfile
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 # Work items live under changes/ (folder-as-type); a node's coordination role is its
 # top-level folder, independent of the resolved type name.

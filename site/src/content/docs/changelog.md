@@ -8,13 +8,13 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current versions:** `vivary-tropo` **0.2.2** · `vivary-exo` **0.2.1** · `create-vivary` / `@vivary/create` **0.2.3** · `vivary-ozone` **0.1.0**.
+**Current versions:** `vivary-tropo` **0.2.3** · `vivary-exo` **0.2.2** · `create-vivary` / `@vivary/create` **0.2.5** · `vivary-ozone` **0.1.0**.
 
-## [Unreleased]
+## [vivary-tropo 0.2.3 / vivary-exo 0.2.2 / create-vivary 0.2.5] — 2026-06-23
 
 Affects `vivary-tropo`, `vivary-exo`, `create-vivary` / `@vivary/create`,
-`strato` workspace assets, and public docs/site release surfaces. These fixes are
-merged to `dev`; publishing remains a manual human gate.
+`strato` workspace assets, and public docs/site release surfaces. This package set
+ships the merged security-hardening batch from the June 23 security scan review.
 
 ### Security
 
@@ -37,13 +37,34 @@ merged to `dev`; publishing remains a manual human gate.
   resolve outside the selected workspace, including when `--force` is used.
 - **create-vivary dry-run cleanup guard** — `--dry-run --force` previews the scaffold
   without removing stale generated files.
+- **create-vivary embedded install fallback** — when `create-vivary` is run through
+  `uvx`, embedded storage setup now falls back to `uv pip install --python ...` if
+  the temporary Python environment does not include `pip`.
 
 ### Documentation
 
 - **Security-hardening release truth** — README, FAQ, command docs, package READMEs,
-  `SECURITY.md`, `HANDOFF.md`, and the website now call out the pending dev-line
-  hardening batch without implying that new package versions have already been
-  published.
+  `SECURITY.md`, `HANDOFF.md`, and the website now identify the package versions that
+  carry the hardening batch.
+
+### Changed
+
+- `vivary-exo` now depends on `vivary-tropo>=0.2.3` so installed claim workflows use
+  the hard-link-safe write behavior.
+- `create-vivary` now depends on `vivary-tropo>=0.2.3`, and the npm launcher
+  version `@vivary/create@0.2.5` pins the matching `create-vivary==0.2.5` PyPI
+  scaffolder.
+- `create-vivary init --no-wizard` now honors the documented lean default of file
+  storage unless `--auto` or `--storage auto` is explicitly requested.
+
+### Release note
+
+Published through the manual human gate as `vivary-tropo==0.2.3`,
+`vivary-exo==0.2.2`, `create-vivary==0.2.5`, and `@vivary/create@0.2.5`.
+`create-vivary==0.2.4` was uploaded during release validation, then superseded by
+0.2.5 after the public `uvx` smoke exposed the embedded-install fallback bug.
+Verified from public PyPI/npm registries plus fresh `uvx` and `npm exec` scaffold
+smokes.
 
 ## [vivary-tropo 0.2.2 / vivary-exo 0.2.1] — 2026-06-22
 
