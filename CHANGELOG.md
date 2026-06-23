@@ -20,6 +20,10 @@ Affects `vivary-tropo`, `create-vivary` / `@vivary/create`, and `strato` workspa
   `heartbeat-reports/*` (while keeping `.gitkeep`), the doctor flags missing report
   ignores, and strato's heartbeat procedure treats reports as PRIV because they may
   summarize private memory.
+- **Doctor privacy ignore validation hardening** — `create-vivary doctor` now
+  validates active `.gitignore` rules for `USER.md`, `MEMORY.md`, `memory/*`, and
+  `heartbeat-reports/*` instead of accepting comments, negations, or unrelated
+  substring matches as proof that private context files are ignored.
 - **`exo claim` hard-link hardening** — claim writes now replace the workspace work
   item file instead of truncating an existing inode, so a hard-linked file outside
   the workspace is not mutated.
