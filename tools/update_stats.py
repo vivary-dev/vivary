@@ -31,7 +31,6 @@ HEADER = [
     "github_stars",
     "github_forks",
     "github_open_issues",
-    "github_release_downloads",
     "stale_sources",
 ]
 
@@ -176,27 +175,12 @@ def pypi_snapshot(previous: dict[str, Any], warnings: list[str]) -> dict[str, An
 def github_snapshot(previous: dict[str, Any], warnings: list[str]) -> dict[str, Any]:
     try:
         repo = fetch_json("https://api.github.com/repos/vivary-dev/vivary")
-        releases = fetch_json("https://api.github.com/repos/vivary-dev/vivary/releases?per_page=100")
-        assets = []
-        for release in releases if isinstance(releases, list) else []:
-            for asset in release.get("assets", []):
-                assets.append(
-                    {
-                        "release": release.get("tag_name"),
-                        "name": asset.get("name"),
-                        "download_count": int(asset.get("download_count") or 0),
-                        "url": asset.get("browser_download_url"),
-                    }
-                )
         return {
             "stars": int(repo.get("stargazers_count") or 0),
             "forks": int(repo.get("forks_count") or 0),
             "watchers": int(repo.get("subscribers_count") or 0),
             "open_issues": int(repo.get("open_issues_count") or 0),
             "pushed_at": repo.get("pushed_at"),
-            "release_count": len(releases) if isinstance(releases, list) else 0,
-            "release_asset_downloads": sum(asset["download_count"] for asset in assets),
-            "release_assets": assets,
             "stale": False,
         }
     except Exception as exc:
@@ -208,9 +192,6 @@ def github_snapshot(previous: dict[str, Any], warnings: list[str]) -> dict[str, 
             "watchers": previous_int(previous, "", "github", "watchers"),
             "open_issues": previous_int(previous, "", "github", "open_issues"),
             "pushed_at": lookup_previous(previous, "github", "pushed_at"),
-            "release_count": previous_int(previous, "", "github", "release_count"),
-            "release_asset_downloads": previous_int(previous, "", "github", "release_asset_downloads") or 0,
-            "release_assets": lookup_previous(previous, "github", "release_assets") or [],
             "stale": True,
         }
 
@@ -236,7 +217,6 @@ def current_snapshot() -> dict[str, Any]:
             "npm_weekly": npm["weekly_total"],
             "pypi_weekly": pypi["weekly_total"],
             "package_weekly": package_weekly,
-            "github_release_downloads": github["release_asset_downloads"],
         },
         "npm_weekly": npm["weekly_total"],
         "pypi_weekly": pypi["weekly_total"],
@@ -261,7 +241,6 @@ def history_row(snapshot: dict[str, Any]) -> dict[str, str]:
         "github_stars": str(snapshot["github"]["stars"]),
         "github_forks": str(snapshot["github"]["forks"]),
         "github_open_issues": str(snapshot["github"]["open_issues"]),
-        "github_release_downloads": str(snapshot["github"]["release_asset_downloads"]),
         "stale_sources": ";".join(snapshot["warnings"]),
     }
 
@@ -270,7 +249,11 @@ def write_stats(snapshot: dict[str, Any]) -> list[dict[str, str]]:
     STATS_DIR.mkdir(exist_ok=True)
     write_text_lf(LATEST_PATH, json.dumps(snapshot, indent=2, sort_keys=True) + "\n")
 
-    rows = [row for row in read_history() if row.get("date") != snapshot["date"]]
+    rows = [
+        {key: row.get(key, "") for key in HEADER}
+        for row in read_history()
+        if row.get("date") != snapshot["date"]
+    ]
     rows.append(history_row(snapshot))
     rows.sort(key=lambda row: row["date"])
 
@@ -292,8 +275,8 @@ def render_svg(snapshot: dict[str, Any], rows: list[dict[str, str]]) -> str:
     pypi = int(snapshot["totals"]["pypi_weekly"])
     package_weekly = int(snapshot["totals"]["package_weekly"])
     stars = int(snapshot["github"]["stars"])
+    forks = int(snapshot["github"]["forks"])
     issues = int(snapshot["github"]["open_issues"] or 0)
-    release_downloads = int(snapshot["github"]["release_asset_downloads"] or 0)
     scale = max(npm, pypi, 1)
     max_width = 420
     npm_width = bar(max_width, npm, scale)
@@ -318,7 +301,7 @@ def render_svg(snapshot: dict[str, Any], rows: list[dict[str, str]]) -> str:
   </style>
   <rect class="bg" width="760" height="300" rx="16" />
   <text x="28" y="40" class="label">Vivary public signals</text>
-  <text x="28" y="64" class="muted">Latest weekly package downloads and GitHub repo signals</text>
+  <text x="28" y="64" class="muted">Latest weekly package downloads and GitHub repo interest</text>
   <text x="578" y="40" class="small">snapshot {date}</text>
   <text x="578" y="60" class="small">status {status}</text>
 
@@ -341,8 +324,8 @@ def render_svg(snapshot: dict[str, Any], rows: list[dict[str, str]]) -> str:
   <text x="668" y="180" class="value">{issues}</text>
 
   <rect class="panel" x="552" y="208" width="180" height="48" rx="12" />
-  <text x="572" y="236" class="small">Release assets</text>
-  <text x="668" y="240" class="value">{release_downloads}</text>
+  <text x="572" y="236" class="small">Forks</text>
+  <text x="668" y="240" class="value">{forks}</text>
 
   <text x="28" y="278" class="small">Tracked daily by .github/workflows/track-stats.yml through reviewed PR snapshots. History rows: {history_count}.</text>
 </svg>

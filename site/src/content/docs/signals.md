@@ -12,7 +12,7 @@ distribution signals without a private analytics dashboard.
 |---|---|---|
 | npm weekly downloads | `https://api.npmjs.org/downloads/point/last-week/%40vivary%2Fcreate` and `https://api.npmjs.org/versions/%40vivary%2Fcreate/last-week` | Public weekly and per-version downloads for `@vivary/create`. |
 | PyPI weekly downloads | `https://pypistats.org/api/packages/<package>/recent` | Public recent downloads for `create-vivary`, `vivary-tropo`, `vivary-ozone`, and `vivary-exo`. PyPI stats can lag, rate-limit, and filter mirrors/bots. |
-| GitHub repo/release signals | `https://api.github.com/repos/vivary-dev/vivary` and `/releases` | Public repository stars, forks, issues, pushed time, release count, and release asset download counts. |
+| GitHub repo signals | `https://api.github.com/repos/vivary-dev/vivary` | Public repository stars, forks, issues, and pushed time. |
 
 The latest checked-in values live in [`stats/latest.json`](../stats/latest.json). The
 history lives in [`stats/history.csv`](../stats/history.csv).

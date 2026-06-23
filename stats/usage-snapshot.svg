@@ -14,7 +14,7 @@
   </style>
   <rect class="bg" width="760" height="300" rx="16" />
   <text x="28" y="40" class="label">Vivary public signals</text>
-  <text x="28" y="64" class="muted">Latest weekly package downloads and GitHub repo signals</text>
+  <text x="28" y="64" class="muted">Latest weekly package downloads and GitHub repo interest</text>
   <text x="578" y="40" class="small">snapshot 2026-06-23</text>
   <text x="578" y="60" class="small">status ok</text>
 
@@ -37,7 +37,7 @@
   <text x="668" y="180" class="value">7</text>
 
   <rect class="panel" x="552" y="208" width="180" height="48" rx="12" />
-  <text x="572" y="236" class="small">Release assets</text>
+  <text x="572" y="236" class="small">Forks</text>
   <text x="668" y="240" class="value">0</text>
 
   <text x="28" y="278" class="small">Tracked daily by .github/workflows/track-stats.yml through reviewed PR snapshots. History rows: 3.</text>
