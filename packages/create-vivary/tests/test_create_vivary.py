@@ -2,6 +2,7 @@
 
 import sys
 import shutil
+import subprocess
 import unittest
 import uuid
 from contextlib import contextmanager
@@ -745,6 +746,28 @@ class TestAgentFlags(unittest.TestCase):
             self.assertGreater(out["files"], 0)
             self.assertFalse(out["dry_run"])
 
+    def test_no_wizard_defaults_to_file_storage(self):
+        with temp_workspace() as td:
+            target = Path(td) / "no-wizard-default"
+            import io, contextlib, json
+            buf = io.StringIO()
+
+            with mock.patch.object(create_vivary, "_ensure_backend_installed") as ensure:
+                with contextlib.redirect_stdout(buf):
+                    rc = create_vivary.main([
+                        "init", str(target),
+                        "--preset", "coding",
+                        "--no-wizard",
+                        "--json",
+                        "--repo-root", str(ROOT),
+                    ])
+
+            self.assertEqual(rc, 0)
+            ensure.assert_not_called()
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["storage"], "file")
+            self.assertFalse((target / ".vivary").exists())
+
     def test_init_storage_file_does_not_write_vivary_dir(self):
         with temp_workspace() as td:
             target = Path(td) / "file-storage"
@@ -810,6 +833,23 @@ class TestAgentFlags(unittest.TestCase):
             self.assertEqual(out["installed"], [])
             self.assertTrue(out["dry_run"])
             self.assertFalse(target.exists(), "dry-run must not create any files")
+
+    def test_embedded_backend_install_falls_back_to_uv_when_pip_is_unavailable(self):
+        pip_error = subprocess.CalledProcessError(1, ["python", "-m", "pip"])
+
+        with mock.patch.object(create_vivary, "_is_importable", return_value=False), \
+             mock.patch.object(create_vivary.shutil, "which", return_value="uv"), \
+             mock.patch.object(create_vivary.subprocess, "check_call") as check_call:
+            check_call.side_effect = [pip_error, None]
+
+            installed = create_vivary._ensure_backend_installed("lancedb", yes=True)
+
+        self.assertEqual(installed, ["lancedb"])
+        self.assertEqual(len(check_call.call_args_list), 2)
+        self.assertEqual(
+            check_call.call_args_list[1].args[0],
+            ["uv", "pip", "install", "--python", sys.executable, "vivary-tropo[embedded]"],
+        )
 
     def test_init_auto_flag_skips_prompts(self):
         with temp_workspace() as td:

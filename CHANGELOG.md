@@ -5,9 +5,9 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current versions:** `vivary-tropo` **0.2.3** · `vivary-exo` **0.2.2** · `create-vivary` / `@vivary/create` **0.2.4** · `vivary-ozone` **0.1.0**.
+**Current versions:** `vivary-tropo` **0.2.3** · `vivary-exo` **0.2.2** · `create-vivary` / `@vivary/create` **0.2.5** · `vivary-ozone` **0.1.0**.
 
-## [vivary-tropo 0.2.3 / vivary-exo 0.2.2 / create-vivary 0.2.4] — 2026-06-23
+## [vivary-tropo 0.2.3 / vivary-exo 0.2.2 / create-vivary 0.2.5] — 2026-06-23
 
 Affects `vivary-tropo`, `vivary-exo`, `create-vivary` / `@vivary/create`,
 `strato` workspace assets, and public docs/site release surfaces. This package set
@@ -34,6 +34,9 @@ ships the merged security-hardening batch from the June 23 security scan review.
   resolve outside the selected workspace, including when `--force` is used.
 - **create-vivary dry-run cleanup guard** — `--dry-run --force` previews the scaffold
   without removing stale generated files.
+- **create-vivary embedded install fallback** — when `create-vivary` is run through
+  `uvx`, embedded storage setup now falls back to `uv pip install --python ...` if
+  the temporary Python environment does not include `pip`.
 
 ### Documentation
 
@@ -46,13 +49,18 @@ ships the merged security-hardening batch from the June 23 security scan review.
 - `vivary-exo` now depends on `vivary-tropo>=0.2.3` so installed claim workflows use
   the hard-link-safe write behavior.
 - `create-vivary` now depends on `vivary-tropo>=0.2.3`, and the npm launcher
-  version `@vivary/create@0.2.4` pins the matching `create-vivary==0.2.4` PyPI
+  version `@vivary/create@0.2.5` pins the matching `create-vivary==0.2.5` PyPI
   scaffolder.
+- `create-vivary init --no-wizard` now honors the documented lean default of file
+  storage unless `--auto` or `--storage auto` is explicitly requested.
 
 ### Release note
 
-Publishing and public registry verification are part of this release goal; update
-this note with the final PyPI/npm smoke commands after the package uploads complete.
+PyPI `vivary-tropo==0.2.3`, `vivary-exo==0.2.2`, and `create-vivary==0.2.4`
+were uploaded during release validation; `create-vivary==0.2.5` supersedes the
+scaffolder upload with the `uvx` embedded-install fallback. npm publishing and
+final public registry smoke verification remain the manual gate before this line
+is promoted.
 
 ## [vivary-tropo 0.2.2 / vivary-exo 0.2.1] — 2026-06-22
 

@@ -14,7 +14,7 @@ Use this prompt in a new window:
 We are in C:\Users\jeffk\dev\vivary (repo: github.com/vivary-dev/vivary). Read
 HANDOFF.md, docs/README.md, and docs/ARCHITECTURE.md. Verify git status/branch/
 remotes before making claims. The current release line is create-vivary /
-@vivary/create 0.2.4, vivary-tropo 0.2.3, vivary-exo 0.2.2, and vivary-ozone
+@vivary/create 0.2.5, vivary-tropo 0.2.3, vivary-exo 0.2.2, and vivary-ozone
 0.1.0. The June 23 package set carries the security-hardening batch. Continue from `dev` by cutting a
 feature branch per change. Tests must be planned before edits. Do not push, open PRs,
 merge, publish, create orgs/repos, install dependencies, or delete files without
@@ -44,11 +44,11 @@ Design law: **minimalism**. Always-on context must be tiny. Expensive-to-load
 framework files are wrong.
 
 **Release target through 2026-06-23.** 0.2.0 shipped the tropo storage/search layer
-and agent-mode scaffolder work. 0.2.4 is the current npm/PyPI scaffolder line.
+and agent-mode scaffolder work. 0.2.5 is the current npm/PyPI scaffolder line.
 `vivary-tropo` 0.2.1 and `vivary-exo` 0.2.0 shipped embedded starter packs,
 opt-in `coordination`, and `exo claim`. The 0.2.2 / 0.2.1 patch hardens UTF-8
 BOM-prefixed config and frontmatter so Windows-created files remain valid claim targets.
-The 0.2.3 / 0.2.2 / 0.2.4 package set carries the security-hardening batch for
+The 0.2.3 / 0.2.2 / 0.2.5 package set carries the security-hardening batch for
 symlink/out-of-root scaffold writes, hard-link-safe `tropo view --out` and `exo claim`
 rewrites, active privacy-ignore validation, and private heartbeat reports.
 
@@ -72,7 +72,7 @@ Every behavior/package/public-copy update ends with
 | `vivary-tropo` | `vivary-tropo` | — | 0.2.3 | current |
 | `vivary-ozone` | `vivary-ozone` | — | 0.1.0 | unchanged |
 | `vivary-exo`   | `vivary-exo`   | — | 0.2.2 | current |
-| `create-vivary` | `create-vivary` | `@vivary/create` | 0.2.4 | current |
+| `create-vivary` | `create-vivary` | `@vivary/create` | 0.2.5 | current |
 
 The **0.2.0** bump affected `vivary-tropo` and `create-vivary` (both PyPI + npm for
 create-vivary). It added: storage layer (`file`/`embedded`/`cloud`), `tropo query`,
@@ -82,7 +82,7 @@ create-vivary). It added: storage layer (`file`/`embedded`/`cloud`), `tropo quer
 scaffolder. The **tropo 0.2.1 / exo 0.2.0** release added bundled pack
 reliability and graph-native claims. The **tropo 0.2.2 / exo 0.2.1** patch hardens
 Windows BOM config and frontmatter handling for `exo claim`. The **tropo 0.2.3 /
-exo 0.2.2 / create-vivary 0.2.4** package set carries the June 23 security hardening
+exo 0.2.2 / create-vivary 0.2.5** package set carries the June 23 security hardening
 from [CHANGELOG.md](CHANGELOG.md).
 
 ## Live Repo State
@@ -109,7 +109,7 @@ lag active GitHub issues.
 ## What Exists
 
 All four layers are working, tested packages (`tropo` 0.2.3, `exo` 0.2.2, `ozone`
-0.1.0; `create-vivary` 0.2.4 on PyPI + npm; CLI commands stay
+0.1.0; `create-vivary` 0.2.5 on PyPI + npm; CLI commands stay
 `tropo`/`ozone`/`exo`/`create-vivary`). The previous tropo/exo patch
 (`vivary-tropo` 0.2.2 / `vivary-exo` 0.2.1) was published and verified from public
 PyPI plus fresh `pip` and `uvx` smokes on 2026-06-22.
@@ -132,7 +132,7 @@ packages/exo/          vivary-exo 0.2.2 — coordination layer: `conflicts` + `b
                        opt-in coordination pack; it rejects malformed BOM-prefixed
                        frontmatter, symlink/out-of-workspace work items, and hard-link
                        truncation. Tests: 14/14.
-packages/create-vivary/ create-vivary 0.2.4 — scaffolder: init/wizard/doctor --preset
+packages/create-vivary/ create-vivary 0.2.5 — scaffolder: init/wizard/doctor --preset
                        coding|second-brain|writing + agent flags (--auto/--yes/--json/
                        --dry-run/--storage/--provider/--size/--privacy). Bundles
                        strato/loops assets for installed use. npm wrapper in npm/.

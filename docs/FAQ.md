@@ -118,7 +118,7 @@ PyPI has no scopes and the bare names `tropo`/`ozone`/`exo` were taken, so the
 stay `tropo` / `ozone` / `exo`. On npm the scaffolder is `@vivary/create`.
 
 ### How do I install / run it?
-`pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.4`, or run on demand with
+`pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.5`, or run on demand with
 `uvx vivary-tropo ...`, or scaffold with `npm create @vivary@latest`. Python 3.11+ only;
 zero third-party dependencies.
 
@@ -142,8 +142,8 @@ changelog for the exact package surfaces.
 
 ### Is it stable? What's the version?
 Published packages are `vivary-tropo` **0.2.3**, `vivary-exo` **0.2.2**,
-`create-vivary` / `@vivary/create` **0.2.4**, and `vivary-ozone` **0.1.0**. Use
-0.2.4 for new scaffolds. It's young — APIs may move before `1.0`. File issues for
+`create-vivary` / `@vivary/create` **0.2.5**, and `vivary-ozone` **0.1.0**. Use
+0.2.5 for new scaffolds. It's young — APIs may move before `1.0`. File issues for
 rough edges.
 
 ### Where do I report bugs or ask for features?

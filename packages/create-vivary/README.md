@@ -4,10 +4,10 @@ Scaffold a complete Vivary agent workspace: tropo config, strato workspace files
 runtime skills, private-memory boundaries, progressive module indexes, and a starter
 typed graph.
 
-**Current release:** 0.2.4. Use 0.2.4 for new installs; no migration is expected
+**Current release:** 0.2.5. Use 0.2.5 for new installs; no migration is expected
 from 0.2.1, 0.2.2, or 0.2.3.
 
-**Security hardening:** 0.2.4 validates active `.gitignore` rules for `USER.md`,
+**Security hardening:** 0.2.5 validates active `.gitignore` rules for `USER.md`,
 `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`; scaffolds private heartbeat report
 storage; and refuses symlinked or out-of-workspace scaffold, storage, and cleanup
 paths.
@@ -15,7 +15,7 @@ paths.
 ## Install & scaffold
 
 ```bash
-pip install create-vivary==0.2.4              # or: uvx create-vivary@0.2.4 ...
+pip install create-vivary==0.2.5              # or: uvx create-vivary@0.2.5 ...
 create-vivary my-workspace --preset coding    # interactive wizard on a TTY
 create-vivary my-codebase --preset coding --active-context cocoindex-code
 create-vivary doctor my-workspace
