@@ -30,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import tomllib
 from collections import Counter, deque
 
@@ -1484,6 +1485,54 @@ def cmd_blast(args, resolver):
     return 0
 
 
+def _is_within(root, path):
+    try:
+        return os.path.commonpath([os.path.abspath(root), os.path.abspath(path)]) == os.path.abspath(root)
+    except ValueError:
+        return False
+
+
+def _write_workspace_file(root, path, text):
+    """Write text only to a regular, non-symlink file inside root."""
+    root_real = os.path.realpath(root)
+    target_abs = os.path.abspath(path)
+    parent_real = os.path.realpath(os.path.dirname(target_abs) or os.curdir)
+    if not _is_within(root_real, parent_real):
+        raise ConfigError(f"output path must stay inside tropo root: {path}")
+
+    if os.path.lexists(target_abs):
+        if os.path.islink(target_abs):
+            raise ConfigError(f"output path must not be a symlink: {path}")
+        if not os.path.isfile(target_abs):
+            raise ConfigError(f"output path must be a regular file: {path}")
+        if not _is_within(root_real, os.path.realpath(target_abs)):
+            raise ConfigError(f"output path must stay inside tropo root: {path}")
+
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{os.path.basename(target_abs)}.",
+        suffix=".tropo-tmp",
+        dir=os.path.dirname(target_abs) or os.curdir,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        if os.path.lexists(target_abs):
+            if os.path.islink(target_abs):
+                raise ConfigError(f"output path must not be a symlink: {path}")
+            if not os.path.isfile(target_abs):
+                raise ConfigError(f"output path must be a regular file: {path}")
+            if not _is_within(root_real, os.path.realpath(target_abs)):
+                raise ConfigError(f"output path must stay inside tropo root: {path}")
+        if not _is_within(root_real, os.path.realpath(os.path.dirname(target_abs) or os.curdir)):
+            raise ConfigError(f"output path must stay inside tropo root: {path}")
+        os.replace(tmp_name, target_abs)
+    except OSError as e:
+        raise ConfigError(f"could not write output {path}: {e.strerror}") from e
+    finally:
+        if os.path.lexists(tmp_name):
+            os.unlink(tmp_name)
+
+
 def cmd_view(args, resolver):
     """Render the graph (or a blast radius) as one self-contained HTML file.
     `tropo view` → whole graph; `tropo view blast <id>` → that node's radius.
@@ -1512,8 +1561,10 @@ def cmd_view(args, resolver):
 
     html = render_graph_html(title, sub_nodes, sub_edges, ranks)
     if args.out:
-        with open(args.out, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(html)
+        try:
+            _write_workspace_file(resolver.root, args.out, html)
+        except ConfigError as e:
+            sys.exit(f"tropo: {e}")
         print(f"tropo: wrote {args.out}  ({len(sub_nodes)} node(s), {len(sub_edges)} edge(s))")
     else:
         print(html)

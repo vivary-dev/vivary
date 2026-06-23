@@ -296,7 +296,8 @@ self-contained HTML file**: inline SVG, inline data, no CDN, no library, in
 keeping with the zero-dependency engine. The whole-graph view lays nodes on a
 circle; `view blast ID` uses concentric rings (the target at the centre, each
 ring a hop further out). `--out FILE` writes it; otherwise the HTML goes to
-stdout.
+stdout. For safety in untrusted workspaces, `--out` must resolve inside the
+tropo root and must not be a symlink or special file.
 
 `tropo plan SPEC.toml` simulates a proposed change to the graph and renders the
 **delta** — without ever touching disk. The change-spec is a small TOML file:

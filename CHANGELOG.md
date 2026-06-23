@@ -9,10 +9,13 @@ the `v0.1.0` line.
 
 ## [Unreleased]
 
-Affects `create-vivary` / `@vivary/create` and `strato` workspace assets.
+Affects `vivary-tropo`, `create-vivary` / `@vivary/create`, and `strato` workspace assets.
 
 ### Fixed
 
+- **`tropo view --out` output hardening** — rendered HTML writes must stay inside
+  the tropo root, refuse symlink output paths, and replace the output path instead
+  of truncating existing hard-linked files.
 - **Heartbeat reports stay private** — scaffolded workspaces now gitignore
   `heartbeat-reports/*` (while keeping `.gitkeep`), the doctor flags missing report
   ignores, and strato's heartbeat procedure treats reports as PRIV because they may
