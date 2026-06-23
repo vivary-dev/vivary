@@ -104,13 +104,15 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
 ## Verify
 
 ```bash
-python packages/tropo/tests/test_tropo.py                  # 61/61
+python packages/tropo/tests/test_tropo.py                  # 64/64
 python packages/ozone/tests/test_ozone.py                  # 7/7
-python packages/exo/tests/test_exo.py                      # 12/12
-python packages/create-vivary/tests/test_create_vivary.py  # 29/29  (+ test_assets_parity 2/2)
+python packages/exo/tests/test_exo.py                      # 14/14
+python packages/create-vivary/tests/test_create_vivary.py  # 44/44  (+ test_assets_parity 3/3)
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # clean
 ```
 
 Current release truth lives in [README.md](README.md) and [CHANGELOG.md](CHANGELOG.md):
 `create-vivary` / `@vivary/create` 0.2.3, `vivary-tropo` 0.2.2,
-`vivary-exo` 0.2.1, and `vivary-ozone` 0.1.0. Full guides live in [docs/](docs/).
+`vivary-exo` 0.2.1, and `vivary-ozone` 0.1.0. The `dev` branch may contain
+Unreleased security hardening that is not published yet; check [CHANGELOG.md](CHANGELOG.md)
+before making package claims. Full guides live in [docs/](docs/).

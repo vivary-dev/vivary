@@ -45,12 +45,12 @@ Mobile:
 - **Restraint:** no third-party dependencies; the framework costs almost nothing
   to load. Plain Markdown, any editor, Claude Code *and* Codex.
 
-> Current release line verified 2026-06-22: `create-vivary` 0.2.3 (PyPI), `@vivary/create` 0.2.3 (npm), `vivary-tropo` 0.2.2, `vivary-exo` 0.2.1.
-> Scaffold output captured from a real run — 36 files, doctor ok (8 nodes, 24
+> Current published release line verified 2026-06-22: `create-vivary` 0.2.3 (PyPI), `@vivary/create` 0.2.3 (npm), `vivary-tropo` 0.2.2, `vivary-exo` 0.2.1. The current `dev` line adds an unreleased security-hardening batch for private scaffold boundaries, hard-link-safe writes, and generated output paths.
+> Scaffold output captured from a real run — 39 files, doctor ok (9 nodes, 28
 > edges, 0 broken), `tropo check` 0 errors.
 
-> Active-context branch proof, 2026-06-20: plain coding scaffold writes 37 files and
-> doctors clean at 9 nodes / 28 edges; `--active-context cocoindex-code` writes 43
+> Active-context branch proof, refreshed 2026-06-23: plain coding scaffold writes 39 files and
+> doctors clean at 9 nodes / 28 edges; `--active-context cocoindex-code` writes 45
 > files and doctors clean at 12 nodes / 38 edges. `cocoindex-code==0.2.36` was
 > installed with local embeddings, initialized against this repo, indexed 95 files into
 > 897 chunks, and `ccc search --refresh` returned the active-context docs plus the

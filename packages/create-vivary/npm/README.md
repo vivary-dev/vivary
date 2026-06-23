@@ -8,6 +8,12 @@ context progressively.
 **Current release:** 0.2.3. Use 0.2.3 for new installs; no migration is expected
 from 0.2.1 or 0.2.2.
 
+**Dev-line hardening:** the current `dev` branch adds unreleased scaffold/privacy
+hardening: active `.gitignore` validation for `USER.md`, `MEMORY.md`, `memory/*`, and
+`heartbeat-reports/*`; private heartbeat report scaffolding; and stronger refusal of
+symlinked or out-of-workspace scaffold/storage/cleanup paths. Do not claim these are in
+the published 0.2.3 npm launcher until the next package cut lands.
+
 ```bash
 npm create @vivary@latest my-workspace -- --preset coding
 npm create @vivary@latest my-codebase -- --preset coding --active-context cocoindex-code

@@ -20,6 +20,9 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 > Release status: **0.2.3 is current** for the scaffolder (`create-vivary` /
 > `@vivary/create`), **0.2.2** for `vivary-tropo`, **0.2.1** for `vivary-exo`,
 > and **0.1.0** for `vivary-ozone`. Use 0.2.3 for new scaffolds.
+> The current `dev` line also contains an unreleased security-hardening batch for
+> scaffold privacy ignores, symlink/out-of-root writes, hard-link-safe rewrites, and
+> private heartbeat reports; see [CHANGELOG.md](CHANGELOG.md) before cutting packages.
 
 | Surface | Current | Link |
 |---|---:|---|
@@ -76,13 +79,13 @@ create-vivary init . --preset coding --auto --size large --yes --json
 ```
 
 The scaffolder writes a full workspace shell: `AGENTS.md`, `STATE.md`, `SOUL.md`,
-private `USER.md`/`MEMORY.md` boundaries, strato runtime skills for Claude/Codex-style
-agents, a `tropo.toml`, a starter typed graph, and (optionally) a `.vivary/storage.toml`
-for LanceDB or cloud storage. Generated modules are directories with `index.md` routers
-(`modules/<id>/index.md`) so agents load the smallest useful context first. `doctor`
-validates the shell, privacy ignores, graph health, storage backend, and module index
-coverage after creation. `tropo query` and `tropo migrate` power graph search and
-backend switching.
+private `USER.md`/`MEMORY.md` boundaries, private heartbeat report storage, strato
+runtime skills for Claude/Codex-style agents, a `tropo.toml`, a starter typed graph,
+and (optionally) a `.vivary/storage.toml` for LanceDB or cloud storage. Generated
+modules are directories with `index.md` routers (`modules/<id>/index.md`) so agents
+load the smallest useful context first. `doctor` validates the shell, active privacy
+ignore rules, graph health, storage backend, and module index coverage after creation.
+`tropo query` and `tropo migrate` power graph search and backend switching.
 
 For coding workspaces that need richer source retrieval, `--active-context
 cocoindex-code` adds optional CocoIndex-code guidance and graph nodes. It does not

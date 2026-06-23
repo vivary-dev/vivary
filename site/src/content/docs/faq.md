@@ -135,8 +135,21 @@ batched: memory writes, publishing (PyPI/npm), `git push`/PR/merge, org/repo cre
 installs, enabling hooks, destructive ops, and sending data of unknown sensitivity. The
 agent is bold *inside* the work and careful at the *edges*.
 
+### What did the latest security-hardening batch cover?
+The current `dev` line hardens local file boundaries before the next package cut:
+`create-vivary` refuses symlinked or out-of-workspace scaffold destinations, `doctor`
+checks active `.gitignore` rules for private files and heartbeat reports,
+`tropo view --out` keeps generated HTML writes inside the tropo root, and `exo claim`
+rewrites the workspace file without mutating hard-linked files outside it. See the
+changelog's Unreleased section for the exact package surfaces.
+
 ### Is it stable? What's the version?
-`vivary-tropo` is at **0.2.2**, `vivary-exo` is at **0.2.1**, `create-vivary` / `@vivary/create` are at **0.2.3**, and `vivary-ozone` remains at **0.1.0**. Use 0.2.3 for new scaffolds; the latest tropo/exo patch hardens Windows UTF-8 BOM config and frontmatter so `exo claim` updates existing metadata instead of duplicating it. See the [CHANGELOG](https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md) for details. It's young — APIs may move before `1.0`. File issues for rough edges.
+Published packages are still `vivary-tropo` **0.2.2**, `vivary-exo` **0.2.1**,
+`create-vivary` / `@vivary/create` **0.2.3**, and `vivary-ozone` **0.1.0**. Use
+0.2.3 for new scaffolds. The current `dev` branch has additional unreleased
+security-hardening fixes; the [CHANGELOG](https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md)
+is the release-truth surface until those package versions are cut. It's young — APIs
+may move before `1.0`. File issues for rough edges.
 
 ### Where do I report bugs or ask for features?
 GitHub: [github.com/vivary-dev/vivary](https://github.com/vivary-dev/vivary). See the

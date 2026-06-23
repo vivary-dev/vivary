@@ -48,7 +48,7 @@ says. `tropo.toml` declares the types.
 | `stats` | Document counts per type + a health summary. |
 | `graph [--json]` | Emit the typed graph: nodes (`id`,`type`,`path`) + edges (`from`,`field`,`to`,`broken`). |
 | `blast <id> [--depth N]` | The **blast radius** of `<id>`: everything that (transitively) refs it — what a change could touch. |
-| `view [graph \| blast <id>] [--out FILE]` | Render the graph (or one radius) as a single self-contained HTML file. `--out` must stay inside the tropo root and may not target symlinks or hard-linked files outside the workspace. |
+| `view [graph \| blast <id>] [--out FILE]` | Render the graph (or one radius) as a single self-contained HTML file. `--out` must stay inside the tropo root, refuse symlink targets, and rewrite the workspace output path without mutating hard-linked files outside the workspace. |
 | `plan <change.toml>` | Simulate a change (remove/retype/break/add) and show the graph delta. |
 | `fix [--dry-run]` | Strip redundant frontmatter (`W210` — a field equal to its derived value). The only mechanical edit tropo makes. |
 | `init [DIR] [--packs a,b]` | Scaffold a `tropo.toml` (optionally composing reusable type packs). |
@@ -200,7 +200,7 @@ create-vivary doctor <target> [--json]
 |---|---|
 | `init <target>` | Lay down a complete workspace: the agent contract, the strato shell (SOUL/USER/STATE/MEMORY), runtime skills, a `tropo.toml`, a starter typed graph, and (based on flags or wizard answers) a `.vivary/storage.toml`. |
 | `wizard <target>` | Re-run the setup wizard on an existing workspace to reconfigure storage, preset, or active-context options. |
-| `doctor <target>` | Validate a workspace: required files, privacy ignores, module directory indexes, tropo graph health, and backend reachability. |
+| `doctor <target>` | Validate a workspace: required files, active privacy ignore rules, module directory indexes, tropo graph health, and backend reachability. |
 
 | Flag | Effect |
 |---|---|
@@ -216,6 +216,10 @@ create-vivary doctor <target> [--json]
 | `--json` | Machine-readable output. Reports `ok`, `root`, `preset`, `storage`, `provider`, `installed`, `files`, `config`, and `dry_run`. |
 | `--size small\|medium\|large` | Hint for `--auto` storage decisions. Agents can pass this after inspecting the repo. |
 | `--privacy local\|cloud` | Hint for `--auto` storage decisions. |
+
+`doctor` checks that `USER.md`, `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`
+are actively ignored. Comments, negations, and unrelated patterns that merely contain
+those names do not count.
 
 When `--storage embedded` (or `auto`) is selected and `vivary-tropo[embedded]` is not yet installed, `init` installs it via `pip` before continuing unless `--dry-run` is set. In `--json` mode, `"installed": ["lancedb"]` reports what was added. Without `--yes`, a single confirmation prompt fires before any pip install. For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use `--auto`; in human mode, the wizard asks and its answers drive storage.
 

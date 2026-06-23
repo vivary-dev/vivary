@@ -7,6 +7,12 @@ typed graph.
 **Current release:** 0.2.3. Use 0.2.3 for new installs; no migration is expected
 from 0.2.1 or 0.2.2.
 
+**Dev-line hardening:** the current `dev` branch adds unreleased scaffold/privacy
+hardening: active `.gitignore` validation for `USER.md`, `MEMORY.md`, `memory/*`, and
+`heartbeat-reports/*`; private heartbeat report scaffolding; and stronger refusal of
+symlinked or out-of-workspace scaffold/storage/cleanup paths. Do not claim these are in
+the published 0.2.3 package until the next package cut lands.
+
 ## Install & scaffold
 
 ```bash
@@ -52,8 +58,8 @@ local policy docs, graph nodes, and `.cocoindex_code/` in `.gitignore`. It does 
 auto-install CocoIndex-code, create an index, or enable MCP; the generated docs give
 the approved `ccc init` / `ccc index` path.
 
-`doctor` validates the generated shell, privacy ignores, module directory indexes, and
-typed graph:
+`doctor` validates the generated shell, active privacy ignore rules, module directory
+indexes, and typed graph:
 
 ```bash
 python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo --json
