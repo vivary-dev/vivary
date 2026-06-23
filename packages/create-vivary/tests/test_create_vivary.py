@@ -82,6 +82,7 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertIn("USER.md", gitignore)
             self.assertIn("MEMORY.md", gitignore)
             self.assertIn("memory/*", gitignore)
+            self.assertIn("heartbeat-reports/*", gitignore)
 
             resolver = tropo.ConfigResolver(str(target), str(TROPO))
             docs = tropo.analyze(str(target), [], resolver)

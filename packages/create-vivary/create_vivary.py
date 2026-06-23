@@ -219,7 +219,7 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         gitignore = target / ".gitignore"
         if gitignore.exists():
             txt = gitignore.read_text(encoding="utf-8", errors="replace")
-            for pattern in ("USER.md", "MEMORY.md", "memory/*"):
+            for pattern in ("USER.md", "MEMORY.md", "memory/*", "heartbeat-reports/*"):
                 if pattern not in txt:
                     errors.append(f"privacy ignore missing: {pattern}")
         errors.extend(_module_index_errors(target))
@@ -535,6 +535,8 @@ USER.md
 MEMORY.md
 memory/*
 !memory/.gitkeep
+heartbeat-reports/*
+!heartbeat-reports/.gitkeep
 .strato/private/
 
 # Vivary runtime data (storage.toml is committed; data/ is not)

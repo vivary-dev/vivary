@@ -89,7 +89,7 @@ A workspace compounds when the agent is bold *inside* the work and careful at th
 ## Privacy
 
 PRIV lives only in ignored files (`USER.md`, `MEMORY.md`, `memory/*.md`,
-`.strato/private/`). Never commit secrets, client data, private names, credentials, or
+`heartbeat-reports/*.md`, `.strato/private/`). Never commit secrets, client data, private names, credentials, or
 machine paths. Before sending anything to an external model or tool, classify
 sensitivity (public · internal · private · sensitive · secret · unknown); if unknown,
 Gate.
