@@ -35,7 +35,7 @@ py-modules = ["create_vivary"]
 packages = ["create_vivary_assets"]
 
 [tool.setuptools.package-data]
-create_vivary_assets = ["*.md", "**/*.md"]
+create_vivary_assets = ["*.md", "**/*.md", "templates/.gitignore"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
