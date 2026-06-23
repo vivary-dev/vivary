@@ -34,16 +34,14 @@ function pipxArgs(args, from = process.env.VIVARY_FROM) {
     : ["run", `create-vivary==${version}`, ...args];
 }
 
+function run(cmd, cmdArgs, spawn = spawnSync) {
+  return spawn(cmd, cmdArgs, { stdio: "inherit", shell: false });
+}
+
 function main() {
   const args = mapArgs(process.argv.slice(2));
-  const onWindows = process.platform === "win32";
-
   // VIVARY_FROM lets dev/CI point at a local wheel or path instead of PyPI.
   const from = process.env.VIVARY_FROM;
-
-  function run(cmd, cmdArgs) {
-    return spawnSync(cmd, cmdArgs, { stdio: "inherit", shell: onWindows });
-  }
 
   // 1) uv (uvx) — preferred, fast, no global install.
   let result = run("uvx", uvxArgs(args, from));
@@ -65,7 +63,7 @@ function main() {
   process.exit(result.status == null ? 1 : result.status);
 }
 
-module.exports = { mapArgs, pipxArgs, uvxArgs };
+module.exports = { mapArgs, pipxArgs, run, uvxArgs };
 
 if (require.main === module) {
   main();

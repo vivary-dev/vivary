@@ -7,7 +7,7 @@
 const assert = require("node:assert");
 const path = require("node:path");
 
-const { mapArgs, pipxArgs, uvxArgs } = require(path.join(__dirname, "..", "npm", "index.js"));
+const { mapArgs, pipxArgs, run, uvxArgs } = require(path.join(__dirname, "..", "npm", "index.js"));
 const { version } = require(path.join(__dirname, "..", "npm", "package.json"));
 
 const cases = [
@@ -64,3 +64,19 @@ assert.deepStrictEqual(
   ["run", "--spec", "C:/tmp/create-vivary.whl", "create-vivary", "doctor", "ws"],
 );
 console.log("ok - launcher pins PyPI package to npm package version");
+
+let captured;
+const fakeSpawn = (cmd, cmdArgs, options) => {
+  captured = { cmd, cmdArgs, options };
+  return { status: 0 };
+};
+assert.deepStrictEqual(
+  run("uvx", ["create-vivary", "demo&echo pwned"], fakeSpawn),
+  { status: 0 },
+);
+assert.deepStrictEqual(captured, {
+  cmd: "uvx",
+  cmdArgs: ["create-vivary", "demo&echo pwned"],
+  options: { stdio: "inherit", shell: false },
+});
+console.log("ok - launcher always passes args without a shell");
