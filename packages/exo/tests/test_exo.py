@@ -243,6 +243,25 @@ def test_claim_rejects_missing_non_change_invalid_and_unconfigured():
         assert 'add packs = ["coordination"]' in str(unconfigured)
 
 
+def test_claim_rejects_symlinked_work_item_outside_workspace():
+    with temp_workspace() as td:
+        _claim_vault(td)
+        outside = Path(td).parent / f"outside-{uuid.uuid4().hex}.md"
+        outside.write_text("# Outside\n", encoding="utf-8")
+        link = Path(td, "changes", "evil.md")
+        try:
+            link.symlink_to(outside)
+        except (AttributeError, NotImplementedError, OSError):
+            outside.unlink(missing_ok=True)
+            return
+        try:
+            blocked, _ = _run_exit(["claim", "evil", "--agent", "connie", "--root", str(td)])
+            assert "refusing to claim symlinked or out-of-workspace file" in str(blocked)
+            assert outside.read_text(encoding="utf-8") == "# Outside\n"
+        finally:
+            outside.unlink(missing_ok=True)
+
+
 def test_claim_rejects_malformed_frontmatter():
     with temp_workspace() as td:
         _claim_vault(td)

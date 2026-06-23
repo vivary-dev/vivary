@@ -187,6 +187,17 @@ def _ensure_assignee_declared(tropo, resolver, doc):
             'assignee is not declared for this workspace; add packs = ["coordination"] to tropo.toml')
 
 
+def _ensure_workspace_file(root, doc):
+    root_real = os.path.realpath(root)
+    doc_real = os.path.realpath(doc.full)
+    try:
+        common = os.path.commonpath([root_real, doc_real])
+    except ValueError:
+        common = None
+    if common != root_real or os.path.islink(doc.full):
+        raise ExoError(f"{doc.rel}: refusing to claim symlinked or out-of-workspace file")
+
+
 def _write_assignee(tropo, doc, assignee):
     with open(doc.full, encoding="utf-8") as fh:
         text = fh.read()
@@ -234,6 +245,7 @@ def cmd_claim(args):
         if role_of(node) != "change":
             raise ExoError(f"{args.target!r} is not a work item under changes/")
         _ensure_assignee_declared(tropo, resolver, doc)
+        _ensure_workspace_file(resolver.root, doc)
         previous, changed = _write_assignee(tropo, doc, assignee)
     except ExoError as e:
         sys.exit(f"exo: {e}")
