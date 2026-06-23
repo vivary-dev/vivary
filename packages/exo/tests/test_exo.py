@@ -262,6 +262,30 @@ def test_claim_rejects_symlinked_work_item_outside_workspace():
             outside.unlink(missing_ok=True)
 
 
+def test_claim_replaces_hard_link_without_mutating_outside_file():
+    with temp_workspace() as td:
+        _claim_vault(td)
+        outside = Path(td).parent / f"outside-{uuid.uuid4().hex}.md"
+        outside_text = "---\nstatus: active\nrelated_modules: [core]\n---\n# Outside\n"
+        outside.write_text(outside_text, encoding="utf-8")
+        linked = Path(td, "changes", "hard-link.md")
+        try:
+            os.link(outside, linked)
+        except (AttributeError, NotImplementedError, OSError):
+            outside.unlink(missing_ok=True)
+            return
+
+        try:
+            rc, data = _run_json(["claim", "hard-link", "--agent", "connie", "--root", str(td), "--json"])
+            assert rc == 0
+            assert data["changed"] is True
+            assert outside.read_text(encoding="utf-8") == outside_text
+            assert "assignee: connie\n" in linked.read_text(encoding="utf-8")
+        finally:
+            linked.unlink(missing_ok=True)
+            outside.unlink(missing_ok=True)
+
+
 def test_claim_rejects_malformed_frontmatter():
     with temp_workspace() as td:
         _claim_vault(td)

@@ -26,6 +26,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 
 __version__ = "0.2.1"
 
@@ -198,7 +199,7 @@ def _ensure_workspace_file(root, doc):
         raise ExoError(f"{doc.rel}: refusing to claim symlinked or out-of-workspace file")
 
 
-def _write_assignee(tropo, doc, assignee):
+def _write_assignee(tropo, root, doc, assignee):
     with open(doc.full, encoding="utf-8") as fh:
         text = fh.read()
     yaml_text, body = tropo.extract_frontmatter(text)
@@ -206,8 +207,7 @@ def _write_assignee(tropo, doc, assignee):
         if body.startswith("---"):
             raise ExoError(f"{doc.rel}: malformed frontmatter")
         previous = None
-        with open(doc.full, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(f"---\nassignee: {assignee}\n---\n{body}")
+        _replace_workspace_file(root, doc, f"---\nassignee: {assignee}\n---\n{body}")
         return previous, True
 
     try:
@@ -229,9 +229,26 @@ def _write_assignee(tropo, doc, assignee):
     else:
         lines.append(f"assignee: {assignee}")
     new_yaml = "\n".join(lines).rstrip()
-    with open(doc.full, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(f"---\n{new_yaml}\n---\n{body}")
+    _replace_workspace_file(root, doc, f"---\n{new_yaml}\n---\n{body}")
     return previous, True
+
+
+def _replace_workspace_file(root, doc, text):
+    path = doc.full
+    directory = os.path.dirname(path) or os.curdir
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{os.path.basename(path)}.",
+        suffix=".exo-tmp",
+        dir=directory,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        _ensure_workspace_file(root, doc)
+        os.replace(tmp_name, path)
+    finally:
+        if os.path.lexists(tmp_name):
+            os.unlink(tmp_name)
 
 
 def cmd_claim(args):
@@ -246,7 +263,7 @@ def cmd_claim(args):
             raise ExoError(f"{args.target!r} is not a work item under changes/")
         _ensure_assignee_declared(tropo, resolver, doc)
         _ensure_workspace_file(resolver.root, doc)
-        previous, changed = _write_assignee(tropo, doc, assignee)
+        previous, changed = _write_assignee(tropo, resolver.root, doc, assignee)
     except ExoError as e:
         sys.exit(f"exo: {e}")
 

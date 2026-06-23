@@ -7,6 +7,14 @@ the `v0.1.0` line.
 
 **Current versions:** `vivary-tropo` **0.2.2** · `vivary-exo` **0.2.1** · `create-vivary` / `@vivary/create` **0.2.3** · `vivary-ozone` **0.1.0**.
 
+## Unreleased
+
+### Fixed
+
+- **`exo claim` hard-link hardening** — claim writes now replace the workspace work
+  item file instead of truncating an existing inode, so a hard-linked file outside
+  the workspace is not mutated.
+
 ## [vivary-tropo 0.2.2 / vivary-exo 0.2.1] — 2026-06-22
 
 Affects `vivary-tropo` and `vivary-exo` only. `create-vivary` / `@vivary/create`
