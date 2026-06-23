@@ -61,6 +61,7 @@ Lay each workspace file down from strato's `templates/`, populated with the answ
 | `MEMORY.md` | `templates/MEMORY.template.md` | **private — gitignore it** |
 | `STATE.md` | `templates/STATE.template.md` | the visible state surface |
 | `bug-risk-playbook.md` | `templates/bug-risk-playbook.md` | self-healing seed |
+| `.gitignore` | `templates/.gitignore` | privacy boundary |
 
 If multi-agent, also create `agents/inbox/`, `agents/group-chat.md`, and the shared
 agent contract. Ensure `USER.md` / `MEMORY.md` / `memory/*` / `heartbeat-reports/*` are
