@@ -1251,16 +1251,43 @@ def _ensure_backend_installed(provider: str, yes: bool) -> list[str]:
         if ans not in ("", "y", "yes"):
             return []
     extra = extras.get(pkg, "embedded")
-    print(f"  Installing vivary-tropo[{extra}]…", file=sys.stderr)
-    subprocess.check_call([sys.executable, "-m", "pip", "install",
-                           f"vivary-tropo[{extra}]"],
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    spec = f"vivary-tropo[{extra}]"
+    print(f"  Installing {spec}…", file=sys.stderr)
+    _install_runtime_extra(spec)
     return [pkg]
+
+
+def _install_runtime_extra(spec: str) -> None:
+    commands = [[sys.executable, "-m", "pip", "install", spec]]
+    uv = shutil.which("uv")
+    if uv:
+        commands.append([uv, "pip", "install", "--python", sys.executable, spec])
+
+    for cmd in commands:
+        try:
+            subprocess.check_call(
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            return
+        except (OSError, subprocess.CalledProcessError):
+            continue
+
+    raise ScaffoldError(
+        f"could not install {spec}; install it manually or rerun with --storage file"
+    )
 
 
 def _run_wizard(args) -> dict:
     """Return storage decisions from interactive prompts or auto-pick."""
-    auto = getattr(args, "auto", False) or getattr(args, "no_wizard", False)
+    if getattr(args, "no_wizard", False) and not getattr(args, "auto", False):
+        if getattr(args, "storage", None) == "auto":
+            storage, provider = _auto_pick_storage(args)
+        else:
+            storage = getattr(args, "storage", None) or "file"
+            provider = getattr(args, "provider", None) or "lancedb"
+        return {"storage": storage, "provider": provider}
+
+    auto = getattr(args, "auto", False)
     interactive = not auto and sys.stdin.isatty()
 
     if not interactive:
@@ -1488,20 +1515,20 @@ def main(argv: list[str] | None = None) -> int:
     # --auto means fully unattended: no prompts anywhere, including installs
     yes = getattr(args, "yes", False) or getattr(args, "auto", False)
 
-    # Determine storage configuration via wizard or flags
-    decisions = _run_wizard(args)
-    storage = decisions["storage"]
-    provider = decisions["provider"]
-
-    # If the interactive wizard already installed (user picked embedded), don't prompt again
-    _prior = decisions.get("installed", [])
-    installed = _prior + (
-        []
-        if dry_run or storage != "embedded"
-        else _ensure_backend_installed(provider, yes)
-    )
-
     try:
+        # Determine storage configuration via wizard or flags
+        decisions = _run_wizard(args)
+        storage = decisions["storage"]
+        provider = decisions["provider"]
+
+        # If the interactive wizard already installed (user picked embedded), don't prompt again
+        _prior = decisions.get("installed", [])
+        installed = _prior + (
+            []
+            if dry_run or storage != "embedded"
+            else _ensure_backend_installed(provider, yes)
+        )
+
         created = scaffold_workspace(
             args.target,
             preset=args.preset,

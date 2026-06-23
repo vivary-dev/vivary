@@ -43,10 +43,8 @@ starter packs without a repo-local `packs/` directory. Workspace-local
 
 TOML config and frontmatter parsing tolerate a single leading UTF-8 BOM, which keeps
 Windows-created files from failing to load or being misread as body-only documents.
-The current `dev` line also hardens `tropo view --out`: generated HTML must stay under
-the tropo root, symlink targets are rejected, and hard-linked files outside the
-workspace are not mutated by output writes. That hardening is unreleased until the next
-package cut.
+`tropo view --out` keeps generated HTML under the tropo root, rejects symlink targets,
+and replaces output files without mutating hard-linked files outside the workspace.
 
 ## Overlays — tighten a subtree
 

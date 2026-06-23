@@ -14,9 +14,8 @@ Use this prompt in a new window:
 We are in C:\Users\jeffk\dev\vivary (repo: github.com/vivary-dev/vivary). Read
 HANDOFF.md, docs/README.md, and docs/ARCHITECTURE.md. Verify git status/branch/
 remotes before making claims. The current release line is create-vivary /
-@vivary/create 0.2.3, vivary-tropo 0.2.2, vivary-exo 0.2.1, and vivary-ozone
-0.1.0. The `dev` branch includes an Unreleased security-hardening batch; do not
-claim it is published until the package cut happens. Continue from `dev` by cutting a
+@vivary/create 0.2.5, vivary-tropo 0.2.3, vivary-exo 0.2.2, and vivary-ozone
+0.1.0. The June 23 package set carries the security-hardening batch. Continue from `dev` by cutting a
 feature branch per change. Tests must be planned before edits. Do not push, open PRs,
 merge, publish, create orgs/repos, install dependencies, or delete files without
 explicit approval.
@@ -45,13 +44,13 @@ Design law: **minimalism**. Always-on context must be tiny. Expensive-to-load
 framework files are wrong.
 
 **Release target through 2026-06-23.** 0.2.0 shipped the tropo storage/search layer
-and agent-mode scaffolder work. 0.2.3 is the clean npm/PyPI scaffolder line.
+and agent-mode scaffolder work. 0.2.5 is the current npm/PyPI scaffolder line.
 `vivary-tropo` 0.2.1 and `vivary-exo` 0.2.0 shipped embedded starter packs,
 opt-in `coordination`, and `exo claim`. The 0.2.2 / 0.2.1 patch hardens UTF-8
 BOM-prefixed config and frontmatter so Windows-created files remain valid claim targets.
-The current `dev` line additionally contains an Unreleased security-hardening batch
-for symlink/out-of-root scaffold writes, hard-link-safe `tropo view --out` and
-`exo claim` rewrites, active privacy-ignore validation, and private heartbeat reports.
+The 0.2.3 / 0.2.2 / 0.2.5 package set carries the security-hardening batch for
+symlink/out-of-root scaffold writes, hard-link-safe `tropo view --out` and `exo claim`
+rewrites, active privacy-ignore validation, and private heartbeat reports.
 
 ```bash
 npm create @vivary my-workspace                          # the scaffolder UX
@@ -70,21 +69,21 @@ Every behavior/package/public-copy update ends with
 
 | Package | PyPI | npm | Published | Branch |
 |---|---|---|---|---|
-| `vivary-tropo` | `vivary-tropo` | — | 0.2.2 | current |
+| `vivary-tropo` | `vivary-tropo` | — | 0.2.3 | current |
 | `vivary-ozone` | `vivary-ozone` | — | 0.1.0 | unchanged |
-| `vivary-exo`   | `vivary-exo`   | — | 0.2.1 | current |
-| `create-vivary` | `create-vivary` | `@vivary/create` | 0.2.3 | current |
+| `vivary-exo`   | `vivary-exo`   | — | 0.2.2 | current |
+| `create-vivary` | `create-vivary` | `@vivary/create` | 0.2.5 | current |
 
 The **0.2.0** bump affected `vivary-tropo` and `create-vivary` (both PyPI + npm for
 create-vivary). It added: storage layer (`file`/`embedded`/`cloud`), `tropo query`,
 `tropo migrate`, agent-mode init flags (`--auto` `--yes` `--json` `--dry-run`),
-`create-vivary wizard`, and the interactive setup wizard. The **0.2.3** bump affects
+`create-vivary wizard`, and the interactive setup wizard. The **0.2.3** bump affected
 `create-vivary` / `@vivary/create` only and pins the npm launcher to the matching PyPI
 scaffolder. The **tropo 0.2.1 / exo 0.2.0** release added bundled pack
 reliability and graph-native claims. The **tropo 0.2.2 / exo 0.2.1** patch hardens
-Windows BOM config and frontmatter handling for `exo claim`. The next package cut must
-carry the Unreleased security hardening from [CHANGELOG.md](CHANGELOG.md) before any
-public release copy claims it is live.
+Windows BOM config and frontmatter handling for `exo claim`. The **tropo 0.2.3 /
+exo 0.2.2 / create-vivary 0.2.5** package set carries the June 23 security hardening
+from [CHANGELOG.md](CHANGELOG.md).
 
 ## Live Repo State
 
@@ -109,13 +108,14 @@ lag active GitHub issues.
 
 ## What Exists
 
-All four layers are working, tested packages (`tropo` 0.2.2, `exo` 0.2.1, `ozone`
-0.1.0; `create-vivary` 0.2.3 on PyPI + npm; CLI commands stay
-`tropo`/`ozone`/`exo`/`create-vivary`). The current tropo/exo patch was published
-and verified from public PyPI plus fresh `pip` and `uvx` smokes on 2026-06-22.
+All four layers are working, tested packages (`tropo` 0.2.3, `exo` 0.2.2, `ozone`
+0.1.0; `create-vivary` 0.2.5 on PyPI + npm; CLI commands stay
+`tropo`/`ozone`/`exo`/`create-vivary`). The previous tropo/exo patch
+(`vivary-tropo` 0.2.2 / `vivary-exo` 0.2.1) was published and verified from public
+PyPI plus fresh `pip` and `uvx` smokes on 2026-06-22.
 
 ```text
-packages/tropo/        vivary-tropo 0.2.2 — knowledge-graph CLI (check/signal/types/
+packages/tropo/        vivary-tropo 0.2.3 — knowledge-graph CLI (check/signal/types/
                        stats/graph/blast/view/plan/fix/init/query/migrate). check is
                        STRICT by default. Storage layer: file/embedded(LanceDB)/cloud.
                        Optional extras: [embedded] [cloud] [astra]. Built-in packs:
@@ -127,16 +127,16 @@ packages/strato/       strato source/templates — agent OS: STRATO.md model + t
                        + bootstrap/heartbeat/self-improve skill. Docs/templates only.
 packages/ozone/        vivary-ozone 0.1.0 — review layer: `review` (structure pack) +
                        `impact <id>` (blast radius) + `packs`. Tests: 7/7.
-packages/exo/          vivary-exo 0.2.1 — coordination layer: `conflicts` + `board` +
+packages/exo/          vivary-exo 0.2.2 — coordination layer: `conflicts` + `board` +
                        `claim` + `roles`. `claim` is the only writer and requires the
                        opt-in coordination pack; it rejects malformed BOM-prefixed
                        frontmatter, symlink/out-of-workspace work items, and hard-link
                        truncation. Tests: 14/14.
-packages/create-vivary/ create-vivary 0.2.3 — scaffolder: init/wizard/doctor --preset
+packages/create-vivary/ create-vivary 0.2.5 — scaffolder: init/wizard/doctor --preset
                        coding|second-brain|writing + agent flags (--auto/--yes/--json/
                        --dry-run/--storage/--provider/--size/--privacy). Bundles
                        strato/loops assets for installed use. npm wrapper in npm/.
-                       Current dev hardening covers active privacy ignore validation,
+                       Security hardening covers active privacy ignore validation,
                        private heartbeat reports, and symlink/out-of-root scaffold
                        writes. Tests: 44/44 + parity 3/3.
 
@@ -252,10 +252,9 @@ release cut.
 The four layers are built and tested through the current versions listed above. The
 near-term work is now post-usability-release hardening:
 
-- **Security hardening release cut.** The Unreleased dev-line hardening is merged and
-  documented, but package publication is still a human gate. Cut package versions,
-  publish, then update the release truth from "merged to dev" to "published and
-  verified."
+- **Security hardening release cut.** The June 23 package set is the release-truth
+  surface for the merged security hardening. Keep public registry verification current
+  after publishing and before launch/post copy.
 - **Stats workflow repair.** Keep popularity snapshots out of direct `dev` pushes:
   automated stats should update a feature branch and open a PR.
 - **Portability CI matrix.** Add Linux/macOS/Windows CI coverage for the core Python

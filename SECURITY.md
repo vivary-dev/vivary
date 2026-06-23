@@ -10,7 +10,7 @@ target the current public release line:
 | `create-vivary` / `@vivary/create` | `0.2.x` |
 | `vivary-tropo` | `0.2.x` |
 | `vivary-ozone` | `0.1.x` |
-| `vivary-exo` | `0.1.x` |
+| `vivary-exo` | `0.2.x` |
 
 Older versions may receive a note in the changelog, but fixes are expected to land in
 the current line.
@@ -38,7 +38,7 @@ publishes packages.
 
 ## Current Hardening Coverage
 
-The current `dev` line contains an unreleased security-hardening batch that covers:
+The current package set contains the June 23 security-hardening batch:
 
 - scaffold writes, storage config writes, and stale generated cleanup refusing
   symlinked or out-of-workspace destination paths
@@ -48,6 +48,3 @@ The current `dev` line contains an unreleased security-hardening batch that cove
   `heartbeat-reports/*` private while preserving `.gitkeep` placeholders
 - `tropo view --out` and `exo claim` replacing workspace files without mutating
   hard-linked targets outside the workspace
-
-Until the next package cut is published, treat these as source/dev-line fixes rather
-than claims about the package versions listed above.

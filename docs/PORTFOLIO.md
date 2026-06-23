@@ -10,11 +10,11 @@ launcher; a generated workspace can be scaffolded and checked in minutes.
 
 - **Live site:** https://vivary.vercel.app/
 - **GitHub:** https://github.com/vivary-dev/vivary (public · MIT)
-- **PyPI:** [`create-vivary`](https://pypi.org/project/create-vivary/) 0.2.3 ·
-  [`vivary-tropo`](https://pypi.org/project/vivary-tropo/) 0.2.2 ·
+- **PyPI:** [`create-vivary`](https://pypi.org/project/create-vivary/) 0.2.5 ·
+  [`vivary-tropo`](https://pypi.org/project/vivary-tropo/) 0.2.3 ·
   [`vivary-ozone`](https://pypi.org/project/vivary-ozone/) ·
-  [`vivary-exo`](https://pypi.org/project/vivary-exo/) 0.2.1
-- **npm:** [`@vivary/create`](https://www.npmjs.com/package/@vivary/create) 0.2.3
+  [`vivary-exo`](https://pypi.org/project/vivary-exo/) 0.2.2
+- **npm:** [`@vivary/create`](https://www.npmjs.com/package/@vivary/create) 0.2.5
 
 ## Proof
 
@@ -45,9 +45,12 @@ Mobile:
 - **Restraint:** no third-party dependencies; the framework costs almost nothing
   to load. Plain Markdown, any editor, Claude Code *and* Codex.
 
-> Current published release line verified 2026-06-22: `create-vivary` 0.2.3 (PyPI), `@vivary/create` 0.2.3 (npm), `vivary-tropo` 0.2.2, `vivary-exo` 0.2.1. The current `dev` line adds an unreleased security-hardening batch for private scaffold boundaries, hard-link-safe writes, and generated output paths.
-> Scaffold output captured from a real run — 39 files, doctor ok (9 nodes, 28
-> edges, 0 broken), `tropo check` 0 errors.
+> Current published release line: `create-vivary` 0.2.5 (PyPI), `@vivary/create`
+> 0.2.5 (npm), `vivary-tropo` 0.2.3, `vivary-exo` 0.2.2. This line includes the
+> security-hardening batch for private scaffold boundaries, hard-link-safe writes,
+> and generated output paths.
+> Published 0.2.5 scaffold output: 39 files, doctor ok (9 nodes, 28 edges),
+> `tropo check` clean.
 
 > Active-context branch proof, refreshed 2026-06-23: plain coding scaffold writes 39 files and
 > doctors clean at 9 nodes / 28 edges; `--active-context cocoindex-code` writes 45
