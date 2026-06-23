@@ -1,6 +1,7 @@
 """The bundled create_vivary_assets/ must stay byte-identical to their canonical
 sources. If this fails, run `python packages/create-vivary/tools/sync_assets.py`."""
 import sys
+import tomllib
 from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
@@ -36,8 +37,14 @@ def test_bundled_assets_match_canonical():
 def test_assets_cover_required_workspace_files():
     # the bundled templates must include everything scaffold_workspace maps from
     for name in ("AGENTS.md", "SOUL.md", "STATE.template.md", "USER.template.md",
-                 "MEMORY.template.md", "bug-risk-playbook.md"):
+                 "MEMORY.template.md", "bug-risk-playbook.md", ".gitignore"):
         assert (ASSETS / "templates" / name).exists(), f"bundled template missing: {name}"
+
+
+def test_package_data_includes_template_gitignore():
+    pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
+    package_data = pyproject["tool"]["setuptools"]["package-data"]["create_vivary_assets"]
+    assert "templates/.gitignore" in package_data
 
 
 if __name__ == "__main__":
