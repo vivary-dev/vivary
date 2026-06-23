@@ -205,7 +205,7 @@ create-vivary doctor <target> [--json]
 | Flag | Effect |
 |---|---|
 | `--preset coding\|second-brain\|writing` | Which starter graph to seed (default `coding`). |
-| `--force` | Overwrite existing scaffold files. |
+| `--force` | Overwrite existing scaffold files, but still refuses symlinked destination paths or paths that resolve outside the target workspace. |
 | `--obsidian` | Also drop an opt-in Obsidian vault config (graph coloured by type). |
 | `--active-context cocoindex-code` | For `coding` workspaces, add CocoIndex-code sidecar profile (skill, docs, graph nodes, gitignore). Does not auto-install or enable MCP. |
 | `--storage auto\|file\|embedded\|cloud` | Storage backend to configure. `auto` = LanceDB locally. Default: `file` (no new deps). Cloud writes config only; the tropo cloud backend is future 0.3.x work. |

@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -174,26 +176,25 @@ def scaffold_workspace(
         writes.extend(_obsidian_writes(target))
 
     copies = _copy_plan(target, sources, active_context=active_context)
-    _ensure_no_conflicts([p for p, _ in writes] + [dst for _, dst in copies], force)
+    planned_paths = [p for p, _ in writes] + [dst for _, dst in copies]
+    _ensure_safe_destinations(target, planned_paths, force)
     if force:
         _cleanup_stale_scaffold_state(target, active_context=active_context)
 
     created: list[Path] = []
     if not dry_run:
         for dst, text in writes:
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            dst.write_text(text, encoding="utf-8", newline="\n")
+            _write_text_no_follow(target, dst, text)
             created.append(dst)
 
         for src, dst in copies:
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dst)
+            _copy_file_no_follow(target, src, dst)
             created.append(dst)
     else:
         created = [dst for dst, _ in writes] + [dst for _, dst in copies]
 
     if storage != "file":
-        created.extend(_write_vivary_dir(target, storage, provider, dry_run))
+        created.extend(_write_vivary_dir(target, storage, provider, dry_run, force=force))
 
     return created
 
@@ -384,7 +385,24 @@ def _copy_plan(
     return copies
 
 
-def _ensure_no_conflicts(paths: list[Path], force: bool) -> None:
+def _ensure_safe_destinations(target: Path, paths: list[Path], force: bool) -> None:
+    _ensure_within_target(target, paths)
+    symlinks = sorted(
+        {
+            component
+            for path in paths
+            for component in _existing_components(target, path)
+            if component.is_symlink()
+        }
+    )
+    if symlinks:
+        preview = "\n".join(f"  - {p}" for p in symlinks[:20])
+        extra = "" if len(symlinks) <= 20 else f"\n  ... and {len(symlinks) - 20} more"
+        raise ScaffoldError(
+            "refusing to scaffold through symlinked destination path(s):\n"
+            f"{preview}{extra}"
+        )
+
     ancestor_conflicts = sorted(
         {
             parent
@@ -413,6 +431,75 @@ def _ensure_no_conflicts(paths: list[Path], force: bool) -> None:
             "refusing to overwrite existing scaffold file(s); rerun with --force:\n"
             f"{preview}{extra}"
         )
+
+
+def _ensure_within_target(target: Path, paths: list[Path]) -> None:
+    escaped = []
+    for path in paths:
+        try:
+            path.relative_to(target)
+            path.resolve(strict=False).relative_to(target)
+        except ValueError:
+            escaped.append(path)
+    if escaped:
+        preview = "\n".join(f"  - {p}" for p in escaped[:20])
+        extra = "" if len(escaped) <= 20 else f"\n  ... and {len(escaped) - 20} more"
+        raise ScaffoldError(
+            "refusing to scaffold outside the selected target directory:\n"
+            f"{preview}{extra}"
+        )
+
+
+def _existing_components(target: Path, path: Path) -> list[Path]:
+    try:
+        relative = path.relative_to(target)
+    except ValueError:
+        return [path] if path.exists() or path.is_symlink() else []
+
+    components: list[Path] = []
+    current = target
+    if current.exists() or current.is_symlink():
+        components.append(current)
+    for part in relative.parts:
+        current = current / part
+        if current.exists() or current.is_symlink():
+            components.append(current)
+        else:
+            break
+    return components
+
+
+def _write_text_no_follow(target: Path, dst: Path, text: str) -> None:
+    _ensure_safe_destinations(target, [dst], force=True)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{dst.name}.", suffix=".vivary-tmp", dir=dst.parent
+    )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        os.replace(tmp, dst)
+    finally:
+        if tmp.exists() or tmp.is_symlink():
+            tmp.unlink()
+
+
+def _copy_file_no_follow(target: Path, src: Path, dst: Path) -> None:
+    _ensure_safe_destinations(target, [dst], force=True)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{dst.name}.", suffix=".vivary-tmp", dir=dst.parent
+    )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as out, src.open("rb") as inp:
+            shutil.copyfileobj(inp, out)
+        shutil.copystat(src, tmp)
+        os.replace(tmp, dst)
+    finally:
+        if tmp.exists() or tmp.is_symlink():
+            tmp.unlink()
 
 
 def _cleanup_stale_scaffold_state(target: Path, *, active_context: str | None) -> None:
@@ -1084,7 +1171,9 @@ def _run_wizard(args) -> dict:
     return {"storage": "embedded", "provider": "lancedb", "installed": installed}
 
 
-def _write_vivary_dir(target: Path, storage: str, provider: str, dry_run: bool) -> list[Path]:
+def _write_vivary_dir(
+    target: Path, storage: str, provider: str, dry_run: bool, *, force: bool
+) -> list[Path]:
     """Write .vivary/storage.toml. Returns list of paths written."""
     vivary_dir = target / _STORAGE_DIR
     cfg_path = vivary_dir / _STORAGE_CONFIG_NAME
@@ -1092,11 +1181,11 @@ def _write_vivary_dir(target: Path, storage: str, provider: str, dry_run: bool) 
     key = storage if storage != "cloud" else f"cloud-{provider}"
     toml_text = _STORAGE_TOML_TEMPLATES.get(key, _STORAGE_TOML_TEMPLATES["file"])
 
+    _ensure_safe_destinations(target, [cfg_path], force)
     if dry_run:
         return [cfg_path]
 
-    vivary_dir.mkdir(parents=True, exist_ok=True)
-    cfg_path.write_text(toml_text, encoding="utf-8", newline="\n")
+    _write_text_no_follow(target, cfg_path, toml_text)
     return [cfg_path]
 
 
@@ -1202,8 +1291,13 @@ def main(argv: list[str] | None = None) -> int:
             if getattr(args, "dry_run", False) or decisions["storage"] == "file"
             else _ensure_backend_installed(decisions["provider"], _yes)
         )
-        vivary_paths = _write_vivary_dir(target, decisions["storage"], decisions["provider"],
-                                         getattr(args, "dry_run", False))
+        vivary_paths = _write_vivary_dir(
+            target,
+            decisions["storage"],
+            decisions["provider"],
+            getattr(args, "dry_run", False),
+            force=True,
+        )
         if getattr(args, "json", False):
             print(json.dumps({
                 "ok": True,

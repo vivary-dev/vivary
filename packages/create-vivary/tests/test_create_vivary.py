@@ -336,6 +336,40 @@ class CreateVivaryTests(unittest.TestCase):
                 "blocks nested module index\n",
             )
 
+    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
+    def test_init_refuses_symlinked_destination_parent(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            target.mkdir()
+            (target / "modules").symlink_to(outside, target_is_directory=True)
+
+            with self.assertRaisesRegex(create_vivary.ScaffoldError, "symlinked|outside"):
+                create_vivary.scaffold_workspace(
+                    target, preset="coding", force=False, repo_root=ROOT
+                )
+
+            self.assertFalse((outside / "agent-workspace" / "index.md").exists())
+
+    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
+    def test_force_refuses_symlinked_destination_leaf(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            target.mkdir()
+            victim = outside / "victim.txt"
+            victim.write_text("keep me\n", encoding="utf-8")
+            (target / "README.md").symlink_to(victim)
+
+            with self.assertRaisesRegex(create_vivary.ScaffoldError, "symlinked|outside"):
+                create_vivary.scaffold_workspace(
+                    target, preset="coding", force=True, repo_root=ROOT
+                )
+
+            self.assertEqual(victim.read_text(encoding="utf-8"), "keep me\n")
+
     def test_cli_init(self):
         with temp_workspace() as td:
             target = Path(td) / "agent-workspace"
