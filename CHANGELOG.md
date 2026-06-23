@@ -7,6 +7,18 @@ the `v0.1.0` line.
 
 **Current versions:** `vivary-tropo` **0.2.2** · `vivary-exo` **0.2.1** · `create-vivary` / `@vivary/create` **0.2.3** · `vivary-ozone` **0.1.0**.
 
+
+## [Unreleased]
+
+Affects `create-vivary` / `@vivary/create` and `strato` workspace assets.
+
+### Fixed
+
+- **Heartbeat reports stay private** — scaffolded workspaces now gitignore
+  `heartbeat-reports/*` (while keeping `.gitkeep`), the doctor flags missing report
+  ignores, and strato's heartbeat procedure treats reports as PRIV because they may
+  summarize private memory.
+
 ## [vivary-tropo 0.2.2 / vivary-exo 0.2.1] — 2026-06-22
 
 Affects `vivary-tropo` and `vivary-exo` only. `create-vivary` / `@vivary/create`

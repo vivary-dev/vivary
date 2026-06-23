@@ -82,6 +82,7 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertIn("USER.md", gitignore)
             self.assertIn("MEMORY.md", gitignore)
             self.assertIn("memory/*", gitignore)
+            self.assertIn("heartbeat-reports/*", gitignore)
 
             resolver = tropo.ConfigResolver(str(target), str(TROPO))
             docs = tropo.analyze(str(target), [], resolver)
@@ -582,6 +583,30 @@ class TestAgentFlags(unittest.TestCase):
             self.assertEqual(out["storage"], "file")
             self.assertFalse((target / ".vivary").exists())
 
+    def test_init_auto_cloud_config_does_not_install_backend(self):
+        with temp_workspace() as td:
+            target = Path(td) / "auto-cloud-demo"
+            import io, contextlib, json
+            buf = io.StringIO()
+
+            with mock.patch.object(create_vivary, "_ensure_backend_installed") as ensure:
+                with contextlib.redirect_stdout(buf):
+                    rc = create_vivary.main([
+                        "init", str(target),
+                        "--auto",
+                        "--privacy", "cloud",
+                        "--json",
+                        "--repo-root", str(ROOT),
+                    ])
+
+            self.assertEqual(rc, 0)
+            ensure.assert_not_called()
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["storage"], "cloud")
+            self.assertEqual(out["provider"], "qdrant")
+            self.assertEqual(out["installed"], [])
+            self.assertTrue((target / ".vivary" / "storage.toml").exists())
+
     def test_wizard_subcommand_writes_storage_toml(self):
         with temp_workspace() as td:
             target = Path(td) / "wizard-demo"
@@ -607,6 +632,33 @@ class TestAgentFlags(unittest.TestCase):
             self.assertEqual(out["storage"], "embedded")
             cfg = target / ".vivary" / "storage.toml"
             self.assertTrue(cfg.exists())
+
+    def test_wizard_cloud_config_does_not_install_backend(self):
+        with temp_workspace() as td:
+            target = Path(td) / "wizard-cloud-demo"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", storage="file", repo_root=ROOT
+            )
+
+            import io, contextlib, json
+            buf = io.StringIO()
+            with mock.patch.object(create_vivary, "_ensure_backend_installed") as ensure:
+                with contextlib.redirect_stdout(buf):
+                    rc = create_vivary.main([
+                        "wizard", str(target),
+                        "--auto",
+                        "--storage", "cloud",
+                        "--provider", "qdrant",
+                        "--json",
+                        "--repo-root", str(ROOT),
+                    ])
+
+            self.assertEqual(rc, 0)
+            ensure.assert_not_called()
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["storage"], "cloud")
+            self.assertEqual(out["provider"], "qdrant")
+            self.assertEqual(out["installed"], [])
 
     def test_wizard_dry_run_does_not_install_backend(self):
         with temp_workspace() as td:
