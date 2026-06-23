@@ -3,4 +3,6 @@ USER.md
 MEMORY.md
 memory/*
 !memory/.gitkeep
+heartbeat-reports/*
+!heartbeat-reports/.gitkeep
 .strato/private/
