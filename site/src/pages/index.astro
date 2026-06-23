@@ -11,8 +11,13 @@ const creates = [
   { t: 'Typed project memory', d: 'A validated knowledge graph, not a notes dump.', f: 'tropo.toml · changes/ · decisions/ · modules/' },
   { t: 'Visible state',        d: 'One surface the agent reads and updates.',        f: 'STATE.md' },
   { t: 'Reusable skills',      d: 'Runtime skills for Claude Code and Codex.',       f: '.claude/skills/ · .agents/skills/' },
-  { t: 'Private boundaries',   d: 'Personal context that never gets committed.',     f: 'USER.md · MEMORY.md · memory/  — gitignored' },
+  { t: 'Private boundaries',   d: 'Personal context and heartbeat reports stay out of Git.', f: 'USER.md · MEMORY.md · memory/ · heartbeat-reports/' },
   { t: 'Verification gates',   d: 'Human sign-off and graph checks before merge.',   f: 'gates/ · verification/ · tropo check' },
+];
+const hardening = [
+  { t: 'Scaffold writes stay local', d: 'create-vivary refuses symlinked or out-of-workspace scaffold, storage, and cleanup paths.' },
+  { t: 'Private files are actively ignored', d: 'doctor validates real ignore rules for USER.md, MEMORY.md, memory/*, and heartbeat-reports/*.' },
+  { t: 'Generated outputs avoid hard-link leaks', d: 'tropo view and exo claim replace workspace files without mutating linked files outside the workspace.' },
 ];
 ---
 
@@ -153,14 +158,32 @@ const creates = [
           ))}
         </ol>
           <pre class="term"><span class="g">$ npm create @vivary@latest my-workspace</span>   <span class="dim"># preset: coding</span>
-create-vivary: wrote 36 file(s) to my-workspace
+create-vivary: wrote 39 file(s) to my-workspace
 
 <span class="g">$ create-vivary doctor my-workspace</span>
-doctor: ok (8 node(s), 24 edge(s), 0 broken)
+doctor: ok (9 node(s), 28 edge(s), 0 broken)
 
 <span class="g">$ tropo check --root my-workspace</span>
-tropo: 8 document(s), 0 error(s), 0 warning(s)  →  exit 0</pre>
+tropo: 9 document(s), 0 error(s), 0 warning(s)  →  exit 0</pre>
       </div>
+    </section>
+
+    <!-- SECURITY HARDENING -->
+    <section class="band hardening">
+      <div class="hardening-copy">
+        <p class="search-label">Current dev hardening</p>
+        <h2>Safer local boundaries before the next package cut.</h2>
+        <p>
+          Published packages remain on the versions above. The current <code>dev</code>
+          line has merged security hardening for private scaffold files, heartbeat
+          reports, generated graph output, and coordination claims.
+        </p>
+      </div>
+      <ul class="hardening-list">
+        {hardening.map((item) => (
+          <li><b>{item.t}</b><span>{item.d}</span></li>
+        ))}
+      </ul>
     </section>
 
     <!-- SEARCH + AGENT MODE -->
@@ -406,6 +429,15 @@ billing  →  4 node(s) depend on it
     .signals a { color: var(--accent); font-weight: 600; }
     .signals img { display: block; width: 100%; height: auto; border-radius: 16px; border: 1px solid var(--line); background: oklch(0.13 0.035 220 / .66); }
 
+    /* hardening */
+    .hardening { display: grid; grid-template-columns: 0.85fr 1.15fr; gap: clamp(22px, 4vw, 52px); align-items: start; }
+    .hardening h2 { font-family: var(--serif); font-size: clamp(28px, 3.8vw, 50px); letter-spacing: -0.025em; line-height: 1.03; margin: 0 0 14px; }
+    .hardening p:not(.search-label) { color: var(--muted); margin: 0; max-width: 39ch; }
+    .hardening-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+    .hardening-list li { display: grid; gap: 4px; padding: 18px 20px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); }
+    .hardening-list b { font-family: var(--serif); font-size: 18px; color: var(--ink); }
+    .hardening-list span { color: var(--muted); font-size: 15px; }
+
     /* creates */
     .creates-head { text-align: center; }
     .creates-head h2 { font-family: var(--serif); font-size: clamp(28px, 4vw, 52px); letter-spacing: -0.025em; line-height: 1.04; margin: 0 auto 14px; max-width: 20ch; }
@@ -488,7 +520,7 @@ billing  →  4 node(s) depend on it
     @keyframes pulse { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
 
     @media (max-width: 880px) {
-      .strata, .row, .row.reverse, .creates-grid, .signals { grid-template-columns: 1fr; }
+      .strata, .row, .row.reverse, .creates-grid, .signals, .hardening { grid-template-columns: 1fr; }
       .creates-grid .term { position: static; }
       .row.reverse .rtext { order: 0; }
       .axis { display: none; }

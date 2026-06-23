@@ -9,9 +9,11 @@ the `v0.1.0` line.
 
 ## [Unreleased]
 
-Affects `vivary-tropo`, `create-vivary` / `@vivary/create`, and `strato` workspace assets.
+Affects `vivary-tropo`, `vivary-exo`, `create-vivary` / `@vivary/create`,
+`strato` workspace assets, and public docs/site release surfaces. These fixes are
+merged to `dev`; publishing remains a manual human gate.
 
-### Fixed
+### Security
 
 - **`tropo view --out` output hardening** — rendered HTML writes must stay inside
   the tropo root, refuse symlink output paths, and replace the output path instead
@@ -32,6 +34,13 @@ Affects `vivary-tropo`, `create-vivary` / `@vivary/create`, and `strato` workspa
   resolve outside the selected workspace, including when `--force` is used.
 - **create-vivary dry-run cleanup guard** — `--dry-run --force` previews the scaffold
   without removing stale generated files.
+
+### Documentation
+
+- **Security-hardening release truth** — README, FAQ, command docs, package READMEs,
+  `SECURITY.md`, `HANDOFF.md`, and the website now call out the pending dev-line
+  hardening batch without implying that new package versions have already been
+  published.
 
 ## [vivary-tropo 0.2.2 / vivary-exo 0.2.1] — 2026-06-22
 

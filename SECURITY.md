@@ -35,3 +35,19 @@ Vivary is a local Markdown workspace scaffold and CLI suite. Security-sensitive 
 include package publishing, dependency installation, generated `.gitignore` privacy
 boundaries, active-context sidecars, and any workflow that pushes, opens PRs, or
 publishes packages.
+
+## Current Hardening Coverage
+
+The current `dev` line contains an unreleased security-hardening batch that covers:
+
+- scaffold writes, storage config writes, and stale generated cleanup refusing
+  symlinked or out-of-workspace destination paths
+- `create-vivary doctor` validating active `.gitignore` rules instead of accepting
+  comments, negations, or substring matches for private files
+- generated workspaces keeping `USER.md`, `MEMORY.md`, `memory/*`, and
+  `heartbeat-reports/*` private while preserving `.gitkeep` placeholders
+- `tropo view --out` and `exo claim` replacing workspace files without mutating
+  hard-linked targets outside the workspace
+
+Until the next package cut is published, treat these as source/dev-line fixes rather
+than claims about the package versions listed above.

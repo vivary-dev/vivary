@@ -1,6 +1,9 @@
 # vivary-exo
 
 > Status: **working** (coordination + graph-native claims). The optional, outermost layer.
+> Current `dev` includes unreleased claim-write hardening for symlinked,
+> out-of-workspace, and hard-linked work item files; publish before claiming that in a
+> released package.
 
 **The coordination layer** — the exosphere. Engaged only when one agent becomes
 many. exo does **not run agents** (that's the harness / the loops skill) — it reasons
