@@ -998,9 +998,13 @@ def _is_importable(module: str) -> bool:
 
 
 def _ensure_backend_installed(provider: str, yes: bool) -> list[str]:
-    """Install the pip extra for provider if not already present. Returns installed names."""
-    extras = {"lancedb": "embedded", "qdrant-client": "cloud", "astrapy": "astra"}
-    pkg_map = {"lancedb": "lancedb", "qdrant": "qdrant-client", "astra": "astrapy"}
+    """Install the embedded pip extra for provider if not already present.
+
+    Cloud backends are config-only for now, so only the shipped embedded
+    provider is eligible for self-install. Returns installed package names.
+    """
+    extras = {"lancedb": "embedded"}
+    pkg_map = {"lancedb": "lancedb"}
     pkg = pkg_map.get(provider)
     if pkg is None or _is_importable(pkg.replace("-", "_")):
         return []
@@ -1201,7 +1205,7 @@ def main(argv: list[str] | None = None) -> int:
         _yes = getattr(args, "yes", False) or getattr(args, "auto", False)
         installed = decisions.get("installed") or (
             []
-            if getattr(args, "dry_run", False) or decisions["storage"] == "file"
+            if getattr(args, "dry_run", False) or decisions["storage"] != "embedded"
             else _ensure_backend_installed(decisions["provider"], _yes)
         )
         vivary_paths = _write_vivary_dir(target, decisions["storage"], decisions["provider"],
@@ -1239,7 +1243,7 @@ def main(argv: list[str] | None = None) -> int:
     _prior = decisions.get("installed", [])
     installed = _prior + (
         []
-        if dry_run or storage == "file"
+        if dry_run or storage != "embedded"
         else _ensure_backend_installed(provider, yes)
     )
 
