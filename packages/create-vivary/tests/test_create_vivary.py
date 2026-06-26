@@ -1,5 +1,7 @@
 """Tests for the create-vivary workspace scaffold."""
 
+import io
+import json
 import sys
 import shutil
 import subprocess
@@ -204,6 +206,11 @@ class CreateVivaryTests(unittest.TestCase):
                 "change": "capture-routine",
                 "verification": "retrieval-smoke",
             },
+            "knowledge-work": {
+                "module": "workbench",
+                "change": "workbench-first-artifact",
+                "verification": "workbench-proof",
+            },
             "writing": {
                 "module": "manuscript-system",
                 "change": "draft-review-loop",
@@ -228,6 +235,133 @@ class CreateVivaryTests(unittest.TestCase):
                     self.assertIn(node, nodes)
                 self.assertIn("agent-workspace", nodes)
                 self.assertTrue(all(not e["broken"] for e in edges))
+
+    def test_knowledge_work_preset_adds_workbench_source_router(self):
+        with temp_workspace() as td:
+            target = Path(td) / "knowledge-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="knowledge-work", force=False, repo_root=ROOT
+            )
+
+            expected = [
+                "modules/workbench/index.md",
+                "modules/sources/index.md",
+                "changes/workbench-first-artifact.md",
+                "verification/workbench-proof.md",
+            ]
+            self.assertEqual([p for p in expected if not (target / p).exists()], [])
+
+            module_index = (target / "modules" / "index.md").read_text(encoding="utf-8")
+            self.assertIn("modules/sources/index.md", module_index)
+            sources = (target / "modules" / "sources" / "index.md").read_text(encoding="utf-8")
+            self.assertIn("source_files: []", sources)
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            self.assertTrue(report["ok"], report)
+            self.assertIn("sources", tropo.build_graph(tropo.analyze(str(target), [], tropo.ConfigResolver(str(target), str(TROPO))))[0])
+
+    def test_default_scaffold_has_no_semantic_memory_config(self):
+        with temp_workspace() as td:
+            target = Path(td) / "plain"
+            create_vivary.scaffold_workspace(
+                target, preset="second-brain", force=False, repo_root=ROOT
+            )
+
+            self.assertFalse((target / ".vivary" / "memory.toml").exists())
+            self.assertFalse((target / "docs" / "semantic-memory.md").exists())
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            self.assertEqual(report["memory"]["status"], "disabled")
+
+    def test_semantic_memory_local_writes_policy_and_doctors_healthy(self):
+        with temp_workspace() as td:
+            target = Path(td) / "memory-local"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="writing",
+                memory="local",
+                force=False,
+                repo_root=ROOT,
+            )
+
+            cfg = (target / ".vivary" / "memory.toml").read_text(encoding="utf-8")
+            self.assertIn('provider = "vivary-local"', cfg)
+            self.assertTrue((target / "modules" / "semantic-memory" / "index.md").exists())
+            self.assertTrue((target / "verification" / "semantic-memory-smoke.md").exists())
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            self.assertTrue(report["ok"], report)
+            self.assertEqual(report["memory"]["provider"], "vivary-local")
+            self.assertEqual(report["memory"]["status"], "healthy")
+
+    def test_semantic_memory_cognee_reports_unavailable_without_dependency(self):
+        with temp_workspace() as td:
+            target = Path(td) / "memory-cognee"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="second-brain",
+                memory="cognee",
+                force=False,
+                repo_root=ROOT,
+            )
+
+            cfg = (target / ".vivary" / "memory.toml").read_text(encoding="utf-8")
+            self.assertIn('provider = "cognee"', cfg)
+            self.assertIn('allow_network = false', cfg)
+            with mock.patch.object(create_vivary, "_is_importable", return_value=False):
+                report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            self.assertTrue(report["ok"], report)
+            self.assertEqual(report["memory"]["provider"], "cognee")
+            self.assertEqual(report["memory"]["status"], "unavailable")
+
+    def test_capability_report_lists_memory_and_preset_specific_active_context(self):
+        report = create_vivary.capability_report("knowledge-work")
+        ids = {cap["id"] for cap in report["available_capabilities"]}
+        self.assertIn("storage:embedded", ids)
+        self.assertIn("memory:local", ids)
+        self.assertIn("memory:cognee", ids)
+        self.assertNotIn("active-context:cocoindex-code", ids)
+
+        coding = create_vivary.capability_report("coding")
+        coding_ids = {cap["id"] for cap in coding["available_capabilities"]}
+        self.assertIn("active-context:cocoindex-code", coding_ids)
+
+    def test_cli_capabilities_json(self):
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = create_vivary.main(["capabilities", "--preset", "knowledge-work", "--json"])
+
+        self.assertEqual(rc, 0)
+        data = json.loads(buf.getvalue())
+        ids = {cap["id"] for cap in data["available_capabilities"]}
+        self.assertIn("memory:cognee", ids)
+        self.assertEqual(data["preset"], "knowledge-work")
+
+    def test_cli_memory_cognee_dry_run_reports_required_install_without_writing(self):
+        with temp_workspace() as td:
+            target = Path(td) / "dry-memory"
+            buf = io.StringIO()
+            with mock.patch("sys.stdout", buf):
+                rc = create_vivary.main(
+                    [
+                        "init",
+                        str(target),
+                        "--preset",
+                        "writing",
+                        "--memory",
+                        "cognee",
+                        "--dry-run",
+                        "--json",
+                        "--repo-root",
+                        str(ROOT),
+                    ]
+                )
+
+            self.assertEqual(rc, 0)
+            data = json.loads(buf.getvalue())
+            self.assertEqual(data["memory"], "cognee")
+            self.assertIn("vivary-memory-cognee", data["memory_capability"]["requires_install"])
+            self.assertTrue(data["memory_capability"]["requires_explicit_index"])
+            self.assertFalse((target / ".vivary" / "memory.toml").exists())
 
     def test_refuses_to_overwrite_without_force(self):
         with temp_workspace() as td:

@@ -10,11 +10,11 @@ launcher; a generated workspace can be scaffolded and checked in minutes.
 
 - **Live site:** https://vivary.vercel.app/
 - **GitHub:** https://github.com/vivary-dev/vivary (public · MIT)
-- **PyPI:** [`create-vivary`](https://pypi.org/project/create-vivary/) 0.2.5 ·
+- **PyPI:** [`create-vivary`](https://pypi.org/project/create-vivary/) 0.2.6 ·
   [`vivary-tropo`](https://pypi.org/project/vivary-tropo/) 0.2.3 ·
   [`vivary-ozone`](https://pypi.org/project/vivary-ozone/) ·
   [`vivary-exo`](https://pypi.org/project/vivary-exo/) 0.2.2
-- **npm:** [`@vivary/create`](https://www.npmjs.com/package/@vivary/create) 0.2.5
+- **npm:** [`@vivary/create`](https://www.npmjs.com/package/@vivary/create) 0.2.6
 
 ## Proof
 
@@ -45,12 +45,12 @@ Mobile:
 - **Restraint:** no third-party dependencies; the framework costs almost nothing
   to load. Plain Markdown, any editor, Claude Code *and* Codex.
 
-> Current published release line: `create-vivary` 0.2.5 (PyPI), `@vivary/create`
-> 0.2.5 (npm), `vivary-tropo` 0.2.3, `vivary-exo` 0.2.2. This line includes the
-> security-hardening batch for private scaffold boundaries, hard-link-safe writes,
-> and generated output paths.
-> Published 0.2.5 scaffold output: 39 files, doctor ok (9 nodes, 28 edges),
-> `tropo check` clean.
+> Prepared release line: `create-vivary` 0.2.6 (PyPI), `@vivary/create`
+> 0.2.6 (npm), `vivary-tropo` 0.2.3, `vivary-exo` 0.2.2. This line adds the
+> `knowledge-work` preset, optional semantic-memory setup, capability discovery, and
+> doctor memory reporting while keeping Cognee optional.
+> Prepared 0.2.6 scaffold proof: `knowledge-work` and semantic-memory setups are
+> covered by the create-vivary test suite and generated docs/site build.
 
 > Active-context branch proof, refreshed 2026-06-23: plain coding scaffold writes 39 files and
 > doctors clean at 9 nodes / 28 edges; `--active-context cocoindex-code` writes 45

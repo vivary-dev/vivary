@@ -29,6 +29,7 @@ sandboxes/*
 # Local drafts
 drafts/
 .release/private/
+HANDOFF.md
 # CocoIndex Code (ccc)
 /.cocoindex_code/
 

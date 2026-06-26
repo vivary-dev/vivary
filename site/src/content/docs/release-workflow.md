@@ -10,7 +10,8 @@ public docs, install commands, release status, or package versions.
 
 1. **Set release truth first.**
    Update the package versions, dependency constraints, `README.md`, `CHANGELOG.md`,
-   package READMEs, `docs/FAQ.md`, `docs/PORTFOLIO.md`, `HANDOFF.md`, and `AGENTS.md`.
+   package READMEs, `docs/FAQ.md`, `docs/PORTFOLIO.md`, and `AGENTS.md` when the
+   public agent contract changes.
    If the homepage names versions or package surfaces, update `site/src/pages/index.astro`.
 
 2. **Keep docs and site in sync.**
@@ -45,9 +46,10 @@ public docs, install commands, release status, or package versions.
    npm pack --dry-run
    ```
 
-5. **Update public post copy outside the repo.**
-   Launch/social posts stay in ignored local storage, such as `.release/private/`, or
-   in the Second Brain. They do not go into the public repo.
+5. **Keep private agent communications outside the repo.**
+   Handoffs, agent-to-Jeff continuity notes, launch/social drafts, and private release
+   packets stay in ignored local storage, such as `.release/private/`, or in the
+   Second Brain. They do not go into the public repo.
 
 6. **Capture the workflow learning.**
    If the update revealed a repeatable release lesson, save it in the repo docs or an

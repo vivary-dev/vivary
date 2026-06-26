@@ -8,7 +8,7 @@ Every CLI across the four layers. All engines are zero-dependency Python (3.11+)
 the CLI command names are `tropo` / `ozone` / `exo` / `create-vivary` regardless of
 how you install them.
 
-- **Install (PyPI):** `pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.5`
+- **Install (PyPI):** `pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.6`
 - **Run without installing (uv):** `uvx vivary-tropo check`, `uvx vivary-ozone review`, …
 - **Scaffold (npm):** `npm create @vivary@latest my-workspace` / `npx @vivary/create@latest my-workspace`
 - **From a repo checkout:** `python packages/tropo/tropo.py check`, etc.
@@ -184,41 +184,48 @@ JSON output for `claim` includes `id`, `path`, `assignee`, `previous_assignee`, 
 ## create-vivary — the scaffolder
 
 ```
-create-vivary init <target> [--preset coding|second-brain|writing] [--force] [--obsidian]
+create-vivary init <target> [--preset coding|second-brain|knowledge-work|writing] [--force] [--obsidian]
                            [--active-context cocoindex-code]
                            [--storage auto|file|embedded|cloud] [--provider lancedb|sqlite-vec|qdrant|astra]
+                           [--memory none|local|cognee]
                            [--auto] [--yes] [--dry-run] [--json]
                            [--size small|medium|large] [--privacy local|cloud]
-create-vivary wizard <target> [--yes] [--dry-run] [--json]
+create-vivary wizard <target> [--storage auto|file|embedded|cloud] [--provider lancedb|sqlite-vec|qdrant|astra]
+                              [--memory none|local|cognee] [--yes] [--dry-run] [--json]
+create-vivary capabilities [--preset coding|second-brain|knowledge-work|writing] [--json]
 create-vivary doctor <target> [--json]
 ```
 
 | Command | What it does |
 |---|---|
-| `init <target>` | Lay down a complete workspace: the agent contract, the strato shell (SOUL/USER/STATE/MEMORY), runtime skills, a `tropo.toml`, a starter typed graph, and (based on flags or wizard answers) a `.vivary/storage.toml`. |
-| `wizard <target>` | Re-run the setup wizard on an existing workspace to reconfigure storage, preset, or active-context options. |
-| `doctor <target>` | Validate a workspace: required files, active privacy ignore rules, module directory indexes, tropo graph health, and backend reachability. |
+| `init <target>` | Lay down a complete workspace: the agent contract, the strato shell (SOUL/USER/STATE/MEMORY), runtime skills, a `tropo.toml`, a starter typed graph, and optional storage or semantic-memory config based on flags/wizard answers. |
+| `wizard <target>` | Re-run the setup wizard on an existing workspace to reconfigure storage and optional semantic-memory policy. |
+| `capabilities` | List optional capabilities for a preset: storage, semantic memory, and preset-specific sidecars. |
+| `doctor <target>` | Validate a workspace: required files, active privacy ignore rules, module directory indexes, tropo graph health, backend reachability, and semantic-memory status. |
 
 | Flag | Effect |
 |---|---|
-| `--preset coding\|second-brain\|writing` | Which starter graph to seed (default `coding`). |
+| `--preset coding\|second-brain\|knowledge-work\|writing` | Which starter graph to seed (default `coding`). |
 | `--force` | Overwrite existing scaffold files and remove stale generated files, but still refuses symlinked destination parents or paths that resolve outside the target workspace. |
 | `--obsidian` | Also drop an opt-in Obsidian vault config (graph coloured by type). |
 | `--active-context cocoindex-code` | For `coding` workspaces, add CocoIndex-code sidecar profile (skill, docs, graph nodes, gitignore). Does not auto-install or enable MCP. |
 | `--storage auto\|file\|embedded\|cloud` | Storage backend to configure. `auto` = LanceDB locally. Default: `file` (no new deps). Cloud writes config only; the tropo cloud backend is future 0.3.x work. |
 | `--provider lancedb\|sqlite-vec\|qdrant\|astra` | Which implementation to use for the selected tier. `lancedb` is the shipped embedded provider. |
+| `--memory none\|local\|cognee` | Optional semantic-memory policy. Default: `none`. `local` writes local-only policy. `cognee` writes gated Cognee policy and graph docs, but does not install Cognee or index content. |
 | `--auto` | **Agent mode.** Skip all interactive prompts; pick the best option from explicit `--storage`, `--privacy`, and `--size` hints. |
 | `--yes` | Auto-confirm installs and confirmations. Safe to combine with `--auto` for fully non-interactive agent use. |
 | `--dry-run` | Print what would be scaffolded and installed; do not write, install, or clean stale files. |
-| `--json` | Machine-readable output. Reports `ok`, `root`, `preset`, `storage`, `provider`, `installed`, `files`, `config`, and `dry_run`. |
+| `--json` | Machine-readable output. Reports `ok`, `root`, `preset`, `storage`, `provider`, `memory`, capability metadata, `installed`, `files`, config paths, and `dry_run`. |
 | `--size small\|medium\|large` | Hint for `--auto` storage decisions. Agents can pass this after inspecting the repo. |
 | `--privacy local\|cloud` | Hint for `--auto` storage decisions. |
 
 `doctor` checks that `USER.md`, `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`
 are actively ignored. Comments, negations, and unrelated patterns that merely contain
-those names do not count.
+those names do not count. If `.vivary/memory.toml` exists, `doctor` reports semantic
+memory as `disabled`, `healthy`, `configured`, `unavailable`, `misconfigured`, or
+`privacy-failed` without requiring optional Cognee support to be installed.
 
-When `--storage embedded` (or `auto`) is selected and `vivary-tropo[embedded]` is not yet installed, `init` installs it via `pip` before continuing unless `--dry-run` is set. In `--json` mode, `"installed": ["lancedb"]` reports what was added. Without `--yes`, a single confirmation prompt fires before any pip install. For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use `--auto`; in human mode, the wizard asks and its answers drive storage.
+When `--storage embedded` (or `auto`) is selected and `vivary-tropo[embedded]` is not yet installed, `init` installs it via `pip` before continuing unless `--dry-run` is set. In `--json` mode, `"installed": ["lancedb"]` reports what was added. Without `--yes`, a single confirmation prompt fires before any pip install. For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use `--auto`; in human mode, the wizard asks and its answers drive storage. `--auto` never selects Cognee by itself.
 
 ```bash
 # Human flow — interactive wizard:
@@ -227,17 +234,22 @@ create-vivary init my-workspace
 # Agent flow — fully non-interactive:
 create-vivary init . --preset coding --auto --size large --privacy local --yes --json
 
+# Inspect available optional pieces for a preset:
+create-vivary capabilities --preset knowledge-work --json
+
 # Inspect without doing anything:
 create-vivary init my-workspace --auto --dry-run --json
 
 # Existing examples:
+create-vivary init my-workspace --preset knowledge-work --memory local
 create-vivary init my-workspace --preset writing
+create-vivary init my-notes --preset second-brain --memory cognee --no-wizard --dry-run --json
 create-vivary init my-codebase --preset coding --active-context cocoindex-code
 create-vivary doctor my-workspace
 # expected for a plain coding workspace: doctor: ok (9 node(s), 28 edge(s), 0 broken)
 ```
 
-The three presets share the same agent-OS shell and differ only by starter graph. Each
+The four presets share the same agent-OS shell and differ only by starter graph. Each
 starter module is a directory index (`modules/<id>/index.md`) so AGENTS can route to a
 small surface before deeper context:
 
@@ -245,6 +257,7 @@ small surface before deeper context:
 |---|---|---|---|
 | `coding` | `codebase` | `local-ci-baseline` | `local-checks` |
 | `second-brain` | `knowledge-base` | `capture-routine` | `retrieval-smoke` |
+| `knowledge-work` | `workbench` + `sources` | `workbench-first-artifact` | `workbench-proof` |
 | `writing` | `manuscript-system` | `draft-review-loop` | `editorial-review` |
 
 ---

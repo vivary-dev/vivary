@@ -4,10 +4,14 @@ Scaffold a complete Vivary agent workspace: tropo config, strato workspace files
 runtime skills, private-memory boundaries, progressive module indexes, and a starter
 typed graph.
 
-**Current release:** 0.2.5. Use 0.2.5 for new installs; no migration is expected
-from 0.2.1, 0.2.2, or 0.2.3.
+**Current release:** 0.2.6. Use 0.2.6 for new installs; no migration is expected
+from 0.2.1, 0.2.2, 0.2.3, or 0.2.5.
 
-**Security hardening:** 0.2.5 validates active `.gitignore` rules for `USER.md`,
+**Release focus:** 0.2.6 adds the `knowledge-work` preset, capability discovery,
+optional semantic-memory setup, and doctor memory reporting. Cognee remains an
+explicit optional policy, not a default dependency or indexing step.
+
+**Security hardening:** The 0.2.5 line validates active `.gitignore` rules for `USER.md`,
 `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`; scaffolds private heartbeat report
 storage; and refuses symlinked or out-of-workspace scaffold, storage, and cleanup
 paths.
@@ -15,9 +19,11 @@ paths.
 ## Install & scaffold
 
 ```bash
-pip install create-vivary==0.2.5              # or: uvx create-vivary@0.2.5 ...
+pip install create-vivary==0.2.6              # or: uvx create-vivary@0.2.6 ...
 create-vivary my-workspace --preset coding    # interactive wizard on a TTY
+create-vivary my-workbench --preset knowledge-work --memory local
 create-vivary my-codebase --preset coding --active-context cocoindex-code
+create-vivary capabilities --preset second-brain --json
 create-vivary doctor my-workspace
 
 # Agent-mode (no prompts, machine-readable output):
@@ -28,7 +34,7 @@ create-vivary wizard my-workspace --auto --storage embedded --yes --json
 ```
 
 `create-vivary <name>` is shorthand for `create-vivary init <name>`;
-pass `init` / `doctor` / `wizard` explicitly whenever you prefer. The same UX is available on npm
+pass `init` / `doctor` / `wizard` / `capabilities` explicitly whenever you prefer. The same UX is available on npm
 via the `@vivary/create` launcher (`npm create @vivary@latest my-workspace`), versioned in
 lockstep.
 
@@ -40,6 +46,7 @@ module index before opening deeper context:
 |---|---|---|---|
 | `coding` | `codebase` | `local-ci-baseline` | `local-checks` |
 | `second-brain` | `knowledge-base` | `capture-routine` | `retrieval-smoke` |
+| `knowledge-work` | `workbench` + `sources` | `workbench-first-artifact` | `workbench-proof` |
 | `writing` | `manuscript-system` | `draft-review-loop` | `editorial-review` |
 
 The command is local-only. With `--storage embedded` or `--auto` on a large workspace, it
@@ -51,6 +58,12 @@ installing, or cleaning stale files. For scripted storage selection, pass
 `--no-wizard --storage embedded --yes` or use `--auto`;
 in human mode, the wizard asks and its answers drive storage.
 
+Semantic memory is a separate optional capability. `--memory local` writes local-only
+policy and graph nodes; `--memory cognee` writes Cognee policy and verification docs.
+Neither option indexes content or sends data anywhere during scaffold, and Cognee is
+not installed by default. Use `create-vivary capabilities --preset <name> --json` to
+show agents the available optional pieces before setup.
+
 For coding workspaces, `--active-context cocoindex-code` adds an optional
 CocoIndex-code sidecar profile: active-context skills for Claude/Codex-style agents,
 local policy docs, graph nodes, and `.cocoindex_code/` in `.gitignore`. It does not
@@ -58,7 +71,7 @@ auto-install CocoIndex-code, create an index, or enable MCP; the generated docs 
 the approved `ccc init` / `ccc index` path.
 
 `doctor` validates the generated shell, active privacy ignore rules, module directory
-indexes, and typed graph:
+indexes, semantic-memory status, and typed graph:
 
 ```bash
 python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo --json

@@ -1,8 +1,8 @@
 # AGENTS.md — Vivary runtime contract
 
 The contract for **any** agent working in this repo (Claude Code, Codex CLI, …).
-Lean by law — depth lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
-[HANDOFF.md](HANDOFF.md). Read those once; don't reload them every turn.
+Lean by law — depth lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Read it
+once; don't reload it every turn.
 
 ## Mission
 
@@ -94,7 +94,9 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
   behavior / command / flag / structure change — never leave them stale (stale docs
   are a bug). Source of truth is `docs/`; the website under `site/` is generated from
   it (`cd site && npm run sync-docs`, also auto-run on build). Touch the package
-  READMEs and `HANDOFF.md` too when relevant. Every merge's verification includes it.
+  READMEs when relevant. Private handoffs and agent-to-Jeff continuity notes stay in
+  ignored local storage or the Second Brain, never in the public repo. Every merge's
+  verification includes it.
 - **Every update ends with release truth.** For any behavior, packaging, version, or
   public-copy change, run [docs/RELEASE-WORKFLOW.md](docs/RELEASE-WORKFLOW.md):
   update changelog/docs/site/package copy, sync generated site docs, verify install
@@ -112,7 +114,7 @@ python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # cl
 ```
 
 Current release truth lives in [README.md](README.md) and [CHANGELOG.md](CHANGELOG.md):
-`create-vivary` / `@vivary/create` 0.2.5, `vivary-tropo` 0.2.3,
+`create-vivary` / `@vivary/create` 0.2.6, `vivary-tropo` 0.2.3,
 `vivary-exo` 0.2.2, and `vivary-ozone` 0.1.0. The June 23 package set carries
 the security-hardening batch for privacy ignores, symlink/out-of-root writes,
 hard-link-safe rewrites, and private heartbeat reports. Full guides live in [docs/](docs/).

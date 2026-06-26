@@ -50,4 +50,5 @@ Guides and how-tos:
 - **Obsidian, optionally** — the visual graph for people who like a vault.
 
 Keep each post concrete, honest, and grounded in a command the reader can run.
-Avoid claims that aren't backed by the package state (see `HANDOFF.md`).
+Avoid claims that aren't backed by the package state (see `README.md` and
+`CHANGELOG.md`).

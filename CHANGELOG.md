@@ -5,7 +5,32 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current versions:** `vivary-tropo` **0.2.3** · `vivary-exo` **0.2.2** · `create-vivary` / `@vivary/create` **0.2.5** · `vivary-ozone` **0.1.0**.
+**Current versions:** `vivary-tropo` **0.2.3** · `vivary-exo` **0.2.2** · `create-vivary` / `@vivary/create` **0.2.6** · `vivary-ozone` **0.1.0**.
+
+## [create-vivary 0.2.6] — 2026-06-26
+
+Affects `create-vivary` / `@vivary/create`, generated workspace docs, and public docs.
+Publishing remains a manual human gate until the release PR is merged and npm/PyPI are
+published from the promoted commit.
+
+### Added
+
+- **`knowledge-work` preset** — a generic workbench for sources, artifacts, decisions,
+  and proof, with editable `workbench` and `sources` module routers.
+- **Capability discovery** — `create-vivary capabilities [--preset ...] [--json]`
+  lists optional storage, semantic-memory, and preset-specific sidecar capabilities for
+  human and agent setup flows.
+- **Optional semantic-memory setup** — `create-vivary init` / `wizard` now accept
+  `--memory none|local|cognee`. `local` writes local-only semantic-memory policy;
+  `cognee` writes Cognee policy, graph docs, and verification surfaces without
+  installing Cognee, indexing content, enabling network access, or using API keys.
+- **Doctor memory reporting** — `create-vivary doctor` reports semantic-memory status
+  as disabled, healthy/configured, unavailable, misconfigured, or privacy-failed.
+
+### Changed
+
+- The npm launcher recognizes the new `capabilities` subcommand instead of rewriting it
+  to `init`.
 
 ## [vivary-tropo 0.2.3 / vivary-exo 0.2.2 / create-vivary 0.2.5] — 2026-06-23
 
@@ -41,8 +66,8 @@ ships the merged security-hardening batch from the June 23 security scan review.
 ### Documentation
 
 - **Security-hardening release truth** — README, FAQ, command docs, package READMEs,
-  `SECURITY.md`, `HANDOFF.md`, and the website now identify the package versions that
-  carry the hardening batch.
+  `SECURITY.md`, and the website now identify the package versions that carry the
+  hardening batch.
 
 ### Changed
 

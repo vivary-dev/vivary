@@ -9,6 +9,7 @@ Start here.
 | [HOWTO.md](HOWTO.md) | Task recipes: add a type, see blast radius, review, CI, multi-agent, … |
 | [SKILLS.md](SKILLS.md) | The agent skills: strato (bootstrap/heartbeat/self-improve), tropo, loops. |
 | [ACTIVE-CONTEXT.md](ACTIVE-CONTEXT.md) | Optional CocoIndex-code sidecar for active semantic code context. |
+| [SEMANTIC-MEMORY.md](SEMANTIC-MEMORY.md) | Architecture plan for optional semantic memory providers such as Cognee. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The layer model (tropo → strato → ozone → exo) and the why. |
 | [OBSIDIAN.md](OBSIDIAN.md) | Optional Obsidian setup for fans (never required). |
 | [SIGNALS.md](SIGNALS.md) | Public npm, PyPI, and GitHub metrics snapshots. |

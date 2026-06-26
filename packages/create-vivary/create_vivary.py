@@ -15,11 +15,13 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 
-PRESETS = ("coding", "second-brain", "writing")
+PRESETS = ("coding", "second-brain", "knowledge-work", "writing")
 
 ACTIVE_CONTEXTS = ("cocoindex-code",)
 
-SUBCOMMANDS = ("init", "doctor", "wizard")
+MEMORY_MODES = ("none", "local", "cognee")
+
+SUBCOMMANDS = ("init", "doctor", "wizard", "capabilities")
 
 REQUIRED_WORKSPACE_FILES = (
     "README.md",
@@ -71,6 +73,21 @@ PRESET_STARTERS = {
         "verification_target": "capture-routine",
         "verification_command": "retrieve one known note from the typed graph",
         "verification_body": "Prove the workspace can find a saved note and its related context.",
+    },
+    "knowledge-work": {
+        "module_id": "workbench",
+        "module_title": "Knowledge Workbench",
+        "module_area": "research, decisions, artifacts, and proof",
+        "module_body": "A routed workbench for sources, decisions, artifacts, verification, and publish-ready proof.",
+        "change_id": "workbench-first-artifact",
+        "change_title": "Workbench First Artifact",
+        "change_slice": "first proof-backed knowledge artifact",
+        "change_body": "Produce or locate one useful artifact, link its sources, and verify the proof path that makes it trustworthy.",
+        "verification_id": "workbench-proof",
+        "verification_title": "Workbench Proof",
+        "verification_target": "workbench-first-artifact",
+        "verification_command": "verify one artifact against its linked sources and local proof gate",
+        "verification_body": "Prove the workbench can route from source material to a durable artifact with inspectable evidence.",
     },
     "writing": {
         "module_id": "manuscript-system",
@@ -126,6 +143,7 @@ def scaffold_workspace(
     repo_root: str | Path | None = None,
     storage: str = "file",
     provider: str = "lancedb",
+    memory: str = "none",
     dry_run: bool = False,
 ) -> list[Path]:
     """Lay down a full Vivary workspace scaffold.
@@ -147,6 +165,8 @@ def scaffold_workspace(
             raise ScaffoldError(
                 "active context 'cocoindex-code' currently requires the coding preset"
             )
+    if memory not in MEMORY_MODES:
+        raise ScaffoldError(f"unknown memory mode {memory!r}; expected one of {', '.join(MEMORY_MODES)}")
 
     root = Path(repo_root) if repo_root is not None else default_repo_root()
     root = root.resolve()
@@ -167,7 +187,7 @@ def scaffold_workspace(
     )
 
     writes: list[tuple[Path, str]] = [
-        (target / "README.md", _workspace_readme(project, preset, active_context)),
+        (target / "README.md", _workspace_readme(project, preset, active_context, memory)),
         (
             target / ".gitignore",
             _workspace_gitignore(
@@ -178,7 +198,13 @@ def scaffold_workspace(
         (target / "tropo.toml", _workspace_tropo_config()),
         (
             target / "modules" / "index.md",
-            _modules_index_doc(project, PRESET_STARTERS[preset], active_context),
+            _modules_index_doc(
+                project,
+                PRESET_STARTERS[preset],
+                active_context,
+                preset=preset,
+                memory=memory,
+            ),
         ),
         (_module_index_path(target, "agent-workspace"), _module_doc(project)),
         (target / "changes" / "scaffold-init.md", _change_doc(project)),
@@ -189,8 +215,12 @@ def scaffold_workspace(
         (target / "heartbeat-reports" / ".gitkeep", ""),
     ]
     writes.extend(_preset_writes(target, project, PRESET_STARTERS[preset]))
+    if preset == "knowledge-work":
+        writes.extend(_knowledge_work_writes(target, project))
     if active_context == "cocoindex-code":
         writes.extend(_cocoindex_active_context_writes(target, project))
+    if memory != "none":
+        writes.extend(_semantic_memory_writes(target, project, memory))
     if obsidian:
         writes.extend(_obsidian_writes(target))
 
@@ -198,11 +228,13 @@ def scaffold_workspace(
     planned_paths = [p for p, _ in writes] + [dst for _, dst in copies]
     if storage != "file":
         planned_paths.append(target / _STORAGE_DIR / _STORAGE_CONFIG_NAME)
+    if memory != "none":
+        planned_paths.append(target / _STORAGE_DIR / _MEMORY_CONFIG_NAME)
     _ensure_safe_destinations(target, planned_paths, force)
-    cleanup_paths = _stale_scaffold_paths(target, active_context) if force and not dry_run else []
+    cleanup_paths = _stale_scaffold_paths(target, active_context, memory) if force and not dry_run else []
     _ensure_safe_cleanup_targets(target, cleanup_paths)
     if force and not dry_run:
-        _cleanup_stale_scaffold_state(target, active_context=active_context)
+        _cleanup_stale_scaffold_state(target, active_context=active_context, memory=memory)
 
     created: list[Path] = []
     if not dry_run:
@@ -218,6 +250,8 @@ def scaffold_workspace(
 
     if storage != "file":
         created.extend(_write_vivary_dir(target, storage, provider, dry_run, force=force))
+    if memory != "none":
+        created.extend(_write_memory_config(target, memory, dry_run, force=force))
 
     return created
 
@@ -280,6 +314,14 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         except Exception:
             backend_name = "unknown"
 
+    memory_report = _memory_report(target)
+    if memory_report["status"] == "misconfigured":
+        errors.append(f"semantic memory misconfigured: {memory_report['detail']}")
+    elif memory_report["status"] == "privacy-failed":
+        errors.append("semantic memory privacy check failed")
+    elif memory_report["status"] == "unavailable":
+        warnings.append(f"semantic memory provider unavailable: {memory_report['provider']}")
+
     return {
         "ok": not errors,
         "root": str(target),
@@ -287,6 +329,71 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         "warnings": warnings,
         "graph": graph,
         "backend": backend_name,
+        "memory": memory_report,
+    }
+
+
+def _memory_report(target: Path) -> dict:
+    cfg_path = target / _STORAGE_DIR / _MEMORY_CONFIG_NAME
+    if not cfg_path.exists():
+        return {
+            "enabled": False,
+            "provider": "none",
+            "mode": "none",
+            "status": "disabled",
+            "config": None,
+            "privacy": "not-indexed",
+            "detail": "",
+        }
+
+    try:
+        import tomllib as _toml
+        with open(cfg_path, "rb") as _fh:
+            data = _toml.load(_fh)
+    except Exception as exc:
+        return {
+            "enabled": False,
+            "provider": "unknown",
+            "mode": "unknown",
+            "status": "misconfigured",
+            "config": str(cfg_path),
+            "privacy": "unknown",
+            "detail": str(exc),
+        }
+
+    memory = data.get("memory", {})
+    enabled = bool(memory.get("enabled", False))
+    provider = str(memory.get("provider", "none"))
+    mode = str(memory.get("mode", "none"))
+
+    if not enabled or provider == "none":
+        status = "disabled"
+        detail = ""
+    elif _missing_privacy_ignores(target):
+        status = "privacy-failed"
+        detail = "private workspace paths are not actively ignored"
+    elif provider == "vivary-local":
+        status = "healthy"
+        detail = "local semantic memory policy configured"
+    elif provider == "cognee":
+        if _is_importable("cognee"):
+            status = "configured"
+            detail = "Cognee import is available; indexing still requires approval"
+        else:
+            status = "unavailable"
+            detail = "install optional Cognee support before indexing"
+    else:
+        status = "misconfigured"
+        detail = f"unknown provider {provider!r}"
+
+    return {
+        "enabled": enabled,
+        "provider": provider,
+        "mode": mode,
+        "status": status,
+        "config": str(cfg_path),
+        "privacy": "private-paths-filtered" if status != "privacy-failed" else "failed",
+        "detail": detail,
     }
 
 
@@ -618,21 +725,28 @@ def _copy_file_no_follow(target: Path, src: Path, dst: Path) -> None:
             tmp.unlink()
 
 
-def _cleanup_stale_scaffold_state(target: Path, *, active_context: str | None) -> None:
+def _cleanup_stale_scaffold_state(
+    target: Path,
+    *,
+    active_context: str | None,
+    memory: str,
+) -> None:
     """Remove generated artifacts that old scaffold shapes can leave behind.
 
     `--force` means "make this target match the selected scaffold", but it should not
     delete arbitrary user content. Keep cleanup limited to paths Vivary itself has
     generated in older or optional profiles.
     """
-    for path in _stale_scaffold_paths(target, active_context):
+    for path in _stale_scaffold_paths(target, active_context, memory):
         _remove_path(target, path)
 
 
-def _stale_scaffold_paths(target: Path, active_context: str | None) -> list[Path]:
+def _stale_scaffold_paths(target: Path, active_context: str | None, memory: str) -> list[Path]:
     paths = _legacy_module_files(target)
     if active_context != "cocoindex-code":
         paths = [*paths, *_cocoindex_active_context_stale_paths(target)]
+    if memory == "none":
+        paths = [*paths, *_semantic_memory_stale_paths(target)]
     return paths
 
 
@@ -640,6 +754,8 @@ def _legacy_module_files(target: Path) -> list[Path]:
     module_ids = {
         "agent-workspace",
         "active-context",
+        "semantic-memory",
+        "sources",
         *(starter["module_id"] for starter in PRESET_STARTERS.values()),
     }
     return [target / "modules" / f"{module_id}.md" for module_id in sorted(module_ids)]
@@ -653,6 +769,17 @@ def _cocoindex_active_context_stale_paths(target: Path) -> list[Path]:
         target / "verification" / "active-context-smoke.md",
         target / ".claude" / "skills" / "active-context",
         target / ".agents" / "skills" / "active-context",
+    ]
+
+
+def _semantic_memory_stale_paths(target: Path) -> list[Path]:
+    return [
+        target / "docs" / "semantic-memory.md",
+        target / "modules" / "semantic-memory",
+        target / "changes" / "semantic-memory-capability.md",
+        target / "decisions" / "0002-semantic-memory-capability.md",
+        target / "verification" / "semantic-memory-smoke.md",
+        target / _STORAGE_DIR / _MEMORY_CONFIG_NAME,
     ]
 
 
@@ -711,7 +838,12 @@ def _module_index_errors(target: Path) -> list[str]:
     return errors
 
 
-def _workspace_readme(project: str, preset: str, active_context: str | None = None) -> str:
+def _workspace_readme(
+    project: str,
+    preset: str,
+    active_context: str | None = None,
+    memory: str = "none",
+) -> str:
     starter = PRESET_STARTERS[preset]
     active_context_section = ""
     if active_context == "cocoindex-code":
@@ -722,6 +854,18 @@ Optional active context:
 - CocoIndex-code guidance lives in `docs/active-context.md`.
 - The active-context skill asks before installing, initializing, indexing, or enabling
   MCP, then combines `tropo graph` truth with `ccc search` semantic candidates.
+"""
+    memory_section = ""
+    if memory != "none":
+        memory_section = f"""
+
+Optional semantic memory:
+
+- Semantic memory policy lives in `docs/semantic-memory.md`.
+- Config lives in `.vivary/memory.toml`.
+- Mode: `{memory}`.
+- Installing providers, indexing source files, enabling network access, or recalling
+  private material are explicit gates.
 """
     return f"""# {project}
 
@@ -749,7 +893,7 @@ Preset starter:
 - Module: `{starter["module_id"]}`
 - First slice: `{starter["change_id"]}`
 - Verification: `{starter["verification_id"]}`
-{active_context_section}"""
+{active_context_section}{memory_section}"""
 
 
 def _workspace_gitignore(
@@ -772,8 +916,9 @@ heartbeat-reports/*
 !heartbeat-reports/.gitkeep
 .strato/private/
 
-# Vivary runtime data (storage.toml is committed; data/ is not)
+# Vivary runtime data (storage.toml/memory.toml are committed; data/indexes are not)
 .vivary/data/
+.vivary/memory/
 
 # Local secrets and tool state
 .env
@@ -873,10 +1018,21 @@ Keep this index small. Link to deeper files instead of copying their contents he
 """
 
 
-def _modules_index_doc(project: str, starter: dict[str, str], active_context: str | None) -> str:
+def _modules_index_doc(
+    project: str,
+    starter: dict[str, str],
+    active_context: str | None,
+    *,
+    preset: str = "coding",
+    memory: str = "none",
+) -> str:
     module_ids = ["agent-workspace", starter["module_id"]]
+    if preset == "knowledge-work":
+        module_ids.append("sources")
     if active_context == "cocoindex-code":
         module_ids.append("active-context")
+    if memory != "none":
+        module_ids.append("semantic-memory")
     refs = ", ".join(module_ids)
     rows = "\n".join(
         f"- `{module_id}` -> `modules/{module_id}/index.md`" for module_id in module_ids
@@ -919,6 +1075,37 @@ def _preset_writes(target: Path, project: str, starter: dict[str, str]) -> list[
     ]
 
 
+def _knowledge_work_writes(target: Path, project: str) -> list[tuple[Path, str]]:
+    return [
+        (
+            _module_index_path(target, "sources"),
+            _knowledge_sources_module_doc(project),
+        ),
+    ]
+
+
+def _semantic_memory_writes(target: Path, project: str, memory: str) -> list[tuple[Path, str]]:
+    return [
+        (target / "docs" / "semantic-memory.md", _semantic_memory_doc(project, memory)),
+        (
+            _module_index_path(target, "semantic-memory"),
+            _semantic_memory_module_doc(project, memory),
+        ),
+        (
+            target / "changes" / "semantic-memory-capability.md",
+            _semantic_memory_change_doc(project, memory),
+        ),
+        (
+            target / "decisions" / "0002-semantic-memory-capability.md",
+            _semantic_memory_decision_doc(project, memory),
+        ),
+        (
+            target / "verification" / "semantic-memory-smoke.md",
+            _semantic_memory_verification_doc(project, memory),
+        ),
+    ]
+
+
 def _cocoindex_active_context_writes(target: Path, project: str) -> list[tuple[Path, str]]:
     return [
         (target / "docs" / "active-context.md", _cocoindex_active_context_doc(project)),
@@ -935,6 +1122,137 @@ def _cocoindex_active_context_writes(target: Path, project: str) -> list[tuple[P
             _cocoindex_active_context_verification_doc(project),
         ),
     ]
+
+
+def _knowledge_sources_module_doc(project: str) -> str:
+    return f"""---
+project: {project}
+status: active
+module_area: source routing and evidence
+related_modules: [workbench, agent-workspace]
+related_changes: [workbench-first-artifact]
+verification: [workbench-proof]
+gates: [human-gates]
+source_files: []
+---
+# Sources
+
+## Purpose
+
+Route agents to the source files, folders, and evidence surfaces that matter for this
+workspace. Add project-specific paths to `source_files` as the workbench takes shape.
+
+## Read Next
+
+- Workbench: `modules/workbench/index.md`
+- First artifact: `changes/workbench-first-artifact.md`
+- Proof: `verification/workbench-proof.md`
+
+Keep this as an index. Link to source material instead of copying it here.
+"""
+
+
+def _semantic_memory_doc(project: str, memory: str) -> str:
+    provider = "Cognee" if memory == "cognee" else "local Vivary"
+    return f"""# Semantic Memory
+
+This workspace has optional semantic memory configured in `{_STORAGE_DIR}/{_MEMORY_CONFIG_NAME}`.
+
+Mode: `{memory}`
+Provider: {provider}
+
+Semantic memory is candidate recall over the typed `tropo` graph. It is not the source
+of truth. Source files plus `tropo check` win when provider state disagrees.
+
+## Gates
+
+Ask before installing providers, indexing files, embedding content, enabling network
+access, or recalling from private paths. `USER.md`, `MEMORY.md`, `memory/**`, and
+`heartbeat-reports/**` must stay outside every memory index.
+
+## Retrieval Order
+
+1. Validate graph truth with `tropo check --root .`.
+2. Use `tropo graph` and `tropo query` first.
+3. Use semantic recall for candidates only.
+4. Read returned source files directly before acting.
+5. Verify with `create-vivary doctor .` and the workspace proof gate.
+"""
+
+
+def _semantic_memory_module_doc(project: str, memory: str) -> str:
+    return f"""---
+project: {project}
+status: active
+module_area: optional semantic recall
+related_modules: [agent-workspace]
+related_changes: [semantic-memory-capability]
+verification: [semantic-memory-smoke]
+gates: [human-gates]
+source_files: []
+---
+# Semantic Memory
+
+## Purpose
+
+Configure optional semantic recall as a sidecar over the typed graph.
+
+## Read Next
+
+- Policy: `docs/semantic-memory.md`
+- Config: `{_STORAGE_DIR}/{_MEMORY_CONFIG_NAME}`
+- Verification: `verification/semantic-memory-smoke.md`
+
+Mode: `{memory}`. Installing providers and indexing content remain explicit gates.
+"""
+
+
+def _semantic_memory_decision_doc(project: str, memory: str) -> str:
+    return f"""---
+project: {project}
+status: accepted
+date: {date.today().isoformat()}
+related_modules: [semantic-memory, agent-workspace]
+related_changes: [semantic-memory-capability]
+rationale: semantic memory is an optional recall provider over typed graph truth
+---
+# Semantic Memory Capability
+
+This workspace may use `{memory}` semantic memory as an optional recall sidecar.
+The typed graph remains the source of truth, and provider state is rebuildable.
+"""
+
+
+def _semantic_memory_change_doc(project: str, memory: str) -> str:
+    return f"""---
+project: {project}
+status: planned
+slice: optional semantic memory setup
+related_modules: [semantic-memory, agent-workspace]
+related_changes: [scaffold-init]
+verification: [semantic-memory-smoke]
+gates: [human-gates]
+---
+# Semantic Memory Capability
+
+Configure `{memory}` semantic memory as an optional, privacy-gated recall sidecar.
+"""
+
+
+def _semantic_memory_verification_doc(project: str, memory: str) -> str:
+    return f"""---
+project: {project}
+status: planned
+target: semantic-memory-capability
+command: create-vivary doctor . --json
+related_modules: [semantic-memory, agent-workspace]
+related_changes: [semantic-memory-capability]
+---
+# Semantic Memory Smoke
+
+Verify that `create-vivary doctor` reports semantic memory mode `{memory}` without
+indexing private files or requiring unavailable providers to break the core workspace.
+"""
 
 
 def _cocoindex_active_context_doc(project: str) -> str:
@@ -1170,7 +1488,9 @@ destructive operation.
 
 _STORAGE_DIR = ".vivary"
 _STORAGE_CONFIG_NAME = "storage.toml"
+_MEMORY_CONFIG_NAME = "memory.toml"
 _STORAGE_DATA_DIR = ".vivary/data"
+_MEMORY_STATE_DIR = ".vivary/memory"
 
 _STORAGE_TOML_TEMPLATES = {
     "file": """\
@@ -1204,6 +1524,44 @@ provider = "astra"
 api_key = "${VIVARY_CLOUD_API_KEY}"
 endpoint = "${VIVARY_CLOUD_ENDPOINT}"
 collection = "my-workspace"
+""",
+}
+
+_MEMORY_TOML_TEMPLATES = {
+    "local": """\
+[memory]
+enabled = true
+mode = "semantic-provider"
+provider = "vivary-local"
+
+[memory.privacy]
+respect_gitignore = true
+respect_vivary_private = true
+private_paths = ["USER.md", "MEMORY.md", "memory/**", "heartbeat-reports/**"]
+fail_closed = true
+
+[memory.local]
+state_path = ".vivary/memory/local"
+allow_network = false
+require_explicit_index = true
+""",
+    "cognee": """\
+[memory]
+enabled = true
+mode = "semantic-provider"
+provider = "cognee"
+
+[memory.privacy]
+respect_gitignore = true
+respect_vivary_private = true
+private_paths = ["USER.md", "MEMORY.md", "memory/**", "heartbeat-reports/**"]
+fail_closed = true
+
+[memory.cognee]
+state_path = ".vivary/memory/cognee"
+allow_network = false
+require_explicit_index = true
+api_key_env = ""
 """,
 }
 
@@ -1279,20 +1637,21 @@ def _install_runtime_extra(spec: str) -> None:
 
 def _run_wizard(args) -> dict:
     """Return storage decisions from interactive prompts or auto-pick."""
+    requested_memory = getattr(args, "memory", None) or "none"
     if getattr(args, "no_wizard", False) and not getattr(args, "auto", False):
         if getattr(args, "storage", None) == "auto":
             storage, provider = _auto_pick_storage(args)
         else:
             storage = getattr(args, "storage", None) or "file"
             provider = getattr(args, "provider", None) or "lancedb"
-        return {"storage": storage, "provider": provider}
+        return {"storage": storage, "provider": provider, "memory": requested_memory}
 
     auto = getattr(args, "auto", False)
     interactive = not auto and sys.stdin.isatty()
 
     if not interactive:
         storage, provider = _auto_pick_storage(args)
-        return {"storage": storage, "provider": provider}
+        return {"storage": storage, "provider": provider, "memory": requested_memory}
 
     # Interactive flow — plain English, no jargon (all prompts to stderr so JSON stdout stays clean)
     print("\nWelcome to Vivary! Let's set up your workspace.\n", file=sys.stderr)
@@ -1311,7 +1670,8 @@ def _run_wizard(args) -> dict:
     size = size_map.get(size_choice, "medium")
 
     if size == "small":
-        return {"storage": "file", "provider": "lancedb"}
+        storage_decision = {"storage": "file", "provider": "lancedb"}
+        return {**storage_decision, "memory": _prompt_memory_choice(requested_memory)}
 
     print("\n  Where should your data live?", file=sys.stderr)
     print("  1) On this computer — private, no accounts needed (recommended)", file=sys.stderr)
@@ -1335,10 +1695,10 @@ def _run_wizard(args) -> dict:
         except EOFError:
             cloud_choice = "1"
         if cloud_choice == "2":
-            return {"storage": "cloud", "provider": "astra", "installed": []}
+            return {"storage": "cloud", "provider": "astra", "installed": [], "memory": _prompt_memory_choice(requested_memory)}
         if cloud_choice == "3":
-            return {"storage": "file", "provider": "lancedb", "installed": []}
-        return {"storage": "cloud", "provider": "qdrant", "installed": []}
+            return {"storage": "file", "provider": "lancedb", "installed": [], "memory": _prompt_memory_choice(requested_memory)}
+        return {"storage": "cloud", "provider": "qdrant", "installed": [], "memory": _prompt_memory_choice(requested_memory)}
 
     # User picked "on this computer" — install LanceDB now, wizard is the consent step
     if getattr(args, "dry_run", False):
@@ -1347,7 +1707,24 @@ def _run_wizard(args) -> dict:
     else:
         print("\n  Setting up LanceDB for local search...", file=sys.stderr)
         installed = _ensure_backend_installed("lancedb", yes=True)
-    return {"storage": "embedded", "provider": "lancedb", "installed": installed}
+    return {"storage": "embedded", "provider": "lancedb", "installed": installed, "memory": _prompt_memory_choice(requested_memory)}
+
+
+def _prompt_memory_choice(default: str) -> str:
+    if default != "none":
+        return default
+
+    print("\n  Do you want optional semantic memory?", file=sys.stderr)
+    print("  1) No semantic memory (recommended)", file=sys.stderr)
+    print("  2) Local semantic memory policy — no network or provider install", file=sys.stderr)
+    print("  3) Cognee semantic memory policy — install and indexing are later gates", file=sys.stderr)
+    try:
+        sys.stderr.write("  Your choice [1]: ")
+        sys.stderr.flush()
+        choice = sys.stdin.readline().strip()
+    except EOFError:
+        choice = ""
+    return {"2": "local", "3": "cognee"}.get(choice, "none")
 
 
 def _write_vivary_dir(
@@ -1366,6 +1743,91 @@ def _write_vivary_dir(
 
     _write_text_no_follow(target, cfg_path, toml_text)
     return [cfg_path]
+
+
+def _write_memory_config(target: Path, memory: str, dry_run: bool, *, force: bool) -> list[Path]:
+    """Write .vivary/memory.toml. Returns list of paths written."""
+    vivary_dir = target / _STORAGE_DIR
+    cfg_path = vivary_dir / _MEMORY_CONFIG_NAME
+    toml_text = _MEMORY_TOML_TEMPLATES[memory]
+
+    _ensure_safe_destinations(target, [cfg_path], force)
+    if dry_run:
+        return [cfg_path]
+
+    _write_text_no_follow(target, cfg_path, toml_text)
+    return [cfg_path]
+
+
+def capability_report(preset: str = "coding") -> dict:
+    if preset not in PRESETS:
+        raise ScaffoldError(f"unknown preset {preset!r}; expected one of {', '.join(PRESETS)}")
+
+    capabilities = [
+        {
+            "id": "storage:file",
+            "label": "File-backed typed graph",
+            "default": True,
+            "requires_install": [],
+            "requires_approval": False,
+            "network": False,
+        },
+        {
+            "id": "storage:embedded",
+            "label": "Local database/search",
+            "default": False,
+            "requires_install": ["vivary-tropo[embedded]"],
+            "requires_approval": True,
+            "network": False,
+        },
+        {
+            "id": "memory:none",
+            "label": "No semantic memory",
+            "default": True,
+            "requires_install": [],
+            "requires_approval": False,
+            "network": False,
+        },
+        {
+            "id": "memory:local",
+            "label": "Local semantic memory policy",
+            "default": False,
+            "requires_install": [],
+            "requires_approval": True,
+            "requires_explicit_index": True,
+            "network": False,
+        },
+        {
+            "id": "memory:cognee",
+            "label": "Cognee semantic memory",
+            "default": False,
+            "requires_install": ["vivary-memory-cognee"],
+            "requires_approval": True,
+            "requires_explicit_index": True,
+            "network": "configurable, default false",
+            "adapter_status": "planned",
+        },
+    ]
+
+    if preset == "coding":
+        capabilities.append(
+            {
+                "id": "active-context:cocoindex-code",
+                "label": "CocoIndex-code active context",
+                "default": False,
+                "requires_install": ["cocoindex-code[full]"],
+                "requires_approval": True,
+                "requires_explicit_index": True,
+                "network": "provider-dependent, default local guidance",
+            }
+        )
+
+    return {
+        "ok": True,
+        "preset": preset,
+        "default_capabilities": ["storage:file", "memory:none"],
+        "available_capabilities": capabilities,
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1407,6 +1869,8 @@ def build_parser() -> argparse.ArgumentParser:
                       help="storage backend (auto=LanceDB locally)")
     init.add_argument("--provider", choices=["lancedb", "sqlite-vec", "qdrant", "astra"],
                       default=None, help="storage provider (default: lancedb)")
+    init.add_argument("--memory", choices=MEMORY_MODES, default="none",
+                      help="optional semantic memory policy (default: none)")
     init.add_argument("--size", choices=["small", "medium", "large"], default=None,
                       help="workspace size hint for --auto decisions")
     init.add_argument("--privacy", choices=["local", "cloud"], default=None,
@@ -1419,6 +1883,7 @@ def build_parser() -> argparse.ArgumentParser:
     wizard.add_argument("--no-wizard", action="store_true", dest="no_wizard")
     wizard.add_argument("--storage", choices=["auto", "file", "embedded", "cloud"], default=None)
     wizard.add_argument("--provider", choices=["lancedb", "sqlite-vec", "qdrant", "astra"], default=None)
+    wizard.add_argument("--memory", choices=MEMORY_MODES, default="none")
     wizard.add_argument("--size", choices=["small", "medium", "large"], default=None)
     wizard.add_argument("--privacy", choices=["local", "cloud"], default=None)
     wizard.add_argument("--json", action="store_true")
@@ -1433,6 +1898,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Vivary source checkout root (mainly for local development/tests)",
     )
+
+    capabilities = sub.add_parser("capabilities", help="list optional preset capabilities")
+    capabilities.add_argument("--preset", choices=PRESETS, default="coding")
+    capabilities.add_argument("--json", action="store_true", help="print a JSON report")
     return parser
 
 
@@ -1452,6 +1921,24 @@ def main(argv: list[str] | None = None) -> int:
     argv = with_default_command(argv)
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "capabilities":
+        try:
+            report = capability_report(args.preset)
+        except ScaffoldError as exc:
+            if getattr(args, "json", False):
+                print(json.dumps({"ok": False, "error": str(exc)}))
+            else:
+                print(f"create-vivary capabilities: {exc}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            print(f"create-vivary capabilities for {report['preset']}:")
+            for cap in report["available_capabilities"]:
+                marker = " (default)" if cap["default"] else ""
+                print(f"- {cap['id']}: {cap['label']}{marker}")
+        return 0
 
     if args.command == "doctor":
         report = doctor_workspace(args.target, repo_root=args.repo_root)
@@ -1485,6 +1972,16 @@ def main(argv: list[str] | None = None) -> int:
                 getattr(args, "dry_run", False),
                 force=True,
             )
+            memory_paths = (
+                []
+                if decisions["memory"] == "none"
+                else _write_memory_config(
+                    target,
+                    decisions["memory"],
+                    getattr(args, "dry_run", False),
+                    force=True,
+                )
+            )
         except ScaffoldError as exc:
             if getattr(args, "json", False):
                 print(json.dumps({"ok": False, "error": str(exc)}))
@@ -1497,13 +1994,19 @@ def main(argv: list[str] | None = None) -> int:
                 "root": str(target),
                 "storage": decisions["storage"],
                 "provider": decisions["provider"],
+                "memory": decisions["memory"],
                 "installed": installed,
                 "config": str(target / _STORAGE_DIR / _STORAGE_CONFIG_NAME),
+                "memory_config": (
+                    None
+                    if decisions["memory"] == "none"
+                    else str(target / _STORAGE_DIR / _MEMORY_CONFIG_NAME)
+                ),
                 "dry_run": getattr(args, "dry_run", False),
             }, indent=2))
         else:
             verb = "would write" if getattr(args, "dry_run", False) else "wrote"
-            print(f"create-vivary wizard: {verb} {target / _STORAGE_DIR / _STORAGE_CONFIG_NAME}")
+            print(f"create-vivary wizard: {verb} {len(vivary_paths) + len(memory_paths)} config file(s)")
         return 0
 
     if args.command != "init":
@@ -1520,6 +2023,7 @@ def main(argv: list[str] | None = None) -> int:
         decisions = _run_wizard(args)
         storage = decisions["storage"]
         provider = decisions["provider"]
+        memory = decisions["memory"]
 
         # If the interactive wizard already installed (user picked embedded), don't prompt again
         _prior = decisions.get("installed", [])
@@ -1538,6 +2042,7 @@ def main(argv: list[str] | None = None) -> int:
             repo_root=args.repo_root,
             storage=storage,
             provider=provider,
+            memory=memory,
             dry_run=dry_run,
         )
     except ScaffoldError as exc:
@@ -1549,17 +2054,29 @@ def main(argv: list[str] | None = None) -> int:
 
     root = Path(args.target).resolve()
     vivary_cfg = str(root / _STORAGE_DIR / _STORAGE_CONFIG_NAME) if storage != "file" else None
+    memory_cfg = str(root / _STORAGE_DIR / _MEMORY_CONFIG_NAME) if memory != "none" else None
 
     if getattr(args, "json", False):
+        memory_capability = next(
+            (
+                cap
+                for cap in capability_report(args.preset)["available_capabilities"]
+                if cap["id"] == f"memory:{memory}"
+            ),
+            None,
+        )
         print(json.dumps({
             "ok": True,
             "root": str(root),
             "preset": args.preset,
             "storage": storage,
             "provider": provider,
+            "memory": memory,
+            "memory_capability": memory_capability,
             "installed": installed,
             "files": len(created),
             "config": vivary_cfg,
+            "memory_config": memory_cfg,
             "dry_run": dry_run,
         }, indent=2))
     else:
@@ -1575,6 +2092,12 @@ def _print_doctor_report(report: dict) -> None:
         f"create-vivary doctor: {status} "
         f"({graph['nodes']} node(s), {graph['edges']} edge(s), {graph['broken']} broken)"
     )
+    memory = report.get("memory", {})
+    if memory:
+        print(
+            f"memory: {memory.get('status', 'unknown')} "
+            f"({memory.get('provider', 'none')})"
+        )
     for warning in report["warnings"]:
         print(f"warning: {warning}")
     for error in report["errors"]:
