@@ -126,6 +126,11 @@ CocoIndex sidecar.
 added, should embed graph nodes rather than arbitrary chunks so the agent retrieves
 structured entities and can traverse typed relationships.
 
+The provider boundary for that future work lives in
+[SEMANTIC-MEMORY.md](SEMANTIC-MEMORY.md): semantic memory consumes privacy-filtered
+typed nodes and edges, then returns typed node candidates for the agent to inspect.
+Cognee is evaluated there as an optional provider, not a storage default.
+
 **Future retrieval notes by workspace type:**
 
 | Workspace | Retrieval approach | Role of LanceDB |

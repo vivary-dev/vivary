@@ -17,7 +17,7 @@ You need **Python 3.11 or newer**. Pick whichever line fits how you like to work
 
 ```bash
 # A) install the command-line tools
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.5
+pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.6
 
 # B) run on demand with uv, nothing installed permanently
 uvx vivary-tropo --version
@@ -42,12 +42,19 @@ A **preset** just picks the starter content. Choose the one closest to your work
 
 - **`coding`** — a software project.
 - **`second-brain`** — a personal knowledge base.
+- **`knowledge-work`** — a workbench for research, sources, artifacts, and proof.
 - **`writing`** — a manuscript or copy system.
 
-They all share the same structure and differ only in the starter notes.
+They all share the same structure and differ only in the starter notes. The
+`knowledge-work` preset also includes a `sources` router so users can point agents at
+specific files, folders, and evidence surfaces without hiding that routing in a
+private config file.
 
-On a terminal that supports input, `init` runs a short wizard to ask about storage (how large your workspace will be, local vs cloud). For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use `--auto`; in human mode, the wizard asks and its answers drive storage. Add
-`--obsidian` if you want an optional Obsidian vault config too. For coding
+On a terminal that supports input, `init` runs a short wizard to ask about storage
+(how large your workspace will be, local vs cloud) and optional semantic memory. For
+scripted selection, pass `--no-wizard --storage embedded --memory local --yes` or use
+`--auto`; in human mode, the wizard asks and its answers drive storage and memory
+policy. Add `--obsidian` if you want an optional Obsidian vault config too. For coding
 workspaces, add `--active-context cocoindex-code` if you want the agent to ask when
 CocoIndex-code semantic search would help:
 
@@ -59,6 +66,20 @@ That option writes guidance and graph nodes only. It does not auto-install
 CocoIndex-code, build an index, enable MCP, or send source text anywhere. After the
 user approves active context, follow [Active context](/active-context/) for the
 verified `ccc init` / `ccc doctor` / `ccc index` path.
+
+For second-brain, knowledge-work, and writing workspaces, semantic memory is a separate
+opt-in capability:
+
+```bash
+create-vivary capabilities --preset knowledge-work --json
+create-vivary init my-workbench --preset knowledge-work --memory local
+create-vivary init my-notes --preset second-brain --memory cognee --no-wizard --dry-run --json
+```
+
+`--memory local` writes local-only semantic-memory policy and graph nodes. `--memory
+cognee` writes Cognee policy and verification docs, but it does not install Cognee,
+index files, enable a server, use an API key, or send notes anywhere. Those remain
+explicit gates after setup.
 
 You now have a complete workspace:
 
@@ -78,6 +99,8 @@ changes/ decisions/ verification/ gates/   the starter knowledge graph
 
 With `--active-context cocoindex-code`, the workspace also includes
 `docs/active-context.md` and an `active-context` skill.
+With `--memory local` or `--memory cognee`, it includes `docs/semantic-memory.md`,
+`.vivary/memory.toml`, and semantic-memory graph nodes.
 
 ## 3. Check that it's healthy
 

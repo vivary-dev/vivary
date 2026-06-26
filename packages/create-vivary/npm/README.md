@@ -5,16 +5,21 @@ workspace — typed knowledge graph (tropo), agent OS (strato), and starter grap
 one command. Generated modules use `modules/<id>/index.md` routers so agents load
 context progressively.
 
-**Current release:** 0.2.5. Use 0.2.5 for new installs; no migration is expected
-from 0.2.1, 0.2.2, or 0.2.3.
+**Current release:** 0.2.6. Use 0.2.6 for new installs; no migration is expected
+from 0.2.1, 0.2.2, 0.2.3, or 0.2.5.
 
-**Security hardening:** 0.2.5 validates active `.gitignore` rules for `USER.md`,
+**Release focus:** 0.2.6 adds the `knowledge-work` preset, capability discovery,
+optional semantic-memory setup, and doctor memory reporting. Cognee remains an
+explicit optional policy, not a default dependency or indexing step.
+
+**Security hardening:** The 0.2.5 line validates active `.gitignore` rules for `USER.md`,
 `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`; scaffolds private heartbeat report
 storage; and refuses symlinked or out-of-workspace scaffold, storage, and cleanup
 paths.
 
 ```bash
 npm create @vivary@latest my-workspace -- --preset coding
+npm create @vivary@latest my-workbench -- --preset knowledge-work --memory local
 npm create @vivary@latest my-codebase -- --preset coding --active-context cocoindex-code
 # or
 npx @vivary/create@latest my-workspace --preset coding
@@ -24,16 +29,22 @@ npx @vivary/create@latest init . --preset coding --auto --size large --yes --jso
 
 # Reconfigure storage on an existing workspace:
 npx @vivary/create@latest wizard my-workspace --auto --storage embedded --yes --json
+
+# Show optional preset capabilities:
+npx @vivary/create@latest capabilities --preset knowledge-work --json
 ```
 
-Presets: `coding` · `second-brain` · `writing`.
+Presets: `coding` · `second-brain` · `knowledge-work` · `writing`.
 
 A bare `npm create @vivary@latest <name>` maps to the `init` subcommand; you can also
-pass `init` / `doctor` / `wizard` explicitly (e.g. `npm create @vivary@latest doctor my-workspace`).
+pass `init` / `doctor` / `wizard` / `capabilities` explicitly (e.g. `npm create @vivary@latest doctor my-workspace`).
 
 On a terminal that supports input, `init` runs a short wizard to pick a storage tier.
 For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use
-`--auto`; in human mode, the wizard asks and its answers drive storage.
+`--auto`; in human mode, the wizard asks and its answers drive storage. Semantic
+memory is separate: `--memory local` writes local-only policy, and `--memory cognee`
+writes Cognee policy and verification docs without installing Cognee or indexing
+content.
 
 ## How it works
 
@@ -42,9 +53,9 @@ This package is a thin launcher: it runs the Python `create-vivary` scaffolder v
 scaffolder stays one source of truth in Python while you get a Node-native entry
 point. **Python 3.11+ and uv (or pipx) must already be installed.**
 
-Prefer Python directly? `uvx create-vivary@0.2.5 my-workspace --preset coding` — a bare
+Prefer Python directly? `uvx create-vivary@0.2.6 my-workspace --preset coding` — a bare
 target defaults to `init` there too (the PyPI `create-vivary` is versioned in lockstep
-with this launcher) — or `pip install create-vivary==0.2.5`.
+with this launcher) — or `pip install create-vivary==0.2.6`.
 
 For coding workspaces, `--active-context cocoindex-code` scaffolds optional
 CocoIndex-code guidance and ignored sidecar state. It does not auto-install, index, or

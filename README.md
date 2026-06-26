@@ -10,23 +10,25 @@
 **Typed memory and gates for AI-agent projects.** A standard plus a scaffolder that
 wires up a normalized, agent-native workspace from standalone modules — typed project
 memory, visible state, reusable skills, private boundaries, and verification gates —
-whether the workspace is a second brain, a coding project, or a writing project. Think
+whether the workspace is a second brain, a coding project, knowledge-work bench, or a writing project. Think
 `create-t3-app`, but for an AI agent's workspace instead of a web app.
 
 A *vivary* is an archaic word for a vivarium: a self-contained world where living
 things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
-> Release status: **0.2.5 is current** for the scaffolder (`create-vivary` /
+> Release status: **0.2.6 is the prepared release** for the scaffolder (`create-vivary` /
 > `@vivary/create`), **0.2.3** for `vivary-tropo`, **0.2.2** for `vivary-exo`,
-> and **0.1.0** for `vivary-ozone`. Use 0.2.5 for new scaffolds.
-> This package set carries the security-hardening batch for scaffold privacy ignores,
-> symlink/out-of-root writes, hard-link-safe rewrites, and private heartbeat reports.
+> and **0.1.0** for `vivary-ozone`. Use 0.2.6 for new scaffolds after the package
+> publish gate completes.
+> This scaffolder release adds the `knowledge-work` preset, optional semantic-memory
+> setup, capability discovery, and doctor memory reporting while keeping Cognee
+> optional and disabled by default.
 
 | Surface | Current | Link |
 |---|---:|---|
-| `create-vivary` (PyPI) | 0.2.5 | [PyPI](https://pypi.org/project/create-vivary/) |
-| `@vivary/create` (npm) | 0.2.5 | [npm](https://www.npmjs.com/package/@vivary/create) |
+| `create-vivary` (PyPI) | 0.2.6 | [PyPI](https://pypi.org/project/create-vivary/) |
+| `@vivary/create` (npm) | 0.2.6 | [npm](https://www.npmjs.com/package/@vivary/create) |
 | `vivary-tropo` | 0.2.3 | [PyPI](https://pypi.org/project/vivary-tropo/) |
 | `vivary-ozone` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
 | `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
@@ -34,9 +36,9 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
 Versions are intentionally independent across the four layers: `create-vivary` moved
-the most because it owns the scaffold and npm launcher, `tropo` and `exo` took the
-security write-boundary patches, and `ozone` stayed at 0.1.0 because this release did
-not change the review CLI.
+the most because it owns the scaffold and npm launcher, `tropo` and `exo` stayed on
+the June security line, and `ozone` stayed at 0.1.0 because this release did not
+change the review CLI.
 
 ## Public Signals
 
@@ -49,13 +51,12 @@ sources and caveats.
 
 `tropo` (typed knowledge graph + search + storage), `strato` (agent OS), `ozone`
 (graph-aware review), and `exo` (coordination) are composed by `create-vivary`. See
-[HANDOFF.md](HANDOFF.md) to continue, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-for the full model, and [docs/PORTFOLIO.md](docs/PORTFOLIO.md) for proof and
-case-study material.
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full model and
+[docs/PORTFOLIO.md](docs/PORTFOLIO.md) for proof and case-study material.
 
 Current command surface:
 
-- `create-vivary init` / `doctor` / `wizard`
+- `create-vivary init` / `doctor` / `wizard` / `capabilities`
 - `tropo check` / `graph` / `query` / `migrate` / `init --packs`
 - `ozone review` / `impact`
 - `exo board` / `conflicts` / `claim` / `roles`
@@ -66,15 +67,17 @@ Scaffold a workspace in one npm command. No Python package install first; the la
 needs Python 3.11+ and `uv` or `pipx` available:
 
 ```bash
-npm create @vivary@latest my-workspace        # pick: second brain · coding · writing
+npm create @vivary@latest my-workspace        # pick: second brain · coding · knowledge work · writing
 ```
 
 Or install the CLIs from PyPI (run on demand with `uvx`, no install needed):
 
 ```bash
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.5
+pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.6
 create-vivary init my-workspace --preset coding     # interactive wizard on a TTY
+create-vivary init my-workbench --preset knowledge-work --memory local
 create-vivary init my-codebase --preset coding --active-context cocoindex-code
+create-vivary capabilities --preset second-brain --json
 create-vivary doctor my-workspace
 uvx vivary-tropo check --root my-workspace
 
@@ -85,10 +88,11 @@ create-vivary init . --preset coding --auto --size large --yes --json
 The scaffolder writes a full workspace shell: `AGENTS.md`, `STATE.md`, `SOUL.md`,
 private `USER.md`/`MEMORY.md` boundaries, private heartbeat report storage, strato
 runtime skills for Claude/Codex-style agents, a `tropo.toml`, a starter typed graph,
-and (optionally) a `.vivary/storage.toml` for LanceDB or cloud storage. Generated
+and optional `.vivary/storage.toml` / `.vivary/memory.toml` capability config. Generated
 modules are directories with `index.md` routers (`modules/<id>/index.md`) so agents
 load the smallest useful context first. `doctor` validates the shell, active privacy
-ignore rules, graph health, storage backend, and module index coverage after creation.
+ignore rules, graph health, storage backend, semantic-memory status, and module index
+coverage after creation.
 `tropo query` and `tropo migrate` power graph search and backend switching.
 
 For coding workspaces that need richer source retrieval, `--active-context
@@ -141,7 +145,7 @@ Standalone Python packages (`vivary-*` on PyPI), plus the npm scaffolder
 | **ozone** | the protective filter | review — graph-aware, code *and* editorial | new ✓ |
 | **exo** | the outermost layer | coordination — conflict detection, work claiming, role contracts | new ✓ |
 
-`create vivary` → pick a preset (**second brain · coding · writing**) → it lays
+`create vivary` → pick a preset (**coding · second brain · knowledge work · writing**) → it lays
 down `tropo` + `strato` and whichever optional layers fit. See
 [Quickstart](#quickstart) above to install.
 
@@ -153,7 +157,7 @@ down `tropo` + `strato` and whichever optional layers fit. See
 - [Getting started](docs/GETTING-STARTED.md) — install → workspace → loop
 - [Command reference](docs/COMMANDS.md) — every CLI, flag, and exit code
 - [How-to recipes](docs/HOWTO.md) · [Agent skills](docs/SKILLS.md) · [FAQ](docs/FAQ.md)
-- [Architecture](docs/ARCHITECTURE.md) · [Obsidian (optional)](docs/OBSIDIAN.md)
+- [Architecture](docs/ARCHITECTURE.md) · [Semantic memory](docs/SEMANTIC-MEMORY.md) · [Obsidian (optional)](docs/OBSIDIAN.md)
 - [Release workflow](docs/RELEASE-WORKFLOW.md) — end-of-update release truth, docs/site sync, and publish checks
 - [Portfolio proof](docs/PORTFOLIO.md) — shipped surfaces, screenshots, and case-study notes
 

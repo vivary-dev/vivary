@@ -12,7 +12,7 @@ const { version } = require("./package.json");
 // but the Python CLI expects an explicit `init`/`doctor` subcommand. Default a
 // bare target to `init` so the documented form works; an explicit subcommand or a
 // leading flag (e.g. `-h`/`--help`) passes through unchanged.
-const SUBCOMMANDS = new Set(["init", "doctor", "wizard"]);
+const SUBCOMMANDS = new Set(["init", "doctor", "wizard", "capabilities"]);
 
 function mapArgs(args) {
   const first = args[0];

@@ -97,14 +97,24 @@ No, deliberately. tropo owns the **typed** graph (explicit links). Semantic
 that *consumes* tropo's clean graph. Keeping embeddings out keeps the core zero-dependency
 and deterministic.
 
+### Can Vivary set up semantic memory or Cognee?
+Yes, as optional setup policy. Use `create-vivary capabilities --preset knowledge-work
+--json` to see what a preset can offer, then pass `--memory local` or `--memory cognee`
+to `create-vivary init`. `local` writes local-only semantic-memory policy.
+`cognee` writes Cognee policy, config, and verification docs, but it does not install
+Cognee, index files, start a server, use an API key, or send data anywhere. Those
+remain explicit gates.
+
 ### What is the wizard?
-When you run `create-vivary init` on a terminal that supports input, it prompts you in plain English — no database jargon — to pick a storage tier (local file, local LanceDB, or cloud config). For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use `--auto`; in human mode, the wizard asks and its answers drive storage. Use `create-vivary wizard <target>` to reconfigure an existing workspace without re-scaffolding.
+When you run `create-vivary init` on a terminal that supports input, it prompts you in plain English — no database jargon — to pick a storage tier (local file, local LanceDB, or cloud config) and optional semantic-memory policy. For scripted selection, pass `--no-wizard --storage embedded --memory local --yes` or use `--auto`; in human mode, the wizard asks and its answers drive storage and memory policy. Use `create-vivary wizard <target>` to reconfigure an existing workspace without re-scaffolding.
 
 ### How do agents self-configure a workspace?
 ```bash
 create-vivary init . --preset coding --auto --size large --yes --json
 ```
 `--auto` picks the best storage tier from explicit `--storage`, `--privacy`, and `--size` hints, `--yes` auto-confirms any installs, and `--json` outputs machine-readable results. No prompts, no human needed. Dry-run first with `--dry-run --json` to preview without writing or installing anything.
+`--auto` does not choose Cognee by itself; Cognee requires an explicit `--memory cognee`
+or wizard selection.
 
 ### Can Vivary use CocoIndex?
 Yes, as an optional sidecar for coding workspaces. Scaffold it with
@@ -121,7 +131,7 @@ PyPI has no scopes and the bare names `tropo`/`ozone`/`exo` were taken, so the
 stay `tropo` / `ozone` / `exo`. On npm the scaffolder is `@vivary/create`.
 
 ### How do I install / run it?
-`pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.5`, or run on demand with
+`pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.6`, or run on demand with
 `uvx vivary-tropo ...`, or scaffold with `npm create @vivary@latest`. Python 3.11+ only;
 zero third-party dependencies.
 
@@ -144,14 +154,14 @@ rewrites the workspace file without mutating hard-linked files outside it. See t
 changelog for the exact package surfaces.
 
 ### Is it stable? What's the version?
-Published packages are `vivary-tropo` **0.2.3**, `vivary-exo` **0.2.2**,
-`create-vivary` / `@vivary/create` **0.2.5**, and `vivary-ozone` **0.1.0**. Use
-0.2.5 for new scaffolds. It's young — APIs may move before `1.0`. File issues for
+Prepared release packages are `vivary-tropo` **0.2.3**, `vivary-exo` **0.2.2**,
+`create-vivary` / `@vivary/create` **0.2.6**, and `vivary-ozone` **0.1.0**. Use
+0.2.6 for new scaffolds after the package publish gate completes. It's young — APIs may move before `1.0`. File issues for
 rough edges.
 
-The versions differ on purpose: the layers are independently versioned. This security
-batch changed scaffolding, graph output, and claim writes; it did not change ozone's
-review CLI.
+The versions differ on purpose: the layers are independently versioned. This release
+changes the scaffolder and its generated docs; it does not change tropo, exo, or
+ozone's review CLI.
 
 ### Where do I report bugs or ask for features?
 GitHub: [github.com/vivary-dev/vivary](https://github.com/vivary-dev/vivary). See the

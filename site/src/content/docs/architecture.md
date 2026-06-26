@@ -56,6 +56,13 @@ using semantic code search. This does not move embeddings or indexing into the t
 core; it keeps the deterministic graph as truth and treats semantic search as
 candidate retrieval.
 
+**Semantic memory is also optional.** For second-brain, knowledge-work, and writing
+workspaces, semantic recall should use provider adapters over typed `tropo`
+nodes, not naive chunked RAG and not a second source of truth. Database/search and
+memory providers are optional capabilities presented in the install flow; Cognee may
+be one provider behind that adapter, but it must stay out of the default install and
+default preset path. See [Optional semantic memory](/semantic-memory/).
+
 ## 3. The layer model
 
 A vertical column. Each layer is a standalone module that reads/writes the same graph

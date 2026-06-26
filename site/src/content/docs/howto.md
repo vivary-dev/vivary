@@ -7,13 +7,13 @@ Short, copy-paste recipes for common tasks. New to Vivary? Do the [getting start
 guide](/getting-started/) first, then use these when you hit a specific job.
 
 Each recipe assumes the CLIs are installed (`pip install vivary-tropo
-vivary-ozone vivary-exo create-vivary==0.2.5`) or run via `uvx`. Run commands from
+vivary-ozone vivary-exo create-vivary==0.2.6`) or run via `uvx`. Run commands from
 inside a workspace unless `--root` is given.
 
 ## Scaffold a new workspace
 
 ```bash
-create-vivary init my-workspace --preset writing      # coding | second-brain | writing
+create-vivary init my-workspace --preset writing      # coding | second-brain | knowledge-work | writing
 create-vivary doctor my-workspace                      # validate it
 ```
 
@@ -163,16 +163,26 @@ Agents can scaffold and configure a workspace without any human interaction:
 # Fully non-interactive: auto picks embedded storage, installs LanceDB, outputs JSON
 create-vivary init . --preset coding --auto --size large --yes --json
 
+# Discover optional pieces for a preset
+create-vivary capabilities --preset knowledge-work --json
+
 # Dry run first (inspect without writing or installing anything)
 create-vivary init my-workspace --auto --dry-run --json
 
 # Reconfigure storage on an existing workspace
 create-vivary wizard my-workspace --auto --storage embedded --yes --json
+
+# Add semantic-memory policy without indexing or installing providers
+create-vivary init my-workspace --preset knowledge-work --memory local --yes
+create-vivary init my-notes --preset second-brain --memory cognee --no-wizard --dry-run --json
 ```
 
 The `--auto` flag picks storage from explicit `--storage`, `--size`, and `--privacy`
 hints (or defaults to `embedded` for medium/large). `--yes` auto-confirms installs.
 `--json` gives machine-readable output. Combine all three for zero-prompt agent use.
+Semantic memory stays separate from storage: `--memory local` writes local policy,
+and `--memory cognee` writes Cognee policy plus verification docs without installing
+Cognee, indexing content, enabling network access, or using an API key.
 
 ## Use Vivary in CI
 
