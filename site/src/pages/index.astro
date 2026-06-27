@@ -241,7 +241,6 @@ tropo: 9 document(s), 0 error(s), 0 warning(s)  →  exit 0</pre>
             <span class="lrole">{l.role}</span>
           </li>
         ))}
-        <span class="axis"><span>space</span><span>ground</span></span>
       </ol>
     </section>
 
@@ -473,8 +472,6 @@ billing  →  4 node(s) depend on it
     .alt { font-family: var(--mono); font-size: 11.5px; color: var(--faint); grid-row: 2; }
     .lname { font-family: var(--serif); font-weight: 700; font-size: 23px; letter-spacing: -0.01em; }
     .lrole { grid-column: 2; color: var(--muted); font-size: 15px; }
-    .axis { position: absolute; left: -24px; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: space-between;
-      writing-mode: vertical-rl; font-family: var(--mono); font-size: 10.5px; color: var(--faint); letter-spacing: 0.1em; }
 
     /* why */
     .why h2, .closer h2 { font-family: var(--serif); font-size: clamp(30px, 4.2vw, 54px); letter-spacing: -0.025em; margin: 0 0 40px; text-align: center; }
@@ -525,7 +522,6 @@ billing  →  4 node(s) depend on it
       .strata, .row, .row.reverse, .creates-grid, .signals, .hardening { grid-template-columns: 1fr; }
       .creates-grid .term { position: static; }
       .row.reverse .rtext { order: 0; }
-      .axis { display: none; }
       h1 { font-size: clamp(44px, 13vw, 76px); }
     }
     @media (prefers-reduced-motion: reduce) {
