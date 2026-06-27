@@ -8,7 +8,7 @@ Every CLI across the four layers. All engines are zero-dependency Python (3.11+)
 the CLI command names are `tropo` / `ozone` / `exo` / `create-vivary` regardless of
 how you install them.
 
-- **Install (PyPI):** `pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.7`
+- **Install (PyPI):** `pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.8`
 - **Run without installing (uv):** `uvx vivary-tropo check`, `uvx vivary-ozone review`, …
 - **Scaffold (npm):** `npm create @vivary@latest my-workspace` / `npx @vivary/create@latest my-workspace`
 - **From a repo checkout:** `python packages/tropo/tropo.py check`, etc.

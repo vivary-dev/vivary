@@ -626,7 +626,7 @@ class CreateVivaryTests(unittest.TestCase):
                 create_vivary.main(["--version"])
 
         self.assertEqual(exc.exception.code, 0)
-        self.assertEqual(stdout.getvalue().strip(), "create-vivary 0.2.7")
+        self.assertEqual(stdout.getvalue().strip(), "create-vivary 0.2.8")
 
     def test_with_default_command_injects_init(self):
         # Bare target -> init (parity with the npm launcher's mapArgs).

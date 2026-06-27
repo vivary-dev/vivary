@@ -10,11 +10,12 @@ launcher; a generated workspace can be scaffolded and checked in minutes.
 
 - **Live site:** https://vivary.vercel.app/
 - **GitHub:** https://github.com/vivary-dev/vivary (public · MIT)
-- **PyPI:** [`create-vivary`](https://pypi.org/project/create-vivary/) 0.2.7 ·
+- **PyPI:** [`create-vivary`](https://pypi.org/project/create-vivary/) 0.2.8 ·
   [`vivary-tropo`](https://pypi.org/project/vivary-tropo/) 0.3.0 ·
   [`vivary-ozone`](https://pypi.org/project/vivary-ozone/) 0.2.0 ·
   [`vivary-exo`](https://pypi.org/project/vivary-exo/) 0.2.2
-- **npm:** [`@vivary/create`](https://www.npmjs.com/package/@vivary/create) 0.2.7
+- **In-repo release candidate:** `vivary-memory-cognee` 0.1.0
+- **npm:** [`@vivary/create`](https://www.npmjs.com/package/@vivary/create) 0.2.8
 
 ## Proof
 
@@ -45,11 +46,11 @@ Mobile:
 - **Restraint:** no third-party dependencies; the framework costs almost nothing
   to load. Plain Markdown, any editor, Claude Code *and* Codex.
 
-> Current release line: `create-vivary` 0.2.7 (PyPI), `@vivary/create` 0.2.7 (npm),
-> `vivary-tropo` 0.3.0, `vivary-ozone` 0.2.0, `vivary-exo` 0.2.2. This line adds
-> typed context packets, graph-aware query filters, Ozone context-budget review, and
-> clearer CocoIndex-code active-context guidance while keeping LanceDB, CocoIndex-code,
-> and Cognee behind explicit gates.
+> Release candidate line: `create-vivary` 0.2.8 (PyPI), `@vivary/create` 0.2.8 (npm),
+> optional `vivary-memory-cognee` 0.1.0, `vivary-tropo` 0.3.0, `vivary-ozone` 0.2.0,
+> `vivary-exo` 0.2.2. Versions are independent; there is no single "Vivary 0.3.0".
+> This line adds typed context packets, graph-aware query filters, Ozone context-budget
+> review, clearer CocoIndex-code active-context guidance, and gated Cognee recall.
 
 > Context-compression release proof, refreshed 2026-06-27: `tropo find` and
 > graph-aware `tropo query` passed 68 tropo tests; Ozone context-budget passed 16 ozone

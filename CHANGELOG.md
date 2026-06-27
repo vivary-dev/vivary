@@ -5,9 +5,16 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current versions:** `vivary-tropo` **0.3.0** · `vivary-exo` **0.2.2** · `create-vivary` / `@vivary/create` **0.2.7** · `vivary-ozone` **0.2.0**. The optional `vivary-memory-cognee` adapter is implemented in-repo but not yet published.
+**Current release line:** `create-vivary` / `@vivary/create` **0.2.8** · optional
+`vivary-memory-cognee` **0.1.0** · `vivary-tropo` **0.3.0** · `vivary-ozone`
+**0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
+"Vivary 0.3.0" release.
 
-## [Unreleased]
+## [vivary-memory-cognee 0.1.0 / create-vivary 0.2.8] — 2026-06-27
+
+Affects the optional Cognee adapter package, `create-vivary` / `@vivary/create`,
+root docs, package docs, and generated website docs. Publishing remains a manual
+human gate until this PR merges.
 
 ### Added
 
@@ -21,6 +28,8 @@ the `v0.1.0` line.
 - `create-vivary capabilities --json` now marks `memory:cognee` with
   `"adapter_status": "optional-package"` while keeping Cognee out of the default
   install path.
+- `create-vivary` / `@vivary/create` move to 0.2.8 so the scaffolder and npm launcher
+  publish the updated Cognee adapter metadata and docs together.
 
 ### Verification
 

@@ -15,7 +15,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 
-__version__ = "0.2.7"
+__version__ = "0.2.8"
 
 PRESETS = ("coding", "second-brain", "knowledge-work", "writing")
 

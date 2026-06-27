@@ -4,13 +4,13 @@ Scaffold a complete Vivary agent workspace: tropo config, strato workspace files
 runtime skills, private-memory boundaries, progressive module indexes, and a starter
 typed graph.
 
-**Current release:** 0.2.7. Use 0.2.7 for new installs; no migration is expected
-from 0.2.1, 0.2.2, 0.2.3, 0.2.5, or 0.2.6.
+**Current release:** 0.2.8. Use 0.2.8 for new installs; no migration is expected
+from 0.2.1, 0.2.2, 0.2.3, 0.2.5, 0.2.6, or 0.2.7.
 
-**Release focus:** 0.2.7 ships the context-compression release surface: generated
-active-context guidance now leads with `tropo find`, points agents to the canonical
-LLM active-context guide, and names LanceDB as embedded storage rather than hidden
-search behavior.
+**Release focus:** 0.2.8 publishes the optional Cognee adapter surface: capability
+metadata now points to `vivary-memory-cognee`, generated workspace docs explain the
+approval gates, and the default scaffolder still does not install Cognee or index
+content.
 
 **Security hardening:** The 0.2.5 line validates active `.gitignore` rules for `USER.md`,
 `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`; scaffolds private heartbeat report
@@ -20,7 +20,7 @@ paths.
 ## Install & scaffold
 
 ```bash
-pip install create-vivary==0.2.7              # or: uvx create-vivary@0.2.7 ...
+pip install create-vivary==0.2.8              # or: uvx create-vivary@0.2.8 ...
 create-vivary my-workspace --preset coding    # interactive wizard on a TTY
 create-vivary my-workbench --preset knowledge-work --memory local
 create-vivary my-codebase --preset coding --active-context cocoindex-code

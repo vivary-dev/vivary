@@ -5,13 +5,13 @@ workspace — typed knowledge graph (tropo), agent OS (strato), and starter grap
 one command. Generated modules use `modules/<id>/index.md` routers so agents load
 context progressively.
 
-**Current release:** 0.2.7. Use 0.2.7 for new installs; no migration is expected
-from 0.2.1, 0.2.2, 0.2.3, 0.2.5, or 0.2.6.
+**Current release:** 0.2.8. Use 0.2.8 for new installs; no migration is expected
+from 0.2.1, 0.2.2, 0.2.3, 0.2.5, 0.2.6, or 0.2.7.
 
-**Release focus:** 0.2.7 ships the context-compression release surface: generated
-active-context guidance now leads with `tropo find`, points agents to the canonical
-LLM active-context guide, and names LanceDB as embedded storage rather than hidden
-search behavior.
+**Release focus:** 0.2.8 publishes the optional Cognee adapter surface: capability
+metadata now points to `vivary-memory-cognee`, generated workspace docs explain the
+approval gates, and the default scaffolder still does not install Cognee or index
+content.
 
 **Security hardening:** The 0.2.5 line validates active `.gitignore` rules for `USER.md`,
 `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`; scaffolds private heartbeat report
@@ -55,9 +55,9 @@ This package is a thin launcher: it runs the Python `create-vivary` scaffolder v
 scaffolder stays one source of truth in Python while you get a Node-native entry
 point. **Python 3.11+ and uv (or pipx) must already be installed.**
 
-Prefer Python directly? `uvx create-vivary@0.2.7 my-workspace --preset coding` — a bare
+Prefer Python directly? `uvx create-vivary@0.2.8 my-workspace --preset coding` — a bare
 target defaults to `init` there too (the PyPI `create-vivary` is versioned in lockstep
-with this launcher) — or `pip install create-vivary==0.2.7`.
+with this launcher) — or `pip install create-vivary==0.2.8`.
 
 For coding workspaces, `--active-context cocoindex-code` scaffolds optional
 CocoIndex-code guidance and ignored sidecar state. It does not auto-install, index, or
