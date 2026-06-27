@@ -15,6 +15,8 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 
+__version__ = "0.2.7"
+
 PRESETS = ("coding", "second-brain", "knowledge-work", "writing")
 
 ACTIVE_CONTEXTS = ("cocoindex-code",)
@@ -1837,6 +1839,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="create-vivary",
         description="Scaffold a complete Vivary agent workspace.",
     )
+    parser.add_argument("--version", action="version", version=f"create-vivary {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     init = sub.add_parser("init", help="create a Vivary workspace scaffold")

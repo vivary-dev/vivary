@@ -133,7 +133,7 @@ PyPI has no scopes and the bare names `tropo`/`ozone`/`exo` were taken, so the
 stay `tropo` / `ozone` / `exo`. On npm the scaffolder is `@vivary/create`.
 
 ### How do I install / run it?
-`pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.6`, or run on demand with
+`pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.7`, or run on demand with
 `uvx vivary-tropo ...`, or scaffold with `npm create @vivary@latest`. Python 3.11+ only;
 zero third-party dependencies.
 
@@ -156,14 +156,14 @@ rewrites the workspace file without mutating hard-linked files outside it. See t
 changelog for the exact package surfaces.
 
 ### Is it stable? What's the version?
-Published packages are `vivary-tropo` **0.2.3**, `vivary-exo` **0.2.2**,
-`create-vivary` / `@vivary/create` **0.2.6**, and `vivary-ozone` **0.1.0**. Use
-0.2.6 for new scaffolds. It's young — APIs may move before `1.0`. File issues for
+Published packages are `vivary-tropo` **0.3.0**, `vivary-exo` **0.2.2**,
+`create-vivary` / `@vivary/create` **0.2.7**, and `vivary-ozone` **0.2.0**. Use
+0.2.7 for new scaffolds. It's young — APIs may move before `1.0`. File issues for
 rough edges.
 
 The versions differ on purpose: the layers are independently versioned. This release
-changes the scaffolder and its generated docs; it does not change tropo, exo, or
-ozone's review CLI.
+changes tropo retrieval, ozone review packs, and the scaffolder's generated guidance;
+it does not change exo.
 
 ### Where do I report bugs or ask for features?
 GitHub: [github.com/vivary-dev/vivary](https://github.com/vivary-dev/vivary). See the

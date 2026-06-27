@@ -17,27 +17,27 @@ A *vivary* is an archaic word for a vivarium: a self-contained world where livin
 things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
-> Release status: **0.2.6 is current** for the scaffolder (`create-vivary` /
-> `@vivary/create`), **0.2.3** for `vivary-tropo`, **0.2.2** for `vivary-exo`,
-> and **0.1.0** for `vivary-ozone`. Use 0.2.6 for new scaffolds.
-> This scaffolder release adds the `knowledge-work` preset, optional semantic-memory
-> setup, capability discovery, and doctor memory reporting while keeping Cognee
-> optional and disabled by default.
+> Release status: **0.2.7 is current** for the scaffolder (`create-vivary` /
+> `@vivary/create`), **0.3.0** for `vivary-tropo`, **0.2.2** for `vivary-exo`,
+> and **0.2.0** for `vivary-ozone`. Use 0.2.7 for new scaffolds.
+> This release adds typed context packets (`tropo find`), graph-aware filtered
+> `tropo query`, the Ozone `context-budget` review pack, and clearer CocoIndex-code
+> active-context guidance while keeping optional integrations behind explicit gates.
 
 | Surface | Current | Link |
 |---|---:|---|
-| `create-vivary` (PyPI) | 0.2.6 | [PyPI](https://pypi.org/project/create-vivary/) |
-| `@vivary/create` (npm) | 0.2.6 | [npm](https://www.npmjs.com/package/@vivary/create) |
-| `vivary-tropo` | 0.2.3 | [PyPI](https://pypi.org/project/vivary-tropo/) |
-| `vivary-ozone` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
+| `create-vivary` (PyPI) | 0.2.7 | [PyPI](https://pypi.org/project/create-vivary/) |
+| `@vivary/create` (npm) | 0.2.7 | [npm](https://www.npmjs.com/package/@vivary/create) |
+| `vivary-tropo` | 0.3.0 | [PyPI](https://pypi.org/project/vivary-tropo/) |
+| `vivary-ozone` | 0.2.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
 | `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
 | Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
-Versions are intentionally independent across the four layers: `create-vivary` moved
-the most because it owns the scaffold and npm launcher, `tropo` and `exo` stayed on
-the June security line, and `ozone` stayed at 0.1.0 because this release did not
-change the review CLI.
+Versions are intentionally independent across the four layers: `tropo` moved to 0.3.0
+for context-packet retrieval and graph-aware query filters, `ozone` moved to 0.2.0 for
+the context-budget pack, `create-vivary` moved to 0.2.7 for scaffolded guidance and
+npm lockstep, and `exo` stayed on the June security line.
 
 ## Public Signals
 
@@ -72,7 +72,7 @@ npm create @vivary@latest my-workspace        # pick: second brain · coding · 
 Or install the CLIs from PyPI (run on demand with `uvx`, no install needed):
 
 ```bash
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.6
+pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.7
 create-vivary init my-workspace --preset coding     # interactive wizard on a TTY
 create-vivary init my-workbench --preset knowledge-work --memory local
 create-vivary init my-codebase --preset coding --active-context cocoindex-code

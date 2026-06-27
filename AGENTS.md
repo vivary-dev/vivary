@@ -106,15 +106,15 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
 ## Verify
 
 ```bash
-python packages/tropo/tests/test_tropo.py                  # 64/64
-python packages/ozone/tests/test_ozone.py                  # 7/7
+python packages/tropo/tests/test_tropo.py                  # 68/68
+python packages/ozone/tests/test_ozone.py                  # 16/16
 python packages/exo/tests/test_exo.py                      # 14/14
-python packages/create-vivary/tests/test_create_vivary.py  # 44/44  (+ test_assets_parity 3/3)
+python packages/create-vivary/tests/test_create_vivary.py  # 54/54  (+ test_assets_parity 3/3)
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # clean
 ```
 
 Current release truth lives in [README.md](README.md) and [CHANGELOG.md](CHANGELOG.md):
-`create-vivary` / `@vivary/create` 0.2.6, `vivary-tropo` 0.2.3,
-`vivary-exo` 0.2.2, and `vivary-ozone` 0.1.0. The June 23 package set carries
-the security-hardening batch for privacy ignores, symlink/out-of-root writes,
-hard-link-safe rewrites, and private heartbeat reports. Full guides live in [docs/](docs/).
+`create-vivary` / `@vivary/create` 0.2.7, `vivary-tropo` 0.3.0,
+`vivary-exo` 0.2.2, and `vivary-ozone` 0.2.0. This release carries context-packet
+retrieval, graph-aware query filters, the Ozone context-budget pack, and active-context
+docs that keep optional integrations gated. Full guides live in [docs/](docs/).

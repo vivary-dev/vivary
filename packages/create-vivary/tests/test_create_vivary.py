@@ -615,6 +615,15 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertTrue((target / "AGENTS.md").exists())
 
+    def test_cli_version(self):
+        stdout = io.StringIO()
+        with mock.patch("sys.stdout", stdout):
+            with self.assertRaises(SystemExit) as exc:
+                create_vivary.main(["--version"])
+
+        self.assertEqual(exc.exception.code, 0)
+        self.assertEqual(stdout.getvalue().strip(), "create-vivary 0.2.7")
+
     def test_with_default_command_injects_init(self):
         # Bare target -> init (parity with the npm launcher's mapArgs).
         self.assertEqual(create_vivary.with_default_command(["ws"]), ["init", "ws"])

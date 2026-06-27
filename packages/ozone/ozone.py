@@ -26,7 +26,7 @@ import json
 import os
 import sys
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # Review role = the workspace folder a node lives in (folder-as-type), independent of
 # the resolved type *name* (e.g. a change may resolve to type `implementation_slice`,

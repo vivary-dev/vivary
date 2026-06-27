@@ -1,6 +1,6 @@
 # vivary-ozone
 
-> Status: **working** (first slice — deterministic review). The optional review layer.
+> Current release: **0.2.0**. The optional review layer.
 
 **The review layer** — the protective filter. Where `tropo` answers *"is each
 document valid?"*, `ozone` reviews the **whole graph**: the relationship-level gaps a

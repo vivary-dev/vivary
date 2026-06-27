@@ -1,13 +1,15 @@
 param(
     [string]$Python = "3.11",
     [switch]$Editable,
-    [switch]$SkipChecks
+    [switch]$SkipChecks,
+    [switch]$SkipLegacyPipCleanup
 )
 
 $ErrorActionPreference = "Stop"
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot "..")).Path
+$tropoPath = Join-Path $repoRoot "packages\tropo"
 
 $packages = @(
     @{ Name = "vivary-tropo"; Path = "packages\tropo"; Command = "tropo" },
@@ -21,6 +23,39 @@ foreach ($pkg in $packages) {
     $pyproject = Join-Path $pkgPath "pyproject.toml"
     if (-not (Test-Path -LiteralPath $pyproject)) {
         throw "missing package pyproject: $pyproject"
+    }
+}
+
+if (-not $SkipLegacyPipCleanup) {
+    $legacyPipPackages = @("create-vivary", "vivary-ozone", "vivary-exo", "vivary-tropo")
+    $installedLegacy = @()
+    foreach ($legacyPackage in $legacyPipPackages) {
+        $oldErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            & python -m pip show $legacyPackage > $null 2> $null
+            $showCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $oldErrorActionPreference
+        }
+        if ($showCode -eq 0) {
+            $installedLegacy += $legacyPackage
+        }
+    }
+
+    if ($installedLegacy.Count -gt 0) {
+        Write-Host "Cleaning legacy default-Python pip installs: $($installedLegacy -join ', ')"
+        $pipOutput = & python -m pip uninstall -y @installedLegacy 2>&1
+        if ($pipOutput) {
+            Write-Host (($pipOutput | Out-String).Trim())
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw "pip failed cleaning legacy Vivary installs"
+        }
+    }
+    else {
+        Write-Host "No legacy default-Python pip installs found"
     }
 }
 
@@ -47,6 +82,14 @@ foreach ($pkg in $packages) {
     if ($Editable) {
         $args += "--editable"
     }
+    if ($pkg.Name -ne "vivary-tropo") {
+        if ($Editable) {
+            $args += @("--with-editable", $tropoPath)
+        }
+        else {
+            $args += @("--with", $tropoPath)
+        }
+    }
     $args += $pkgPath
 
     Write-Host "Installing $($pkg.Name) from current checkout: $pkgPath"
@@ -62,8 +105,29 @@ if (-not $SkipChecks) {
     & tropo --version
     & ozone --version
     & exo --version
-    & create-vivary --help | Select-Object -First 8
+    & create-vivary --version
     & tropo find --help | Out-Null
     & ozone packs --json
     & create-vivary capabilities --preset coding --json | Out-Null
+
+    foreach ($pkg in $packages) {
+        $expectedOutput = @(& $pkg.Command --version 2>&1)
+        $expectedCode = $LASTEXITCODE
+        if ($expectedCode -ne 0) {
+            throw "$($pkg.Command) did not report an active version: $(($expectedOutput | Out-String).Trim())"
+        }
+        $expected = ($expectedOutput | Select-Object -First 1).Trim()
+        $resolved = @(Get-Command $pkg.Command -All)
+        foreach ($entry in $resolved) {
+            $actualOutput = @(& $entry.Source --version 2>&1)
+            $actualCode = $LASTEXITCODE
+            if ($actualCode -ne 0) {
+                throw "$($entry.Source) did not report a version for $($pkg.Command): $(($actualOutput | Out-String).Trim())"
+            }
+            $actual = $actualOutput | Select-Object -First 1
+            if ($actual.Trim() -ne $expected) {
+                throw "stale $($pkg.Command) at $($entry.Source): expected '$expected', got '$($actual.Trim())'"
+            }
+        }
+    }
 }
