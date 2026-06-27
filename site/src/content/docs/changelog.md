@@ -16,8 +16,9 @@ the `v0.1.0` line.
 ## [vivary-memory-cognee 0.1.0 / create-vivary 0.2.8] — 2026-06-27
 
 Affects the optional Cognee adapter package, `create-vivary` / `@vivary/create`,
-root docs, package docs, and generated website docs. Publishing remains a manual
-human gate until this PR merges.
+root docs, package docs, and generated website docs. Published and verified as
+`vivary-memory-cognee==0.1.0`, `create-vivary==0.2.8`, and `@vivary/create@0.2.8`
+after PR #93 merged to `dev`.
 
 ### Added
 
@@ -37,6 +38,16 @@ human gate until this PR merges.
 ### Verification
 
 - `python packages/memory-cognee/tests/test_memory_cognee.py` passed locally: 6/6.
+- `python -m pip index versions create-vivary` reported `0.2.8`.
+- `python -m pip index versions vivary-memory-cognee` reported `0.1.0`.
+- `uvx --no-cache --index-url https://pypi.org/simple --from create-vivary==0.2.8 create-vivary --version`
+  returned `create-vivary 0.2.8`.
+- `uvx --no-cache --index-url https://pypi.org/simple --from vivary-memory-cognee==0.1.0 vivary-cognee --version`
+  returned `vivary-cognee 0.1.0`.
+- `npm view @vivary/create version` returned `0.2.8`.
+- `npx --yes @vivary/create@0.2.8 capabilities --preset coding --json` completed
+  through the published npm launcher and reported `memory:cognee` with
+  `"adapter_status": "optional-package"`.
 
 ## [vivary-tropo 0.3.0 / vivary-ozone 0.2.0 / create-vivary 0.2.7] — 2026-06-27
 

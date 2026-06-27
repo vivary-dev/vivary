@@ -113,7 +113,7 @@ python packages/create-vivary/tests/test_create_vivary.py  # 54/54  (+ test_asse
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # clean
 ```
 
-Release-candidate truth lives in [README.md](README.md) and [CHANGELOG.md](CHANGELOG.md):
+Current release truth lives in [README.md](README.md) and [CHANGELOG.md](CHANGELOG.md):
 `create-vivary` / `@vivary/create` 0.2.8, `vivary-memory-cognee` 0.1.0,
 `vivary-tropo` 0.3.0, `vivary-exo` 0.2.2, and `vivary-ozone` 0.2.0. Versions are
 independent; there is no single "Vivary 0.3.0" release. This line carries context

@@ -13,8 +13,8 @@ launcher; a generated workspace can be scaffolded and checked in minutes.
 - **PyPI:** [`create-vivary`](https://pypi.org/project/create-vivary/) 0.2.8 ·
   [`vivary-tropo`](https://pypi.org/project/vivary-tropo/) 0.3.0 ·
   [`vivary-ozone`](https://pypi.org/project/vivary-ozone/) 0.2.0 ·
-  [`vivary-exo`](https://pypi.org/project/vivary-exo/) 0.2.2
-- **In-repo release candidate:** `vivary-memory-cognee` 0.1.0
+  [`vivary-exo`](https://pypi.org/project/vivary-exo/) 0.2.2 ·
+  [`vivary-memory-cognee`](https://pypi.org/project/vivary-memory-cognee/) 0.1.0
 - **npm:** [`@vivary/create`](https://www.npmjs.com/package/@vivary/create) 0.2.8
 
 ## Proof
@@ -46,7 +46,7 @@ Mobile:
 - **Restraint:** no third-party dependencies; the framework costs almost nothing
   to load. Plain Markdown, any editor, Claude Code *and* Codex.
 
-> Release candidate line: `create-vivary` 0.2.8 (PyPI), `@vivary/create` 0.2.8 (npm),
+> Current release line: `create-vivary` 0.2.8 (PyPI), `@vivary/create` 0.2.8 (npm),
 > optional `vivary-memory-cognee` 0.1.0, `vivary-tropo` 0.3.0, `vivary-ozone` 0.2.0,
 > `vivary-exo` 0.2.2. Versions are independent; there is no single "Vivary 0.3.0".
 > This line adds typed context packets, graph-aware query filters, Ozone context-budget

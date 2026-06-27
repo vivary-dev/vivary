@@ -17,24 +17,23 @@ A *vivary* is an archaic word for a vivarium: a self-contained world where livin
 things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
-> Release candidate: package versions are independent; there is no single "Vivary
-> 0.3.0" release. This PR prepares **0.2.8** for the scaffolder (`create-vivary` /
+> Release status: package versions are independent; there is no single "Vivary
+> 0.3.0" release. Use **0.2.8** for the scaffolder (`create-vivary` /
 > `@vivary/create`), **0.3.0** for `vivary-tropo`, **0.2.2** for `vivary-exo`,
 > **0.2.0** for `vivary-ozone`, and **0.1.0** for the optional
-> `vivary-memory-cognee` adapter. Public registries remain on the previous line
-> until the publish gate is complete.
+> `vivary-memory-cognee` adapter.
 > This line adds typed context packets (`tropo find`), graph-aware filtered
 > `tropo query`, the Ozone `context-budget` review pack, clearer CocoIndex-code
 > active-context guidance, and gated Cognee recall.
 
-| Surface | Release candidate | Link |
+| Surface | Current | Link |
 |---|---:|---|
 | `create-vivary` (PyPI) | 0.2.8 | [PyPI](https://pypi.org/project/create-vivary/) |
 | `@vivary/create` (npm) | 0.2.8 | [npm](https://www.npmjs.com/package/@vivary/create) |
 | `vivary-tropo` | 0.3.0 | [PyPI](https://pypi.org/project/vivary-tropo/) |
 | `vivary-ozone` | 0.2.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
 | `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
-| `vivary-memory-cognee` | 0.1.0 | optional Cognee adapter package |
+| `vivary-memory-cognee` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-memory-cognee/) |
 | Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 

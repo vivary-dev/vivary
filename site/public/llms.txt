@@ -8,7 +8,7 @@ Website: https://vivary.vercel.app/
 Repository: https://github.com/vivary-dev/vivary
 License: MIT
 
-## Release-candidate package surfaces
+## Current package surfaces
 
 - npm scaffolder: `@vivary/create` 0.2.8
 - PyPI scaffolder: `create-vivary` 0.2.8
@@ -18,7 +18,6 @@ License: MIT
 - `strato` is bundled as workspace templates and agent skills, not a separate package.
 - Optional Cognee adapter: `vivary-memory-cognee` 0.1.0, command `vivary-cognee`
 - Versions are independent; do not call the whole project "Vivary 0.3.0".
-- Public registries remain on the previous line until the publish gate is complete.
 
 ## Install
 
