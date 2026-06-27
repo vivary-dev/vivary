@@ -45,12 +45,12 @@ Mobile:
 - **Restraint:** no third-party dependencies; the framework costs almost nothing
   to load. Plain Markdown, any editor, Claude Code *and* Codex.
 
-> Prepared release line: `create-vivary` 0.2.6 (PyPI), `@vivary/create`
+> Current published release line: `create-vivary` 0.2.6 (PyPI), `@vivary/create`
 > 0.2.6 (npm), `vivary-tropo` 0.2.3, `vivary-exo` 0.2.2. This line adds the
 > `knowledge-work` preset, optional semantic-memory setup, capability discovery, and
 > doctor memory reporting while keeping Cognee optional.
-> Prepared 0.2.6 scaffold proof: `knowledge-work` and semantic-memory setups are
-> covered by the create-vivary test suite and generated docs/site build.
+> Published 0.2.6 proof: fresh PyPI and npm launcher smokes both returned
+> `create-vivary capabilities --preset knowledge-work --json`.
 
 > Active-context branch proof, refreshed 2026-06-23: plain coding scaffold writes 39 files and
 > doctors clean at 9 nodes / 28 edges; `--active-context cocoindex-code` writes 45
