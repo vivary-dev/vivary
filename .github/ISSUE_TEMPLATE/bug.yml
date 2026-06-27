@@ -17,7 +17,7 @@ body:
       label: Reproduction steps
       description: List the smallest commands or actions that reproduce the bug.
       placeholder: |
-        1. Run `npm create @vivary my-workspace`
+        1. Run `npm create @vivary@latest my-workspace`
         2. Run `create-vivary doctor my-workspace`
         3. See ...
     validations:
@@ -55,7 +55,7 @@ body:
     id: version
     attributes:
       label: Version or commit
-      placeholder: "create-vivary 0.2.2, vivary-tropo 0.2.0, or commit SHA"
+      placeholder: "create-vivary 0.2.8, vivary-tropo 0.3.0, vivary-ozone 0.2.0, vivary-exo 0.2.2, or commit SHA"
   - type: textarea
     id: environment
     attributes:
