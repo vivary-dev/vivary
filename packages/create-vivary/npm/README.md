@@ -59,7 +59,8 @@ with this launcher) — or `pip install create-vivary==0.2.6`.
 
 For coding workspaces, `--active-context cocoindex-code` scaffolds optional
 CocoIndex-code guidance and ignored sidecar state. It does not auto-install, index, or
-enable MCP; the generated docs give the approved `ccc init` / `ccc index` path.
+enable MCP; the generated docs give the approved `ccc init` / `ccc index` path, and the
+skill points agents to the canonical copyable LLM guide.
 
 ## License
 

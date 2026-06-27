@@ -101,7 +101,8 @@ For coding workspaces that need richer source retrieval, `--active-context
 cocoindex-code` adds optional CocoIndex-code guidance and graph nodes. It does not
 auto-install, index, enable MCP, or send source text anywhere; the generated skill asks
 before those gates, then gives the approved `ccc init` / `ccc index` / `ccc search`
-path. See [docs/ACTIVE-CONTEXT.md](docs/ACTIVE-CONTEXT.md).
+path. See [docs/ACTIVE-CONTEXT.md](docs/ACTIVE-CONTEXT.md) and the copyable
+[LLM active-context guide](docs/LLM-ACTIVE-CONTEXT.md).
 
 <details><summary>Run from source (no install)</summary>
 
@@ -160,6 +161,7 @@ down `tropo` + `strato` and whichever optional layers fit. See
 - [Getting started](docs/GETTING-STARTED.md) — install → workspace → loop
 - [Command reference](docs/COMMANDS.md) — every CLI, flag, and exit code
 - [How-to recipes](docs/HOWTO.md) · [Agent skills](docs/SKILLS.md) · [FAQ](docs/FAQ.md)
+- [Active context](docs/ACTIVE-CONTEXT.md) · [LLM active-context guide](docs/LLM-ACTIVE-CONTEXT.md)
 - [Architecture](docs/ARCHITECTURE.md) · [Semantic memory](docs/SEMANTIC-MEMORY.md) · [Obsidian (optional)](docs/OBSIDIAN.md)
 - [Release workflow](docs/RELEASE-WORKFLOW.md) — end-of-update release truth, docs/site sync, and publish checks
 - [Portfolio proof](docs/PORTFOLIO.md) — shipped surfaces, screenshots, and case-study notes

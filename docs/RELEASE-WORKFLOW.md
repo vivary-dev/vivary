@@ -23,15 +23,16 @@ public docs, install commands, release status, or package versions.
    Commit generated `site/src/content/docs/*` changes with the source docs.
 
 3. **Make local CLI truth explicit before command smokes.**
-   If the change adds or changes CLI behavior that is not published yet, install the
-   current checkout's CLIs before testing bare commands:
+   If the change adds or changes CLI behavior that is not published yet, refresh the
+   local CLIs from the current checkout before testing bare commands:
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts/install-local-clis.ps1
    ```
 
-   This prevents stale global tools from silently testing an older package or, worse,
-   treating a new subcommand as a scaffold target.
+   The script uninstalls existing Vivary uv tools, then installs this checkout without
+   `uv tool install --force`. This prevents stale global tools from silently testing an
+   older package or, worse, treating a new subcommand as a scaffold target.
 
 4. **Record whether the release is planned or live.**
    Before publishing, the changelog may say "Publishing remains a manual human gate."

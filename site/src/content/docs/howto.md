@@ -136,7 +136,7 @@ out-of-workspace work item files, and rewrites the workspace file without mutati
 hard-linked targets outside it. Single-agent workspaces stay free of coordination
 fields they do not use. `exo roles` still lists the bounded contracts to hand workers.
 
-## Set up LanceDB search (embedded backend)
+## Set up LanceDB storage (embedded backend)
 
 Install the embedded extra and migrate your existing workspace:
 
@@ -144,7 +144,6 @@ Install the embedded extra and migrate your existing workspace:
 pip install vivary-tropo[embedded]
 tropo migrate --from file --to embedded --root my-workspace --dry-run   # preview
 tropo migrate --from file --to embedded --root my-workspace --yes        # run
-tropo query "billing module" --root my-workspace --k 5                   # search
 ```
 
 Or configure storage at init time:
@@ -158,10 +157,13 @@ create-vivary init my-workspace --preset coding --storage embedded --yes
 ```bash
 tropo query "CI baseline" --root .                   # text search, top-10 results
 tropo query "auth" --root . --k 3 --json             # top-3, machine-readable
+tropo find "what should I read for auth?" --root . --budget 1200 --json
 ```
 
-With the default file backend, this is a grep-style text match. With the embedded
-backend (LanceDB), it uses BM25 full-text search over migrated node content.
+`tropo query` and `tropo find` search analyzed typed graph nodes directly: id/title,
+frontmatter, path, body, and outbound edge context. They do not require LanceDB.
+Embedded storage is a separate opt-in backend for migrated node rows and future local
+retrieval work.
 
 ## Agent self-configure a workspace
 

@@ -27,18 +27,21 @@ website docs.
 - **Ozone pack selection** — `ozone review --pack structure|context-budget|all`
   keeps the default `structure` behavior stable while allowing opt-in context-budget
   review. `--strict` still exits non-zero only on `warn` findings.
-- **Local checkout CLI installer** — `scripts/install-local-clis.ps1` installs the
-  current branch's Vivary CLIs with `uv tool install --force`, preventing stale global
-  tools from silently testing older behavior during local review.
+- **Local checkout CLI refresh** — `scripts/install-local-clis.ps1` uninstalls existing
+  Vivary uv tools, then installs the current branch's CLIs without `--force`, preventing
+  stale global tools from silently testing older behavior during local review.
+- **LLM active-context guide** — `docs/LLM-ACTIVE-CONTEXT.md` and the generated website
+  page provide a compact, copyable graph-first CocoIndex-code retrieval prompt.
 
 ### Changed
 
 - **`tropo query` is graph-aware** — query now searches analyzed Tropo nodes instead
   of raw Markdown files, returning real graph ids/types/paths and supporting `--type`,
   `--path`, `--edge`, `--snippet`, and `--explain`.
-- **Active-context guidance is stricter about CocoIndex path filters** — the generated
-  skill and docs now use exact `ccc search --path` examples and warn that broad folder
-  globs can miss indexed files in current CocoIndex-code releases.
+- **Active-context guidance is simpler and stricter about CocoIndex path filters** —
+  the generated skill and docs now lead with `tropo find`, use exact
+  `ccc search --path` examples, and warn that broad folder globs can miss indexed files
+  in current CocoIndex-code releases.
 
 ### Verification
 

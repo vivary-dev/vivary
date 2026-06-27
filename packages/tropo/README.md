@@ -35,8 +35,9 @@ python tests/test_tropo.py                       # run the test suite
 ```
 
 Requires Python 3.11+ (stdlib `tomllib`), zero third-party dependencies for the core.
-Optional extras: `pip install vivary-tropo[embedded]` for LanceDB full-text search.
-Cloud extras are reserved for the 0.3.x adapter work.
+Optional extras: `pip install vivary-tropo[embedded]` for LanceDB embedded storage
+and backend-level experiments. Public `tropo find` / `query` stay zero-dependency and
+read the typed graph directly. Cloud extras are reserved for the 0.3.x adapter work.
 
 Built-in packs are embedded in the single-file engine, so installed wheels can resolve
 starter packs without a repo-local `packs/` directory. Workspace-local

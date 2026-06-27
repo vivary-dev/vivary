@@ -10,10 +10,13 @@ description: >-
 
 # active-context
 
-Active context is an optional sidecar for a Vivary workspace. Vivary's core truth
-stays the typed graph (`tropo`) and the agent loop (`strato`). CocoIndex-code can add
-fresh semantic code search when the codebase is large enough or fuzzy enough that
-plain file search is wasting context.
+Active context is an optional sidecar for a Vivary workspace. Vivary routes the work;
+CocoIndex-code finds fuzzy source-code candidates when names are unknown and plain file
+search is wasting context. The core truth stays the typed graph (`tropo`) and the
+agent loop (`strato`).
+
+For the compact copy/paste agent guide, use the canonical Vivary docs page:
+https://vivary.vercel.app/llm-active-context/
 
 ## Ask First
 
@@ -51,12 +54,13 @@ Skip it when:
 
 ## Retrieval Order
 
-1. Read the Vivary graph first: `tropo graph`, `tropo blast <id>`, or
-   `ozone impact <id>` for workspace truth and blast radius.
-2. Use `modules/index.md` and the relevant `modules/<id>/index.md` to stay DRY.
-3. Use CocoIndex-code for semantic candidates: `ccc search --refresh "<query>"`.
-4. Read the matched files and nearby lines directly before acting.
-5. Verify with the repo's tests/build and Vivary checks (`tropo check`,
+1. Ask Vivary what to open first: `tropo find "<task>" --budget 1200 --json`.
+2. Read the Vivary graph when ids, edges, or blast radius matter: `tropo graph`,
+   `tropo blast <id>`, or `ozone impact <id>`.
+3. Use `modules/index.md` and the relevant `modules/<id>/index.md` to stay DRY.
+4. Use CocoIndex-code for semantic candidates: `ccc search --refresh "<query>"`.
+5. Read the matched files and nearby lines directly before acting.
+6. Verify with the repo's tests/build and Vivary checks (`tropo check`,
    `ozone review`) before a gate.
 
 ## Useful Commands

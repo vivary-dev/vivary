@@ -78,15 +78,19 @@ Everything that (transitively) depends on a node — what a change to it could t
 give, and it's the moat: review by *what it touches*, not just *what lines changed*.
 
 ### Does tropo support search?
-Yes. `tropo query "auth module"` searches the knowledge graph. The default **file backend** does a grep-style text match over your Markdown files with no extra dependencies. The **embedded backend** (LanceDB) does BM25 full-text search over indexed node content:
+Yes. `tropo query "auth module"` searches analyzed typed graph nodes with no extra
+dependencies: id/title, frontmatter, path, body, and outbound edge context. Use
+`tropo find` when you want a small "open these first" packet.
 
 ```bash
-pip install vivary-tropo[embedded]
-tropo migrate --from file --to embedded --root my-workspace --yes
 tropo query "auth module" --root my-workspace --k 5
+tropo find "what should I read for auth?" --root my-workspace --budget 1200
 ```
 
-Semantic/vector embeddings are not in scope for tropo — those belong to a graphify-style layer that consumes the clean typed graph.
+LanceDB is still available as the explicit embedded storage backend for migrated node
+rows, but public `tropo query` / `find` stay graph-first and zero-dependency in the
+current command surface. Semantic/vector embeddings are not in scope for tropo — those
+belong to a graphify-style layer that consumes the clean typed graph.
 
 ### Does tropo do semantic search / embeddings?
 No, deliberately. tropo owns the **typed** graph (explicit links). Semantic
@@ -120,7 +124,8 @@ That adds an active-context skill, docs, graph nodes, and `.cocoindex_code/` to
 `.gitignore`. It does not auto-install CocoIndex-code, build an index, enable MCP, or
 send source text anywhere. The generated skill asks before crossing those gates, then
 uses the approved `ccc init` / `ccc index` / `ccc search --refresh` path alongside
-`tropo graph` / `tropo blast`.
+`tropo find` / `tropo graph` / `tropo blast`. The copyable agent version lives in
+[LLM-ACTIVE-CONTEXT.md](LLM-ACTIVE-CONTEXT.md).
 
 ### Why are there package names like `vivary-tropo` but the command is `tropo`?
 PyPI has no scopes and the bare names `tropo`/`ozone`/`exo` were taken, so the

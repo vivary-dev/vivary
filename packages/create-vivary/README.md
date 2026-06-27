@@ -68,7 +68,8 @@ For coding workspaces, `--active-context cocoindex-code` adds an optional
 CocoIndex-code sidecar profile: active-context skills for Claude/Codex-style agents,
 local policy docs, graph nodes, and `.cocoindex_code/` in `.gitignore`. It does not
 auto-install CocoIndex-code, create an index, or enable MCP; the generated docs give
-the approved `ccc init` / `ccc index` path.
+the approved `ccc init` / `ccc index` path, and the skill points agents to the
+canonical copyable LLM guide.
 
 `doctor` validates the generated shell, active privacy ignore rules, module directory
 indexes, semantic-memory status, and typed graph:

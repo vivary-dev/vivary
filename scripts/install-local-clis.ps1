@@ -22,14 +22,34 @@ foreach ($pkg in $packages) {
     if (-not (Test-Path -LiteralPath $pyproject)) {
         throw "missing package pyproject: $pyproject"
     }
+}
 
-    $args = @("tool", "install", "--python", $Python, "--force")
+foreach ($pkg in $packages) {
+    $pkgPath = Join-Path $repoRoot $pkg.Path
+
+    Write-Host "Uninstalling existing $($pkg.Name), if present"
+    $oldErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $uninstallOutput = & uv tool uninstall $pkg.Name 2>&1
+        $uninstallCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
+    $uninstallText = $uninstallOutput | Out-String
+    if ($uninstallCode -ne 0 -and $uninstallText -notmatch "is not installed") {
+        Write-Host $uninstallText.Trim()
+        throw "uv failed uninstalling $($pkg.Name)"
+    }
+
+    $args = @("tool", "install", "--python", $Python)
     if ($Editable) {
         $args += "--editable"
     }
     $args += $pkgPath
 
-    Write-Host "Installing $($pkg.Name) from $pkgPath"
+    Write-Host "Installing $($pkg.Name) from current checkout: $pkgPath"
     & uv @args
     if ($LASTEXITCODE -ne 0) {
         throw "uv failed installing $($pkg.Name)"
