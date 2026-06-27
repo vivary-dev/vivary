@@ -13,9 +13,9 @@ frontmatter** and still be fully typed and valid.
 > Status: **working engine (v0.2).** `tropo.py` implements spec v1 end-to-end —
 > folder-as-type resolution, derivation, validation, packs, **overlays**, the
 > `signal` report, **`fix`** (de-noise), **`init`**, the graph layer
-> (`graph`/`blast`/`view`/`plan`), and the data layer (`query` plus file →
-> embedded migration). Cloud adapters are future 0.3.x work. An agent can drive the whole
-> thing via [.claude/skills/tropo/SKILL.md](.claude/skills/tropo/SKILL.md).
+> (`graph`/`blast`/`view`/`plan`), typed retrieval (`find`/`query`), and the
+> data layer (file → embedded migration). Cloud adapters are future 0.3.x work. An
+> agent can drive the whole thing via [.claude/skills/tropo/SKILL.md](.claude/skills/tropo/SKILL.md).
 > See [SPEC.md](SPEC.md).
 
 ## Quickstart
@@ -28,7 +28,8 @@ python tropo.py signal --root examples/vault    # print ONLY the irreducible met
 python tropo.py graph  --root examples/vault    # emit typed nodes + edges
 python tropo.py view   --root examples/vault --out examples/vault/graph.html
 python tropo.py fix    --dry-run                 # preview redundant-frontmatter removal
-python tropo.py query "meeting notes" --root examples/vault   # search the graph
+python tropo.py find "folder as type decision" --root examples/vault --json  # read-this-first packet
+python tropo.py query "meeting notes" --root examples/vault --type meeting --explain
 python tropo.py migrate --from file --to embedded --root my-vault --yes  # switch to LanceDB
 python tests/test_tropo.py                       # run the test suite
 ```
@@ -45,6 +46,13 @@ TOML config and frontmatter parsing tolerate a single leading UTF-8 BOM, which k
 Windows-created files from failing to load or being misread as body-only documents.
 `tropo view --out` keeps generated HTML under the tropo root, rejects symlink targets,
 and replaces output files without mutating hard-linked files outside the workspace.
+
+`tropo find` is the friendly context-compression command: it returns a short packet of
+typed nodes/files to open first, with reasons, snippets, and an approximate token
+budget. `tropo query` is the lower-level filtered search primitive; it can filter by
+type, path glob, or outbound edge and explain whether a match came from id/title,
+frontmatter, path, body, or edge context. Both commands stay zero-dependency and read
+the typed graph directly.
 
 ## Overlays — tighten a subtree
 

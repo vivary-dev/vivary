@@ -100,6 +100,10 @@ tropo migrate --from file --to embedded --yes --json
 # Agent queries the knowledge graph by text:
 tropo query "what decisions affect the auth module" --json
 # → { "results": [ { "id": "...", "type": "decision", "score": 2, ... } ] }
+
+# Agent asks for a small read-this-first context packet:
+tropo find "where is auth release truth owned" --budget 800 --json
+# → { "results": [ { "id": "...", "type": "decision", "path": "...", "reason": "..." } ] }
 ```
 
 ---
@@ -119,8 +123,9 @@ return typed graph nodes for agents to follow.
 **For code specifically:** CocoIndex (already in Vivary as of PR #40) provides
 structured active-context indexing — ASTs, call graphs, import graphs, hot context.
 That's strictly better than RAG for code. The shipped `tropo query` command is
-text/BM25-style graph search; semantic code retrieval belongs to the active-context
-CocoIndex sidecar.
+typed graph search over ids, titles, frontmatter, paths, body text, and edge context.
+`tropo find` packages that same deterministic search into a small context packet.
+Semantic code retrieval belongs to the active-context CocoIndex sidecar.
 
 **For second brain / writing:** The tropo graph is the index. Future embeddings, if
 added, should embed graph nodes rather than arbitrary chunks so the agent retrieves

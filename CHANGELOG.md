@@ -7,6 +7,26 @@ the `v0.1.0` line.
 
 **Current versions:** `vivary-tropo` **0.2.3** · `vivary-exo` **0.2.2** · `create-vivary` / `@vivary/create` **0.2.6** · `vivary-ozone` **0.1.0**.
 
+## [Unreleased]
+
+Affects `vivary-tropo`, root docs, package docs, and generated website docs.
+
+### Added
+
+- **`tropo find` context packets** — a human-friendly command that returns the small
+  set of typed nodes/files worth opening first, with reasons, snippets, filters, JSON
+  output, and an approximate token budget.
+
+### Changed
+
+- **`tropo query` is graph-aware** — query now searches analyzed Tropo nodes instead
+  of raw Markdown files, returning real graph ids/types/paths and supporting `--type`,
+  `--path`, `--edge`, `--snippet`, and `--explain`.
+
+### Verification
+
+- `python packages/tropo/tests/test_tropo.py` passed locally with query/find coverage.
+
 ## [create-vivary 0.2.6] — 2026-06-26
 
 Affects `create-vivary` / `@vivary/create`, generated workspace docs, and public docs.

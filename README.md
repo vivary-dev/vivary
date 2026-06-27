@@ -56,7 +56,7 @@ sources and caveats.
 Current command surface:
 
 - `create-vivary init` / `doctor` / `wizard` / `capabilities`
-- `tropo check` / `graph` / `query` / `migrate` / `init --packs`
+- `tropo check` / `graph` / `find` / `query` / `migrate` / `init --packs`
 - `ozone review` / `impact`
 - `exo board` / `conflicts` / `claim` / `roles`
 
@@ -79,6 +79,7 @@ create-vivary init my-codebase --preset coding --active-context cocoindex-code
 create-vivary capabilities --preset second-brain --json
 create-vivary doctor my-workspace
 uvx vivary-tropo check --root my-workspace
+uvx vivary-tropo find "where is release truth owned" --root my-workspace --json
 
 # Agent-mode — fully non-interactive, outputs JSON:
 create-vivary init . --preset coding --auto --size large --yes --json
@@ -92,7 +93,9 @@ modules are directories with `index.md` routers (`modules/<id>/index.md`) so age
 load the smallest useful context first. `doctor` validates the shell, active privacy
 ignore rules, graph health, storage backend, semantic-memory status, and module index
 coverage after creation.
-`tropo query` and `tropo migrate` power graph search and backend switching.
+`tropo find` returns small typed context packets for agents and humans to read first;
+`tropo query` provides filtered graph search, and `tropo migrate` handles backend
+switching.
 
 For coding workspaces that need richer source retrieval, `--active-context
 cocoindex-code` adds optional CocoIndex-code guidance and graph nodes. It does not
@@ -106,6 +109,7 @@ path. See [docs/ACTIVE-CONTEXT.md](docs/ACTIVE-CONTEXT.md).
 python packages/create-vivary/create_vivary.py init sandboxes/coding-demo --preset coding
 python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo
 python packages/tropo/tropo.py check --root sandboxes/coding-demo
+python packages/tropo/tropo.py find "local ci baseline" --root sandboxes/coding-demo --json
 python packages/tropo/tropo.py graph --root sandboxes/coding-demo --json
 ```
 

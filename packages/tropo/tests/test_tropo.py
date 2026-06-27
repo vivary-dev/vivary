@@ -645,6 +645,64 @@ def _minimal_vault(tmp_path):
     (tmp_path / "notes" / "beta.md").write_text("# Beta\nUnrelated content.\n", encoding="utf-8")
 
 
+def _search_vault(tmp_path):
+    """Typed graph fixture for query/find behavior."""
+    (tmp_path / "tropo.toml").write_text(
+        "[base]\nderive = ['id', 'title']\nallow_untyped = true\n"
+        "[types.decision]\nfolder = 'decisions'\noptional = { status = 'string', affects = 'ref' }\n"
+        "[types.module]\nfolder = 'modules'\noptional = { owner = 'string' }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "decisions").mkdir()
+    (tmp_path / "modules").mkdir()
+    (tmp_path / "decisions" / "release-workflow.md").write_text(
+        "---\n"
+        "status: accepted\n"
+        "affects: agent-workspace\n"
+        "---\n"
+        "# Release Workflow\n\n"
+        "Owns release truth and changelog site sync verification.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "modules" / "agent-workspace.md").write_text(
+        "---\nowner: connie\n---\n"
+        "# Agent Workspace\n\n"
+        "The always-on contract should stay tiny and route to indexes.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "modules" / "retrieval.md").write_text(
+        "---\nowner: connie\n---\n"
+        "# Retrieval\n\n"
+        "Context compression helps agents open fewer files.\n",
+        encoding="utf-8",
+    )
+
+
+def _query_args(query, **overrides):
+    data = {
+        "paths": query.split(),
+        "json": True,
+        "k": 10,
+        "type": [],
+        "path": [],
+        "edge": [],
+        "snippet": 160,
+        "explain": False,
+        "root": None,
+        "config": None,
+        "strict": False,
+        "lenient": False,
+        "quiet": False,
+        "dry_run": False,
+        "yes": False,
+        "from_backend": None,
+        "to_backend": None,
+        "budget": 1200,
+    }
+    data.update(overrides)
+    return argparse.Namespace(**data)
+
+
 def test_file_backend_query_returns_matches(tmp_path):
     _minimal_vault(tmp_path)
     backend = tropo._FileBackend(str(tmp_path))
@@ -725,32 +783,83 @@ def test_cmd_migrate_dry_run(tmp_path):
     assert out["to"] == "embedded"
 
 
-def test_cmd_query_file_backend(tmp_path):
-    _minimal_vault(tmp_path)
+def test_cmd_query_returns_graph_aware_typed_matches(tmp_path):
+    _search_vault(tmp_path)
     rc, out = _capture_rc(
         tropo.cmd_query,
-        argparse.Namespace(paths=["auth"], json=True, k=10,
-                           root=str(tmp_path), config=None,
-                           strict=False, lenient=False, quiet=False,
-                           dry_run=False, yes=False,
-                           from_backend=None, to_backend=None),
+        _query_args("release truth"),
         res(str(tmp_path)),
     )
     assert rc == 0
     assert "results" in out
-    assert out["query"] == "auth"
+    assert out["query"] == "release truth"
+    assert len(out["results"]) >= 1
+    assert out["results"][0]["id"] == "release-workflow"
+    assert out["results"][0]["type"] == "decision"
+    assert "release truth" in out["results"][0]["snippet"].lower()
+
+
+def test_cmd_query_filters_by_type_path_and_edge(tmp_path):
+    _search_vault(tmp_path)
+    rc, out = _capture_rc(
+        tropo.cmd_query,
+        _query_args(
+            "release",
+            type=["decision"],
+            path=["decisions/*"],
+            edge=["affects:agent-workspace"],
+        ),
+        res(str(tmp_path)),
+    )
+    assert rc == 0
+    assert [r["id"] for r in out["results"]] == ["release-workflow"]
+
+
+def test_cmd_query_snippet_zero_and_explain(tmp_path):
+    _search_vault(tmp_path)
+    rc, out = _capture_rc(
+        tropo.cmd_query,
+        _query_args("accepted", snippet=0, explain=True),
+        res(str(tmp_path)),
+    )
+    assert rc == 0
+    assert out["results"][0]["id"] == "release-workflow"
+    assert "snippet" not in out["results"][0]
+    assert any("frontmatter" in reason for reason in out["results"][0]["reasons"])
+
+
+def test_cmd_find_returns_context_packet(tmp_path):
+    _search_vault(tmp_path)
+    rc, out = _capture_rc(
+        tropo.cmd_find,
+        _query_args("where is release truth owned", k=5, budget=1200),
+        res(str(tmp_path)),
+    )
+    assert rc == 0
+    assert out["query"] == "where is release truth owned"
+    assert out["budget"] == 1200
+    assert out["estimated_tokens"] > 0
+    assert out["results"][0]["id"] == "release-workflow"
+    assert out["results"][0]["reason"]
+
+
+def test_cmd_find_budget_trims_context(tmp_path):
+    _search_vault(tmp_path)
+    rc, out = _capture_rc(
+        tropo.cmd_find,
+        _query_args("release truth context compression", k=10, budget=30),
+        res(str(tmp_path)),
+    )
+    assert rc == 0
+    assert out["estimated_tokens"] <= 30
     assert len(out["results"]) >= 1
 
 
 def test_cmd_query_no_results(tmp_path):
-    _minimal_vault(tmp_path)
+    _search_vault(tmp_path)
     rc, out = _capture_rc(
         tropo.cmd_query,
-        argparse.Namespace(paths=["zzznomatch123"], json=True, k=10,
-                           root=str(tmp_path), config=None,
-                           strict=False, lenient=False, quiet=False,
-                           dry_run=False, yes=False,
-                           from_backend=None, to_backend=None),
+        _query_args("zzznomatch123"),
         res(str(tmp_path)),
     )
     assert rc == 0

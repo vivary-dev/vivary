@@ -34,6 +34,8 @@ storage/migration commands.
 ```
 tropo [command] [paths...] [--lenient | --strict] [--json] [--quiet]
                 [--depth N] [--out FILE] [--packs a,b] [--root DIR] [--config PATH]
+                [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]]
+                [--snippet N] [--explain] [--budget N]
 ```
 
 A document's **type is the folder it lives in** (`decisions/0001.md` → type
@@ -52,12 +54,32 @@ says. `tropo.toml` declares the types.
 | `plan <change.toml>` | Simulate a change (remove/retype/break/add) and show the graph delta. |
 | `fix [--dry-run]` | Strip redundant frontmatter (`W210` — a field equal to its derived value). The only mechanical edit tropo makes. |
 | `init [DIR] [--packs a,b]` | Scaffold a `tropo.toml` (optionally composing reusable type packs). |
-| `query <text> [--k N] [--json]` | Text/BM25-style graph search over the workspace. Returns top-k typed nodes by text relevance; no type filter ships yet. The file backend falls back to simple text matching. |
+| `find <text> [--budget N] [--k N] [--json]` | Human-friendly context packet: the smallest typed nodes/files worth opening first, with reasons and snippets trimmed to an approximate token budget. |
+| `query <text> [--k N] [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]] [--snippet N] [--explain] [--json]` | Filtered graph search over typed nodes. Searches id/title, frontmatter, path, body, and outbound edge context, then returns real graph ids/types/paths. |
 | `migrate --from file --to embedded [--dry-run] [--json]` | Move file-backed graph data into the configured embedded backend. Cloud migration, non-file sources, backend installation, and `migrated_at` tracking are future 0.3.x work. |
 
-`tropo query` is graph/text retrieval, not the CocoIndex active-context sidecar. Use
-`create-vivary init ... --active-context cocoindex-code` when a coding workspace needs
-semantic code candidates.
+`tropo find` is the default "what should I read first?" command for humans and agents.
+`tropo query` is the lower-level filtered search primitive. Both are graph/text
+retrieval, not the CocoIndex active-context sidecar. Use `create-vivary init ...
+--active-context cocoindex-code` when a coding workspace needs semantic code
+candidates.
+
+Useful retrieval flags:
+
+| Flag | Effect |
+|---|---|
+| `--type TYPE` | Restrict to a document type; repeat for multiple allowed types. |
+| `--path GLOB` | Restrict to path globs such as `decisions/*`; repeatable and slash-normalized for Windows paths. |
+| `--edge FIELD[:TARGET]` | Require an outbound graph edge field, optionally pointing at a target id. |
+| `--snippet N` | Include up to `N` snippet characters per result; `0` disables snippets. |
+| `--explain` | Include stable match reasons such as title/id, frontmatter, path, body, or edge context. |
+| `--budget N` | `find` only: approximate token budget for the returned context packet. |
+
+```bash
+tropo find "where is release truth owned" --root . --budget 800 --json
+tropo query "release truth" --type decision --path "decisions/*" --explain --json
+tropo query "agent workspace" --edge affects:agent-workspace
+```
 
 ### Strictness (the `check` gate)
 

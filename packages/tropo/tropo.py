@@ -15,6 +15,8 @@ Usage:
   tropo blast <id> [--depth N] [--json]
   tropo view [graph | blast <id>] [--out FILE]
   tropo plan <change-spec.toml> [--json]
+  tropo query <text> [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]]
+  tropo find <text> [--budget N] [--json]
 
 Config is TOML (tropo.toml, resolved by walking up). Content frontmatter is YAML.
 Zero dependencies. Requires Python 3.11+ (for tomllib).
@@ -33,6 +35,7 @@ import sys
 import tempfile
 import tomllib
 from collections import Counter, deque
+from fnmatch import fnmatchcase
 
 __version__ = "0.2.3"
 
@@ -1123,6 +1126,13 @@ _HTML_SHELL = """<!doctype html>
 STORAGE_DIR = ".vivary"
 STORAGE_CONFIG_NAME = "storage.toml"
 _CONTENT_PREVIEW_CHARS = 1000
+_DEFAULT_SNIPPET_CHARS = 160
+_DEFAULT_FIND_BUDGET = 1200
+_QUERY_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "do", "does", "for",
+    "from", "how", "i", "in", "is", "it", "of", "on", "or", "our", "the",
+    "this", "to", "we", "what", "where", "which", "who", "why",
+}
 
 
 def _load_storage_config(root):
@@ -1137,14 +1147,14 @@ def _load_storage_config(root):
     return data.get("storage", {"backend": "file"})
 
 
-def _file_body(full_path):
+def _file_body(full_path, limit=_CONTENT_PREVIEW_CHARS):
     try:
         text = open(full_path, encoding="utf-8", errors="replace").read()
     except OSError:
         return ""
     m, text = _frontmatter_match(text)
     body = text[m.end():] if m else text
-    return body[:_CONTENT_PREVIEW_CHARS]
+    return body if limit is None else body[:limit]
 
 
 def _doc_to_node(d):
@@ -1309,6 +1319,260 @@ def get_backend(root):
         )
 
     raise ConfigError(f"unknown storage backend: {backend!r}")
+
+
+# ---------------------------------------------------------------------------
+# Graph search: shared by `query` and context-packet `find`
+# ---------------------------------------------------------------------------
+
+def _stringify_field_value(value):
+    if isinstance(value, list):
+        return ", ".join(_stringify_field_value(v) for v in value)
+    if isinstance(value, dict):
+        return " ".join(
+            f"{k}: {_stringify_field_value(v)}" for k, v in sorted(value.items())
+            if k != "__lines__"
+        )
+    return "" if value is None else str(value)
+
+
+def _query_terms(text):
+    raw = re.findall(r"[a-z0-9]+", text.lower())
+    terms = [t for t in raw if t not in _QUERY_STOPWORDS]
+    return terms or raw
+
+
+def _normalize_glob(pattern):
+    return pattern.replace("\\", "/")
+
+
+def _edge_filter_matches(edges, spec):
+    if ":" in spec:
+        field, target = spec.split(":", 1)
+    else:
+        field, target = spec, ""
+    field = field.strip()
+    target = target.strip()
+    for edge in edges:
+        if field and edge["field"] != field:
+            continue
+        if target and edge["to"] != target:
+            continue
+        return True
+    return False
+
+
+def _build_search_records(docs, nodes, edges):
+    docs_by_id = {d.derived.get("id"): d for d in docs if d.derived.get("id") is not None}
+    outbound = {}
+    for edge in edges:
+        if edge["broken"]:
+            continue
+        outbound.setdefault(edge["from"], []).append({
+            "field": edge["field"],
+            "to": edge["to"],
+        })
+    records = []
+    for nid in sorted(nodes):
+        doc = docs_by_id.get(nid)
+        node = nodes[nid]
+        fields = doc.fields if doc is not None else {}
+        frontmatter_text = " ".join(
+            f"{key}: {_stringify_field_value(value)}"
+            for key, value in sorted(fields.items())
+        )
+        body = _file_body(doc.full, limit=None) if doc is not None else ""
+        title = (doc.derived.get("title") if doc is not None else "") or nid
+        records.append({
+            "id": nid,
+            "type": node.get("type"),
+            "path": node.get("path", ""),
+            "title": title,
+            "frontmatter_text": frontmatter_text,
+            "body": body,
+            "edges": outbound.get(nid, []),
+        })
+    return records
+
+
+def _score_source(query, terms, source, phrase_weight, term_weight):
+    if not source:
+        return 0, False
+    source_l = source.lower()
+    query_l = query.lower().strip()
+    score = 0
+    matched = False
+    if query_l and query_l in source_l:
+        score += phrase_weight
+        matched = True
+    for term in terms:
+        count = len(re.findall(rf"\b{re.escape(term)}\b", source_l))
+        if count:
+            score += count * term_weight
+            matched = True
+    return score, matched
+
+
+def _best_snippet(record, query, terms, limit):
+    if limit is None:
+        limit = _DEFAULT_SNIPPET_CHARS
+    if limit <= 0:
+        return None
+    source = record.get("body") or record.get("frontmatter_text") or record.get("title") or ""
+    text = re.sub(r"\s+", " ", source).strip()
+    if not text:
+        return None
+    lower = text.lower()
+    needles = [query.lower().strip()] + terms
+    starts = [lower.find(n) for n in needles if n and lower.find(n) >= 0]
+    start = min(starts) if starts else 0
+    if len(text) <= limit:
+        return text
+    half = max(0, limit // 2)
+    left = max(0, start - half)
+    right = min(len(text), left + limit)
+    if right - left < limit:
+        left = max(0, right - limit)
+    snippet = text[left:right].strip()
+    if left > 0:
+        snippet = "..." + snippet
+    if right < len(text):
+        snippet += "..."
+    return snippet
+
+
+def _passes_search_filters(record, type_filters, path_filters, edge_filters):
+    if type_filters and (record.get("type") or "") not in set(type_filters):
+        return False
+    if path_filters:
+        path = record.get("path", "")
+        if not any(fnmatchcase(path, _normalize_glob(p)) for p in path_filters):
+            return False
+    if edge_filters and not all(
+        _edge_filter_matches(record.get("edges", []), e) for e in edge_filters
+    ):
+        return False
+    return True
+
+
+def search_graph(resolver, text, *, k=10, type_filters=None, path_filters=None,
+                 edge_filters=None, snippet_chars=_DEFAULT_SNIPPET_CHARS,
+                 explain=False):
+    docs = analyze(resolver.root, [], resolver)
+    nodes, edges = build_graph(docs)
+    records = _build_search_records(docs, nodes, edges)
+    terms = _query_terms(text)
+    type_filters = type_filters or []
+    path_filters = path_filters or []
+    edge_filters = edge_filters or []
+    results = []
+
+    for record in records:
+        if not _passes_search_filters(record, type_filters, path_filters, edge_filters):
+            continue
+
+        score = 0
+        reasons = []
+        id_title = f"{record['id']} {record['title']}"
+        s, matched = _score_source(text, terms, id_title, 120, 40)
+        if matched:
+            score += s
+            reasons.append("title/id match")
+        s, matched = _score_source(text, terms, record["frontmatter_text"], 80, 24)
+        if matched:
+            score += s
+            reasons.append("frontmatter match")
+        s, matched = _score_source(text, terms, record["path"], 60, 16)
+        if matched:
+            score += s
+            reasons.append("path match")
+        s, matched = _score_source(text, terms, record["body"], 40, 10)
+        if matched:
+            score += s
+            reasons.append("body match")
+        edge_text = " ".join(f"{e['field']} {e['to']}" for e in record["edges"])
+        s, matched = _score_source(text, terms, edge_text, 30, 8)
+        if matched:
+            score += s
+            reasons.append("edge context match")
+        if edge_filters:
+            score += 20 * len(edge_filters)
+            reasons.append("edge filter match")
+
+        if score <= 0:
+            continue
+        result = {
+            "id": record["id"],
+            "type": record["type"],
+            "path": record["path"],
+            "title": record["title"],
+            "score": score,
+        }
+        snippet = _best_snippet(record, text, terms, snippet_chars)
+        if snippet:
+            result["snippet"] = snippet
+        if explain:
+            result["reasons"] = reasons
+        if explain or edge_filters:
+            result["edges"] = record["edges"]
+        results.append(result)
+
+    results.sort(key=lambda r: (-r["score"], r["path"], r["id"]))
+    return results[:max(0, k)]
+
+
+def _estimate_tokens(value):
+    text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return max(0, math.ceil(len(text) / 4))
+
+
+def _context_results(query_results):
+    context = []
+    for result in query_results:
+        reasons = result.get("reasons") or []
+        reason = "; ".join(reasons) if reasons else "matches the task query"
+        item = {
+            "id": result["id"],
+            "type": result["type"],
+            "path": result["path"],
+            "reason": reason,
+        }
+        if result.get("snippet"):
+            item["snippet"] = result["snippet"]
+        if result.get("edges"):
+            item["edges"] = result["edges"]
+        context.append(item)
+    return context
+
+
+def _trim_context_to_budget(results, budget):
+    if budget is None or budget <= 0:
+        return results, _estimate_tokens(results)
+    trimmed = [dict(r) for r in results]
+    while _estimate_tokens(trimmed) > budget and any("snippet" in r for r in trimmed):
+        for r in trimmed:
+            if "snippet" not in r:
+                continue
+            snippet = r["snippet"]
+            if len(snippet) <= 80:
+                r.pop("snippet", None)
+            else:
+                r["snippet"] = snippet[:max(40, len(snippet) // 2)].rstrip()
+    while _estimate_tokens(trimmed) > budget and any("edges" in r for r in trimmed):
+        for r in trimmed:
+            r.pop("edges", None)
+    while _estimate_tokens(trimmed) > budget and len(trimmed) > 1:
+        trimmed.pop()
+    for r in trimmed:
+        if not isinstance(r.get("reason"), str):
+            continue
+        if _estimate_tokens(trimmed) > budget and ";" in r["reason"]:
+            r["reason"] = r["reason"].split(";", 1)[0]
+        if _estimate_tokens(trimmed) > budget and len(r["reason"]) > 24:
+            r["reason"] = "query match"
+        elif len(r["reason"]) > 80:
+            r["reason"] = r["reason"][:77].rstrip() + "..."
+    return trimmed, _estimate_tokens(trimmed)
 
 
 # ---------------------------------------------------------------------------
@@ -1757,25 +2021,102 @@ def cmd_query(args, resolver):
         sys.exit("tropo query: provide a search query — e.g. tropo query \"auth module\"")
     text = " ".join(args.paths)
     k = getattr(args, "k", 10) or 10
+    snippet = getattr(args, "snippet", _DEFAULT_SNIPPET_CHARS)
+    explain = getattr(args, "explain", False)
+    type_filters = getattr(args, "type", None) or []
+    path_filters = getattr(args, "path", None) or []
+    edge_filters = getattr(args, "edge", None) or []
 
-    try:
-        backend = get_backend(resolver.root)
-    except ConfigError as e:
-        sys.exit(f"tropo query: {e}")
-
-    results = backend.query(text, k=k)
-    backend.close()
+    results = search_graph(
+        resolver,
+        text,
+        k=k,
+        type_filters=type_filters,
+        path_filters=path_filters,
+        edge_filters=edge_filters,
+        snippet_chars=snippet,
+        explain=explain,
+    )
 
     if args.json:
-        print(json.dumps({"query": text, "k": k, "results": results}, indent=2))
+        print(json.dumps({
+            "query": text,
+            "k": k,
+            "filters": {
+                "type": type_filters,
+                "path": path_filters,
+                "edge": edge_filters,
+            },
+            "results": results,
+        }, indent=2))
         return 0
 
     if not results:
         print(f"tropo query: no results for {text!r}")
         return 0
+    print(f"tropo query: {len(results)} result(s) for {text!r}")
     for i, r in enumerate(results, 1):
         typ = f"[{r['type']}] " if r.get("type") else ""
-        print(f"{i:2}. {typ}{r['id']} — {r['path']}")
+        print(f"{i:2}. {typ}{r['id']} - {r['path']}")
+        if explain and r.get("reasons"):
+            print(f"    why: {', '.join(r['reasons'])}")
+        if r.get("snippet"):
+            print(f"    {r['snippet']}")
+    return 0
+
+
+def cmd_find(args, resolver):
+    """Return a small typed context packet for a task or question."""
+    if not args.paths:
+        sys.exit("tropo find: provide a task or question — e.g. tropo find \"auth module\"")
+    text = " ".join(args.paths)
+    k = getattr(args, "k", 5) or 5
+    budget = getattr(args, "budget", _DEFAULT_FIND_BUDGET) or _DEFAULT_FIND_BUDGET
+    type_filters = getattr(args, "type", None) or []
+    path_filters = getattr(args, "path", None) or []
+    edge_filters = getattr(args, "edge", None) or []
+    snippet = getattr(args, "snippet", _DEFAULT_SNIPPET_CHARS)
+
+    query_results = search_graph(
+        resolver,
+        text,
+        k=k,
+        type_filters=type_filters,
+        path_filters=path_filters,
+        edge_filters=edge_filters,
+        snippet_chars=snippet,
+        explain=True,
+    )
+    context, estimated_tokens = _trim_context_to_budget(_context_results(query_results), budget)
+
+    if args.json:
+        print(json.dumps({
+            "query": text,
+            "k": k,
+            "budget": budget,
+            "estimated_tokens": estimated_tokens,
+            "filters": {
+                "type": type_filters,
+                "path": path_filters,
+                "edge": edge_filters,
+            },
+            "results": context,
+        }, indent=2))
+        return 0
+
+    if not context:
+        print(f"tropo find: no context for {text!r}")
+        return 0
+    print(
+        f"tropo find: {len(context)} context result(s) for {text!r} "
+        f"(~{estimated_tokens} token(s), budget {budget})"
+    )
+    for i, result in enumerate(context, 1):
+        typ = f"[{result['type']}] " if result.get("type") else ""
+        print(f"{i:2}. {typ}{result['id']} - {result['path']}")
+        print(f"    why: {result['reason']}")
+        if result.get("snippet"):
+            print(f"    {result['snippet']}")
     return 0
 
 
@@ -1784,9 +2125,9 @@ def main(argv=None):
     p.add_argument("--version", action="version", version=f"tropo {__version__}")
     p.add_argument("command", nargs="?", default="check",
                    choices=["check", "signal", "types", "stats", "graph", "blast",
-                            "view", "plan", "fix", "init", "migrate", "query"])
+                            "view", "plan", "fix", "init", "migrate", "query", "find"])
     p.add_argument("paths", nargs="*",
-                   help="files or folders (default: whole tree); for blast/query, the target id/text")
+                   help="files or folders (default: whole tree); for blast/query/find, the target id/text")
     p.add_argument("--strict", action="store_true",
                    help="check: force warnings to fail (the default; overrides a lenient config)")
     p.add_argument("--lenient", action="store_true",
@@ -1804,7 +2145,20 @@ def main(argv=None):
     p.add_argument("--to", dest="to_backend", choices=["file", "embedded", "cloud"],
                    default=None, help="migrate: destination backend (default: embedded)")
     p.add_argument("--yes", action="store_true", help="auto-confirm prompts (agent/CI use)")
-    p.add_argument("--k", type=int, default=10, help="query: number of results (default: 10)")
+    p.add_argument("--k", type=int, default=None,
+                   help="query/find: number of results (query default: 10, find default: 5)")
+    p.add_argument("--type", action="append", default=[],
+                   help="query/find: restrict results to a document type; repeatable")
+    p.add_argument("--path", action="append", default=[],
+                   help="query/find: restrict results to a path glob; repeatable")
+    p.add_argument("--edge", action="append", default=[],
+                   help="query/find: require outbound edge FIELD or FIELD:TARGET; repeatable")
+    p.add_argument("--snippet", type=int, default=_DEFAULT_SNIPPET_CHARS,
+                   help="query/find: snippet characters per result (0 disables snippets)")
+    p.add_argument("--explain", action="store_true",
+                   help="query: include stable match reasons")
+    p.add_argument("--budget", type=int, default=_DEFAULT_FIND_BUDGET,
+                   help="find: approximate token budget for the context packet")
     args = p.parse_args(argv)
 
     if args.command == "init":
@@ -1814,7 +2168,7 @@ def main(argv=None):
     if args.config:
         root = args.root or os.path.dirname(os.path.abspath(args.config))
     else:
-        start = args.root or (args.paths[0] if args.paths and args.command not in ("migrate", "query") else os.getcwd())
+        start = args.root or (args.paths[0] if args.paths and args.command not in ("migrate", "query", "find") else os.getcwd())
         root = find_root(start)
         if root is None:
             sys.exit(f"tropo: no {CONFIG_NAME} found walking up from {os.path.abspath(start)}")
@@ -1826,7 +2180,7 @@ def main(argv=None):
     return {"check": cmd_check, "signal": cmd_signal, "types": cmd_types,
             "stats": cmd_stats, "graph": cmd_graph, "blast": cmd_blast,
             "view": cmd_view, "plan": cmd_plan, "fix": cmd_fix,
-            "migrate": cmd_migrate, "query": cmd_query}[args.command](args, resolver)
+            "migrate": cmd_migrate, "query": cmd_query, "find": cmd_find}[args.command](args, resolver)
 
 
 if __name__ == "__main__":
