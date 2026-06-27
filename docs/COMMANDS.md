@@ -144,6 +144,7 @@ packs = ["repo-graph", "coordination"]
 
 ```
 ozone [review | impact <id> | packs] [--root DIR] [--json] [--strict]
+      [--pack structure|context-budget|all]
 ```
 
 Where `tropo check` asks "is each document valid?", `ozone` reviews the **whole graph**
@@ -151,9 +152,9 @@ and a change's impact. It reads tropo's graph in-process (one graph, no fork).
 
 | Command | What it does |
 |---|---|
-| `review` | Run the `structure` pack: relationship/completeness findings over the graph. **Advisory by default** (exit 0); `--strict` makes it a gate (exit 1 on warnings). |
+| `review` | Run a deterministic review pack. Defaults to `--pack structure` for stable CI; use `--pack context-budget` for context bloat or `--pack all` for every pack. **Advisory by default** (exit 0); `--strict` makes it a gate (exit 1 on warnings). |
 | `impact <id>` | The blast radius of a node — what (transitively) depends on it, with distance + the edge field it came in by. |
-| `packs` | List the available rule packs (currently `structure`). |
+| `packs` | List the available rule packs. |
 
 ### The `structure` pack
 
@@ -165,9 +166,28 @@ and a change's impact. It reads tropo's graph in-process (one graph, no fork).
 | `orphan` | info | a node has no edges in or out |
 | `broken-edge` | warn | an edge points at a missing node (tropo `check` enforces this) |
 
+### The `context-budget` pack
+
+`context-budget` reviews only public routing/startup surfaces:
+`AGENTS.md`, `CLAUDE.md`, `STRATO.md`, `STATE.md`, `SOUL.md`, `README.md`,
+`modules/index.md`, and `modules/*/index.md`. It does not read private memory files
+such as `USER.md`, `MEMORY.md`, `memory/**`, heartbeat reports, `.vivary/**`, or
+`.git/**`.
+
+| Rule | Severity | Fires when |
+|---|---|---|
+| `module-index-missing` | warn | a `modules/<name>/` directory has no `index.md` |
+| `legacy-module-file` | warn | `modules/<name>.md` coexists with `modules/<name>/index.md` |
+| `always-on-large` | info | a root routing contract exceeds its fixed line/char threshold |
+| `module-index-large` | info | `modules/index.md` or `modules/*/index.md` exceeds 120 lines or 8000 chars |
+| `bulk-load-cue` | info | public routing text tells agents to read/load/scan/open whole repos, docs trees, folders, or everything |
+| `duplicate-routing-block` | info | an exact normalized routing block over 100 chars repeats across public routing surfaces |
+
 ```bash
 ozone review --root .            # advisory report
 ozone review --root . --strict   # gate: exit 1 if any warning (CI / pre-merge)
+ozone review --root . --pack context-budget
+ozone review --root . --pack all --json
 ozone impact human-gates --root . --json
 ```
 

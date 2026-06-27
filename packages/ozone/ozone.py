@@ -12,7 +12,8 @@ no LLM. Semantic ("organize by meaning") review is graphify's job, layered on to
 tropo's clean graph — not here.
 
 Usage:
-  ozone [review] [--root DIR] [--json] [--strict]   # findings over the graph
+  ozone [review] [--root DIR] [--pack NAME] [--json] [--strict]
+                                                        # findings over the graph
   ozone impact <id> [--root DIR] [--json]            # what depends on <id>
   ozone packs [--json]                               # list rule packs
 
@@ -37,6 +38,23 @@ ROLE_FOLDERS = {
     "verification": "verification",
     "gates": "gate",
 }
+
+ROOT_SURFACE_THRESHOLDS = {
+    "AGENTS.md": (160, 10000),
+    "CLAUDE.md": (160, 10000),
+    "STRATO.md": (160, 10000),
+    "SOUL.md": (160, 10000),
+    "STATE.md": (80, 4000),
+    "README.md": (250, 15000),
+}
+MODULE_INDEX_THRESHOLD = (120, 8000)
+BULK_LOAD_VERBS = ("read", "load", "scan", "open")
+BULK_LOAD_TARGETS = (
+    "whole repo", "entire repo", "full repo", "whole repository", "entire repository",
+    "entire docs", "whole docs", "full docs", "docs tree", "docs folder",
+    "whole folder", "entire folder", "all files", "everything",
+)
+BULK_LOAD_NEGATIONS = ("do not", "don't", "dont", "never", "avoid")
 
 
 class OzoneError(Exception):
@@ -66,7 +84,7 @@ def _load_tropo():
 
 
 def build_workspace_graph(root):
-    """Resolve the tropo graph for a workspace root. Returns (tropo, nodes, edges)."""
+    """Resolve the tropo graph for a workspace root. Returns (tropo, root, nodes, edges)."""
     tropo, tropo_dir = _load_tropo()
     start = root or os.getcwd()
     found = tropo.find_root(start)
@@ -75,7 +93,7 @@ def build_workspace_graph(root):
     resolver = tropo.ConfigResolver(found, tropo_dir)
     docs = tropo.analyze(resolver.root, [], resolver)
     nodes, edges = tropo.build_graph(docs)
-    return tropo, nodes, edges
+    return tropo, resolver.root, nodes, edges
 
 
 def role_of(node):
@@ -130,16 +148,191 @@ def structure_pack(nodes, edges):
     return findings
 
 
+def workspace_rel(root, path):
+    return os.path.relpath(path, root).replace(os.sep, "/")
+
+
+def estimate_tokens(text):
+    return (len(text) + 3) // 4
+
+
+def read_public_text(path):
+    try:
+        with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def public_routing_surfaces(root):
+    surfaces = []
+    for name in sorted(ROOT_SURFACE_THRESHOLDS):
+        path = os.path.join(root, name)
+        if os.path.isfile(path):
+            text = read_public_text(path)
+            if text is not None:
+                surfaces.append({
+                    "path": name,
+                    "text": text,
+                    "threshold": ROOT_SURFACE_THRESHOLDS[name],
+                    "kind": "root",
+                })
+
+    modules_dir = os.path.join(root, "modules")
+    index_path = os.path.join(modules_dir, "index.md")
+    if os.path.isfile(index_path):
+        text = read_public_text(index_path)
+        if text is not None:
+            surfaces.append({
+                "path": "modules/index.md",
+                "text": text,
+                "threshold": MODULE_INDEX_THRESHOLD,
+                "kind": "module-index",
+            })
+    if os.path.isdir(modules_dir):
+        for name in sorted(os.listdir(modules_dir)):
+            index_path = os.path.join(modules_dir, name, "index.md")
+            if os.path.isfile(index_path):
+                text = read_public_text(index_path)
+                if text is not None:
+                    surfaces.append({
+                        "path": workspace_rel(root, index_path),
+                        "text": text,
+                        "threshold": MODULE_INDEX_THRESHOLD,
+                        "kind": "module-index",
+                    })
+    return surfaces
+
+
+def bulk_load_cue(line):
+    text = " ".join(line.lower().replace("-", " ").split())
+    if any(neg in text for neg in BULK_LOAD_NEGATIONS):
+        return False
+    return any(verb in text for verb in BULK_LOAD_VERBS) and any(
+        target in text for target in BULK_LOAD_TARGETS)
+
+
+def normalized_routing_blocks(text):
+    blocks = []
+    for raw in text.split("\n\n"):
+        normalized = " ".join(raw.split()).strip().lower()
+        if len(normalized) > 100:
+            blocks.append(normalized)
+    return blocks
+
+
+def context_budget_pack(root, nodes, edges):
+    findings = []
+    modules_dir = os.path.join(root, "modules")
+    if os.path.isdir(modules_dir):
+        for name in sorted(os.listdir(modules_dir)):
+            child = os.path.join(modules_dir, name)
+            if not os.path.isdir(child):
+                continue
+            index_path = os.path.join(child, "index.md")
+            if not os.path.isfile(index_path):
+                rel_child = workspace_rel(root, child)
+                findings.append({
+                    "severity": "warn",
+                    "rule": "module-index-missing",
+                    "path": workspace_rel(root, index_path),
+                    "message": f"module directory '{rel_child}' is missing index.md",
+                })
+        for name in sorted(os.listdir(modules_dir)):
+            child = os.path.join(modules_dir, name)
+            if not os.path.isfile(child) or not name.endswith(".md") or name == "index.md":
+                continue
+            stem = name[:-3]
+            index_path = os.path.join(modules_dir, stem, "index.md")
+            if os.path.isfile(index_path):
+                findings.append({
+                    "severity": "warn",
+                    "rule": "legacy-module-file",
+                    "path": workspace_rel(root, child),
+                    "message": f"legacy module file duplicates '{workspace_rel(root, index_path)}'",
+                })
+    surfaces = public_routing_surfaces(root)
+    duplicate_blocks = {}
+    for surface in surfaces:
+        for block in normalized_routing_blocks(surface["text"]):
+            duplicate_blocks.setdefault(block, [])
+            if surface["path"] not in duplicate_blocks[block]:
+                duplicate_blocks[block].append(surface["path"])
+
+    for surface in surfaces:
+        line_count = len(surface["text"].splitlines())
+        char_count = len(surface["text"])
+        max_lines, max_chars = surface["threshold"]
+        if line_count > max_lines or char_count > max_chars:
+            if surface["kind"] == "module-index":
+                rule = "module-index-large"
+            else:
+                rule = "always-on-large"
+            findings.append({
+                "severity": "info",
+                "rule": rule,
+                "path": surface["path"],
+                "estimated_tokens": estimate_tokens(surface["text"]),
+                "message": f"{surface['path']} is {line_count} line(s), {char_count} char(s); "
+                           f"keep routing surfaces under {max_lines} line(s) or "
+                           f"{max_chars} char(s)",
+            })
+        for line_no, line in enumerate(surface["text"].splitlines(), start=1):
+            if not bulk_load_cue(line):
+                continue
+            findings.append({
+                "severity": "info",
+                "rule": "bulk-load-cue",
+                "path": surface["path"],
+                "message": f"{surface['path']}:{line_no} encourages bulk-loading context; "
+                           "route agents through targeted indexes instead",
+            })
+    for block in sorted(duplicate_blocks):
+        paths = duplicate_blocks[block]
+        if len(paths) < 2:
+            continue
+        findings.append({
+            "severity": "info",
+            "rule": "duplicate-routing-block",
+            "path": paths[0],
+            "message": f"routing block is repeated across {', '.join(paths)}; "
+                       "keep durable truth in one owner and link to it",
+        })
+    return findings
+
+
+PACKS = [
+    {"name": "structure",
+     "description": "deterministic completeness + topology review over the Vivary graph"},
+    {"name": "context-budget",
+     "description": "deterministic context-bloat review over public routing surfaces"},
+]
+
+
+def selected_packs(name):
+    if name == "all":
+        return [p["name"] for p in PACKS]
+    known = {p["name"] for p in PACKS}
+    if name not in known:
+        raise OzoneError(f"unknown review pack {name!r}")
+    return [name]
+
+
 def cmd_review(args):
     try:
-        _tropo, nodes, edges = build_workspace_graph(args.root)
+        _tropo, root, nodes, edges = build_workspace_graph(args.root)
+        packs = selected_packs(args.pack)
     except OzoneError as e:
         sys.exit(f"ozone: {e}")
-    findings = structure_pack(nodes, edges)
+    findings = []
+    if "structure" in packs:
+        findings.extend(structure_pack(nodes, edges))
+    if "context-budget" in packs:
+        findings.extend(context_budget_pack(root, nodes, edges))
     warns = [f for f in findings if f["severity"] == "warn"]
     notes = [f for f in findings if f["severity"] != "warn"]
     if args.json:
-        print(json.dumps({"reviewed": len(nodes), "warnings": len(warns),
+        print(json.dumps({"reviewed": len(nodes), "packs": packs, "warnings": len(warns),
                           "notes": len(notes), "findings": findings}, indent=2))
     else:
         for f in findings:
@@ -156,7 +349,7 @@ def cmd_impact(args):
     if not args.id:
         sys.exit("ozone: impact requires a node id (ozone impact <id>)")
     try:
-        tropo, nodes, edges = build_workspace_graph(args.root)
+        tropo, _root, nodes, edges = build_workspace_graph(args.root)
     except OzoneError as e:
         sys.exit(f"ozone: {e}")
     if args.id not in nodes:
@@ -177,10 +370,6 @@ def cmd_impact(args):
             t = nodes.get(nid, {}).get("type", "?")
             print(f"  {d['distance']}  {nid}  ({t}, via {d['via']})")
     return 0
-
-
-PACKS = [{"name": "structure",
-          "description": "deterministic completeness + topology review over the Vivary graph"}]
 
 
 def cmd_packs(args):
@@ -204,6 +393,9 @@ def main(argv=None):
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument("--strict", action="store_true",
                    help="review: exit non-zero when warnings exist (gate mode)")
+    p.add_argument("--pack", default="structure",
+                   choices=["structure", "context-budget", "all"],
+                   help="review: rule pack to run (default: structure)")
     args = p.parse_args(argv)
     return {"review": cmd_review, "impact": cmd_impact, "packs": cmd_packs}[args.command](args)
 

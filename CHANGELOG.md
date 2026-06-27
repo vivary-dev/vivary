@@ -9,13 +9,21 @@ the `v0.1.0` line.
 
 ## [Unreleased]
 
-Affects `vivary-tropo`, root docs, package docs, and generated website docs.
+Affects `vivary-tropo`, `vivary-ozone`, root docs, package docs, and generated
+website docs.
 
 ### Added
 
 - **`tropo find` context packets** — a human-friendly command that returns the small
   set of typed nodes/files worth opening first, with reasons, snippets, filters, JSON
   output, and an approximate token budget.
+- **Ozone `context-budget` pack** — `ozone review --pack context-budget` flags
+  context-bloat risks in public routing surfaces: missing module indexes, legacy
+  module files that coexist with directory indexes, oversized always-on files,
+  oversized module indexes, bulk-load wording, and duplicated routing blocks.
+- **Ozone pack selection** — `ozone review --pack structure|context-budget|all`
+  keeps the default `structure` behavior stable while allowing opt-in context-budget
+  review. `--strict` still exits non-zero only on `warn` findings.
 
 ### Changed
 

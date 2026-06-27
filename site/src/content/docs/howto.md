@@ -79,11 +79,19 @@ Run this **before** editing a load-bearing node — it's the impact a text diff 
 
 ```bash
 ozone review                # advisory: unverified changes, broken edges, orphans
+ozone review --pack context-budget   # advisory: context bloat and routing surfaces
+ozone review --pack all     # run every deterministic review pack
 ozone review --strict       # gate: exit 1 if any warning (use in CI / pre-merge)
 ```
 
 `tropo check` validates each document; `ozone review` checks the *relationships* between
 them. Use both before you merge.
+
+Use `--pack context-budget` before a release or after adding repo-level docs/contracts.
+It flags missing `modules/*/index.md` routers, legacy `modules/*.md` files that
+coexist with directory indexes, oversized public routing surfaces, exact duplicated
+routing blocks, and wording that tells agents to bulk-load whole repos or docs trees.
+It does not read private `USER.md`, `MEMORY.md`, `memory/**`, or heartbeat reports.
 
 ## Simulate a change
 
@@ -192,6 +200,8 @@ CI is just the gate, run on the exit code:
 - run: pip install vivary-tropo vivary-ozone
 - run: tropo check                 # strict by default — warnings fail
 - run: ozone review --strict       # relationship gate
+# Optional, once adopted:
+- run: ozone review --pack all --strict
 ```
 
 ## First run in an agent (bootstrap)
