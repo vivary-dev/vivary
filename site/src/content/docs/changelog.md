@@ -33,6 +33,9 @@ gate.
   stale global tools from silently testing older behavior during local review.
 - **LLM active-context guide** — `docs/LLM-ACTIVE-CONTEXT.md` and the generated website
   page provide a compact, copyable graph-first CocoIndex-code retrieval prompt.
+- **Product roadmap** — `docs/PRODUCT-ROADMAP.md` captures the high-leverage backlog
+  for large filesystem maps, module index planning, structured content query, typed
+  recall providers, optional integration proof, and context-budget repair workflows.
 
 ### Changed
 
@@ -54,7 +57,7 @@ gate.
 
 - `python packages/tropo/tests/test_tropo.py` passed locally: 68/68.
 - `python packages/ozone/tests/test_ozone.py` passed locally: 16/16.
-- `python packages/create-vivary/tests/test_create_vivary.py` passed locally: 53 tests.
+- `python packages/create-vivary/tests/test_create_vivary.py` passed locally: 54/54.
 - `python packages/create-vivary/tests/test_assets_parity.py` passed locally: 3/3.
 - `python packages/exo/tests/test_exo.py` passed locally: 14/14.
 - `cd site && npm run sync-docs && npm run build` passed locally.

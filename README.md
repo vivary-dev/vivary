@@ -51,7 +51,8 @@ sources and caveats.
 `tropo` (typed knowledge graph + search + storage), `strato` (agent OS), `ozone`
 (graph-aware review), and `exo` (coordination) are composed by `create-vivary`. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full model and
-[docs/PORTFOLIO.md](docs/PORTFOLIO.md) for proof and case-study material.
+[docs/PORTFOLIO.md](docs/PORTFOLIO.md) for proof and case-study material. The
+high-leverage backlog lives in [docs/PRODUCT-ROADMAP.md](docs/PRODUCT-ROADMAP.md).
 
 Current command surface:
 
