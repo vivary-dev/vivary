@@ -151,9 +151,9 @@ rewrites the workspace file without mutating hard-linked files outside it. See t
 changelog for the exact package surfaces.
 
 ### Is it stable? What's the version?
-Prepared release packages are `vivary-tropo` **0.2.3**, `vivary-exo` **0.2.2**,
+Published packages are `vivary-tropo` **0.2.3**, `vivary-exo` **0.2.2**,
 `create-vivary` / `@vivary/create` **0.2.6**, and `vivary-ozone` **0.1.0**. Use
-0.2.6 for new scaffolds after the package publish gate completes. It's young — APIs may move before `1.0`. File issues for
+0.2.6 for new scaffolds. It's young — APIs may move before `1.0`. File issues for
 rough edges.
 
 The versions differ on purpose: the layers are independently versioned. This release

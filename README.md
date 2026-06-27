@@ -17,10 +17,9 @@ A *vivary* is an archaic word for a vivarium: a self-contained world where livin
 things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
-> Release status: **0.2.6 is the prepared release** for the scaffolder (`create-vivary` /
+> Release status: **0.2.6 is current** for the scaffolder (`create-vivary` /
 > `@vivary/create`), **0.2.3** for `vivary-tropo`, **0.2.2** for `vivary-exo`,
-> and **0.1.0** for `vivary-ozone`. Use 0.2.6 for new scaffolds after the package
-> publish gate completes.
+> and **0.1.0** for `vivary-ozone`. Use 0.2.6 for new scaffolds.
 > This scaffolder release adds the `knowledge-work` preset, optional semantic-memory
 > setup, capability discovery, and doctor memory reporting while keeping Cognee
 > optional and disabled by default.

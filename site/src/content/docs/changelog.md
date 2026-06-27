@@ -13,8 +13,8 @@ the `v0.1.0` line.
 ## [create-vivary 0.2.6] — 2026-06-26
 
 Affects `create-vivary` / `@vivary/create`, generated workspace docs, and public docs.
-Publishing remains a manual human gate until the release PR is merged and npm/PyPI are
-published from the promoted commit.
+Published and verified as `create-vivary==0.2.6` on PyPI and `@vivary/create@0.2.6`
+on npm after PR #87 merged to `dev`.
 
 ### Added
 
@@ -34,6 +34,15 @@ published from the promoted commit.
 
 - The npm launcher recognizes the new `capabilities` subcommand instead of rewriting it
   to `init`.
+
+### Verification
+
+- `python -m pip index versions create-vivary` reported `LATEST: 0.2.6`.
+- A fresh venv installed `create-vivary==0.2.6` from PyPI and ran
+  `create-vivary capabilities --preset knowledge-work --json`.
+- `npm view @vivary/create version` reported `0.2.6`.
+- `npx --yes @vivary/create@0.2.6 capabilities --preset knowledge-work --json`
+  ran through the published npm launcher and matching PyPI scaffolder.
 
 ## [vivary-tropo 0.2.3 / vivary-exo 0.2.2 / create-vivary 0.2.5] — 2026-06-23
 
