@@ -17,27 +17,32 @@ A *vivary* is an archaic word for a vivarium: a self-contained world where livin
 things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
-> Release status: **0.2.7 is current** for the scaffolder (`create-vivary` /
+> Release candidate: package versions are independent; there is no single "Vivary
+> 0.3.0" release. This PR prepares **0.2.8** for the scaffolder (`create-vivary` /
 > `@vivary/create`), **0.3.0** for `vivary-tropo`, **0.2.2** for `vivary-exo`,
-> and **0.2.0** for `vivary-ozone`. Use 0.2.7 for new scaffolds.
-> This release adds typed context packets (`tropo find`), graph-aware filtered
-> `tropo query`, the Ozone `context-budget` review pack, and clearer CocoIndex-code
-> active-context guidance while keeping optional integrations behind explicit gates.
+> **0.2.0** for `vivary-ozone`, and **0.1.0** for the optional
+> `vivary-memory-cognee` adapter. Public registries remain on the previous line
+> until the publish gate is complete.
+> This line adds typed context packets (`tropo find`), graph-aware filtered
+> `tropo query`, the Ozone `context-budget` review pack, clearer CocoIndex-code
+> active-context guidance, and gated Cognee recall.
 
-| Surface | Current | Link |
+| Surface | Release candidate | Link |
 |---|---:|---|
-| `create-vivary` (PyPI) | 0.2.7 | [PyPI](https://pypi.org/project/create-vivary/) |
-| `@vivary/create` (npm) | 0.2.7 | [npm](https://www.npmjs.com/package/@vivary/create) |
+| `create-vivary` (PyPI) | 0.2.8 | [PyPI](https://pypi.org/project/create-vivary/) |
+| `@vivary/create` (npm) | 0.2.8 | [npm](https://www.npmjs.com/package/@vivary/create) |
 | `vivary-tropo` | 0.3.0 | [PyPI](https://pypi.org/project/vivary-tropo/) |
 | `vivary-ozone` | 0.2.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
 | `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
+| `vivary-memory-cognee` | 0.1.0 | optional Cognee adapter package |
 | Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
-Versions are intentionally independent across the four layers: `tropo` moved to 0.3.0
-for context-packet retrieval and graph-aware query filters, `ozone` moved to 0.2.0 for
-the context-budget pack, `create-vivary` moved to 0.2.7 for scaffolded guidance and
-npm lockstep, and `exo` stayed on the June security line.
+Versions are intentionally independent across the layers and optional adapters: `tropo`
+moved to 0.3.0 for context-packet retrieval and graph-aware query filters, `ozone`
+moved to 0.2.0 for the context-budget pack, `create-vivary` / `@vivary/create` move to
+0.2.8 for scaffolded Cognee adapter metadata and docs, `vivary-memory-cognee` starts at
+0.1.0, and `exo` stays on the June security line.
 
 ## Public Signals
 
@@ -60,6 +65,8 @@ Current command surface:
 - `tropo check` / `graph` / `find` / `query` / `migrate` / `init --packs`
 - `ozone review` / `impact`
 - `exo board` / `conflicts` / `claim` / `roles`
+- `vivary-cognee doctor` / `index` / `recall` / `forget` from the optional
+  `vivary-memory-cognee` package
 
 ## Quickstart
 
@@ -73,7 +80,7 @@ npm create @vivary@latest my-workspace        # pick: second brain · coding · 
 Or install the CLIs from PyPI (run on demand with `uvx`, no install needed):
 
 ```bash
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.7
+pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.8
 create-vivary init my-workspace --preset coding     # interactive wizard on a TTY
 create-vivary init my-workbench --preset knowledge-work --memory local
 create-vivary init my-codebase --preset coding --active-context cocoindex-code
@@ -97,6 +104,12 @@ coverage after creation.
 `tropo find` returns small typed context packets for agents and humans to read first;
 `tropo query` provides filtered graph search, and `tropo migrate` handles backend
 switching.
+
+For workspaces that explicitly choose Cognee semantic memory, the optional
+`vivary-memory-cognee` package adds `vivary-cognee doctor`, `index`, `recall`, and
+`forget`. It indexes privacy-filtered typed Tropo node packets and only accepts recall
+hits that map back to known Vivary node ids. It is not part of the default install and
+provider writes require explicit approval.
 
 For coding workspaces that need richer source retrieval, `--active-context
 cocoindex-code` adds optional CocoIndex-code guidance and graph nodes. It does not

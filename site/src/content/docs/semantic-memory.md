@@ -1,16 +1,17 @@
 ---
 title: "Optional semantic memory"
-description: "Architecture plan for optional semantic memory providers such as Cognee."
+description: "Architecture and adapter plan for optional semantic memory providers such as Cognee."
 ---
 
-Status: architecture and setup note from spike
+Status: architecture note plus first optional Cognee adapter slice
 [#84](https://github.com/vivary-dev/vivary/issues/84), now split into
 [#85](https://github.com/vivary-dev/vivary/issues/85) for presets/capabilities and
 [#86](https://github.com/vivary-dev/vivary/issues/86) for semantic memory/Cognee,
-aligned with [#20](https://github.com/vivary-dev/vivary/issues/20). The first setup slice has
-landed: `knowledge-work`, `create-vivary capabilities`, `--memory local|cognee`,
-`.vivary/memory.toml`, scaffolded policy docs, and doctor memory reporting. The real
-Cognee adapter remains a separate optional-provider implementation.
+aligned with [#20](https://github.com/vivary-dev/vivary/issues/20). The setup slice
+landed `knowledge-work`, `create-vivary capabilities`, `--memory local|cognee`,
+`.vivary/memory.toml`, scaffolded policy docs, and doctor memory reporting. The first
+runtime slice adds an optional `vivary-memory-cognee` package with `vivary-cognee`
+doctor/index/recall/forget commands.
 
 ## Position
 
@@ -163,10 +164,13 @@ Minimum contract:
 
 ## Cognee provider
 
-Cognee should plug in as an adapter behind the provider interface, likely in a
-separate optional package or extra such as one of:
+Cognee plugs in as an adapter behind the provider interface through a separate
+optional package:
 
 - `vivary-memory-cognee`
+
+Future packaging options may still include:
+
 - `vivary-strato[cognee]` if `strato` later becomes packaged code
 - `create-vivary[cognee]` only if the scaffolder owns provider setup, not core runtime
 
@@ -186,9 +190,19 @@ LLM/embedding model settings, data directories, optional server/UI usage, and an
 remote/API key configuration. The default Vivary install should not import Cognee or
 run a Cognee doctor.
 
-Including a Cognee layer "in Vivary" means the monorepo may own an optional adapter,
+Including a Cognee layer "in Vivary" means the monorepo owns an optional adapter,
 tests, docs, and install flow. It does not mean Cognee becomes a dependency of the
 core packages or the default preset output.
+
+Current commands:
+
+```bash
+vivary-cognee doctor --root . --json
+vivary-cognee index --root . --dry-run --json
+vivary-cognee index --root . --yes --json
+vivary-cognee recall "what should I read about auth?" --root . --json
+vivary-cognee forget --root . --yes --json
+```
 
 ## Config
 
@@ -319,7 +333,8 @@ Agent-mode discovery does not require the agent to know package names.
       "requires_install": ["vivary-memory-cognee"],
       "requires_approval": true,
       "requires_explicit_index": true,
-      "network": "configurable, default false"
+      "network": "configurable, default false",
+      "adapter_status": "optional-package"
     }
   ]
 }
@@ -413,8 +428,8 @@ Files touched by the setup slice and likely files for the Cognee adapter PR:
 - `packages/create-vivary/README.md`, `packages/create-vivary/npm/README.md`, and
   npm package metadata - install examples for optional storage and memory capability
   selection.
-- A future provider module/package such as `packages/memory-cognee/` or
-  `packages/strato-memory/` - adapter and fake-provider tests.
+- `packages/memory-cognee/` - optional Cognee adapter package and fake-provider
+  tests.
 - `packages/tropo/` - only for shared typed-node export helpers if the memory layer
   needs a stable graph snapshot API; do not put Cognee imports in tropo.
 - `.github/workflows/ci.yml` - only if new package tests or extras need CI coverage.
@@ -462,7 +477,8 @@ When this becomes implementation work, treat it as a behavior and public-copy ch
 
 1. Cut a feature branch from `dev`.
 2. Write the tests above before provider code.
-3. Implement the provider abstraction with a fake provider first.
+3. Implement the provider abstraction with a fake provider first. Done for the first
+   Cognee adapter slice in `packages/memory-cognee/`.
 4. Add capability discovery so human and agent flows can see optional database,
    local-memory, and Cognee choices before installing anything.
 5. Add optional Cognee adapter only behind an explicit extra/package.
@@ -482,8 +498,8 @@ When this becomes implementation work, treat it as a behavior and public-copy ch
 
 ## Open questions
 
-- Package ownership: separate `vivary-memory-cognee` package vs a future `strato`
-  package extra.
+- Whether a future `strato` package should wrap `vivary-memory-cognee` or keep the
+  adapter package separate.
 - Whether local Vivary semantic recall should be implemented before Cognee so the
   provider interface is proven without a third-party dependency.
 - Whether #20's eventual `tropo query --mode semantic` should call this provider layer

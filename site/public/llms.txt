@@ -8,20 +8,23 @@ Website: https://vivary.vercel.app/
 Repository: https://github.com/vivary-dev/vivary
 License: MIT
 
-## Current package surfaces
+## Release-candidate package surfaces
 
-- npm scaffolder: `@vivary/create` 0.2.7
-- PyPI scaffolder: `create-vivary` 0.2.7
+- npm scaffolder: `@vivary/create` 0.2.8
+- PyPI scaffolder: `create-vivary` 0.2.8
 - PyPI knowledge graph CLI: `vivary-tropo` 0.3.0, command `tropo`
 - PyPI review CLI: `vivary-ozone` 0.2.0, command `ozone`
 - PyPI coordination CLI: `vivary-exo` 0.2.2, command `exo`
 - `strato` is bundled as workspace templates and agent skills, not a separate package.
+- Optional Cognee adapter: `vivary-memory-cognee` 0.1.0, command `vivary-cognee`
+- Versions are independent; do not call the whole project "Vivary 0.3.0".
+- Public registries remain on the previous line until the publish gate is complete.
 
 ## Install
 
 ```bash
 npm create @vivary@latest my-workspace
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.7
+pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.8
 ```
 
 ## Core docs
@@ -48,7 +51,9 @@ Optional active context:
 
 - CocoIndex-code is an optional coding sidecar, not default behavior.
 - LanceDB is explicit embedded storage, not semantic retrieval.
-- Cognee is policy-only in the current release; the optional adapter is future work.
+- The published scaffolder can write Cognee policy without installing or indexing.
+- The optional Cognee adapter indexes privacy-filtered typed Tropo node packets only
+  after explicit install and index approval.
 - Vivary core does not install embeddings, start daemons, enable MCP, or send data
   anywhere by default.
 

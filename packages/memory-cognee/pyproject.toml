@@ -3,22 +3,25 @@ requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "create-vivary"
-version = "0.2.8"
-description = "Scaffold a complete Vivary agent workspace — the create-t3-app for agent-native workspaces."
+name = "vivary-memory-cognee"
+version = "0.1.0"
+description = "Optional Cognee adapter for Vivary typed memory recall."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Jeff Kazzee" }]
-keywords = ["agents", "workspace", "scaffold", "knowledge-graph", "create-app"]
+keywords = ["agents", "memory", "knowledge-graph", "cognee", "vivary"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3 :: Only",
-    "Topic :: Software Development :: Code Generators",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-dependencies = ["vivary-tropo>=0.3.0"]
+dependencies = [
+    "vivary-tropo>=0.3.0",
+    "cognee>=1.2.2",
+]
 
 [project.urls]
 Homepage = "https://vivary.vercel.app/"
@@ -28,15 +31,10 @@ Issues = "https://github.com/vivary-dev/vivary/issues"
 Changelog = "https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md"
 
 [project.scripts]
-create-vivary = "create_vivary:main"
+vivary-cognee = "vivary_cognee:main"
 
 [tool.setuptools]
-py-modules = ["create_vivary"]
-packages = ["create_vivary_assets"]
-include-package-data = false
-
-[tool.setuptools.package-data]
-create_vivary_assets = ["*.md", "**/*.md", "templates/.gitignore"]
+py-modules = ["vivary_cognee"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

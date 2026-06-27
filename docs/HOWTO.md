@@ -4,7 +4,7 @@ Short, copy-paste recipes for common tasks. New to Vivary? Do the [getting start
 guide](/getting-started/) first, then use these when you hit a specific job.
 
 Each recipe assumes the CLIs are installed (`pip install vivary-tropo
-vivary-ozone vivary-exo create-vivary==0.2.7`) or run via `uvx`. Run commands from
+vivary-ozone vivary-exo create-vivary==0.2.8`) or run via `uvx`. Run commands from
 inside a workspace unless `--root` is given.
 
 ## Scaffold a new workspace
@@ -190,6 +190,18 @@ hints (or defaults to `embedded` for medium/large). `--yes` auto-confirms instal
 Semantic memory stays separate from storage: `--memory local` writes local policy,
 and `--memory cognee` writes Cognee policy plus verification docs without installing
 Cognee, indexing content, enabling network access, or using an API key.
+
+If you explicitly install the optional Cognee adapter, dry-run before provider writes:
+
+```bash
+vivary-cognee doctor --root . --json
+vivary-cognee index --root . --dry-run --json
+vivary-cognee index --root . --yes --json
+vivary-cognee recall "which notes explain the auth decision?" --root . --json
+```
+
+The adapter sends privacy-filtered typed Tropo node packets and ignores recall hits
+that do not map back to known Vivary node ids.
 
 ## Use Vivary in CI
 

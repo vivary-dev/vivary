@@ -29,6 +29,8 @@ The context-compression release covers the first concrete slice:
   MCP by default.
 - Local LanceDB, CocoIndex-code, and Cognee-policy smokes proved the optional
   surfaces can be exercised without making them core dependencies.
+- The first Cognee adapter slice now lives in `packages/memory-cognee/`, returning
+  typed Vivary node hits only and keeping provider state rebuildable.
 
 ## Next release candidates
 
@@ -100,7 +102,7 @@ Shape:
 
 - define a provider contract that returns typed node hits only: id, type, path,
   score, reason, and optional snippet;
-- ship a fake/local provider first for deterministic tests;
+- ship fake-provider tests for deterministic adapter behavior;
 - make `tropo find` able to merge provider hits after graph-first retrieval;
 - keep providers opt-in and inspectable.
 
@@ -121,7 +123,8 @@ Shape:
 - LanceDB: smoke embedded storage migration and query from a fresh scaffold;
 - CocoIndex-code: smoke active-context setup against a tiny fixture and document
   exact-path filtering;
-- Cognee: smoke import/doctor/policy behavior behind an optional package or adapter;
+- Cognee: smoke import/doctor/policy behavior behind the optional
+  `vivary-memory-cognee` adapter;
 - report proof as local verification, not as a claim that integration is always
   installed or enabled.
 
