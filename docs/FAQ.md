@@ -160,10 +160,9 @@ repo, but it is not part of the default install line; see the changelog for the 
 package surfaces.
 
 ### Is it stable? What's the version?
-The release candidate is independently versioned: `create-vivary` / `@vivary/create`
+Published packages are independently versioned: `create-vivary` / `@vivary/create`
 **0.2.8**, optional `vivary-memory-cognee` **0.1.0**, `vivary-tropo` **0.3.0**,
-`vivary-ozone` **0.2.0**, and `vivary-exo` **0.2.2**. Public registries remain on the
-previous line until the publish gate is complete. It's young — APIs may move before
+`vivary-ozone` **0.2.0**, and `vivary-exo` **0.2.2**. It's young — APIs may move before
 `1.0`. File issues for rough edges.
 
 The versions differ on purpose: the layers and optional adapters are independently
