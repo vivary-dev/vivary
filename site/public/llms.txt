@@ -1,0 +1,55 @@
+# Vivary
+
+Vivary is a standard and scaffolder for agent-native workspaces. It gives AI agents a
+small, inspectable workspace they can navigate and verify: typed project memory,
+visible state, reusable skills, private boundaries, and human gates.
+
+Website: https://vivary.vercel.app/
+Repository: https://github.com/vivary-dev/vivary
+License: MIT
+
+## Current package surfaces
+
+- npm scaffolder: `@vivary/create` 0.2.7
+- PyPI scaffolder: `create-vivary` 0.2.7
+- PyPI knowledge graph CLI: `vivary-tropo` 0.3.0, command `tropo`
+- PyPI review CLI: `vivary-ozone` 0.2.0, command `ozone`
+- PyPI coordination CLI: `vivary-exo` 0.2.2, command `exo`
+- `strato` is bundled as workspace templates and agent skills, not a separate package.
+
+## Install
+
+```bash
+npm create @vivary@latest my-workspace
+pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.7
+```
+
+## Core docs
+
+- What is Vivary: https://vivary.vercel.app/concepts/
+- Getting started: https://vivary.vercel.app/getting-started/
+- Command reference: https://vivary.vercel.app/commands/
+- How-to recipes: https://vivary.vercel.app/howto/
+- Architecture: https://vivary.vercel.app/architecture/
+- Changelog: https://vivary.vercel.app/changelog/
+- Product roadmap: https://vivary.vercel.app/product-roadmap/
+
+## Agent retrieval
+
+Start with graph-first context:
+
+```bash
+tropo find "<task or question>" --root . --budget 1200 --json
+tropo query "<text>" --root . --type decision --explain --json
+ozone review --root . --pack context-budget
+```
+
+Optional active context:
+
+- CocoIndex-code is an optional coding sidecar, not default behavior.
+- LanceDB is explicit embedded storage, not semantic retrieval.
+- Cognee is policy-only in the current release; the optional adapter is future work.
+- Vivary core does not install embeddings, start daemons, enable MCP, or send data
+  anywhere by default.
+
+LLM active-context guide: https://vivary.vercel.app/llm-active-context/

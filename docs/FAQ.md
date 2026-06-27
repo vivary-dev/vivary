@@ -147,13 +147,13 @@ batched: memory writes, publishing (PyPI/npm), `git push`/PR/merge, org/repo cre
 installs, enabling hooks, destructive ops, and sending data of unknown sensitivity. The
 agent is bold *inside* the work and careful at the *edges*.
 
-### What did the latest security-hardening batch cover?
-The June 23 package set hardens local file boundaries:
-`create-vivary` refuses symlinked or out-of-workspace scaffold destinations, `doctor`
-checks active `.gitignore` rules for private files and heartbeat reports,
-`tropo view --out` keeps generated HTML writes inside the tropo root, and `exo claim`
-rewrites the workspace file without mutating hard-linked files outside it. See the
-changelog for the exact package surfaces.
+### What does the current context-compression release cover?
+The current package set helps agents open fewer files while getting better context:
+`tropo find` returns typed context packets, `tropo query` searches graph nodes with
+type/path/edge filters, `ozone review --pack context-budget` flags bloated routing
+surfaces, and generated active-context guidance keeps CocoIndex-code behind explicit
+install/index/MCP gates. The June 23 security-hardening work is still part of the
+published line; see the changelog for the exact package surfaces.
 
 ### Is it stable? What's the version?
 Published packages are `vivary-tropo` **0.3.0**, `vivary-exo` **0.2.2**,

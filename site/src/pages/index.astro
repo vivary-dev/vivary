@@ -14,11 +14,11 @@ const creates = [
   { t: 'Private boundaries',   d: 'Personal context and heartbeat reports stay out of Git.', f: 'USER.md · MEMORY.md · memory/ · heartbeat-reports/' },
   { t: 'Verification gates',   d: 'Human sign-off and graph checks before merge.',   f: 'gates/ · verification/ · tropo check' },
 ];
-const hardening = [
-  { t: 'Scaffold writes stay local', d: 'create-vivary refuses symlinked or out-of-workspace scaffold, storage, and cleanup paths.' },
-  { t: 'Private files are actively ignored', d: 'doctor validates real ignore rules for USER.md, MEMORY.md, memory/*, and heartbeat-reports/*.' },
-  { t: 'Generated outputs avoid hard-link leaks', d: 'tropo view and exo claim replace workspace files without mutating linked files outside the workspace.' },
-  { t: 'uvx installs survive no-pip environments', d: 'embedded storage setup falls back to uv pip install when a temporary uvx Python has no pip module.' },
+const releaseHighlights = [
+  { t: 'Typed context packets', d: 'tropo find ranks the small set of graph nodes and files worth opening first, with reasons, snippets, and a token budget.' },
+  { t: 'Filtered graph query', d: 'tropo query now searches typed graph nodes and supports type, path, edge, snippet, and explain filters.' },
+  { t: 'Context-budget review', d: 'ozone review --pack context-budget flags oversized routing files, missing module indexes, duplicate routing blocks, and bulk-load cues.' },
+  { t: 'Optional sidecars stay gated', d: 'LanceDB, CocoIndex-code, and Cognee policy remain explicit opt-ins; graph-first retrieval stays zero-dependency.' },
 ];
 ---
 
@@ -170,11 +170,11 @@ tropo: 9 document(s), 0 error(s), 0 warning(s)  →  exit 0</pre>
       </div>
     </section>
 
-    <!-- SECURITY HARDENING -->
+    <!-- CONTEXT COMPRESSION -->
     <section class="band hardening">
       <div class="hardening-copy">
-        <p class="search-label">Security hardening</p>
-        <h2>Safer local boundaries in the current package set.</h2>
+        <p class="search-label">Context compression</p>
+        <h2>Open fewer files. Trust the ones you do open.</h2>
         <p>
           The current release adds typed context packets, graph-aware query filters,
           context-budget review, and clearer active-context guidance while keeping
@@ -182,7 +182,7 @@ tropo: 9 document(s), 0 error(s), 0 warning(s)  →  exit 0</pre>
         </p>
       </div>
       <ul class="hardening-list">
-        {hardening.map((item) => (
+        {releaseHighlights.map((item) => (
           <li><b>{item.t}</b><span>{item.d}</span></li>
         ))}
       </ul>
@@ -192,20 +192,20 @@ tropo: 9 document(s), 0 error(s), 0 warning(s)  →  exit 0</pre>
     <section class="band search">
       <div class="search-head">
         <h2>Your workspace knows<br />what it knows.</h2>
-        <p>In 0.2 the graph gained search and agent self-configuration. <code>tropo query</code>
-          finds typed nodes by content. Agents can scaffold and configure themselves with zero prompts,
-          with explicit flags for storage and installs.</p>
+        <p><code>tropo find</code> returns a small packet of typed nodes to open first.
+          <code>tropo query</code> gives power users graph-aware filters. Agents can scaffold
+          and configure themselves with zero prompts, with explicit flags for storage and installs.</p>
       </div>
       <div class="search-grid">
         <div>
           <p class="search-label">Search the knowledge graph</p>
-          <pre class="term"><span class="g">$ tropo query "auth module"</span>
-  1  auth        module   score 0.94
-  2  checkout    module   score 0.78
-  3  session-fix change   score 0.61
+          <pre class="term"><span class="g">$ tropo find "where is release truth owned"</span>
+  1  release-workflow  doc       reason: title/id + body
+  2  changelog         doc       reason: path + body
+  3  package-readme    doc       reason: body
 
-<span class="g">$ tropo migrate --from file --to embedded</span>
-<span class="dim">migrated 9 nodes  →  exit 0</span></pre>
+<span class="g">$ tropo query "release truth" --type decision --explain</span>
+<span class="dim">returns graph ids, types, paths, snippets, and match reasons</span></pre>
         </div>
         <div>
           <p class="search-label">Agents self-configure — no prompts</p>
