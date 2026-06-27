@@ -62,8 +62,10 @@ in human mode, the wizard asks and its answers drive storage.
 Semantic memory is a separate optional capability. `--memory local` writes local-only
 policy and graph nodes; `--memory cognee` writes Cognee policy and verification docs.
 Neither option indexes content or sends data anywhere during scaffold, and Cognee is
-not installed by default. Use `create-vivary capabilities --preset <name> --json` to
-show agents the available optional pieces before setup.
+not installed by default. The optional `vivary-memory-cognee` adapter package can run
+`vivary-cognee doctor`, `index`, `recall`, and `forget` after an explicit install and
+index approval. Use `create-vivary capabilities --preset <name> --json` to show agents
+the available optional pieces before setup.
 
 For coding workspaces, `--active-context cocoindex-code` adds an optional
 CocoIndex-code sidecar profile: active-context skills for Claude/Codex-style agents,

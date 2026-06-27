@@ -80,7 +80,9 @@ create-vivary init my-notes --preset second-brain --memory cognee --no-wizard --
 `--memory local` writes local-only semantic-memory policy and graph nodes. `--memory
 cognee` writes Cognee policy and verification docs, but it does not install Cognee,
 index files, enable a server, use an API key, or send notes anywhere. Those remain
-explicit gates after setup.
+explicit gates after setup. If you approve the runtime adapter later, install the
+optional `vivary-memory-cognee` package and run `vivary-cognee index --yes` only after
+reviewing `vivary-cognee index --dry-run --json`.
 
 You now have a complete workspace:
 

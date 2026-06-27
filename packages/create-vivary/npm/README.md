@@ -45,7 +45,8 @@ For scripted storage selection, pass `--no-wizard --storage embedded --yes` or u
 `--auto`; in human mode, the wizard asks and its answers drive storage. Semantic
 memory is separate: `--memory local` writes local-only policy, and `--memory cognee`
 writes Cognee policy and verification docs without installing Cognee or indexing
-content.
+content. Runtime Cognee recall lives in the optional `vivary-memory-cognee` Python
+package and still requires explicit install and index approval.
 
 ## How it works
 

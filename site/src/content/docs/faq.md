@@ -107,7 +107,9 @@ Yes, as optional setup policy. Use `create-vivary capabilities --preset knowledg
 to `create-vivary init`. `local` writes local-only semantic-memory policy.
 `cognee` writes Cognee policy, config, and verification docs, but it does not install
 Cognee, index files, start a server, use an API key, or send data anywhere. Those
-remain explicit gates.
+remain explicit gates. The optional `vivary-memory-cognee` package adds the runtime
+adapter (`vivary-cognee doctor/index/recall/forget`) for users who explicitly install
+it and approve indexing.
 
 ### What is the wizard?
 When you run `create-vivary init` on a terminal that supports input, it prompts you in plain English — no database jargon — to pick a storage tier (local file, local LanceDB, or cloud config) and optional semantic-memory policy. For scripted selection, pass `--no-wizard --storage embedded --memory local --yes` or use `--auto`; in human mode, the wizard asks and its answers drive storage and memory policy. Use `create-vivary wizard <target>` to reconfigure an existing workspace without re-scaffolding.
@@ -156,7 +158,9 @@ The current package set helps agents open fewer files while getting better conte
 type/path/edge filters, `ozone review --pack context-budget` flags bloated routing
 surfaces, and generated active-context guidance keeps CocoIndex-code behind explicit
 install/index/MCP gates. The June 23 security-hardening work is still part of the
-published line; see the changelog for the exact package surfaces.
+published line. The Cognee adapter is now implemented as an optional package in the
+repo, but it is not part of the default install line; see the changelog for the exact
+package surfaces.
 
 ### Is it stable? What's the version?
 Published packages are `vivary-tropo` **0.3.0**, `vivary-exo` **0.2.2**,

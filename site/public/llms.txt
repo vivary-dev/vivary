@@ -16,6 +16,8 @@ License: MIT
 - PyPI review CLI: `vivary-ozone` 0.2.0, command `ozone`
 - PyPI coordination CLI: `vivary-exo` 0.2.2, command `exo`
 - `strato` is bundled as workspace templates and agent skills, not a separate package.
+- In-repo optional Cognee adapter: `vivary-memory-cognee`, command `vivary-cognee`
+  (not published in the current package line).
 
 ## Install
 
@@ -48,7 +50,9 @@ Optional active context:
 
 - CocoIndex-code is an optional coding sidecar, not default behavior.
 - LanceDB is explicit embedded storage, not semantic retrieval.
-- Cognee is policy-only in the current release; the optional adapter is future work.
+- The published scaffolder can write Cognee policy without installing or indexing.
+- The optional Cognee adapter indexes privacy-filtered typed Tropo node packets only
+  after explicit install and index approval.
 - Vivary core does not install embeddings, start daemons, enable MCP, or send data
   anywhere by default.
 

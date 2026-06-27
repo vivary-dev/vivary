@@ -31,6 +31,7 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 | `vivary-tropo` | 0.3.0 | [PyPI](https://pypi.org/project/vivary-tropo/) |
 | `vivary-ozone` | 0.2.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
 | `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
+| `vivary-memory-cognee` | unreleased | optional Cognee adapter package in this repo |
 | Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
@@ -60,6 +61,8 @@ Current command surface:
 - `tropo check` / `graph` / `find` / `query` / `migrate` / `init --packs`
 - `ozone review` / `impact`
 - `exo board` / `conflicts` / `claim` / `roles`
+- `vivary-cognee doctor` / `index` / `recall` / `forget` from the optional,
+  unreleased `vivary-memory-cognee` package
 
 ## Quickstart
 
@@ -97,6 +100,12 @@ coverage after creation.
 `tropo find` returns small typed context packets for agents and humans to read first;
 `tropo query` provides filtered graph search, and `tropo migrate` handles backend
 switching.
+
+For workspaces that explicitly choose Cognee semantic memory, the optional
+`vivary-memory-cognee` package adds `vivary-cognee doctor`, `index`, `recall`, and
+`forget`. It indexes privacy-filtered typed Tropo node packets and only accepts recall
+hits that map back to known Vivary node ids. It is not part of the default install and
+provider writes require explicit approval.
 
 For coding workspaces that need richer source retrieval, `--active-context
 cocoindex-code` adds optional CocoIndex-code guidance and graph nodes. It does not

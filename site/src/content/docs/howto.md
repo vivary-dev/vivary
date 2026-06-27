@@ -194,6 +194,18 @@ Semantic memory stays separate from storage: `--memory local` writes local polic
 and `--memory cognee` writes Cognee policy plus verification docs without installing
 Cognee, indexing content, enabling network access, or using an API key.
 
+If you explicitly install the optional Cognee adapter, dry-run before provider writes:
+
+```bash
+vivary-cognee doctor --root . --json
+vivary-cognee index --root . --dry-run --json
+vivary-cognee index --root . --yes --json
+vivary-cognee recall "which notes explain the auth decision?" --root . --json
+```
+
+The adapter sends privacy-filtered typed Tropo node packets and ignores recall hits
+that do not map back to known Vivary node ids.
+
 ## Use Vivary in CI
 
 CI is just the gate, run on the exit code:

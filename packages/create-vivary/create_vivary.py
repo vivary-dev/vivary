@@ -1156,6 +1156,24 @@ Keep this as an index. Link to source material instead of copying it here.
 
 def _semantic_memory_doc(project: str, memory: str) -> str:
     provider = "Cognee" if memory == "cognee" else "local Vivary"
+    adapter_section = ""
+    if memory == "cognee":
+        adapter_section = """
+## Optional Adapter
+
+If the human approves Cognee runtime recall later, install `vivary-memory-cognee`
+and run the adapter with an explicit dry run before indexing:
+
+```bash
+vivary-cognee doctor --root . --json
+vivary-cognee index --root . --dry-run --json
+vivary-cognee index --root . --yes --json
+vivary-cognee recall "what should I read?" --root . --json
+```
+
+The adapter indexes privacy-filtered typed `tropo` node packets and accepts only
+recall hits that map back to known graph node ids.
+"""
     return f"""# Semantic Memory
 
 This workspace has optional semantic memory configured in `{_STORAGE_DIR}/{_MEMORY_CONFIG_NAME}`.
@@ -1179,10 +1197,14 @@ access, or recalling from private paths. `USER.md`, `MEMORY.md`, `memory/**`, an
 3. Use semantic recall for candidates only.
 4. Read returned source files directly before acting.
 5. Verify with `create-vivary doctor .` and the workspace proof gate.
+{adapter_section}
 """
 
 
 def _semantic_memory_module_doc(project: str, memory: str) -> str:
+    adapter_line = ""
+    if memory == "cognee":
+        adapter_line = "Adapter CLI after explicit install: `vivary-cognee doctor/index/recall/forget`."
     return f"""---
 project: {project}
 status: active
@@ -1206,6 +1228,7 @@ Configure optional semantic recall as a sidecar over the typed graph.
 - Verification: `verification/semantic-memory-smoke.md`
 
 Mode: `{memory}`. Installing providers and indexing content remain explicit gates.
+{adapter_line}
 """
 
 
@@ -1242,6 +1265,19 @@ Configure `{memory}` semantic memory as an optional, privacy-gated recall sideca
 
 
 def _semantic_memory_verification_doc(project: str, memory: str) -> str:
+    adapter_check = ""
+    if memory == "cognee":
+        adapter_check = """
+If `vivary-memory-cognee` is installed, also run:
+
+```bash
+vivary-cognee doctor --root . --json
+vivary-cognee index --root . --dry-run --json
+```
+
+Do not run `vivary-cognee index --yes` until the human approves provider memory
+writes.
+"""
     return f"""---
 project: {project}
 status: planned
@@ -1254,6 +1290,7 @@ related_changes: [semantic-memory-capability]
 
 Verify that `create-vivary doctor` reports semantic memory mode `{memory}` without
 indexing private files or requiring unavailable providers to break the core workspace.
+{adapter_check}
 """
 
 
@@ -1809,7 +1846,7 @@ def capability_report(preset: str = "coding") -> dict:
             "requires_approval": True,
             "requires_explicit_index": True,
             "network": "configurable, default false",
-            "adapter_status": "planned",
+            "adapter_status": "optional-package",
         },
     ]
 

@@ -1,6 +1,6 @@
 ---
 title: "Command reference"
-description: "Every CLI across the four layers: tropo, ozone, exo, create-vivary."
+description: "Every CLI across Vivary: tropo, ozone, exo, create-vivary, and optional adapters."
 ---
 
 This is the full, technical list of every command. If you're just starting, you only
@@ -271,6 +271,29 @@ memory as `disabled`, `healthy`, `configured`, `unavailable`, `misconfigured`, o
 `privacy-failed` without requiring optional Cognee support to be installed.
 
 When `--storage embedded` (or `auto`) is selected and `vivary-tropo[embedded]` is not yet installed, `init` installs it via `pip` before continuing unless `--dry-run` is set. In `--json` mode, `"installed": ["lancedb"]` reports what was added. Without `--yes`, a single confirmation prompt fires before any pip install. For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use `--auto`; in human mode, the wizard asks and its answers drive storage. `--auto` never selects Cognee by itself.
+
+## vivary-cognee
+
+`vivary-cognee` ships from the optional `vivary-memory-cognee` package. It is not part
+of core Vivary and does not run unless a workspace explicitly configures
+`--memory cognee`, installs the adapter, and approves provider writes.
+
+```bash
+vivary-cognee doctor --root . [--json]
+vivary-cognee index --root . [--dry-run] [--yes] [--json]
+vivary-cognee recall "<query>" --root . [--k N] [--json]
+vivary-cognee forget --root . --yes [--json]
+```
+
+| Command | What it does |
+|---|---|
+| `doctor` | Reports Cognee adapter readiness, typed node count, manifest path, and stale/healthy/unavailable status. |
+| `index` | Builds privacy-filtered typed Tropo node packets and sends them to Cognee. Requires `--yes` unless `--dry-run` is set. |
+| `recall <query>` | Calls Cognee recall, then returns only hits that contain known Vivary node ids from the current typed graph. |
+| `forget` | Removes the workspace dataset from Cognee provider memory. Requires `--yes`. |
+
+The adapter uses `tropo` graph truth for ids, types, paths, and edges. Provider state
+under `.vivary/memory/cognee/` is rebuildable cache, not source truth.
 
 ```bash
 # Human flow — interactive wizard:

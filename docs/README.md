@@ -10,7 +10,7 @@ Start here.
 | [SKILLS.md](SKILLS.md) | The agent skills: strato (bootstrap/heartbeat/self-improve), tropo, loops. |
 | [ACTIVE-CONTEXT.md](ACTIVE-CONTEXT.md) | Optional CocoIndex-code sidecar for active semantic code context. |
 | [LLM-ACTIVE-CONTEXT.md](LLM-ACTIVE-CONTEXT.md) | Copyable LLM instructions for graph-first CocoIndex-code retrieval. |
-| [SEMANTIC-MEMORY.md](SEMANTIC-MEMORY.md) | Architecture plan for optional semantic memory providers such as Cognee. |
+| [SEMANTIC-MEMORY.md](SEMANTIC-MEMORY.md) | Architecture and optional adapter plan for semantic memory providers such as Cognee. |
 | [PRODUCT-ROADMAP.md](PRODUCT-ROADMAP.md) | High-leverage product backlog for context compression, maps, recall, and optional integrations. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The layer model (tropo → strato → ozone → exo) and the why. |
 | [OBSIDIAN.md](OBSIDIAN.md) | Optional Obsidian setup for fans (never required). |

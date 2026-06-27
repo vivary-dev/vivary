@@ -55,5 +55,5 @@ Mobile:
 > graph-aware `tropo query` passed 68 tropo tests; Ozone context-budget passed 16 ozone
 > tests; create-vivary generated active-context workspaces doctor clean. Disposable
 > smokes verified LanceDB embedded storage migration, CocoIndex-code exact-path search,
-> and Cognee policy scaffolding. The third-party Cognee package imports in isolation,
-> but no Cognee adapter ships in Vivary core.
+> and Cognee policy scaffolding. The optional `vivary-memory-cognee` adapter lives
+> outside Vivary core and only accepts recall hits that map back to typed graph nodes.

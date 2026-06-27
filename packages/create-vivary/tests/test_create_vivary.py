@@ -307,6 +307,9 @@ class CreateVivaryTests(unittest.TestCase):
             cfg = (target / ".vivary" / "memory.toml").read_text(encoding="utf-8")
             self.assertIn('provider = "cognee"', cfg)
             self.assertIn('allow_network = false', cfg)
+            doc = (target / "docs" / "semantic-memory.md").read_text(encoding="utf-8")
+            self.assertIn("vivary-cognee index --root . --dry-run --json", doc)
+            self.assertIn("known graph node ids", doc)
             with mock.patch.object(create_vivary, "_is_importable", return_value=False):
                 report = create_vivary.doctor_workspace(target, repo_root=ROOT)
             self.assertTrue(report["ok"], report)
@@ -361,6 +364,7 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertEqual(data["memory"], "cognee")
             self.assertIn("vivary-memory-cognee", data["memory_capability"]["requires_install"])
             self.assertTrue(data["memory_capability"]["requires_explicit_index"])
+            self.assertEqual(data["memory_capability"]["adapter_status"], "optional-package")
             self.assertFalse((target / ".vivary" / "memory.toml").exists())
 
     def test_refuses_to_overwrite_without_force(self):

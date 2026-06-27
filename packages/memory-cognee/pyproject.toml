@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vivary-memory-cognee"
+version = "0.1.0"
+description = "Optional Cognee adapter for Vivary typed memory recall."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Jeff Kazzee" }]
+keywords = ["agents", "memory", "knowledge-graph", "cognee", "vivary"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "vivary-tropo>=0.3.0",
+    "cognee>=1.2.2",
+]
+
+[project.urls]
+Homepage = "https://vivary.vercel.app/"
+Documentation = "https://vivary.vercel.app/"
+Repository = "https://github.com/vivary-dev/vivary"
+Issues = "https://github.com/vivary-dev/vivary/issues"
+Changelog = "https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md"
+
+[project.scripts]
+vivary-cognee = "vivary_cognee:main"
+
+[tool.setuptools]
+py-modules = ["vivary_cognee"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
