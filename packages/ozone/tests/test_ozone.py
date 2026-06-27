@@ -67,10 +67,11 @@ def _run_json(argv):
     return rc, json.loads(out)
 
 
-def test_packs_lists_structure():
+def test_packs_lists_structure_and_context_budget():
     rc, data = _run_json(["packs", "--json"])
     assert rc == 0
-    assert any(p["name"] == "structure" for p in data["packs"])
+    names = {p["name"] for p in data["packs"]}
+    assert {"structure", "context-budget"} <= names
 
 
 def test_review_flags_unverified_change():
@@ -83,11 +84,135 @@ def test_review_flags_unverified_change():
         assert rc == 0                                   # advisory by default
 
 
+def test_review_default_remains_structure_only():
+    with temp_workspace() as td:
+        _vault(td, complete=True)
+        Path(td, "modules", "m2").mkdir()
+        rc, data = _run_json(["review", "--root", str(td), "--json"])
+        assert data["packs"] == ["structure"]
+        assert not any(f["rule"] == "module-index-missing" for f in data["findings"])
+        assert rc == 0
+
+
+def test_context_budget_flags_missing_module_index():
+    with temp_workspace() as td:
+        _vault(td, complete=True)
+        Path(td, "modules", "m2").mkdir()
+        rc, data = _run_json(["review", "--root", str(td),
+                              "--pack", "context-budget", "--json"])
+        findings = {(f["rule"], f["path"]) for f in data["findings"]}
+        assert data["packs"] == ["context-budget"]
+        assert ("module-index-missing", "modules/m2/index.md") in findings
+        assert data["warnings"] == 1
+        assert rc == 0
+
+
+def test_context_budget_flags_legacy_module_file_with_index():
+    with temp_workspace() as td:
+        _vault(td, complete=True)
+        Path(td, "modules", "m1").mkdir()
+        Path(td, "modules", "m1", "index.md").write_text("# Module One Index\n")
+        rc, data = _run_json(["review", "--root", str(td),
+                              "--pack", "context-budget", "--json"])
+        findings = {(f["rule"], f["path"]) for f in data["findings"]}
+        assert ("legacy-module-file", "modules/m1.md") in findings
+        assert data["warnings"] == 1
+        assert rc == 0
+
+
+def test_context_budget_flags_large_public_routing_surfaces_as_info():
+    with temp_workspace() as td:
+        _vault(td, complete=True)
+        Path(td, "AGENTS.md").write_text("\n".join(f"root line {i}" for i in range(161)))
+        Path(td, "modules", "big").mkdir()
+        Path(td, "modules", "big", "index.md").write_text(
+            "\n".join(f"module line {i}" for i in range(121)))
+        rc, data = _run_json(["review", "--root", str(td),
+                              "--pack", "context-budget", "--json"])
+        by_rule = {(f["rule"], f["path"]): f for f in data["findings"]}
+        assert by_rule[("always-on-large", "AGENTS.md")]["severity"] == "info"
+        assert by_rule[("module-index-large", "modules/big/index.md")]["severity"] == "info"
+        assert data["warnings"] == 0
+        assert data["notes"] == 2
+        assert rc == 0
+
+
+def test_context_budget_flags_positive_bulk_load_cues_only():
+    with temp_workspace() as td:
+        _vault(td, complete=True)
+        Path(td, "AGENTS.md").write_text(
+            "Before every task, read the entire docs folder for context.\n")
+        Path(td, "modules", "index.md").write_text(
+            "Do not read the whole repo by default; use targeted pointers.\n")
+        rc, data = _run_json(["review", "--root", str(td),
+                              "--pack", "context-budget", "--json"])
+        matches = [f for f in data["findings"] if f["rule"] == "bulk-load-cue"]
+        assert [(f["severity"], f["path"]) for f in matches] == [("info", "AGENTS.md")]
+        assert data["warnings"] == 0
+        assert rc == 0
+
+
+def test_context_budget_ignores_private_memory_surfaces():
+    with temp_workspace() as td:
+        _vault(td, complete=True)
+        Path(td, "USER.md").write_text("\n".join("private user line" for _ in range(1000)))
+        Path(td, "MEMORY.md").write_text(
+            "Before every task, read the entire docs folder for context.\n")
+        Path(td, "memory").mkdir()
+        Path(td, "memory", "notes.md").write_text("\n".join("private memory line" for _ in range(1000)))
+        rc, data = _run_json(["review", "--root", str(td),
+                              "--pack", "context-budget", "--json"])
+        assert data["findings"] == []
+        assert rc == 0
+
+
+def test_context_budget_flags_duplicate_long_routing_blocks():
+    block = (
+        "This routing surface owns a short stable summary for agents and points them "
+        "toward the one canonical detail file for each durable fact in the workspace."
+    )
+    with temp_workspace() as td:
+        _vault(td, complete=True)
+        Path(td, "AGENTS.md").write_text(f"# Agent Contract\n\n{block}\n")
+        Path(td, "modules", "index.md").write_text(f"# Modules\n\n{block}\n")
+        rc, data = _run_json(["review", "--root", str(td),
+                              "--pack", "context-budget", "--json"])
+        matches = [f for f in data["findings"] if f["rule"] == "duplicate-routing-block"]
+        assert len(matches) == 1
+        assert matches[0]["severity"] == "info"
+        assert matches[0]["path"] == "AGENTS.md"
+        assert "modules/index.md" in matches[0]["message"]
+        assert data["warnings"] == 0
+        assert rc == 0
+
+
 def test_strict_gates_on_warnings():
     with temp_workspace() as td:
         _vault(td)
         rc, _ = _run(["review", "--root", str(td), "--strict"])
         assert rc == 1  # c2 is unverified -> warn -> strict fails
+
+
+def test_strict_gates_on_context_budget_warnings_with_pack_all():
+    with temp_workspace() as td:
+        _vault(td, complete=True)
+        Path(td, "modules", "m2").mkdir()
+        rc, data = _run_json(["review", "--root", str(td),
+                              "--pack", "all", "--strict", "--json"])
+        assert data["packs"] == ["structure", "context-budget"]
+        assert any(f["rule"] == "module-index-missing" for f in data["findings"])
+        assert rc == 1
+
+
+def test_strict_allows_info_only_context_budget_findings():
+    with temp_workspace() as td:
+        _vault(td, complete=True)
+        Path(td, "AGENTS.md").write_text("\n".join(f"root line {i}" for i in range(161)))
+        rc, data = _run_json(["review", "--root", str(td),
+                              "--pack", "all", "--strict", "--json"])
+        assert any(f["rule"] == "always-on-large" for f in data["findings"])
+        assert data["warnings"] == 0
+        assert rc == 0
 
 
 def test_clean_vault_has_no_warnings():

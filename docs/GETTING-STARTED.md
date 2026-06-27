@@ -14,7 +14,7 @@ You need **Python 3.11 or newer**. Pick whichever line fits how you like to work
 
 ```bash
 # A) install the command-line tools
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.6
+pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.7
 
 # B) run on demand with uv, nothing installed permanently
 uvx vivary-tropo --version
@@ -62,7 +62,8 @@ create-vivary init my-codebase --preset coding --active-context cocoindex-code
 That option writes guidance and graph nodes only. It does not auto-install
 CocoIndex-code, build an index, enable MCP, or send source text anywhere. After the
 user approves active context, follow [Active context](/active-context/) for the
-verified `ccc init` / `ccc doctor` / `ccc index` path.
+verified `ccc init` / `ccc doctor` / `ccc index` path, or paste
+[the LLM active-context guide](/llm-active-context/) into an agent session.
 
 For second-brain, knowledge-work, and writing workspaces, semantic memory is a separate
 opt-in capability:
@@ -183,8 +184,9 @@ graph is wrong. Run `tropo fix` to clear redundant frontmatter.
 
 - [Concepts](/concepts/) — what everything means, in plain language.
 - [Command reference](/commands/) — every CLI, flag, exit code, and data storage options.
-- [How-to recipes](/howto/) — review a change, multi-agent, CI, LanceDB search, and more.
+- [How-to recipes](/howto/) — review a change, multi-agent, CI, embedded storage, and more.
 - [Agent skills](/skills/) — bootstrap, heartbeat, self-improve, loops.
 - [Active context](/active-context/) — optional CocoIndex-code sidecar for code search.
+- [LLM active-context guide](/llm-active-context/) — copyable graph-first retrieval prompt.
 - [Architecture](/architecture/) — the layer model and the reasoning behind it.
 - [FAQ](/faq/)

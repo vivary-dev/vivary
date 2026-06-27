@@ -17,27 +17,27 @@ A *vivary* is an archaic word for a vivarium: a self-contained world where livin
 things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
-> Release status: **0.2.6 is current** for the scaffolder (`create-vivary` /
-> `@vivary/create`), **0.2.3** for `vivary-tropo`, **0.2.2** for `vivary-exo`,
-> and **0.1.0** for `vivary-ozone`. Use 0.2.6 for new scaffolds.
-> This scaffolder release adds the `knowledge-work` preset, optional semantic-memory
-> setup, capability discovery, and doctor memory reporting while keeping Cognee
-> optional and disabled by default.
+> Release status: **0.2.7 is current** for the scaffolder (`create-vivary` /
+> `@vivary/create`), **0.3.0** for `vivary-tropo`, **0.2.2** for `vivary-exo`,
+> and **0.2.0** for `vivary-ozone`. Use 0.2.7 for new scaffolds.
+> This release adds typed context packets (`tropo find`), graph-aware filtered
+> `tropo query`, the Ozone `context-budget` review pack, and clearer CocoIndex-code
+> active-context guidance while keeping optional integrations behind explicit gates.
 
 | Surface | Current | Link |
 |---|---:|---|
-| `create-vivary` (PyPI) | 0.2.6 | [PyPI](https://pypi.org/project/create-vivary/) |
-| `@vivary/create` (npm) | 0.2.6 | [npm](https://www.npmjs.com/package/@vivary/create) |
-| `vivary-tropo` | 0.2.3 | [PyPI](https://pypi.org/project/vivary-tropo/) |
-| `vivary-ozone` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
+| `create-vivary` (PyPI) | 0.2.7 | [PyPI](https://pypi.org/project/create-vivary/) |
+| `@vivary/create` (npm) | 0.2.7 | [npm](https://www.npmjs.com/package/@vivary/create) |
+| `vivary-tropo` | 0.3.0 | [PyPI](https://pypi.org/project/vivary-tropo/) |
+| `vivary-ozone` | 0.2.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
 | `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
 | Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
-Versions are intentionally independent across the four layers: `create-vivary` moved
-the most because it owns the scaffold and npm launcher, `tropo` and `exo` stayed on
-the June security line, and `ozone` stayed at 0.1.0 because this release did not
-change the review CLI.
+Versions are intentionally independent across the four layers: `tropo` moved to 0.3.0
+for context-packet retrieval and graph-aware query filters, `ozone` moved to 0.2.0 for
+the context-budget pack, `create-vivary` moved to 0.2.7 for scaffolded guidance and
+npm lockstep, and `exo` stayed on the June security line.
 
 ## Public Signals
 
@@ -51,12 +51,13 @@ sources and caveats.
 `tropo` (typed knowledge graph + search + storage), `strato` (agent OS), `ozone`
 (graph-aware review), and `exo` (coordination) are composed by `create-vivary`. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full model and
-[docs/PORTFOLIO.md](docs/PORTFOLIO.md) for proof and case-study material.
+[docs/PORTFOLIO.md](docs/PORTFOLIO.md) for proof and case-study material. The
+high-leverage backlog lives in [docs/PRODUCT-ROADMAP.md](docs/PRODUCT-ROADMAP.md).
 
 Current command surface:
 
 - `create-vivary init` / `doctor` / `wizard` / `capabilities`
-- `tropo check` / `graph` / `query` / `migrate` / `init --packs`
+- `tropo check` / `graph` / `find` / `query` / `migrate` / `init --packs`
 - `ozone review` / `impact`
 - `exo board` / `conflicts` / `claim` / `roles`
 
@@ -72,13 +73,14 @@ npm create @vivary@latest my-workspace        # pick: second brain · coding · 
 Or install the CLIs from PyPI (run on demand with `uvx`, no install needed):
 
 ```bash
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.6
+pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.7
 create-vivary init my-workspace --preset coding     # interactive wizard on a TTY
 create-vivary init my-workbench --preset knowledge-work --memory local
 create-vivary init my-codebase --preset coding --active-context cocoindex-code
 create-vivary capabilities --preset second-brain --json
 create-vivary doctor my-workspace
 uvx vivary-tropo check --root my-workspace
+uvx vivary-tropo find "where is release truth owned" --root my-workspace --json
 
 # Agent-mode — fully non-interactive, outputs JSON:
 create-vivary init . --preset coding --auto --size large --yes --json
@@ -92,13 +94,16 @@ modules are directories with `index.md` routers (`modules/<id>/index.md`) so age
 load the smallest useful context first. `doctor` validates the shell, active privacy
 ignore rules, graph health, storage backend, semantic-memory status, and module index
 coverage after creation.
-`tropo query` and `tropo migrate` power graph search and backend switching.
+`tropo find` returns small typed context packets for agents and humans to read first;
+`tropo query` provides filtered graph search, and `tropo migrate` handles backend
+switching.
 
 For coding workspaces that need richer source retrieval, `--active-context
 cocoindex-code` adds optional CocoIndex-code guidance and graph nodes. It does not
 auto-install, index, enable MCP, or send source text anywhere; the generated skill asks
 before those gates, then gives the approved `ccc init` / `ccc index` / `ccc search`
-path. See [docs/ACTIVE-CONTEXT.md](docs/ACTIVE-CONTEXT.md).
+path. See [docs/ACTIVE-CONTEXT.md](docs/ACTIVE-CONTEXT.md) and the copyable
+[LLM active-context guide](docs/LLM-ACTIVE-CONTEXT.md).
 
 <details><summary>Run from source (no install)</summary>
 
@@ -106,6 +111,7 @@ path. See [docs/ACTIVE-CONTEXT.md](docs/ACTIVE-CONTEXT.md).
 python packages/create-vivary/create_vivary.py init sandboxes/coding-demo --preset coding
 python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo
 python packages/tropo/tropo.py check --root sandboxes/coding-demo
+python packages/tropo/tropo.py find "local ci baseline" --root sandboxes/coding-demo --json
 python packages/tropo/tropo.py graph --root sandboxes/coding-demo --json
 ```
 
@@ -156,6 +162,7 @@ down `tropo` + `strato` and whichever optional layers fit. See
 - [Getting started](docs/GETTING-STARTED.md) — install → workspace → loop
 - [Command reference](docs/COMMANDS.md) — every CLI, flag, and exit code
 - [How-to recipes](docs/HOWTO.md) · [Agent skills](docs/SKILLS.md) · [FAQ](docs/FAQ.md)
+- [Active context](docs/ACTIVE-CONTEXT.md) · [LLM active-context guide](docs/LLM-ACTIVE-CONTEXT.md)
 - [Architecture](docs/ARCHITECTURE.md) · [Semantic memory](docs/SEMANTIC-MEMORY.md) · [Obsidian (optional)](docs/OBSIDIAN.md)
 - [Release workflow](docs/RELEASE-WORKFLOW.md) — end-of-update release truth, docs/site sync, and publish checks
 - [Portfolio proof](docs/PORTFOLIO.md) — shipped surfaces, screenshots, and case-study notes

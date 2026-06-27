@@ -81,15 +81,19 @@ Everything that (transitively) depends on a node — what a change to it could t
 give, and it's the moat: review by *what it touches*, not just *what lines changed*.
 
 ### Does tropo support search?
-Yes. `tropo query "auth module"` searches the knowledge graph. The default **file backend** does a grep-style text match over your Markdown files with no extra dependencies. The **embedded backend** (LanceDB) does BM25 full-text search over indexed node content:
+Yes. `tropo query "auth module"` searches analyzed typed graph nodes with no extra
+dependencies: id/title, frontmatter, path, body, and outbound edge context. Use
+`tropo find` when you want a small "open these first" packet.
 
 ```bash
-pip install vivary-tropo[embedded]
-tropo migrate --from file --to embedded --root my-workspace --yes
 tropo query "auth module" --root my-workspace --k 5
+tropo find "what should I read for auth?" --root my-workspace --budget 1200
 ```
 
-Semantic/vector embeddings are not in scope for tropo — those belong to a graphify-style layer that consumes the clean typed graph.
+LanceDB is still available as the explicit embedded storage backend for migrated node
+rows, but public `tropo query` / `find` stay graph-first and zero-dependency in the
+current command surface. Semantic/vector embeddings are not in scope for tropo — those
+belong to a graphify-style layer that consumes the clean typed graph.
 
 ### Does tropo do semantic search / embeddings?
 No, deliberately. tropo owns the **typed** graph (explicit links). Semantic
@@ -123,7 +127,8 @@ That adds an active-context skill, docs, graph nodes, and `.cocoindex_code/` to
 `.gitignore`. It does not auto-install CocoIndex-code, build an index, enable MCP, or
 send source text anywhere. The generated skill asks before crossing those gates, then
 uses the approved `ccc init` / `ccc index` / `ccc search --refresh` path alongside
-`tropo graph` / `tropo blast`.
+`tropo find` / `tropo graph` / `tropo blast`. The copyable agent version lives in
+[LLM-ACTIVE-CONTEXT.md](/llm-active-context/).
 
 ### Why are there package names like `vivary-tropo` but the command is `tropo`?
 PyPI has no scopes and the bare names `tropo`/`ozone`/`exo` were taken, so the
@@ -131,7 +136,7 @@ PyPI has no scopes and the bare names `tropo`/`ozone`/`exo` were taken, so the
 stay `tropo` / `ozone` / `exo`. On npm the scaffolder is `@vivary/create`.
 
 ### How do I install / run it?
-`pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.6`, or run on demand with
+`pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.7`, or run on demand with
 `uvx vivary-tropo ...`, or scaffold with `npm create @vivary@latest`. Python 3.11+ only;
 zero third-party dependencies.
 
@@ -145,23 +150,23 @@ batched: memory writes, publishing (PyPI/npm), `git push`/PR/merge, org/repo cre
 installs, enabling hooks, destructive ops, and sending data of unknown sensitivity. The
 agent is bold *inside* the work and careful at the *edges*.
 
-### What did the latest security-hardening batch cover?
-The June 23 package set hardens local file boundaries:
-`create-vivary` refuses symlinked or out-of-workspace scaffold destinations, `doctor`
-checks active `.gitignore` rules for private files and heartbeat reports,
-`tropo view --out` keeps generated HTML writes inside the tropo root, and `exo claim`
-rewrites the workspace file without mutating hard-linked files outside it. See the
-changelog for the exact package surfaces.
+### What does the current context-compression release cover?
+The current package set helps agents open fewer files while getting better context:
+`tropo find` returns typed context packets, `tropo query` searches graph nodes with
+type/path/edge filters, `ozone review --pack context-budget` flags bloated routing
+surfaces, and generated active-context guidance keeps CocoIndex-code behind explicit
+install/index/MCP gates. The June 23 security-hardening work is still part of the
+published line; see the changelog for the exact package surfaces.
 
 ### Is it stable? What's the version?
-Published packages are `vivary-tropo` **0.2.3**, `vivary-exo` **0.2.2**,
-`create-vivary` / `@vivary/create` **0.2.6**, and `vivary-ozone` **0.1.0**. Use
-0.2.6 for new scaffolds. It's young — APIs may move before `1.0`. File issues for
+Published packages are `vivary-tropo` **0.3.0**, `vivary-exo` **0.2.2**,
+`create-vivary` / `@vivary/create` **0.2.7**, and `vivary-ozone` **0.2.0**. Use
+0.2.7 for new scaffolds. It's young — APIs may move before `1.0`. File issues for
 rough edges.
 
 The versions differ on purpose: the layers are independently versioned. This release
-changes the scaffolder and its generated docs; it does not change tropo, exo, or
-ozone's review CLI.
+changes tropo retrieval, ozone review packs, and the scaffolder's generated guidance;
+it does not change exo.
 
 ### Where do I report bugs or ask for features?
 GitHub: [github.com/vivary-dev/vivary](https://github.com/vivary-dev/vivary). See the

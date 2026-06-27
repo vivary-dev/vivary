@@ -15,6 +15,8 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 
+__version__ = "0.2.7"
+
 PRESETS = ("coding", "second-brain", "knowledge-work", "writing")
 
 ACTIVE_CONTEXTS = ("cocoindex-code",)
@@ -1259,9 +1261,8 @@ def _cocoindex_active_context_doc(project: str) -> str:
     return f"""# Active Context
 
 This workspace can use CocoIndex-code as an optional active-context sidecar for
-semantic code search. Vivary core stays plain Markdown/YAML plus the zero-dependency
-graph tools; CocoIndex-code is engaged only when the agent and human agree it will
-improve retrieval.
+semantic code search. Vivary routes the work; CocoIndex-code finds fuzzy source-code
+candidates when names are unknown and plain file search is wasting context.
 
 Project: `{project}`
 
@@ -1269,12 +1270,14 @@ Project: `{project}`
 
 1. Ask before installing `cocoindex-code`, running `ccc init`, indexing code, enabling
    MCP, or sending source text to an external embedding provider.
-2. Lead with Vivary truth: `tropo graph`, `tropo blast <id>`, and `ozone impact <id>`.
-3. Use `ccc search --refresh "<query>"` for semantic candidates when exact names are
+2. Ask Vivary what to open first: `tropo find "<task>" --budget 1200 --json`.
+3. Use graph truth for ids, types, edges, and blast radius: `tropo graph`,
+   `tropo blast <id>`, and `ozone impact <id>`.
+4. Use `ccc search --refresh "<query>"` for semantic candidates when exact names are
    unknown or `rg` is too noisy.
-4. Read matched files directly before editing; semantic search finds candidates, not
+5. Read matched files directly before editing; semantic search finds candidates, not
    final truth.
-5. Report the query, refresh status, file paths, line ranges, and whether the semantic
+6. Report the query, refresh status, file paths, line ranges, and whether the semantic
    hits confirmed or changed the graph-based understanding.
 
 ## Setup Options
@@ -1288,6 +1291,7 @@ ccc doctor
 ccc index
 ccc status
 ccc search --refresh "where is authentication handled"
+ccc search --path "src/db.py" "database connection pool"
 ```
 
 On non-interactive Windows agent runs, use `cmd /c "echo. | ccc init -f"` so the CLI
@@ -1700,12 +1704,12 @@ def _run_wizard(args) -> dict:
             return {"storage": "file", "provider": "lancedb", "installed": [], "memory": _prompt_memory_choice(requested_memory)}
         return {"storage": "cloud", "provider": "qdrant", "installed": [], "memory": _prompt_memory_choice(requested_memory)}
 
-    # User picked "on this computer" — install LanceDB now, wizard is the consent step
+    # User picked "on this computer" — install LanceDB now, wizard is the consent step.
     if getattr(args, "dry_run", False):
-        print("\n  Would set up LanceDB for local search (dry run).", file=sys.stderr)
+        print("\n  Would set up LanceDB embedded storage (dry run).", file=sys.stderr)
         installed = []
     else:
-        print("\n  Setting up LanceDB for local search...", file=sys.stderr)
+        print("\n  Setting up LanceDB embedded storage...", file=sys.stderr)
         installed = _ensure_backend_installed("lancedb", yes=True)
     return {"storage": "embedded", "provider": "lancedb", "installed": installed, "memory": _prompt_memory_choice(requested_memory)}
 
@@ -1774,7 +1778,7 @@ def capability_report(preset: str = "coding") -> dict:
         },
         {
             "id": "storage:embedded",
-            "label": "Local database/search",
+            "label": "Local embedded storage",
             "default": False,
             "requires_install": ["vivary-tropo[embedded]"],
             "requires_approval": True,
@@ -1835,6 +1839,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="create-vivary",
         description="Scaffold a complete Vivary agent workspace.",
     )
+    parser.add_argument("--version", action="version", version=f"create-vivary {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     init = sub.add_parser("init", help="create a Vivary workspace scaffold")

@@ -8,7 +8,64 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current versions:** `vivary-tropo` **0.2.3** · `vivary-exo` **0.2.2** · `create-vivary` / `@vivary/create` **0.2.6** · `vivary-ozone` **0.1.0**.
+**Current versions:** `vivary-tropo` **0.3.0** · `vivary-exo` **0.2.2** · `create-vivary` / `@vivary/create` **0.2.7** · `vivary-ozone` **0.2.0**.
+
+## [vivary-tropo 0.3.0 / vivary-ozone 0.2.0 / create-vivary 0.2.7] — 2026-06-27
+
+Affects `vivary-tropo`, `vivary-ozone`, `create-vivary` / `@vivary/create`, root
+docs, package docs, and generated website docs. Publishing remains a manual human
+gate.
+
+### Added
+
+- **`tropo find` context packets** — a human-friendly command that returns the small
+  set of typed nodes/files worth opening first, with reasons, snippets, filters, JSON
+  output, and an approximate token budget.
+- **Ozone `context-budget` pack** — `ozone review --pack context-budget` flags
+  context-bloat risks in public routing surfaces: missing module indexes, legacy
+  module files that coexist with directory indexes, oversized always-on files,
+  oversized module indexes, bulk-load wording, and duplicated routing blocks.
+- **Ozone pack selection** — `ozone review --pack structure|context-budget|all`
+  keeps the default `structure` behavior stable while allowing opt-in context-budget
+  review. `--strict` still exits non-zero only on `warn` findings.
+- **Local checkout CLI refresh** — `scripts/install-local-clis.ps1` uninstalls existing
+  Vivary uv tools, then installs the current branch's CLIs without `--force`, preventing
+  stale global tools from silently testing older behavior during local review.
+- **LLM active-context guide** — `docs/LLM-ACTIVE-CONTEXT.md` and the generated website
+  page provide a compact, copyable graph-first CocoIndex-code retrieval prompt.
+- **Product roadmap** — `docs/PRODUCT-ROADMAP.md` captures the high-leverage backlog
+  for large filesystem maps, module index planning, structured content query, typed
+  recall providers, optional integration proof, and context-budget repair workflows.
+
+### Changed
+
+- **`tropo query` is graph-aware** — query now searches analyzed Tropo nodes instead
+  of raw Markdown files, returning real graph ids/types/paths and supporting `--type`,
+  `--path`, `--edge`, `--snippet`, and `--explain`.
+- **Active-context guidance is simpler and stricter about CocoIndex path filters** —
+  the generated skill and docs now lead with `tropo find`, use exact
+  `ccc search --path` examples, and warn that broad folder globs can miss indexed files
+  in current CocoIndex-code releases.
+- **LanceDB wording is storage-first** — public docs, wizard copy, and capability
+  labels now describe LanceDB as explicit embedded storage, while `tropo find` and
+  `tropo query` remain graph-first zero-dependency retrieval commands.
+- **Package dependency floor moved with retrieval guidance** — `create-vivary` and
+  `vivary-ozone` now depend on `vivary-tropo>=0.3.0` so installed scaffolds and review
+  docs reference a tropo version that includes `find` and graph-aware `query`.
+
+### Verification
+
+- `python packages/tropo/tests/test_tropo.py` passed locally: 68/68.
+- `python packages/ozone/tests/test_ozone.py` passed locally: 16/16.
+- `python packages/create-vivary/tests/test_create_vivary.py` passed locally: 54/54.
+- `python packages/create-vivary/tests/test_assets_parity.py` passed locally: 3/3.
+- `python packages/exo/tests/test_exo.py` passed locally: 14/14.
+- `cd site && npm run sync-docs && npm run build` passed locally.
+- Local CLI refresh passed with `scripts/install-local-clis.ps1`, then bare `tropo`,
+  `ozone`, `exo`, and `create-vivary` smokes passed.
+- Disposable LanceDB, CocoIndex-code, and Cognee-policy smokes passed locally. Cognee
+  remains policy-only in Vivary; the actual optional adapter is not shipped in this
+  release.
 
 ## [create-vivary 0.2.6] — 2026-06-26
 

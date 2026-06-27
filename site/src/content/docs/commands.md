@@ -11,7 +11,7 @@ Every CLI across the four layers. All engines are zero-dependency Python (3.11+)
 the CLI command names are `tropo` / `ozone` / `exo` / `create-vivary` regardless of
 how you install them.
 
-- **Install (PyPI):** `pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.6`
+- **Install (PyPI):** `pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.7`
 - **Run without installing (uv):** `uvx vivary-tropo check`, `uvx vivary-ozone review`, …
 - **Scaffold (npm):** `npm create @vivary@latest my-workspace` / `npx @vivary/create@latest my-workspace`
 - **From a repo checkout:** `python packages/tropo/tropo.py check`, etc.
@@ -34,6 +34,8 @@ storage/migration commands.
 ```
 tropo [command] [paths...] [--lenient | --strict] [--json] [--quiet]
                 [--depth N] [--out FILE] [--packs a,b] [--root DIR] [--config PATH]
+                [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]]
+                [--snippet N] [--explain] [--budget N]
 ```
 
 A document's **type is the folder it lives in** (`decisions/0001.md` → type
@@ -52,12 +54,32 @@ says. `tropo.toml` declares the types.
 | `plan <change.toml>` | Simulate a change (remove/retype/break/add) and show the graph delta. |
 | `fix [--dry-run]` | Strip redundant frontmatter (`W210` — a field equal to its derived value). The only mechanical edit tropo makes. |
 | `init [DIR] [--packs a,b]` | Scaffold a `tropo.toml` (optionally composing reusable type packs). |
-| `query <text> [--k N] [--json]` | Text/BM25-style graph search over the workspace. Returns top-k typed nodes by text relevance; no type filter ships yet. The file backend falls back to simple text matching. |
+| `find <text> [--budget N] [--k N] [--json]` | Human-friendly context packet: the smallest typed nodes/files worth opening first, with reasons and snippets trimmed to an approximate token budget. |
+| `query <text> [--k N] [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]] [--snippet N] [--explain] [--json]` | Filtered graph search over typed nodes. Searches id/title, frontmatter, path, body, and outbound edge context, then returns real graph ids/types/paths. |
 | `migrate --from file --to embedded [--dry-run] [--json]` | Move file-backed graph data into the configured embedded backend. Cloud migration, non-file sources, backend installation, and `migrated_at` tracking are future 0.3.x work. |
 
-`tropo query` is graph/text retrieval, not the CocoIndex active-context sidecar. Use
-`create-vivary init ... --active-context cocoindex-code` when a coding workspace needs
-semantic code candidates.
+`tropo find` is the default "what should I read first?" command for humans and agents.
+`tropo query` is the lower-level filtered search primitive. Both are graph/text
+retrieval, not the CocoIndex active-context sidecar. Use `create-vivary init ...
+--active-context cocoindex-code` when a coding workspace needs semantic code
+candidates.
+
+Useful retrieval flags:
+
+| Flag | Effect |
+|---|---|
+| `--type TYPE` | Restrict to a document type; repeat for multiple allowed types. |
+| `--path GLOB` | Restrict to path globs such as `decisions/*`; repeatable and slash-normalized for Windows paths. |
+| `--edge FIELD[:TARGET]` | Require an outbound graph edge field, optionally pointing at a target id. |
+| `--snippet N` | Include up to `N` snippet characters per result; `0` disables snippets. |
+| `--explain` | Include stable match reasons such as title/id, frontmatter, path, body, or edge context. |
+| `--budget N` | `find` only: approximate token budget for the returned context packet. |
+
+```bash
+tropo find "where is release truth owned" --root . --budget 800 --json
+tropo query "release truth" --type decision --path "decisions/*" --explain --json
+tropo query "agent workspace" --edge affects:agent-workspace
+```
 
 ### Strictness (the `check` gate)
 
@@ -125,6 +147,7 @@ packs = ["repo-graph", "coordination"]
 
 ```
 ozone [review | impact <id> | packs] [--root DIR] [--json] [--strict]
+      [--pack structure|context-budget|all]
 ```
 
 Where `tropo check` asks "is each document valid?", `ozone` reviews the **whole graph**
@@ -132,9 +155,9 @@ and a change's impact. It reads tropo's graph in-process (one graph, no fork).
 
 | Command | What it does |
 |---|---|
-| `review` | Run the `structure` pack: relationship/completeness findings over the graph. **Advisory by default** (exit 0); `--strict` makes it a gate (exit 1 on warnings). |
+| `review` | Run a deterministic review pack. Defaults to `--pack structure` for stable CI; use `--pack context-budget` for context bloat or `--pack all` for every pack. **Advisory by default** (exit 0); `--strict` makes it a gate (exit 1 on warnings). |
 | `impact <id>` | The blast radius of a node — what (transitively) depends on it, with distance + the edge field it came in by. |
-| `packs` | List the available rule packs (currently `structure`). |
+| `packs` | List the available rule packs. |
 
 ### The `structure` pack
 
@@ -146,9 +169,28 @@ and a change's impact. It reads tropo's graph in-process (one graph, no fork).
 | `orphan` | info | a node has no edges in or out |
 | `broken-edge` | warn | an edge points at a missing node (tropo `check` enforces this) |
 
+### The `context-budget` pack
+
+`context-budget` reviews only public routing/startup surfaces:
+`AGENTS.md`, `CLAUDE.md`, `STRATO.md`, `STATE.md`, `SOUL.md`, `README.md`,
+`modules/index.md`, and `modules/*/index.md`. It does not read private memory files
+such as `USER.md`, `MEMORY.md`, `memory/**`, heartbeat reports, `.vivary/**`, or
+`.git/**`.
+
+| Rule | Severity | Fires when |
+|---|---|---|
+| `module-index-missing` | warn | a `modules/<name>/` directory has no `index.md` |
+| `legacy-module-file` | warn | `modules/<name>.md` coexists with `modules/<name>/index.md` |
+| `always-on-large` | info | a root routing contract exceeds its fixed line/char threshold |
+| `module-index-large` | info | `modules/index.md` or `modules/*/index.md` exceeds 120 lines or 8000 chars |
+| `bulk-load-cue` | info | public routing text tells agents to read/load/scan/open whole repos, docs trees, folders, or everything |
+| `duplicate-routing-block` | info | an exact normalized routing block over 100 chars repeats across public routing surfaces |
+
 ```bash
 ozone review --root .            # advisory report
 ozone review --root . --strict   # gate: exit 1 if any warning (CI / pre-merge)
+ozone review --root . --pack context-budget
+ozone review --root . --pack all --json
 ozone impact human-gates --root . --json
 ```
 

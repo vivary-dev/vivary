@@ -34,6 +34,8 @@ export default defineConfig({
 						{ label: 'How-to recipes', slug: 'howto' },
 						{ label: 'Agent skills', slug: 'skills' },
 						{ label: 'Active context', slug: 'active-context' },
+						{ label: 'LLM active-context guide', slug: 'llm-active-context' },
+						{ label: 'Product roadmap', slug: 'product-roadmap' },
 						{ label: 'Public signals', slug: 'signals' },
 					],
 				},

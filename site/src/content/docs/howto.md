@@ -7,7 +7,7 @@ Short, copy-paste recipes for common tasks. New to Vivary? Do the [getting start
 guide](/getting-started/) first, then use these when you hit a specific job.
 
 Each recipe assumes the CLIs are installed (`pip install vivary-tropo
-vivary-ozone vivary-exo create-vivary==0.2.6`) or run via `uvx`. Run commands from
+vivary-ozone vivary-exo create-vivary==0.2.7`) or run via `uvx`. Run commands from
 inside a workspace unless `--root` is given.
 
 ## Scaffold a new workspace
@@ -79,11 +79,19 @@ Run this **before** editing a load-bearing node — it's the impact a text diff 
 
 ```bash
 ozone review                # advisory: unverified changes, broken edges, orphans
+ozone review --pack context-budget   # advisory: context bloat and routing surfaces
+ozone review --pack all     # run every deterministic review pack
 ozone review --strict       # gate: exit 1 if any warning (use in CI / pre-merge)
 ```
 
 `tropo check` validates each document; `ozone review` checks the *relationships* between
 them. Use both before you merge.
+
+Use `--pack context-budget` before a release or after adding repo-level docs/contracts.
+It flags missing `modules/*/index.md` routers, legacy `modules/*.md` files that
+coexist with directory indexes, oversized public routing surfaces, exact duplicated
+routing blocks, and wording that tells agents to bulk-load whole repos or docs trees.
+It does not read private `USER.md`, `MEMORY.md`, `memory/**`, or heartbeat reports.
 
 ## Simulate a change
 
@@ -128,7 +136,7 @@ out-of-workspace work item files, and rewrites the workspace file without mutati
 hard-linked targets outside it. Single-agent workspaces stay free of coordination
 fields they do not use. `exo roles` still lists the bounded contracts to hand workers.
 
-## Set up LanceDB search (embedded backend)
+## Set up LanceDB storage (embedded backend)
 
 Install the embedded extra and migrate your existing workspace:
 
@@ -136,7 +144,6 @@ Install the embedded extra and migrate your existing workspace:
 pip install vivary-tropo[embedded]
 tropo migrate --from file --to embedded --root my-workspace --dry-run   # preview
 tropo migrate --from file --to embedded --root my-workspace --yes        # run
-tropo query "billing module" --root my-workspace --k 5                   # search
 ```
 
 Or configure storage at init time:
@@ -150,10 +157,13 @@ create-vivary init my-workspace --preset coding --storage embedded --yes
 ```bash
 tropo query "CI baseline" --root .                   # text search, top-10 results
 tropo query "auth" --root . --k 3 --json             # top-3, machine-readable
+tropo find "what should I read for auth?" --root . --budget 1200 --json
 ```
 
-With the default file backend, this is a grep-style text match. With the embedded
-backend (LanceDB), it uses BM25 full-text search over migrated node content.
+`tropo query` and `tropo find` search analyzed typed graph nodes directly: id/title,
+frontmatter, path, body, and outbound edge context. They do not require LanceDB.
+Embedded storage is a separate opt-in backend for migrated node rows and future local
+retrieval work.
 
 ## Agent self-configure a workspace
 
@@ -192,6 +202,8 @@ CI is just the gate, run on the exit code:
 - run: pip install vivary-tropo vivary-ozone
 - run: tropo check                 # strict by default — warnings fail
 - run: ozone review --strict       # relationship gate
+# Optional, once adopted:
+- run: ozone review --pack all --strict
 ```
 
 ## First run in an agent (bootstrap)

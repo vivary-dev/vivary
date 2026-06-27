@@ -15,8 +15,9 @@ hit a ceiling for:
 
 Before 0.2.0 there was no storage configuration, migration command, guided onboarding
 for users who do not know the primitives, or machine-readable init path for agents.
-0.2.0 shipped the storage layer, text/BM25-style graph search, migration, setup
-wizard, and agent-mode flags. Cloud adapters and vector retrieval remain future work.
+0.2.0 shipped the storage layer, backend migration, setup wizard, and agent-mode flags.
+The current public retrieval commands (`tropo find` / `query`) are graph-first and
+zero-dependency; cloud adapters and vector retrieval remain future work.
 
 ---
 
@@ -100,6 +101,10 @@ tropo migrate --from file --to embedded --yes --json
 # Agent queries the knowledge graph by text:
 tropo query "what decisions affect the auth module" --json
 # → { "results": [ { "id": "...", "type": "decision", "score": 2, ... } ] }
+
+# Agent asks for a small read-this-first context packet:
+tropo find "where is auth release truth owned" --budget 800 --json
+# → { "results": [ { "id": "...", "type": "decision", "path": "...", "reason": "..." } ] }
 ```
 
 ---
@@ -119,8 +124,9 @@ return typed graph nodes for agents to follow.
 **For code specifically:** CocoIndex (already in Vivary as of PR #40) provides
 structured active-context indexing — ASTs, call graphs, import graphs, hot context.
 That's strictly better than RAG for code. The shipped `tropo query` command is
-text/BM25-style graph search; semantic code retrieval belongs to the active-context
-CocoIndex sidecar.
+typed graph search over ids, titles, frontmatter, paths, body text, and edge context.
+`tropo find` packages that same deterministic search into a small context packet.
+Semantic code retrieval belongs to the active-context CocoIndex sidecar.
 
 **For second brain / writing:** The tropo graph is the index. Future embeddings, if
 added, should embed graph nodes rather than arbitrary chunks so the agent retrieves
@@ -155,7 +161,7 @@ Three tiers, one interface. Users never think about tiers — the wizard maps th
 
 ```
 file (default)  →  tropo's existing file-system graph. No new deps. Works for small workspaces.
-embedded        →  LanceDB. In-process, disk-file, zero server. Unlocks indexed graph search now and future local vector retrieval.
+embedded        →  LanceDB. In-process, disk-file, zero server. Unlocks persisted graph-node storage now and future local retrieval.
 cloud           →  Qdrant Cloud (primary) or Astra DB (enterprise). Requires account + API key.
 ```
 
@@ -183,8 +189,8 @@ cloud           →  Qdrant Cloud (primary) or Astra DB (enterprise). Requires a
 
 "Migration" = when a user switches storage backends, their existing graph data needs
 to move. Example: workspace starts on `file` backend, grows to 10k nodes, and switches
-to `embedded` (LanceDB) for indexed local search. Without migration, the LanceDB index
-starts empty and agents can't find anything.
+to `embedded` (LanceDB) for local persisted node storage and future retrieval work.
+Without migration, the LanceDB table starts empty.
 
 **Solution: `tropo migrate` command.**
 
@@ -200,9 +206,11 @@ tropo migrate --from file --to embedded
 Non-file sources, cloud targets, automatic backend installation, and `migrated_at`
 tracking are future 0.3.x work.
 
-**No embeddings in tropo migration.** The embedded backend uses indexed node content
-for BM25-style text search. Semantic/vector embeddings remain future graphify or
-active-context-sidecar work, outside the deterministic tropo core.
+**No embeddings in tropo migration.** The embedded backend stores indexed node content
+and can be queried at the backend layer, but the public `tropo find` / `query`
+commands in the current command surface search the analyzed typed graph directly.
+Semantic/vector embeddings remain future graphify or active-context-sidecar work,
+outside the deterministic tropo core.
 
 ---
 

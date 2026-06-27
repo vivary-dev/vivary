@@ -102,18 +102,20 @@ PRs", "run it unattended".
 
 **What it's for:** deciding whether a Vivary-backed codebase should use an optional
 CocoIndex-code sidecar for semantic code search. It keeps Vivary's graph-first loop in
-charge, then uses `ccc search` when exact names are unknown or `rg` is not enough.
+charge, then uses `ccc search` when exact names are unknown or `rg` is not enough. For
+a compact copy/paste version, use [LLM-ACTIVE-CONTEXT.md](/llm-active-context/).
 
 The skill asks before installing, initializing, indexing, enabling MCP, or using an
 external embedding provider. Those are Vivary gates. Once approved, it retrieves in
 this order:
 
-1. `tropo graph` / `tropo blast <id>` / `ozone impact <id>` for workspace truth.
-2. `uv tool install --python 3.11 --upgrade "cocoindex-code[full]"`, then
+1. `tropo find "<task>" --budget 1200 --json` for a small read-first packet.
+2. `tropo graph` / `tropo blast <id>` / `ozone impact <id>` for workspace truth.
+3. `uv tool install --python 3.11 --upgrade "cocoindex-code[full]"`, then
    `ccc init -f`, `ccc doctor`, and `ccc index` if the sidecar is not already ready.
-3. `ccc search --refresh "<query>"` for semantic code candidates.
-4. Direct file reads around returned line ranges.
-5. Project tests plus `tropo check` / `ozone review` before a gate.
+4. `ccc search --refresh "<query>"` for semantic code candidates.
+5. Direct file reads around returned line ranges.
+6. Project tests plus `tropo check` / `ozone review` before a gate.
 
 **Triggers:** "CocoIndex", "ccc", "active context", "semantic code search", "find
 where this is implemented", "search the codebase", or code work where grep is too

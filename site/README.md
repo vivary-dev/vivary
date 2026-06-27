@@ -33,6 +33,9 @@ src/
   content/docs/      generated docs routes; edit ../docs/ and run sync-docs
   assets/vivary.svg  logo
   styles/theme.css   brand colours (atmosphere greens/teals)
+public/
+  llms.txt           LLM/crawler summary of current package and docs truth
+  robots.txt         crawler policy and sitemap pointer
 astro.config.mjs     title, sidebar, social, theme
 ```
 

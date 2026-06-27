@@ -10,11 +10,11 @@ launcher; a generated workspace can be scaffolded and checked in minutes.
 
 - **Live site:** https://vivary.vercel.app/
 - **GitHub:** https://github.com/vivary-dev/vivary (public · MIT)
-- **PyPI:** [`create-vivary`](https://pypi.org/project/create-vivary/) 0.2.6 ·
-  [`vivary-tropo`](https://pypi.org/project/vivary-tropo/) 0.2.3 ·
-  [`vivary-ozone`](https://pypi.org/project/vivary-ozone/) ·
+- **PyPI:** [`create-vivary`](https://pypi.org/project/create-vivary/) 0.2.7 ·
+  [`vivary-tropo`](https://pypi.org/project/vivary-tropo/) 0.3.0 ·
+  [`vivary-ozone`](https://pypi.org/project/vivary-ozone/) 0.2.0 ·
   [`vivary-exo`](https://pypi.org/project/vivary-exo/) 0.2.2
-- **npm:** [`@vivary/create`](https://www.npmjs.com/package/@vivary/create) 0.2.6
+- **npm:** [`@vivary/create`](https://www.npmjs.com/package/@vivary/create) 0.2.7
 
 ## Proof
 
@@ -45,16 +45,15 @@ Mobile:
 - **Restraint:** no third-party dependencies; the framework costs almost nothing
   to load. Plain Markdown, any editor, Claude Code *and* Codex.
 
-> Current published release line: `create-vivary` 0.2.6 (PyPI), `@vivary/create`
-> 0.2.6 (npm), `vivary-tropo` 0.2.3, `vivary-exo` 0.2.2. This line adds the
-> `knowledge-work` preset, optional semantic-memory setup, capability discovery, and
-> doctor memory reporting while keeping Cognee optional.
-> Published 0.2.6 proof: fresh PyPI and npm launcher smokes both returned
-> `create-vivary capabilities --preset knowledge-work --json`.
+> Current release line: `create-vivary` 0.2.7 (PyPI), `@vivary/create` 0.2.7 (npm),
+> `vivary-tropo` 0.3.0, `vivary-ozone` 0.2.0, `vivary-exo` 0.2.2. This line adds
+> typed context packets, graph-aware query filters, Ozone context-budget review, and
+> clearer CocoIndex-code active-context guidance while keeping LanceDB, CocoIndex-code,
+> and Cognee behind explicit gates.
 
-> Active-context branch proof, refreshed 2026-06-23: plain coding scaffold writes 39 files and
-> doctors clean at 9 nodes / 28 edges; `--active-context cocoindex-code` writes 45
-> files and doctors clean at 12 nodes / 38 edges. `cocoindex-code==0.2.36` was
-> installed with local embeddings, initialized against this repo, indexed 95 files into
-> 897 chunks, and `ccc search --refresh` returned the active-context docs plus the
-> `create_vivary.py` implementation.
+> Context-compression release proof, refreshed 2026-06-27: `tropo find` and
+> graph-aware `tropo query` passed 68 tropo tests; Ozone context-budget passed 16 ozone
+> tests; create-vivary generated active-context workspaces doctor clean. Disposable
+> smokes verified LanceDB embedded storage migration, CocoIndex-code exact-path search,
+> and Cognee policy scaffolding. The third-party Cognee package imports in isolation,
+> but no Cognee adapter ships in Vivary core.

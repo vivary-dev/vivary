@@ -24,7 +24,9 @@ const pages = [
   ['COMMANDS', 'commands', 'Command reference', 'Every CLI across the four layers: tropo, ozone, exo, create-vivary.'],
   ['SKILLS', 'skills', 'Agent skills', 'The strato, tropo, and loops skills that operate a Vivary workspace.'],
   ['ACTIVE-CONTEXT', 'active-context', 'Active context', 'Optional CocoIndex-code sidecar guidance for semantic code retrieval.'],
+  ['LLM-ACTIVE-CONTEXT', 'llm-active-context', 'LLM active-context guide', 'Copyable agent instructions for graph-first CocoIndex-code retrieval.'],
   ['SEMANTIC-MEMORY', 'semantic-memory', 'Optional semantic memory', 'Architecture plan for optional semantic memory providers such as Cognee.'],
+  ['PRODUCT-ROADMAP', 'product-roadmap', 'Product roadmap', 'High-leverage product backlog for context compression, maps, recall, and optional integrations.'],
   ['HOWTO', 'howto', 'How-to recipes', 'Task recipes: add a type, see blast radius, review, CI, multi-agent.'],
   ['SIGNALS', 'signals', 'Public signals', 'Public npm, PyPI, and GitHub metrics snapshots.'],
   ['RELEASE-WORKFLOW', 'release-workflow', 'Release workflow', 'End-of-update checklist for Vivary release truth, docs, publishing, and post copy.'],
@@ -40,7 +42,9 @@ const rewrite = (s) =>
    .replaceAll('](COMMANDS.md)', '](/commands/)')
    .replaceAll('](SKILLS.md)', '](/skills/)')
    .replaceAll('](ACTIVE-CONTEXT.md)', '](/active-context/)')
+   .replaceAll('](LLM-ACTIVE-CONTEXT.md)', '](/llm-active-context/)')
    .replaceAll('](SEMANTIC-MEMORY.md)', '](/semantic-memory/)')
+   .replaceAll('](PRODUCT-ROADMAP.md)', '](/product-roadmap/)')
    .replaceAll('](HOWTO.md)', '](/howto/)')
    .replaceAll('](SIGNALS.md)', '](/signals/)')
    .replaceAll('](RELEASE-WORKFLOW.md)', '](/release-workflow/)')
