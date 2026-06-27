@@ -10,8 +10,9 @@ the `v0.1.0` line.
 ## [vivary-tropo 0.3.0 / vivary-ozone 0.2.0 / create-vivary 0.2.7] — 2026-06-27
 
 Affects `vivary-tropo`, `vivary-ozone`, `create-vivary` / `@vivary/create`, root
-docs, package docs, and generated website docs. Publishing remains a manual human
-gate.
+docs, package docs, and generated website docs. Published and verified as
+`vivary-tropo==0.3.0`, `vivary-ozone==0.2.0`, `create-vivary==0.2.7`, and
+`@vivary/create@0.2.7` after PR #91 merged to `dev`.
 
 ### Added
 
@@ -63,6 +64,15 @@ gate.
 - Disposable LanceDB, CocoIndex-code, and Cognee-policy smokes passed locally. Cognee
   remains policy-only in Vivary; the actual optional adapter is not shipped in this
   release.
+- `uvx --no-cache --index-url https://pypi.org/simple --from vivary-tropo==0.3.0 tropo --version`
+  returned `tropo 0.3.0` from public PyPI.
+- `uvx --no-cache --index-url https://pypi.org/simple --from vivary-ozone==0.2.0 ozone --version`
+  returned `ozone 0.2.0` from public PyPI.
+- `uvx --no-cache --index-url https://pypi.org/simple --from create-vivary==0.2.7 create-vivary --version`
+  returned `create-vivary 0.2.7` from public PyPI.
+- `npm view @vivary/create version` returned `0.2.7`, and
+  `npx --yes @vivary/create@0.2.7 capabilities --preset coding --json` completed
+  through the published npm launcher.
 
 ## [create-vivary 0.2.6] — 2026-06-26
 

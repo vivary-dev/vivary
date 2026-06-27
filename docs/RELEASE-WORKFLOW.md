@@ -40,19 +40,23 @@ public docs, install commands, release status, or package versions.
    package versions and smoke commands.
 
 5. **Verify from the public registries after publish.**
-   Check the package pages and run cache-resistant install smokes:
+   Check the package pages and run cache-resistant install smokes for every changed
+   package:
 
    ```bash
    uvx --no-cache --index-url https://pypi.org/simple --from vivary-tropo==<tropo-version> tropo --version
+   uvx --no-cache --index-url https://pypi.org/simple --from vivary-ozone==<ozone-version> ozone --version
    uvx --no-cache --index-url https://pypi.org/simple --from vivary-exo==<exo-version> exo --version
+   uvx --no-cache --index-url https://pypi.org/simple --from create-vivary==<create-version> create-vivary --version
    ```
 
-   If npm changed, run npm from the package directory that owns the npm package:
+   If npm changed, verify both the registry version and the launcher path from the
+   package directory that owns the npm package:
 
    ```bash
    cd packages/create-vivary/npm
    npm view @vivary/create version
-   npm pack --dry-run
+   npx --yes @vivary/create@<create-version> capabilities --preset coding --json
    ```
 
 6. **Keep private agent communications outside the repo.**
