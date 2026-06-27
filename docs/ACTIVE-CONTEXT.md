@@ -65,6 +65,11 @@ ccc search --refresh "authentication flow"
 codex mcp add cocoindex-code -- ccc mcp
 ```
 
+When filtering with `ccc search --path`, prefer an exact indexed path such as
+`src/db.py`. In `cocoindex-code==0.2.36`, broad folder globs like `src/*` can return no
+results even when matching files are indexed; run the query without `--path` first if
+you need to discover the exact path.
+
 On non-interactive Windows agent runs, drive init through stdin so it chooses the
 local sentence-transformers default instead of opening an interactive prompt:
 

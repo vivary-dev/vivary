@@ -22,12 +22,23 @@ public docs, install commands, release status, or package versions.
 
    Commit generated `site/src/content/docs/*` changes with the source docs.
 
-3. **Record whether the release is planned or live.**
+3. **Make local CLI truth explicit before command smokes.**
+   If the change adds or changes CLI behavior that is not published yet, install the
+   current checkout's CLIs before testing bare commands:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts/install-local-clis.ps1
+   ```
+
+   This prevents stale global tools from silently testing an older package or, worse,
+   treating a new subcommand as a scaffold target.
+
+4. **Record whether the release is planned or live.**
    Before publishing, the changelog may say "Publishing remains a manual human gate."
    After publishing, change that same entry to "Published and verified" with the exact
    package versions and smoke commands.
 
-4. **Verify from the public registries after publish.**
+5. **Verify from the public registries after publish.**
    Check the package pages and run cache-resistant install smokes:
 
    ```bash
@@ -43,12 +54,12 @@ public docs, install commands, release status, or package versions.
    npm pack --dry-run
    ```
 
-5. **Keep private agent communications outside the repo.**
+6. **Keep private agent communications outside the repo.**
    Handoffs, agent-to-Jeff continuity notes, launch/social drafts, and private release
    packets stay in ignored local storage, such as `.release/private/`, or in the
    Second Brain. They do not go into the public repo.
 
-6. **Capture the workflow learning.**
+7. **Capture the workflow learning.**
    If the update revealed a repeatable release lesson, save it in the repo docs or an
    explicit memory note. Do not rely on chat history as the only copy.
 

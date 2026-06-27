@@ -68,8 +68,12 @@ ccc doctor
 ccc index
 ccc status
 ccc search --refresh "authentication flow"
-ccc search --lang python --path "src/*" "database connection pool"
+ccc search --lang python --path "src/db.py" "database connection pool"
 ```
+
+For `ccc search --path`, prefer an exact indexed path. Broad folder globs such as
+`src/*` may not match in current CocoIndex-code releases; if a path filter returns no
+results, run the query without `--path`, then retry with one exact returned file path.
 
 For non-interactive Windows agent runs, use `cmd /c "echo. | ccc init -f"` so `ccc`
 uses the default local embedding model without opening an interactive prompt.

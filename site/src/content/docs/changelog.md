@@ -27,12 +27,18 @@ website docs.
 - **Ozone pack selection** — `ozone review --pack structure|context-budget|all`
   keeps the default `structure` behavior stable while allowing opt-in context-budget
   review. `--strict` still exits non-zero only on `warn` findings.
+- **Local checkout CLI installer** — `scripts/install-local-clis.ps1` installs the
+  current branch's Vivary CLIs with `uv tool install --force`, preventing stale global
+  tools from silently testing older behavior during local review.
 
 ### Changed
 
 - **`tropo query` is graph-aware** — query now searches analyzed Tropo nodes instead
   of raw Markdown files, returning real graph ids/types/paths and supporting `--type`,
   `--path`, `--edge`, `--snippet`, and `--explain`.
+- **Active-context guidance is stricter about CocoIndex path filters** — the generated
+  skill and docs now use exact `ccc search --path` examples and warn that broad folder
+  globs can miss indexed files in current CocoIndex-code releases.
 
 ### Verification
 
