@@ -28,6 +28,7 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
 | Surface | Current | Link |
 |---|---:|---|
+| `vivary` (PyPI, installs the suite) | 0.1.0 | [PyPI](https://pypi.org/project/vivary/) |
 | `create-vivary` (PyPI) | 0.3.1 | [PyPI](https://pypi.org/project/create-vivary/) |
 | `@vivary/create` (npm) | 0.3.1 | [npm](https://www.npmjs.com/package/@vivary/create) |
 | `vivary-tropo` | 0.4.1 | [PyPI](https://pypi.org/project/vivary-tropo/) |
@@ -80,7 +81,7 @@ npm create @vivary@latest my-workspace        # pick: second brain · coding · 
 Or install the CLIs from PyPI (run on demand with `uvx`, no install needed):
 
 ```bash
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.3.1
+pip install vivary
 create-vivary init my-workspace --preset coding     # interactive wizard on a TTY
 create-vivary init my-workbench --preset knowledge-work --memory local
 create-vivary init my-codebase --preset coding --active-context cocoindex-code

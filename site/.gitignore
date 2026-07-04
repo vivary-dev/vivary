@@ -1,5 +1,7 @@
 # build output
 dist/
+public/llms.txt
+public/llms-full.txt
 # generated types
 .astro/
 
