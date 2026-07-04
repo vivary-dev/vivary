@@ -369,27 +369,28 @@ billing  →  4 node(s) depend on it
 
     /* nav */
     .nav { display: flex; align-items: center; justify-content: space-between;
-      max-width: 1200px; margin: 0 auto; padding: 22px clamp(20px, 5vw, 44px); }
+      max-width: 1200px; width: 100%; margin: 0 auto; padding: 22px clamp(20px, 5vw, 44px); gap: 18px; }
     .brand { display: flex; align-items: center; gap: 10px; font-family: var(--serif);
-      font-weight: 700; font-size: 19px; letter-spacing: -0.01em; }
-    .nav nav { display: flex; gap: clamp(14px, 2.6vw, 28px); align-items: center; font-size: 15px; color: var(--muted); }
+      font-weight: 700; font-size: 19px; letter-spacing: -0.01em; flex: 0 0 auto; }
+    .nav nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px clamp(14px, 2.6vw, 28px); align-items: center; min-width: 0; font-size: 15px; color: var(--muted); }
     .nav nav a:hover { color: var(--ink); }
     .nav .pill { color: var(--ink); border: 1px solid var(--line-strong); border-radius: 999px; padding: 8px 16px; transition: border-color .2s, background .2s; }
     .nav .pill:hover { border-color: var(--accent); background: oklch(0.84 0.16 168 / 0.12); }
 
     main { max-width: 1200px; margin: 0 auto; padding: 0 clamp(20px, 5vw, 44px); }
+    main > *, .signals > *, .hardening > *, .creates-grid > *, .search-grid > *, .strata > *, .row > * { min-width: 0; }
 
     /* hero */
     .hero { text-align: center; padding: clamp(34px, 6vw, 76px) 0 clamp(40px, 6vw, 80px); }
     .kicker { font-family: var(--mono); font-size: 13.5px; letter-spacing: 0.04em; color: var(--accent); margin: 0 0 26px; }
     h1 { font-family: var(--serif); font-weight: 800; letter-spacing: -0.035em; line-height: 0.9;
-      font-size: clamp(46px, 9.4vw, 132px); margin: 0; color: var(--ink); }
+      font-size: clamp(46px, 9.4vw, 132px); margin: 0 auto; max-width: 10ch; color: var(--ink); }
     .grad { color: var(--accent); }
     .lede { max-width: 54ch; color: var(--muted); font-size: clamp(16px, 1.3vw, 21px); margin: 30px auto 30px; line-height: 1.5; }
     .cmd { display: inline-flex; align-items: center; gap: 12px; font-family: var(--mono); font-size: 15px;
       background: var(--panel); border: 1px solid var(--line); border-radius: 13px;
-      padding: 14px 16px; backdrop-filter: blur(8px); }
-    .cmd .p { color: var(--accent); } .cmd .typed { color: var(--ink); }
+      padding: 14px 16px; backdrop-filter: blur(8px); max-width: 100%; }
+    .cmd .p { color: var(--accent); flex: 0 0 auto; } .cmd .typed { color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
     .copy { font-family: var(--mono); font-size: 12px; color: var(--faint); background: none;
       border: 1px solid var(--line); border-radius: 7px; padding: 4px 9px; cursor: pointer; transition: color .2s, border-color .2s; }
     .copy:hover { color: var(--accent); border-color: var(--line-strong); }
@@ -406,7 +407,7 @@ billing  →  4 node(s) depend on it
     .graph .node.src circle { fill: oklch(0.92 0.14 168); }
     .graph .node text { fill: var(--muted); font-family: var(--mono); font-size: 12.5px; text-anchor: middle; }
     .graph .node.hot text { fill: var(--ink); }
-    figcaption { text-align: center; color: var(--faint); font-size: 14px; margin-top: 16px; }
+    figcaption { text-align: center; color: var(--faint); font-size: 14px; margin: 16px auto 0; max-width: 100%; overflow-wrap: anywhere; }
     figcaption code { color: var(--accent); }
 
     .strip { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin: 50px 0 0; padding: 0; }
@@ -481,7 +482,7 @@ billing  →  4 node(s) depend on it
     .row.reverse .rtext { order: 2; }
     .rtext h3 { font-family: var(--serif); font-size: clamp(21px, 1.9vw, 28px); margin: 0 0 10px; letter-spacing: -0.01em; }
     .rtext p { color: var(--muted); margin: 0; max-width: 40ch; }
-    .term { font-family: var(--mono); font-size: 13px; line-height: 1.75; color: var(--muted);
+    .term { font-family: var(--mono); font-size: 13px; line-height: 1.75; color: var(--muted); max-width: 100%;
       background: oklch(0.13 0.035 220 / .66); border: 1px solid var(--line); border-radius: 14px;
       padding: 18px 20px; overflow-x: auto; margin: 0; backdrop-filter: blur(6px); }
     .term .g { color: var(--accent); } .term .r { color: oklch(0.78 0.15 30); } .term .dim { color: var(--faint); }
@@ -522,7 +523,33 @@ billing  →  4 node(s) depend on it
       .strata, .row, .row.reverse, .creates-grid, .signals, .hardening { grid-template-columns: 1fr; }
       .creates-grid .term { position: static; }
       .row.reverse .rtext { order: 0; }
-      h1 { font-size: clamp(44px, 13vw, 76px); }
+      h1 { font-size: 72px; }
+    }
+    @media (max-width: 640px) {
+      .nav { align-items: flex-start; flex-direction: column; padding: 18px 24px; }
+      .nav nav { justify-content: flex-start; width: 100%; gap: 8px 14px; font-size: 14px; }
+      .nav .pill { padding: 6px 12px; }
+      main { padding-inline: 24px; }
+      .hero { padding-top: 42px; }
+      .kicker { max-width: 30ch; margin-inline: auto; }
+      h1 { font-size: 48px; line-height: 0.96; letter-spacing: 0; max-width: 8ch; }
+      .lede { font-size: 16px; margin-top: 24px; }
+      .cmd { display: grid; grid-template-columns: auto minmax(0, 1fr); width: 100%; padding: 14px; text-align: left; }
+      .copy { grid-column: 2; justify-self: start; margin-top: 2px; }
+      .strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+      .strip a, .strip > li { min-width: 0; }
+      .strip li { height: 100%; padding-inline: 12px; }
+      .strip span { overflow-wrap: anywhere; }
+      .term { font-size: 12px; padding: 16px; }
+      .term.big { font-size: 12px; }
+    }
+    @media (max-width: 420px) {
+      main { padding-inline: 20px; }
+      .nav { padding-inline: 20px; }
+      h1 { font-size: 44px; }
+      .cmd { font-size: 13px; }
+      .copy { padding-inline: 8px; }
+      .strip { grid-template-columns: 1fr; }
     }
     @media (prefers-reduced-motion: reduce) {
       *, .graph .edges path, .stratum, .graph .halo { animation: none !important; opacity: 1 !important; transform: none !important; stroke-dashoffset: 0 !important; }
