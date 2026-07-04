@@ -40,6 +40,14 @@ workspace's own `AGENTS.md` (from `templates/AGENTS.md`) is distinct from Vivary
 Loop *literacy* — running the loop unattended — is strato's domain too; see the loops
 skill (`.claude/skills/loops/`).
 
+## Versioning
+
+strato is not independently versioned — it has no version number of its own and
+ships no separate release. Its templates and skills ride the `create-vivary` release
+train: any change here lands in a `create-vivary` release, and the change itself is
+recorded in the root [`CHANGELOG.md`](../../CHANGELOG.md) under that package's entries,
+not under a `strato` heading.
+
 > Distilled from throughline + flywheel (Jeff's own repos, used read-only). Not a
 > verbatim copy — the overlap (duplicate memory templates, gates, proactivity rules)
 > is collapsed into one model.
