@@ -34,11 +34,11 @@
 
   <rect class="panel" x="552" y="148" width="180" height="48" rx="12" />
   <text x="572" y="176" class="small">Open issues</text>
-  <text x="668" y="180" class="value">9</text>
+  <text x="668" y="180" class="value">7</text>
 
   <rect class="panel" x="552" y="208" width="180" height="48" rx="12" />
   <text x="572" y="236" class="small">Forks</text>
-  <text x="668" y="240" class="value">0</text>
+  <text x="668" y="240" class="value">1</text>
 
   <text x="28" y="278" class="small">Tracked daily by .github/workflows/track-stats.yml through reviewed PR snapshots. History rows: 14.</text>
 </svg>
