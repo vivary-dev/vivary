@@ -353,7 +353,7 @@ disturbing anything already there.
 |---|---|
 | `--preset coding\|second-brain\|knowledge-work\|writing` | Starter graph to seed. Default: auto-detected — `coding` for a code-file majority, `second-brain` for a markdown-file majority. `--json`/text output states the chosen preset and the reason. |
 | `--yes` | Write the planned files. Without it, `adopt` only analyzes and prints a plan (**dry-run is the default**, unlike `init`). |
-| `--json` | Machine-readable output: `{mode, root, preset, preset_reason, would_create, kept, followups, candidate_modules, skipped_module_collisions}`, plus `doctor` when `--yes` was passed. `mode` is `"dry-run"` or `"applied"`. |
+| `--json` | Machine-readable output: `{mode, root, preset, preset_reason, would_create, kept, followups, candidate_modules, excluded_pre_existing, skipped_module_collisions}`, plus `doctor` when `--yes` was passed. `mode` is `"dry-run"` or `"applied"`. |
 
 `adopt` never moves, renames, edits, or overwrites any existing file. If a file it
 would create already exists, it is skipped and reported "exists, kept" — this
@@ -377,6 +377,16 @@ Adopt uses the same symlink- and out-of-root-hardened write path as `init`, and 
 adopted workspace passes `create-vivary doctor` and `tropo check` (adopt writes a
 `tropo.toml` whose `exclude` list is widened to cover pre-existing brownfield
 content, so it isn't flagged as untyped noise).
+
+Pre-existing content inside Vivary's graph folders (`modules/`, `changes/`,
+`decisions/`, `verification/`, `gates/`) is handled the same way: each
+pre-existing Markdown file there is excluded from the typed graph by exact path
+(reported under `excluded_pre_existing` and as a manual follow-up), while
+everything adopt itself writes stays graph-visible. A pre-existing `modules/`
+sub-directory without an `index.md` additionally gets a thin router index (still
+only adding a file), because doctor requires every module directory to carry one.
+To bring an excluded file into the graph later, add the frontmatter its type
+needs and remove its exclude entry from `tropo.toml`.
 
 ```bash
 # See what adopt would do, without writing anything:

@@ -426,7 +426,7 @@ class AdoptApplyTests(unittest.TestCase):
             self.assertNotIn("doctor", payload)
             for key in (
                 "would_create", "kept", "followups", "preset", "preset_reason",
-                "skipped_module_collisions",
+                "excluded_pre_existing", "skipped_module_collisions",
             ):
                 self.assertIn(key, payload)
         finally:
@@ -497,6 +497,149 @@ class AdoptApplyTests(unittest.TestCase):
             second = create_vivary.plan_adopt(target, repo_root=ROOT)
 
             self.assertEqual(second["would_create"], [])
+        finally:
+            shutil.rmtree(target)
+
+
+class AdoptManagedDirContentTests(unittest.TestCase):
+    """Pre-existing content inside Vivary's graph type folders (modules/,
+    changes/, decisions/, verification/, gates/) must not break the adopted
+    workspace — PR #104 adversarial review finding."""
+
+    def test_pre_existing_decisions_file_adopts_green(self):
+        """Reviewer's exact repro: an untyped decisions/random.md previously
+        failed tropo check with E101 and doctor ok:false after adopt --yes."""
+        target = temp_dir()
+        try:
+            write(target / "decisions" / "random.md", "# random notes, no frontmatter\n")
+            write(target / "src" / "main.py", "print('hello')\n")
+            before = hashlib.sha256((target / "decisions" / "random.md").read_bytes()).hexdigest()
+
+            rc, out = run_cli(["adopt", str(target), "--repo-root", str(ROOT), "--yes", "--json"])
+
+            self.assertEqual(rc, 0)
+            payload = json.loads(out)
+            self.assertTrue(payload["doctor"]["ok"], payload["doctor"]["errors"])
+            self.assertIn("decisions/random.md", payload["excluded_pre_existing"])
+
+            after = hashlib.sha256((target / "decisions" / "random.md").read_bytes()).hexdigest()
+            self.assertEqual(before, after, "pre-existing file must be byte-identical")
+
+            resolver = tropo.ConfigResolver(str(target), str(TROPO))
+            docs = tropo.analyze(str(target), [], resolver)
+            self.assertEqual([f.render() for d in docs for f in d.findings], [])
+        finally:
+            shutil.rmtree(target)
+
+    def test_pre_existing_modules_subdir_gets_router_and_stays_untouched(self):
+        """modules/legacy/notes.md variant: doctor's module-index check is a
+        filesystem check no exclude can satisfy, so adopt must add a thin
+        router index.md while excluding the pre-existing notes.md."""
+        target = temp_dir()
+        try:
+            write(target / "modules" / "legacy" / "notes.md", "# legacy notes, no frontmatter\n")
+            write(target / "src" / "main.py", "print('hello')\n")
+            before = hashlib.sha256((target / "modules" / "legacy" / "notes.md").read_bytes()).hexdigest()
+
+            result = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
+
+            self.assertTrue(result["doctor"]["ok"], result["doctor"]["errors"])
+            self.assertTrue((target / "modules" / "legacy" / "index.md").exists())
+            self.assertIn("modules/legacy/notes.md", result["excluded_pre_existing"])
+
+            after = hashlib.sha256((target / "modules" / "legacy" / "notes.md").read_bytes()).hexdigest()
+            self.assertEqual(before, after)
+
+            resolver = tropo.ConfigResolver(str(target), str(TROPO))
+            docs = tropo.analyze(str(target), [], resolver)
+            self.assertEqual([f.render() for d in docs for f in d.findings], [])
+            nodes, edges = tropo.build_graph(docs)
+            self.assertIn("legacy", nodes, "the new router must be a real graph node")
+            self.assertTrue(all(not e["broken"] for e in edges))
+        finally:
+            shutil.rmtree(target)
+
+    def test_adopts_own_docs_under_managed_dirs_stay_graph_visible(self):
+        """The widened excludes must only cover pre-existing files: everything
+        adopt itself writes under the graph folders stays in the graph."""
+        target = temp_dir()
+        try:
+            write(target / "decisions" / "random.md", "# random\n")
+            write(target / "changes" / "old-change.md", "# old\n")
+            write(target / "modules" / "legacy" / "notes.md", "# legacy\n")
+            for i in range(6):
+                write(target / "docs" / f"topic-{i}.md", f"# Topic {i}\n")
+            write(target / "src" / "main.py", "print(1)\n")
+
+            result = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
+
+            self.assertTrue(result["doctor"]["ok"], result["doctor"]["errors"])
+            resolver = tropo.ConfigResolver(str(target), str(TROPO))
+            docs = tropo.analyze(str(target), [], resolver)
+            self.assertEqual([f.render() for d in docs for f in d.findings], [])
+            nodes, _ = tropo.build_graph(docs)
+            for node in (
+                "modules", "agent-workspace", "scaffold-init",
+                "0001-vivary-baseline", "scaffold-smoke", "human-gates",
+                "docs", "legacy",
+            ):
+                self.assertIn(node, nodes, f"adopt-created doc missing from graph: {node}")
+            self.assertNotIn("random", nodes)
+            self.assertNotIn("old-change", nodes)
+            self.assertNotIn("notes", nodes)
+        finally:
+            shutil.rmtree(target)
+
+    def test_dry_run_reports_excluded_pre_existing_in_followups(self):
+        target = temp_dir()
+        try:
+            write(target / "decisions" / "random.md", "# random\n")
+            write(target / "src" / "main.py", "print(1)\n")
+            before = snapshot(target)
+
+            plan = create_vivary.plan_adopt(target, repo_root=ROOT)
+
+            self.assertEqual(snapshot(target), before, "planning must stay read-only")
+            self.assertEqual(plan["excluded_pre_existing"], ["decisions/random.md"])
+            self.assertTrue(
+                any("decisions/" in f and "excluded from the typed graph" in f for f in plan["followups"])
+            )
+        finally:
+            shutil.rmtree(target)
+
+    def test_rerun_on_adopted_workspace_is_idempotent(self):
+        """Re-adopting must not flip the detected preset (adopt's own root
+        contract files don't vote) and must not claim exclusions it will never
+        write (tropo.toml already exists and is kept)."""
+        target = temp_dir()
+        try:
+            write(target / "decisions" / "random.md", "# random\n")
+            write(target / "src" / "main.py", "print(1)\n")
+
+            first = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
+            self.assertEqual(first["preset"], "coding")
+
+            second = create_vivary.plan_adopt(target, repo_root=ROOT)
+
+            self.assertEqual(second["preset"], "coding")
+            self.assertEqual(second["would_create"], [])
+            self.assertEqual(second["excluded_pre_existing"], [])
+        finally:
+            shutil.rmtree(target)
+
+    def test_preset_tie_does_not_claim_majority(self):
+        target = temp_dir()
+        try:
+            write(target / "a.md", "# a\n")
+            write(target / "b.md", "# b\n")
+            write(target / "src" / "one.py", "x = 1\n")
+            write(target / "src" / "two.py", "y = 2\n")
+
+            result = create_vivary.plan_adopt(target, repo_root=ROOT)
+
+            self.assertEqual(result["preset"], "coding")
+            self.assertNotIn("majority tree", result["preset_reason"])
+            self.assertIn("no file-type majority", result["preset_reason"])
         finally:
             shutil.rmtree(target)
 

@@ -2043,6 +2043,13 @@ class BrownfieldInventory:
 
             depth = 0 if not rel_dir else rel_dir.count("/") + 1
             for name in filenames:
+                # Root files owned by (or reserved for) the Vivary scaffold
+                # don't vote in the preset heuristic — otherwise re-running
+                # adopt on an adopted tree would count its own README/SOUL/
+                # STATE contract files as markdown and flip the detected
+                # preset, the same reason Vivary-owned dirs are pruned above.
+                if depth == 0 and name in _ADOPT_RESERVED_ROOT_FILES:
+                    continue
                 suffix = Path(name).suffix.lower()
                 if suffix in (".md", ".markdown"):
                     self.markdown_count += 1
@@ -2076,6 +2083,12 @@ class BrownfieldInventory:
                 "second-brain",
                 f"markdown-majority tree ({self.markdown_count} .md vs "
                 f"{self.code_count} code file(s))",
+            )
+        if self.markdown_count == self.code_count:
+            return (
+                "coding",
+                f"no file-type majority ({self.code_count} code file(s) vs "
+                f"{self.markdown_count} .md); defaulting to coding",
             )
         return (
             "coding",
@@ -2120,6 +2133,36 @@ Keep this as a thin pointer. If `{rel_dir}/` grows its own `index.md` or
 """
 
 
+def _preexisting_module_router_doc(project: str, module_id: str) -> str:
+    """Thin router for a pre-existing `modules/<id>/` directory that has no
+    `index.md`. Doctor requires every module directory to carry an index — a
+    filesystem check no tropo.toml exclude can satisfy — so adopt adds this one
+    file and leaves everything already in the directory untouched (and excluded
+    from the typed graph)."""
+    return f"""---
+project: {project}
+status: active
+module_area: pre-existing module directory adopted from the brownfield tree
+related_modules: [agent-workspace]
+---
+# {module_id}
+
+## Purpose
+
+Router for the pre-existing `modules/{module_id}/` directory, found during
+`create-vivary adopt`. Vivary did not move, rename, or edit anything already in
+this directory; its pre-existing files are excluded from the typed graph in
+`tropo.toml`.
+
+## Read Next
+
+- Pre-existing files: `modules/{module_id}/` (read them directly)
+
+To bring a pre-existing file into the graph, add the module frontmatter it needs
+and remove its exclude entry from `tropo.toml`.
+"""
+
+
 # Top-level names adopt itself writes into and must keep fully masked (adopt puts
 # non-node content directly inside them, e.g. `templates/AGENTS.md`,
 # `memory/.gitkeep`). Bare-name excludes are correct and safe for these because
@@ -2137,11 +2180,23 @@ _ADOPT_RESERVED_ROOT_FILES = {
     "MEMORY.md", "bug-risk-playbook.md", "tropo.toml", ".gitignore",
 }
 
+# The tropo type folders. Pre-existing markdown inside these is typed by the
+# folder-as-type rule the moment adopt drops a tropo.toml, so an untyped
+# pre-existing `decisions/random.md` would fail `tropo check`/`doctor` with
+# E101. Unlike `templates/` or `memory/`, these cannot be bare-name excluded —
+# adopt's own graph docs live here — so pre-existing files are excluded
+# per-path instead.
+_ADOPT_GRAPH_TYPE_DIRS = ("changes", "decisions", "gates", "modules", "verification")
 
-def _adopt_tropo_config(inventory: BrownfieldInventory) -> str:
+
+def _adopt_tropo_config(
+    inventory: BrownfieldInventory, *, keep_paths: set[Path] = frozenset()
+) -> tuple[str, list[str]]:
     """Same base tropo.toml exclude/type config as a fresh scaffold, adjusted so
-    `tropo check`/`doctor` only validate the Vivary-managed folders adopt creates,
-    not brownfield content it never touched.
+    `tropo check`/`doctor` only validate the Vivary-managed content adopt
+    creates, not brownfield content it never touched. Returns
+    ``(config_text, excluded_pre_existing)`` where the second element lists the
+    pre-existing graph-folder files that were excluded (for reporting).
 
     tropo's `is_excluded` treats any slash-free pattern as a bare directory/file
     *name* that matches at any depth (so a bare `"docs"` would also prune
@@ -2149,15 +2204,22 @@ def _adopt_tropo_config(inventory: BrownfieldInventory) -> str:
     brownfield `docs/`). Patterns that contain a `/` are start-anchored instead
     and only ever match at the root. So:
 
-    - Directories adopt itself writes into (`_ADOPT_MANAGED_TOP_LEVEL`, e.g.
-      `templates/`, `modules/`) keep the base's bare-name exclude — safe, since
-      adopt never nests a same-named module id under `modules/` for them.
+    - Non-graph directories adopt itself writes into (`templates/`, `memory/`,
+      `heartbeat-reports/`, dotdirs) keep the base's bare-name exclude.
     - Every other pre-existing top-level brownfield directory (e.g. a root
       `docs/` or `src/`) is excluded by root-anchored `"<dir>/<child>"` entries
       for each of its current children instead of its bare name, so a same-named
       module router stays visible to the graph.
     - Pre-existing top-level brownfield *files* are excluded by exact name
       (root files are never nested elsewhere in the Vivary-managed tree).
+    - Pre-existing *markdown* files inside the graph type folders
+      (`_ADOPT_GRAPH_TYPE_DIRS`) are excluded by exact root-anchored path, so
+      untyped brownfield ADRs/notes there don't fail the check while adopt's
+      own newly-written docs stay graph-visible (only-adds guarantees new docs
+      are new paths, never in this pre-existing enumeration). Files at paths the
+      scaffold itself plans (`keep_paths`) are NOT excluded: they are kept
+      as-is, and other scaffold docs reference their node ids, so excluding
+      them would break edges instead of fixing anything.
 
     Known limitation: a file added to an excluded brownfield directory after
     adopt runs (e.g. a later `docs/new-page.md`) is not covered by the
@@ -2180,7 +2242,24 @@ def _adopt_tropo_config(inventory: BrownfieldInventory) -> str:
         else:
             excludes.append(name)
 
-    return _render_tropo_config(tuple(excludes))
+    excluded_pre_existing: list[str] = []
+    for dir_name in _ADOPT_GRAPH_TYPE_DIRS:
+        managed = inventory.target / dir_name
+        if not managed.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(managed):
+            dirnames.sort()
+            rel_dir = os.path.relpath(dirpath, inventory.target).replace("\\", "/")
+            for fname in sorted(filenames):
+                if not fname.lower().endswith((".md", ".markdown")):
+                    continue
+                rel = f"{rel_dir}/{fname}"
+                if (inventory.target / rel) in keep_paths:
+                    continue
+                excluded_pre_existing.append(rel)
+    excludes.extend(excluded_pre_existing)
+
+    return _render_tropo_config(tuple(excludes)), excluded_pre_existing
 
 
 def _adopt_gitignore_followups(target: Path) -> list[str]:
@@ -2208,8 +2287,11 @@ def plan_adopt(
     Returns a dict with keys: `target`, `preset`, `preset_reason`, `inventory`
     (candidate module dirs + has_agents_md/has_claude_md/has_gitignore),
     `would_create` (list[Path]), `kept` (list[Path] that already exist and are
-    skipped), `followups` (list[str] manual .gitignore lines), and the raw
-    `writes`/`copies` plan tuples for `adopt_workspace` to reuse.
+    skipped), `followups` (list[str]: manual .gitignore lines plus per-folder
+    notes about pre-existing graph-folder content that was excluded),
+    `gitignore_followups` / `excluded_pre_existing` (the two followup groups
+    separately), `skipped_module_collisions`, and the raw `writes`/`copies`
+    plan tuples for `adopt_workspace` to reuse.
     """
     root = Path(repo_root) if repo_root is not None else default_repo_root()
     root = root.resolve()
@@ -2241,10 +2323,23 @@ def plan_adopt(
     )
     # Adopt's tropo.toml must exclude brownfield content adopt doesn't own, or a
     # correctly-adopted workspace would fail its own `doctor`/`tropo check` gate.
-    writes = [
-        (dst, _adopt_tropo_config(inventory) if dst.name == "tropo.toml" and dst.parent == target else text)
-        for dst, text in writes
-    ]
+    # `keep_paths` are the scaffold's own planned destinations: a pre-existing
+    # file sitting at one of those exact paths is kept and must stay in the
+    # graph, because other scaffold docs reference its node id.
+    # When tropo.toml already exists (kept — e.g. re-running adopt on an adopted
+    # workspace), this run writes no config and therefore excludes nothing:
+    # don't compute or report exclusions that would never land in a file.
+    scaffold_planned_paths = {dst for dst, _ in writes} | {dst for _, dst in copies}
+    excluded_pre_existing: list[str] = []
+    if not (target / "tropo.toml").exists():
+        adopt_tropo_text, excluded_pre_existing = _adopt_tropo_config(
+            inventory, keep_paths=scaffold_planned_paths
+        )
+        writes = [
+            (dst, adopt_tropo_text if dst.name == "tropo.toml" and dst.parent == target else text)
+            for dst, text in writes
+        ]
+    project_name = target.name or "vivary-workspace"
 
     # A candidate router must never land on a path the scaffold itself already
     # plans to write (e.g. a brownfield top-level `codebase/` colliding with the
@@ -2256,8 +2351,9 @@ def plan_adopt(
     # Two different candidate directories can also flatten to the same module id
     # (e.g. top-level `docs-guides/` alongside nested `docs/guides/`); track
     # emitted router paths too so the second one is skipped instead of silently
-    # clobbering the first router write in the same run.
-    scaffold_planned_paths = {dst for dst, _ in writes} | {dst for _, dst in copies}
+    # clobbering the first router write in the same run. A pre-existing legacy
+    # `modules/<id>.md` file also blocks a router: creating the paired index
+    # would trip doctor's legacy-module-file-coexists error.
     skipped_module_collisions: list[str] = []
     emitted_router_paths: set[Path] = set()
     for rel_dir in inventory.candidate_modules:
@@ -2266,13 +2362,41 @@ def plan_adopt(
         if router_path in scaffold_planned_paths or router_path in emitted_router_paths:
             skipped_module_collisions.append(rel_dir)
             continue
+        if (target / "modules" / f"{module_id}.md").exists():
+            skipped_module_collisions.append(rel_dir)
+            continue
         emitted_router_paths.add(router_path)
         writes.append(
             (
                 router_path,
-                _candidate_module_router_doc(target.name or "vivary-workspace", rel_dir),
+                _candidate_module_router_doc(project_name, rel_dir),
             )
         )
+
+    # Pre-existing sub-directories of modules/ would fail doctor's module-index
+    # check ("module directory missing index.md") — a filesystem check no
+    # tropo.toml exclude can satisfy. Give each one a thin router index.md:
+    # still only adding a file, never touching the directory's existing
+    # contents, which the widened excludes above already keep out of the graph.
+    modules_dir = target / "modules"
+    if modules_dir.is_dir():
+        for child in sorted(modules_dir.iterdir()):
+            if not child.is_dir() or child.name.startswith("."):
+                continue
+            router_path = child / "index.md"
+            if (
+                router_path.exists()
+                or router_path in scaffold_planned_paths
+                or router_path in emitted_router_paths
+            ):
+                continue
+            if (modules_dir / f"{child.name}.md").exists():
+                skipped_module_collisions.append(f"modules/{child.name}")
+                continue
+            emitted_router_paths.add(router_path)
+            writes.append(
+                (router_path, _preexisting_module_router_doc(project_name, child.name))
+            )
 
     would_create: list[Path] = []
     kept: list[Path] = []
@@ -2293,7 +2417,13 @@ def plan_adopt(
 
     would_create = sorted(set(would_create))
     kept = sorted(set(kept))
-    followups = _adopt_gitignore_followups(target) if inventory.has_gitignore else []
+    gitignore_followups = _adopt_gitignore_followups(target) if inventory.has_gitignore else []
+    excluded_dirs = sorted({rel.split("/", 1)[0] for rel in excluded_pre_existing})
+    exclusion_followups = [
+        f"pre-existing content under {dir_name}/ was excluded from the typed graph "
+        "in tropo.toml; add frontmatter and remove its exclude entries to bring it in"
+        for dir_name in excluded_dirs
+    ]
 
     return {
         "target": target,
@@ -2302,7 +2432,9 @@ def plan_adopt(
         "inventory": inventory,
         "would_create": would_create,
         "kept": kept,
-        "followups": followups,
+        "followups": gitignore_followups + exclusion_followups,
+        "gitignore_followups": gitignore_followups,
+        "excluded_pre_existing": sorted(excluded_pre_existing),
         "skipped_module_collisions": sorted(skipped_module_collisions),
         "writes": final_writes,
         "copies": final_copies,
@@ -2354,6 +2486,7 @@ def _adopt_report_to_json(result: dict, *, mode: str) -> dict:
         "kept": [p.relative_to(result["target"]).as_posix() for p in result["kept"]],
         "followups": result["followups"],
         "candidate_modules": inventory.candidate_modules,
+        "excluded_pre_existing": result["excluded_pre_existing"],
         "skipped_module_collisions": result["skipped_module_collisions"],
     }
     if mode == "applied":
@@ -2375,12 +2508,24 @@ def _print_adopt_report(result: dict, *, mode: str) -> None:
         rel = dst.relative_to(target).as_posix()
         print(f"  exists, kept: {rel}")
 
-    if result["followups"]:
+    if result["gitignore_followups"]:
         print("\nManual follow-up: your .gitignore exists and was left untouched.")
         print("Add these privacy lines yourself:")
-        for line in result["followups"]:
+        for line in result["gitignore_followups"]:
             for sub in line.splitlines():
                 print(f"  {sub}")
+
+    if result["excluded_pre_existing"]:
+        print(
+            "\nManual follow-up: pre-existing content under Vivary-managed graph "
+            "folders was excluded from the typed graph (tropo.toml):"
+        )
+        for rel in result["excluded_pre_existing"]:
+            print(f"  excluded from graph: {rel}")
+        print(
+            "Add frontmatter and remove a file's exclude entry in tropo.toml to "
+            "bring it into the graph."
+        )
 
     if result["skipped_module_collisions"]:
         print("\nSkipped module router(s) — Vivary already uses this module name:")
