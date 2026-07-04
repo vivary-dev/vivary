@@ -866,6 +866,156 @@ def test_cmd_query_no_results(tmp_path):
     assert out["results"] == []
 
 
+# --- map: read-only filesystem inventory -----------------------------------
+
+def _map_tree(tmp_path):
+    """Nested code + docs + an ignored folder (node_modules) + an oversized
+    file, plus one module with an index and one without."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.py").write_text("print('a')\n", encoding="utf-8")
+    (tmp_path / "src" / "b.py").write_text("print('b')\n", encoding="utf-8")
+    (tmp_path / "src" / "c.py").write_text("print('c')\n", encoding="utf-8")
+    (tmp_path / "src" / "d.py").write_text("print('d')\n", encoding="utf-8")
+    (tmp_path / "src" / "e.py").write_text("print('e')\n", encoding="utf-8")
+    # src has 5 files and no index -> should be flagged as a likely module.
+
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "README.md").write_text("# Docs\n", encoding="utf-8")
+    (tmp_path / "docs" / "guide.md").write_text("# Guide\n", encoding="utf-8")
+    # docs has an index (README.md) -> should NOT be flagged.
+
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "pkg.js").write_text("// pkg\n", encoding="utf-8")
+    (tmp_path / "node_modules" / "sub").mkdir()
+    (tmp_path / "node_modules" / "sub" / "x.js").write_text("// x\n", encoding="utf-8")
+    # node_modules is fixed-skip-list -> must be entirely absent from output.
+
+    (tmp_path / "big.bin").write_bytes(b"0" * 5000)  # the oversized file
+
+
+def _map_args(root, json_out=True, depth=None, max_entries=None):
+    return argparse.Namespace(root=root, json=json_out, depth=depth, max_entries=max_entries)
+
+
+def test_map_counts_and_ignored_folder_absent(tmp_path):
+    _map_tree(tmp_path)
+    rc, out = _capture_rc(tropo.cmd_map, _map_args(str(tmp_path)))
+    assert rc == 0
+    # 5 .py + 2 .md + 1 .bin = 8 files; node_modules' 2 files must not be counted.
+    assert out["summary"]["total_files"] == 8
+    dir_paths = [d["path"] for d in out["directories"]]
+    assert not any("node_modules" in p for p in dir_paths)
+    assert not any("pkg.js" in f["path"] for f in out["summary"]["largest_files"])
+    assert not any("node_modules" in p for p in out["summary"]["index_files"])
+
+    src_row = next(d for d in out["directories"] if d["path"] == "src")
+    assert src_row["files"] == 5
+    docs_row = next(d for d in out["directories"] if d["path"] == "docs")
+    assert docs_row["files"] == 2
+    assert docs_row["has_index"] is True
+
+    largest_paths = [f["path"] for f in out["summary"]["largest_files"]]
+    assert "big.bin" in largest_paths
+    assert out["summary"]["largest_files"][0]["path"] == "big.bin"  # biggest first
+
+
+def test_map_missing_index_detection(tmp_path):
+    _map_tree(tmp_path)
+    rc, out = _capture_rc(tropo.cmd_map, _map_args(str(tmp_path)))
+    assert rc == 0
+    flagged = out["summary"]["likely_modules_without_index"]
+    assert "src" in flagged        # 5 files, no index.md/README.md
+    assert "docs" not in flagged   # has README.md
+    assert "docs/README.md" in out["summary"]["index_files"]
+
+
+def test_map_json_is_deterministic(tmp_path):
+    import contextlib
+    import io
+    import json as _json
+    _map_tree(tmp_path)
+
+    def run():
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            tropo.cmd_map(_map_args(str(tmp_path)))
+        return buf.getvalue()
+
+    first, second = run(), run()
+    assert first == second
+    _json.loads(first)  # parses cleanly
+
+
+def test_map_paths_use_forward_slashes(tmp_path):
+    _map_tree(tmp_path)
+    rc, out = _capture_rc(tropo.cmd_map, _map_args(str(tmp_path)))
+    assert rc == 0
+    assert "\\" not in out["root"]
+    src_row = next(d for d in out["directories"] if d["path"] == "src")
+    assert "\\" not in src_row["path"]
+    for f in out["summary"]["largest_files"]:
+        assert "\\" not in f["path"]
+    for p in out["summary"]["index_files"]:
+        assert "\\" not in p
+
+
+def test_map_is_read_only(tmp_path):
+    import contextlib
+    import io
+    _map_tree(tmp_path)
+    before = {}
+    for dirpath, dirnames, filenames in os.walk(tmp_path):
+        for fname in filenames:
+            full = os.path.join(dirpath, fname)
+            st = os.stat(full)
+            before[full] = (st.st_mtime_ns, st.st_size)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        tropo.cmd_map(_map_args(str(tmp_path), json_out=False, depth=2, max_entries=3))
+        tropo.cmd_map(_map_args(str(tmp_path)))
+
+    after = {}
+    for dirpath, dirnames, filenames in os.walk(tmp_path):
+        for fname in filenames:
+            full = os.path.join(dirpath, fname)
+            st = os.stat(full)
+            after[full] = (st.st_mtime_ns, st.st_size)
+
+    assert before == after  # same file set, same sizes, same mtimes
+
+
+def test_map_markdown_output_and_max_entries(tmp_path):
+    _map_tree(tmp_path)
+    import contextlib
+    import io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = tropo.cmd_map(_map_args(str(tmp_path), json_out=False, max_entries=1))
+    out = buf.getvalue()
+    assert rc == 0
+    assert out.startswith("# tropo map:")
+    assert "## Directories" in out
+    assert "## Likely modules without an index" in out
+    # max_entries=1 caps the table to the root row only: the header row plus
+    # exactly one data row (the "|---|" divider does not start with "| ").
+    table_lines = [ln for ln in out.splitlines() if ln.startswith("| ")]
+    assert len(table_lines) == 2
+    assert table_lines[1].startswith("| . |")
+
+
+def test_map_depth_limits_table_not_counts(tmp_path):
+    _map_tree(tmp_path)
+    rc, out = _capture_rc(tropo.cmd_map, _map_args(str(tmp_path), depth=0))
+    assert rc == 0
+    assert out["directories"] == [{
+        "path": ".", "depth": 0, "files": 8, "size": out["directories"][0]["size"],
+        "dominant_extensions": out["directories"][0]["dominant_extensions"],
+        "has_index": False,
+    }]
+    # counts still reflect the whole tree even though the table is depth 0
+    assert out["summary"]["total_files"] == 8
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

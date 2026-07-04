@@ -30,7 +30,8 @@ storage/migration commands.
 
 ```
 tropo [command] [paths...] [--lenient | --strict] [--json] [--quiet]
-                [--depth N] [--out FILE] [--packs a,b] [--root DIR] [--config PATH]
+                [--depth N] [--max-entries N] [--out FILE] [--packs a,b]
+                [--root DIR] [--config PATH]
                 [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]]
                 [--snippet N] [--explain] [--budget N]
 ```
@@ -54,6 +55,7 @@ says. `tropo.toml` declares the types.
 | `find <text> [--budget N] [--k N] [--json]` | Human-friendly context packet: the smallest typed nodes/files worth opening first, with reasons and snippets trimmed to an approximate token budget. |
 | `query <text> [--k N] [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]] [--snippet N] [--explain] [--json]` | Filtered graph search over typed nodes. Searches id/title, frontmatter, path, body, and outbound edge context, then returns real graph ids/types/paths. |
 | `migrate --from file --to embedded [--dry-run] [--json]` | Move file-backed graph data into the configured embedded backend. Cloud migration, non-file sources, backend installation, and `migrated_at` tracking are future 0.3.x work. |
+| `map [--root PATH] [--depth N] [--max-entries N] [--json]` | Read-only filesystem inventory of a repo/vault/docs tree — no `tropo.toml` required. See [Filesystem map](#filesystem-map-tropo-map) below. |
 
 `tropo find` is the default "what should I read first?" command for humans and agents.
 `tropo query` is the lower-level filtered search primitive. Both are graph/text
@@ -108,6 +110,56 @@ configs — a sub-folder may turn it on, never off.
 | `W220` | warn | ref points at no document id (broken edge) |
 
 (Under the default strict mode, every `W2xx` fails the check.)
+
+### Filesystem map (`tropo map`)
+
+```
+tropo map [--root PATH] [--depth N] [--max-entries N] [--json]
+```
+
+Read-only inventory of a large repo, vault, docs tree, or file system — no
+`tropo.toml` required, and nothing is ever written. Meant to let an agent
+understand the shape of a tree without opening hundreds of files: a directory
+table, extension and size summary, existing index/routing files, and folders
+that look like modules but have no `index.md`/`README.md`.
+
+| Flag | Effect |
+|---|---|
+| `--root PATH` | Tree to inventory (default: current directory). Does **not** need a `tropo.toml`. |
+| `--depth N` | Directory-table depth, root = depth 0 (default: `3`). Counts (totals, extensions, largest files, missing-index detection) always cover the *whole* tree regardless of `--depth` — only the table rows are limited. |
+| `--max-entries N` | Cap the number of directory rows printed in the table (default: unlimited). |
+| `--json` | Emit a single JSON object with sorted keys and deterministic ordering (stable to diff and safe to cite). |
+
+Skipped directories: `.git`, `node_modules`, `__pycache__`, `.venv`, `venv`,
+`dist`, `build`, `.astro`, `.next`, `target`, plus any `exclude` patterns from
+a `tropo.toml` found by walking up from `--root` (the same `is_excluded`
+mechanism `check`/`graph` use) — a missing or invalid config never blocks the
+map. "Likely modules without an index" = directories at depth 1-2 with
+5 or more files (recursive count) and no `index.md`/`README.md`.
+
+```
+$ tropo map --root . --depth 2
+# tropo map: /repo
+
+163 file(s), 65 director(y/ies), depth ≤ 2
+
+## Directories
+
+| Path | Depth | Files | Size | Dominant extensions | Index? |
+|---|---|---|---|---|---|
+| . | 0 | 163 | 1.6MB | .md (89), .py (14) | yes |
+| docs | 1 | 22 | 574.0KB | .md (18), .webp (4) | yes |
+| packages/tropo | 2 | 6 | 128.4KB | .py (2), .md (2) | no |
+
+## File extensions (top 10)
+...
+
+## Likely modules without an index
+
+Directories at depth 1-2 with >= 5 files (recursive) and no `index.md`/`README.md`:
+
+- packages/tropo
+```
 
 ### `tropo.toml`
 
