@@ -10,12 +10,12 @@ launcher; a generated workspace can be scaffolded and checked in minutes.
 
 - **Live site:** https://vivary.vercel.app/
 - **GitHub:** https://github.com/vivary-dev/vivary (public · MIT)
-- **PyPI:** [`create-vivary`](https://pypi.org/project/create-vivary/) 0.3.0 ·
-  [`vivary-tropo`](https://pypi.org/project/vivary-tropo/) 0.4.0 ·
+- **PyPI:** [`create-vivary`](https://pypi.org/project/create-vivary/) 0.3.1 ·
+  [`vivary-tropo`](https://pypi.org/project/vivary-tropo/) 0.4.1 ·
   [`vivary-ozone`](https://pypi.org/project/vivary-ozone/) 0.2.0 ·
   [`vivary-exo`](https://pypi.org/project/vivary-exo/) 0.2.2 ·
   [`vivary-memory-cognee`](https://pypi.org/project/vivary-memory-cognee/) 0.1.0
-- **npm:** [`@vivary/create`](https://www.npmjs.com/package/@vivary/create) 0.3.0
+- **npm:** [`@vivary/create`](https://www.npmjs.com/package/@vivary/create) 0.3.1
 
 ## Proof
 
@@ -46,9 +46,9 @@ Mobile:
 - **Restraint:** no third-party dependencies; the framework costs almost nothing
   to load. Plain Markdown, any editor, Claude Code *and* Codex.
 
-> Current release line: `create-vivary` 0.3.0 (PyPI), `@vivary/create` 0.3.0 (npm),
-> optional `vivary-memory-cognee` 0.1.0, `vivary-tropo` 0.4.0, `vivary-ozone` 0.2.0,
-> `vivary-exo` 0.2.2. Versions are independent; there is no single "Vivary 0.4.0".
+> Current release line: `create-vivary` 0.3.1 (PyPI), `@vivary/create` 0.3.1 (npm),
+> optional `vivary-memory-cognee` 0.1.0, `vivary-tropo` 0.4.1, `vivary-ozone` 0.2.0,
+> `vivary-exo` 0.2.2. Versions are independent; there is no single "Vivary 0.4.1".
 > This line adds `tropo map` (read-only filesystem inventory), brownfield
 > `create-vivary adopt`, `doctor --trend` drift tracking, and strato integrity gates
 > in CI.

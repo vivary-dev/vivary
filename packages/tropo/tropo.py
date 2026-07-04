@@ -38,7 +38,7 @@ import tomllib
 from collections import Counter, deque
 from fnmatch import fnmatchcase
 
-__version__ = "0.3.0"
+__version__ = "0.4.1"
 
 # ---------------------------------------------------------------------------
 # Minimal YAML-subset parser for frontmatter (zero-dependency).

@@ -626,7 +626,7 @@ class CreateVivaryTests(unittest.TestCase):
                 create_vivary.main(["--version"])
 
         self.assertEqual(exc.exception.code, 0)
-        self.assertEqual(stdout.getvalue().strip(), "create-vivary 0.2.8")
+        self.assertEqual(stdout.getvalue().strip(), f"create-vivary {create_vivary.__version__}")
 
     def test_with_default_command_injects_init(self):
         # Bare target -> init (parity with the npm launcher's mapArgs).
@@ -1432,6 +1432,19 @@ class TestAgentFlags(unittest.TestCase):
             )
             self.assertIsNone(out["trend"])
             self.assertFalse((target / ".vivary" / "doctor-state.json").exists())
+
+
+class VersionParityTests(unittest.TestCase):
+    def test_version_constant_matches_pyproject_and_npm(self):
+        import tomllib
+        root = Path(__file__).resolve().parents[1]
+        declared = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+        self.assertEqual(
+            create_vivary.__version__, declared,
+            "create_vivary.__version__ and pyproject version must be bumped together",
+        )
+        npm = json.loads((root / "npm" / "package.json").read_text(encoding="utf-8"))
+        self.assertEqual(npm["version"], declared, "npm package.json must stay in lockstep")
 
 
 if __name__ == "__main__":

@@ -114,8 +114,8 @@ python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # cl
 ```
 
 Current release truth lives in [README.md](README.md) and [CHANGELOG.md](CHANGELOG.md):
-`create-vivary` / `@vivary/create` 0.3.0, `vivary-memory-cognee` 0.1.0,
-`vivary-tropo` 0.4.0, `vivary-exo` 0.2.2, and `vivary-ozone` 0.2.0. Versions are
-independent; there is no single "Vivary 0.4.0" release. This line adds `tropo map`,
+`create-vivary` / `@vivary/create` 0.3.1, `vivary-memory-cognee` 0.1.0,
+`vivary-tropo` 0.4.1, `vivary-exo` 0.2.2, and `vivary-ozone` 0.2.0. Versions are
+independent; there is no single "Vivary 0.4.1" release. This line adds `tropo map`,
 brownfield `create-vivary adopt`, `doctor --trend` drift tracking, and strato
 integrity gates in CI. Full guides live in [docs/](docs/).
