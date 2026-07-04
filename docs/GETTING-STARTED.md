@@ -102,6 +102,22 @@ With `--active-context cocoindex-code`, the workspace also includes
 With `--memory local` or `--memory cognee`, it includes `docs/semantic-memory.md`,
 `.vivary/memory.toml`, and semantic-memory graph nodes.
 
+### Adopt an existing repo or vault
+
+Already have a codebase or a notes folder? Point Vivary at it instead of starting
+from an empty directory:
+
+```bash
+create-vivary adopt . --json      # dry-run by default: prints the plan, writes nothing
+create-vivary adopt . --yes       # apply it
+```
+
+`adopt` only *adds* files — it never edits, renames, or overwrites anything already
+there (an existing `README.md` or `AGENTS.md` is reported "exists, kept"), and it
+auto-detects a preset from your file mix. Markdown-heavy directories it finds get a
+thin router under `modules/` instead of being touched directly. See
+[COMMANDS.md](COMMANDS.md#adopt--point-vivary-at-your-mess) for the full behavior.
+
 ## 3. Check that it's healthy
 
 `doctor` confirms the workspace was created correctly, including that private context

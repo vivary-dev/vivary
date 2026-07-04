@@ -23,7 +23,7 @@ ACTIVE_CONTEXTS = ("cocoindex-code",)
 
 MEMORY_MODES = ("none", "local", "cognee")
 
-SUBCOMMANDS = ("init", "doctor", "wizard", "capabilities")
+SUBCOMMANDS = ("init", "doctor", "wizard", "capabilities", "adopt")
 
 REQUIRED_WORKSPACE_FILES = (
     "README.md",
@@ -135,6 +135,68 @@ def _resolve_scaffold_target(target: str | Path) -> Path:
     return absolute.resolve(strict=False)
 
 
+def _build_scaffold_plan(
+    target: Path,
+    sources: dict[str, Path],
+    *,
+    preset: str,
+    obsidian: bool,
+    active_context: str | None,
+    memory: str,
+    preserve_cocoindex_ignore: bool = False,
+) -> tuple[list[tuple[Path, str]], list[tuple[Path, Path]]]:
+    """Build the (writes, copies) plan for a full scaffold at `target`.
+
+    Pure planning: computes destinations and generated text/copy sources without
+    touching disk. Shared by `scaffold_workspace` (init/wizard) and `adopt_workspace`
+    (brownfield adopt), which filters this same plan down to files that don't
+    already exist.
+    """
+    project = target.name or "vivary-workspace"
+    today = date.today().isoformat()
+
+    writes: list[tuple[Path, str]] = [
+        (target / "README.md", _workspace_readme(project, preset, active_context, memory)),
+        (
+            target / ".gitignore",
+            _workspace_gitignore(
+                active_context,
+                preserve_cocoindex_ignore=preserve_cocoindex_ignore,
+            ),
+        ),
+        (target / "tropo.toml", _workspace_tropo_config()),
+        (
+            target / "modules" / "index.md",
+            _modules_index_doc(
+                project,
+                PRESET_STARTERS[preset],
+                active_context,
+                preset=preset,
+                memory=memory,
+            ),
+        ),
+        (_module_index_path(target, "agent-workspace"), _module_doc(project)),
+        (target / "changes" / "scaffold-init.md", _change_doc(project)),
+        (target / "decisions" / "0001-vivary-baseline.md", _decision_doc(project, today)),
+        (target / "verification" / "scaffold-smoke.md", _verification_doc(project)),
+        (target / "gates" / "human-gates.md", _gate_doc(project)),
+        (target / "memory" / ".gitkeep", ""),
+        (target / "heartbeat-reports" / ".gitkeep", ""),
+    ]
+    writes.extend(_preset_writes(target, project, PRESET_STARTERS[preset]))
+    if preset == "knowledge-work":
+        writes.extend(_knowledge_work_writes(target, project))
+    if active_context == "cocoindex-code":
+        writes.extend(_cocoindex_active_context_writes(target, project))
+    if memory != "none":
+        writes.extend(_semantic_memory_writes(target, project, memory))
+    if obsidian:
+        writes.extend(_obsidian_writes(target))
+
+    copies = _copy_plan(target, sources, active_context=active_context)
+    return writes, copies
+
+
 def scaffold_workspace(
     target: str | Path,
     *,
@@ -179,54 +241,21 @@ def scaffold_workspace(
         if not src.exists():
             raise ScaffoldError(f"missing scaffold source for {label}: {src}")
 
-    project = target.name or "vivary-workspace"
-    today = date.today().isoformat()
-
     preserve_cocoindex_ignore = (
         active_context != "cocoindex-code"
         and force
         and (target / ".cocoindex_code").exists()
     )
 
-    writes: list[tuple[Path, str]] = [
-        (target / "README.md", _workspace_readme(project, preset, active_context, memory)),
-        (
-            target / ".gitignore",
-            _workspace_gitignore(
-                active_context,
-                preserve_cocoindex_ignore=preserve_cocoindex_ignore,
-            ),
-        ),
-        (target / "tropo.toml", _workspace_tropo_config()),
-        (
-            target / "modules" / "index.md",
-            _modules_index_doc(
-                project,
-                PRESET_STARTERS[preset],
-                active_context,
-                preset=preset,
-                memory=memory,
-            ),
-        ),
-        (_module_index_path(target, "agent-workspace"), _module_doc(project)),
-        (target / "changes" / "scaffold-init.md", _change_doc(project)),
-        (target / "decisions" / "0001-vivary-baseline.md", _decision_doc(project, today)),
-        (target / "verification" / "scaffold-smoke.md", _verification_doc(project)),
-        (target / "gates" / "human-gates.md", _gate_doc(project)),
-        (target / "memory" / ".gitkeep", ""),
-        (target / "heartbeat-reports" / ".gitkeep", ""),
-    ]
-    writes.extend(_preset_writes(target, project, PRESET_STARTERS[preset]))
-    if preset == "knowledge-work":
-        writes.extend(_knowledge_work_writes(target, project))
-    if active_context == "cocoindex-code":
-        writes.extend(_cocoindex_active_context_writes(target, project))
-    if memory != "none":
-        writes.extend(_semantic_memory_writes(target, project, memory))
-    if obsidian:
-        writes.extend(_obsidian_writes(target))
-
-    copies = _copy_plan(target, sources, active_context=active_context)
+    writes, copies = _build_scaffold_plan(
+        target,
+        sources,
+        preset=preset,
+        obsidian=obsidian,
+        active_context=active_context,
+        memory=memory,
+        preserve_cocoindex_ignore=preserve_cocoindex_ignore,
+    )
     planned_paths = [p for p, _ in writes] + [dst for _, dst in copies]
     if storage != "file":
         planned_paths.append(target / _STORAGE_DIR / _STORAGE_CONFIG_NAME)
@@ -942,26 +971,26 @@ __pycache__/
 {active_context_ignores}"""
 
 
-def _workspace_tropo_config() -> str:
-    return """version = 1
-exclude = [
-  ".git",
-  ".claude",
-  ".agents",
-  "docs",
-  "templates",
-  "memory",
-  "heartbeat-reports",
-  "README.md",
-  "AGENTS.md",
-  "SOUL.md",
-  "STRATO.md",
-  "STATE.md",
-  "USER.md",
-  "MEMORY.md",
-  "bug-risk-playbook.md",
-]
+_WORKSPACE_TROPO_EXCLUDES = (
+    ".git",
+    ".claude",
+    ".agents",
+    "docs",
+    "templates",
+    "memory",
+    "heartbeat-reports",
+    "README.md",
+    "AGENTS.md",
+    "SOUL.md",
+    "STRATO.md",
+    "STATE.md",
+    "USER.md",
+    "MEMORY.md",
+    "bug-risk-playbook.md",
+)
 
+
+_TROPO_CONFIG_BODY = """
 [base]
 derive = ["id", "title"]
 allow_untyped = true
@@ -992,6 +1021,15 @@ folder = "gates"
 required = { project = "string", status = "enum:open|approved|rejected|deferred", gate = "string" }
 optional = { approver = "string", approved_at = "datetime", command_intent = "string", related_modules = "ref-list", related_changes = "ref-list" }
 """
+
+
+def _render_tropo_config(excludes: tuple[str, ...]) -> str:
+    exclude_lines = "\n".join(f'  "{name}",' for name in excludes)
+    return f"version = 1\nexclude = [\n{exclude_lines}\n]\n" + _TROPO_CONFIG_BODY
+
+
+def _workspace_tropo_config() -> str:
+    return _render_tropo_config(_WORKSPACE_TROPO_EXCLUDES)
 
 
 def _module_doc(project: str) -> str:
@@ -1800,6 +1838,429 @@ def _write_memory_config(target: Path, memory: str, dry_run: bool, *, force: boo
     return [cfg_path]
 
 
+# ---------------------------------------------------------------------------
+# Adopt: bring Vivary to an existing repo/vault without touching its files
+# ---------------------------------------------------------------------------
+
+_ADOPT_SKIP_DIRS = {
+    ".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build",
+    ".astro", ".next", "target",
+}
+
+# A conservative code-file signal used only for the coding-vs-second-brain preset
+# heuristic; it does not need to be exhaustive.
+_ADOPT_CODE_SUFFIXES = {
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".go", ".rs", ".java",
+    ".kt", ".c", ".h", ".cpp", ".cc", ".hpp", ".cs", ".rb", ".php", ".swift",
+    ".m", ".mm", ".scala", ".sh", ".ps1", ".sql", ".lua", ".vue", ".svelte",
+}
+
+# Top-level directories a Vivary scaffold (init or a prior adopt) itself creates.
+# Re-running `adopt analyze` on an already-adopted tree must not mistake its own
+# `templates/` (six starter .md files, no index.md) or `modules/` for brownfield
+# content worth a router or worth counting toward the preset heuristic.
+_ADOPT_VIVARY_OWNED_DIRS = {
+    "templates", "modules", "changes", "decisions", "verification", "gates",
+    "memory", "heartbeat-reports",
+}
+
+
+class BrownfieldInventory:
+    """Read-only snapshot of an existing directory tree for `adopt`.
+
+    Never mutates disk. Walks `target` once, skipping the fixed skip-list dirs,
+    any dotdir, and any directory Vivary itself would have created, and records
+    just enough to plan an adopt: whether root contract files already exist, how
+    markdown- vs code-heavy the tree is, and which directories look like
+    undocumented "modules" worth a router.
+    """
+
+    def __init__(self, target: Path):
+        self.target = target
+        self.has_agents_md = (target / "AGENTS.md").exists()
+        self.has_claude_md = (target / "CLAUDE.md").exists()
+        self.has_gitignore = (target / ".gitignore").exists()
+        self.has_readme = (target / "README.md").exists()
+        self.markdown_count = 0
+        self.code_count = 0
+        self.other_count = 0
+        self.candidate_modules: list[str] = []
+        self._scan()
+
+    def _scan(self) -> None:
+        md_by_dir: dict[str, int] = {}
+        index_dirs: set[str] = set()
+
+        for dirpath, dirnames, filenames in os.walk(self.target):
+            rel_dir = os.path.relpath(dirpath, self.target)
+            rel_dir = "" if rel_dir == "." else rel_dir.replace("\\", "/")
+            dirnames[:] = sorted(
+                d for d in dirnames
+                if d not in _ADOPT_SKIP_DIRS
+                and not d.startswith(".")
+                and not (rel_dir == "" and d in _ADOPT_VIVARY_OWNED_DIRS)
+            )
+
+            depth = 0 if not rel_dir else rel_dir.count("/") + 1
+            for name in filenames:
+                suffix = Path(name).suffix.lower()
+                if suffix in (".md", ".markdown"):
+                    self.markdown_count += 1
+                    if depth >= 1 and depth <= 2:
+                        md_by_dir[rel_dir] = md_by_dir.get(rel_dir, 0) + 1
+                    lower = name.lower()
+                    if lower in ("index.md", "readme.md"):
+                        index_dirs.add(rel_dir)
+                elif suffix in _ADOPT_CODE_SUFFIXES:
+                    self.code_count += 1
+                else:
+                    self.other_count += 1
+
+        # Candidate modules: depth 1-2 dirs with >= 5 markdown files and no
+        # index.md/README.md of their own (same shape as tropo's module-router
+        # heuristic, reimplemented locally so adopt has no import on the tropo
+        # package).
+        self.candidate_modules = sorted(
+            rel_dir for rel_dir, count in md_by_dir.items()
+            if count >= 5 and rel_dir not in index_dirs
+        )
+
+    def choose_preset(self, requested: str | None) -> tuple[str, str]:
+        """Return (preset, reason). `requested` wins when given and valid."""
+        if requested is not None:
+            return requested, f"explicit --preset {requested}"
+        if self.code_count == 0 and self.markdown_count == 0:
+            return "coding", "empty or unrecognized tree; defaulting to coding"
+        if self.markdown_count > self.code_count:
+            return (
+                "second-brain",
+                f"markdown-majority tree ({self.markdown_count} .md vs "
+                f"{self.code_count} code file(s))",
+            )
+        return (
+            "coding",
+            f"code-majority tree ({self.code_count} code file(s) vs "
+            f"{self.markdown_count} .md)",
+        )
+
+
+def _module_id_for_candidate(rel_dir: str) -> str:
+    """Derive a module id from a candidate directory's relative path.
+
+    Nested paths flatten with `-` so `docs/guides` -> `docs-guides`, matching the
+    slug shape `tropo` expects for a module id.
+    """
+    parts = [p for p in rel_dir.replace("\\", "/").split("/") if p]
+    slug = "-".join(parts) if parts else "root"
+    return slug.lower()
+
+
+def _candidate_module_router_doc(project: str, rel_dir: str) -> str:
+    module_id = _module_id_for_candidate(rel_dir)
+    return f"""---
+project: {project}
+status: active
+module_area: existing directory adopted from the brownfield tree
+related_modules: [agent-workspace]
+---
+# {module_id}
+
+## Purpose
+
+Router for the existing `{rel_dir}/` directory, discovered during `create-vivary
+adopt`. Vivary did not move, rename, or edit anything inside `{rel_dir}/` — this
+index only points at it.
+
+## Read Next
+
+- Existing directory: `{rel_dir}/` (not managed by Vivary; read it directly)
+
+Keep this as a thin pointer. If `{rel_dir}/` grows its own `index.md` or
+`README.md` later, fold the routing here into that file instead of duplicating it.
+"""
+
+
+# Top-level names adopt itself writes into and must keep fully masked (adopt puts
+# non-node content directly inside them, e.g. `templates/AGENTS.md`,
+# `memory/.gitkeep`). Bare-name excludes are correct and safe for these because
+# adopt never creates a same-named module id nested under `modules/` for them.
+_ADOPT_MANAGED_TOP_LEVEL = {
+    ".claude", ".agents", "templates", "memory", "heartbeat-reports",
+    "modules", "changes", "decisions", "verification", "gates",
+}
+
+# Root files adopt owns or reads as-is; never re-excluded or re-planned from a
+# brownfield scan (either already in the base exclude list, or handled specially
+# — .gitignore is either created fresh or left untouched with followups).
+_ADOPT_RESERVED_ROOT_FILES = {
+    "README.md", "AGENTS.md", "SOUL.md", "STRATO.md", "STATE.md", "USER.md",
+    "MEMORY.md", "bug-risk-playbook.md", "tropo.toml", ".gitignore",
+}
+
+
+def _adopt_tropo_config(inventory: BrownfieldInventory) -> str:
+    """Same base tropo.toml exclude/type config as a fresh scaffold, adjusted so
+    `tropo check`/`doctor` only validate the Vivary-managed folders adopt creates,
+    not brownfield content it never touched.
+
+    tropo's `is_excluded` treats any slash-free pattern as a bare directory/file
+    *name* that matches at any depth (so a bare `"docs"` would also prune
+    `modules/docs/index.md`, the very module router adopt just created for a
+    brownfield `docs/`). Patterns that contain a `/` are start-anchored instead
+    and only ever match at the root. So:
+
+    - Directories adopt itself writes into (`_ADOPT_MANAGED_TOP_LEVEL`, e.g.
+      `templates/`, `modules/`) keep the base's bare-name exclude — safe, since
+      adopt never nests a same-named module id under `modules/` for them.
+    - Every other pre-existing top-level brownfield directory (e.g. a root
+      `docs/` or `src/`) is excluded by root-anchored `"<dir>/<child>"` entries
+      for each of its current children instead of its bare name, so a same-named
+      module router stays visible to the graph.
+    - Pre-existing top-level brownfield *files* are excluded by exact name
+      (root files are never nested elsewhere in the Vivary-managed tree).
+
+    Known limitation: a file added to an excluded brownfield directory after
+    adopt runs (e.g. a later `docs/new-page.md`) is not covered by the
+    child-enumerated excludes and a subsequent `tropo check` would flag it.
+    Adopt only has to be correct about the tree as it existed at adopt time.
+    """
+    excludes = list(_WORKSPACE_TROPO_EXCLUDES)
+
+    for entry in sorted(os.scandir(inventory.target), key=lambda e: e.name):
+        name = entry.name
+        if name in _ADOPT_SKIP_DIRS or name.startswith("."):
+            continue
+        if name in _ADOPT_MANAGED_TOP_LEVEL or name in _ADOPT_RESERVED_ROOT_FILES:
+            continue
+        if entry.is_dir():
+            if name in excludes:
+                excludes.remove(name)
+            children = sorted(os.listdir(entry.path))
+            excludes.extend(f"{name}/{child}" for child in children)
+        else:
+            excludes.append(name)
+
+    return _render_tropo_config(tuple(excludes))
+
+
+def _adopt_gitignore_followups(target: Path) -> list[str]:
+    """Missing privacy-ignore lines to hand the human when `.gitignore` already
+    exists and adopt refuses to edit it. Maps the same probe keys `doctor` uses
+    to the literal lines a human would add."""
+    lines_by_pattern = {
+        "USER.md": "USER.md",
+        "MEMORY.md": "MEMORY.md",
+        "memory/*": "memory/*\n!memory/.gitkeep",
+        "heartbeat-reports/*": "heartbeat-reports/*\n!heartbeat-reports/.gitkeep",
+    }
+    missing = _missing_privacy_ignores(target)
+    return [lines_by_pattern[pattern] for pattern in missing if pattern in lines_by_pattern]
+
+
+def plan_adopt(
+    target: str | Path,
+    *,
+    preset: str | None = None,
+    repo_root: str | Path | None = None,
+) -> dict:
+    """Analyze `target` and compute what `adopt` would create, read-only.
+
+    Returns a dict with keys: `target`, `preset`, `preset_reason`, `inventory`
+    (candidate module dirs + has_agents_md/has_claude_md/has_gitignore),
+    `would_create` (list[Path]), `kept` (list[Path] that already exist and are
+    skipped), `followups` (list[str] manual .gitignore lines), and the raw
+    `writes`/`copies` plan tuples for `adopt_workspace` to reuse.
+    """
+    root = Path(repo_root) if repo_root is not None else default_repo_root()
+    root = root.resolve()
+    target = _resolve_scaffold_target(target)
+    if not target.exists():
+        raise ScaffoldError(f"adopt target does not exist: {target}")
+    if not target.is_dir():
+        raise ScaffoldError(f"adopt target is not a directory: {target}")
+
+    sources = _source_paths(root)
+    for label, src in sources.items():
+        if not src.exists():
+            raise ScaffoldError(f"missing scaffold source for {label}: {src}")
+
+    inventory = BrownfieldInventory(target)
+    chosen_preset, preset_reason = inventory.choose_preset(preset)
+    if chosen_preset not in PRESETS:
+        raise ScaffoldError(
+            f"unknown preset {chosen_preset!r}; expected one of {', '.join(PRESETS)}"
+        )
+
+    writes, copies = _build_scaffold_plan(
+        target,
+        sources,
+        preset=chosen_preset,
+        obsidian=False,
+        active_context=None,
+        memory="none",
+    )
+    # Adopt's tropo.toml must exclude brownfield content adopt doesn't own, or a
+    # correctly-adopted workspace would fail its own `doctor`/`tropo check` gate.
+    writes = [
+        (dst, _adopt_tropo_config(inventory) if dst.name == "tropo.toml" and dst.parent == target else text)
+        for dst, text in writes
+    ]
+
+    # A candidate router must never land on a path the scaffold itself already
+    # plans to write (e.g. a brownfield top-level `codebase/` colliding with the
+    # coding preset's own `modules/codebase/index.md`). Both are same-run writes,
+    # so neither exists on disk yet to short-circuit via the exists() filter
+    # below — silently letting the router write second would replace the typed
+    # starter module doc with a thin pointer. Vivary owns the name in that case;
+    # skip the router entirely rather than guess which one should win.
+    # Two different candidate directories can also flatten to the same module id
+    # (e.g. top-level `docs-guides/` alongside nested `docs/guides/`); track
+    # emitted router paths too so the second one is skipped instead of silently
+    # clobbering the first router write in the same run.
+    scaffold_planned_paths = {dst for dst, _ in writes} | {dst for _, dst in copies}
+    skipped_module_collisions: list[str] = []
+    emitted_router_paths: set[Path] = set()
+    for rel_dir in inventory.candidate_modules:
+        module_id = _module_id_for_candidate(rel_dir)
+        router_path = _module_index_path(target, module_id)
+        if router_path in scaffold_planned_paths or router_path in emitted_router_paths:
+            skipped_module_collisions.append(rel_dir)
+            continue
+        emitted_router_paths.add(router_path)
+        writes.append(
+            (
+                router_path,
+                _candidate_module_router_doc(target.name or "vivary-workspace", rel_dir),
+            )
+        )
+
+    would_create: list[Path] = []
+    kept: list[Path] = []
+    final_writes: list[tuple[Path, str]] = []
+    final_copies: list[tuple[Path, Path]] = []
+    for dst, text in writes:
+        if dst.exists():
+            kept.append(dst)
+        else:
+            would_create.append(dst)
+            final_writes.append((dst, text))
+    for src, dst in copies:
+        if dst.exists():
+            kept.append(dst)
+        else:
+            would_create.append(dst)
+            final_copies.append((src, dst))
+
+    would_create = sorted(set(would_create))
+    kept = sorted(set(kept))
+    followups = _adopt_gitignore_followups(target) if inventory.has_gitignore else []
+
+    return {
+        "target": target,
+        "preset": chosen_preset,
+        "preset_reason": preset_reason,
+        "inventory": inventory,
+        "would_create": would_create,
+        "kept": kept,
+        "followups": followups,
+        "skipped_module_collisions": sorted(skipped_module_collisions),
+        "writes": final_writes,
+        "copies": final_copies,
+    }
+
+
+def adopt_workspace(
+    target: str | Path,
+    *,
+    preset: str | None = None,
+    repo_root: str | Path | None = None,
+    yes: bool = False,
+) -> dict:
+    """Adopt Vivary onto an existing tree.
+
+    Analyze + plan always run read-only. When `yes` is False (the default), no
+    file is written — the plan is returned for the caller to render as a dry run.
+    When `yes` is True, only files that do not already exist are written, using
+    the same symlink/out-of-root hardened write path as `init`. Existing files are
+    never opened for writing, moved, renamed, or truncated.
+    """
+    plan = plan_adopt(target, preset=preset, repo_root=repo_root)
+    target_path = plan["target"]
+
+    if not yes:
+        return {**plan, "applied": False, "doctor": None}
+
+    planned_paths = [dst for dst, _ in plan["writes"]] + [dst for _, dst in plan["copies"]]
+    _ensure_safe_destinations(target_path, planned_paths, force=False)
+
+    for dst, text in plan["writes"]:
+        _write_text_no_follow(target_path, dst, text)
+    for src, dst in plan["copies"]:
+        _copy_file_no_follow(target_path, src, dst)
+
+    doctor = doctor_workspace(target_path, repo_root=repo_root)
+    return {**plan, "applied": True, "doctor": doctor}
+
+
+def _adopt_report_to_json(result: dict, *, mode: str) -> dict:
+    inventory: BrownfieldInventory = result["inventory"]
+    payload = {
+        "ok": True,
+        "mode": mode,
+        "root": str(result["target"]),
+        "preset": result["preset"],
+        "preset_reason": result["preset_reason"],
+        "would_create": [p.relative_to(result["target"]).as_posix() for p in result["would_create"]],
+        "kept": [p.relative_to(result["target"]).as_posix() for p in result["kept"]],
+        "followups": result["followups"],
+        "candidate_modules": inventory.candidate_modules,
+        "skipped_module_collisions": result["skipped_module_collisions"],
+    }
+    if mode == "applied":
+        payload["doctor"] = result["doctor"]
+    return payload
+
+
+def _print_adopt_report(result: dict, *, mode: str) -> None:
+    target = result["target"]
+    verb = "Adopted" if mode == "applied" else "Would adopt"
+    print(f"create-vivary adopt: {verb} Vivary onto {target}")
+    print(f"preset: {result['preset']} ({result['preset_reason']})")
+
+    for dst in result["would_create"]:
+        rel = dst.relative_to(target).as_posix()
+        verb2 = "created" if mode == "applied" else "would create"
+        print(f"  {verb2}: {rel}")
+    for dst in result["kept"]:
+        rel = dst.relative_to(target).as_posix()
+        print(f"  exists, kept: {rel}")
+
+    if result["followups"]:
+        print("\nManual follow-up: your .gitignore exists and was left untouched.")
+        print("Add these privacy lines yourself:")
+        for line in result["followups"]:
+            for sub in line.splitlines():
+                print(f"  {sub}")
+
+    if result["skipped_module_collisions"]:
+        print("\nSkipped module router(s) — Vivary already uses this module name:")
+        for rel_dir in result["skipped_module_collisions"]:
+            print(f"  {rel_dir}/ (no router created; directory left untouched)")
+
+    if mode == "applied":
+        doctor = result["doctor"]
+        status = "ok" if doctor["ok"] else "failed"
+        graph = doctor["graph"]
+        print(
+            f"\ndoctor: {status} "
+            f"({graph['nodes']} node(s), {graph['edges']} edge(s), {graph['broken']} broken)"
+        )
+        for error in doctor["errors"]:
+            print(f"  error: {error}")
+        for warning in doctor["warnings"]:
+            print(f"  warning: {warning}")
+
+
 def capability_report(preset: str = "coding") -> dict:
     if preset not in PRESETS:
         raise ScaffoldError(f"unknown preset {preset!r}; expected one of {', '.join(PRESETS)}")
@@ -1944,6 +2405,21 @@ def build_parser() -> argparse.ArgumentParser:
     capabilities = sub.add_parser("capabilities", help="list optional preset capabilities")
     capabilities.add_argument("--preset", choices=PRESETS, default="coding")
     capabilities.add_argument("--json", action="store_true", help="print a JSON report")
+
+    adopt = sub.add_parser(
+        "adopt", help="bring Vivary to an existing repo or vault without touching its files"
+    )
+    adopt.add_argument("target", help="existing directory to adopt")
+    adopt.add_argument("--preset", choices=PRESETS, default=None,
+                       help="starter graph to seed; default is auto-detected from the tree")
+    adopt.add_argument("--yes", action="store_true",
+                       help="write the planned files (default is dry-run: plan only)")
+    adopt.add_argument("--json", action="store_true", help="machine-readable output")
+    adopt.add_argument(
+        "--repo-root",
+        default=None,
+        help="Vivary source checkout root (mainly for local development/tests)",
+    )
     return parser
 
 
@@ -1989,6 +2465,27 @@ def main(argv: list[str] | None = None) -> int:
         else:
             _print_doctor_report(report)
         return 0 if report["ok"] else 1
+
+    if args.command == "adopt":
+        yes = getattr(args, "yes", False)
+        try:
+            result = adopt_workspace(
+                args.target, preset=args.preset, repo_root=args.repo_root, yes=yes
+            )
+        except ScaffoldError as exc:
+            if getattr(args, "json", False):
+                print(json.dumps({"ok": False, "error": str(exc)}))
+            else:
+                print(f"create-vivary adopt: {exc}", file=sys.stderr)
+            return 1
+        mode = "applied" if yes else "dry-run"
+        if args.json:
+            print(json.dumps(_adopt_report_to_json(result, mode=mode), indent=2))
+        else:
+            _print_adopt_report(result, mode=mode)
+        if yes and not result["doctor"]["ok"]:
+            return 1
+        return 0
 
     if args.command == "wizard":
         try:
