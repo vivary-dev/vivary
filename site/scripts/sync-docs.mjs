@@ -171,7 +171,7 @@ Full Documentation: https://vivary.vercel.app/llms-full.txt
 
 ## Current package surfaces
 
-- PyPI meta-package (installs the suite): \`vivary\` — \`pip install vivary\`
+- PyPI meta-package (installs the suite): \`vivary\`, via \`pip install vivary\`
 - npm scaffolder: \`@vivary/create\` ${createVivaryNpm}
 - PyPI scaffolder: \`create-vivary\` ${createVivaryPyPI}
 - PyPI knowledge graph CLI: \`vivary-tropo\` ${tropoVersion}, command \`tropo\`
