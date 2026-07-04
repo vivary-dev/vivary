@@ -20,7 +20,8 @@ collapse to the one-liner; the homepage strip shows a single PyPI card.
 
 ### Verification
 
-- Publishing remains a manual human gate.
+- Published and verified: `pip index versions vivary` returned `vivary (0.1.0)`
+  from the public index after `twine upload`.
 
 ## [vivary-tropo 0.4.1 / create-vivary 0.3.1] — 2026-07-04
 
