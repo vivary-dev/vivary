@@ -125,8 +125,9 @@ High-value tests:
 
 ### P1.5 Doctor as the retention loop
 
-Goal: give adopters a reason to run Vivary weekly, not once. Today adopters
-run `doctor` once at creation and have no reason to run it again.
+Goal: give adopters a reason to run Vivary weekly, not once. Today `doctor`
+has no drift-tracking — nothing compares workspace health across runs or gives
+an adopter a reason to re-run it.
 
 Shape:
 
@@ -156,6 +157,13 @@ Shape:
   awkward;
 - fold friction found here straight back into P1.1/P1.2.
 
+High-value tests:
+
+- the walkthrough is reproducible: a reader can run the same commands and
+  reach doctor-clean on their own repo;
+- friction found while dogfooding lands as tracked issues against P1.1/P1.2,
+  not private notes.
+
 ### P1.7 Strato as a verifiable agent OS
 
 Goal: the conceptual core of the product — the agent OS layer — must be as
@@ -170,6 +178,12 @@ Shape:
   skills present for both Claude and Codex runtimes);
 - decide and document versioning: strato rides create-vivary's release train,
   and the changelog says so when templates change.
+
+High-value tests:
+
+- CI fails when any preset scaffold stops passing `doctor` or `tropo check`;
+- template cross-references resolve in every generated workspace;
+- Claude and Codex runtime skill trees stay structurally in sync.
 
 ## P2 — next candidates
 
