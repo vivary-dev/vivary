@@ -37,7 +37,7 @@ Bump rules (semver-ish, pre-1.0):
 Update every surface that names versions or the command set, in the repo,
 **before** publishing:
 
-- `packages/<pkg>/pyproject.toml` — `version = "..."`, and dependency floors if
+- `packages/<pkg>/pyproject.toml` — `version = "..."` **and the module's `__version__` constant** (they must match — a parity test enforces it), plus dependency floors if
   a package now needs a newer sibling (e.g. ozone requiring `vivary-tropo>=0.4.0`);
 - `packages/create-vivary/npm/package.json` — lockstep version;
 - root `README.md` — the release-status blockquote, the surface/version table,

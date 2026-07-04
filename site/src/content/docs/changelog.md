@@ -8,17 +8,22 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current release line:** `create-vivary` / `@vivary/create` **0.3.0** · optional
-`vivary-memory-cognee` **0.1.0** · `vivary-tropo` **0.4.0** · `vivary-ozone`
+**Current release line:** `create-vivary` / `@vivary/create` **0.3.1** · optional
+`vivary-memory-cognee` **0.1.0** · `vivary-tropo` **0.4.1** · `vivary-ozone`
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
-"Vivary 0.4.0" release.
+"Vivary 0.4.1" release.
 
-## [vivary-tropo 0.4.0 / create-vivary 0.3.0] — 2026-07-04
+## [vivary-tropo 0.4.1 / create-vivary 0.3.1] — 2026-07-04
 
 Affects `vivary-tropo`, `create-vivary` / `@vivary/create`, root docs, package docs,
 generated website docs, and the homepage. The adoption-line release: Vivary now works
 on existing repos and vaults, not just fresh scaffolds. Publishing remains a manual
 human gate.
+
+> Note: `vivary-tropo==0.4.0` and `create-vivary==0.3.0` exist on PyPI but
+> self-report the previous version from a stale `__version__` constant; they are
+> superseded by 0.4.1 / 0.3.1 (same content plus the constant fix and a
+> version-parity test). `@vivary/create` skips 0.3.0 on npm entirely.
 
 ### Added
 

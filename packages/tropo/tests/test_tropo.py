@@ -1152,6 +1152,16 @@ def test_map_subtree_rebases_config_excludes(tmp_path):
     assert not any("private" in d["path"] for d in out["directories"])
 
 
+def test_version_constant_matches_pyproject(tmp_path):
+    import tomllib
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    declared = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]
+    assert tropo.__version__ == declared, (
+        f"tropo.__version__ {tropo.__version__} != pyproject {declared} — "
+        "bump both together at release time"
+    )
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

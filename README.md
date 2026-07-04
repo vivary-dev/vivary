@@ -18,8 +18,8 @@ things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
 > Release status: package versions are independent; there is no single "Vivary
-> 0.4.0" release. Use **0.3.0** for the scaffolder (`create-vivary` /
-> `@vivary/create`), **0.4.0** for `vivary-tropo`, **0.2.2** for `vivary-exo`,
+> 0.4.1" release. Use **0.3.1** for the scaffolder (`create-vivary` /
+> `@vivary/create`), **0.4.1** for `vivary-tropo`, **0.2.2** for `vivary-exo`,
 > **0.2.0** for `vivary-ozone`, and **0.1.0** for the optional
 > `vivary-memory-cognee` adapter.
 > This line adds `tropo map` (read-only filesystem inventory), brownfield
@@ -28,9 +28,9 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
 | Surface | Current | Link |
 |---|---:|---|
-| `create-vivary` (PyPI) | 0.3.0 | [PyPI](https://pypi.org/project/create-vivary/) |
-| `@vivary/create` (npm) | 0.3.0 | [npm](https://www.npmjs.com/package/@vivary/create) |
-| `vivary-tropo` | 0.4.0 | [PyPI](https://pypi.org/project/vivary-tropo/) |
+| `create-vivary` (PyPI) | 0.3.1 | [PyPI](https://pypi.org/project/create-vivary/) |
+| `@vivary/create` (npm) | 0.3.1 | [npm](https://www.npmjs.com/package/@vivary/create) |
+| `vivary-tropo` | 0.4.1 | [PyPI](https://pypi.org/project/vivary-tropo/) |
 | `vivary-ozone` | 0.2.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
 | `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
 | `vivary-memory-cognee` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-memory-cognee/) |
@@ -38,8 +38,8 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
 Versions are intentionally independent across the layers and optional adapters: `tropo`
-moved to 0.4.0 for the read-only `map` filesystem inventory command, `create-vivary` /
-`@vivary/create` move to 0.3.0 for brownfield `adopt` and `doctor --trend` drift
+moved to 0.4.1 for the read-only `map` filesystem inventory command, `create-vivary` /
+`@vivary/create` move to 0.3.1 for brownfield `adopt` and `doctor --trend` drift
 tracking, `ozone` and `exo` are unchanged in this line, and `vivary-memory-cognee`
 stays at 0.1.0.
 
@@ -80,7 +80,7 @@ npm create @vivary@latest my-workspace        # pick: second brain · coding · 
 Or install the CLIs from PyPI (run on demand with `uvx`, no install needed):
 
 ```bash
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.3.0
+pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.3.1
 create-vivary init my-workspace --preset coding     # interactive wizard on a TTY
 create-vivary init my-workbench --preset knowledge-work --memory local
 create-vivary init my-codebase --preset coding --active-context cocoindex-code

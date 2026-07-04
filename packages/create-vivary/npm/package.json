@@ -1,6 +1,6 @@
 {
   "name": "@vivary/create",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Scaffold a complete Vivary agent workspace — the create-t3-app for agent-native workspaces. Runs the Python create-vivary via uv/pipx.",
   "bin": {
     "create-vivary": "index.js"
