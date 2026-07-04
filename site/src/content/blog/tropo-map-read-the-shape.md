@@ -66,8 +66,8 @@ have to read, not what gets counted.
 
 This is the part I'd get wrong if I were skimming: `map` doesn't need a Vivary
 workspace at all. Run it against any repo, any notes vault, any docs tree,
-adopted or not. It skips the usual junk — `.git`, `node_modules`,
-`__pycache__`, `.venv`, `venv`, `dist`, `build`, `.astro`, `.next`, `target` —
+adopted or not. It skips the usual junk (`.git`, `node_modules`,
+`__pycache__`, `.venv`, `venv`, `dist`, `build`, `.astro`, `.next`, `target`),
 and if it finds a `tropo.toml` by walking up from wherever you pointed it, it
 also honors that config's `exclude` patterns. If it doesn't find one, it just
 runs anyway. A missing or broken config never blocks the map.
@@ -76,7 +76,7 @@ That matters for the adoption story. Before you decide whether a repo should
 become a `coding` or `second-brain` preset, before you run `create-vivary
 adopt`, you can run `map` against it with nothing installed but the map
 command itself. It's the look-before-you-touch step. More on the actual
-touching in [Adopt, don't rebuild](/blog/adopt-dont-rebuild/).
+touching in a follow-up post, Adopt, don't rebuild.
 
 ## `--json` is deterministic on purpose
 
@@ -85,9 +85,9 @@ tropo map --root . --json
 ```
 
 Every key is sorted, ordering is stable, and the output is meant to be diffed.
-That's not a throwaway detail. If an agent is going to make a decision based on
-the map — "there are 40 markdown files under `notes/` with no index, propose a
-router" — the map needs to be something you can run twice and get the same
+That's not a throwaway detail. Say an agent is going to make a decision based
+on the map: "there are 40 markdown files under `notes/` with no index, propose
+a router." The map needs to be something you can run twice and get the same
 answer, and something you can put in a test fixture without it flaking on key
 order. Deterministic JSON is what makes `map` usable as a build block for
 other tools instead of just a pretty printout for humans.
@@ -125,8 +125,8 @@ are eleven million files in your project.
 
 Anytime an agent (or you) are about to work in a tree you don't already have a
 mental model of. Before adoption. Before a big refactor. Before you ask an
-agent to "go find where X lives" in a codebase it's never seen — hand it a
-`tropo map` first and it's spending its budget on your actual question instead
+agent to "go find where X lives" in a codebase it's never seen, hand it a
+`tropo map` first, and it spends its budget on your actual question instead
 of on orientation.
 
 See the [command reference](/commands/) for the full flag list, or

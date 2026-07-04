@@ -25,7 +25,7 @@ Here's a realistic `STATE.md`, six weeks into a project:
 
 Working on the billing refactor. Stripe webhook handling is done.
 Need to update the retry logic next. Auth module still uses the old
-session format — don't touch until Q3 migration.
+session format, don't touch until Q3 migration.
 
 Decision: use Postgres for the events table (see notes from the
 meeting on the 12th, ask Sarah if you can't find them).
@@ -33,14 +33,14 @@ meeting on the 12th, ask Sarah if you can't find them).
 
 Every sentence in that file is a landmine, six weeks later:
 
-- "Stripe webhook handling is done" — done as of when? Is it still done? A
+- "Stripe webhook handling is done." Done as of when? Is it still done? A
   file has no way to say "this fact expires."
-- "Need to update the retry logic next" — did someone do that already and
+- "Need to update the retry logic next." Did someone do that already and
   forget to update this line? There's no way to know without asking a human.
-- "see notes from the meeting on the 12th, ask Sarah" — that's not a
+- "See notes from the meeting on the 12th, ask Sarah." That's not a
   reference, that's a broken link with extra steps. Sarah left the company in
   April.
-- "don't touch until Q3 migration" — is it Q3 yet? Did the migration happen?
+- "Don't touch until Q3 migration." Is it Q3 yet? Did the migration happen?
   The file doesn't say, and nobody's job is to keep it current.
 
 Nothing about this file is malformed. It reads fine. An agent (or a human)
@@ -51,16 +51,18 @@ which posture is correct from the file alone.
 
 ## The same information, typed
 
-Here's the same content as Vivary's typed graph would hold it. Not more
-prose — structured facts with a validator behind them.
+Here's the same content as Vivary's typed graph would hold it: not more
+prose, structured facts with a validator behind them.
 
 `changes/billing-refactor.md`:
 ```yaml
 ---
+project: acme-billing
 status: active
-module: billing
-verification: retry-logic-tests
-related_decisions: [use-postgres-events]
+slice: stripe webhook and retry handling
+related_modules: [billing]
+related_changes: [use-postgres-events]
+verification: [retry-logic-tests]
 ---
 Stripe webhook handling shipped. Retry logic is next.
 ```
@@ -68,35 +70,39 @@ Stripe webhook handling shipped. Retry logic is next.
 `decisions/use-postgres-events.md`:
 ```yaml
 ---
+project: acme-billing
 status: accepted
 date: 2026-06-12
-supersedes: null
+related_modules: [billing]
+rationale: query patterns need joins against the orders table; a document
+  store would force denormalization
 ---
-Events table uses Postgres. Rationale: query patterns need joins
-against the orders table; a document store would force denormalization.
+Events table uses Postgres.
 ```
 
 `modules/auth/index.md`:
 ```yaml
 ---
-status: frozen
-freeze_until: 2026-09-01
-freeze_reason: session-format-migration
+project: acme-billing
+status: blocked
+module_area: authentication
+related_changes: [use-postgres-events]
 ---
+Frozen until the Q3 session-format migration lands. Do not touch.
 ```
 
 The difference isn't verbosity, it's that every fact above is now a typed
 field a machine can check. "Is the billing change verified?" is
 `related edge -> verification`, not a sentence you have to trust. "Is auth
-still frozen?" is a `freeze_until` date you can compare against today, not a
-qualitative "don't touch" that nobody remembers to update. "Where's the
-Postgres decision from?" is a graph edge, `related_decisions:
+still blocked?" is a `status` field a validator can check against the live
+graph, not a qualitative "don't touch" that nobody remembers to update.
+"Where's the Postgres decision from?" is a graph edge, `related_changes:
 [use-postgres-events]`, that either resolves to a real document or doesn't.
 
 ## Where rot gets caught, not just avoided
 
 Run `tropo signal` on either doc and it prints only the *irreducible*
-metadata — the fields that couldn't be derived from where the file lives and
+metadata: the fields that couldn't be derived from where the file lives and
 what it says. Everything else is noise stripped away. That alone is a rot
 check: if a field shows up in `signal` that's identical to what the folder
 structure or content already implies, `tropo check` flags it as `W210`
@@ -107,12 +113,12 @@ contradictory statements, because nothing is checking.
 The typed graph does object, and loudly, via two failure modes flat notes
 can't produce:
 
-- **`W201` — untyped document.** A file sitting outside any registered type
+- **`W201`, untyped document.** A file sitting outside any registered type
   folder gets flagged. In a flat-notes world, a stray `random-thoughts.md`
   just exists forever, ignored or half-trusted. In tropo, it's visible as
   "this isn't graph-typed," which is either a bug to fix or a deliberate
   exclusion you name.
-- **`W220` — broken edge.** A `ref` field pointing at a document id that
+- **`W220`, broken edge.** A `ref` field pointing at a document id that
   doesn't exist. That's the machine-checkable version of "ask Sarah, she
   left in April." The reference either resolves or it fails `tropo check`,
   full stop. Under Vivary's default strict mode, every warning fails the
@@ -145,7 +151,7 @@ That's the thing a flat `notes.md` structurally cannot give you: a same-shape
 comparison over time. "You added 14 files under `modules/` since the 12th, but
 0 new module indexes" is a sentence only possible because there's something
 countable and typed to compare against its own past. A corrupt or unreadable
-state file doesn't crash the run either — it degrades to "first recorded run"
+state file doesn't crash the run either. It degrades to "first recorded run"
 with a visible `trend_warning`, and gets overwritten with a fresh baseline, so
 a bad write doesn't wedge your CI gate.
 
@@ -160,8 +166,8 @@ maintaining module indexes?"
 Typed memory doesn't mean more ceremony than a flat file. The examples above
 are roughly the same amount of text. The difference is that every fact in the
 typed version is sitting in a field a validator can check, instead of a
-sentence a human has to remember to keep honest. Rot doesn't stop happening —
-people will always let things go stale — but it stops happening silently.
+sentence a human has to remember to keep honest. Rot doesn't stop happening;
+people will always let things go stale. But it stops happening silently.
 
 If you haven't set any of this up yet, [getting started](/getting-started/)
 walks through scaffolding the graph, and the [command reference](/commands/)

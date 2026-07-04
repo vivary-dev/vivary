@@ -31,7 +31,7 @@ assumption and running with it.
 task. `tropo graph` for the shape of what exists, `tropo blast <id>` for
 what's connected to the thing you're about to change, `modules/index.md` to
 pick one module instead of loading the whole tree. This is the step that a
-typed graph makes cheap and a flat notes folder makes expensive — see [memory
+typed graph makes cheap and a flat notes folder makes expensive. See [memory
 that doesn't rot](/blog/memory-that-doesnt-rot/) for why retrieval degrades
 without types, and [tropo map](/blog/tropo-map-read-the-shape/) for the
 version of this that runs before any graph exists at all.
@@ -64,7 +64,7 @@ They're there because verification and judgment are different things, and
 only one of them scales. `tropo check` can verify a graph is well-formed
 every single time, instantly, for free. No script can verify that publishing
 a package right now, with this changelog, under this level of confidence, is
-the right call — that's a judgment call, and judgment calls are exactly what
+the right call. That's a judgment call, and judgment calls are exactly what
 a human gate is for.
 
 That's why `ozone review` is advisory by default and only becomes a hard gate
@@ -74,8 +74,8 @@ manual no matter what.
 
 ## Proof, not theory: how this release shipped
 
-Point this at the release this whole series is about — `vivary-tropo` 0.4.1,
-`create-vivary`/`@vivary/create` 0.3.1 — and the loop isn't a description of
+Point this at the release this whole series is about (`vivary-tropo` 0.4.1,
+`create-vivary`/`@vivary/create` 0.3.1), and the loop isn't a description of
 some ideal process, it's what actually happened.
 
 **Retrieve and verify, repeatedly.** Every PR in the line, #98 through #105,
@@ -90,7 +90,7 @@ self-report the wrong version, because of a stale `__version__` constant.
 That's exactly the kind of small, boring bug that slips through when nobody's
 specifically checking for it. A version-parity test caught it before this
 release shipped, which is why you should install `0.4.1` / `0.3.1`, not
-`0.4.0` / `0.3.0` — same functional content, but the constant is fixed and the
+`0.4.0` / `0.3.0`. Same functional content, but the constant is fixed and the
 parity test now guards against it happening again silently. That's a gate
 doing its actual job: not preventing every mistake, catching this one before
 a user did.
@@ -101,15 +101,15 @@ verification section in the changelog for this release is not "trust us," it's
 a specific, checkable list: 83 of 83 tropo tests across Python 3.11 and 3.14,
 `init` byte-parity against 0.2.8 verified across five flag configurations,
 only-adds and dry-run purity verified against hostile fixtures for `adopt`.
-Some of that testing found real problems in `adopt`'s guarantees — I wrote
-about that specifically in [adopt, don't rebuild](/blog/adopt-dont-rebuild/) —
+Some of that testing found real problems in `adopt`'s guarantees. I wrote
+about that specifically in [adopt, don't rebuild](/blog/adopt-dont-rebuild/),
 and those got fixed pre-merge, which is the entire point of running the
 verify step before the gate instead of treating the gate as a formality.
 
 ## Why this is the whole pitch
 
-Everything else Vivary ships — the typed graph, the map, the adopt path, the
-trend tracking — exists to make one or more of these six steps cheaper or more
+Everything else Vivary ships (the typed graph, the map, the adopt path, the
+trend tracking) exists to make one or more of these six steps cheaper or more
 reliable. Retrieve is cheap because the graph is typed. Verify is reliable
 because it's a script, not a vibe. Learn actually happens because there's a
 typed place to put what was learned instead of a `notes.md` that nobody
@@ -119,5 +119,5 @@ actually need a human, instead of being diluted across every trivial action.
 If the loop is new to you, [getting started](/getting-started/) walks through
 setting up a workspace where it runs by default, and the [command
 reference](/commands/) has the full CLI surface behind each step. This is
-also the last post in this series — if you started elsewhere, [the adoption
+also the last post in this series. If you started elsewhere, [the adoption
 line](/blog/the-adoption-line/) is where it began.

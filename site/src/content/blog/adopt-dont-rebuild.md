@@ -16,7 +16,7 @@ against a real project instead of a throwaway folder.
 you already have, without becoming that failure mode. The product promise is
 one sentence: **adopt only adds files.** It never moves, renames, edits, or
 overwrites anything that was already there. If a file it would have created
-already exists — `README.md`, `AGENTS.md`, `CLAUDE.md`, anything — it's
+already exists (`README.md`, `AGENTS.md`, `CLAUDE.md`, anything), it's
 skipped and reported "exists, kept."
 
 A promise like that is worth exactly as much as the testing behind it, so
@@ -54,9 +54,9 @@ malformed typed documents. They stay exactly as they were; they're just not
 graph-typed until you deliberately add frontmatter and remove the exclude
 later.
 
-**Module collisions.** If a brownfield directory's name collides with a module
-the chosen preset already owns — say you have a `codebase/` folder and the
-`coding` preset wants to create its own `codebase` module — `adopt` doesn't
+**Module collisions.** Say a brownfield directory's name collides with a
+module the chosen preset already owns: you have a `codebase/` folder, and the
+`coding` preset wants to create its own `codebase` module. `adopt` doesn't
 create a router for the existing one and doesn't let the preset's starter
 module get silently overwritten either. It reports the collision under
 `skipped_module_collisions` and moves on.
@@ -100,16 +100,20 @@ When you do run `--yes`, here's the shape of what lands:
   brownfield content, so adoption doesn't immediately fail its own `tropo
   check`.
 - Thin `modules/<name>/index.md` routers for markdown-heavy directories (5+
-  files, no existing `index.md`/`README.md`) it finds during analysis — the
+  files, no existing `index.md`/`README.md`) it finds during analysis. The
   directory itself is never touched, just a router pointing at it.
 - A `.gitignore` follow-up if one already exists: `adopt` leaves it alone and
   lists the privacy lines it's missing instead of editing it for you.
 
 An adopted workspace passes `create-vivary doctor` and `tropo check` the same
-way a freshly-scaffolded one does. That was a deliberate bar: adoption isn't a
-lesser path that gets you something doctor complains about.
+way a freshly-scaffolded one does, with one honest exception: if your repo
+already had a `.gitignore` missing Vivary's privacy lines, `adopt` won't edit
+a file you own, so it reports the exact lines you need as a follow-up instead.
+Add them and `doctor` passes clean. That was the deliberate bar: adoption
+isn't a lesser path, but it also won't silently rewrite your files to hit a
+green check.
 
-## Greenfield or brownfield — the decision is simple
+## Greenfield or brownfield: the decision is simple
 
 If the folder is empty or new, you want `init`. If it already has content, you
 want `adopt`. `create-vivary` can even make that call for you: point the
@@ -125,8 +129,8 @@ create-vivary adopt . --json    # see the plan
 create-vivary adopt . --yes     # apply it
 ```
 
-`adopt` also auto-detects a preset if you don't pass one — `coding` for a
-code-file majority, `second-brain` for a markdown-file majority — and tells
+`adopt` also auto-detects a preset if you don't pass one (`coding` for a
+code-file majority, `second-brain` for a markdown-file majority), and tells
 you which one it picked and why, in both the human and `--json` output.
 
 Want to see what `adopt` is looking at before it plans anything? That's

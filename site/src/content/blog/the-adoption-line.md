@@ -22,6 +22,10 @@ an agent project already has a project. They have a repo, or a vault, or a pile
 of client notes. They don't have a Tuesday free to rebuild it inside a new
 scaffold.
 
+I built Vivary to use myself, in every project I run: this codebase, my
+writing, my notes. Nearly all of that was brownfield already. The adoption
+line exists because I hit this gap on my own work first.
+
 This release is about closing that gap. `vivary-tropo` moves to 0.4.1,
 `create-vivary` and `@vivary/create` move to 0.3.1, and the theme of the whole
 line is: Vivary should work on the mess you already have, not just the mess
@@ -32,19 +36,18 @@ you're about to make.
 **`tropo map`** is read-only reconnaissance. Before you touch anything, you can
 ask Vivary to describe the shape of a repo: how many files, what's dense, what
 already has an index, what's a de facto module with no router pointing at it.
-No `tropo.toml` required, nothing written to disk. I wrote a whole post on why
-this matters for agent context — see [Read the shape of a repo before you read
-the repo](/blog/tropo-map-read-the-shape/) — but the short version is that an
-agent's first move in an unfamiliar codebase shouldn't be "read everything and
-hope."
+No `tropo.toml` required, nothing written to disk. I'll write a whole post on
+why this matters for agent context later this week, but the short version is
+that an agent's first move in an unfamiliar codebase shouldn't be "read
+everything and hope."
 
 **`create-vivary adopt`** is the actual migration path. Point it at your
 existing repo and it plans a set of additions: an `AGENTS.md`, a `STATE.md`, a
 `tropo.toml` with excludes wide enough to not choke on your existing content,
 and thin `modules/<name>/index.md` routers for markdown-heavy directories that
 don't have one. It never touches a file that's already there. Dry-run is the
-default; you have to pass `--yes` to write anything. I go deep on how that
-invariant is verified in [Adopt, don't rebuild](/blog/adopt-dont-rebuild/).
+default; you have to pass `--yes` to write anything. I'll go deep on how that
+invariant is verified in a follow-up post later this week.
 
 **`doctor --trend`** is what happens after adoption, once the workspace is
 live and evolving. It's opt-in drift tracking: it snapshots the workspace's
@@ -66,9 +69,9 @@ Set up Vivary (https://vivary.vercel.app) in this project.
 
 1. Read https://vivary.vercel.app/getting-started/ and https://vivary.vercel.app/commands/ before running anything.
 2. You need Python 3.11+ and uv (or pipx). Tell me if something is missing before installing it.
-3. If this folder already has content, this is an adoption: run `uvx create-vivary adopt .`, show me the dry-run plan, and apply with `--yes` only after I approve. Adopt only adds files — it never touches existing ones.
+3. If this folder already has content, this is an adoption: run `uvx create-vivary adopt .`, show me the dry-run plan, and apply with `--yes` only after I approve. Adopt only adds files; it never touches existing ones.
    If this folder is new or empty, it is a fresh workspace: ask me which preset fits (coding / second brain / knowledge work / writing), then run `uvx create-vivary init . --preset <choice>`.
-4. Verify with `uvx create-vivary doctor .` and `uvx --from vivary-tropo tropo check --root .` — both must pass; show me the results.
+4. Verify with `uvx create-vivary doctor .` and `uvx --from vivary-tropo tropo check --root .`. Both must pass; show me the results.
 5. Read the generated AGENTS.md, then follow it for all future work here.
 ```
 
