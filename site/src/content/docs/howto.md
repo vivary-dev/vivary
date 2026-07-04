@@ -218,6 +218,38 @@ CI is just the gate, run on the exit code:
 - run: ozone review --pack all --strict
 ```
 
+## Run Vivary as a CI gate
+
+A full copy-paste GitHub Actions job: checkout, install the CLIs, then run doctor and
+the two graph gates against the exit code.
+
+```yaml
+name: vivary
+on: [push, pull_request]
+
+jobs:
+  vivary-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install vivary-tropo vivary-ozone create-vivary
+      - run: create-vivary doctor . --json
+      - run: tropo check --root .
+      - run: ozone review --strict --root .
+```
+
+`create-vivary doctor . --json` validates the scaffold (required files, privacy
+ignores, module indexes, graph health, backend/memory status) and exits non-zero on
+any error. `tropo check` validates each typed document; `ozone review --strict`
+checks relationships between them (broken edges, orphans, unverified changes) and
+fails the build on any warning. Add `--trend` to the doctor step once you want drift
+tracking; it writes `.vivary/doctor-state.json`, so commit that file (or cache it
+between runs) if you want deltas across CI runs rather than a "first recorded run"
+every time.
+
 ## First run in an agent (bootstrap)
 
 Open the workspace in Claude Code or Codex and say **"bootstrap the workspace"** — the

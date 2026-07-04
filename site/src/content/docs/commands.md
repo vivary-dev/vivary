@@ -299,7 +299,8 @@ create-vivary init <target> [--preset coding|second-brain|knowledge-work|writing
 create-vivary wizard <target> [--storage auto|file|embedded|cloud] [--provider lancedb|sqlite-vec|qdrant|astra]
                               [--memory none|local|cognee] [--yes] [--dry-run] [--json]
 create-vivary capabilities [--preset coding|second-brain|knowledge-work|writing] [--json]
-create-vivary doctor <target> [--json]
+create-vivary doctor <target> [--json] [--trend]
+create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writing] [--yes] [--json]
 ```
 
 | Command | What it does |
@@ -308,6 +309,7 @@ create-vivary doctor <target> [--json]
 | `wizard <target>` | Re-run the setup wizard on an existing workspace to reconfigure storage and optional semantic-memory policy. |
 | `capabilities` | List optional capabilities for a preset: storage, semantic memory, and preset-specific sidecars. |
 | `doctor <target>` | Validate a workspace: required files, active privacy ignore rules, module directory indexes, tropo graph health, backend reachability, and semantic-memory status. |
+| `adopt <target>` | Bring Vivary to an existing repo or vault. Only adds files that don't already exist; never moves, renames, edits, or overwrites anything. Dry-run by default. |
 
 | Flag | Effect |
 |---|---|
@@ -331,7 +333,61 @@ those names do not count. If `.vivary/memory.toml` exists, `doctor` reports sema
 memory as `disabled`, `healthy`, `configured`, `unavailable`, `misconfigured`, or
 `privacy-failed` without requiring optional Cognee support to be installed.
 
+`doctor --trend` is opt-in and is the only thing that writes `.vivary/doctor-state.json`
+(plain `doctor` stays read-only). It compares this run's graph health, module-index
+count, and file count under `modules/` against the prior recorded run and reports
+signed deltas — a short "trend vs `<date>`" section in human mode, or a `trend` object
+(`prior`/`current`/`deltas`) in `--json` mode. The first `--trend` run on a workspace
+has no prior state, so it reports "first recorded run" and just writes the baseline. A
+corrupt or unreadable state file is treated the same way — a warning, not a failure —
+and gets overwritten with a fresh one.
+
 When `--storage embedded` (or `auto`) is selected and `vivary-tropo[embedded]` is not yet installed, `init` installs it via `pip` before continuing unless `--dry-run` is set. In `--json` mode, `"installed": ["lancedb"]` reports what was added. Without `--yes`, a single confirmation prompt fires before any pip install. For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use `--auto`; in human mode, the wizard asks and its answers drive storage. `--auto` never selects Cognee by itself.
+
+### `adopt` — point Vivary at your mess
+
+`adopt` brings the Vivary scaffold to a repo or vault that already exists, without
+disturbing anything already there.
+
+| Flag | Effect |
+|---|---|
+| `--preset coding\|second-brain\|knowledge-work\|writing` | Starter graph to seed. Default: auto-detected — `coding` for a code-file majority, `second-brain` for a markdown-file majority. `--json`/text output states the chosen preset and the reason. |
+| `--yes` | Write the planned files. Without it, `adopt` only analyzes and prints a plan (**dry-run is the default**, unlike `init`). |
+| `--json` | Machine-readable output: `{mode, root, preset, preset_reason, would_create, kept, followups, candidate_modules, skipped_module_collisions}`, plus `doctor` when `--yes` was passed. `mode` is `"dry-run"` or `"applied"`. |
+
+`adopt` never moves, renames, edits, or overwrites any existing file. If a file it
+would create already exists, it is skipped and reported "exists, kept" — this
+includes `README.md`, `AGENTS.md`, `CLAUDE.md`, and any other file already at that
+path. If `.gitignore` already exists, `adopt` leaves it untouched and instead prints
+a manual follow-up listing the privacy lines (`USER.md`, `MEMORY.md`, `memory/*`,
+`heartbeat-reports/*`) it's missing.
+
+The analyze phase does a light, read-only inventory of the tree (skipping `.git`,
+`node_modules`, `__pycache__`, `.venv`, `venv`, `dist`, `build`, `.astro`, `.next`,
+`target`, and dotdirs) and looks for **candidate modules**: depth 1-2 directories
+with 5 or more Markdown files and no `index.md`/`README.md` of their own. Each
+candidate gets a thin router at `modules/<name>/index.md` that links to the existing
+directory — the directory itself is never touched. If a candidate's name collides
+with a module the chosen preset already owns (for example a brownfield `codebase/`
+under the `coding` preset), no router is created for it and the collision is
+reported under `skipped_module_collisions`; the preset's own starter module doc is
+never overwritten by a router.
+
+Adopt uses the same symlink- and out-of-root-hardened write path as `init`, and an
+adopted workspace passes `create-vivary doctor` and `tropo check` (adopt writes a
+`tropo.toml` whose `exclude` list is widened to cover pre-existing brownfield
+content, so it isn't flagged as untyped noise).
+
+```bash
+# See what adopt would do, without writing anything:
+create-vivary adopt . --json
+
+# Apply it:
+create-vivary adopt . --yes
+
+# Force a preset instead of the auto-detected one:
+create-vivary adopt ~/notes --preset second-brain --yes
+```
 
 ## vivary-cognee
 
