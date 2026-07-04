@@ -99,7 +99,7 @@ uvx --from vivary-tropo tropo check --root .
 Or install the CLIs directly:
 
 ```bash
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.3.1
+pip install vivary
 create-vivary adopt . --json
 ```
 
