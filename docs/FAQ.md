@@ -25,6 +25,22 @@ Vivary itself never contacts a model; it only reads and writes local files. You 
 the whole thing with a [local model](/blog/run-vivary-with-local-models/) and keep
 everything offline.
 
+### How should I set this up — and what do I paste to my agent?
+The agent path is recommended: `adopt` for existing projects, `init` for fresh ones.
+
+```text
+Set up Vivary (https://vivary.vercel.app) in this project.
+
+1. Read https://vivary.vercel.app/getting-started/ and https://vivary.vercel.app/commands/ before running anything.
+2. You need Python 3.11+ and uv (or pipx). Tell me if something is missing before installing it.
+3. If this folder already has content, this is an adoption: run `uvx create-vivary adopt .`, show me the dry-run plan, and apply with `--yes` only after I approve. Adopt only adds files — it never touches existing ones.
+   If this folder is new or empty, it is a fresh workspace: ask me which preset fits (coding / second brain / knowledge work / writing), then run `uvx create-vivary init . --preset <choice>`.
+4. Verify with `uvx create-vivary doctor .` and `uvx --from vivary-tropo tropo check --root .` — both must pass; show me the results.
+5. Read the generated AGENTS.md, then follow it for all future work here.
+```
+
+The full walkthrough is in the [getting started guide](/getting-started/).
+
 ### What is Vivary, in one sentence?
 A standard and scaffolder for agent-native workspaces: *a self-improving loop running
 over a typed, navigable knowledge graph, with one visible state surface and human

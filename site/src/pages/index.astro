@@ -15,10 +15,10 @@ const creates = [
   { t: 'Verification gates',   d: 'Human sign-off and graph checks before merge.',   f: 'gates/ · verification/ · tropo check' },
 ];
 const releaseHighlights = [
-  { t: 'Typed context packets', d: 'tropo find ranks the small set of graph nodes and files worth opening first, with reasons, snippets, and a token budget.' },
-  { t: 'Filtered graph query', d: 'tropo query now searches typed graph nodes and supports type, path, edge, snippet, and explain filters.' },
-  { t: 'Context-budget review', d: 'ozone review --pack context-budget flags oversized routing files, missing module indexes, duplicate routing blocks, and bulk-load cues.' },
-  { t: 'Optional sidecars stay gated', d: 'LanceDB, CocoIndex-code, and Cognee remain explicit opt-ins; graph-first retrieval stays zero-dependency.' },
+  { t: 'Filesystem map', d: 'tropo map inventories any repo or vault read-only — folders, sizes, routing surfaces, and modules missing an index. No tropo.toml required.' },
+  { t: 'Brownfield adopt', d: 'create-vivary adopt turns an existing project into an agent-native workspace. Dry-run first, an explicit write gate, and it only ever adds files.' },
+  { t: 'Doctor drift tracking', d: 'doctor --trend remembers workspace health and reports signed deltas run over run, plus a copy-paste CI gate recipe.' },
+  { t: 'Strato integrity gates', d: 'Scaffold smokes, link integrity, and Claude/Codex skills parity run in CI — every preset scaffolds to doctor-clean.' },
 ];
 ---
 
@@ -74,6 +74,7 @@ const releaseHighlights = [
         <span class="p">$</span><span class="typed">npm create @vivary@latest my-workspace</span>
         <button class="copy" data-copy="npm create @vivary@latest my-workspace" aria-label="Copy">copy</button>
       </div>
+      <p class="agent-cue"><a href="/getting-started/">Have an agent? Paste the setup prompt →</a></p>
 
       <!-- big central glowing graph: one node's blast radius lit -->
       <figure class="graphwrap" aria-label="A typed knowledge graph; changing the 'billing' node lights up everything that depends on it.">
@@ -170,15 +171,15 @@ tropo: 9 document(s), 0 error(s), 0 warning(s)  →  exit 0</pre>
       </div>
     </section>
 
-    <!-- CONTEXT COMPRESSION -->
+    <!-- THE ADOPTION LINE -->
     <section class="band hardening">
       <div class="hardening-copy">
-        <p class="search-label">Context compression</p>
-        <h2>Open fewer files. Trust the ones you do open.</h2>
+        <p class="search-label">The adoption line</p>
+        <h2>No greenfield required.</h2>
         <p>
-          The current line adds typed context packets, graph-aware query filters,
-          context-budget review, clearer active-context guidance, and an optional
-          Cognee adapter path while keeping integrations behind explicit gates.
+          The current line adds a read-only filesystem map, brownfield adoption,
+          doctor drift tracking, and strato integrity gates — Vivary now works on
+          the projects you already have.
         </p>
       </div>
       <ul class="hardening-list">
@@ -394,6 +395,9 @@ billing  →  4 node(s) depend on it
     .copy { font-family: var(--mono); font-size: 12px; color: var(--faint); background: none;
       border: 1px solid var(--line); border-radius: 7px; padding: 4px 9px; cursor: pointer; transition: color .2s, border-color .2s; }
     .copy:hover { color: var(--accent); border-color: var(--line-strong); }
+    .agent-cue { margin: 14px 0 0; font-size: 14px; }
+    .agent-cue a { color: var(--accent); font-weight: 600; }
+    .agent-cue a:hover { color: oklch(0.9 0.14 168); }
 
     /* hero graph */
     .graphwrap { margin: clamp(28px, 5vw, 56px) 0 0; }

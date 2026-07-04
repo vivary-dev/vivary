@@ -130,6 +130,22 @@ python packages/tropo/tropo.py graph --root sandboxes/coding-demo --json
 
 </details>
 
+### Agent setup
+
+Already working with Claude Code, Codex, Cursor, or another coding agent? Paste this
+prompt and it handles setup — greenfield or brownfield — with your approval at every gate:
+
+```text
+Set up Vivary (https://vivary.vercel.app) in this project.
+
+1. Read https://vivary.vercel.app/getting-started/ and https://vivary.vercel.app/commands/ before running anything.
+2. You need Python 3.11+ and uv (or pipx). Tell me if something is missing before installing it.
+3. If this folder already has content, this is an adoption: run `uvx create-vivary adopt .`, show me the dry-run plan, and apply with `--yes` only after I approve. Adopt only adds files — it never touches existing ones.
+   If this folder is new or empty, it is a fresh workspace: ask me which preset fits (coding / second brain / knowledge work / writing), then run `uvx create-vivary init . --preset <choice>`.
+4. Verify with `uvx create-vivary doctor .` and `uvx --from vivary-tropo tropo check --root .` — both must pass; show me the results.
+5. Read the generated AGENTS.md, then follow it for all future work here.
+```
+
 ## The irreducible baseline
 
 Every agent workspace, regardless of stack or task, needs the same small core:
