@@ -3,6 +3,7 @@ title: "Active context"
 description: "Optional CocoIndex-code sidecar guidance for semantic code retrieval."
 ---
 
+
 Active context is an optional sidecar pattern for Vivary-backed codebases. The simple
 mental model is:
 

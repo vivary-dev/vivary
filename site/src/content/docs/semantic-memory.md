@@ -3,6 +3,7 @@ title: "Optional semantic memory"
 description: "Architecture and adapter plan for optional semantic memory providers such as Cognee."
 ---
 
+
 Status: architecture note plus first optional Cognee adapter slice
 [#84](https://github.com/vivary-dev/vivary/issues/84), now split into
 [#85](https://github.com/vivary-dev/vivary/issues/85) for presets/capabilities and

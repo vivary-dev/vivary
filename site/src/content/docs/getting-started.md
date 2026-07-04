@@ -3,6 +3,7 @@ title: "Getting started"
 description: "Install Vivary and run your first agent workspace."
 ---
 
+
 This page takes you from nothing to a working **agent-native workspace**: a project
 folder set up so an AI agent can navigate it, check its own work, and remember things
 between sessions. You don't need to be an expert. If a term is unfamiliar, the

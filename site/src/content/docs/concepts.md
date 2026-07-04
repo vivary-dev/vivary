@@ -3,6 +3,7 @@ title: "What is Vivary?"
 description: "Plain-language intro: what Vivary is, the core ideas, and a glossary. Start here."
 ---
 
+
 New to AI agents? Start here. This page explains, in plain language, what Vivary is,
 the few ideas it's built on, and why they matter. No prior experience assumed.
 

@@ -3,6 +3,7 @@ title: "Agent skills"
 description: "The strato, tropo, and loops skills that operate a Vivary workspace."
 ---
 
+
 Vivary ships **agent skills**: load-on-demand procedures that tell an agent *how* to
 operate the workspace. They live next to the workspace (`.claude/skills/` for Claude
 Code, `.agents/skills/` for Codex) and load only when relevant, so they cost nothing

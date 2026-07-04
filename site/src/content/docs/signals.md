@@ -3,6 +3,7 @@ title: "Public signals"
 description: "Public npm, PyPI, and GitHub metrics snapshots."
 ---
 
+
 Vivary tracks a small public metrics snapshot so the README and site can show real
 distribution signals without a private analytics dashboard.
 

@@ -3,6 +3,7 @@ title: "Command reference"
 description: "Every CLI across Vivary: tropo, ozone, exo, create-vivary, and optional adapters."
 ---
 
+
 This is the full, technical list of every command. If you're just starting, you only
 need a handful (`create-vivary init`, `doctor`, `tropo check`); the [getting started
 guide](/getting-started/) walks through those. Come back here for the details.

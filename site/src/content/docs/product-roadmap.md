@@ -3,6 +3,7 @@ title: "Product roadmap"
 description: "High-leverage product backlog for context compression, maps, recall, and optional integrations."
 ---
 
+
 This is the durable backlog for high-leverage Vivary upgrades that should not be
 lost in chat. The filter is first-principles Vivary:
 

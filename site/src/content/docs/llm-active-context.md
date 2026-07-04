@@ -3,6 +3,7 @@ title: "LLM active-context guide"
 description: "Copyable agent instructions for graph-first CocoIndex-code retrieval."
 ---
 
+
 Copy this into an agent when a Vivary coding workspace was created with
 `--active-context cocoindex-code`.
 
