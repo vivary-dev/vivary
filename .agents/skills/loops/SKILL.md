@@ -77,13 +77,19 @@ merges or publishes on its own.
 define the per-tick self-check; set an iteration cap and a budget ceiling; point
 it at a fixed set of anchor files; make state durable.
 
-**Codex mechanisms:**
+**Claude Code mechanisms:**
 - `/loop` — run a prompt or skill on an interval or self-paced (e.g. *"babysit my
   PRs, auto-fix build issues, address review comments in a worktree"*).
 - `/goal` — keep going until a validator confirms done.
 - dynamic workflows — orchestrate many agents for one task.
 - cloud + auto-mode permissions — unattended runs with the laptop closed.
-- Always: a way to self-verify end to end, plus the caps above.
+
+**Codex mechanisms:** Codex has no built-in loop command. Drive iterations from
+outside: re-invoke `codex exec` from a shell loop, cron / Task Scheduler, or CI
+with an explicit iteration cap, and keep loop state in a file each run reads and
+updates. Cloud tasks can be re-run for unattended iterations.
+
+**Always (any runtime):** a way to self-verify end to end, plus the caps above.
 
 ## Recommend, then confirm
 
