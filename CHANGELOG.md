@@ -10,6 +10,18 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [vivary 0.1.0] — 2026-07-04
+
+Adds the `vivary` meta-package on PyPI: `pip install vivary` installs the full
+CLI suite (`create-vivary`, `vivary-tropo`, `vivary-ozone`, `vivary-exo`) with
+compatible minimum versions. No code of its own; the four packages stay
+independently versioned and installable. Website and docs install commands
+collapse to the one-liner; the homepage strip shows a single PyPI card.
+
+### Verification
+
+- Publishing remains a manual human gate.
+
 ## [vivary-tropo 0.4.1 / create-vivary 0.3.1] — 2026-07-04
 
 Affects `vivary-tropo`, `create-vivary` / `@vivary/create`, root docs, package docs,

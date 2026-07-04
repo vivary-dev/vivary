@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vivary"
+version = "0.1.0"
+description = "Typed memory and gates for AI-agent projects. One install for the full Vivary CLI suite: create-vivary, tropo, ozone, and exo."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "Jeff Kazzee" }]
+keywords = ["agents", "workspace", "knowledge-graph", "scaffold", "vivary"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+    "create-vivary>=0.3.1",
+    "vivary-tropo>=0.4.1",
+    "vivary-ozone>=0.2.0",
+    "vivary-exo>=0.2.2",
+]
+
+[project.urls]
+Homepage = "https://vivary.vercel.app/"
+Repository = "https://github.com/vivary-dev/vivary"
+Changelog = "https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md"
+
+[tool.setuptools]
+py-modules = []
