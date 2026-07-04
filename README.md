@@ -18,19 +18,19 @@ things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
 > Release status: package versions are independent; there is no single "Vivary
-> 0.3.0" release. Use **0.2.8** for the scaffolder (`create-vivary` /
-> `@vivary/create`), **0.3.0** for `vivary-tropo`, **0.2.2** for `vivary-exo`,
+> 0.4.0" release. Use **0.3.0** for the scaffolder (`create-vivary` /
+> `@vivary/create`), **0.4.0** for `vivary-tropo`, **0.2.2** for `vivary-exo`,
 > **0.2.0** for `vivary-ozone`, and **0.1.0** for the optional
 > `vivary-memory-cognee` adapter.
-> This line adds typed context packets (`tropo find`), graph-aware filtered
-> `tropo query`, the Ozone `context-budget` review pack, clearer CocoIndex-code
-> active-context guidance, and gated Cognee recall.
+> This line adds `tropo map` (read-only filesystem inventory), brownfield
+> `create-vivary adopt`, `doctor --trend` drift tracking, and strato integrity
+> gates in CI.
 
 | Surface | Current | Link |
 |---|---:|---|
-| `create-vivary` (PyPI) | 0.2.8 | [PyPI](https://pypi.org/project/create-vivary/) |
-| `@vivary/create` (npm) | 0.2.8 | [npm](https://www.npmjs.com/package/@vivary/create) |
-| `vivary-tropo` | 0.3.0 | [PyPI](https://pypi.org/project/vivary-tropo/) |
+| `create-vivary` (PyPI) | 0.3.0 | [PyPI](https://pypi.org/project/create-vivary/) |
+| `@vivary/create` (npm) | 0.3.0 | [npm](https://www.npmjs.com/package/@vivary/create) |
+| `vivary-tropo` | 0.4.0 | [PyPI](https://pypi.org/project/vivary-tropo/) |
 | `vivary-ozone` | 0.2.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
 | `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
 | `vivary-memory-cognee` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-memory-cognee/) |
@@ -38,10 +38,10 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
 Versions are intentionally independent across the layers and optional adapters: `tropo`
-moved to 0.3.0 for context-packet retrieval and graph-aware query filters, `ozone`
-moved to 0.2.0 for the context-budget pack, `create-vivary` / `@vivary/create` move to
-0.2.8 for scaffolded Cognee adapter metadata and docs, `vivary-memory-cognee` starts at
-0.1.0, and `exo` stays on the June security line.
+moved to 0.4.0 for the read-only `map` filesystem inventory command, `create-vivary` /
+`@vivary/create` move to 0.3.0 for brownfield `adopt` and `doctor --trend` drift
+tracking, `ozone` and `exo` are unchanged in this line, and `vivary-memory-cognee`
+stays at 0.1.0.
 
 ## Public Signals
 
@@ -60,8 +60,9 @@ high-leverage backlog lives in [docs/PRODUCT-ROADMAP.md](docs/PRODUCT-ROADMAP.md
 
 Current command surface:
 
-- `create-vivary init` / `doctor` / `wizard` / `capabilities`
-- `tropo check` / `graph` / `find` / `query` / `migrate` / `init --packs`
+- `create-vivary init` / `doctor` / `wizard` / `capabilities` / `adopt` /
+  `doctor --trend`
+- `tropo check` / `graph` / `find` / `query` / `migrate` / `map` / `init --packs`
 - `ozone review` / `impact`
 - `exo board` / `conflicts` / `claim` / `roles`
 - `vivary-cognee doctor` / `index` / `recall` / `forget` from the optional
@@ -79,7 +80,7 @@ npm create @vivary@latest my-workspace        # pick: second brain · coding · 
 Or install the CLIs from PyPI (run on demand with `uvx`, no install needed):
 
 ```bash
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.8
+pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.3.0
 create-vivary init my-workspace --preset coding     # interactive wizard on a TTY
 create-vivary init my-workbench --preset knowledge-work --memory local
 create-vivary init my-codebase --preset coding --active-context cocoindex-code
@@ -128,6 +129,22 @@ python packages/tropo/tropo.py graph --root sandboxes/coding-demo --json
 ```
 
 </details>
+
+### Agent setup
+
+Already working with Claude Code, Codex, Cursor, or another coding agent? Paste this
+prompt and it handles setup — greenfield or brownfield — with your approval at every gate:
+
+```text
+Set up Vivary (https://vivary.vercel.app) in this project.
+
+1. Read https://vivary.vercel.app/getting-started/ and https://vivary.vercel.app/commands/ before running anything.
+2. You need Python 3.11+ and uv (or pipx). Tell me if something is missing before installing it.
+3. If this folder already has content, this is an adoption: run `uvx create-vivary adopt .`, show me the dry-run plan, and apply with `--yes` only after I approve. Adopt only adds files — it never touches existing ones.
+   If this folder is new or empty, it is a fresh workspace: ask me which preset fits (coding / second brain / knowledge work / writing), then run `uvx create-vivary init . --preset <choice>`.
+4. Verify with `uvx create-vivary doctor .` and `uvx --from vivary-tropo tropo check --root .` — both must pass; show me the results.
+5. Read the generated AGENTS.md, then follow it for all future work here.
+```
 
 ## The irreducible baseline
 

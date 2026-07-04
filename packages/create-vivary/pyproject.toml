@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "create-vivary"
-version = "0.2.8"
+version = "0.3.0"
 description = "Scaffold a complete Vivary agent workspace — the create-t3-app for agent-native workspaces."
 readme = "README.md"
 requires-python = ">=3.11"

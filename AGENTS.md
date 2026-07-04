@@ -106,17 +106,16 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
 ## Verify
 
 ```bash
-python packages/tropo/tests/test_tropo.py                  # 68/68
+python packages/tropo/tests/test_tropo.py                  # 83/83
 python packages/ozone/tests/test_ozone.py                  # 16/16
 python packages/exo/tests/test_exo.py                      # 14/14
-python packages/create-vivary/tests/test_create_vivary.py  # 54/54  (+ test_assets_parity 3/3)
+python packages/create-vivary/tests/test_create_vivary.py  # 62/62  (+ test_assets_parity 3/3)
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # clean
 ```
 
 Current release truth lives in [README.md](README.md) and [CHANGELOG.md](CHANGELOG.md):
-`create-vivary` / `@vivary/create` 0.2.8, `vivary-memory-cognee` 0.1.0,
-`vivary-tropo` 0.3.0, `vivary-exo` 0.2.2, and `vivary-ozone` 0.2.0. Versions are
-independent; there is no single "Vivary 0.3.0" release. This line carries context
-packets, graph-aware query filters, the Ozone context-budget pack, active-context
-docs, and the optional Cognee adapter while keeping optional integrations gated.
-Full guides live in [docs/](docs/).
+`create-vivary` / `@vivary/create` 0.3.0, `vivary-memory-cognee` 0.1.0,
+`vivary-tropo` 0.4.0, `vivary-exo` 0.2.2, and `vivary-ozone` 0.2.0. Versions are
+independent; there is no single "Vivary 0.4.0" release. This line adds `tropo map`,
+brownfield `create-vivary adopt`, `doctor --trend` drift tracking, and strato
+integrity gates in CI. Full guides live in [docs/](docs/).

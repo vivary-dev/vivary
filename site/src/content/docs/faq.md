@@ -28,6 +28,22 @@ Vivary itself never contacts a model; it only reads and writes local files. You 
 the whole thing with a [local model](/blog/run-vivary-with-local-models/) and keep
 everything offline.
 
+### How should I set this up — and what do I paste to my agent?
+The agent path is recommended: `adopt` for existing projects, `init` for fresh ones.
+
+```text
+Set up Vivary (https://vivary.vercel.app) in this project.
+
+1. Read https://vivary.vercel.app/getting-started/ and https://vivary.vercel.app/commands/ before running anything.
+2. You need Python 3.11+ and uv (or pipx). Tell me if something is missing before installing it.
+3. If this folder already has content, this is an adoption: run `uvx create-vivary adopt .`, show me the dry-run plan, and apply with `--yes` only after I approve. Adopt only adds files — it never touches existing ones.
+   If this folder is new or empty, it is a fresh workspace: ask me which preset fits (coding / second brain / knowledge work / writing), then run `uvx create-vivary init . --preset <choice>`.
+4. Verify with `uvx create-vivary doctor .` and `uvx --from vivary-tropo tropo check --root .` — both must pass; show me the results.
+5. Read the generated AGENTS.md, then follow it for all future work here.
+```
+
+The full walkthrough is in the [getting started guide](/getting-started/).
+
 ### What is Vivary, in one sentence?
 A standard and scaffolder for agent-native workspaces: *a self-improving loop running
 over a typed, navigable knowledge graph, with one visible state surface and human
@@ -138,7 +154,7 @@ PyPI has no scopes and the bare names `tropo`/`ozone`/`exo` were taken, so the
 stay `tropo` / `ozone` / `exo`. On npm the scaffolder is `@vivary/create`.
 
 ### How do I install / run it?
-`pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.8`, or run on demand with
+`pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.3.0`, or run on demand with
 `uvx vivary-tropo ...`, or scaffold with `npm create @vivary@latest`. Python 3.11+ only;
 zero third-party dependencies.
 
@@ -152,24 +168,23 @@ batched: memory writes, publishing (PyPI/npm), `git push`/PR/merge, org/repo cre
 installs, enabling hooks, destructive ops, and sending data of unknown sensitivity. The
 agent is bold *inside* the work and careful at the *edges*.
 
-### What does the current context-compression release cover?
-The current package set helps agents open fewer files while getting better context:
-`tropo find` returns typed context packets, `tropo query` searches graph nodes with
-type/path/edge filters, `ozone review --pack context-budget` flags bloated routing
-surfaces, and generated active-context guidance keeps CocoIndex-code behind explicit
-install/index/MCP gates. The June 23 security-hardening work is still part of the
-published line. The Cognee adapter is now implemented as an optional package in the
-repo, but it is not part of the default install line; see the changelog for the exact
-package surfaces.
+### What does the current adoption-line release cover?
+The current package set makes Vivary work on existing repos and vaults, not just
+fresh scaffolds: `tropo map` gives a read-only filesystem inventory of any repo, vault,
+or docs tree; `create-vivary adopt <path>` brings Vivary into a brownfield workspace
+without touching existing files (dry-run by default, `--yes` to write); and
+`create-vivary doctor --trend` tracks graph and routing drift across runs. strato's
+scaffold and skills-parity smokes now run as CI gates. Publishing remains a manual
+human gate; see the changelog for the exact package surfaces.
 
 ### Is it stable? What's the version?
 Published packages are independently versioned: `create-vivary` / `@vivary/create`
-**0.2.8**, optional `vivary-memory-cognee` **0.1.0**, `vivary-tropo` **0.3.0**,
+**0.3.0**, optional `vivary-memory-cognee` **0.1.0**, `vivary-tropo` **0.4.0**,
 `vivary-ozone` **0.2.0**, and `vivary-exo` **0.2.2**. It's young — APIs may move before
 `1.0`. File issues for rough edges.
 
 The versions differ on purpose: the layers and optional adapters are independently
-versioned. There is no single "Vivary 0.3.0" release.
+versioned. There is no single "Vivary 0.4.0" release.
 
 ### Where do I report bugs or ask for features?
 GitHub: [github.com/vivary-dev/vivary](https://github.com/vivary-dev/vivary). See the

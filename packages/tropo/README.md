@@ -10,12 +10,13 @@ model made every file pay a ceremony tax — `type:`, `created:`, `updated:`,
 write down only the irreducible signal. A clean note can have **zero
 frontmatter** and still be fully typed and valid.
 
-> Status: **working engine (v0.3).** `tropo.py` implements spec v1 end-to-end —
+> Status: **working engine (v0.4).** `tropo.py` implements spec v1 end-to-end —
 > folder-as-type resolution, derivation, validation, packs, **overlays**, the
 > `signal` report, **`fix`** (de-noise), **`init`**, the graph layer
-> (`graph`/`blast`/`view`/`plan`), typed retrieval (`find`/`query`), and the
-> data layer (file → embedded migration). Cloud adapters are future 0.3.x work. An
-> agent can drive the whole thing via [.claude/skills/tropo/SKILL.md](.claude/skills/tropo/SKILL.md).
+> (`graph`/`blast`/`view`/`plan`), typed retrieval (`find`/`query`), read-only
+> filesystem inventory (**`map`**), and the data layer (file → embedded
+> migration). Cloud adapters are future work. An agent can drive the whole thing
+> via [.claude/skills/tropo/SKILL.md](.claude/skills/tropo/SKILL.md).
 > See [SPEC.md](SPEC.md).
 
 ## Quickstart
@@ -30,6 +31,7 @@ python tropo.py view   --root examples/vault --out examples/vault/graph.html
 python tropo.py fix    --dry-run                 # preview redundant-frontmatter removal
 python tropo.py find "folder as type decision" --root examples/vault --json  # read-this-first packet
 python tropo.py query "meeting notes" --root examples/vault --type meeting --explain
+python tropo.py map    --root examples/vault    # read-only filesystem inventory, no tropo.toml required
 python tropo.py migrate --from file --to embedded --root my-vault --yes  # switch to LanceDB
 python tests/test_tropo.py                       # run the test suite
 ```
@@ -37,7 +39,7 @@ python tests/test_tropo.py                       # run the test suite
 Requires Python 3.11+ (stdlib `tomllib`), zero third-party dependencies for the core.
 Optional extras: `pip install vivary-tropo[embedded]` for LanceDB embedded storage
 and backend-level experiments. Public `tropo find` / `query` stay zero-dependency and
-read the typed graph directly. Cloud extras are reserved for the 0.3.x adapter work.
+read the typed graph directly. Cloud extras are reserved for future adapter work.
 
 Built-in packs are embedded in the single-file engine, so installed wheels can resolve
 starter packs without a repo-local `packs/` directory. Workspace-local
