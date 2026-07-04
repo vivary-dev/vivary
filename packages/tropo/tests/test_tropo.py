@@ -893,8 +893,9 @@ def _map_tree(tmp_path):
     (tmp_path / "big.bin").write_bytes(b"0" * 5000)  # the oversized file
 
 
-def _map_args(root, json_out=True, depth=None, max_entries=None):
-    return argparse.Namespace(root=root, json=json_out, depth=depth, max_entries=max_entries)
+def _map_args(root, json_out=True, depth=None, max_entries=None, paths=()):
+    return argparse.Namespace(root=root, json=json_out, depth=depth,
+                              max_entries=max_entries, paths=list(paths))
 
 
 def test_map_counts_and_ignored_folder_absent(tmp_path):
@@ -1014,6 +1015,141 @@ def test_map_depth_limits_table_not_counts(tmp_path):
     }]
     # counts still reflect the whole tree even though the table is depth 0
     assert out["summary"]["total_files"] == 8
+
+
+def test_map_json_max_entries_caps_directories(tmp_path):
+    _map_tree(tmp_path)
+    rc, out = _capture_rc(tropo.cmd_map, _map_args(str(tmp_path), max_entries=1))
+    assert rc == 0
+    # --max-entries must cap the JSON directories array exactly like the
+    # markdown table (it was silently ignored in --json mode).
+    assert len(out["directories"]) == 1
+    assert out["directories"][0]["path"] == "."
+    # summary sections are not affected by the row cap
+    assert out["summary"]["total_files"] == 8
+    assert len(out["summary"]["largest_files"]) == 8
+
+
+def test_map_root_is_basename_only(tmp_path):
+    _map_tree(tmp_path)
+    rc, out = _capture_rc(tropo.cmd_map, _map_args(str(tmp_path)))
+    assert rc == 0
+    # The JSON map is pitched as shareable: `root` must be the basename only,
+    # never the absolute local path (which contains the username).
+    assert out["root"] == os.path.basename(str(tmp_path))
+    assert "/" not in out["root"] and "\\" not in out["root"]
+
+    import contextlib
+    import io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        tropo.cmd_map(_map_args(str(tmp_path), json_out=False))
+    first_line = buf.getvalue().splitlines()[0]
+    assert first_line == f"# tropo map: {os.path.basename(str(tmp_path))}"
+
+
+def test_map_junction_cycle_not_double_counted(tmp_path):
+    """A junction (mklink /J) pointing back up the tree must not loop or
+    double-count: os.walk's followlinks=False does not stop junctions because
+    Windows does not classify them as symlinks. Skips gracefully when junction
+    creation is unavailable (non-Windows, or mklink fails)."""
+    import subprocess
+    if os.name != "nt":
+        return  # junctions are a Windows/NTFS concept
+    _map_tree(tmp_path)
+    link = tmp_path / "src" / "loop"
+    try:
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(tmp_path)],
+            capture_output=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return  # cannot create a junction here — skip gracefully
+    if result.returncode != 0:
+        return  # mklink unavailable/refused — skip gracefully
+    try:
+        rc, out = _capture_rc(tropo.cmd_map, _map_args(str(tmp_path)))
+        assert rc == 0
+        assert out["summary"]["total_files"] == 8  # not inflated by the cycle
+        assert not any("loop" in d["path"] for d in out["directories"])
+        assert not any("loop" in f["path"] for f in out["summary"]["largest_files"])
+    finally:
+        os.rmdir(link)  # removes the junction only, never its target's contents
+
+
+def test_map_markdown_escapes_table_cells():
+    # '|' would split a Markdown table cell; newlines would break the row.
+    assert tropo._md_cell("a|b.md") == "a\\|b.md"
+    assert tropo._md_cell("a\nb") == "a b"
+    assert tropo._md_cell("a\r\nb") == "a  b"
+    assert tropo._md_cell("plain/path.md") == "plain/path.md"
+
+
+def test_map_file_level_excludes(tmp_path):
+    (tmp_path / "tropo.toml").write_text(
+        "exclude = ['notes/secret.md', 'vault/README.md']\n"
+        "[base]\nallow_untyped = true\n", encoding="utf-8")
+    (tmp_path / "notes").mkdir()
+    # big enough that a leak would top largest_files
+    (tmp_path / "notes" / "secret.md").write_text("# Secret\n" * 500, encoding="utf-8")
+    (tmp_path / "notes" / "open.md").write_text("# Open\n", encoding="utf-8")
+    (tmp_path / "vault").mkdir()
+    (tmp_path / "vault" / "README.md").write_text("# Vault\n", encoding="utf-8")
+
+    rc, out = _capture_rc(tropo.cmd_map, _map_args(str(tmp_path)))
+    assert rc == 0
+    # tropo.toml + notes/open.md = 2; both excluded files out of every surface
+    assert out["summary"]["total_files"] == 2
+    assert not any("secret" in f["path"] for f in out["summary"]["largest_files"])
+    assert "vault/README.md" not in out["summary"]["index_files"]
+    notes_row = next(d for d in out["directories"] if d["path"] == "notes")
+    assert notes_row["files"] == 1
+    vault_row = next(d for d in out["directories"] if d["path"] == "vault")
+    assert vault_row["has_index"] is False  # its only index file is excluded
+
+
+def test_map_positional_path_is_root(tmp_path):
+    _map_tree(tmp_path)
+    rc, out = _capture_rc(
+        tropo.cmd_map, _map_args(None, paths=[str(tmp_path)]))
+    assert rc == 0
+    assert out["summary"]["total_files"] == 8
+    assert out["root"] == os.path.basename(str(tmp_path))
+
+
+def test_map_rejects_multiple_or_conflicting_paths(tmp_path):
+    _map_tree(tmp_path)
+    for bad in (
+        _map_args(None, paths=[str(tmp_path), str(tmp_path / "src")]),
+        _map_args(str(tmp_path), paths=[str(tmp_path)]),  # --root AND positional
+    ):
+        try:
+            tropo.cmd_map(bad)
+            assert False, "expected SystemExit for ambiguous map root"
+        except SystemExit:
+            pass
+
+
+def test_map_subtree_rebases_config_excludes(tmp_path):
+    """`exclude = ["docs/private"]` is anchored at the config root; mapping
+    --root docs must still keep private/ out (the pattern gets rebased)."""
+    (tmp_path / "tropo.toml").write_text(
+        "exclude = ['docs/private']\n[base]\nallow_untyped = true\n",
+        encoding="utf-8")
+    docs = tmp_path / "docs"
+    (docs / "private").mkdir(parents=True)
+    (docs / "private" / "secret.md").write_text("# Secret\n", encoding="utf-8")
+    (docs / "guide.md").write_text("# Guide\n", encoding="utf-8")
+
+    rc, out = _capture_rc(tropo.cmd_map, _map_args(str(docs)))
+    assert rc == 0
+    assert out["summary"]["total_files"] == 1  # guide.md only
+    assert not any("private" in d["path"] for d in out["directories"])
+    assert not any("secret" in f["path"] for f in out["summary"]["largest_files"])
+
+    # same exclude still works when mapping from the config root itself
+    rc, out = _capture_rc(tropo.cmd_map, _map_args(str(tmp_path)))
+    assert rc == 0
+    assert not any("private" in d["path"] for d in out["directories"])
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ Usage:
   tropo plan <change-spec.toml> [--json]
   tropo query <text> [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]]
   tropo find <text> [--budget N] [--json]
-  tropo map [--root PATH] [--depth N] [--max-entries N] [--json]
+  tropo map [PATH | --root PATH] [--depth N] [--max-entries N] [--json]
 
 Config is TOML (tropo.toml, resolved by walking up). Content frontmatter is YAML.
 Zero dependencies. Requires Python 3.11+ (for tomllib).
@@ -1594,15 +1594,35 @@ def _map_skip_patterns(root):
     """Fixed skip list, plus the workspace's own tropo.toml `exclude` patterns
     (the same `Config.exclude`/`is_excluded` mechanism `check`/`graph` use) when
     a config happens to be found walking up from `root`. A missing or broken
-    config never blocks the (read-only) map."""
+    config never blocks the (read-only) map.
+
+    Config excludes are anchored at the *config* root, but map paths are
+    relative to the *map* root — when mapping a subtree, path-anchored patterns
+    are rebased onto the map root (prefix dropped; patterns that cannot apply
+    under the subtree are discarded). Bare-name patterns match any level and
+    pass through unchanged."""
     patterns = set(MAP_SKIP_DIRS)
-    cfg_root = find_root(root)
+    root_abs = os.path.abspath(root)
+    cfg_root = find_root(root_abs)
     if cfg_root:
         try:
             config = load_config(cfg_root, os.path.dirname(os.path.abspath(__file__)))
-            patterns.update(config.exclude)
         except ConfigError:
-            pass
+            config = None
+        if config is not None:
+            rel = os.path.relpath(root_abs, cfg_root).replace("\\", "/")
+            prefix = "" if rel in (".", "") else rel + "/"
+            for pat in config.exclude:
+                p = pat.replace("\\", "/").rstrip("/")
+                if not p:
+                    continue
+                if "/" not in p or not prefix:
+                    patterns.add(p)  # bare name (any level) or map root == config root
+                elif p.startswith(prefix):
+                    rebased = p[len(prefix):]
+                    if rebased:
+                        patterns.add(rebased)
+                # else: anchored outside this subtree — cannot match, drop it
     return sorted(patterns)
 
 
@@ -1613,9 +1633,18 @@ def _map_is_index(filename):
 def _map_walk(root, skip_patterns):
     """Walk the full tree from `root` (no depth limit — aggregate counts need
     the whole tree). Reuses `is_excluded` so skip semantics match `check`/`graph`
-    (dotted dir-name patterns and path-anchored patterns both work). Yields
-    (dirpath, reldir, dirnames, filenames) with dirnames pruned in place."""
+    (dotted dir-name patterns and path-anchored patterns both work). Directories
+    whose *real* path was already visited are pruned, so NTFS junctions and
+    symlink cycles never loop or double-count (os.walk's followlinks=False alone
+    does not stop junctions — Windows does not classify them as symlinks).
+    Yields (dirpath, reldir, dirnames, filenames) with dirnames pruned in place."""
+    seen = set()
     for dirpath, dirnames, filenames in os.walk(root):
+        real = os.path.normcase(os.path.realpath(dirpath))
+        if real in seen:
+            dirnames[:] = []  # already inventoried under its real path
+            continue
+        seen.add(real)
         reldir = os.path.relpath(dirpath, root)
         reldir = "" if reldir == "." else reldir.replace("\\", "/")
         dirnames.sort()
@@ -1647,12 +1676,14 @@ def build_filesystem_map(root, skip_patterns):
         entry = own.setdefault(
             reldir, {"files": 0, "size": 0, "ext_counts": Counter(), "has_index": False})
         for fname in filenames:
+            rel = f"{reldir}/{fname}" if reldir else fname
+            if is_excluded(rel, skip_patterns):
+                continue  # file-level excludes count for files, not just dirs
             full = os.path.join(dirpath, fname)
             try:
                 size = os.path.getsize(full)
             except OSError:
                 size = 0
-            rel = f"{reldir}/{fname}" if reldir else fname
             ext = os.path.splitext(fname)[1].lower() or "(none)"
 
             total_files += 1
@@ -1742,10 +1773,27 @@ def _human_size(n):
     return f"{size:.1f}TB"
 
 
-def render_map_json(map_data, depth):
+def _map_root_label(root):
+    """Shareable label for the mapped root: its basename only. Every other path
+    in the map is root-relative; the absolute local path (which may contain a
+    username) must not leak into output that is pitched as safe to share."""
+    root = os.path.abspath(root)
+    return os.path.basename(root) or root.replace("\\", "/").rstrip("/") or "/"
+
+
+def _md_cell(s):
+    """Escape a value for a Markdown table cell: a literal '|' would split the
+    cell and a newline would break the row (POSIX filenames may contain both).
+    JSON output needs no such escaping — json.dumps already handles it."""
+    return str(s).replace("\r", " ").replace("\n", " ").replace("|", "\\|")
+
+
+def render_map_json(map_data, depth, max_entries=None):
     rows = _map_directory_rows(map_data, depth)
+    if max_entries is not None and max_entries >= 0:
+        rows = rows[:max_entries]
     return {
-        "root": map_data["root"].replace("\\", "/"),
+        "root": _map_root_label(map_data["root"]),
         "depth": depth,
         "summary": {
             "total_files": map_data["total_files"],
@@ -1777,7 +1825,7 @@ def render_map_markdown(map_data, depth, max_entries=None):
     if max_entries is not None and max_entries >= 0:
         rows = rows[:max_entries]
 
-    lines = [f"# tropo map: {map_data['root'].replace(chr(92), '/')}", ""]
+    lines = [f"# tropo map: {_md_cell(_map_root_label(map_data['root']))}", ""]
     lines.append(
         f"{map_data['total_files']} file(s), {map_data['total_dirs']} "
         f"director(y/ies), depth ≤ {depth}"
@@ -1789,9 +1837,9 @@ def render_map_markdown(map_data, depth, max_entries=None):
     lines.append("| Path | Depth | Files | Size | Dominant extensions | Index? |")
     lines.append("|---|---|---|---|---|---|")
     for r in rows:
-        dom = ", ".join(f"{ext} ({c})" for ext, c in r["dominant_extensions"]) or "-"
+        dom = ", ".join(f"{_md_cell(ext)} ({c})" for ext, c in r["dominant_extensions"]) or "-"
         lines.append(
-            f"| {r['path']} | {r['depth']} | {r['files']} | {_human_size(r['size'])} "
+            f"| {_md_cell(r['path'])} | {r['depth']} | {r['files']} | {_human_size(r['size'])} "
             f"| {dom} | {'yes' if r['has_index'] else 'no'} |"
         )
     lines.append("")
@@ -1800,7 +1848,7 @@ def render_map_markdown(map_data, depth, max_entries=None):
     lines.append("")
     if map_data["extensions_top"]:
         for ext, c in map_data["extensions_top"]:
-            lines.append(f"- `{ext}`: {c}")
+            lines.append(f"- `{_md_cell(ext)}`: {c}")
     else:
         lines.append("- (none)")
     lines.append("")
@@ -1809,7 +1857,7 @@ def render_map_markdown(map_data, depth, max_entries=None):
     lines.append("")
     if map_data["largest_files"]:
         for p, s in map_data["largest_files"]:
-            lines.append(f"- {p} — {_human_size(s)}")
+            lines.append(f"- {_md_cell(p)} — {_human_size(s)}")
     else:
         lines.append("- (none)")
     lines.append("")
@@ -1818,7 +1866,7 @@ def render_map_markdown(map_data, depth, max_entries=None):
     lines.append("")
     if map_data["index_files"]:
         for p in map_data["index_files"]:
-            lines.append(f"- {p}")
+            lines.append(f"- {_md_cell(p)}")
     else:
         lines.append("- (none found)")
     lines.append("")
@@ -1832,7 +1880,7 @@ def render_map_markdown(map_data, depth, max_entries=None):
     lines.append("")
     if map_data["likely_modules_without_index"]:
         for d in map_data["likely_modules_without_index"]:
-            lines.append(f"- {d}")
+            lines.append(f"- {_md_cell(d)}")
     else:
         lines.append("- (none)")
     lines.append("")
@@ -1849,7 +1897,12 @@ def cmd_map(args):
     large repo, vault, docs tree, or file system without opening hundreds of
     files: directory table (up to --depth), extension/size summary, existing
     index files, and likely module folders missing an index.md/README.md."""
-    root = os.path.abspath(args.root or os.getcwd())
+    paths = getattr(args, "paths", None) or []
+    if len(paths) > 1:
+        sys.exit("tropo: map takes at most one path (the tree to inventory)")
+    if paths and args.root:
+        sys.exit("tropo: map: give either a positional path or --root, not both")
+    root = os.path.abspath(paths[0] if paths else (args.root or os.getcwd()))
     if not os.path.isdir(root):
         sys.exit(f"tropo: map root is not a directory: {root}")
     depth = MAP_DEFAULT_DEPTH if args.depth is None else args.depth
@@ -1859,7 +1912,8 @@ def cmd_map(args):
     map_data = build_filesystem_map(root, skip_patterns)
 
     if args.json:
-        print(json.dumps(render_map_json(map_data, depth), indent=2, sort_keys=True))
+        print(json.dumps(render_map_json(map_data, depth, max_entries),
+                         indent=2, sort_keys=True))
     else:
         print(render_map_markdown(map_data, depth, max_entries))
     return 0
@@ -2414,7 +2468,8 @@ def main(argv=None):
                             "view", "plan", "fix", "init", "migrate", "query", "find",
                             "map"])
     p.add_argument("paths", nargs="*",
-                   help="files or folders (default: whole tree); for blast/query/find, the target id/text")
+                   help="files or folders (default: whole tree); for blast/query/find, "
+                        "the target id/text; for map, the single tree to inventory")
     p.add_argument("--strict", action="store_true",
                    help="check: force warnings to fail (the default; overrides a lenient config)")
     p.add_argument("--lenient", action="store_true",

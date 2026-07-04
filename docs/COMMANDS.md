@@ -114,7 +114,7 @@ configs — a sub-folder may turn it on, never off.
 ### Filesystem map (`tropo map`)
 
 ```
-tropo map [--root PATH] [--depth N] [--max-entries N] [--json]
+tropo map [PATH | --root PATH] [--depth N] [--max-entries N] [--json]
 ```
 
 Read-only inventory of a large repo, vault, docs tree, or file system — no
@@ -125,21 +125,30 @@ that look like modules but have no `index.md`/`README.md`.
 
 | Flag | Effect |
 |---|---|
-| `--root PATH` | Tree to inventory (default: current directory). Does **not** need a `tropo.toml`. |
+| `PATH` / `--root PATH` | Tree to inventory (default: current directory) — give one or the other, not both; extra positional paths are an error. Does **not** need a `tropo.toml`. |
 | `--depth N` | Directory-table depth, root = depth 0 (default: `3`). Counts (totals, extensions, largest files, missing-index detection) always cover the *whole* tree regardless of `--depth` — only the table rows are limited. |
-| `--max-entries N` | Cap the number of directory rows printed in the table (default: unlimited). |
+| `--max-entries N` | Cap the number of directory rows — the markdown table and the JSON `directories` array alike (default: unlimited). Summary sections are never capped. |
 | `--json` | Emit a single JSON object with sorted keys and deterministic ordering (stable to diff and safe to cite). |
 
-Skipped directories: `.git`, `node_modules`, `__pycache__`, `.venv`, `venv`,
-`dist`, `build`, `.astro`, `.next`, `target`, plus any `exclude` patterns from
-a `tropo.toml` found by walking up from `--root` (the same `is_excluded`
-mechanism `check`/`graph` use) — a missing or invalid config never blocks the
-map. "Likely modules without an index" = directories at depth 1-2 with
-5 or more files (recursive count) and no `index.md`/`README.md`.
+The output is safe to share: the `root` field (and the markdown heading) is the
+mapped directory's **basename only** — the absolute local path never appears.
+Every other path is root-relative with forward slashes.
+
+Skipped: `.git`, `node_modules`, `__pycache__`, `.venv`, `venv`, `dist`,
+`build`, `.astro`, `.next`, `target`, plus any `exclude` patterns from a
+`tropo.toml` found by walking up from the map root (the same `is_excluded`
+mechanism `check`/`graph` use, applied to directories **and** individual
+files) — a missing or invalid config never blocks the map. When the map root
+sits below the config root, path-anchored excludes are rebased onto the map
+root, so `exclude = ["docs/private"]` still hides `private/` when you run
+`tropo map docs`. Directory junctions and symlink cycles are pruned by real
+path, so a looping tree never inflates counts. "Likely modules without an
+index" = directories at depth 1-2 with 5 or more files (recursive count) and
+no `index.md`/`README.md`.
 
 ```
 $ tropo map --root . --depth 2
-# tropo map: /repo
+# tropo map: repo
 
 163 file(s), 65 director(y/ies), depth ≤ 2
 
