@@ -106,7 +106,7 @@ const readCanonicalMarkdown = (root, relativePath, label) => {
 const render = (raw, title, desc) => {
   const lines = raw.split('\n');
   if (lines[0]?.startsWith('# ')) lines.shift();
-  const body = rewrite(lines.join('\n')).replace(/^\n+/, '');
+  const body = rewrite(lines.join('\n')).replace(/^[\r\n]+/, '');
   return `---\ntitle: ${JSON.stringify(title)}\ndescription: ${JSON.stringify(desc)}\n---\n\n${body}`;
 };
 
@@ -129,3 +129,119 @@ fs.writeFileSync(
 console.log('  synced CHANGELOG.md -> changelog.md');
 
 console.log('site docs synced from docs/ (+ CHANGELOG.md).');
+
+// --- Generate llms.txt & llms-full.txt ---
+
+const readPythonVersion = (packagePath) => {
+  const file = path.join(repoRoot, 'packages', packagePath, 'pyproject.toml');
+  const content = fs.readFileSync(file, 'utf8');
+  const match = content.match(/^version\s*=\s*"([^"]+)"/m);
+  if (!match) throw new Error(`Could not find version in pyproject.toml for ${packagePath}`);
+  return match[1];
+};
+
+const readNpmVersion = (packagePath) => {
+  const file = path.join(repoRoot, 'packages', packagePath, 'package.json');
+  const content = fs.readFileSync(file, 'utf8');
+  const pkg = JSON.parse(content);
+  return pkg.version;
+};
+
+const createVivaryPyPI = readPythonVersion('create-vivary');
+const createVivaryNpm = readNpmVersion('create-vivary/npm');
+const tropoVersion = readPythonVersion('tropo');
+const ozoneVersion = readPythonVersion('ozone');
+const exoVersion = readPythonVersion('exo');
+const cogneeVersion = readPythonVersion('memory-cognee');
+
+const coreDocsList = pages
+  .map(([_, slug, title]) => `- ${title}: https://vivary.vercel.app/${slug}/`)
+  .join('\n') + '\n- Changelog: https://vivary.vercel.app/changelog/';
+
+const llmsText = `# Vivary
+
+Vivary is a standard and scaffolder for agent-native workspaces. It gives AI agents a
+small, inspectable workspace they can navigate and verify: typed project memory,
+visible state, reusable skills, private boundaries, and human gates.
+
+Website: https://vivary.vercel.app/
+Repository: https://github.com/vivary-dev/vivary
+License: MIT
+Full Documentation: https://vivary.vercel.app/llms-full.txt
+
+## Current package surfaces
+
+- PyPI meta-package (installs the suite): \`vivary\`, via \`pip install vivary\`
+- npm scaffolder: \`@vivary/create\` ${createVivaryNpm}
+- PyPI scaffolder: \`create-vivary\` ${createVivaryPyPI}
+- PyPI knowledge graph CLI: \`vivary-tropo\` ${tropoVersion}, command \`tropo\`
+- PyPI review CLI: \`vivary-ozone\` ${ozoneVersion}, command \`ozone\`
+- PyPI coordination CLI: \`vivary-exo\` ${exoVersion}, command \`exo\`
+- \`strato\` is bundled as workspace templates and agent skills, not a separate package.
+- Optional Cognee adapter: \`vivary-memory-cognee\` ${cogneeVersion}, command \`vivary-cognee\`
+- Versions are independent; do not call the whole project "Vivary ${createVivaryPyPI}".
+
+## Install
+
+\`\`\`bash
+npm create @vivary@latest my-workspace
+pip install vivary
+\`\`\`
+
+## Core docs
+
+${coreDocsList}
+
+## Agent retrieval
+
+Start with graph-first context:
+
+\`\`\`bash
+tropo find "<task or question>" --root . --budget 1200 --json
+tropo query "<text>" --root . --type decision --explain --json
+ozone review --root . --pack context-budget
+\`\`\`
+
+Optional active context:
+
+- CocoIndex-code is an optional coding sidecar, not default behavior.
+- LanceDB is explicit embedded storage, not semantic retrieval.
+- The published scaffolder can write Cognee policy without installing or indexing.
+- The optional Cognee adapter indexes privacy-filtered typed Tropo node packets only
+  after explicit install and index approval.
+- Vivary core does not install embeddings, start daemons, enable MCP, or send data
+  anywhere by default.
+
+LLM active-context guide: https://vivary.vercel.app/llm-active-context/
+`;
+
+const publicDir = path.resolve(here, '..', 'public');
+fs.writeFileSync(path.join(publicDir, 'llms.txt'), llmsText);
+console.log('  generated site/public/llms.txt');
+
+// We collect the full markdown content of each page, rewriting local links to absolute
+const makeAbsolute = (body) => {
+  return body.replaceAll('](/', '](https://vivary.vercel.app/');
+};
+
+let llmsFullText = `# Vivary (Full Documentation)
+
+This file contains the complete documentation suite for Vivary.
+
+${llmsText}
+
+`;
+
+for (const [src, slug, title] of pages) {
+  const raw = readCanonicalMarkdown(docsDir, `${src}.md`, `docs/${src}.md`);
+  const body = makeAbsolute(rewrite(raw));
+  llmsFullText += `\n---\n\n${body}\n`;
+}
+
+// Append the Changelog to llms-full.txt
+const changelogBody = makeAbsolute(rewrite(changelog));
+llmsFullText += `\n---\n\n${changelogBody}\n`;
+
+fs.writeFileSync(path.join(publicDir, 'llms-full.txt'), llmsFullText);
+console.log('  generated site/public/llms-full.txt');
+
