@@ -171,6 +171,7 @@ Full Documentation: https://vivary.vercel.app/llms-full.txt
 
 ## Current package surfaces
 
+- PyPI meta-package (installs the suite): \`vivary\` — \`pip install vivary\`
 - npm scaffolder: \`@vivary/create\` ${createVivaryNpm}
 - PyPI scaffolder: \`create-vivary\` ${createVivaryPyPI}
 - PyPI knowledge graph CLI: \`vivary-tropo\` ${tropoVersion}, command \`tropo\`
@@ -184,7 +185,7 @@ Full Documentation: https://vivary.vercel.app/llms-full.txt
 
 \`\`\`bash
 npm create @vivary@latest my-workspace
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary==${createVivaryPyPI}
+pip install vivary
 \`\`\`
 
 ## Core docs
