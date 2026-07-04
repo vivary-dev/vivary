@@ -1181,6 +1181,258 @@ class TestAgentFlags(unittest.TestCase):
             gitignore = (target / ".gitignore").read_text(encoding="utf-8")
             self.assertIn(".vivary/data/", gitignore)
 
+    def test_doctor_default_writes_no_state_file(self):
+        with temp_workspace() as td:
+            target = Path(td) / "doctor-trend-default"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", repo_root=ROOT
+            )
+
+            rc = create_vivary.main(["doctor", str(target), "--repo-root", str(ROOT)])
+
+            self.assertEqual(rc, 0)
+            self.assertFalse((target / ".vivary" / "doctor-state.json").exists())
+            self.assertFalse((target / ".vivary").exists())
+
+    def test_doctor_trend_first_run_is_graceful_and_writes_state(self):
+        with temp_workspace() as td:
+            target = Path(td) / "doctor-trend-first"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", repo_root=ROOT
+            )
+
+            import io, contextlib
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "doctor", str(target), "--trend", "--repo-root", str(ROOT)
+                ])
+
+            self.assertEqual(rc, 0)
+            self.assertIn("trend: first recorded run", buf.getvalue())
+
+            state_path = target / ".vivary" / "doctor-state.json"
+            self.assertTrue(state_path.exists())
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state["schema_version"], 1)
+            metrics = state["metrics"]
+            for key in (
+                "date", "graph_nodes", "graph_edges", "graph_broken",
+                "error_count", "warning_count", "module_index_count",
+                "total_files",
+            ):
+                self.assertIn(key, metrics)
+            self.assertEqual(metrics["graph_broken"], 0)
+            self.assertEqual(metrics["error_count"], 0)
+
+    def test_doctor_trend_json_first_run_reports_null_prior(self):
+        with temp_workspace() as td:
+            target = Path(td) / "doctor-trend-first-json"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", repo_root=ROOT
+            )
+
+            import io, contextlib
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "doctor", str(target), "--trend", "--json", "--repo-root", str(ROOT)
+                ])
+
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertIn("trend", out)
+            self.assertIsNone(out["trend"]["prior"])
+            self.assertIsNone(out["trend"]["deltas"])
+            self.assertIn("current", out["trend"])
+            self.assertNotIn("trend_warning", out)
+
+    def test_doctor_trend_second_run_reports_deltas_after_workspace_change(self):
+        with temp_workspace() as td:
+            target = Path(td) / "doctor-trend-second"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", repo_root=ROOT
+            )
+
+            self.assertEqual(
+                create_vivary.main([
+                    "doctor", str(target), "--trend", "--repo-root", str(ROOT)
+                ]),
+                0,
+            )
+
+            (target / "modules" / "extra-module").mkdir()
+            (target / "modules" / "extra-module" / "index.md").write_text(
+                "---\n"
+                "project: doctor-trend-second\n"
+                "status: active\n"
+                "module_area: extra\n"
+                "---\n"
+                "# Extra module\n",
+                encoding="utf-8",
+            )
+
+            import io, contextlib
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "doctor", str(target), "--trend", "--json", "--repo-root", str(ROOT)
+                ])
+
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            deltas = out["trend"]["deltas"]
+            self.assertEqual(deltas["module_index_count"], 1)
+            self.assertEqual(deltas["total_files"], 1)
+            self.assertGreaterEqual(deltas["graph_nodes"], 1)
+            self.assertEqual(deltas["graph_broken"], 0)
+            self.assertEqual(out["trend"]["prior"]["module_index_count"], 2)
+            self.assertEqual(out["trend"]["current"]["module_index_count"], 3)
+
+    def test_doctor_trend_corrupt_state_file_treated_as_first_run(self):
+        with temp_workspace() as td:
+            target = Path(td) / "doctor-trend-corrupt"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", repo_root=ROOT
+            )
+            (target / ".vivary").mkdir()
+            (target / ".vivary" / "doctor-state.json").write_text(
+                "not valid json {{{", encoding="utf-8"
+            )
+
+            import io, contextlib
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "doctor", str(target), "--trend", "--repo-root", str(ROOT)
+                ])
+
+            self.assertEqual(rc, 0)
+            output = buf.getvalue()
+            self.assertIn("warning:", output)
+            self.assertIn("treating as first recorded run", output)
+            self.assertIn("trend: first recorded run", output)
+
+            # doctor recovered and wrote a fresh, valid state file
+            state = json.loads(
+                (target / ".vivary" / "doctor-state.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(state["schema_version"], 1)
+
+            # in --json mode a corrupt state file is distinguishable from a
+            # real first run via trend_warning (still not in warnings/count)
+            (target / ".vivary" / "doctor-state.json").write_text(
+                "not valid json {{{", encoding="utf-8"
+            )
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "doctor", str(target), "--trend", "--json", "--repo-root", str(ROOT)
+                ])
+
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertIn("trend_warning", out)
+            self.assertIn("treating as first recorded run", out["trend_warning"])
+            self.assertIsNone(out["trend"]["prior"])
+            self.assertEqual(out["warnings"], [])
+
+    def test_doctor_trend_partial_metrics_state_treated_as_first_run(self):
+        with temp_workspace() as td:
+            target = Path(td) / "doctor-trend-partial"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", repo_root=ROOT
+            )
+            (target / ".vivary").mkdir()
+            (target / ".vivary" / "doctor-state.json").write_text(
+                json.dumps({"schema_version": 1, "metrics": {"graph_nodes": 9}}),
+                encoding="utf-8",
+            )
+
+            import io, contextlib
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "doctor", str(target), "--trend", "--repo-root", str(ROOT)
+                ])
+
+            self.assertEqual(rc, 0)
+            output = buf.getvalue()
+            self.assertIn("warning:", output)
+            self.assertIn("treating as first recorded run", output)
+            self.assertIn("trend: first recorded run", output)
+
+            state = json.loads(
+                (target / ".vivary" / "doctor-state.json").read_text(encoding="utf-8")
+            )
+            for key in (
+                "date", "graph_nodes", "graph_edges", "graph_broken",
+                "error_count", "warning_count", "module_index_count",
+                "total_files",
+            ):
+                self.assertIn(key, state["metrics"])
+
+    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
+    def test_doctor_trend_refuses_symlinked_state_file(self):
+        with temp_workspace() as td:
+            target = Path(td) / "doctor-trend-symlink"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", repo_root=ROOT
+            )
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            victim = outside / "victim.json"
+            victim.write_text("{}", encoding="utf-8")
+
+            state_path = target / ".vivary" / "doctor-state.json"
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                state_path.symlink_to(victim)
+            except OSError:
+                return
+
+            import io, contextlib
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "doctor", str(target), "--trend", "--json", "--repo-root", str(ROOT)
+                ])
+
+            self.assertEqual(rc, 1)
+            out = json.loads(buf.getvalue())
+            self.assertFalse(out["ok"])
+            self.assertRegex(" ".join(out["errors"]), "symlinked|outside")
+            self.assertEqual(victim.read_text(encoding="utf-8"), "{}")
+
+    def test_doctor_trend_reports_state_write_oserror_cleanly(self):
+        with temp_workspace() as td:
+            target = Path(td) / "doctor-trend-readonly"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", repo_root=ROOT
+            )
+
+            import io, contextlib
+            buf = io.StringIO()
+            with mock.patch.object(
+                create_vivary,
+                "_write_doctor_state",
+                side_effect=PermissionError("simulated read-only .vivary"),
+            ):
+                with contextlib.redirect_stdout(buf):
+                    rc = create_vivary.main([
+                        "doctor", str(target), "--trend", "--json",
+                        "--repo-root", str(ROOT),
+                    ])
+
+            self.assertEqual(rc, 1)
+            out = json.loads(buf.getvalue())
+            self.assertFalse(out["ok"])
+            self.assertIn(
+                "doctor --trend: simulated read-only .vivary", out["errors"]
+            )
+            self.assertIsNone(out["trend"])
+            self.assertFalse((target / ".vivary" / "doctor-state.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

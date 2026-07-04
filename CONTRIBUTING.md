@@ -5,8 +5,10 @@ keep the implementation narrow enough that the tests and docs can move with it.
 
 ## Branches
 
-- `dev` is the active integration branch.
-- `prod` is reserved for finished product cuts.
+- `dev` is the active integration branch — and what the live site deploys from
+  (Vercel's production branch is `dev`).
+- `prod` is a legacy branch from an earlier cut model; it lags `dev` and nothing
+  deploys from it. Don't target it.
 - Feature work happens on short-lived `feat/*` branches cut from `dev`.
 - Do not push directly to `dev` or `prod`; open a PR and let CI plus review gates run.
 
