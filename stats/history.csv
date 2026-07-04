@@ -2,4 +2,14 @@ date,npm_weekly,pypi_weekly,package_weekly,github_stars,github_forks,github_open
 2026-06-21,259,279,,1,0,,
 2026-06-22,259,452,,1,0,,
 2026-06-23,446,1479,1925,1,0,7,
+2026-06-24,555,2350,2905,2,0,7,
+2026-06-25,562,2368,2930,2,0,7,
+2026-06-26,562,1479,2041,2,0,7,pypi:create-vivary: stale previous value used after fetch failure (https://pypistats.org/api/packages/create-vivary/recent -> <urlopen error [Errno -3] Temporary failure in name resolution>);pypi:vivary-tropo: stale previous value used after fetch failure (https://pypistats.org/api/packages/vivary-tropo/recent -> <urlopen error [Errno -3] Temporary failure in name resolution>);pypi:vivary-ozone: stale previous value used after fetch failure (https://pypistats.org/api/packages/vivary-ozone/recent -> <urlopen error [Errno -3] Temporary failure in name resolution>);pypi:vivary-exo: stale previous value used after fetch failure (https://pypistats.org/api/packages/vivary-exo/recent -> <urlopen error [Errno -3] Temporary failure in name resolution>)
 2026-06-27,562,2426,2988,2,0,8,
+2026-06-28,1076,3356,4432,2,0,9,
+2026-06-29,866,2566,3432,2,0,9,pypi:create-vivary: stale previous value used after fetch failure (https://pypistats.org/api/packages/create-vivary/recent -> HTTP Error 429: Too Many Requests);pypi:vivary-tropo: stale previous value used after fetch failure (https://pypistats.org/api/packages/vivary-tropo/recent -> HTTP Error 429: Too Many Requests)
+2026-06-30,866,2545,3411,2,0,9,pypi:create-vivary: stale previous value used after fetch failure (https://pypistats.org/api/packages/create-vivary/recent -> HTTP Error 429: Too Many Requests);pypi:vivary-tropo: stale previous value used after fetch failure (https://pypistats.org/api/packages/vivary-tropo/recent -> HTTP Error 429: Too Many Requests);pypi:vivary-exo: stale previous value used after fetch failure (https://pypistats.org/api/packages/vivary-exo/recent -> HTTP Error 429: Too Many Requests)
+2026-07-01,866,1201,2067,3,0,9,
+2026-07-02,866,1219,2085,3,0,9,
+2026-07-03,590,1425,2015,3,0,9,pypi:create-vivary: stale previous value used after fetch failure (https://pypistats.org/api/packages/create-vivary/recent -> HTTP Error 429: Too Many Requests)
+2026-07-04,590,1155,1745,3,0,9,

@@ -3,6 +3,7 @@ title: "Changelog"
 description: "Release history for the Vivary packages."
 ---
 
+
 Notable changes to Vivary. The project ships several **independently versioned**
 packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
@@ -17,8 +18,11 @@ the `v0.1.0` line.
 
 Affects `vivary-tropo`, `create-vivary` / `@vivary/create`, root docs, package docs,
 generated website docs, and the homepage. The adoption-line release: Vivary now works
-on existing repos and vaults, not just fresh scaffolds. Publishing remains a manual
-human gate.
+on existing repos and vaults, not just fresh scaffolds. Published and verified as
+`vivary-tropo==0.4.1`, `create-vivary==0.3.1`, and `@vivary/create@0.3.1`:
+cache-resistant `uvx --no-cache` installs from the public index self-report
+`tropo 0.4.1` / `create-vivary 0.3.1`, and
+`npx --yes @vivary/create@0.3.1 capabilities --preset coding --json` returns ok.
 
 > Note: `vivary-tropo==0.4.0` and `create-vivary==0.3.0` exist on PyPI but
 > self-report the previous version from a stale `__version__` constant; they are
