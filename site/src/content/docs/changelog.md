@@ -3,7 +3,6 @@ title: "Changelog"
 description: "Release history for the Vivary packages."
 ---
 
-
 Notable changes to Vivary. The project ships several **independently versioned**
 packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is

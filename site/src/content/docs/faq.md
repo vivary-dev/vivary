@@ -3,7 +3,6 @@ title: "FAQ"
 description: "Common questions about Vivary."
 ---
 
-
 New to all of this? Read [Concepts](/concepts/) first; it defines every term in plain
 language. The quick beginner answers are right below.
 

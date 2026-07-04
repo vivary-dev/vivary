@@ -3,7 +3,6 @@ title: "Obsidian (optional)"
 description: "Optional Obsidian setup for fans, never required."
 ---
 
-
 **Obsidian is optional and never required.** A Vivary workspace is plain Markdown +
 YAML — it works in any editor, or none. This page is for people who *like* Obsidian
 and want a nice visual home for the graph. Nothing in Vivary depends on it.

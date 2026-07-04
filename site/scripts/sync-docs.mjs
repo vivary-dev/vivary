@@ -106,7 +106,7 @@ const readCanonicalMarkdown = (root, relativePath, label) => {
 const render = (raw, title, desc) => {
   const lines = raw.split('\n');
   if (lines[0]?.startsWith('# ')) lines.shift();
-  const body = rewrite(lines.join('\n')).replace(/^\n+/, '');
+  const body = rewrite(lines.join('\n')).replace(/^[\r\n]+/, '');
   return `---\ntitle: ${JSON.stringify(title)}\ndescription: ${JSON.stringify(desc)}\n---\n\n${body}`;
 };
 
