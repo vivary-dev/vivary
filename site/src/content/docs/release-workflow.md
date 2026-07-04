@@ -150,7 +150,29 @@ Create or update the GitHub release (human gate) titled after the headline
 package set, e.g. "v0.2.8 — Cognee adapter + published release truth", with the
 changelog entry as the body.
 
-## 8. After the release
+## 8. Announce the release
+
+Every release gets a coordinated public announcement on **Facebook, LinkedIn,
+X/Twitter, Bluesky, and Instagram** — each post with a generated image sized
+for the platform, conveying what the update means for users (not a changelog
+dump).
+
+- Draft everything in `.release/private/` (ignored local storage — social
+  drafts never enter the public repo): one file per release, containing
+  per-platform copy plus an image prompt per platform.
+- Tailor, don't broadcast: X/Bluesky short and concrete (what you can now do,
+  one command example); LinkedIn value-framed for practitioners; Facebook
+  conversational; Instagram image-first with a tight caption.
+- Image prompts specify aspect ratio per platform (X/Facebook/LinkedIn 16:9 or
+  1.91:1 link-card, Instagram 1:1, Bluesky 16:9), and keep the brand language:
+  the layered-vivarium metaphor and the site's emerald-on-dark palette.
+- Generate the images from the prompts, review them against the copy, and
+  attach per post.
+- **Posting is a human gate, per item, per platform** — no batch approval. Post
+  only after the registry verification (step 6) has passed, so the announcement
+  never points at an unpublished version.
+
+## 9. After the release
 
 - Confirm the live site (https://vivary.vercel.app/) shows the new versions and
   command surface — it deploys from `dev`, so this is a read-check, not a step.
