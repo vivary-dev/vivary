@@ -11,7 +11,7 @@ Every CLI across the four layers. All engines are zero-dependency Python (3.11+)
 the CLI command names are `tropo` / `ozone` / `exo` / `create-vivary` regardless of
 how you install them.
 
-- **Install (PyPI):** `pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.8`
+- **Install (PyPI):** `pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.3.0`
 - **Run without installing (uv):** `uvx vivary-tropo check`, `uvx vivary-ozone review`, …
 - **Scaffold (npm):** `npm create @vivary@latest my-workspace` / `npx @vivary/create@latest my-workspace`
 - **From a repo checkout:** `python packages/tropo/tropo.py check`, etc.
@@ -299,7 +299,7 @@ create-vivary init <target> [--preset coding|second-brain|knowledge-work|writing
 create-vivary wizard <target> [--storage auto|file|embedded|cloud] [--provider lancedb|sqlite-vec|qdrant|astra]
                               [--memory none|local|cognee] [--yes] [--dry-run] [--json]
 create-vivary capabilities [--preset coding|second-brain|knowledge-work|writing] [--json]
-create-vivary doctor <target> [--json]
+create-vivary doctor <target> [--json] [--trend]
 ```
 
 | Command | What it does |
@@ -330,6 +330,15 @@ are actively ignored. Comments, negations, and unrelated patterns that merely co
 those names do not count. If `.vivary/memory.toml` exists, `doctor` reports semantic
 memory as `disabled`, `healthy`, `configured`, `unavailable`, `misconfigured`, or
 `privacy-failed` without requiring optional Cognee support to be installed.
+
+`doctor --trend` is opt-in and is the only thing that writes `.vivary/doctor-state.json`
+(plain `doctor` stays read-only). It compares this run's graph health, module-index
+count, and file count under `modules/` against the prior recorded run and reports
+signed deltas — a short "trend vs `<date>`" section in human mode, or a `trend` object
+(`prior`/`current`/`deltas`) in `--json` mode. The first `--trend` run on a workspace
+has no prior state, so it reports "first recorded run" and just writes the baseline. A
+corrupt or unreadable state file is treated the same way — a warning, not a failure —
+and gets overwritten with a fresh one.
 
 When `--storage embedded` (or `auto`) is selected and `vivary-tropo[embedded]` is not yet installed, `init` installs it via `pip` before continuing unless `--dry-run` is set. In `--json` mode, `"installed": ["lancedb"]` reports what was added. Without `--yes`, a single confirmation prompt fires before any pip install. For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use `--auto`; in human mode, the wizard asks and its answers drive storage. `--auto` never selects Cognee by itself.
 

@@ -4,13 +4,13 @@ Scaffold a complete Vivary agent workspace: tropo config, strato workspace files
 runtime skills, private-memory boundaries, progressive module indexes, and a starter
 typed graph.
 
-**Current release:** 0.2.8. Use 0.2.8 for new installs; no migration is expected
-from 0.2.1, 0.2.2, 0.2.3, 0.2.5, 0.2.6, or 0.2.7.
+**Current release:** 0.3.0. Use 0.3.0 for new installs; no migration is expected
+from 0.2.1, 0.2.2, 0.2.3, 0.2.5, 0.2.6, 0.2.7, or 0.2.8.
 
-**Release focus:** 0.2.8 publishes the optional Cognee adapter surface: capability
-metadata now points to `vivary-memory-cognee`, generated workspace docs explain the
-approval gates, and the default scaffolder still does not install Cognee or index
-content.
+**Release focus:** 0.3.0 is the adoption line: brownfield `create-vivary adopt <path>`
+brings Vivary into an existing repo or vault without touching existing files
+(dry-run by default, `--yes` to write), and `doctor --trend` tracks graph and
+routing drift across runs in `.vivary/doctor-state.json`.
 
 **Security hardening:** The 0.2.5 line validates active `.gitignore` rules for `USER.md`,
 `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`; scaffolds private heartbeat report
@@ -20,7 +20,7 @@ paths.
 ## Install & scaffold
 
 ```bash
-pip install create-vivary==0.2.8              # or: uvx create-vivary@0.2.8 ...
+pip install create-vivary==0.3.0              # or: uvx create-vivary@0.3.0 ...
 create-vivary my-workspace --preset coding    # interactive wizard on a TTY
 create-vivary my-workbench --preset knowledge-work --memory local
 create-vivary my-codebase --preset coding --active-context cocoindex-code

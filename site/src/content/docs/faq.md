@@ -138,7 +138,7 @@ PyPI has no scopes and the bare names `tropo`/`ozone`/`exo` were taken, so the
 stay `tropo` / `ozone` / `exo`. On npm the scaffolder is `@vivary/create`.
 
 ### How do I install / run it?
-`pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.2.8`, or run on demand with
+`pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.3.0`, or run on demand with
 `uvx vivary-tropo ...`, or scaffold with `npm create @vivary@latest`. Python 3.11+ only;
 zero third-party dependencies.
 
@@ -152,24 +152,23 @@ batched: memory writes, publishing (PyPI/npm), `git push`/PR/merge, org/repo cre
 installs, enabling hooks, destructive ops, and sending data of unknown sensitivity. The
 agent is bold *inside* the work and careful at the *edges*.
 
-### What does the current context-compression release cover?
-The current package set helps agents open fewer files while getting better context:
-`tropo find` returns typed context packets, `tropo query` searches graph nodes with
-type/path/edge filters, `ozone review --pack context-budget` flags bloated routing
-surfaces, and generated active-context guidance keeps CocoIndex-code behind explicit
-install/index/MCP gates. The June 23 security-hardening work is still part of the
-published line. The Cognee adapter is now implemented as an optional package in the
-repo, but it is not part of the default install line; see the changelog for the exact
-package surfaces.
+### What does the current adoption-line release cover?
+The current package set makes Vivary work on existing repos and vaults, not just
+fresh scaffolds: `tropo map` gives a read-only filesystem inventory of any repo, vault,
+or docs tree; `create-vivary adopt <path>` brings Vivary into a brownfield workspace
+without touching existing files (dry-run by default, `--yes` to write); and
+`create-vivary doctor --trend` tracks graph and routing drift across runs. strato's
+scaffold and skills-parity smokes now run as CI gates. Publishing remains a manual
+human gate; see the changelog for the exact package surfaces.
 
 ### Is it stable? What's the version?
 Published packages are independently versioned: `create-vivary` / `@vivary/create`
-**0.2.8**, optional `vivary-memory-cognee` **0.1.0**, `vivary-tropo` **0.3.0**,
+**0.3.0**, optional `vivary-memory-cognee` **0.1.0**, `vivary-tropo` **0.4.0**,
 `vivary-ozone` **0.2.0**, and `vivary-exo` **0.2.2**. It's young — APIs may move before
 `1.0`. File issues for rough edges.
 
 The versions differ on purpose: the layers and optional adapters are independently
-versioned. There is no single "Vivary 0.3.0" release.
+versioned. There is no single "Vivary 0.4.0" release.
 
 ### Where do I report bugs or ask for features?
 GitHub: [github.com/vivary-dev/vivary](https://github.com/vivary-dev/vivary). See the

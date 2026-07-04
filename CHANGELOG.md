@@ -5,10 +5,61 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current release line:** `create-vivary` / `@vivary/create` **0.2.8** · optional
-`vivary-memory-cognee` **0.1.0** · `vivary-tropo` **0.3.0** · `vivary-ozone`
+**Current release line:** `create-vivary` / `@vivary/create` **0.3.0** · optional
+`vivary-memory-cognee` **0.1.0** · `vivary-tropo` **0.4.0** · `vivary-ozone`
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
-"Vivary 0.3.0" release.
+"Vivary 0.4.0" release.
+
+## [vivary-tropo 0.4.0 / create-vivary 0.3.0] — 2026-07-04
+
+Affects `vivary-tropo`, `create-vivary` / `@vivary/create`, root docs, package docs,
+generated website docs, and the homepage. The adoption-line release: Vivary now works
+on existing repos and vaults, not just fresh scaffolds. Publishing remains a manual
+human gate.
+
+### Added
+
+- **`tropo map`** (tropo 0.4.0) — read-only filesystem inventory of any repo, vault, or
+  docs tree: directory table, extension/size summaries, largest files, existing
+  index/routing surfaces, and likely-modules-without-an-index. Markdown by default,
+  deterministic `--json`; workspace excludes honored (file-level and subtree-rebased),
+  junction/symlink cycles pruned, no `tropo.toml` required.
+- **`create-vivary adopt <path>`** (create-vivary 0.3.0) — brownfield adoption: dry-run
+  by default, `--yes` write gate, only ever adds files (existing content stays
+  byte-identical), candidate module routers for markdown-heavy directories, collision
+  skip and report, privacy follow-ups for an existing `.gitignore`, and the 0.2.5
+  symlink/out-of-root hardening. An adopted workspace passes `doctor` and `tropo check`.
+- **`create-vivary doctor --trend`** (create-vivary 0.3.0) — opt-in drift tracking:
+  prior-run state in `.vivary/doctor-state.json` (atomic, symlink-refusing writes),
+  signed deltas for graph and routing metrics, corrupt state degrades to first-run with
+  a visible `trend_warning` in `--json`. Plus a copy-paste GitHub Actions CI-gate
+  recipe in `docs/HOWTO.md`.
+- **Strato integrity gates** — scaffold smokes for all four presets, markdown
+  cross-reference integrity, and Claude/Codex skills structural parity now run in CI.
+  strato formally rides the create-vivary release train.
+
+### Fixed
+
+- Homepage mobile overflow (155px horizontal overflow at a 375px viewport) and a
+  desktop hero width regression caught in review.
+- The loops skill is runtime-honest: the Codex copy no longer claims Claude Code's
+  `/loop` and `/goal`; one combined section covers both runtimes in all three copies.
+
+### Changed
+
+- `docs/PRODUCT-ROADMAP.md` restructured around the P1 adoption line;
+  `docs/RELEASE-WORKFLOW.md` expanded into a detailed runbook (scope table, publish
+  commands, verification smokes, social announcement step); `CONTRIBUTING.md`
+  corrects the stale prod-branch claim.
+
+### Verification
+
+- tropo: 83/83 tests on Python 3.11 and 3.14 (68 pre-existing + 15 map).
+- create-vivary: full suite green post-merge; init byte-parity vs 0.2.8 verified
+  across five flag configurations by adversarial review; only-adds and dry-run purity
+  verified against hostile fixtures.
+- Adversarial review on every PR in the line (#98–#105) with findings fixed pre-merge.
+- Publishing remains a manual human gate.
 
 ## [vivary-memory-cognee 0.1.0 / create-vivary 0.2.8] — 2026-06-27
 
