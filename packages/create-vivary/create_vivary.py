@@ -2138,12 +2138,16 @@ def main(argv: list[str] | None = None) -> int:
             if target_path.is_dir():
                 try:
                     trend_result = _apply_doctor_trend(report, target_path.resolve())
-                except ScaffoldError as exc:
+                except (ScaffoldError, OSError) as exc:
                     report["errors"].append(f"doctor --trend: {exc}")
                     report["ok"] = False
                     report["trend"] = None
                 else:
                     report["trend"] = trend_result["trend"]
+                    if trend_result["state_warning"]:
+                        # kept out of report["warnings"] so a corrupt state file
+                        # never inflates the stored warning_count
+                        report["trend_warning"] = trend_result["state_warning"]
                     trend_lines = _format_doctor_trend(
                         trend_result["trend"], trend_result["state_warning"]
                     )

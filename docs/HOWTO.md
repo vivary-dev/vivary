@@ -234,7 +234,7 @@ jobs:
           python-version: "3.11"
       - run: pip install vivary-tropo vivary-ozone create-vivary
       - run: create-vivary doctor . --json
-      - run: uvx --from vivary-tropo tropo check --root .
+      - run: tropo check --root .
       - run: ozone review --strict --root .
 ```
 
