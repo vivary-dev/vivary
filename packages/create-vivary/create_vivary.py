@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import date
+from datetime import date, datetime, timezone
 from fnmatch import fnmatchcase
 from pathlib import Path
 
@@ -333,6 +333,144 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         "backend": backend_name,
         "memory": memory_report,
     }
+
+
+# ---------------------------------------------------------------------------
+# doctor --trend: drift tracking against a prior run
+# ---------------------------------------------------------------------------
+#
+# Read-only unless the caller opts in with --trend, which acts as the write
+# gate for a small, inspectable state file at .vivary/doctor-state.json. The
+# metrics reuse doctor's own graph summary and module-index scan rather than
+# inventing a second notion of "routing surface" or "context budget".
+
+
+def _module_routing_metrics(target: Path) -> tuple[int, int]:
+    """Module index count and total file count under modules/, the same
+    directories doctor already walks in `_module_index_errors`. This doubles
+    as a cheap routing-surface proxy without re-deriving one."""
+    modules = target / "modules"
+    if not modules.exists():
+        return 0, 0
+    module_index_count = sum(1 for _ in modules.glob("*/index.md"))
+    total_files = sum(1 for p in modules.rglob("*") if p.is_file())
+    return module_index_count, total_files
+
+
+def _doctor_metrics_snapshot(report: dict, target: Path) -> dict:
+    module_index_count, total_files = _module_routing_metrics(target)
+    graph = report["graph"]
+    return {
+        "date": datetime.now(timezone.utc).date().isoformat(),
+        "graph_nodes": graph["nodes"],
+        "graph_edges": graph["edges"],
+        "graph_broken": graph["broken"],
+        "error_count": len(report["errors"]),
+        "warning_count": len(report["warnings"]),
+        "module_index_count": module_index_count,
+        "total_files": total_files,
+    }
+
+
+def _doctor_state_path(target: Path) -> Path:
+    return target / _STORAGE_DIR / _DOCTOR_STATE_NAME
+
+
+def _load_doctor_state(target: Path) -> tuple[dict | None, str | None]:
+    """Read prior trend state. Returns (state, warning); a corrupt or
+    unreadable file is treated as "no prior state" plus a warning, never a
+    crash."""
+    state_path = _doctor_state_path(target)
+    if not state_path.exists():
+        return None, None
+    try:
+        with open(state_path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception as exc:
+        return None, f"doctor-state.json unreadable ({exc}); treating as first recorded run"
+
+    metrics = data.get("metrics") if isinstance(data, dict) else None
+    required_keys = ("date", *_TREND_METRIC_KEYS)
+    if (
+        not isinstance(data, dict)
+        or data.get("schema_version") != _DOCTOR_STATE_SCHEMA_VERSION
+        or not isinstance(metrics, dict)
+        or not all(key in metrics for key in required_keys)
+    ):
+        return None, "doctor-state.json malformed; treating as first recorded run"
+    return data, None
+
+
+def _write_doctor_state(target: Path, metrics: dict) -> None:
+    state = {
+        "schema_version": _DOCTOR_STATE_SCHEMA_VERSION,
+        "metrics": metrics,
+    }
+    text = json.dumps(state, indent=2) + "\n"
+    _write_text_no_follow(target, _doctor_state_path(target), text)
+
+
+_TREND_METRIC_KEYS = (
+    "graph_nodes",
+    "graph_edges",
+    "graph_broken",
+    "error_count",
+    "warning_count",
+    "module_index_count",
+    "total_files",
+)
+
+
+def _trend_deltas(prior: dict, current: dict) -> dict:
+    return {key: current[key] - prior[key] for key in _TREND_METRIC_KEYS}
+
+
+def _apply_doctor_trend(report: dict, target: Path) -> dict:
+    """Compute the --trend addendum: read prior state, snapshot current
+    metrics, write new state (the --trend flag is the only write gate for
+    .vivary/doctor-state.json), and return the JSON-mode trend payload plus
+    any state-read warning (kept separate from report["warnings"] so a
+    corrupt state file never inflates the stored warning_count)."""
+    current_metrics = _doctor_metrics_snapshot(report, target)
+    prior_state, state_warning = _load_doctor_state(target)
+
+    if prior_state is None:
+        trend = {"prior": None, "current": current_metrics, "deltas": None}
+    else:
+        prior_metrics = prior_state["metrics"]
+        trend = {
+            "prior": prior_metrics,
+            "current": current_metrics,
+            "deltas": _trend_deltas(prior_metrics, current_metrics),
+        }
+
+    _write_doctor_state(target, current_metrics)
+    return {"trend": trend, "state_warning": state_warning}
+
+
+def _format_doctor_trend(trend: dict, state_warning: str | None) -> list[str]:
+    lines: list[str] = []
+    if state_warning:
+        lines.append(f"warning: {state_warning}")
+
+    if trend["prior"] is None:
+        lines.append("trend: first recorded run (no prior .vivary/doctor-state.json)")
+        return lines
+
+    prior_date = trend["prior"]["date"]
+    deltas = trend["deltas"]
+    changed = {key: value for key, value in deltas.items() if value != 0}
+    lines.append(f"trend vs {prior_date}:")
+    if not changed:
+        lines.append("  no change")
+    else:
+        for key in _TREND_METRIC_KEYS:
+            if key not in changed:
+                continue
+            value = changed[key]
+            sign = "+" if value > 0 else ""
+            lines.append(f"  {key}: {sign}{value}")
+    return lines
 
 
 def _memory_report(target: Path) -> dict:
@@ -1532,6 +1670,8 @@ _STORAGE_CONFIG_NAME = "storage.toml"
 _MEMORY_CONFIG_NAME = "memory.toml"
 _STORAGE_DATA_DIR = ".vivary/data"
 _MEMORY_STATE_DIR = ".vivary/memory"
+_DOCTOR_STATE_NAME = "doctor-state.json"
+_DOCTOR_STATE_SCHEMA_VERSION = 1
 
 _STORAGE_TOML_TEMPLATES = {
     "file": """\
@@ -1936,6 +2076,14 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("target", help="workspace directory to validate")
     doctor.add_argument("--json", action="store_true", help="print a JSON report")
     doctor.add_argument(
+        "--trend",
+        action="store_true",
+        help=(
+            "compare this run against the prior one in .vivary/doctor-state.json "
+            "and report drift (write gate: only --trend writes this file)"
+        ),
+    )
+    doctor.add_argument(
         "--repo-root",
         default=None,
         help="Vivary source checkout root (mainly for local development/tests)",
@@ -1984,10 +2132,33 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "doctor":
         report = doctor_workspace(args.target, repo_root=args.repo_root)
+        trend_lines: list[str] = []
+        if getattr(args, "trend", False):
+            target_path = Path(args.target)
+            if target_path.is_dir():
+                try:
+                    trend_result = _apply_doctor_trend(report, target_path.resolve())
+                except (ScaffoldError, OSError) as exc:
+                    report["errors"].append(f"doctor --trend: {exc}")
+                    report["ok"] = False
+                    report["trend"] = None
+                else:
+                    report["trend"] = trend_result["trend"]
+                    if trend_result["state_warning"]:
+                        # kept out of report["warnings"] so a corrupt state file
+                        # never inflates the stored warning_count
+                        report["trend_warning"] = trend_result["state_warning"]
+                    trend_lines = _format_doctor_trend(
+                        trend_result["trend"], trend_result["state_warning"]
+                    )
+            else:
+                report["trend"] = None
         if args.json:
             print(json.dumps(report, indent=2))
         else:
             _print_doctor_report(report)
+            for line in trend_lines:
+                print(line)
         return 0 if report["ok"] else 1
 
     if args.command == "wizard":
