@@ -36,7 +36,7 @@ You need **Python 3.11 or newer**. Pick whichever line fits how you like to work
 
 ```bash
 # A) install the command-line tools
-pip install vivary-tropo vivary-ozone vivary-exo create-vivary==0.3.0
+pip install vivary
 
 # B) run on demand with uv, nothing installed permanently
 uvx vivary-tropo --version

@@ -3,7 +3,6 @@ title: "Release workflow"
 description: "End-of-update checklist for Vivary release truth, docs, publishing, and post copy."
 ---
 
-
 Use this at the end of every Vivary update that changes behavior, packaging,
 public docs, install commands, release status, or package versions.
 
@@ -25,6 +24,7 @@ Work out which packages actually changed, then bump only those:
 | `packages/create-vivary/create_vivary.py` or `create_vivary_assets/` | `create-vivary` (PyPI) **and** `@vivary/create` (npm) — always in lockstep | same |
 | `packages/strato/` templates or skills | `create-vivary` + `@vivary/create` (strato has no version — it rides the create-vivary release train; say so in the changelog entry) | same |
 | `packages/memory-cognee/vivary_cognee.py` | `vivary-memory-cognee` | same |
+| dependency floors in `packages/vivary/pyproject.toml` | `vivary` (meta) — bump its floors and patch version when component minimums move | README table |
 | `docs/`, `site/`, root README only | **no package bump** — site redeploys from `dev` via Vercel automatically | keep docs/site sync (step 3) |
 | repo CI / stats / tests only | no bump, no site work | — |
 
