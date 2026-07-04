@@ -48,6 +48,14 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Self-heal: close any stats PR left open from a previous day (its data
+          # is superseded by today's snapshot) and delete its branch.
+          TODAY=$(date -u +%Y-%m-%d)
+          gh pr list --state open --json number,headRefName \
+            --jq '.[] | select(.headRefName | startswith("chore/stats-")) | select(.headRefName | contains("'"$TODAY"'") | not) | .number' \
+            | while read -r STALE; do
+              gh pr close "$STALE" --comment "Superseded by today's snapshot." --delete-branch || true
+            done
           git add stats/ site/public/usage-snapshot.svg
           if git diff --staged --quiet; then
             echo "no changes to commit"
@@ -78,4 +86,9 @@ jobs:
                 --title "chore(stats): $DATE snapshot" \
                 --body "$BODY"
             fi
+            # Merge hands-free once the required checks pass. Requires the repo
+            # settings "allow auto-merge" and "Actions can create PRs"; if either
+            # is off, leave the PR open rather than failing the run.
+            gh pr merge "$BRANCH" --auto --merge \
+              || echo "auto-merge unavailable; PR left open for manual merge"
           fi
