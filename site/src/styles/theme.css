@@ -106,3 +106,22 @@ h1#_top,
 .sl-markdown-content a {
 	text-underline-offset: 0.18em;
 }
+
+/* Code blocks that scroll sideways (narrow viewports): keep the OS scrollbar
+   off the last line of code and theme it instead of inheriting the platform
+   accent color. */
+.expressive-code pre {
+	scrollbar-width: thin;
+	scrollbar-color: oklch(0.55 0.06 168 / 0.55) transparent;
+	padding-bottom: 0.6rem;
+}
+.expressive-code pre::-webkit-scrollbar {
+	height: 8px;
+}
+.expressive-code pre::-webkit-scrollbar-track {
+	background: transparent;
+}
+.expressive-code pre::-webkit-scrollbar-thumb {
+	background: oklch(0.55 0.06 168 / 0.55);
+	border-radius: 999px;
+}
