@@ -125,8 +125,8 @@ High-value tests:
 
 ### P1.5 Doctor as the retention loop
 
-Goal: give adopters a reason to run Vivary weekly, not once. `doctor` currently
-runs at creation and never again.
+Goal: give adopters a reason to run Vivary weekly, not once. Today adopters
+run `doctor` once at creation and have no reason to run it again.
 
 Shape:
 
