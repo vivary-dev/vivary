@@ -10,6 +10,26 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Public stats snapshot] — 2026-07-05
+
+Affects README/site public signals only. No package release, changelog-worthy
+runtime change, npm publish, or PyPI publish is implied.
+
+### Changed
+
+- Refreshed the checked-in public signals snapshot: `@vivary/create` npm weekly
+  downloads `344`, PyPI package weekly downloads `1467`, all package weekly
+  downloads `1811`, GitHub stars `3`, forks `1`, and open issues `8`.
+- The usage snapshot chart keeps the same fixed SVG canvas; the npm bar is shorter
+  because bars are proportional to the largest package-source count in that
+  snapshot, not because a badge or chart container was resized.
+
+### Verification
+
+- `stats/latest.json` reports `status: "ok"` with no stale-source warnings.
+- `stats/history.csv` adds the `2026-07-05` row.
+- `stats/usage-snapshot.svg` and `site/public/usage-snapshot.svg` match.
+
 ## [vivary 0.1.0] — 2026-07-04
 
 Adds the `vivary` meta-package on PyPI: `pip install vivary` installs the full
