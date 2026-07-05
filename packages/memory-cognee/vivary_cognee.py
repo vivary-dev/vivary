@@ -24,7 +24,10 @@ from contextlib import contextmanager, redirect_stdout
 from typing import Any
 
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
+TROPO_SEMANTIC_ADAPTER_API = 1
+REQUIRES_EXPLICIT_PROVIDER_GATES = True
+MAX_RECALL_K = 250
 
 MEMORY_CONFIG = ".vivary/memory.toml"
 DEFAULT_PRIVATE_PATTERNS = (
@@ -91,37 +94,64 @@ def _slug(value: str) -> str:
     return slug or "workspace"
 
 
-def _pattern_matches(pattern: str, rel_path: str) -> bool:
-    pattern = _norm(pattern)
+def _pattern_matches(pattern: str, rel_path: str, base: str = "") -> bool:
+    raw_pattern = str(pattern).replace("\\", "/").strip()
+    dir_only = raw_pattern.endswith("/")
+    pattern = _norm(raw_pattern)
     rel_path = _norm(rel_path)
+    base = _norm(base)
+    if base:
+        if rel_path != base and not rel_path.startswith(base + "/"):
+            return False
+        rel_path = rel_path[len(base):].lstrip("/")
+    if not pattern:
+        return False
     if pattern.endswith("/**"):
         base = pattern[:-3]
         return rel_path == base or rel_path.startswith(base + "/")
+    if dir_only:
+        if "/" not in pattern:
+            return any(fnmatchcase(part, pattern) for part in rel_path.split("/")[:-1])
+        return rel_path == pattern or rel_path.startswith(pattern + "/")
     if "/" not in pattern:
-        return fnmatchcase(Path(rel_path).name, pattern)
-    return fnmatchcase(rel_path, pattern)
+        parts = rel_path.split("/")
+        return fnmatchcase(Path(rel_path).name, pattern) or any(
+            fnmatchcase(part, pattern) for part in parts[:-1]
+        )
+    return fnmatchcase(rel_path, pattern) or rel_path.startswith(pattern + "/")
 
 
-def _gitignore_rules(root: Path) -> list[tuple[bool, str]]:
-    path = root / ".gitignore"
-    if not path.exists():
-        return []
-    rules: list[tuple[bool, str]] = []
-    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
+def _gitignore_rules(root: Path) -> list[tuple[bool, str, str]]:
+    rules: list[tuple[bool, str, str]] = []
+    paths = sorted(
+        root.rglob(".gitignore"),
+        key=lambda path: (len(path.relative_to(root).parts), str(path.relative_to(root)).lower()),
+    )
+    for path in paths:
+        try:
+            resolved = path.resolve(strict=False)
+        except OSError:
             continue
-        negated = line.startswith("!")
-        pattern = line[1:] if negated else line
-        if pattern:
-            rules.append((negated, pattern))
+        if not _inside_root(root, resolved):
+            continue
+        base = _norm(path.parent.relative_to(root))
+        if base == ".":
+            base = ""
+        for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            negated = line.startswith("!")
+            pattern = line[1:] if negated else line
+            if pattern:
+                rules.append((negated, base, pattern))
     return rules
 
 
-def _ignored_by_gitignore(rel_path: str, rules: list[tuple[bool, str]]) -> bool:
+def _ignored_by_gitignore(rel_path: str, rules: list[tuple[bool, str, str]]) -> bool:
     ignored = False
-    for negated, pattern in rules:
-        if _pattern_matches(pattern, rel_path):
+    for negated, base, pattern in rules:
+        if _pattern_matches(pattern, rel_path, base):
             ignored = not negated
     return ignored
 
@@ -257,7 +287,7 @@ def _is_private_path(
     rel_path: str,
     *,
     patterns: list[str],
-    gitignore_rules: list[tuple[bool, str]],
+    gitignore_rules: list[tuple[bool, str, str]],
     respect_gitignore: bool,
 ) -> bool:
     if any(_pattern_matches(pattern, rel_path) for pattern in patterns):
@@ -545,8 +575,28 @@ def _manifest_path(root: Path, config: dict[str, Any]) -> Path:
     return path
 
 
-def _write_manifest(root: Path, config: dict[str, Any], snapshot: MemorySnapshot) -> Path:
+def _manifest_payload(snapshot: MemorySnapshot) -> dict[str, Any]:
+    return {
+        "provider": "cognee",
+        "dataset": snapshot.dataset,
+        "fingerprint": snapshot.fingerprint,
+        "nodes": len(snapshot.nodes),
+        "edges": len(snapshot.edges),
+    }
+
+
+def _manifest_matches(data: dict[str, Any], snapshot: MemorySnapshot) -> bool:
+    expected = _manifest_payload(snapshot)
+    return all(data.get(key) == value for key, value in expected.items())
+
+
+def _preflight_manifest_path(root: Path, config: dict[str, Any]) -> Path:
     path = _manifest_path(root, config)
+    if path.parent.exists():
+        real_parent = os.path.realpath(path.parent)
+        absolute_parent = os.path.abspath(path.parent)
+        if os.path.normcase(real_parent) != os.path.normcase(absolute_parent):
+            raise AdapterError("refusing linked Cognee manifest parent")
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() or os.path.islink(path):
         real = os.path.realpath(path)
@@ -558,13 +608,12 @@ def _write_manifest(root: Path, config: dict[str, Any], snapshot: MemorySnapshot
                 raise AdapterError("refusing to overwrite hard-linked Cognee manifest")
         except OSError as exc:
             raise AdapterError("cannot stat Cognee manifest") from exc
-    payload = {
-        "provider": "cognee",
-        "dataset": snapshot.dataset,
-        "fingerprint": snapshot.fingerprint,
-        "nodes": len(snapshot.nodes),
-        "edges": len(snapshot.edges),
-    }
+    return path
+
+
+def _write_manifest(root: Path, config: dict[str, Any], snapshot: MemorySnapshot) -> Path:
+    path = _preflight_manifest_path(root, config)
+    payload = _manifest_payload(snapshot)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
 
@@ -577,7 +626,7 @@ def _manifest_is_current(root: Path, config: dict[str, Any], snapshot: MemorySna
         data = json.loads(manifest.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
-    return data.get("fingerprint") == snapshot.fingerprint
+    return _manifest_matches(data, snapshot)
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -594,6 +643,16 @@ async def _run_provider_call(call: Any, *args: Any, **kwargs: Any) -> Any:
 def _is_missing_dataset_error(exc: Exception) -> bool:
     message = str(exc).lower()
     return "dataset" in message and "not found" in message
+
+
+def _provider_failure(action: str, exc: Exception) -> AdapterError:
+    return AdapterError(f"Cognee {action} failed ({exc.__class__.__name__})")
+
+
+def _normalize_recall_k(k: int) -> int:
+    if k < 1:
+        raise AdapterError("recall --k must be at least 1")
+    return min(k, MAX_RECALL_K)
 
 
 def _coerce_result_text(item: Any) -> str:
@@ -704,6 +763,7 @@ class CogneeMemoryAdapter:
                 "fingerprint": snapshot.fingerprint,
             }
 
+        _preflight_manifest_path(self.root, self.config)
         self._require_provider_runtime("indexing provider memory")
         client = self._client()
         forget = getattr(client, "forget", None)
@@ -713,7 +773,7 @@ class CogneeMemoryAdapter:
             await _run_provider_call(forget, dataset=snapshot.dataset, memory_only=False)
         except Exception as exc:
             if not _is_missing_dataset_error(exc):
-                raise AdapterError(f"Cognee forget() failed before re-index: {exc}") from exc
+                raise _provider_failure("forget() before re-index", exc) from exc
         for node in snapshot.nodes:
             remember = getattr(client, "remember", None)
             if remember is None:
@@ -721,7 +781,7 @@ class CogneeMemoryAdapter:
             try:
                 await _run_provider_call(remember, node.text, dataset_name=snapshot.dataset)
             except Exception as exc:
-                raise AdapterError(f"Cognee remember() failed: {exc}") from exc
+                raise _provider_failure("remember()", exc) from exc
         manifest = _write_manifest(self.root, self.config, snapshot)
         return {
             "ok": True,
@@ -737,6 +797,7 @@ class CogneeMemoryAdapter:
 
     async def recall(self, query: str, *, k: int = 10) -> list[RecallHit]:
         self._require_cognee_config()
+        k = _normalize_recall_k(k)
         snapshot = build_snapshot(self.root)
         by_id = {node.id: node for node in snapshot.nodes}
         edges_by_source: dict[str, list[MemoryEdge]] = {}
@@ -753,7 +814,7 @@ class CogneeMemoryAdapter:
         try:
             raw_items = await _run_provider_call(recall, query, datasets=[snapshot.dataset], top_k=k)
         except Exception as exc:
-            raise AdapterError(f"Cognee recall() failed: {exc}") from exc
+            raise _provider_failure("recall()", exc) from exc
 
         hits: list[RecallHit] = []
         seen: set[str] = set()
@@ -796,7 +857,7 @@ class CogneeMemoryAdapter:
             result = await _run_provider_call(forget, dataset=self.dataset, memory_only=False)
         except Exception as exc:
             if not _is_missing_dataset_error(exc):
-                raise AdapterError(f"Cognee forget() failed: {exc}") from exc
+                raise _provider_failure("forget()", exc) from exc
             result = {"status": "missing", "dataset": self.dataset}
         manifest = _manifest_path(self.root, self.config)
         if manifest.exists():
@@ -885,7 +946,7 @@ def doctor(root: str | Path) -> dict[str, Any]:
     if manifest.exists():
         try:
             data = json.loads(manifest.read_text(encoding="utf-8"))
-            stale = data.get("fingerprint") != snapshot.fingerprint
+            stale = not _manifest_matches(data, snapshot)
         except (OSError, json.JSONDecodeError):
             stale = True
     status = "stale" if stale else "healthy"

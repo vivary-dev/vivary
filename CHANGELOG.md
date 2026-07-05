@@ -13,8 +13,8 @@ the `v0.1.0` line.
 ## [Unreleased: tropo semantic query mode] — 2026-07-05
 
 Affects `vivary-tropo`, `vivary-memory-cognee`, CLI docs, package docs, and
-generated website docs. This is not published yet; package version bumps and
-registry publishes remain release-train gates.
+generated website docs. This is not published yet; registry publishes remain
+release-train gates.
 
 ### Added
 
@@ -55,6 +55,14 @@ registry publishes remain release-train gates.
 - Hardened `tropo query --mode semantic` against workspace-local `vivary_cognee.py`
   import hijacking while still allowing the repo adapter or installed adapters outside
   the workspace/current working tree.
+- Bumped the unreleased `vivary-memory-cognee` adapter metadata to `0.1.1`, added an
+  explicit adapter capability marker, and made `tropo query --mode semantic` refuse
+  older adapters before calling provider recall.
+- Honored nested `.gitignore` files and directory ignore patterns before building
+  provider snapshots, so ignored private Markdown is not sent to the optional provider.
+- Preflighted the local Cognee manifest path before any provider-side mutation, compared
+  full manifest identity instead of fingerprint alone, and sanitized provider exception
+  strings to action plus exception class.
 - Capped semantic provider over-fetch for filtered queries so large `--k` values cannot
   fan out into unbounded provider requests before local filtering.
 - Kept `vivary-cognee doctor` package-presence-only, avoiding Cognee import side

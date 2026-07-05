@@ -1,6 +1,7 @@
 """Tests for the create-vivary workspace scaffold."""
 
 import io
+import importlib
 import json
 import os
 import sys
@@ -472,7 +473,7 @@ class CreateVivaryTests(unittest.TestCase):
             doc = (target / "docs" / "semantic-memory.md").read_text(encoding="utf-8")
             self.assertIn("vivary-cognee index --root . --dry-run --json", doc)
             self.assertIn("known graph node ids", doc)
-            with mock.patch.object(create_vivary, "_is_importable", return_value=False):
+            with mock.patch.object(create_vivary, "_safe_cognee_adapter_available", return_value=False):
                 report = create_vivary.doctor_workspace(target, repo_root=ROOT)
             self.assertTrue(report["ok"], report)
             self.assertEqual(report["memory"]["provider"], "cognee")
@@ -489,15 +490,40 @@ class CreateVivaryTests(unittest.TestCase):
                 repo_root=ROOT,
             )
 
-            def fake_importable(name):
-                return name == "vivary_cognee"
-
-            with mock.patch.object(create_vivary, "_is_importable", side_effect=fake_importable):
+            with mock.patch.object(create_vivary, "_safe_cognee_adapter_available", return_value=True):
                 report = create_vivary.doctor_workspace(target, repo_root=ROOT)
 
         self.assertEqual(report["memory"]["provider"], "cognee")
         self.assertEqual(report["memory"]["status"], "configured")
         self.assertIn("vivary-memory-cognee", report["memory"]["detail"])
+
+    def test_semantic_memory_cognee_ignores_workspace_local_adapter_spoof(self):
+        with temp_workspace() as td:
+            target = Path(td) / "memory-cognee"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="second-brain",
+                memory="cognee",
+                force=False,
+                repo_root=ROOT,
+            )
+            (target / "vivary_cognee.py").write_text("raise RuntimeError('do not import')\n", encoding="utf-8")
+            importlib.invalidate_caches()
+            old_path = list(sys.path)
+            sys.path.insert(0, str(target))
+            try:
+                with mock.patch.object(
+                    create_vivary.importlib_metadata,
+                    "version",
+                    return_value="0.1.1",
+                ):
+                    report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            finally:
+                sys.path[:] = old_path
+                importlib.invalidate_caches()
+
+        self.assertEqual(report["memory"]["provider"], "cognee")
+        self.assertEqual(report["memory"]["status"], "unavailable")
 
     def test_doctor_reports_invalid_memory_config_schema(self):
         with temp_workspace() as td:

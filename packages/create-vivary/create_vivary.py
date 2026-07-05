@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata as importlib_metadata
 import importlib.util
 import json
 import os
@@ -611,7 +612,7 @@ def _memory_report(target: Path) -> dict:
         status = "healthy"
         detail = "local semantic memory policy configured"
     elif provider == "cognee":
-        if _is_importable("vivary_cognee"):
+        if _safe_cognee_adapter_available(target):
             status = "configured"
             detail = "vivary-memory-cognee adapter is available; indexing still requires approval"
         else:
@@ -1875,6 +1876,42 @@ def _auto_pick_storage(args) -> tuple[str, str]:
 def _is_importable(module: str) -> bool:
     import importlib.util
     return importlib.util.find_spec(module) is not None
+
+
+def _version_tuple(value: str) -> tuple[int, ...]:
+    parts = []
+    for part in str(value or "").split("."):
+        digits = ""
+        for char in part:
+            if not char.isdigit():
+                break
+            digits += char
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
+
+
+def _path_within(root: Path, path: Path) -> bool:
+    try:
+        return os.path.commonpath([str(root), str(path)]) == str(root)
+    except ValueError:
+        return False
+
+
+def _safe_cognee_adapter_available(target: Path) -> bool:
+    try:
+        version = importlib_metadata.version("vivary-memory-cognee")
+    except importlib_metadata.PackageNotFoundError:
+        return False
+    if _version_tuple(version) < (0, 1, 1):
+        return False
+    spec = importlib.util.find_spec("vivary_cognee")
+    if spec is None or spec.origin is None:
+        return False
+    origin = Path(os.path.realpath(spec.origin))
+    unsafe_roots = [target.resolve(), Path(os.path.realpath(os.getcwd()))]
+    return not any(_path_within(root, origin) for root in unsafe_roots)
 
 
 def _ensure_backend_installed(provider: str, yes: bool) -> list[str]:

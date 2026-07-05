@@ -454,7 +454,7 @@ vivary-cognee forget --root . --yes [--json]
 |---|---|
 | `doctor` | Reports Cognee adapter readiness, typed node count, manifest path, and stale/healthy/unavailable status without importing Cognee runtime. |
 | `index` | Builds privacy-filtered typed Tropo node packets and sends them to Cognee. Requires `--yes` unless `--dry-run` is set, and requires `memory.cognee.allow_network = true` before provider runtime calls. |
-| `recall <query>` | Calls Cognee recall when network/provider runtime is explicitly allowed and the manifest fingerprint matches the current graph, then returns only hits that contain known Vivary node ids from the current typed graph. |
+| `recall <query>` | Calls Cognee recall when network/provider runtime is explicitly allowed and the manifest identity matches the current graph, then returns only hits that contain known Vivary node ids from the current typed graph. |
 | `forget` | Removes the workspace dataset from Cognee provider memory. Requires `--yes` and explicit provider runtime allowance. |
 
 The adapter uses `tropo` graph truth for ids, types, paths, and edges. Provider state
@@ -469,7 +469,8 @@ Approved index replaces the prior workspace-bound dataset, and recall refuses st
 or missing manifests so provider results cannot outrun Tropo graph truth. Dataset
 names include a workspace path hash even when a label is configured. Tropo refuses
 workspace-local `vivary_cognee.py` adapter imports for semantic query mode; installed
-adapters must resolve outside the workspace and current working tree.
+adapters must resolve outside the workspace and current working tree, and must expose
+the hardened `vivary-memory-cognee` `0.1.1+` adapter contract.
 
 ```bash
 # Human flow — interactive wizard:

@@ -538,6 +538,34 @@ def test_iter_markdown_skips_symlinked_file_outside_root(tmp_path):
     assert found == []
 
 
+def test_iter_markdown_junction_cycle_not_double_counted_by_analyze(tmp_path):
+    import subprocess
+    if os.name != "nt":
+        return
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "tropo.toml").write_text("[base]\nderive = ['id', 'title']\nallow_untyped = true\n")
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    loop_parent = root / "nested"
+    loop_parent.mkdir()
+    link = loop_parent / "loop"
+    try:
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(root)],
+            capture_output=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return
+    if result.returncode != 0:
+        return
+    try:
+        docs = tropo.analyze(str(root), [], res(str(root)))
+        assert [doc.rel for doc in docs] == ["a.md"]
+    finally:
+        os.rmdir(link)
+
+
 def test_build_graph_marks_broken_ref(tmp_path):
     docs = _graph_tree(tmp_path, {"a.md": "---\ndepends_on: ghost\n---\n# A\n"})
     _, edges = tropo.build_graph(docs)
@@ -1143,6 +1171,9 @@ def test_cmd_query_semantic_mode_returns_optional_provider_hits(tmp_path):
         CogneeMemoryAdapter=FakeAdapter,
         AdapterError=RuntimeError,
         __file__=str(allowed),
+        __version__="0.1.1",
+        TROPO_SEMANTIC_ADAPTER_API=1,
+        REQUIRES_EXPLICIT_PROVIDER_GATES=True,
     )
     try:
         rc, out = _capture_rc(
@@ -1162,6 +1193,47 @@ def test_cmd_query_semantic_mode_returns_optional_provider_hits(tmp_path):
     assert out["semantic"]["status"] == "ok"
     assert [r["id"] for r in out["results"]] == ["release-workflow"]
     assert out["results"][0]["reason"] == "typed semantic match"
+
+
+def test_cmd_query_semantic_mode_rejects_stale_adapter(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "memory.toml").write_text(
+        '[memory]\nenabled = true\nprovider = "cognee"\n',
+        encoding="utf-8",
+    )
+
+    class FakeAdapter:
+        def __init__(self, root):
+            self.root = root
+
+        async def recall(self, query, *, k=10):
+            return []
+
+    previous = sys.modules.get("vivary_cognee")
+    allowed = Path(ROOT).parent / "memory-cognee" / "vivary_cognee.py"
+    sys.modules["vivary_cognee"] = types.SimpleNamespace(
+        CogneeMemoryAdapter=FakeAdapter,
+        AdapterError=RuntimeError,
+        __file__=str(allowed),
+        __version__="0.1.0",
+    )
+    try:
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="semantic"),
+            res(str(tmp_path)),
+        )
+    finally:
+        if previous is None:
+            sys.modules.pop("vivary_cognee", None)
+        else:
+            sys.modules["vivary_cognee"] = previous
+
+    assert rc == 1
+    assert out["semantic"]["status"] == "unavailable"
+    assert out["results"] == []
 
 
 def test_cmd_query_semantic_mode_applies_graph_filters(tmp_path):
@@ -1195,6 +1267,9 @@ def test_cmd_query_semantic_mode_applies_graph_filters(tmp_path):
         CogneeMemoryAdapter=FakeAdapter,
         AdapterError=RuntimeError,
         __file__=str(allowed),
+        __version__="0.1.1",
+        TROPO_SEMANTIC_ADAPTER_API=1,
+        REQUIRES_EXPLICIT_PROVIDER_GATES=True,
     )
     try:
         rc, out = _capture_rc(
@@ -1267,6 +1342,9 @@ def test_cmd_query_semantic_mode_overfetches_before_filtering(tmp_path):
         CogneeMemoryAdapter=FakeAdapter,
         AdapterError=RuntimeError,
         __file__=str(allowed),
+        __version__="0.1.1",
+        TROPO_SEMANTIC_ADAPTER_API=1,
+        REQUIRES_EXPLICIT_PROVIDER_GATES=True,
     )
     try:
         rc, out = _capture_rc(
@@ -1310,6 +1388,9 @@ def test_cmd_query_semantic_mode_caps_provider_overfetch(tmp_path):
         CogneeMemoryAdapter=FakeAdapter,
         AdapterError=RuntimeError,
         __file__=str(allowed),
+        __version__="0.1.1",
+        TROPO_SEMANTIC_ADAPTER_API=1,
+        REQUIRES_EXPLICIT_PROVIDER_GATES=True,
     )
     try:
         rc, out = _capture_rc(

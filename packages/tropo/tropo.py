@@ -776,6 +776,7 @@ def iter_markdown(root, paths, exclude):
     targets = paths or [root]
     root_real = os.path.normcase(os.path.realpath(root))
     seen = set()
+    seen_dirs = set()
     for target in targets:
         target = os.path.abspath(target)
         if not _realpath_within(root_real, target):
@@ -788,15 +789,25 @@ def iter_markdown(root, paths, exclude):
                 yield target, rel
             continue
         for dirpath, dirnames, filenames in os.walk(target):
-            if not _realpath_within(root_real, dirpath):
+            dir_real = os.path.normcase(os.path.realpath(dirpath))
+            if not _realpath_within(root_real, dirpath) or dir_real in seen_dirs:
                 dirnames[:] = []
                 continue
+            seen_dirs.add(dir_real)
             reldir = os.path.relpath(dirpath, root)
             reldir = "" if reldir == "." else reldir
-            dirnames[:] = sorted(
-                d for d in dirnames
-                if not is_excluded(os.path.join(reldir, d), exclude)
-                and _realpath_within(root_real, os.path.join(dirpath, d)))
+            kept_dirs = []
+            for d in sorted(dirnames):
+                child = os.path.join(dirpath, d)
+                child_real = os.path.normcase(os.path.realpath(child))
+                if is_excluded(os.path.join(reldir, d), exclude):
+                    continue
+                if not _realpath_within(root_real, child):
+                    continue
+                if child_real in seen_dirs:
+                    continue
+                kept_dirs.append(d)
+            dirnames[:] = kept_dirs
             for f in sorted(filenames):
                 if not f.endswith((".md", ".markdown")):
                     continue
@@ -1719,6 +1730,28 @@ def _adapter_origin_is_unsafe(origin, workspace_root, allowed_source):
     return any(_is_within(root, origin_real) for root in untrusted_roots)
 
 
+def _version_tuple(value):
+    parts = []
+    for part in str(value or "").split("."):
+        match = re.match(r"(\d+)", part)
+        if not match:
+            break
+        parts.append(int(match.group(1)))
+    return tuple(parts)
+
+
+def _validate_cognee_adapter(module):
+    if getattr(module, "TROPO_SEMANTIC_ADAPTER_API", 0) < 1:
+        raise ImportError("vivary-memory-cognee adapter is too old for semantic query")
+    if not getattr(module, "REQUIRES_EXPLICIT_PROVIDER_GATES", False):
+        raise ImportError("vivary-memory-cognee adapter lacks provider safety gates")
+    if _version_tuple(getattr(module, "__version__", "")) < (0, 1, 1):
+        raise ImportError("vivary-memory-cognee 0.1.1 or newer is required")
+    if not hasattr(module, "CogneeMemoryAdapter"):
+        raise ImportError("vivary-memory-cognee adapter is missing CogneeMemoryAdapter")
+    return module
+
+
 def _import_optional_cognee_adapter(workspace_root):
     package_file = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "memory-cognee", "vivary_cognee.py")
@@ -1728,15 +1761,15 @@ def _import_optional_cognee_adapter(workspace_root):
         origin = getattr(existing, "__file__", None)
         if _adapter_origin_is_unsafe(origin, workspace_root, package_file):
             raise ImportError("refusing workspace-local vivary_cognee adapter")
-        return existing
+        return _validate_cognee_adapter(existing)
     if os.path.isfile(package_file):
-        return _load_cognee_adapter_from_path(package_file)
+        return _validate_cognee_adapter(_load_cognee_adapter_from_path(package_file))
     spec = importlib.util.find_spec("vivary_cognee")
     if spec is None or spec.origin is None:
         raise ImportError("vivary-memory-cognee is not installed")
     if _adapter_origin_is_unsafe(spec.origin, workspace_root, package_file):
         raise ImportError("refusing workspace-local vivary_cognee adapter")
-    return importlib.import_module("vivary_cognee")
+    return _validate_cognee_adapter(importlib.import_module("vivary_cognee"))
 
 
 def _hit_value(hit, name, default=None):

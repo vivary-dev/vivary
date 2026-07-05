@@ -10,6 +10,7 @@ import os
 import shutil
 import sys
 import types
+import tomllib
 import unittest
 import uuid
 from contextlib import contextmanager
@@ -87,6 +88,14 @@ class InaccessibleDatasetOnForgetCognee(FakeCognee):
             {"dataset": dataset, "memory_only": memory_only, "kwargs": kwargs}
         )
         raise PermissionError(f"Dataset {dataset} not accessible.")
+
+
+class FailingRecallCognee(FakeCognee):
+    async def recall(self, query_text, *, datasets=None, top_k=15, **kwargs):
+        self.recall_calls.append(
+            {"query_text": query_text, "datasets": datasets, "top_k": top_k, "kwargs": kwargs}
+        )
+        raise RuntimeError("provider leaked secret payload")
 
 
 class CachedFunction:
@@ -223,6 +232,41 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
         self.assertIn("source_files", auth.text)
         self.assertTrue(any(edge.source_id == "auth" for edge in snapshot.edges))
 
+    def test_build_snapshot_honors_gitignore_directory_pattern(self):
+        with temp_workspace() as root:
+            write_workspace(root)
+            with (root / ".gitignore").open("a", encoding="utf-8") as fh:
+                fh.write("secrets/\n")
+            secret_dir = root / "modules" / "secrets"
+            secret_dir.mkdir()
+            (secret_dir / "index.md").write_text(
+                "---\nproject: demo\nstatus: active\nmodule_area: secrets\n---\n"
+                "# Secrets\n\nprivate token from ignored directory\n",
+                encoding="utf-8",
+            )
+
+            snapshot = vivary_cognee.build_snapshot(root)
+
+        sent_text = "\n".join(node.text for node in snapshot.nodes)
+        self.assertNotIn("private token from ignored directory", sent_text)
+
+    def test_build_snapshot_honors_nested_gitignore_rules(self):
+        with temp_workspace() as root:
+            write_workspace(root)
+            private_dir = root / "modules" / "auth" / "private"
+            private_dir.mkdir()
+            (root / "modules" / "auth" / ".gitignore").write_text("private/\n", encoding="utf-8")
+            (private_dir / "index.md").write_text(
+                "---\nproject: demo\nstatus: active\nmodule_area: hidden\n---\n"
+                "# Hidden\n\nnested private adapter leak\n",
+                encoding="utf-8",
+            )
+
+            snapshot = vivary_cognee.build_snapshot(root)
+
+        sent_text = "\n".join(node.text for node in snapshot.nodes)
+        self.assertNotIn("nested private adapter leak", sent_text)
+
     def test_dataset_name_is_workspace_bound_even_when_configured(self):
         with temp_workspace() as root:
             write_workspace(root, dataset="shared-prod")
@@ -342,7 +386,7 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
             manifest.parent.mkdir(parents=True, exist_ok=True)
             manifest.write_text("{}", encoding="utf-8")
 
-            with self.assertRaisesRegex(vivary_cognee.AdapterError, "not accessible"):
+            with self.assertRaisesRegex(vivary_cognee.AdapterError, "PermissionError"):
                 asyncio.run(adapter.forget(approved=True))
 
             self.assertTrue(manifest.exists())
@@ -381,6 +425,33 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
         self.assertEqual(hits[0].path, "modules/auth/index.md")
         self.assertEqual(hits[0].provider, "cognee")
         self.assertEqual(fake.recall_calls[0]["top_k"], 3)
+
+    def test_recall_rejects_zero_k_and_caps_large_k(self):
+        recall_items = [{"text": "strong match\nvivary_node_id: auth\nreason: auth"}]
+        with temp_workspace() as root:
+            write_workspace(root, allow_network=True, allow_without_api_key=True)
+            fake = FakeCognee(recall_items=recall_items)
+            adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=fake)
+            asyncio.run(adapter.index(approved=True))
+
+            with self.assertRaisesRegex(vivary_cognee.AdapterError, "at least 1"):
+                asyncio.run(adapter.recall("login identity", k=0))
+            hits = asyncio.run(adapter.recall("login identity", k=1_000_000))
+
+        self.assertEqual([hit.node_id for hit in hits], ["auth"])
+        self.assertEqual(fake.recall_calls[-1]["top_k"], vivary_cognee.MAX_RECALL_K)
+
+    def test_recall_sanitizes_provider_error_detail(self):
+        with temp_workspace() as root:
+            write_workspace(root, allow_network=True, allow_without_api_key=True)
+            fake = FailingRecallCognee()
+            adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=fake)
+            asyncio.run(adapter.index(approved=True))
+
+            with self.assertRaisesRegex(vivary_cognee.AdapterError, "RuntimeError") as cm:
+                asyncio.run(adapter.recall("login identity"))
+
+        self.assertNotIn("secret payload", str(cm.exception))
 
     def test_recall_keeps_provider_chatter_off_stdout(self):
         with temp_workspace() as root:
@@ -429,6 +500,24 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
 
             with self.assertRaisesRegex(vivary_cognee.AdapterError, "stale"):
                 asyncio.run(adapter.recall("login identity"))
+
+    def test_recall_refuses_manifest_with_wrong_dataset_metadata(self):
+        with temp_workspace() as root:
+            write_workspace(root, allow_network=True, allow_without_api_key=True)
+            fake = FakeCognee(recall_items=[{"text": "vivary_node_id: auth"}])
+            adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=fake)
+            asyncio.run(adapter.index(approved=True))
+            manifest = root / ".vivary" / "memory" / "cognee" / "manifest.json"
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            data["dataset"] = "wrong-dataset"
+            manifest.write_text(json.dumps(data), encoding="utf-8")
+
+            with self.assertRaisesRegex(vivary_cognee.AdapterError, "stale"):
+                asyncio.run(adapter.recall("login identity"))
+            with mock.patch.object(vivary_cognee, "_cognee_available", return_value=True):
+                report = vivary_cognee.doctor(root)
+
+        self.assertEqual(report["status"], "stale")
 
     def test_index_requires_configured_api_key_env_when_present(self):
         with temp_workspace() as root:
@@ -668,6 +757,8 @@ allow_network = false
                     self.skipTest("filesystem does not permit symlink creation")
                 with self.assertRaisesRegex(vivary_cognee.AdapterError, "linked Cognee manifest"):
                     asyncio.run(adapter.index(approved=True))
+                self.assertEqual(fake.forget_calls, [])
+                self.assertEqual(fake.remember_calls, [])
                 self.assertEqual(outside.read_text(encoding="utf-8"), "keep me\n")
             finally:
                 outside.unlink(missing_ok=True)
@@ -688,6 +779,8 @@ allow_network = false
                     self.skipTest("filesystem does not permit hardlink creation")
                 with self.assertRaisesRegex(vivary_cognee.AdapterError, "hard-linked Cognee manifest"):
                     asyncio.run(adapter.index(approved=True))
+                self.assertEqual(fake.forget_calls, [])
+                self.assertEqual(fake.remember_calls, [])
                 self.assertEqual(outside.read_text(encoding="utf-8"), "keep me\n")
             finally:
                 outside.unlink(missing_ok=True)
@@ -798,6 +891,10 @@ allow_network = false
                 sys.path.remove(str(root))
 
         self.assertIsNotNone(client)
+
+    def test_version_constant_matches_pyproject(self):
+        declared = tomllib.loads((PKG / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+        self.assertEqual(vivary_cognee.__version__, declared)
 
 
 if __name__ == "__main__":
