@@ -137,6 +137,8 @@ def _gitignore_rules(root: Path) -> list[tuple[bool, str, str]]:
         base = _norm(path.parent.relative_to(root))
         if base == ".":
             base = ""
+        if base and _ignored_by_gitignore(f"{base}/.gitignore", rules):
+            continue
         for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
             line = raw.strip()
             if not line or line.startswith("#"):
@@ -773,7 +775,7 @@ class CogneeMemoryAdapter:
             await _run_provider_call(forget, dataset=snapshot.dataset, memory_only=False)
         except Exception as exc:
             if not _is_missing_dataset_error(exc):
-                raise _provider_failure("forget() before re-index", exc) from exc
+                raise _provider_failure("forget() before re-index", exc) from None
         for node in snapshot.nodes:
             remember = getattr(client, "remember", None)
             if remember is None:
@@ -781,7 +783,7 @@ class CogneeMemoryAdapter:
             try:
                 await _run_provider_call(remember, node.text, dataset_name=snapshot.dataset)
             except Exception as exc:
-                raise _provider_failure("remember()", exc) from exc
+                raise _provider_failure("remember()", exc) from None
         manifest = _write_manifest(self.root, self.config, snapshot)
         return {
             "ok": True,
@@ -814,7 +816,7 @@ class CogneeMemoryAdapter:
         try:
             raw_items = await _run_provider_call(recall, query, datasets=[snapshot.dataset], top_k=k)
         except Exception as exc:
-            raise _provider_failure("recall()", exc) from exc
+            raise _provider_failure("recall()", exc) from None
 
         hits: list[RecallHit] = []
         seen: set[str] = set()
@@ -857,7 +859,7 @@ class CogneeMemoryAdapter:
             result = await _run_provider_call(forget, dataset=self.dataset, memory_only=False)
         except Exception as exc:
             if not _is_missing_dataset_error(exc):
-                raise _provider_failure("forget()", exc) from exc
+                raise _provider_failure("forget()", exc) from None
             result = {"status": "missing", "dataset": self.dataset}
         manifest = _manifest_path(self.root, self.config)
         if manifest.exists():

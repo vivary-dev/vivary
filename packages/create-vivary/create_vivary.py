@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import importlib.metadata as importlib_metadata
 import importlib.util
 import json
@@ -1911,7 +1912,23 @@ def _safe_cognee_adapter_available(target: Path) -> bool:
         return False
     origin = Path(os.path.realpath(spec.origin))
     unsafe_roots = [target.resolve(), Path(os.path.realpath(os.getcwd()))]
-    return not any(_path_within(root, origin) for root in unsafe_roots)
+    if any(_path_within(root, origin) for root in unsafe_roots):
+        return False
+    try:
+        module = importlib.import_module("vivary_cognee")
+    except Exception:
+        return False
+    module_origin = getattr(module, "__file__", spec.origin)
+    if module_origin:
+        module_origin_path = Path(os.path.realpath(module_origin))
+        if any(_path_within(root, module_origin_path) for root in unsafe_roots):
+            return False
+    return (
+        hasattr(module, "CogneeMemoryAdapter")
+        and getattr(module, "TROPO_SEMANTIC_ADAPTER_API", 0) >= 1
+        and bool(getattr(module, "REQUIRES_EXPLICIT_PROVIDER_GATES", False))
+        and _version_tuple(getattr(module, "__version__", "")) >= (0, 1, 1)
+    )
 
 
 def _ensure_backend_installed(provider: str, yes: bool) -> list[str]:

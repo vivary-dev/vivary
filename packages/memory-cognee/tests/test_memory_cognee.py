@@ -267,6 +267,25 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
         sent_text = "\n".join(node.text for node in snapshot.nodes)
         self.assertNotIn("nested private adapter leak", sent_text)
 
+    def test_nested_gitignore_cannot_reinclude_parent_ignored_directory(self):
+        with temp_workspace() as root:
+            write_workspace(root)
+            with (root / ".gitignore").open("a", encoding="utf-8") as fh:
+                fh.write("secrets/\n")
+            secret_dir = root / "modules" / "secrets"
+            secret_dir.mkdir()
+            (secret_dir / ".gitignore").write_text("!index.md\n", encoding="utf-8")
+            (secret_dir / "index.md").write_text(
+                "---\nproject: demo\nstatus: active\nmodule_area: secrets\n---\n"
+                "# Secrets\n\nreincluded parent ignored leak\n",
+                encoding="utf-8",
+            )
+
+            snapshot = vivary_cognee.build_snapshot(root)
+
+        sent_text = "\n".join(node.text for node in snapshot.nodes)
+        self.assertNotIn("reincluded parent ignored leak", sent_text)
+
     def test_dataset_name_is_workspace_bound_even_when_configured(self):
         with temp_workspace() as root:
             write_workspace(root, dataset="shared-prod")
@@ -452,6 +471,7 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
                 asyncio.run(adapter.recall("login identity"))
 
         self.assertNotIn("secret payload", str(cm.exception))
+        self.assertIsNone(cm.exception.__cause__)
 
     def test_recall_keeps_provider_chatter_off_stdout(self):
         with temp_workspace() as root:
