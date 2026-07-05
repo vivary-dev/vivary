@@ -13,6 +13,47 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: local run receipts] — 2026-07-05
+
+Affects `create-vivary`, `vivary-tropo`, `vivary-ozone`, `vivary-exo`, CLI docs,
+package docs, and generated website docs. This is not published yet; package version
+bumps and registry publishes remain release-train gates.
+
+### Added
+
+- Added dependency-free, opt-in local JSONL run receipts to the core CLIs via
+  `--receipt PATH` or `VIVARY_RECEIPT_LOG=PATH`.
+- Receipts record a small debug envelope: schema version, tool/version, command,
+  flag names, argument count, exit code, duration, Python version, and platform.
+- Receipts deliberately avoid stdout, stderr, environment variables, file contents,
+  raw query text, target ids, local paths, graph content, preset values, and agent
+  handles.
+
+### Security
+
+- Receipt targets must be regular files; symlink targets and directory targets are
+  refused so an opt-in debug log cannot silently append through a suspicious path.
+- Symlink or Windows junction directory ancestors are refused for receipt paths before
+  and after parent directory creation.
+- Windows device names such as `NUL`, `CON`, `COM1`, and `LPT1` are refused as
+  receipt targets.
+
+### Verification
+
+- `python packages/tropo/tests/test_tropo.py`
+- `python packages/ozone/tests/test_ozone.py`
+- `python packages/exo/tests/test_exo.py`
+- `python packages/create-vivary/tests/test_create_vivary.py`
+- `python packages/create-vivary/tests/test_adopt.py`
+- `python packages/create-vivary/tests/test_strato_integrity.py`
+- `python packages/create-vivary/tests/test_assets_parity.py`
+- `python packages/memory-cognee/tests/test_memory_cognee.py`
+- `node packages/create-vivary/tests/test_npm_launcher.js`
+- `python packages/tropo/tropo.py check --root packages/tropo/examples/vault`
+- `cd site && npm run sync-docs && npm run build`
+- `cd packages/create-vivary/npm && npm pack --dry-run`
+- `git diff --check`
+
 ## [Unreleased: vivary-ozone editorial pack] — 2026-07-05
 
 Affects `vivary-ozone`, CLI docs, package docs, and generated website docs. This is

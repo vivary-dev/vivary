@@ -33,6 +33,7 @@ python tropo.py find "folder as type decision" --root examples/vault --json  # r
 python tropo.py query "meeting notes" --root examples/vault --type meeting --explain
 python tropo.py map    --root examples/vault    # read-only filesystem inventory, no tropo.toml required
 python tropo.py migrate --from file --to embedded --root my-vault --yes  # switch to LanceDB
+python tropo.py check --root examples/vault --receipt .vivary/receipts.jsonl
 python tests/test_tropo.py                       # run the test suite
 ```
 
@@ -49,6 +50,12 @@ TOML config and frontmatter parsing tolerate a single leading UTF-8 BOM, which k
 Windows-created files from failing to load or being misread as body-only documents.
 `tropo view --out` keeps generated HTML under the tropo root, rejects symlink targets,
 and replaces output files without mutating hard-linked files outside the workspace.
+
+For local debugging, pass `--receipt PATH` or set `VIVARY_RECEIPT_LOG=PATH` to append
+a dependency-free JSONL run receipt. Receipts stay local and record only command
+envelope data such as tool version, command, flag names, exit code, duration, Python,
+and platform; they do not capture stdout, stderr, file contents, raw query text,
+target ids, or paths.
 
 `tropo find` is the friendly context-compression command: it returns a short packet of
 typed nodes/files to open first, with reasons, snippets, and an approximate token

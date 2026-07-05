@@ -6,10 +6,12 @@ import argparse
 import importlib.util
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import date, datetime, timezone
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -24,6 +26,41 @@ ACTIVE_CONTEXTS = ("cocoindex-code",)
 MEMORY_MODES = ("none", "local", "cognee")
 
 SUBCOMMANDS = ("init", "doctor", "wizard", "capabilities", "adopt")
+
+RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
+RECEIPT_SCHEMA = "vivary.run_receipt.v1"
+RECEIPT_VALUE_FLAGS = {
+    "--receipt",
+    "--preset",
+    "--active-context",
+    "--repo-root",
+    "--storage",
+    "--provider",
+    "--memory",
+    "--size",
+    "--privacy",
+}
+RECEIPT_KNOWN_FLAGS = RECEIPT_VALUE_FLAGS | {
+    "--auto",
+    "--dry-run",
+    "--force",
+    "--help",
+    "--json",
+    "--no-wizard",
+    "--obsidian",
+    "--trend",
+    "--version",
+    "--yes",
+    "-h",
+}
+RECEIPT_RESERVED_WINDOWS_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
 
 REQUIRED_WORKSPACE_FILES = (
     "README.md",
@@ -2617,15 +2654,29 @@ def capability_report(preset: str = "coding") -> dict:
     }
 
 
+def _add_receipt_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--receipt",
+        metavar="PATH",
+        default=None,
+        help=(
+            "append a local privacy-preserving JSONL run receipt "
+            f"(or set {RECEIPT_ENV})"
+        ),
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="create-vivary",
         description="Scaffold a complete Vivary agent workspace.",
     )
     parser.add_argument("--version", action="version", version=f"create-vivary {__version__}")
+    _add_receipt_argument(parser)
     sub = parser.add_subparsers(dest="command")
 
     init = sub.add_parser("init", help="create a Vivary workspace scaffold")
+    _add_receipt_argument(init)
     init.add_argument("target", help="directory to create or populate")
     init.add_argument("--preset", choices=PRESETS, default="coding")
     init.add_argument("--force", action="store_true", help="overwrite scaffold files")
@@ -2665,6 +2716,7 @@ def build_parser() -> argparse.ArgumentParser:
                       help="data locality hint for --auto decisions")
 
     wizard = sub.add_parser("wizard", help="reconfigure storage for an existing workspace")
+    _add_receipt_argument(wizard)
     wizard.add_argument("target", help="workspace directory to reconfigure")
     wizard.add_argument("--auto", action="store_true")
     wizard.add_argument("--yes", action="store_true")
@@ -2679,6 +2731,7 @@ def build_parser() -> argparse.ArgumentParser:
     wizard.add_argument("--repo-root", default=None)
 
     doctor = sub.add_parser("doctor", help="validate a Vivary workspace scaffold")
+    _add_receipt_argument(doctor)
     doctor.add_argument("target", help="workspace directory to validate")
     doctor.add_argument("--json", action="store_true", help="print a JSON report")
     doctor.add_argument(
@@ -2696,12 +2749,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     capabilities = sub.add_parser("capabilities", help="list optional preset capabilities")
+    _add_receipt_argument(capabilities)
     capabilities.add_argument("--preset", choices=PRESETS, default="coding")
     capabilities.add_argument("--json", action="store_true", help="print a JSON report")
 
     adopt = sub.add_parser(
         "adopt", help="bring Vivary to an existing repo or vault without touching its files"
     )
+    _add_receipt_argument(adopt)
     adopt.add_argument("target", help="existing directory to adopt")
     adopt.add_argument("--preset", choices=PRESETS, default=None,
                        help="starter graph to seed; default is auto-detected from the tree")
@@ -2721,12 +2776,191 @@ def with_default_command(argv: list[str]) -> list[str]:
     behaves like ``create-vivary init <name>``. This mirrors the npm launcher
     (`@vivary/create`) so both entry points share one UX. An explicit subcommand or
     a leading flag (e.g. ``-h``/``--help``) passes through unchanged."""
-    if argv and not argv[0].startswith("-") and argv[0] not in SUBCOMMANDS:
-        return ["init", *argv]
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token == "--":
+            return argv
+        if token in ("-h", "--help", "--version"):
+            return argv
+        if token == "--receipt":
+            if index + 1 >= len(argv) or argv[index + 1].startswith("-"):
+                return argv
+            index += 2
+            continue
+        if token.startswith("--receipt="):
+            index += 1
+            continue
+        if token.startswith("-"):
+            return argv
+        if token not in SUBCOMMANDS:
+            return [*argv[:index], "init", *argv[index:]]
+        return argv
     return argv
 
 
-def main(argv: list[str] | None = None) -> int:
+def _extract_receipt_path(argv: list[str]) -> tuple[str | None, str | None]:
+    for index, token in enumerate(argv):
+        if token == "--":
+            break
+        if token == "--receipt":
+            if index + 1 < len(argv) and not argv[index + 1].startswith("-"):
+                return argv[index + 1], "flag"
+            return None, None
+        if token.startswith("--receipt="):
+            path = token.split("=", 1)[1]
+            return (path, "flag") if path else (None, None)
+    env_path = os.environ.get(RECEIPT_ENV)
+    if env_path:
+        return env_path, "env"
+    return None, None
+
+
+def _receipt_flags(argv: list[str]) -> list[str]:
+    flags: set[str] = set()
+    skip_value = False
+    for token in argv:
+        if token == "--":
+            break
+        if skip_value:
+            skip_value = False
+            continue
+        if token.startswith("--"):
+            name = token.split("=", 1)[0]
+            if name in RECEIPT_KNOWN_FLAGS and name != "--receipt":
+                flags.add(name)
+            if name in RECEIPT_VALUE_FLAGS and "=" not in token:
+                skip_value = True
+        elif token in RECEIPT_KNOWN_FLAGS:
+            flags.add(token)
+    return sorted(flags)
+
+
+def _receipt_command(argv: list[str]) -> str:
+    if "--version" in argv:
+        return "version"
+    if any(token in ("-h", "--help") for token in argv):
+        return "help"
+    normalized = with_default_command(list(argv))
+    skip_value = False
+    for token in normalized:
+        if token == "--":
+            break
+        if skip_value:
+            skip_value = False
+            continue
+        if token.startswith("--"):
+            name = token.split("=", 1)[0]
+            if name in RECEIPT_VALUE_FLAGS and "=" not in token:
+                skip_value = True
+            continue
+        if token in SUBCOMMANDS:
+            return token
+    return "help"
+
+
+def _exit_code_value(code) -> int:
+    if code is None:
+        return 0
+    if isinstance(code, int):
+        return code
+    return 1
+
+
+def _receipt_is_reserved_windows_path(path: Path) -> bool:
+    if os.name != "nt":
+        return False
+    stem = path.name.split(".", 1)[0].rstrip(" .").upper()
+    return stem in RECEIPT_RESERVED_WINDOWS_NAMES
+
+
+def _receipt_has_symlink_ancestor(path: Path) -> bool:
+    target = path if path.is_absolute() else Path.cwd() / path
+    current = target.parent
+    while True:
+        if os.path.lexists(current) and (
+            current.is_symlink()
+            or (
+                hasattr(os.path, "isjunction")
+                and os.path.isjunction(current)
+            )
+        ):
+            return True
+        parent = current.parent
+        if parent == current:
+            return False
+        current = parent
+
+
+def _receipt_error_message(exc: OSError) -> str:
+    message = str(exc)
+    safe_messages = {
+        "receipt path must not be a Windows device name",
+        "receipt path must not be a symlink",
+        "receipt path must be a regular file",
+        "receipt path must not contain a symlink or junction directory",
+    }
+    if message in safe_messages:
+        return message
+    return "could not write receipt; check that the receipt path is a writable regular file"
+
+
+def _append_run_receipt(
+    *,
+    tool: str,
+    version: str,
+    argv: list[str],
+    started_at: float,
+    exit_code: int,
+    receipt_path: str | None,
+    receipt_source: str | None,
+    error_type: str | None = None,
+) -> bool:
+    if not receipt_path:
+        return True
+
+    target = Path(receipt_path).expanduser()
+    try:
+        if _receipt_is_reserved_windows_path(target):
+            raise OSError("receipt path must not be a Windows device name")
+        if _receipt_has_symlink_ancestor(target):
+            raise OSError("receipt path must not contain a symlink or junction directory")
+        if target.exists() or os.path.lexists(target):
+            if target.is_symlink():
+                raise OSError("receipt path must not be a symlink")
+            if not target.is_file():
+                raise OSError("receipt path must be a regular file")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if _receipt_has_symlink_ancestor(target):
+            raise OSError("receipt path must not contain a symlink or junction directory")
+
+        record = {
+            "schema": RECEIPT_SCHEMA,
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "tool": tool,
+            "version": version,
+            "command": _receipt_command(argv),
+            "flags": _receipt_flags(argv),
+            "arg_count": len(argv),
+            "exit_code": exit_code,
+            "ok": exit_code == 0,
+            "duration_ms": int((time.monotonic() - started_at) * 1000),
+            "python": platform.python_version(),
+            "platform": platform.system(),
+            "receipt_source": receipt_source,
+        }
+        if error_type:
+            record["error_type"] = error_type
+        with target.open("a", encoding="utf-8", newline="\n") as fh:
+            fh.write(json.dumps(record, sort_keys=True, separators=(",", ":")))
+            fh.write("\n")
+    except OSError as exc:
+        print(f"{tool}: receipt: {_receipt_error_message(exc)}", file=sys.stderr)
+        return False
+    return True
+
+
+def _main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     argv = with_default_command(argv)
@@ -2938,6 +3172,53 @@ def main(argv: list[str] | None = None) -> int:
         verb = "would write" if dry_run else "wrote"
         print(f"create-vivary: {verb} {len(created)} file(s) to {root}")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    started_at = time.monotonic()
+    receipt_path, receipt_source = _extract_receipt_path(raw_argv)
+    try:
+        rc = _main(raw_argv)
+    except SystemExit as exc:
+        code = _exit_code_value(exc.code)
+        receipt_ok = _append_run_receipt(
+            tool="create-vivary",
+            version=__version__,
+            argv=raw_argv,
+            started_at=started_at,
+            exit_code=code,
+            receipt_path=receipt_path,
+            receipt_source=receipt_source,
+            error_type="SystemExit" if code else None,
+        )
+        if not receipt_ok and code == 0:
+            raise SystemExit(1) from exc
+        raise
+    except Exception as exc:
+        _append_run_receipt(
+            tool="create-vivary",
+            version=__version__,
+            argv=raw_argv,
+            started_at=started_at,
+            exit_code=1,
+            receipt_path=receipt_path,
+            receipt_source=receipt_source,
+            error_type=type(exc).__name__,
+        )
+        raise
+    receipt_ok = _append_run_receipt(
+        tool="create-vivary",
+        version=__version__,
+        argv=raw_argv,
+        started_at=started_at,
+        exit_code=_exit_code_value(rc),
+        receipt_path=receipt_path,
+        receipt_source=receipt_source,
+    )
+    if not receipt_ok and _exit_code_value(rc) == 0:
+        return 1
+    return rc
 
 
 def _print_doctor_report(report: dict) -> None:

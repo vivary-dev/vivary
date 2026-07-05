@@ -2,12 +2,13 @@
 
 import io
 import json
+import os
 import sys
 import shutil
 import subprocess
 import unittest
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -33,6 +34,165 @@ def temp_workspace():
 
 
 class CreateVivaryTests(unittest.TestCase):
+    def test_receipt_flag_appends_privacy_preserving_jsonl_without_polluting_stdout(self):
+        with temp_workspace() as td:
+            receipt = td / "receipts" / "runs.jsonl"
+            buf = io.StringIO()
+
+            with redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "capabilities",
+                    "--preset",
+                    "coding",
+                    "--json",
+                    "--receipt",
+                    str(receipt),
+                ])
+
+            self.assertEqual(rc, 0)
+            self.assertTrue(json.loads(buf.getvalue())["ok"])
+            records = [json.loads(line) for line in receipt.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(records), 1)
+            record = records[0]
+            self.assertEqual(record["schema"], "vivary.run_receipt.v1")
+            self.assertEqual(record["tool"], "create-vivary")
+            self.assertEqual(record["command"], "capabilities")
+            self.assertEqual(record["exit_code"], 0)
+            self.assertTrue(record["ok"])
+            self.assertIn("--json", record["flags"])
+            self.assertIn("--preset", record["flags"])
+            self.assertNotIn("--receipt", record["flags"])
+
+            serialized = json.dumps(record, sort_keys=True)
+            self.assertNotIn(str(td), serialized)
+            self.assertNotIn("coding", serialized)
+
+    def test_receipt_env_appends_jsonl(self):
+        with temp_workspace() as td:
+            receipt = td / "runs.jsonl"
+            buf = io.StringIO()
+
+            with mock.patch.dict(os.environ, {"VIVARY_RECEIPT_LOG": str(receipt)}):
+                with redirect_stdout(buf):
+                    rc = create_vivary.main(["capabilities", "--json"])
+
+            self.assertEqual(rc, 0)
+            self.assertTrue(json.loads(buf.getvalue())["ok"])
+            record = json.loads(receipt.read_text(encoding="utf-8").strip())
+            self.assertEqual(record["receipt_source"], "env")
+            self.assertEqual(record["command"], "capabilities")
+
+    def test_global_receipt_preserves_bare_target_init_shorthand(self):
+        with temp_workspace() as td:
+            target = td / "agent-workspace"
+            receipt = td / "runs.jsonl"
+            buf = io.StringIO()
+
+            with redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "--receipt",
+                    str(receipt),
+                    str(target),
+                    "--preset",
+                    "coding",
+                    "--auto",
+                    "--dry-run",
+                    "--json",
+                ])
+
+            self.assertEqual(rc, 0)
+            result = json.loads(buf.getvalue())
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["dry_run"])
+            record = json.loads(receipt.read_text(encoding="utf-8").strip())
+            self.assertEqual(record["command"], "init")
+
+    def test_malformed_receipt_flag_does_not_create_option_named_file(self):
+        with temp_workspace() as td:
+            old_cwd = Path.cwd()
+            err = io.StringIO()
+            try:
+                os.chdir(td)
+                with redirect_stderr(err):
+                    with self.assertRaises(SystemExit):
+                        create_vivary.main(["capabilities", "--receipt", "--json"])
+            finally:
+                os.chdir(old_cwd)
+
+            self.assertFalse((td / "--json").exists())
+            self.assertIn("expected one argument", err.getvalue())
+
+    def test_receipt_scanner_stops_at_argument_separator(self):
+        with temp_workspace() as td:
+            receipt = td / "should-not-exist.jsonl"
+            self.assertEqual(
+                create_vivary._extract_receipt_path([
+                    "capabilities",
+                    "--",
+                    "--receipt",
+                    str(receipt),
+                ]),
+                (None, None),
+            )
+            self.assertEqual(
+                create_vivary._receipt_flags([
+                    "capabilities",
+                    "--json",
+                    "--",
+                    "--receipt",
+                    str(receipt),
+                ]),
+                ["--json"],
+            )
+
+    def test_receipt_rejects_junction_ancestors_when_platform_reports_them(self):
+        with temp_workspace() as td:
+            (td / "junction").mkdir()
+            target = td / "junction" / "receipts" / "runs.jsonl"
+
+            with mock.patch.object(
+                create_vivary.os.path,
+                "isjunction",
+                create=True,
+                side_effect=lambda p: Path(p).name == "junction",
+            ):
+                self.assertTrue(create_vivary._receipt_has_symlink_ancestor(target))
+
+    def test_receipt_refuses_directory_target(self):
+        with temp_workspace() as td:
+            bad_receipt = td / "not-a-file"
+            bad_receipt.mkdir()
+            out = io.StringIO()
+            err = io.StringIO()
+
+            with redirect_stdout(out), redirect_stderr(err):
+                rc = create_vivary.main([
+                    "capabilities",
+                    "--json",
+                    "--receipt",
+                    str(bad_receipt),
+                ])
+
+            self.assertEqual(rc, 1)
+            self.assertTrue(json.loads(out.getvalue())["ok"])
+            self.assertIn("receipt path must be a regular file", err.getvalue())
+
+    def test_receipt_refuses_windows_device_names(self):
+        if os.name != "nt":
+            self.skipTest("Windows device names are platform-specific")
+        out = io.StringIO()
+        err = io.StringIO()
+
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = create_vivary.main(["capabilities", "--json", "--receipt", "NUL"])
+
+        self.assertEqual(rc, 1)
+        self.assertTrue(json.loads(out.getvalue())["ok"])
+        self.assertIn("Windows device name", err.getvalue())
+
+    def test_doctor_trend_is_recorded_as_receipt_flag(self):
+        self.assertIn("--trend", create_vivary._receipt_flags(["doctor", "x", "--trend"]))
+
     def test_init_writes_full_agent_workspace_scaffold(self):
         with temp_workspace() as td:
             target = Path(td) / "agent-workspace"
