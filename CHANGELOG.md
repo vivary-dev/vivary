@@ -10,6 +10,25 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: vivary-ozone editorial pack] — 2026-07-05
+
+Affects `vivary-ozone`, CLI docs, package docs, and generated website docs. This is
+not published yet; the `vivary-ozone` version bump and registry publish remain a
+later release-train gate.
+
+### Added
+
+- Added `ozone review --pack editorial`, a deterministic writing-workspace rule pack
+  that demonstrates the "code review and editorial review are the same layer with
+  different rule packs" thesis.
+- The pack flags missing draft/manuscript review coverage, missing edit/revision
+  coverage, missing outline/structure coverage, and unlinked reviews or edits while
+  staying quiet for non-writing workspaces.
+
+### Verification
+
+- `python packages/ozone/tests/test_ozone.py`
+
 ## [Release workflow / @vivary/create trusted publishing] — 2026-07-05
 
 Affects GitHub Actions, release docs, and generated website docs only. No package

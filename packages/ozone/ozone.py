@@ -38,6 +38,29 @@ ROLE_FOLDERS = {
     "verification": "verification",
     "gates": "gate",
 }
+EDITORIAL_ROLE_FOLDERS = {
+    "drafts": "draft",
+    "manuscripts": "manuscript",
+    "reviews": "review",
+    "editorial-reviews": "review",
+    "edits": "edit",
+    "revisions": "edit",
+    "outlines": "structure",
+    "structures": "structure",
+    "beats": "structure",
+}
+EDITORIAL_REVIEW_FIELDS = {
+    "review", "reviews", "editorial_review", "editorial_reviews", "critique", "critiques",
+}
+EDITORIAL_EDIT_FIELDS = {
+    "edit", "edits", "revision", "revisions", "copyedit", "copyedits",
+}
+EDITORIAL_STRUCTURE_FIELDS = {
+    "outline", "outlines", "structure", "structures", "beat_sheet", "beats", "brief", "briefs",
+}
+EDITORIAL_SUBJECT_FIELDS = {
+    "draft", "drafts", "manuscript", "manuscripts", "work", "target", "targets",
+}
 
 ROOT_SURFACE_THRESHOLDS = {
     "AGENTS.md": (160, 10000),
@@ -99,6 +122,12 @@ def build_workspace_graph(root):
 def role_of(node):
     parts = node["path"].split("/")
     return ROLE_FOLDERS.get(parts[0]) if len(parts) > 1 else None
+
+
+def editorial_role_of(node):
+    parts = node["path"].split("/")
+    folder = parts[0] if len(parts) > 1 else ""
+    return EDITORIAL_ROLE_FOLDERS.get(folder)
 
 
 def structure_pack(nodes, edges):
@@ -301,11 +330,90 @@ def context_budget_pack(root, nodes, edges):
     return findings
 
 
+def editorial_pack(nodes, edges):
+    """Medium-specific review for writing workspaces.
+
+    The pack stays graph-native and deterministic: it looks for review/edit/structure
+    coverage between writing folders and stays silent for non-writing workspaces.
+    """
+    findings = []
+    roles = {nid: editorial_role_of(node) for nid, node in nodes.items()}
+    out_edges, in_edges = {}, {}
+    for edge in edges:
+        if edge.get("broken"):
+            continue
+        out_edges.setdefault(edge["from"], []).append(edge)
+        in_edges.setdefault(edge["to"], []).append(edge)
+
+    def add(sev, rule, nid, msg):
+        node = nodes[nid]
+        findings.append({
+            "severity": sev,
+            "rule": rule,
+            "id": nid,
+            "type": node["type"],
+            "path": node["path"],
+            "message": msg,
+        })
+
+    def outgoing_to_role(nid, fields, target_roles):
+        return any(edge["field"] in fields and roles.get(edge["to"]) in target_roles
+                   for edge in out_edges.get(nid, []))
+
+    def incoming_from_role(nid, fields, source_roles):
+        return any(edge["field"] in fields and roles.get(edge["from"]) in source_roles
+                   for edge in in_edges.get(nid, []))
+
+    for nid in sorted(nodes):
+        role = roles.get(nid)
+        if role in {"draft", "manuscript"}:
+            label = f"{role} '{nid}'"
+            has_review = (
+                outgoing_to_role(nid, EDITORIAL_REVIEW_FIELDS, {"review"}) or
+                incoming_from_role(nid, EDITORIAL_SUBJECT_FIELDS, {"review"})
+            )
+            has_edit = (
+                outgoing_to_role(nid, EDITORIAL_EDIT_FIELDS, {"edit"}) or
+                incoming_from_role(nid, EDITORIAL_SUBJECT_FIELDS, {"edit"})
+            )
+            has_structure = (
+                outgoing_to_role(nid, EDITORIAL_STRUCTURE_FIELDS, {"structure"}) or
+                incoming_from_role(nid, EDITORIAL_SUBJECT_FIELDS, {"structure"})
+            )
+            if not has_review:
+                add("warn", "draft-unreviewed", nid, f"{label} has no review linked")
+            if not has_edit:
+                add("info", "draft-unedited", nid, f"{label} has no edit or revision linked")
+            if not has_structure:
+                add("info", "draft-structure-missing", nid,
+                    f"{label} has no outline, beat sheet, or structure note linked")
+        elif role == "review":
+            linked_to_work = (
+                outgoing_to_role(nid, EDITORIAL_SUBJECT_FIELDS, {"draft", "manuscript"}) or
+                incoming_from_role(nid, EDITORIAL_REVIEW_FIELDS, {"draft", "manuscript"})
+            )
+            if not linked_to_work:
+                add("warn", "review-unlinked", nid,
+                    f"review '{nid}' is not linked to a draft or manuscript")
+        elif role == "edit":
+            linked_to_work = (
+                outgoing_to_role(nid, EDITORIAL_SUBJECT_FIELDS | EDITORIAL_REVIEW_FIELDS,
+                                 {"draft", "manuscript", "review"}) or
+                incoming_from_role(nid, EDITORIAL_EDIT_FIELDS, {"draft", "manuscript", "review"})
+            )
+            if not linked_to_work:
+                add("warn", "edit-unlinked", nid,
+                    f"edit '{nid}' is not linked to a draft, manuscript, or review")
+    return findings
+
+
 PACKS = [
     {"name": "structure",
      "description": "deterministic completeness + topology review over the Vivary graph"},
     {"name": "context-budget",
      "description": "deterministic context-bloat review over public routing surfaces"},
+    {"name": "editorial",
+     "description": "deterministic editorial coverage review for writing workspaces"},
 ]
 
 
@@ -329,6 +437,8 @@ def cmd_review(args):
         findings.extend(structure_pack(nodes, edges))
     if "context-budget" in packs:
         findings.extend(context_budget_pack(root, nodes, edges))
+    if "editorial" in packs:
+        findings.extend(editorial_pack(nodes, edges))
     warns = [f for f in findings if f["severity"] == "warn"]
     notes = [f for f in findings if f["severity"] != "warn"]
     if args.json:
@@ -394,7 +504,7 @@ def main(argv=None):
     p.add_argument("--strict", action="store_true",
                    help="review: exit non-zero when warnings exist (gate mode)")
     p.add_argument("--pack", default="structure",
-                   choices=["structure", "context-budget", "all"],
+                   choices=["structure", "context-budget", "editorial", "all"],
                    help="review: rule pack to run (default: structure)")
     args = p.parse_args(argv)
     return {"review": cmd_review, "impact": cmd_impact, "packs": cmd_packs}[args.command](args)

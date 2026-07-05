@@ -208,7 +208,7 @@ packs = ["repo-graph", "coordination"]
 
 ```
 ozone [review | impact <id> | packs] [--root DIR] [--json] [--strict]
-      [--pack structure|context-budget|all]
+      [--pack structure|context-budget|editorial|all]
 ```
 
 Where `tropo check` asks "is each document valid?", `ozone` reviews the **whole graph**
@@ -216,7 +216,7 @@ and a change's impact. It reads tropo's graph in-process (one graph, no fork).
 
 | Command | What it does |
 |---|---|
-| `review` | Run a deterministic review pack. Defaults to `--pack structure` for stable CI; use `--pack context-budget` for context bloat or `--pack all` for every pack. **Advisory by default** (exit 0); `--strict` makes it a gate (exit 1 on warnings). |
+| `review` | Run a deterministic review pack. Defaults to `--pack structure` for stable CI; use `--pack context-budget` for context bloat, `--pack editorial` for writing workspaces, or `--pack all` for every pack. **Advisory by default** (exit 0); `--strict` makes it a gate (exit 1 on warnings). |
 | `impact <id>` | The blast radius of a node — what (transitively) depends on it, with distance + the edge field it came in by. |
 | `packs` | List the available rule packs. |
 
@@ -247,10 +247,26 @@ such as `USER.md`, `MEMORY.md`, `memory/**`, heartbeat reports, `.vivary/**`, or
 | `bulk-load-cue` | info | public routing text tells agents to read/load/scan/open whole repos, docs trees, folders, or everything |
 | `duplicate-routing-block` | info | an exact normalized routing block over 100 chars repeats across public routing surfaces |
 
+### The `editorial` pack
+
+`editorial` reviews writing workspaces using graph edges only. It stays silent for
+non-writing workspaces, and looks for coverage across `drafts/`, `manuscripts/`,
+`reviews/`, `editorial-reviews/`, `edits/`, `revisions/`, `outlines/`,
+`structures/`, and `beats/`.
+
+| Rule | Severity | Fires when |
+|---|---|---|
+| `draft-unreviewed` | warn | a `drafts/` or `manuscripts/` node has no linked review |
+| `draft-unedited` | info | a draft/manuscript has no linked edit or revision |
+| `draft-structure-missing` | info | a draft/manuscript has no linked outline, beat sheet, or structure note |
+| `review-unlinked` | warn | a review is not linked to a draft or manuscript |
+| `edit-unlinked` | warn | an edit/revision is not linked to a draft, manuscript, or review |
+
 ```bash
 ozone review --root .            # advisory report
 ozone review --root . --strict   # gate: exit 1 if any warning (CI / pre-merge)
 ozone review --root . --pack context-budget
+ozone review --root . --pack editorial
 ozone review --root . --pack all --json
 ozone impact human-gates --root . --json
 ```

@@ -55,6 +55,33 @@ def _vault(td, complete=False):
         Path(td, "changes", "c2.md").write_text("# Change Two\n")
 
 
+def _writing_vault(td):
+    Path(td, "tropo.toml").write_text(
+        '[base]\nallow_untyped = true\n'
+        '[types.draft]\nfolder = ["drafts", "manuscripts"]\n'
+        '[types.draft.optional]\nreviews = "ref-list"\nedits = "ref-list"\noutline = "ref"\n'
+        '[types.review]\nfolder = ["reviews", "editorial-reviews"]\n'
+        '[types.review.optional]\ndraft = "ref"\nedits = "ref-list"\n'
+        '[types.edit]\nfolder = ["edits", "revisions"]\n'
+        '[types.edit.optional]\ndraft = "ref"\nreview = "ref"\n'
+        '[types.outline]\nfolder = ["outlines", "structures", "beats"]\n'
+        '[types.outline.optional]\ndraft = "ref"\n')
+    for d in ("drafts", "reviews", "edits", "outlines"):
+        Path(td, d).mkdir()
+    Path(td, "drafts", "complete.md").write_text(
+        "---\nreviews: [review-complete]\nedits: [edit-complete]\noutline: outline-complete\n---\n"
+        "# Complete Draft\n")
+    Path(td, "reviews", "review-complete.md").write_text(
+        "---\ndraft: complete\n---\n# Review Complete\n")
+    Path(td, "edits", "edit-complete.md").write_text(
+        "---\ndraft: complete\nreview: review-complete\n---\n# Edit Complete\n")
+    Path(td, "outlines", "outline-complete.md").write_text(
+        "---\ndraft: complete\n---\n# Outline Complete\n")
+    Path(td, "drafts", "raw.md").write_text("# Raw Draft\n")
+    Path(td, "reviews", "orphan-review.md").write_text("# Orphan Review\n")
+    Path(td, "edits", "orphan-edit.md").write_text("# Orphan Edit\n")
+
+
 def _run(argv):
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -71,7 +98,7 @@ def test_packs_lists_structure_and_context_budget():
     rc, data = _run_json(["packs", "--json"])
     assert rc == 0
     names = {p["name"] for p in data["packs"]}
-    assert {"structure", "context-budget"} <= names
+    assert {"structure", "context-budget", "editorial"} <= names
 
 
 def test_review_flags_unverified_change():
@@ -186,6 +213,46 @@ def test_context_budget_flags_duplicate_long_routing_blocks():
         assert rc == 0
 
 
+def test_editorial_flags_missing_review_edit_and_structure():
+    with temp_workspace() as td:
+        _writing_vault(td)
+        rc, data = _run_json(["review", "--root", str(td),
+                              "--pack", "editorial", "--json"])
+        by_rule = {(f["rule"], f["id"]): f for f in data["findings"]}
+        assert data["packs"] == ["editorial"]
+        assert by_rule[("draft-unreviewed", "raw")]["severity"] == "warn"
+        assert by_rule[("draft-unedited", "raw")]["severity"] == "info"
+        assert by_rule[("draft-structure-missing", "raw")]["severity"] == "info"
+        assert ("draft-unreviewed", "complete") not in by_rule
+        assert ("draft-unedited", "complete") not in by_rule
+        assert ("draft-structure-missing", "complete") not in by_rule
+        assert data["warnings"] == 3
+        assert rc == 0
+
+
+def test_editorial_flags_unlinked_reviews_and_edits():
+    with temp_workspace() as td:
+        _writing_vault(td)
+        rc, data = _run_json(["review", "--root", str(td),
+                              "--pack", "editorial", "--json"])
+        by_rule = {(f["rule"], f["id"]): f for f in data["findings"]}
+        assert by_rule[("review-unlinked", "orphan-review")]["severity"] == "warn"
+        assert by_rule[("edit-unlinked", "orphan-edit")]["severity"] == "warn"
+        assert ("review-unlinked", "review-complete") not in by_rule
+        assert ("edit-unlinked", "edit-complete") not in by_rule
+        assert rc == 0
+
+
+def test_editorial_pack_stays_quiet_for_non_writing_workspace():
+    with temp_workspace() as td:
+        _vault(td)
+        rc, data = _run_json(["review", "--root", str(td),
+                              "--pack", "editorial", "--json"])
+        assert data["findings"] == []
+        assert data["warnings"] == 0
+        assert rc == 0
+
+
 def test_strict_gates_on_warnings():
     with temp_workspace() as td:
         _vault(td)
@@ -199,7 +266,7 @@ def test_strict_gates_on_context_budget_warnings_with_pack_all():
         Path(td, "modules", "m2").mkdir()
         rc, data = _run_json(["review", "--root", str(td),
                               "--pack", "all", "--strict", "--json"])
-        assert data["packs"] == ["structure", "context-budget"]
+        assert data["packs"] == ["structure", "context-budget", "editorial"]
         assert any(f["rule"] == "module-index-missing" for f in data["findings"])
         assert rc == 1
 
