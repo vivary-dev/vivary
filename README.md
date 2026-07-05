@@ -46,6 +46,9 @@ moved to 0.4.1 for the read-only `map` filesystem inventory command, `create-viv
 tracking, `ozone` and `exo` are unchanged in this line, and `vivary-memory-cognee`
 stays at 0.1.0.
 
+Unreleased entries documented on the `dev` branch are not included in those published
+package versions until the release-train PR bumps, publishes, and verifies them.
+
 ## Public Signals
 
 ![Vivary public usage snapshot](stats/usage-snapshot.svg)
@@ -112,8 +115,9 @@ ignore rules, graph health, storage backend, semantic-memory status, and module 
 coverage after creation.
 `tropo find` returns small typed context packets for agents and humans to read first;
 `tropo query` provides filtered graph search, and `tropo migrate` handles backend
-switching. `tropo query --mode semantic` can call an explicitly configured optional
-semantic-memory provider while still returning typed Vivary node ids.
+switching. On the unreleased `dev` branch, `tropo query --mode semantic` can call an
+explicitly configured optional semantic-memory provider while still returning typed
+Vivary node ids.
 
 For workspaces that explicitly choose Cognee semantic memory, the optional
 `vivary-memory-cognee` package adds `vivary-cognee doctor`, `index`, `recall`, and

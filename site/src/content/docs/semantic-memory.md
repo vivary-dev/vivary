@@ -250,14 +250,17 @@ no secrets. API keys and hosted endpoints should use environment variables.
 `vivary-cognee index --dry-run` can still prove package readiness and packet counts,
 but provider writes/recalls/forgets require `allow_network = true`; they also require
 either a populated `api_key_env` whose environment variable exists, or the explicit
-local-provider escape hatch `allow_without_api_key = true`. Cognee telemetry is
-disabled by default through `allow_telemetry = false`; setting it to `true` is an
-explicit third-party telemetry opt-in.
+local-provider escape hatch `allow_without_api_key = true`. Cognee telemetry/tracing
+is forced off by default through `allow_telemetry = false`, even when inherited
+environment variables try to enable tracing; setting it to `true` is an explicit
+third-party telemetry opt-in.
 
 Provider recall is graph-fingerprint gated: if the manifest is missing or stale, recall
 refuses and asks for `vivary-cognee index --yes`. Approved index replaces the prior
-dataset before remembering current node packets, and `forget --yes` requests dataset
-deletion rather than a memory-only reset.
+workspace-bound dataset before remembering current node packets, and `forget --yes`
+requests dataset deletion rather than a memory-only reset. Dataset names include a
+workspace path hash even when a label is configured, so committed config cannot
+accidentally target another workspace's provider dataset.
 
 Storage/database remains independently configured in `.vivary/storage.toml`. A user
 may choose file storage with Cognee disabled, embedded storage with no semantic memory,
@@ -372,20 +375,24 @@ Recommended states:
 |---|---|
 | `disabled` | no `.vivary/memory.toml`, or `[memory].enabled = false` |
 | `enabled` | provider configured and policy says semantic recall can run |
-| `healthy` | provider import/config works and privacy probe passes |
+| `healthy` | optional provider package is installed and the current graph fingerprint matches the manifest |
 | `unavailable` | optional provider dependency is not installed |
 | `misconfigured` | invalid provider, missing required fields, secret literal in config, or forbidden network mode |
 | `stale` | provider index exists but graph fingerprint or indexed node count is outdated |
-| `privacy-failed` | ignored/private probe path would be indexed or recalled |
 
 Doctor checks:
 
 - Parse `.vivary/memory.toml` if present.
 - Report disabled cleanly when absent or disabled.
-- Validate provider name and mode combinations.
-- Confirm private paths are actively excluded before provider calls.
-- Use a fake private probe node to prove provider recall cannot return it.
-- Confirm optional Cognee dependency status only when Cognee is configured.
+- Type-check the committed semantic-memory config shape and report invalid TOML as
+  `misconfigured`.
+- Build a privacy-filtered Tropo graph snapshot without provider calls, refusing
+  out-of-root, linked, or hard-linked Markdown files before they can become provider
+  packets.
+- Confirm optional Cognee package presence only when Cognee is configured; this check
+  does not import Cognee runtime or make embedding/LLM calls.
+- Compare the local manifest fingerprint to the current Tropo graph snapshot and
+  report `stale` or `healthy`.
 - Return JSON that agents can gate on, for example:
 
 ```json

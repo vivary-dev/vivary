@@ -15,9 +15,9 @@ the `v0.1.0` line.
 
 ## [Unreleased: tropo semantic query mode] — 2026-07-05
 
-Affects `vivary-tropo`, CLI docs, package docs, and generated website docs. This is
-not published yet; package version bumps and registry publishes remain release-train
-gates.
+Affects `vivary-tropo`, `vivary-memory-cognee`, CLI docs, package docs, and
+generated website docs. This is not published yet; package version bumps and
+registry publishes remain release-train gates.
 
 ### Added
 
@@ -36,18 +36,23 @@ gates.
   providers.
 - Required either `memory.cognee.api_key_env` or explicit
   `memory.cognee.allow_without_api_key = true` before provider runtime calls.
-- Disabled Cognee third-party telemetry by default with
-  `memory.cognee.allow_telemetry = false`, while still allowing an explicit opt-in.
+- Forced Cognee third-party telemetry/tracing off by default with
+  `memory.cognee.allow_telemetry = false`, even when inherited environment variables
+  try to enable tracing, while still allowing an explicit opt-in.
 - Rejected invalid semantic-memory TOML schema instead of coercing truthy strings or
   integers into safety gates.
 - Refused semantic provider snapshots that resolve Markdown files outside the workspace
-  through symlinks or Windows junctions.
+  through symlinks or Windows junctions, plus in-root linked or hard-linked Markdown
+  files that could smuggle private content through a public path.
+- Bound Cognee dataset names to the workspace path hash, even when a label is
+  configured, so one workspace cannot accidentally forget another workspace's dataset.
 - Made provider recall require a current manifest fingerprint, and made approved index
   replace the prior Cognee dataset before remembering current node packets.
 - Made `vivary-cognee forget` request full dataset deletion instead of memory-only
-  deletion.
+  deletion, and made missing provider datasets idempotent under `--yes`.
 - Hardened `tropo query --mode semantic` against workspace-local `vivary_cognee.py`
-  import hijacking.
+  import hijacking while still allowing installed adapters from the active
+  interpreter's site-packages, including project-local virtualenvs.
 - Kept `vivary-cognee doctor` package-presence-only, avoiding Cognee import side
   effects, suppressed Cognee dotenv autoload during runtime import, and kept provider
   import/call chatter off JSON stdout for runtime commands.
@@ -56,6 +61,10 @@ gates.
 
 - `python packages/tropo/tests/test_tropo.py`
 - `python packages/memory-cognee/tests/test_memory_cognee.py`
+- CI packaged optional semantic bridge smoke installs local `vivary-tropo` plus
+  `vivary-memory-cognee` with `--no-deps`, then verifies installed `tropo query
+  --mode semantic --json` reaches the explicit `allow_network` gate without provider
+  calls.
 - Real installed `cognee 1.2.2` smoke: `vivary-cognee doctor --json` reported the
   installed package without importing provider runtime, `vivary-cognee index --dry-run
   --json` reported packet counts, and provider runtime calls were refused while

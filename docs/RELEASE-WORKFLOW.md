@@ -104,6 +104,10 @@ tests or docs before pushing:
   an ignored disposable environment, install the real dependency there, run package
   presence/dry-run/blocking smokes, and delete the disposable environment after
   verification. Do not commit proof sandboxes.
+- **Packaged bridge smoke:** when source code imports an optional sibling package
+  through the installed CLI path, add a CI smoke that installs the local packages and
+  exercises the bridge. Use `--no-deps` only when the smoke is intentionally proving
+  package/import boundaries without provider runtime or network calls.
 - **No silent provider side effects:** optional providers must be explicit about
   network, API-key, telemetry, dotenv, cache, log, and state-directory behavior.
   Default to closed gates and workspace-scoped paths; add an explicit opt-in flag

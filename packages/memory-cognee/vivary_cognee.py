@@ -35,7 +35,7 @@ DEFAULT_PRIVATE_PATTERNS = (
     ".git/**",
 )
 NODE_ID_RE = re.compile(r"\bvivary_node_id:\s*([A-Za-z0-9._-]+)\b")
-WORKSPACE_MARKERS = ("tropo.toml", MEMORY_CONFIG)
+WORKSPACE_MARKERS = ("tropo.toml",)
 
 
 class AdapterError(RuntimeError):
@@ -187,7 +187,7 @@ def _load_memory_config(root: Path) -> dict[str, Any]:
             "config": None,
         }
     try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        data = tomllib.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise AdapterError(f"invalid {MEMORY_CONFIG}: {exc}") from exc
     memory = _toml_table(data.get("memory", {}), "memory")
@@ -226,6 +226,7 @@ def _load_memory_config(root: Path) -> dict[str, Any]:
             "allow_telemetry": _toml_bool(
                 cognee, "allow_telemetry", False, "memory.cognee"
             ),
+            "dataset": _toml_str(cognee, "dataset", "", "memory.cognee"),
         }
     )
     return {
@@ -391,17 +392,25 @@ def _inside_root(root: Path, path: Path) -> bool:
 
 
 def _resolve_public_file(root: Path, full_path: str | Path, rel_path: str) -> Path:
-    resolved = Path(full_path).resolve(strict=False)
+    raw = Path(full_path)
+    if os.path.normcase(os.path.realpath(raw)) != os.path.normcase(os.path.abspath(raw)):
+        raise AdapterError(f"semantic memory refuses linked file: {rel_path}")
+    resolved = raw.resolve(strict=False)
     if not _inside_root(root, resolved):
         raise AdapterError(f"semantic memory refuses out-of-root file: {rel_path}")
+    try:
+        if os.stat(resolved).st_nlink > 1:
+            raise AdapterError(f"semantic memory refuses hard-linked file: {rel_path}")
+    except OSError as exc:
+        raise AdapterError(f"semantic memory cannot stat file: {rel_path}") from exc
     return resolved
 
 
 def _dataset_name(root: Path, config: dict[str, Any]) -> str:
     configured = config.get("cognee", {}).get("dataset")
-    if configured:
-        return str(configured)
-    return f"vivary-{_slug(root.name)}"
+    base = _slug(str(configured or root.name))
+    digest = hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()[:12]
+    return f"vivary-{base}-{digest}"
 
 
 def build_snapshot(root: str | Path) -> MemorySnapshot:
@@ -413,9 +422,9 @@ def build_snapshot(root: str | Path) -> MemorySnapshot:
     gitignore_rules = _gitignore_rules(root_path)
     respect_gitignore = privacy.get("respect_gitignore", True)
 
-    tropo = _import_tropo()
-    resolver = tropo.ConfigResolver(str(root_path), str(Path(tropo.__file__).parent))
     try:
+        tropo = _import_tropo()
+        resolver = tropo.ConfigResolver(str(root_path), str(Path(tropo.__file__).parent))
         docs = tropo.analyze(str(root_path), [], resolver)
         graph_nodes, graph_edges = tropo.build_graph(docs)
     except Exception as exc:
@@ -512,9 +521,11 @@ def _configure_cognee_environment(root: Path, config: dict[str, Any]) -> None:
     }
     for key, path in env_paths.items():
         os.environ[key] = str(path)
-    os.environ.setdefault("COGNEE_TRACING_ENABLED", "false")
     if not bool(cognee.get("allow_telemetry", False)):
+        os.environ["COGNEE_TRACING_ENABLED"] = "false"
         os.environ["TELEMETRY_DISABLED"] = "1"
+    else:
+        os.environ.setdefault("COGNEE_TRACING_ENABLED", "false")
 
 
 def _manifest_path(root: Path, config: dict[str, Any]) -> Path:
@@ -761,7 +772,9 @@ class CogneeMemoryAdapter:
         try:
             result = await _run_provider_call(forget, dataset=self.dataset, memory_only=False)
         except Exception as exc:
-            raise AdapterError(f"Cognee forget() failed: {exc}") from exc
+            if not _is_missing_dataset_error(exc):
+                raise AdapterError(f"Cognee forget() failed: {exc}") from exc
+            result = {"status": "missing", "dataset": self.dataset}
         manifest = _manifest_path(self.root, self.config)
         if manifest.exists():
             manifest.unlink()
@@ -825,7 +838,18 @@ def doctor(root: str | Path) -> dict[str, Any]:
             "edges": len(snapshot.edges),
             "detail": "Cognee package is not installed",
         }
-    manifest = _manifest_path(root_path, config)
+    try:
+        manifest = _manifest_path(root_path, config)
+    except AdapterError as exc:
+        return {
+            "ok": False,
+            "provider": "cognee",
+            "status": "misconfigured",
+            "dataset": snapshot.dataset,
+            "nodes": len(snapshot.nodes),
+            "edges": len(snapshot.edges),
+            "detail": str(exc),
+        }
     stale = True
     if manifest.exists():
         try:

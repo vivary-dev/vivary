@@ -33,11 +33,13 @@ enables the Cognee/embedding provider path. If `memory.cognee.api_key_env` is se
 that environment variable must be present before provider writes or recalls run. Local
 providers that intentionally need no API key must set
 `memory.cognee.allow_without_api_key = true`. Cognee telemetry is disabled by
-default unless `memory.cognee.allow_telemetry = true` is set explicitly.
+default unless `memory.cognee.allow_telemetry = true` is set explicitly; inherited
+tracing environment variables are forced off by the default policy.
 `doctor` checks package presence without importing Cognee runtime; runtime commands
 bind Cognee's state/cache/log roots to the workspace before import.
 Recall requires a current manifest fingerprint. Approved index replaces the previous
-dataset first, and `forget --yes` requests dataset deletion instead of a memory-only
-reset.
+workspace-bound dataset first, and `forget --yes` requests dataset deletion instead of
+a memory-only reset. Dataset names include a workspace path hash even when a label is
+configured, so one workspace cannot accidentally target another workspace's dataset.
 
 The adapter never imports Cognee from core Vivary packages.

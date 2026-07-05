@@ -1042,12 +1042,42 @@ def test_cmd_query_semantic_mode_rejects_invalid_memory_config(tmp_path):
     assert "memory.enabled" in out["semantic"]["detail"]
 
 
+def test_semantic_memory_query_config_accepts_leading_utf8_bom(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "memory.toml").write_text(
+        '[memory]\nenabled = true\nprovider = "cognee"\n',
+        encoding="utf-8-sig",
+    )
+
+    config = tropo._load_memory_query_config(str(tmp_path))
+
+    assert config["status"] == "configured"
+    assert config["provider"] == "cognee"
+
+
 def test_semantic_adapter_origin_rejects_workspace_local_module(tmp_path):
     malicious = tmp_path / "vivary_cognee.py"
     malicious.write_text("raise AssertionError('should not import')\n", encoding="utf-8")
     allowed = Path(ROOT).parent / "memory-cognee" / "vivary_cognee.py"
 
     assert tropo._adapter_origin_is_unsafe(str(malicious), str(tmp_path), str(allowed))
+
+
+def test_semantic_adapter_origin_allows_project_local_venv_install(tmp_path):
+    site_packages = tmp_path / ".venv" / "Lib" / "site-packages"
+    origin = site_packages / "vivary_cognee.py"
+    allowed = Path(ROOT).parent / "memory-cognee" / "vivary_cognee.py"
+    original_get_paths = tropo.sysconfig.get_paths
+    tropo.sysconfig.get_paths = lambda: {
+        "purelib": str(site_packages),
+        "platlib": str(site_packages),
+    }
+    try:
+        assert not tropo._adapter_origin_is_unsafe(str(origin), str(tmp_path), str(allowed))
+    finally:
+        tropo.sysconfig.get_paths = original_get_paths
 
 
 def test_semantic_adapter_source_loader_registers_module_for_dataclasses():
@@ -1171,6 +1201,67 @@ def test_cmd_query_semantic_mode_applies_graph_filters(tmp_path):
     assert [r["id"] for r in out["results"]] == ["release-workflow"]
     assert rc_wrong_type == 0
     assert out_wrong_type["results"] == []
+
+
+def test_cmd_query_semantic_mode_overfetches_before_filtering(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "memory.toml").write_text(
+        '[memory]\nenabled = true\nprovider = "cognee"\n',
+        encoding="utf-8",
+    )
+    recall_ks = []
+
+    class ModuleHit:
+        node_id = "agent-workspace"
+        type = "module"
+        path = "modules/agent-workspace/index.md"
+        score = 0.99
+        reason = "semantic module match"
+        provider = "cognee"
+        edge_context = []
+
+    class DecisionHit:
+        node_id = "release-workflow"
+        type = "decision"
+        path = "decisions/release-workflow.md"
+        score = 0.98
+        reason = "typed semantic match"
+        provider = "cognee"
+        edge_context = []
+
+    class FakeAdapter:
+        def __init__(self, root):
+            self.root = root
+
+        async def recall(self, query, *, k=10):
+            recall_ks.append(k)
+            return [ModuleHit(), DecisionHit()][:k]
+
+    previous = sys.modules.get("vivary_cognee")
+    allowed = Path(ROOT).parent / "memory-cognee" / "vivary_cognee.py"
+    sys.modules["vivary_cognee"] = types.SimpleNamespace(
+        CogneeMemoryAdapter=FakeAdapter,
+        AdapterError=RuntimeError,
+        __file__=str(allowed),
+    )
+    try:
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="semantic", k=1, type=["decision"]),
+            res(str(tmp_path)),
+        )
+    finally:
+        if previous is None:
+            sys.modules.pop("vivary_cognee", None)
+        else:
+            sys.modules["vivary_cognee"] = previous
+
+    assert rc == 0
+    assert recall_ks == [50]
+    assert out["k"] == 1
+    assert [r["id"] for r in out["results"]] == ["release-workflow"]
 
 
 # --- map: read-only filesystem inventory -----------------------------------

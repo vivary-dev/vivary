@@ -462,9 +462,11 @@ making embedding or LLM calls. Runtime provider calls also require `api_key_env`
 the explicit local-provider setting `allow_without_api_key = true`. Third-party
 Cognee telemetry is disabled by default unless the workspace explicitly sets
 `allow_telemetry = true`.
-Approved index replaces the prior dataset, and recall refuses stale
-or missing manifests so provider results cannot outrun Tropo graph truth. Tropo refuses
-workspace-local `vivary_cognee.py` adapter imports for semantic query mode.
+Approved index replaces the prior workspace-bound dataset, and recall refuses stale
+or missing manifests so provider results cannot outrun Tropo graph truth. Dataset
+names include a workspace path hash even when a label is configured. Tropo refuses
+workspace-local `vivary_cognee.py` adapter imports for semantic query mode unless the
+file resolves inside the active interpreter's installed package directory.
 
 ```bash
 # Human flow — interactive wizard:

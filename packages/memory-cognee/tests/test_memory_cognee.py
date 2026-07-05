@@ -100,6 +100,7 @@ def write_workspace(
     allow_without_api_key: bool = False,
     allow_telemetry: bool = False,
     state_path: str = ".vivary/memory/cognee",
+    dataset: str = "",
 ) -> None:
     (root / ".vivary").mkdir()
     (root / "modules" / "auth").mkdir(parents=True)
@@ -123,6 +124,7 @@ depends_on = "ref-list"
     allow_network_text = "true" if allow_network else "false"
     allow_without_api_key_text = "true" if allow_without_api_key else "false"
     allow_telemetry_text = "true" if allow_telemetry else "false"
+    dataset_text = f'dataset = "{dataset}"\n' if dataset else ""
     (root / ".vivary" / "memory.toml").write_text(
         f"""[memory]
 enabled = true
@@ -142,7 +144,7 @@ allow_network = {allow_network_text}
 api_key_env = "{api_key_env}"
 allow_without_api_key = {allow_without_api_key_text}
 allow_telemetry = {allow_telemetry_text}
-""",
+{dataset_text}""",
         encoding="utf-8",
     )
     (root / "modules" / "auth" / "index.md").write_text(
@@ -212,6 +214,28 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
         self.assertIn("vivary_type: module", auth.text)
         self.assertIn("source_files", auth.text)
         self.assertTrue(any(edge.source_id == "auth" for edge in snapshot.edges))
+
+    def test_dataset_name_is_workspace_bound_even_when_configured(self):
+        with temp_workspace() as root:
+            write_workspace(root, dataset="shared-prod")
+            snapshot = vivary_cognee.build_snapshot(root)
+
+        self.assertRegex(snapshot.dataset, r"^vivary-shared-prod-[0-9a-f]{12}$")
+        self.assertNotEqual(snapshot.dataset, "shared-prod")
+
+    def test_memory_config_alone_does_not_make_workspace_valid(self):
+        with temp_workspace() as root:
+            (root / ".vivary").mkdir()
+            (root / ".vivary" / "memory.toml").write_text(
+                '[memory]\nenabled = true\nprovider = "cognee"\n',
+                encoding="utf-8",
+            )
+
+            report = vivary_cognee.doctor(root)
+
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["status"], "misconfigured")
+        self.assertIn("not a Vivary workspace", report["detail"])
 
     def test_index_dry_run_does_not_call_cognee(self):
         with temp_workspace() as root:
@@ -285,6 +309,21 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
 
         self.assertGreater(report["indexed"], 0)
         self.assertEqual(len(fake.forget_calls), 1)
+
+    def test_forget_is_idempotent_when_provider_dataset_is_missing(self):
+        with temp_workspace() as root:
+            write_workspace(root, allow_network=True, allow_without_api_key=True)
+            fake = MissingDatasetOnForgetCognee()
+            adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=fake)
+            manifest = root / ".vivary" / "memory" / "cognee" / "manifest.json"
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            manifest.write_text("{}", encoding="utf-8")
+
+            report = asyncio.run(adapter.forget(approved=True))
+
+        self.assertTrue(report["forgot"])
+        self.assertEqual(report["result"]["status"], "missing")
+        self.assertFalse(manifest.exists())
 
     def test_index_keeps_provider_chatter_off_stdout(self):
         with temp_workspace() as root:
@@ -402,6 +441,26 @@ allow_network = 1
             with self.assertRaisesRegex(vivary_cognee.AdapterError, "memory.enabled"):
                 vivary_cognee.CogneeMemoryAdapter(root)
 
+    def test_memory_config_accepts_leading_utf8_bom(self):
+        with temp_workspace() as root:
+            write_workspace(root)
+            (root / ".vivary" / "memory.toml").write_text(
+                """[memory]
+enabled = true
+mode = "semantic-provider"
+provider = "cognee"
+
+[memory.cognee]
+allow_network = false
+""",
+                encoding="utf-8-sig",
+            )
+            with mock.patch.object(vivary_cognee, "_cognee_available", return_value=False):
+                report = vivary_cognee.doctor(root)
+
+        self.assertEqual(report["provider"], "cognee")
+        self.assertEqual(report["status"], "unavailable")
+
     def test_state_path_must_stay_inside_workspace(self):
         with temp_workspace() as root:
             outside = root.parent / "outside-cognee-state"
@@ -445,6 +504,66 @@ allow_network = 1
             finally:
                 outside.unlink(missing_ok=True)
 
+    def test_linked_indexed_files_are_refused(self):
+        with temp_workspace() as root:
+            write_workspace(root)
+            link = root / "modules" / "auth" / "linked-user.md"
+            try:
+                link.symlink_to(root / "USER.md")
+            except (NotImplementedError, OSError):
+                self.skipTest("filesystem does not permit symlink creation")
+
+            class Doc:
+                full = str(link)
+                rel = "modules/auth/linked-user.md"
+                derived = {"id": "linked-user", "title": "Linked User"}
+                declared = {}
+                type = "module"
+
+            fake_tropo = types.SimpleNamespace(
+                ConfigResolver=lambda *args: object(),
+                __file__=str(ROOT / "packages" / "tropo" / "tropo.py"),
+                analyze=lambda *args: [Doc()],
+                build_graph=lambda docs: (
+                    {"linked-user": {"path": "modules/auth/linked-user.md", "type": "module"}},
+                    [],
+                ),
+            )
+
+            with mock.patch.object(vivary_cognee, "_import_tropo", return_value=fake_tropo):
+                with self.assertRaisesRegex(vivary_cognee.AdapterError, "linked file"):
+                    vivary_cognee.build_snapshot(root)
+
+    def test_hard_linked_indexed_files_are_refused(self):
+        with temp_workspace() as root:
+            write_workspace(root)
+            hard_link = root / "modules" / "auth" / "hard-user.md"
+            try:
+                os.link(root / "USER.md", hard_link)
+            except (AttributeError, NotImplementedError, OSError):
+                self.skipTest("filesystem does not permit hardlink creation")
+
+            class Doc:
+                full = str(hard_link)
+                rel = "modules/auth/hard-user.md"
+                derived = {"id": "hard-user", "title": "Hard User"}
+                declared = {}
+                type = "module"
+
+            fake_tropo = types.SimpleNamespace(
+                ConfigResolver=lambda *args: object(),
+                __file__=str(ROOT / "packages" / "tropo" / "tropo.py"),
+                analyze=lambda *args: [Doc()],
+                build_graph=lambda docs: (
+                    {"hard-user": {"path": "modules/auth/hard-user.md", "type": "module"}},
+                    [],
+                ),
+            )
+
+            with mock.patch.object(vivary_cognee, "_import_tropo", return_value=fake_tropo):
+                with self.assertRaisesRegex(vivary_cognee.AdapterError, "hard-linked"):
+                    vivary_cognee.build_snapshot(root)
+
     def test_doctor_reports_unavailable_without_cognee_package(self):
         with temp_workspace() as root:
             write_workspace(root)
@@ -483,6 +602,17 @@ allow_network = 1
 
         self.assertEqual(report["status"], "stale")
 
+    def test_doctor_reports_bad_state_path_without_traceback(self):
+        with temp_workspace() as root:
+            outside = root.parent / "outside-cognee-state"
+            write_workspace(root, state_path=str(outside).replace("\\", "/"))
+            with mock.patch.object(vivary_cognee, "_cognee_available", return_value=True):
+                report = vivary_cognee.doctor(root)
+
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["status"], "misconfigured")
+        self.assertIn("state_path", report["detail"])
+
     def test_client_configures_cognee_state_under_workspace_before_import(self):
         with temp_workspace() as root:
             write_workspace(root)
@@ -493,10 +623,15 @@ allow_network = 1
                 self.assertEqual(os.environ["SYSTEM_ROOT_DIRECTORY"], str(state_root / "system"))
                 self.assertEqual(os.environ["CACHE_ROOT_DIRECTORY"], str(state_root / "cache"))
                 self.assertEqual(os.environ["COGNEE_LOGS_DIR"], str(state_root / "logs"))
+                self.assertEqual(os.environ["COGNEE_TRACING_ENABLED"], "false")
                 self.assertEqual(os.environ["TELEMETRY_DISABLED"], "1")
                 return object()
 
-            with mock.patch.dict(os.environ, {"TELEMETRY_DISABLED": ""}, clear=False):
+            with mock.patch.dict(
+                os.environ,
+                {"COGNEE_TRACING_ENABLED": "true", "TELEMETRY_DISABLED": ""},
+                clear=False,
+            ):
                 with mock.patch.object(vivary_cognee, "_import_cognee", side_effect=fake_import):
                     client = vivary_cognee.CogneeMemoryAdapter(root)._client()
 
