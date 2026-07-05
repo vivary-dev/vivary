@@ -3,9 +3,9 @@
 [![CI](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/vivary-dev/vivary?style=flat-square&label=release)](https://github.com/vivary-dev/vivary/releases/latest)
 [![npm](https://img.shields.io/npm/v/%40vivary%2Fcreate?style=flat-square&color=1f9d72&label=npm)](https://www.npmjs.com/package/@vivary/create)
-[![npm downloads](https://img.shields.io/npm/dm/%40vivary%2Fcreate?style=flat-square&color=1f9d72&label=npm%20downloads)](https://www.npmjs.com/package/@vivary/create)
+[![npm downloads](https://img.shields.io/npm/dw/%40vivary%2Fcreate?style=flat-square&color=1f9d72&label=npm%20downloads)](https://www.npmjs.com/package/@vivary/create)
 [![PyPI](https://img.shields.io/pypi/v/create-vivary?style=flat-square&color=1f9d72&label=PyPI)](https://pypi.org/project/create-vivary/)
-[![PyPI downloads](https://img.shields.io/pypi/dm/create-vivary?style=flat-square&color=1f9d72&label=PyPI%20downloads)](https://pypistats.org/packages/create-vivary)
+[![PyPI downloads](https://img.shields.io/pypi/dw/create-vivary?style=flat-square&color=1f9d72&label=PyPI%20downloads)](https://pypistats.org/packages/create-vivary)
 [![License](https://img.shields.io/github/license/vivary-dev/vivary?style=flat-square&color=1f9d72)](LICENSE)
 [![Docs](https://img.shields.io/website?url=https%3A%2F%2Fvivary.vercel.app%2F&style=flat-square&label=docs)](https://vivary.vercel.app/)
 
