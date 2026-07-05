@@ -560,6 +560,47 @@ class CreateVivaryTests(unittest.TestCase):
         self.assertEqual(report["memory"]["provider"], "cognee")
         self.assertEqual(report["memory"]["status"], "unavailable")
 
+    def test_semantic_memory_cognee_requires_callable_adapter(self):
+        with temp_workspace() as td:
+            target = Path(td) / "memory-cognee"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="second-brain",
+                memory="cognee",
+                force=False,
+                repo_root=ROOT,
+            )
+            fake_site = Path(td) / "fake-site"
+            fake_site.mkdir()
+            (fake_site / "vivary_cognee.py").write_text(
+                '__version__ = "0.1.1"\n'
+                "TROPO_SEMANTIC_ADAPTER_API = 1\n"
+                "REQUIRES_EXPLICIT_PROVIDER_GATES = True\n"
+                "CogneeMemoryAdapter = None\n",
+                encoding="utf-8",
+            )
+            importlib.invalidate_caches()
+            old_path = list(sys.path)
+            old_module = sys.modules.pop("vivary_cognee", None)
+            sys.path.insert(0, str(fake_site))
+            try:
+                with mock.patch.object(
+                    create_vivary.importlib_metadata,
+                    "version",
+                    return_value="0.1.1",
+                ):
+                    report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            finally:
+                sys.path[:] = old_path
+                if old_module is not None:
+                    sys.modules["vivary_cognee"] = old_module
+                else:
+                    sys.modules.pop("vivary_cognee", None)
+                importlib.invalidate_caches()
+
+        self.assertEqual(report["memory"]["provider"], "cognee")
+        self.assertEqual(report["memory"]["status"], "unavailable")
+
     def test_doctor_reports_invalid_memory_config_schema(self):
         with temp_workspace() as td:
             target = Path(td) / "bad-memory"

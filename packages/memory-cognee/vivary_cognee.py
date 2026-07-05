@@ -137,7 +137,7 @@ def _gitignore_rules(root: Path) -> list[tuple[bool, str, str]]:
         base = _norm(path.parent.relative_to(root))
         if base == ".":
             base = ""
-        if base and _ignored_by_gitignore(f"{base}/.gitignore", rules):
+        if base and _ignored_by_gitignore(f"{base}/.vivary-gitignore-probe", rules):
             continue
         for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
             line = raw.strip()

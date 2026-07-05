@@ -1741,13 +1741,17 @@ def _version_tuple(value):
 
 
 def _validate_cognee_adapter(module):
-    if getattr(module, "TROPO_SEMANTIC_ADAPTER_API", 0) < 1:
+    try:
+        adapter_api = int(getattr(module, "TROPO_SEMANTIC_ADAPTER_API", 0))
+    except (TypeError, ValueError):
         raise ImportError("vivary-memory-cognee adapter is too old for semantic query")
-    if not getattr(module, "REQUIRES_EXPLICIT_PROVIDER_GATES", False):
+    if adapter_api < 1:
+        raise ImportError("vivary-memory-cognee adapter is too old for semantic query")
+    if getattr(module, "REQUIRES_EXPLICIT_PROVIDER_GATES", None) is not True:
         raise ImportError("vivary-memory-cognee adapter lacks provider safety gates")
     if _version_tuple(getattr(module, "__version__", "")) < (0, 1, 1):
         raise ImportError("vivary-memory-cognee 0.1.1 or newer is required")
-    if not hasattr(module, "CogneeMemoryAdapter"):
+    if not callable(getattr(module, "CogneeMemoryAdapter", None)):
         raise ImportError("vivary-memory-cognee adapter is missing CogneeMemoryAdapter")
     return module
 
@@ -1825,12 +1829,16 @@ def semantic_query(resolver, text, *, k=10, type_filters=None, path_filters=None
     filters_present = bool(type_filters or path_filters or edge_filters)
     requested_k = max(0, k)
     if requested_k == 0:
-        provider_k = 0
-    else:
-        provider_k = min(
-            requested_k if not filters_present else max(requested_k * 5, requested_k + 20, 50),
-            250,
-        )
+        return 0, [], {
+            "enabled": True,
+            "provider": "cognee",
+            "status": "ok",
+            "detail": "",
+        }
+    provider_k = min(
+        requested_k if not filters_present else max(requested_k * 5, requested_k + 20, 50),
+        250,
+    )
     try:
         hits = asyncio.run(
             vivary_cognee.CogneeMemoryAdapter(resolver.root).recall(text, k=provider_k)
@@ -2650,7 +2658,8 @@ def cmd_query(args, resolver):
     if not args.paths:
         sys.exit("tropo query: provide a search query — e.g. tropo query \"auth module\"")
     text = " ".join(args.paths)
-    k = getattr(args, "k", 10) or 10
+    raw_k = getattr(args, "k", 10)
+    k = 10 if raw_k is None else raw_k
     mode = getattr(args, "mode", "text") or "text"
     snippet = getattr(args, "snippet", _DEFAULT_SNIPPET_CHARS)
     explain = getattr(args, "explain", False)

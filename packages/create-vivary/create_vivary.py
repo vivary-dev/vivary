@@ -1923,10 +1923,15 @@ def _safe_cognee_adapter_available(target: Path) -> bool:
         module_origin_path = Path(os.path.realpath(module_origin))
         if any(_path_within(root, module_origin_path) for root in unsafe_roots):
             return False
+    adapter = getattr(module, "CogneeMemoryAdapter", None)
+    try:
+        adapter_api = int(getattr(module, "TROPO_SEMANTIC_ADAPTER_API", 0))
+    except (TypeError, ValueError):
+        return False
     return (
-        hasattr(module, "CogneeMemoryAdapter")
-        and getattr(module, "TROPO_SEMANTIC_ADAPTER_API", 0) >= 1
-        and bool(getattr(module, "REQUIRES_EXPLICIT_PROVIDER_GATES", False))
+        callable(adapter)
+        and adapter_api >= 1
+        and getattr(module, "REQUIRES_EXPLICIT_PROVIDER_GATES", None) is True
         and _version_tuple(getattr(module, "__version__", "")) >= (0, 1, 1)
     )
 

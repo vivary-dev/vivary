@@ -1236,6 +1236,85 @@ def test_cmd_query_semantic_mode_rejects_stale_adapter(tmp_path):
     assert out["results"] == []
 
 
+def test_cmd_query_semantic_mode_rejects_noncallable_adapter(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "memory.toml").write_text(
+        '[memory]\nenabled = true\nprovider = "cognee"\n',
+        encoding="utf-8",
+    )
+
+    previous = sys.modules.get("vivary_cognee")
+    allowed = Path(ROOT).parent / "memory-cognee" / "vivary_cognee.py"
+    sys.modules["vivary_cognee"] = types.SimpleNamespace(
+        CogneeMemoryAdapter=None,
+        AdapterError=RuntimeError,
+        __file__=str(allowed),
+        __version__="0.1.1",
+        TROPO_SEMANTIC_ADAPTER_API=1,
+        REQUIRES_EXPLICIT_PROVIDER_GATES=True,
+    )
+    try:
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="semantic"),
+            res(str(tmp_path)),
+        )
+    finally:
+        if previous is None:
+            sys.modules.pop("vivary_cognee", None)
+        else:
+            sys.modules["vivary_cognee"] = previous
+
+    assert rc == 1
+    assert out["semantic"]["status"] == "unavailable"
+    assert out["results"] == []
+
+
+def test_cmd_query_semantic_mode_zero_k_does_not_call_provider(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "memory.toml").write_text(
+        '[memory]\nenabled = true\nprovider = "cognee"\n',
+        encoding="utf-8",
+    )
+
+    class FakeAdapter:
+        def __init__(self, root):
+            self.root = root
+
+        async def recall(self, query, *, k=10):
+            raise AssertionError("provider should not be called for k=0")
+
+    previous = sys.modules.get("vivary_cognee")
+    allowed = Path(ROOT).parent / "memory-cognee" / "vivary_cognee.py"
+    sys.modules["vivary_cognee"] = types.SimpleNamespace(
+        CogneeMemoryAdapter=FakeAdapter,
+        AdapterError=RuntimeError,
+        __file__=str(allowed),
+        __version__="0.1.1",
+        TROPO_SEMANTIC_ADAPTER_API=1,
+        REQUIRES_EXPLICIT_PROVIDER_GATES=True,
+    )
+    try:
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="semantic", k=0),
+            res(str(tmp_path)),
+        )
+    finally:
+        if previous is None:
+            sys.modules.pop("vivary_cognee", None)
+        else:
+            sys.modules["vivary_cognee"] = previous
+
+    assert rc == 0
+    assert out["semantic"]["status"] == "ok"
+    assert out["results"] == []
+
+
 def test_cmd_query_semantic_mode_applies_graph_filters(tmp_path):
     _search_vault(tmp_path)
     vivary_dir = tmp_path / ".vivary"
