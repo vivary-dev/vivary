@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import importlib
+import importlib.metadata as importlib_metadata
 import importlib.util
 import json
 import os
@@ -554,8 +556,7 @@ def _memory_report(target: Path) -> dict:
 
     try:
         import tomllib as _toml
-        with open(cfg_path, "rb") as _fh:
-            data = _toml.load(_fh)
+        data = _toml.loads(cfg_path.read_text(encoding="utf-8-sig"))
     except Exception as exc:
         return {
             "enabled": False,
@@ -568,9 +569,39 @@ def _memory_report(target: Path) -> dict:
         }
 
     memory = data.get("memory", {})
-    enabled = bool(memory.get("enabled", False))
-    provider = str(memory.get("provider", "none"))
-    mode = str(memory.get("mode", "none"))
+    if not isinstance(memory, dict):
+        return {
+            "enabled": False,
+            "provider": "unknown",
+            "mode": "unknown",
+            "status": "misconfigured",
+            "config": str(cfg_path),
+            "privacy": "unknown",
+            "detail": "memory must be a TOML table",
+        }
+    enabled = memory.get("enabled", False)
+    provider = memory.get("provider", "none")
+    mode = memory.get("mode", "none")
+    if not isinstance(enabled, bool):
+        return {
+            "enabled": False,
+            "provider": "unknown",
+            "mode": "unknown",
+            "status": "misconfigured",
+            "config": str(cfg_path),
+            "privacy": "unknown",
+            "detail": "memory.enabled must be true or false",
+        }
+    if not isinstance(provider, str) or not isinstance(mode, str):
+        return {
+            "enabled": False,
+            "provider": "unknown",
+            "mode": "unknown",
+            "status": "misconfigured",
+            "config": str(cfg_path),
+            "privacy": "unknown",
+            "detail": "memory.provider and memory.mode must be strings",
+        }
 
     if not enabled or provider == "none":
         status = "disabled"
@@ -582,12 +613,12 @@ def _memory_report(target: Path) -> dict:
         status = "healthy"
         detail = "local semantic memory policy configured"
     elif provider == "cognee":
-        if _is_importable("cognee"):
+        if _safe_cognee_adapter_available(target):
             status = "configured"
-            detail = "Cognee import is available; indexing still requires approval"
+            detail = "vivary-memory-cognee adapter is available; indexing still requires approval"
         else:
             status = "unavailable"
-            detail = "install optional Cognee support before indexing"
+            detail = "install vivary-memory-cognee before indexing"
     else:
         status = "misconfigured"
         detail = f"unknown provider {provider!r}"
@@ -1489,7 +1520,9 @@ vivary-cognee index --root . --dry-run --json
 ```
 
 Do not run `vivary-cognee index --yes` until the human approves provider memory
-writes.
+writes, sets `memory.cognee.allow_network = true`, and configures the chosen provider
+credentials. Local no-key providers must explicitly set
+`memory.cognee.allow_without_api_key = true`.
 """
     return f"""---
 project: {project}
@@ -1818,6 +1851,8 @@ state_path = ".vivary/memory/cognee"
 allow_network = false
 require_explicit_index = true
 api_key_env = ""
+allow_without_api_key = false
+allow_telemetry = false
 """,
 }
 
@@ -1842,6 +1877,63 @@ def _auto_pick_storage(args) -> tuple[str, str]:
 def _is_importable(module: str) -> bool:
     import importlib.util
     return importlib.util.find_spec(module) is not None
+
+
+def _version_tuple(value: str) -> tuple[int, ...]:
+    parts = []
+    for part in str(value or "").split("."):
+        digits = ""
+        for char in part:
+            if not char.isdigit():
+                break
+            digits += char
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
+
+
+def _path_within(root: Path, path: Path) -> bool:
+    try:
+        return os.path.commonpath([str(root), str(path)]) == str(root)
+    except ValueError:
+        return False
+
+
+def _safe_cognee_adapter_available(target: Path) -> bool:
+    try:
+        version = importlib_metadata.version("vivary-memory-cognee")
+    except importlib_metadata.PackageNotFoundError:
+        return False
+    if _version_tuple(version) < (0, 1, 1):
+        return False
+    spec = importlib.util.find_spec("vivary_cognee")
+    if spec is None or spec.origin is None:
+        return False
+    origin = Path(os.path.realpath(spec.origin))
+    unsafe_roots = [target.resolve(), Path(os.path.realpath(os.getcwd()))]
+    if any(_path_within(root, origin) for root in unsafe_roots):
+        return False
+    try:
+        module = importlib.import_module("vivary_cognee")
+    except Exception:
+        return False
+    module_origin = getattr(module, "__file__", spec.origin)
+    if module_origin:
+        module_origin_path = Path(os.path.realpath(module_origin))
+        if any(_path_within(root, module_origin_path) for root in unsafe_roots):
+            return False
+    adapter = getattr(module, "CogneeMemoryAdapter", None)
+    try:
+        adapter_api = int(getattr(module, "TROPO_SEMANTIC_ADAPTER_API", 0))
+    except (TypeError, ValueError):
+        return False
+    return (
+        callable(adapter)
+        and adapter_api >= 1
+        and getattr(module, "REQUIRES_EXPLICIT_PROVIDER_GATES", None) is True
+        and _version_tuple(getattr(module, "__version__", "")) >= (0, 1, 1)
+    )
 
 
 def _ensure_backend_installed(provider: str, yes: bool) -> list[str]:

@@ -99,8 +99,10 @@ create-vivary init my-notes --preset second-brain --memory cognee --no-wizard --
 cognee` writes Cognee policy and verification docs, but it does not install Cognee,
 index files, enable a server, use an API key, or send notes anywhere. Those remain
 explicit gates after setup. If you approve the runtime adapter later, install the
-optional `vivary-memory-cognee` package and run `vivary-cognee index --yes` only after
-reviewing `vivary-cognee index --dry-run --json`.
+optional `vivary-memory-cognee` package, review `vivary-cognee index --dry-run --json`,
+then set `memory.cognee.allow_network = true` and the chosen provider credentials before
+running `vivary-cognee index --yes`. Local no-key providers must be made explicit with
+`memory.cognee.allow_without_api_key = true`.
 
 You now have a complete workspace:
 

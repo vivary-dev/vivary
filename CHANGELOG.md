@@ -10,6 +10,78 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: tropo semantic query mode] — 2026-07-05
+
+Affects `vivary-tropo`, `vivary-memory-cognee`, CLI docs, package docs, and
+generated website docs. This is not published yet; registry publishes remain
+release-train gates.
+
+### Added
+
+- Added `tropo query --mode semantic`, a dependency-free bridge to an explicitly
+  configured optional semantic-memory provider. The default `text` mode is unchanged.
+- Semantic query returns typed Vivary node ids from the provider instead of opaque
+  chunks, and reports a structured unavailable state when semantic memory is not
+  configured, installed, or indexed.
+
+### Hardened
+
+- Scoped real Cognee runtime state/log/cache directories to the workspace
+  `memory.cognee.state_path` before provider import.
+- Enforced `memory.cognee.allow_network = true` before Cognee provider runtime calls
+  so generated Cognee policy cannot accidentally index or recall through embedding/LLM
+  providers.
+- Required either `memory.cognee.api_key_env` or explicit
+  `memory.cognee.allow_without_api_key = true` before provider runtime calls.
+- Forced Cognee third-party telemetry/tracing off by default with
+  `memory.cognee.allow_telemetry = false`, even when inherited environment variables
+  try to enable tracing, while still allowing an explicit opt-in.
+- Rejected invalid semantic-memory TOML schema instead of coercing truthy strings or
+  integers into safety gates.
+- Refused semantic provider snapshots that resolve Markdown files outside the workspace
+  through symlinks or Windows junctions, plus in-root linked or hard-linked Markdown
+  files that could smuggle private content through a public path.
+- Bound Cognee dataset names to the workspace path hash, even when a label is
+  configured, so one workspace cannot accidentally forget another workspace's dataset.
+- Made provider recall require a current manifest fingerprint, and made approved index
+  replace the prior Cognee dataset before remembering current node packets.
+- Made `vivary-cognee forget` request full dataset deletion instead of memory-only
+  deletion, and made missing provider datasets idempotent under `--yes`.
+- Refused nonexistent `vivary-cognee --root` targets instead of promoting typos to the
+  nearest ancestor workspace before a mutating command.
+- Refused linked or hard-linked Cognee manifest targets before writing local index
+  proof, and preserved manifests when provider dataset deletion fails with permission
+  or accessibility errors.
+- Hardened `tropo query --mode semantic` against workspace-local `vivary_cognee.py`
+  import hijacking while still allowing the repo adapter or installed adapters outside
+  the workspace/current working tree.
+- Bumped the unreleased `vivary-memory-cognee` adapter metadata to `0.1.1`, added an
+  explicit adapter capability marker, and made `tropo query --mode semantic` refuse
+  older adapters before calling provider recall.
+- Honored nested `.gitignore` files and directory ignore patterns before building
+  provider snapshots, so ignored private Markdown is not sent to the optional provider.
+- Preflighted the local Cognee manifest path before any provider-side mutation, compared
+  full manifest identity instead of fingerprint alone, and sanitized provider exception
+  strings to action plus exception class.
+- Capped semantic provider over-fetch for filtered queries so large `--k` values cannot
+  fan out into unbounded provider requests before local filtering.
+- Kept `vivary-cognee doctor` package-presence-only, avoiding Cognee import side
+  effects, suppressed Cognee dotenv autoload during runtime import, and kept provider
+  import/call chatter off JSON stdout for runtime commands.
+
+### Verification
+
+- `python packages/tropo/tests/test_tropo.py`
+- `python packages/memory-cognee/tests/test_memory_cognee.py`
+- CI packaged optional semantic bridge smoke installs local `vivary-tropo` plus
+  `vivary-memory-cognee` with `--no-deps`, then verifies installed `tropo query
+  --mode semantic --json` reaches the explicit `allow_network` gate without provider
+  calls.
+- Real installed `cognee 1.2.2` smoke: `vivary-cognee doctor --json` reported the
+  installed package without importing provider runtime, `vivary-cognee index --dry-run
+  --json` reported packet counts, and provider runtime calls were refused while
+  `allow_network = false`.
+
 ## [Unreleased: local run receipts] — 2026-07-05
 
 Affects `create-vivary`, `vivary-tropo`, `vivary-ozone`, `vivary-exo`, CLI docs,

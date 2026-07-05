@@ -25,8 +25,11 @@ Exit codes: 0 = clean, 1 = errors found, 2 = config/usage problem.
 """
 
 import argparse
+import asyncio
 import copy
 import datetime
+import importlib
+import importlib.util
 import json
 import math
 import os
@@ -34,6 +37,7 @@ import platform
 import re
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 import tomllib
@@ -760,23 +764,50 @@ def is_excluded(relpath, patterns):
     return False
 
 
+def _realpath_within(root_real, path):
+    try:
+        path_real = os.path.normcase(os.path.realpath(path))
+        return os.path.commonpath([root_real, path_real]) == root_real
+    except ValueError:
+        return False
+
+
 def iter_markdown(root, paths, exclude):
     targets = paths or [root]
+    root_real = os.path.normcase(os.path.realpath(root))
     seen = set()
+    seen_dirs = set()
     for target in targets:
         target = os.path.abspath(target)
+        if not _realpath_within(root_real, target):
+            continue
         if os.path.isfile(target):
             rel = os.path.relpath(target, root)
             if target.endswith((".md", ".markdown")) and not is_excluded(rel, exclude) \
-                    and target not in seen:
+                    and target not in seen and _realpath_within(root_real, target):
                 seen.add(target)
                 yield target, rel
             continue
         for dirpath, dirnames, filenames in os.walk(target):
+            dir_real = os.path.normcase(os.path.realpath(dirpath))
+            if not _realpath_within(root_real, dirpath) or dir_real in seen_dirs:
+                dirnames[:] = []
+                continue
+            seen_dirs.add(dir_real)
             reldir = os.path.relpath(dirpath, root)
             reldir = "" if reldir == "." else reldir
-            dirnames[:] = sorted(
-                d for d in dirnames if not is_excluded(os.path.join(reldir, d), exclude))
+            kept_dirs = []
+            for d in sorted(dirnames):
+                child = os.path.join(dirpath, d)
+                child_real = os.path.normcase(os.path.realpath(child))
+                if is_excluded(os.path.join(reldir, d), exclude):
+                    continue
+                if not _realpath_within(root_real, child):
+                    continue
+                if child_real in seen_dirs:
+                    continue
+                kept_dirs.append(d)
+            dirnames[:] = kept_dirs
             for f in sorted(filenames):
                 if not f.endswith((".md", ".markdown")):
                     continue
@@ -784,7 +815,7 @@ def iter_markdown(root, paths, exclude):
                 if is_excluded(rel, exclude):
                     continue
                 full = os.path.join(dirpath, f)
-                if full not in seen:
+                if full not in seen and _realpath_within(root_real, full):
                     seen.add(full)
                     yield full, rel
 
@@ -1151,6 +1182,7 @@ _HTML_SHELL = """<!doctype html>
 
 STORAGE_DIR = ".vivary"
 STORAGE_CONFIG_NAME = "storage.toml"
+MEMORY_CONFIG_NAME = "memory.toml"
 _CONTENT_PREVIEW_CHARS = 1000
 _DEFAULT_SNIPPET_CHARS = 160
 _DEFAULT_FIND_BUDGET = 1200
@@ -1171,6 +1203,64 @@ def _load_storage_config(root):
     except (OSError, tomllib.TOMLDecodeError) as e:
         raise ConfigError(f"{path}: {e}")
     return data.get("storage", {"backend": "file"})
+
+
+def _load_memory_query_config(root):
+    path = os.path.join(root, STORAGE_DIR, MEMORY_CONFIG_NAME)
+    if not os.path.isfile(path):
+        return {
+            "enabled": False,
+            "provider": "none",
+            "status": "disabled",
+            "detail": f"{STORAGE_DIR}/{MEMORY_CONFIG_NAME} does not enable semantic memory",
+        }
+    try:
+        with open(path, encoding="utf-8-sig") as fh:
+            data = tomllib.loads(fh.read())
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        return {
+            "enabled": False,
+            "provider": "unknown",
+            "status": "misconfigured",
+            "detail": f"invalid {STORAGE_DIR}/{MEMORY_CONFIG_NAME}: {e}",
+        }
+    memory = data.get("memory", {})
+    if not isinstance(memory, dict):
+        return {
+            "enabled": False,
+            "provider": "unknown",
+            "status": "misconfigured",
+            "detail": f"{STORAGE_DIR}/{MEMORY_CONFIG_NAME}: memory must be a TOML table",
+        }
+    enabled = memory.get("enabled", False)
+    provider = memory.get("provider", "none")
+    if not isinstance(enabled, bool):
+        return {
+            "enabled": False,
+            "provider": "unknown",
+            "status": "misconfigured",
+            "detail": f"{STORAGE_DIR}/{MEMORY_CONFIG_NAME}: memory.enabled must be true or false",
+        }
+    if not isinstance(provider, str):
+        return {
+            "enabled": False,
+            "provider": "unknown",
+            "status": "misconfigured",
+            "detail": f"{STORAGE_DIR}/{MEMORY_CONFIG_NAME}: memory.provider must be a string",
+        }
+    if not enabled or provider == "none":
+        return {
+            "enabled": enabled,
+            "provider": provider,
+            "status": "disabled",
+            "detail": f"{STORAGE_DIR}/{MEMORY_CONFIG_NAME} does not enable semantic memory",
+        }
+    return {
+        "enabled": True,
+        "provider": provider,
+        "status": "configured",
+        "detail": "",
+    }
 
 
 def _file_body(full_path, limit=_CONTENT_PREVIEW_CHARS):
@@ -1599,6 +1689,189 @@ def _trim_context_to_budget(results, budget):
         elif len(r["reason"]) > 80:
             r["reason"] = r["reason"][:77].rstrip() + "..."
     return trimmed, _estimate_tokens(trimmed)
+
+
+def _load_cognee_adapter_from_path(path):
+    module_name = "_vivary_cognee_adapter"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError("cannot load vivary-memory-cognee adapter")
+    module = importlib.util.module_from_spec(spec)
+    previous = sys.modules.get(module_name)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        if previous is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = previous
+        raise
+    return module
+
+
+def _adapter_origin_is_unsafe(origin, workspace_root, allowed_source):
+    if not origin:
+        return True
+    origin_real = os.path.realpath(origin)
+    allowed_real = os.path.realpath(allowed_source)
+    if origin_real == allowed_real:
+        return False
+    install_roots = {
+        os.path.realpath(path)
+        for key, path in sysconfig.get_paths().items()
+        if key in {"purelib", "platlib"} and path
+    }
+    untrusted_roots = [os.path.realpath(workspace_root), os.path.realpath(os.getcwd())]
+    if any(_is_within(root, origin_real) for root in install_roots) and not any(
+        _is_within(root, origin_real) for root in untrusted_roots
+    ):
+        return False
+    return any(_is_within(root, origin_real) for root in untrusted_roots)
+
+
+def _version_tuple(value):
+    parts = []
+    for part in str(value or "").split("."):
+        match = re.match(r"(\d+)", part)
+        if not match:
+            break
+        parts.append(int(match.group(1)))
+    return tuple(parts)
+
+
+def _validate_cognee_adapter(module):
+    try:
+        adapter_api = int(getattr(module, "TROPO_SEMANTIC_ADAPTER_API", 0))
+    except (TypeError, ValueError):
+        raise ImportError("vivary-memory-cognee adapter is too old for semantic query")
+    if adapter_api < 1:
+        raise ImportError("vivary-memory-cognee adapter is too old for semantic query")
+    if getattr(module, "REQUIRES_EXPLICIT_PROVIDER_GATES", None) is not True:
+        raise ImportError("vivary-memory-cognee adapter lacks provider safety gates")
+    if _version_tuple(getattr(module, "__version__", "")) < (0, 1, 1):
+        raise ImportError("vivary-memory-cognee 0.1.1 or newer is required")
+    if not callable(getattr(module, "CogneeMemoryAdapter", None)):
+        raise ImportError("vivary-memory-cognee adapter is missing CogneeMemoryAdapter")
+    return module
+
+
+def _import_optional_cognee_adapter(workspace_root):
+    package_file = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "memory-cognee", "vivary_cognee.py")
+    )
+    existing = sys.modules.get("vivary_cognee")
+    if existing is not None:
+        origin = getattr(existing, "__file__", None)
+        if _adapter_origin_is_unsafe(origin, workspace_root, package_file):
+            raise ImportError("refusing workspace-local vivary_cognee adapter")
+        return _validate_cognee_adapter(existing)
+    if os.path.isfile(package_file):
+        return _validate_cognee_adapter(_load_cognee_adapter_from_path(package_file))
+    spec = importlib.util.find_spec("vivary_cognee")
+    if spec is None or spec.origin is None:
+        raise ImportError("vivary-memory-cognee is not installed")
+    if _adapter_origin_is_unsafe(spec.origin, workspace_root, package_file):
+        raise ImportError("refusing workspace-local vivary_cognee adapter")
+    return _validate_cognee_adapter(importlib.import_module("vivary_cognee"))
+
+
+def _hit_value(hit, name, default=None):
+    if isinstance(hit, dict):
+        return hit.get(name, default)
+    return getattr(hit, name, default)
+
+
+def _semantic_edge_context(hit):
+    edges = _hit_value(hit, "edge_context", []) or []
+    out = []
+    for edge in edges:
+        if isinstance(edge, dict):
+            source = edge.get("source_id")
+            field = edge.get("field")
+            target = edge.get("target_id")
+        else:
+            source = getattr(edge, "source_id", None)
+            field = getattr(edge, "field", None)
+            target = getattr(edge, "target_id", None)
+        if source is not None and field is not None and target is not None:
+            out.append({"from": source, "field": field, "to": target})
+    return out
+
+
+def semantic_query(resolver, text, *, k=10, type_filters=None, path_filters=None,
+                   edge_filters=None):
+    """Search through an explicitly configured optional semantic-memory provider."""
+    config = _load_memory_query_config(resolver.root)
+    provider = config.get("provider", "none")
+    if config["status"] != "configured":
+        return 1, [], config
+    if provider != "cognee":
+        return 1, [], {
+            "enabled": True,
+            "provider": provider,
+            "status": "unsupported",
+            "detail": f"semantic query provider {provider!r} is not supported by tropo",
+        }
+    try:
+        vivary_cognee = _import_optional_cognee_adapter(resolver.root)
+    except ImportError:
+        return 1, [], {
+            "enabled": True,
+            "provider": "cognee",
+            "status": "unavailable",
+            "detail": "install vivary-memory-cognee and index the workspace before semantic query",
+        }
+
+    type_filters = type_filters or []
+    path_filters = path_filters or []
+    edge_filters = edge_filters or []
+    filters_present = bool(type_filters or path_filters or edge_filters)
+    requested_k = max(0, k)
+    if requested_k == 0:
+        return 0, [], {
+            "enabled": True,
+            "provider": "cognee",
+            "status": "ok",
+            "detail": "",
+        }
+    provider_k = min(
+        requested_k if not filters_present else max(requested_k * 5, requested_k + 20, 50),
+        250,
+    )
+    try:
+        hits = asyncio.run(
+            vivary_cognee.CogneeMemoryAdapter(resolver.root).recall(text, k=provider_k)
+        )
+    except getattr(vivary_cognee, "AdapterError", RuntimeError) as e:
+        return 1, [], {
+            "enabled": True,
+            "provider": "cognee",
+            "status": "unavailable",
+            "detail": str(e),
+        }
+    results = []
+    for hit in hits:
+        result = {
+            "id": _hit_value(hit, "node_id", ""),
+            "type": _hit_value(hit, "type"),
+            "path": _hit_value(hit, "path", ""),
+            "score": _hit_value(hit, "score", 0),
+            "reason": _hit_value(hit, "reason", "semantic provider match"),
+            "provider": _hit_value(hit, "provider", provider),
+        }
+        edges = _semantic_edge_context(hit)
+        if edges:
+            result["edges"] = edges
+        if not _passes_search_filters(result, type_filters, path_filters, edge_filters):
+            continue
+        results.append(result)
+    return 0, results[:max(0, k)], {
+        "enabled": True,
+        "provider": "cognee",
+        "status": "ok",
+        "detail": "",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -2385,12 +2658,48 @@ def cmd_query(args, resolver):
     if not args.paths:
         sys.exit("tropo query: provide a search query — e.g. tropo query \"auth module\"")
     text = " ".join(args.paths)
-    k = getattr(args, "k", 10) or 10
+    raw_k = getattr(args, "k", 10)
+    k = 10 if raw_k is None else raw_k
+    mode = getattr(args, "mode", "text") or "text"
     snippet = getattr(args, "snippet", _DEFAULT_SNIPPET_CHARS)
     explain = getattr(args, "explain", False)
     type_filters = getattr(args, "type", None) or []
     path_filters = getattr(args, "path", None) or []
     edge_filters = getattr(args, "edge", None) or []
+
+    if mode == "semantic":
+        rc, results, semantic = semantic_query(
+            resolver,
+            text,
+            k=k,
+            type_filters=type_filters,
+            path_filters=path_filters,
+            edge_filters=edge_filters,
+        )
+        if args.json:
+            print(json.dumps({
+                "query": text,
+                "k": k,
+                "mode": mode,
+                "semantic": semantic,
+                "filters": {
+                    "type": type_filters,
+                    "path": path_filters,
+                    "edge": edge_filters,
+                },
+                "results": results,
+            }, indent=2))
+            return rc
+        if rc != 0:
+            print(f"tropo query: semantic search unavailable: {semantic['detail']}")
+            return rc
+        print(f"tropo query: {len(results)} semantic result(s) for {text!r}")
+        for i, r in enumerate(results, 1):
+            typ = f"[{r['type']}] " if r.get("type") else ""
+            print(f"{i:2}. {typ}{r['id']} - {r['path']}")
+            if r.get("reason"):
+                print(f"    why: {r['reason']}")
+        return 0
 
     results = search_graph(
         resolver,
@@ -2407,6 +2716,7 @@ def cmd_query(args, resolver):
         print(json.dumps({
             "query": text,
             "k": k,
+            "mode": mode,
             "filters": {
                 "type": type_filters,
                 "path": path_filters,
@@ -2678,6 +2988,8 @@ def _main(argv=None):
     p.add_argument("--yes", action="store_true", help="auto-confirm prompts (agent/CI use)")
     p.add_argument("--k", type=int, default=None,
                    help="query/find: number of results (query default: 10, find default: 5)")
+    p.add_argument("--mode", choices=["text", "semantic"], default="text",
+                   help="query: text graph search (default) or optional semantic-memory provider search")
     p.add_argument("--type", action="append", default=[],
                    help="query/find: restrict results to a document type; repeatable")
     p.add_argument("--path", action="append", default=[],

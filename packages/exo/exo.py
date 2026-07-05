@@ -198,6 +198,14 @@ def _doc_by_id(docs, target_id):
     return None
 
 
+def _claim_target_candidate(root, target_id):
+    if not target_id or any(sep in target_id for sep in (os.sep, os.altsep) if sep):
+        return None
+    if target_id in (".", "..") or "\x00" in target_id:
+        return None
+    return os.path.join(root, "changes", f"{target_id}.md")
+
+
 def _ensure_assignee_declared(tropo, resolver, doc):
     config = resolver.for_dir(os.path.dirname(doc.full))
     _required, known = config.fields_for(doc.type)
@@ -215,6 +223,21 @@ def _ensure_workspace_file(root, doc):
         common = None
     if common != root_real or os.path.islink(doc.full):
         raise ExoError(f"{doc.rel}: refusing to claim symlinked or out-of-workspace file")
+
+
+def _ensure_no_pruned_claim_target(root, target_id):
+    candidate = _claim_target_candidate(root, target_id)
+    if not candidate or not os.path.lexists(candidate):
+        return
+    root_real = os.path.realpath(root)
+    candidate_real = os.path.realpath(candidate)
+    try:
+        common = os.path.commonpath([root_real, candidate_real])
+    except ValueError:
+        common = None
+    if common != root_real or os.path.islink(candidate):
+        rel = os.path.relpath(candidate, root)
+        raise ExoError(f"{rel}: refusing to claim symlinked or out-of-workspace file")
 
 
 def _write_assignee(tropo, root, doc, assignee):
@@ -275,6 +298,7 @@ def cmd_claim(args):
         tropo, resolver, docs = _workspace_docs(args.root)
         doc = _doc_by_id(docs, args.target)
         if doc is None:
+            _ensure_no_pruned_claim_target(resolver.root, args.target)
             raise ExoError(f"no work item with id {args.target!r}")
         node = {"path": doc.rel.replace("\\", "/")}
         if role_of(node) != "change":
