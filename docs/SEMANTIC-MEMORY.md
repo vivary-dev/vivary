@@ -400,9 +400,10 @@ Conflict rules:
   privacy failure and stop.
 - If semantic score and graph edges disagree, prefer graph edges for truth and use the
   semantic hit as a lead to inspect.
-- `tropo query --mode semantic`, if added for #20, should share the provider contract
-  or call the same typed-node embedding layer. It should not become a parallel RAG
-  system.
+- `tropo query --mode semantic` shares this provider contract. It calls the configured
+  optional semantic-memory provider and returns typed Vivary node ids, not opaque
+  chunks. It must stay unavailable until the user has explicitly configured, installed,
+  and indexed a supported provider.
 
 ## Implementation files
 

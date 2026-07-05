@@ -112,13 +112,15 @@ ignore rules, graph health, storage backend, semantic-memory status, and module 
 coverage after creation.
 `tropo find` returns small typed context packets for agents and humans to read first;
 `tropo query` provides filtered graph search, and `tropo migrate` handles backend
-switching.
+switching. `tropo query --mode semantic` can call an explicitly configured optional
+semantic-memory provider while still returning typed Vivary node ids.
 
 For workspaces that explicitly choose Cognee semantic memory, the optional
 `vivary-memory-cognee` package adds `vivary-cognee doctor`, `index`, `recall`, and
 `forget`. It indexes privacy-filtered typed Tropo node packets and only accepts recall
 hits that map back to known Vivary node ids. It is not part of the default install and
-provider writes require explicit approval.
+provider writes require explicit approval. `tropo query --mode semantic --json` uses
+that same optional provider bridge after the workspace has been configured and indexed.
 
 For coding workspaces that need richer source retrieval, `--active-context
 cocoindex-code` adds optional CocoIndex-code guidance and graph nodes. It does not

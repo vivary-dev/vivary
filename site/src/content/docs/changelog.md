@@ -13,6 +13,24 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: tropo semantic query mode] — 2026-07-05
+
+Affects `vivary-tropo`, CLI docs, package docs, and generated website docs. This is
+not published yet; package version bumps and registry publishes remain release-train
+gates.
+
+### Added
+
+- Added `tropo query --mode semantic`, a dependency-free bridge to an explicitly
+  configured optional semantic-memory provider. The default `text` mode is unchanged.
+- Semantic query returns typed Vivary node ids from the provider instead of opaque
+  chunks, and reports a structured unavailable state when semantic memory is not
+  configured, installed, or indexed.
+
+### Verification
+
+- `python packages/tropo/tests/test_tropo.py`
+
 ## [Unreleased: local run receipts] — 2026-07-05
 
 Affects `create-vivary`, `vivary-tropo`, `vivary-ozone`, `vivary-exo`, CLI docs,

@@ -46,7 +46,7 @@ tropo [command] [paths...] [--lenient | --strict] [--json] [--quiet]
                 [--depth N] [--max-entries N] [--out FILE] [--packs a,b]
                 [--root DIR] [--config PATH] [--receipt PATH]
                 [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]]
-                [--snippet N] [--explain] [--budget N]
+                [--snippet N] [--explain] [--mode text|semantic] [--budget N]
 ```
 
 A document's **type is the folder it lives in** (`decisions/0001.md` → type
@@ -66,15 +66,19 @@ says. `tropo.toml` declares the types.
 | `fix [--dry-run]` | Strip redundant frontmatter (`W210` — a field equal to its derived value). The only mechanical edit tropo makes. |
 | `init [DIR] [--packs a,b]` | Scaffold a `tropo.toml` (optionally composing reusable type packs). |
 | `find <text> [--budget N] [--k N] [--json]` | Human-friendly context packet: the smallest typed nodes/files worth opening first, with reasons and snippets trimmed to an approximate token budget. |
-| `query <text> [--k N] [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]] [--snippet N] [--explain] [--json]` | Filtered graph search over typed nodes. Searches id/title, frontmatter, path, body, and outbound edge context, then returns real graph ids/types/paths. |
+| `query <text> [--k N] [--mode text\|semantic] [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]] [--snippet N] [--explain] [--json]` | Filtered graph search over typed nodes. Default `text` searches id/title, frontmatter, path, body, and outbound edge context. `semantic` calls an explicitly configured optional semantic-memory provider and returns typed node ids. |
 | `migrate --from file --to embedded [--dry-run] [--json]` | Move file-backed graph data into the configured embedded backend. Cloud migration, non-file sources, backend installation, and `migrated_at` tracking are future 0.3.x work. |
 | `map [--root PATH] [--depth N] [--max-entries N] [--json]` | Read-only filesystem inventory of a repo/vault/docs tree — no `tropo.toml` required. See [Filesystem map](#filesystem-map-tropo-map) below. |
 
 `tropo find` is the default "what should I read first?" command for humans and agents.
-`tropo query` is the lower-level filtered search primitive. Both are graph/text
-retrieval, not the CocoIndex active-context sidecar. Use `create-vivary init ...
---active-context cocoindex-code` when a coding workspace needs semantic code
-candidates.
+`tropo query` is the lower-level filtered search primitive. By default both are
+graph/text retrieval, not the CocoIndex active-context sidecar. `tropo query --mode
+semantic` is an optional-provider bridge: it requires `.vivary/memory.toml` to enable
+a supported semantic-memory provider, and today that means the separate
+`vivary-memory-cognee` package must be installed and indexed by the user. It does
+not add Cognee, embeddings, network calls, or an index to `vivary-tropo` core.
+Use `create-vivary init ... --active-context cocoindex-code` when a coding workspace
+needs semantic code candidates.
 
 Useful retrieval flags:
 
@@ -85,12 +89,14 @@ Useful retrieval flags:
 | `--edge FIELD[:TARGET]` | Require an outbound graph edge field, optionally pointing at a target id. |
 | `--snippet N` | Include up to `N` snippet characters per result; `0` disables snippets. |
 | `--explain` | Include stable match reasons such as title/id, frontmatter, path, body, or edge context. |
+| `--mode text\|semantic` | `query` only: use dependency-free graph/text search, or call the configured optional semantic-memory provider. |
 | `--budget N` | `find` only: approximate token budget for the returned context packet. |
 
 ```bash
 tropo find "where is release truth owned" --root . --budget 800 --json
 tropo query "release truth" --type decision --path "decisions/*" --explain --json
 tropo query "agent workspace" --edge affects:agent-workspace
+tropo query "release truth" --mode semantic --json
 ```
 
 ### Strictness (the `check` gate)

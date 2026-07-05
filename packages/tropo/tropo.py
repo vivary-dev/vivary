@@ -25,8 +25,10 @@ Exit codes: 0 = clean, 1 = errors found, 2 = config/usage problem.
 """
 
 import argparse
+import asyncio
 import copy
 import datetime
+import importlib
 import json
 import math
 import os
@@ -1151,6 +1153,7 @@ _HTML_SHELL = """<!doctype html>
 
 STORAGE_DIR = ".vivary"
 STORAGE_CONFIG_NAME = "storage.toml"
+MEMORY_CONFIG_NAME = "memory.toml"
 _CONTENT_PREVIEW_CHARS = 1000
 _DEFAULT_SNIPPET_CHARS = 160
 _DEFAULT_FIND_BUDGET = 1200
@@ -1171,6 +1174,43 @@ def _load_storage_config(root):
     except (OSError, tomllib.TOMLDecodeError) as e:
         raise ConfigError(f"{path}: {e}")
     return data.get("storage", {"backend": "file"})
+
+
+def _load_memory_query_config(root):
+    path = os.path.join(root, STORAGE_DIR, MEMORY_CONFIG_NAME)
+    if not os.path.isfile(path):
+        return {
+            "enabled": False,
+            "provider": "none",
+            "status": "disabled",
+            "detail": f"{STORAGE_DIR}/{MEMORY_CONFIG_NAME} does not enable semantic memory",
+        }
+    try:
+        with open(path, "rb") as fh:
+            data = tomllib.load(fh)
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        return {
+            "enabled": False,
+            "provider": "unknown",
+            "status": "misconfigured",
+            "detail": f"invalid {STORAGE_DIR}/{MEMORY_CONFIG_NAME}: {e}",
+        }
+    memory = data.get("memory", {})
+    enabled = bool(memory.get("enabled", False))
+    provider = str(memory.get("provider", "none"))
+    if not enabled or provider == "none":
+        return {
+            "enabled": enabled,
+            "provider": provider,
+            "status": "disabled",
+            "detail": f"{STORAGE_DIR}/{MEMORY_CONFIG_NAME} does not enable semantic memory",
+        }
+    return {
+        "enabled": True,
+        "provider": provider,
+        "status": "configured",
+        "detail": "",
+    }
 
 
 def _file_body(full_path, limit=_CONTENT_PREVIEW_CHARS):
@@ -1599,6 +1639,106 @@ def _trim_context_to_budget(results, budget):
         elif len(r["reason"]) > 80:
             r["reason"] = r["reason"][:77].rstrip() + "..."
     return trimmed, _estimate_tokens(trimmed)
+
+
+def _import_optional_cognee_adapter():
+    try:
+        return importlib.import_module("vivary_cognee")
+    except ImportError:
+        package_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "memory-cognee")
+        )
+        if os.path.isdir(package_dir) and package_dir not in sys.path:
+            sys.path.insert(0, package_dir)
+            try:
+                return importlib.import_module("vivary_cognee")
+            except ImportError:
+                pass
+        raise
+
+
+def _hit_value(hit, name, default=None):
+    if isinstance(hit, dict):
+        return hit.get(name, default)
+    return getattr(hit, name, default)
+
+
+def _semantic_edge_context(hit):
+    edges = _hit_value(hit, "edge_context", []) or []
+    out = []
+    for edge in edges:
+        if isinstance(edge, dict):
+            source = edge.get("source_id")
+            field = edge.get("field")
+            target = edge.get("target_id")
+        else:
+            source = getattr(edge, "source_id", None)
+            field = getattr(edge, "field", None)
+            target = getattr(edge, "target_id", None)
+        if source is not None and field is not None and target is not None:
+            out.append({"from": source, "field": field, "to": target})
+    return out
+
+
+def semantic_query(resolver, text, *, k=10, type_filters=None, path_filters=None,
+                   edge_filters=None):
+    """Search through an explicitly configured optional semantic-memory provider."""
+    config = _load_memory_query_config(resolver.root)
+    provider = config.get("provider", "none")
+    if config["status"] != "configured":
+        return 1, [], config
+    if provider != "cognee":
+        return 1, [], {
+            "enabled": True,
+            "provider": provider,
+            "status": "unsupported",
+            "detail": f"semantic query provider {provider!r} is not supported by tropo",
+        }
+    try:
+        vivary_cognee = _import_optional_cognee_adapter()
+    except ImportError:
+        return 1, [], {
+            "enabled": True,
+            "provider": "cognee",
+            "status": "unavailable",
+            "detail": "install vivary-memory-cognee and index the workspace before semantic query",
+        }
+
+    try:
+        hits = asyncio.run(vivary_cognee.CogneeMemoryAdapter(resolver.root).recall(text, k=k))
+    except getattr(vivary_cognee, "AdapterError", RuntimeError) as e:
+        return 1, [], {
+            "enabled": True,
+            "provider": "cognee",
+            "status": "unavailable",
+            "detail": str(e),
+        }
+
+    type_filters = type_filters or []
+    path_filters = path_filters or []
+    edge_filters = edge_filters or []
+    results = []
+    for hit in hits:
+        result = {
+            "id": _hit_value(hit, "node_id", ""),
+            "type": _hit_value(hit, "type"),
+            "path": _hit_value(hit, "path", ""),
+            "score": _hit_value(hit, "score", 0),
+            "reason": _hit_value(hit, "reason", "semantic provider match"),
+            "provider": _hit_value(hit, "provider", provider),
+        }
+        edges = _semantic_edge_context(hit)
+        if edges:
+            result["edges"] = edges
+        if not _passes_search_filters(result, type_filters, path_filters, edge_filters):
+            continue
+        results.append(result)
+    return 0, results[:max(0, k)], {
+        "enabled": True,
+        "provider": "cognee",
+        "status": "ok",
+        "detail": "",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -2386,11 +2526,46 @@ def cmd_query(args, resolver):
         sys.exit("tropo query: provide a search query — e.g. tropo query \"auth module\"")
     text = " ".join(args.paths)
     k = getattr(args, "k", 10) or 10
+    mode = getattr(args, "mode", "text") or "text"
     snippet = getattr(args, "snippet", _DEFAULT_SNIPPET_CHARS)
     explain = getattr(args, "explain", False)
     type_filters = getattr(args, "type", None) or []
     path_filters = getattr(args, "path", None) or []
     edge_filters = getattr(args, "edge", None) or []
+
+    if mode == "semantic":
+        rc, results, semantic = semantic_query(
+            resolver,
+            text,
+            k=k,
+            type_filters=type_filters,
+            path_filters=path_filters,
+            edge_filters=edge_filters,
+        )
+        if args.json:
+            print(json.dumps({
+                "query": text,
+                "k": k,
+                "mode": mode,
+                "semantic": semantic,
+                "filters": {
+                    "type": type_filters,
+                    "path": path_filters,
+                    "edge": edge_filters,
+                },
+                "results": results,
+            }, indent=2))
+            return rc
+        if rc != 0:
+            print(f"tropo query: semantic search unavailable: {semantic['detail']}")
+            return rc
+        print(f"tropo query: {len(results)} semantic result(s) for {text!r}")
+        for i, r in enumerate(results, 1):
+            typ = f"[{r['type']}] " if r.get("type") else ""
+            print(f"{i:2}. {typ}{r['id']} - {r['path']}")
+            if r.get("reason"):
+                print(f"    why: {r['reason']}")
+        return 0
 
     results = search_graph(
         resolver,
@@ -2407,6 +2582,7 @@ def cmd_query(args, resolver):
         print(json.dumps({
             "query": text,
             "k": k,
+            "mode": mode,
             "filters": {
                 "type": type_filters,
                 "path": path_filters,
@@ -2678,6 +2854,8 @@ def _main(argv=None):
     p.add_argument("--yes", action="store_true", help="auto-confirm prompts (agent/CI use)")
     p.add_argument("--k", type=int, default=None,
                    help="query/find: number of results (query default: 10, find default: 5)")
+    p.add_argument("--mode", choices=["text", "semantic"], default="text",
+                   help="query: text graph search (default) or optional semantic-memory provider search")
     p.add_argument("--type", action="append", default=[],
                    help="query/find: restrict results to a document type; repeatable")
     p.add_argument("--path", action="append", default=[],

@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import sys
+import types
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -810,6 +811,7 @@ def _query_args(query, **overrides):
         "edge": [],
         "snippet": 160,
         "explain": False,
+        "mode": "text",
         "root": None,
         "config": None,
         "strict": False,
@@ -986,6 +988,131 @@ def test_cmd_query_no_results(tmp_path):
     )
     assert rc == 0
     assert out["results"] == []
+
+
+def test_cmd_query_semantic_mode_reports_unavailable_without_memory(tmp_path):
+    _search_vault(tmp_path)
+    rc, out = _capture_rc(
+        tropo.cmd_query,
+        _query_args("release truth", mode="semantic"),
+        res(str(tmp_path)),
+    )
+    assert rc == 1
+    assert out["mode"] == "semantic"
+    assert out["results"] == []
+    assert out["semantic"]["status"] == "disabled"
+    assert "memory.toml" in out["semantic"]["detail"]
+
+
+def test_cmd_query_semantic_mode_returns_optional_provider_hits(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "memory.toml").write_text(
+        '[memory]\nenabled = true\nprovider = "cognee"\n',
+        encoding="utf-8",
+    )
+
+    class FakeHit:
+        node_id = "release-workflow"
+        type = "decision"
+        path = "decisions/release-workflow.md"
+        score = 0.98
+        reason = "typed semantic match"
+        provider = "cognee"
+        edge_context = []
+
+    class FakeAdapter:
+        def __init__(self, root):
+            self.root = root
+
+        async def recall(self, query, *, k=10):
+            assert query == "release truth"
+            assert k == 10
+            return [FakeHit()]
+
+    previous = sys.modules.get("vivary_cognee")
+    sys.modules["vivary_cognee"] = types.SimpleNamespace(
+        CogneeMemoryAdapter=FakeAdapter,
+        AdapterError=RuntimeError,
+    )
+    try:
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="semantic"),
+            res(str(tmp_path)),
+        )
+    finally:
+        if previous is None:
+            sys.modules.pop("vivary_cognee", None)
+        else:
+            sys.modules["vivary_cognee"] = previous
+
+    assert rc == 0
+    assert out["mode"] == "semantic"
+    assert out["semantic"]["provider"] == "cognee"
+    assert out["semantic"]["status"] == "ok"
+    assert [r["id"] for r in out["results"]] == ["release-workflow"]
+    assert out["results"][0]["reason"] == "typed semantic match"
+
+
+def test_cmd_query_semantic_mode_applies_graph_filters(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "memory.toml").write_text(
+        '[memory]\nenabled = true\nprovider = "cognee"\n',
+        encoding="utf-8",
+    )
+
+    class FakeHit:
+        node_id = "release-workflow"
+        type = "decision"
+        path = "decisions/release-workflow.md"
+        score = 0.98
+        reason = "typed semantic match"
+        provider = "cognee"
+        edge_context = [{"source_id": "release-workflow", "field": "affects", "target_id": "agent-workspace"}]
+
+    class FakeAdapter:
+        def __init__(self, root):
+            self.root = root
+
+        async def recall(self, query, *, k=10):
+            return [FakeHit()]
+
+    previous = sys.modules.get("vivary_cognee")
+    sys.modules["vivary_cognee"] = types.SimpleNamespace(
+        CogneeMemoryAdapter=FakeAdapter,
+        AdapterError=RuntimeError,
+    )
+    try:
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args(
+                "release truth",
+                mode="semantic",
+                type=["decision"],
+                path=["decisions/*"],
+                edge=["affects:agent-workspace"],
+            ),
+            res(str(tmp_path)),
+        )
+        rc_wrong_type, out_wrong_type = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="semantic", type=["module"]),
+            res(str(tmp_path)),
+        )
+    finally:
+        if previous is None:
+            sys.modules.pop("vivary_cognee", None)
+        else:
+            sys.modules["vivary_cognee"] = previous
+
+    assert rc == 0
+    assert [r["id"] for r in out["results"]] == ["release-workflow"]
+    assert rc_wrong_type == 0
+    assert out_wrong_type["results"] == []
 
 
 # --- map: read-only filesystem inventory -----------------------------------

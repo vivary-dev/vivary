@@ -128,9 +128,11 @@ typed graph search over ids, titles, frontmatter, paths, body text, and edge con
 `tropo find` packages that same deterministic search into a small context packet.
 Semantic code retrieval belongs to the active-context CocoIndex sidecar.
 
-**For second brain / writing:** The tropo graph is the index. Future embeddings, if
-added, should embed graph nodes rather than arbitrary chunks so the agent retrieves
-structured entities and can traverse typed relationships.
+**For second brain / writing:** The tropo graph is the index. Semantic retrieval, when
+enabled, should embed graph nodes rather than arbitrary chunks so the agent retrieves
+structured entities and can traverse typed relationships. `tropo query --mode
+semantic` is the minimal bridge into that optional provider layer; default query and
+find remain deterministic graph/text search.
 
 The provider boundary for that future work lives in
 [SEMANTIC-MEMORY.md](SEMANTIC-MEMORY.md): semantic memory consumes privacy-filtered
@@ -207,10 +209,11 @@ Non-file sources, cloud targets, automatic backend installation, and `migrated_a
 tracking are future 0.3.x work.
 
 **No embeddings in tropo migration.** The embedded backend stores indexed node content
-and can be queried at the backend layer, but the public `tropo find` / `query`
-commands in the current command surface search the analyzed typed graph directly.
-Semantic/vector embeddings remain future graphify or active-context-sidecar work,
-outside the deterministic tropo core.
+and can be queried at the backend layer, but migration does not create vectors, call
+providers, or index private content. Public `tropo find` and default `tropo query`
+search the analyzed typed graph directly. `tropo query --mode semantic` delegates to
+an explicitly configured optional semantic-memory provider and returns typed node ids;
+it is unavailable until the user installs and indexes that provider.
 
 ---
 
@@ -431,9 +434,10 @@ Welcome to Vivary! Let's set up your workspace.
 - mem0 / Zep as storage primitives — layers above storage; document as optional integrations.
 - Automatic migration on install — migration is always explicit via `tropo migrate`.
 - Multi-backend writes simultaneously.
-- Embeddings model ownership — tropo delegates; the graphify semantic layer (#16) owns the embedding strategy long-term.
-- Chunked-text RAG — not this product. Future semantic retrieval should operate over
-  typed nodes or active-context sidecars, not arbitrary chunks.
+- Embeddings model ownership — tropo delegates; optional semantic-memory providers own
+  embedding/index mechanics.
+- Chunked-text RAG — not this product. Semantic retrieval should operate over typed
+  nodes or active-context sidecars, not arbitrary chunks.
 
 ---
 
