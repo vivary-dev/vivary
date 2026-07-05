@@ -139,9 +139,25 @@ const releaseHighlights = [
           weekly PR snapshots. Early numbers are not a traction claim; they are a
           heartbeat that the package surfaces are live.
         </p>
+        <div class="live-badges" aria-label="Live weekly package download badges">
+          <a href="https://www.npmjs.com/package/@vivary/create">
+            <img
+              src="https://img.shields.io/npm/dw/%40vivary%2Fcreate?style=flat-square&color=1f9d72&label=npm%20downloads"
+              alt="npm weekly downloads for @vivary/create"
+              loading="lazy"
+            />
+          </a>
+          <a href="https://pypistats.org/packages/create-vivary">
+            <img
+              src="https://img.shields.io/pypi/dw/create-vivary?style=flat-square&color=1f9d72&label=PyPI%20downloads"
+              alt="PyPI weekly downloads for create-vivary"
+              loading="lazy"
+            />
+          </a>
+        </div>
         <a href="/signals/">How signals are tracked →</a>
       </div>
-      <img src="/usage-snapshot.svg" alt="Vivary public usage snapshot chart" loading="lazy" />
+      <img class="signals-chart" src="/usage-snapshot.svg" alt="Vivary public usage snapshot chart" loading="lazy" />
     </section>
 
     <!-- WHAT IT CREATES -->
@@ -430,7 +446,10 @@ billing  →  4 node(s) depend on it
     .signals h2 { font-family: var(--serif); font-size: clamp(28px, 3.5vw, 46px); letter-spacing: -0.025em; line-height: 1.03; margin: 0 0 14px; }
     .signals p:not(.search-label) { color: var(--muted); margin: 0 0 16px; max-width: 38ch; }
     .signals a { color: var(--accent); font-weight: 600; }
-    .signals img { display: block; width: 100%; height: auto; border-radius: 16px; border: 1px solid var(--line); background: oklch(0.13 0.035 220 / .66); }
+    .live-badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+    .live-badges a { display: inline-flex; line-height: 0; }
+    .live-badges img { display: block; width: auto; height: 20px; border: 0; border-radius: 0; background: transparent; }
+    .signals-chart { display: block; width: 100%; height: auto; border-radius: 16px; border: 1px solid var(--line); background: oklch(0.13 0.035 220 / .66); }
 
     /* hardening */
     .hardening { display: grid; grid-template-columns: 0.85fr 1.15fr; gap: clamp(22px, 4vw, 52px); align-items: start; }
