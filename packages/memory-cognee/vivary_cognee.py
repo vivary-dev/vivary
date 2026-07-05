@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import tomllib
+import types
 from dataclasses import asdict, dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -126,7 +127,10 @@ def _ignored_by_gitignore(rel_path: str, rules: list[tuple[bool, str]]) -> bool:
 
 
 def _resolve_workspace_root(target: str | Path) -> Path:
-    path = Path(target).resolve()
+    raw = Path(target)
+    if not raw.exists():
+        raise AdapterError(f"target does not exist: {target}")
+    path = raw.resolve()
     start = path if path.is_dir() else path.parent
     for candidate in (start, *start.parents):
         if any((candidate / marker).exists() for marker in WORKSPACE_MARKERS):
@@ -285,10 +289,18 @@ def _cognee_available() -> bool:
 
 @contextmanager
 def _without_dotenv_autoload():
-    try:
-        dotenv = importlib.import_module("dotenv")
-    except ImportError:
-        yield
+    dotenv = sys.modules.get("dotenv")
+    if dotenv is None:
+        stub = types.ModuleType("dotenv")
+        stub.load_dotenv = lambda *args, **kwargs: False
+        stub.dotenv_values = lambda *args, **kwargs: {}
+        stub.find_dotenv = lambda *args, **kwargs: ""
+        sys.modules["dotenv"] = stub
+        try:
+            yield
+        finally:
+            if sys.modules.get("dotenv") is stub:
+                sys.modules.pop("dotenv", None)
         return
     original = getattr(dotenv, "load_dotenv", None)
     if original is None:
@@ -536,6 +548,16 @@ def _manifest_path(root: Path, config: dict[str, Any]) -> Path:
 def _write_manifest(root: Path, config: dict[str, Any], snapshot: MemorySnapshot) -> Path:
     path = _manifest_path(root, config)
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() or os.path.islink(path):
+        real = os.path.realpath(path)
+        absolute = os.path.abspath(path)
+        if os.path.normcase(real) != os.path.normcase(absolute):
+            raise AdapterError("refusing to overwrite linked Cognee manifest")
+        try:
+            if os.stat(path).st_nlink > 1:
+                raise AdapterError("refusing to overwrite hard-linked Cognee manifest")
+        except OSError as exc:
+            raise AdapterError("cannot stat Cognee manifest") from exc
     payload = {
         "provider": "cognee",
         "dataset": snapshot.dataset,
@@ -571,9 +593,7 @@ async def _run_provider_call(call: Any, *args: Any, **kwargs: Any) -> Any:
 
 def _is_missing_dataset_error(exc: Exception) -> bool:
     message = str(exc).lower()
-    return "dataset" in message and (
-        "not found" in message or "not accessible" in message
-    )
+    return "dataset" in message and "not found" in message
 
 
 def _coerce_result_text(item: Any) -> str:
@@ -639,7 +659,10 @@ class CogneeMemoryAdapter:
         try:
             self._cognee_client = _load_cognee_module()
         except ImportError as exc:
-            raise AdapterError("Cognee is not installed; install vivary-memory-cognee") from exc
+            raise AdapterError(
+                "Cognee runtime dependency is not installed; reinstall "
+                "vivary-memory-cognee with dependencies or install cognee"
+            ) from exc
         _configure_cognee_environment(self.root, self.config)
         _clear_cognee_config_caches()
         return self._cognee_client
@@ -788,7 +811,15 @@ class CogneeMemoryAdapter:
 
 
 def doctor(root: str | Path) -> dict[str, Any]:
-    root_path = _resolve_workspace_root(root)
+    try:
+        root_path = _resolve_workspace_root(root)
+    except AdapterError as exc:
+        return {
+            "ok": False,
+            "provider": "unknown",
+            "status": "misconfigured",
+            "detail": str(exc),
+        }
     if not _looks_like_workspace(root_path):
         return {
             "ok": False,

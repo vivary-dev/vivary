@@ -554,8 +554,7 @@ def _memory_report(target: Path) -> dict:
 
     try:
         import tomllib as _toml
-        with open(cfg_path, "rb") as _fh:
-            data = _toml.load(_fh)
+        data = _toml.loads(cfg_path.read_text(encoding="utf-8-sig"))
     except Exception as exc:
         return {
             "enabled": False,
@@ -612,12 +611,12 @@ def _memory_report(target: Path) -> dict:
         status = "healthy"
         detail = "local semantic memory policy configured"
     elif provider == "cognee":
-        if _is_importable("cognee"):
+        if _is_importable("vivary_cognee"):
             status = "configured"
-            detail = "Cognee import is available; indexing still requires approval"
+            detail = "vivary-memory-cognee adapter is available; indexing still requires approval"
         else:
             status = "unavailable"
-            detail = "install optional Cognee support before indexing"
+            detail = "install vivary-memory-cognee before indexing"
     else:
         status = "misconfigured"
         detail = f"unknown provider {provider!r}"

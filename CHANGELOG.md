@@ -47,9 +47,16 @@ registry publishes remain release-train gates.
   replace the prior Cognee dataset before remembering current node packets.
 - Made `vivary-cognee forget` request full dataset deletion instead of memory-only
   deletion, and made missing provider datasets idempotent under `--yes`.
+- Refused nonexistent `vivary-cognee --root` targets instead of promoting typos to the
+  nearest ancestor workspace before a mutating command.
+- Refused linked or hard-linked Cognee manifest targets before writing local index
+  proof, and preserved manifests when provider dataset deletion fails with permission
+  or accessibility errors.
 - Hardened `tropo query --mode semantic` against workspace-local `vivary_cognee.py`
-  import hijacking while still allowing installed adapters from the active
-  interpreter's site-packages, including project-local virtualenvs.
+  import hijacking while still allowing the repo adapter or installed adapters outside
+  the workspace/current working tree.
+- Capped semantic provider over-fetch for filtered queries so large `--k` values cannot
+  fan out into unbounded provider requests before local filtering.
 - Kept `vivary-cognee doctor` package-presence-only, avoiding Cognee import side
   effects, suppressed Cognee dotenv autoload during runtime import, and kept provider
   import/call chatter off JSON stdout for runtime commands.

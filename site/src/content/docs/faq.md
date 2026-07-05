@@ -107,15 +107,20 @@ tropo find "what should I read for auth?" --root my-workspace --budget 1200
 ```
 
 LanceDB is still available as the explicit embedded storage backend for migrated node
-rows, but public `tropo query` / `find` stay graph-first and zero-dependency in the
-current command surface. Semantic/vector embeddings are not in scope for tropo — those
-belong to a graphify-style layer that consumes the clean typed graph.
+rows, but published `tropo query` / `find` stay graph-first and zero-dependency in the
+current package line. On the unreleased `dev` branch, `tropo query --mode semantic`
+can call an explicitly configured optional semantic-memory provider while still
+returning typed Vivary node ids. That provider path is not part of default Tropo and
+does not add embeddings, network calls, or an index to core.
 
 ### Does tropo do semantic search / embeddings?
-No, deliberately. tropo owns the **typed** graph (explicit links). Semantic
-("organize by meaning") clustering is a separate, future job — a graphify-style layer
-that *consumes* tropo's clean graph. Keeping embeddings out keeps the core zero-dependency
-and deterministic.
+
+Published Tropo defaults to dependency-free typed graph/text search. Tropo owns the
+**typed** graph (explicit links) and keeps embeddings out of core so `check`, `graph`,
+`find`, and normal `query` stay deterministic. The unreleased `dev` branch adds
+`tropo query --mode semantic` as an optional-provider bridge: it can call a separately
+installed/configured semantic-memory adapter, then filters provider hits back to known
+Vivary node ids.
 
 ### Can Vivary set up semantic memory or Cognee?
 Yes, as optional setup policy. Use `create-vivary capabilities --preset knowledge-work

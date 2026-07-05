@@ -1711,10 +1711,12 @@ def _adapter_origin_is_unsafe(origin, workspace_root, allowed_source):
         for key, path in sysconfig.get_paths().items()
         if key in {"purelib", "platlib"} and path
     }
-    if any(_is_within(root, origin_real) for root in install_roots):
+    untrusted_roots = [os.path.realpath(workspace_root), os.path.realpath(os.getcwd())]
+    if any(_is_within(root, origin_real) for root in install_roots) and not any(
+        _is_within(root, origin_real) for root in untrusted_roots
+    ):
         return False
-    roots = [workspace_root, os.getcwd()]
-    return any(_is_within(os.path.realpath(root), origin_real) for root in roots)
+    return any(_is_within(root, origin_real) for root in untrusted_roots)
 
 
 def _import_optional_cognee_adapter(workspace_root):
@@ -1788,7 +1790,14 @@ def semantic_query(resolver, text, *, k=10, type_filters=None, path_filters=None
     path_filters = path_filters or []
     edge_filters = edge_filters or []
     filters_present = bool(type_filters or path_filters or edge_filters)
-    provider_k = k if not filters_present else max(k * 5, k + 20, 50)
+    requested_k = max(0, k)
+    if requested_k == 0:
+        provider_k = 0
+    else:
+        provider_k = min(
+            requested_k if not filters_present else max(requested_k * 5, requested_k + 20, 50),
+            250,
+        )
     try:
         hits = asyncio.run(
             vivary_cognee.CogneeMemoryAdapter(resolver.root).recall(text, k=provider_k)

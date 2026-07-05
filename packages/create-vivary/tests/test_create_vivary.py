@@ -478,6 +478,27 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertEqual(report["memory"]["provider"], "cognee")
             self.assertEqual(report["memory"]["status"], "unavailable")
 
+    def test_semantic_memory_cognee_reports_configured_when_adapter_installed(self):
+        with temp_workspace() as td:
+            target = Path(td) / "memory-cognee"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="second-brain",
+                memory="cognee",
+                force=False,
+                repo_root=ROOT,
+            )
+
+            def fake_importable(name):
+                return name == "vivary_cognee"
+
+            with mock.patch.object(create_vivary, "_is_importable", side_effect=fake_importable):
+                report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+        self.assertEqual(report["memory"]["provider"], "cognee")
+        self.assertEqual(report["memory"]["status"], "configured")
+        self.assertIn("vivary-memory-cognee", report["memory"]["detail"])
+
     def test_doctor_reports_invalid_memory_config_schema(self):
         with temp_workspace() as td:
             target = Path(td) / "bad-memory"
@@ -497,6 +518,26 @@ class CreateVivaryTests(unittest.TestCase):
 
         self.assertEqual(report["memory"]["status"], "misconfigured")
         self.assertIn("memory.enabled", report["memory"]["detail"])
+
+    def test_doctor_accepts_bom_prefixed_memory_config(self):
+        with temp_workspace() as td:
+            target = Path(td) / "bom-memory"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="writing",
+                memory="cognee",
+                force=False,
+                repo_root=ROOT,
+            )
+            (target / ".vivary" / "memory.toml").write_text(
+                '[memory]\nenabled = true\nmode = "semantic-provider"\nprovider = "cognee"\n',
+                encoding="utf-8-sig",
+            )
+            with mock.patch.object(create_vivary, "_is_importable", return_value=False):
+                report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+        self.assertEqual(report["memory"]["provider"], "cognee")
+        self.assertEqual(report["memory"]["status"], "unavailable")
 
     def test_capability_report_lists_memory_and_preset_specific_active_context(self):
         report = create_vivary.capability_report("knowledge-work")

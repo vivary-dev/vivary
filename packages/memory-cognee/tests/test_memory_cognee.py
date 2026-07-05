@@ -78,7 +78,15 @@ class MissingDatasetOnForgetCognee(FakeCognee):
         self.forget_calls.append(
             {"dataset": dataset, "memory_only": memory_only, "kwargs": kwargs}
         )
-        raise ValueError(f"Dataset {dataset} not found or not accessible.")
+        raise ValueError(f"Dataset {dataset} not found.")
+
+
+class InaccessibleDatasetOnForgetCognee(FakeCognee):
+    async def forget(self, *, dataset=None, memory_only=False, **kwargs):
+        self.forget_calls.append(
+            {"dataset": dataset, "memory_only": memory_only, "kwargs": kwargs}
+        )
+        raise PermissionError(f"Dataset {dataset} not accessible.")
 
 
 class CachedFunction:
@@ -324,6 +332,20 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
         self.assertTrue(report["forgot"])
         self.assertEqual(report["result"]["status"], "missing")
         self.assertFalse(manifest.exists())
+
+    def test_forget_preserves_manifest_when_dataset_is_inaccessible(self):
+        with temp_workspace() as root:
+            write_workspace(root, allow_network=True, allow_without_api_key=True)
+            fake = InaccessibleDatasetOnForgetCognee()
+            adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=fake)
+            manifest = root / ".vivary" / "memory" / "cognee" / "manifest.json"
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            manifest.write_text("{}", encoding="utf-8")
+
+            with self.assertRaisesRegex(vivary_cognee.AdapterError, "not accessible"):
+                asyncio.run(adapter.forget(approved=True))
+
+            self.assertTrue(manifest.exists())
 
     def test_index_keeps_provider_chatter_off_stdout(self):
         with temp_workspace() as root:
@@ -593,6 +615,23 @@ allow_network = false
         self.assertEqual(report["status"], "misconfigured")
         self.assertIn("not a Vivary workspace", report["detail"])
 
+    def test_doctor_reports_missing_root_without_promoting_to_workspace(self):
+        with temp_workspace() as root:
+            write_workspace(root)
+
+            report = vivary_cognee.doctor(root / "modules" / "aut")
+
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["status"], "misconfigured")
+        self.assertIn("does not exist", report["detail"])
+
+    def test_adapter_rejects_missing_root_without_promoting_to_workspace(self):
+        with temp_workspace() as root:
+            write_workspace(root)
+
+            with self.assertRaisesRegex(vivary_cognee.AdapterError, "does not exist"):
+                vivary_cognee.CogneeMemoryAdapter(root / "modules" / "aut")
+
     def test_doctor_does_not_import_cognee(self):
         with temp_workspace() as root:
             write_workspace(root)
@@ -612,6 +651,46 @@ allow_network = false
         self.assertFalse(report["ok"])
         self.assertEqual(report["status"], "misconfigured")
         self.assertIn("state_path", report["detail"])
+
+    def test_index_refuses_linked_manifest_target(self):
+        with temp_workspace() as root:
+            write_workspace(root, allow_network=True, allow_without_api_key=True)
+            fake = FakeCognee()
+            adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=fake)
+            manifest = root / ".vivary" / "memory" / "cognee" / "manifest.json"
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            outside = root.parent / f"outside-manifest-{uuid.uuid4().hex}.json"
+            outside.write_text("keep me\n", encoding="utf-8")
+            try:
+                try:
+                    manifest.symlink_to(outside)
+                except (NotImplementedError, OSError):
+                    self.skipTest("filesystem does not permit symlink creation")
+                with self.assertRaisesRegex(vivary_cognee.AdapterError, "linked Cognee manifest"):
+                    asyncio.run(adapter.index(approved=True))
+                self.assertEqual(outside.read_text(encoding="utf-8"), "keep me\n")
+            finally:
+                outside.unlink(missing_ok=True)
+
+    def test_index_refuses_hard_linked_manifest_target(self):
+        with temp_workspace() as root:
+            write_workspace(root, allow_network=True, allow_without_api_key=True)
+            fake = FakeCognee()
+            adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=fake)
+            manifest = root / ".vivary" / "memory" / "cognee" / "manifest.json"
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            outside = root.parent / f"outside-manifest-{uuid.uuid4().hex}.json"
+            outside.write_text("keep me\n", encoding="utf-8")
+            try:
+                try:
+                    os.link(outside, manifest)
+                except (AttributeError, NotImplementedError, OSError):
+                    self.skipTest("filesystem does not permit hardlink creation")
+                with self.assertRaisesRegex(vivary_cognee.AdapterError, "hard-linked Cognee manifest"):
+                    asyncio.run(adapter.index(approved=True))
+                self.assertEqual(outside.read_text(encoding="utf-8"), "keep me\n")
+            finally:
+                outside.unlink(missing_ok=True)
 
     def test_client_configures_cognee_state_under_workspace_before_import(self):
         with temp_workspace() as root:
@@ -700,6 +779,25 @@ allow_network = false
 
                     expected = str(root / ".vivary" / "memory" / "cognee" / "data")
                     self.assertEqual(os.environ["DATA_ROOT_DIRECTORY"], expected)
+
+    def test_client_does_not_import_workspace_local_dotenv(self):
+        with temp_workspace() as root:
+            write_workspace(root)
+            (root / "dotenv.py").write_text(
+                "raise AssertionError('workspace dotenv imported')\n",
+                encoding="utf-8",
+            )
+            old_cwd = Path.cwd()
+            sys.path.insert(0, str(root))
+            try:
+                os.chdir(root)
+                with mock.patch.object(vivary_cognee, "_import_cognee", return_value=object()):
+                    client = vivary_cognee.CogneeMemoryAdapter(root)._client()
+            finally:
+                os.chdir(old_cwd)
+                sys.path.remove(str(root))
+
+        self.assertIsNotNone(client)
 
 
 if __name__ == "__main__":
