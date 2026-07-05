@@ -41,3 +41,8 @@ This is an early open-source project signal, not product analytics. Use it to se
 whether the distribution surfaces are alive and whether the trend is moving; do not
 over-interpret one row or compare npm and PyPI numbers as if the registries count the
 same way.
+
+The SVG chart size is fixed (`760x300`). The npm and PyPI bars are proportional to
+the larger of the two weekly counts in that snapshot, so a bar can shrink even when
+the total package download number rises. That is a data-scale change, not a badge or
+container resize.
