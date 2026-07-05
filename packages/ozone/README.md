@@ -19,6 +19,7 @@ ozone's core.
 ```bash
 python ozone.py review --root <workspace>      # findings over the graph
 python ozone.py review --root <workspace> --pack context-budget
+python ozone.py review --root <workspace> --pack editorial
 python ozone.py review --root <workspace> --pack all
 python ozone.py review --root <workspace> --strict   # gate mode: exit 1 on warnings
 python ozone.py impact <id> --root <workspace> # what depends on <id> (blast radius)
@@ -31,8 +32,8 @@ exist), e.g. pre-merge or in CI. `tropo check` remains the hard structural gate;
 ozone is the relationship/impact review layered on top.
 
 `ozone review` defaults to `--pack structure` for stable CI. Use
-`--pack context-budget` to review context bloat surfaces, or `--pack all` to run every
-deterministic pack.
+`--pack context-budget` to review context bloat surfaces, `--pack editorial` to review
+writing-workspace coverage, or `--pack all` to run every deterministic pack.
 
 ## The `structure` pack
 
@@ -60,6 +61,21 @@ heartbeat reports, `.vivary/**`, or `.git/**`.
 | `module-index-large` | info | `modules/index.md` or `modules/*/index.md` exceeds 120 lines or 8000 chars |
 | `bulk-load-cue` | info | public routing text tells agents to read/load/scan/open whole repos, docs trees, folders, or everything |
 | `duplicate-routing-block` | info | an exact normalized routing block over 100 chars repeats across public routing surfaces |
+
+## The `editorial` pack
+
+Deterministic editorial coverage findings over writing folders only. It stays silent
+for non-writing workspaces, and looks for graph coverage across `drafts/`,
+`manuscripts/`, `reviews/`, `editorial-reviews/`, `edits/`, `revisions/`,
+`outlines/`, `structures/`, and `beats/`.
+
+| rule | severity | fires when |
+|---|---|---|
+| `draft-unreviewed` | warn | a `drafts/` or `manuscripts/` node has no linked review |
+| `draft-unedited` | info | a draft/manuscript has no linked edit or revision |
+| `draft-structure-missing` | info | a draft/manuscript has no linked outline, beat sheet, or structure note |
+| `review-unlinked` | warn | a review is not linked to a draft or manuscript |
+| `edit-unlinked` | warn | an edit/revision is not linked to a draft, manuscript, or review |
 
 ## Render
 
