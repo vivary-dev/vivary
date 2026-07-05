@@ -447,12 +447,14 @@ vivary-cognee forget --root . --yes [--json]
 | Command | What it does |
 |---|---|
 | `doctor` | Reports Cognee adapter readiness, typed node count, manifest path, and stale/healthy/unavailable status. |
-| `index` | Builds privacy-filtered typed Tropo node packets and sends them to Cognee. Requires `--yes` unless `--dry-run` is set. |
-| `recall <query>` | Calls Cognee recall, then returns only hits that contain known Vivary node ids from the current typed graph. |
-| `forget` | Removes the workspace dataset from Cognee provider memory. Requires `--yes`. |
+| `index` | Builds privacy-filtered typed Tropo node packets and sends them to Cognee. Requires `--yes` unless `--dry-run` is set, and requires `memory.cognee.allow_network = true` before provider runtime calls. |
+| `recall <query>` | Calls Cognee recall when network/provider runtime is explicitly allowed, then returns only hits that contain known Vivary node ids from the current typed graph. |
+| `forget` | Removes the workspace dataset from Cognee provider memory. Requires `--yes` and explicit provider runtime allowance. |
 
 The adapter uses `tropo` graph truth for ids, types, paths, and edges. Provider state
-under `.vivary/memory/cognee/` is rebuildable cache, not source truth.
+under `.vivary/memory/cognee/` is rebuildable cache, not source truth. The generated
+Cognee policy starts with `allow_network = false`; that is an enforced gate so
+doctor/dry-run receipts can prove readiness without making embedding or LLM calls.
 
 ```bash
 # Human flow — interactive wizard:

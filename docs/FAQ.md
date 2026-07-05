@@ -122,7 +122,8 @@ to `create-vivary init`. `local` writes local-only semantic-memory policy.
 Cognee, index files, start a server, use an API key, or send data anywhere. Those
 remain explicit gates. The optional `vivary-memory-cognee` package adds the runtime
 adapter (`vivary-cognee doctor/index/recall/forget`) for users who explicitly install
-it and approve indexing.
+it, review dry-run output, set `memory.cognee.allow_network = true`, and approve
+indexing.
 
 ### What is the wizard?
 When you run `create-vivary init` on a terminal that supports input, it prompts you in plain English — no database jargon — to pick a storage tier (local file, local LanceDB, or cloud config) and optional semantic-memory policy. For scripted selection, pass `--no-wizard --storage embedded --memory local --yes` or use `--auto`; in human mode, the wizard asks and its answers drive storage and memory policy. Use `create-vivary wizard <target>` to reconfigure an existing workspace without re-scaffolding.

@@ -235,9 +235,16 @@ allow_network = false
 api_key_env = ""
 ```
 
-Runtime/index state belongs under `.vivary/memory/` and should be ignored. The policy
-file can be committed if it contains no secrets. API keys and hosted endpoints should
-use environment variables.
+Runtime/index state belongs under `.vivary/memory/` and should be ignored. The adapter
+binds Cognee's data, system, cache, and log roots to the configured `state_path`
+before importing Cognee, so provider side effects stay in the workspace cache instead
+of user-home or package directories. The policy file can be committed if it contains
+no secrets. API keys and hosted endpoints should use environment variables.
+
+`allow_network = false` is an enforced default. `vivary-cognee doctor` and
+`vivary-cognee index --dry-run` can still prove package readiness and packet counts,
+but provider writes/recalls/forgets require `allow_network = true`; if `api_key_env`
+is set, that environment variable must also exist.
 
 Storage/database remains independently configured in `.vivary/storage.toml`. A user
 may choose file storage with Cognee disabled, embedded storage with no semantic memory,

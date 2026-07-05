@@ -18,6 +18,7 @@ import tomllib
 from dataclasses import asdict, dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path
+from contextlib import redirect_stdout
 from typing import Any
 
 
@@ -188,6 +189,11 @@ def _import_cognee():
     return importlib.import_module("cognee")
 
 
+def _load_cognee_module():
+    with redirect_stdout(sys.stderr):
+        return _import_cognee()
+
+
 def _read_body(tropo: Any, full_path: str) -> str:
     raw = Path(full_path).read_text(encoding="utf-8", errors="replace")
     try:
@@ -337,12 +343,41 @@ def build_snapshot(root: str | Path) -> MemorySnapshot:
     )
 
 
-def _manifest_path(root: Path, config: dict[str, Any]) -> Path:
+def _as_bool(value: Any, *, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    if value is None:
+        return default
+    return bool(value)
+
+
+def _cognee_state_root(root: Path, config: dict[str, Any]) -> Path:
     state_path = str(config.get("cognee", {}).get("state_path") or ".vivary/memory/cognee")
-    path = root / state_path / "manifest.json"
-    resolved_parent = path.parent.resolve(strict=False)
-    if os.path.commonpath([str(root), str(resolved_parent)]) != str(root):
+    root = root.resolve()
+    path = (root / state_path).resolve(strict=False)
+    if os.path.commonpath([str(root), str(path)]) != str(root):
         raise AdapterError("memory.cognee.state_path must stay inside the workspace")
+    return path
+
+
+def _configure_cognee_environment(root: Path, config: dict[str, Any]) -> None:
+    state_root = _cognee_state_root(root, config)
+    env_paths = {
+        "DATA_ROOT_DIRECTORY": state_root / "data",
+        "SYSTEM_ROOT_DIRECTORY": state_root / "system",
+        "CACHE_ROOT_DIRECTORY": state_root / "cache",
+        "COGNEE_LOGS_DIR": state_root / "logs",
+        "LOGS_ROOT_DIRECTORY": state_root / "logs",
+    }
+    for key, path in env_paths.items():
+        os.environ[key] = str(path)
+    os.environ.setdefault("COGNEE_TRACING_ENABLED", "false")
+
+
+def _manifest_path(root: Path, config: dict[str, Any]) -> Path:
+    path = _cognee_state_root(root, config) / "manifest.json"
     return path
 
 
@@ -364,6 +399,11 @@ async def _maybe_await(value: Any) -> Any:
     if hasattr(value, "__await__"):
         return await value
     return value
+
+
+async def _run_provider_call(call: Any, *args: Any, **kwargs: Any) -> Any:
+    with redirect_stdout(sys.stderr):
+        return await _maybe_await(call(*args, **kwargs))
 
 
 def _coerce_result_text(item: Any) -> str:
@@ -425,11 +465,23 @@ class CogneeMemoryAdapter:
     def _client(self) -> Any:
         if self._cognee_client is not None:
             return self._cognee_client
+        _configure_cognee_environment(self.root, self.config)
         try:
-            self._cognee_client = _import_cognee()
+            self._cognee_client = _load_cognee_module()
         except ImportError as exc:
             raise AdapterError("Cognee is not installed; install vivary-memory-cognee") from exc
         return self._cognee_client
+
+    def _require_provider_runtime(self, action: str) -> None:
+        cognee = self.config.get("cognee", {})
+        if not _as_bool(cognee.get("allow_network"), default=False):
+            raise AdapterError(
+                f"{action} requires memory.cognee.allow_network = true because Cognee "
+                "may call embedding or LLM providers"
+            )
+        api_key_env = str(cognee.get("api_key_env") or "").strip()
+        if api_key_env and not os.environ.get(api_key_env):
+            raise AdapterError(f"{action} requires environment variable {api_key_env}")
 
     async def index(self, *, dry_run: bool = False, approved: bool = False) -> dict[str, Any]:
         self._require_cognee_config()
@@ -451,12 +503,16 @@ class CogneeMemoryAdapter:
                 "fingerprint": snapshot.fingerprint,
             }
 
+        self._require_provider_runtime("indexing provider memory")
         client = self._client()
         for node in snapshot.nodes:
             remember = getattr(client, "remember", None)
             if remember is None:
                 raise AdapterError("installed Cognee package has no remember() API")
-            await _maybe_await(remember(node.text, dataset_name=snapshot.dataset))
+            try:
+                await _run_provider_call(remember, node.text, dataset_name=snapshot.dataset)
+            except Exception as exc:
+                raise AdapterError(f"Cognee remember() failed: {exc}") from exc
         manifest = _write_manifest(self.root, self.config, snapshot)
         return {
             "ok": True,
@@ -478,13 +534,15 @@ class CogneeMemoryAdapter:
         for edge in snapshot.edges:
             edges_by_source.setdefault(edge.source_id, []).append(edge)
 
+        self._require_provider_runtime("recalling provider memory")
         client = self._client()
         recall = getattr(client, "recall", None)
         if recall is None:
             raise AdapterError("installed Cognee package has no recall() API")
-        raw_items = await _maybe_await(
-            recall(query, datasets=[snapshot.dataset], top_k=k)
-        )
+        try:
+            raw_items = await _run_provider_call(recall, query, datasets=[snapshot.dataset], top_k=k)
+        except Exception as exc:
+            raise AdapterError(f"Cognee recall() failed: {exc}") from exc
 
         hits: list[RecallHit] = []
         seen: set[str] = set()
@@ -518,11 +576,15 @@ class CogneeMemoryAdapter:
         self._require_cognee_config()
         if not approved:
             raise AdapterError("forgetting provider memory requires --yes")
+        self._require_provider_runtime("forgetting provider memory")
         client = self._client()
         forget = getattr(client, "forget", None)
         if forget is None:
             raise AdapterError("installed Cognee package has no forget() API")
-        result = await _maybe_await(forget(dataset=self.dataset, memory_only=True))
+        try:
+            result = await _run_provider_call(forget, dataset=self.dataset, memory_only=True)
+        except Exception as exc:
+            raise AdapterError(f"Cognee forget() failed: {exc}") from exc
         manifest = _manifest_path(self.root, self.config)
         if manifest.exists():
             manifest.unlink()
@@ -570,7 +632,8 @@ def doctor(root: str | Path) -> dict[str, Any]:
             "detail": str(exc),
         }
     try:
-        _import_cognee()
+        _configure_cognee_environment(root_path, config)
+        _load_cognee_module()
     except ImportError:
         return {
             "ok": True,

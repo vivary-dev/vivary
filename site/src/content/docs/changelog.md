@@ -27,9 +27,22 @@ gates.
   chunks, and reports a structured unavailable state when semantic memory is not
   configured, installed, or indexed.
 
+### Hardened
+
+- Scoped real Cognee runtime state/log/cache directories to the workspace
+  `memory.cognee.state_path` before provider import.
+- Enforced `memory.cognee.allow_network = true` before Cognee provider runtime calls
+  so generated Cognee policy cannot accidentally index or recall through embedding/LLM
+  providers.
+- Kept Cognee import chatter off JSON stdout receipts for `vivary-cognee doctor`.
+
 ### Verification
 
 - `python packages/tropo/tests/test_tropo.py`
+- `python packages/memory-cognee/tests/test_memory_cognee.py`
+- Real installed `cognee 1.2.2` smoke: `vivary-cognee doctor --json` parsed as JSON,
+  `vivary-cognee index --dry-run --json` reported packet counts, and provider runtime
+  calls were refused while `allow_network = false`.
 
 ## [Unreleased: local run receipts] — 2026-07-05
 

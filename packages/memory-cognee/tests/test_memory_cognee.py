@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
 import json
+import os
 import shutil
 import sys
 import unittest
@@ -59,7 +62,17 @@ class FakeCognee:
         return {"status": "forgotten", "dataset": dataset}
 
 
-def write_workspace(root: Path) -> None:
+class NoisyFakeCognee(FakeCognee):
+    async def remember(self, text, *, dataset_name=None, **kwargs):
+        print("provider remember noise")
+        return await super().remember(text, dataset_name=dataset_name, **kwargs)
+
+    async def recall(self, query_text, *, datasets=None, top_k=15, **kwargs):
+        print("provider recall noise")
+        return await super().recall(query_text, datasets=datasets, top_k=top_k, **kwargs)
+
+
+def write_workspace(root: Path, *, allow_network: bool = False, api_key_env: str = "") -> None:
     (root / ".vivary").mkdir()
     (root / "modules" / "auth").mkdir(parents=True)
     (root / "changes").mkdir()
@@ -79,8 +92,9 @@ depends_on = "ref-list"
         "USER.md\nMEMORY.md\nmemory/*\n!memory/.gitkeep\nheartbeat-reports/*\n.vivary/memory/\n",
         encoding="utf-8",
     )
+    allow_network_text = "true" if allow_network else "false"
     (root / ".vivary" / "memory.toml").write_text(
-        """[memory]
+        f"""[memory]
 enabled = true
 mode = "semantic-provider"
 provider = "cognee"
@@ -94,8 +108,8 @@ fail_closed = true
 [memory.cognee]
 state_path = ".vivary/memory/cognee"
 require_explicit_index = true
-allow_network = false
-api_key_env = ""
+allow_network = {allow_network_text}
+api_key_env = "{api_key_env}"
 """,
         encoding="utf-8",
     )
@@ -182,15 +196,23 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
 
     def test_index_requires_explicit_approval_for_provider_writes(self):
         with temp_workspace() as root:
-            write_workspace(root)
+            write_workspace(root, allow_network=True)
             adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=FakeCognee())
 
             with self.assertRaisesRegex(vivary_cognee.AdapterError, "--yes"):
                 asyncio.run(adapter.index())
 
-    def test_index_sends_typed_packets_and_writes_manifest(self):
+    def test_index_refuses_provider_runtime_when_network_is_disabled(self):
         with temp_workspace() as root:
             write_workspace(root)
+            adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=FakeCognee())
+
+            with self.assertRaisesRegex(vivary_cognee.AdapterError, "allow_network"):
+                asyncio.run(adapter.index(approved=True))
+
+    def test_index_sends_typed_packets_and_writes_manifest(self):
+        with temp_workspace() as root:
+            write_workspace(root, allow_network=True)
             fake = FakeCognee()
             adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=fake)
 
@@ -207,6 +229,20 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
         self.assertNotIn("private identity token", sent_text)
         self.assertNotIn("private durable memory", sent_text)
 
+    def test_index_keeps_provider_chatter_off_stdout(self):
+        with temp_workspace() as root:
+            write_workspace(root, allow_network=True)
+            fake = NoisyFakeCognee()
+            adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=fake)
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                report = asyncio.run(adapter.index(approved=True))
+
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertGreater(report["indexed"], 0)
+
     def test_recall_returns_only_known_public_typed_node_hits(self):
         recall_items = [
             {"text": "strong match\nvivary_node_id: auth\nreason: auth"},
@@ -215,7 +251,7 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
             {"text": "opaque untyped chunk with no Vivary marker"},
         ]
         with temp_workspace() as root:
-            write_workspace(root)
+            write_workspace(root, allow_network=True)
             fake = FakeCognee(recall_items=recall_items)
             adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=fake)
 
@@ -227,6 +263,38 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
         self.assertEqual(hits[0].provider, "cognee")
         self.assertEqual(fake.recall_calls[0]["top_k"], 3)
 
+    def test_recall_keeps_provider_chatter_off_stdout(self):
+        with temp_workspace() as root:
+            write_workspace(root, allow_network=True)
+            fake = NoisyFakeCognee(
+                recall_items=[{"text": "strong match\nvivary_node_id: auth"}]
+            )
+            adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=fake)
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                hits = asyncio.run(adapter.recall("login identity"))
+
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual([hit.node_id for hit in hits], ["auth"])
+
+    def test_recall_refuses_provider_runtime_when_network_is_disabled(self):
+        with temp_workspace() as root:
+            write_workspace(root)
+            adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=FakeCognee())
+
+            with self.assertRaisesRegex(vivary_cognee.AdapterError, "allow_network"):
+                asyncio.run(adapter.recall("login identity"))
+
+    def test_index_requires_configured_api_key_env_when_present(self):
+        with temp_workspace() as root:
+            write_workspace(root, allow_network=True, api_key_env="VIVARY_TEST_COGNEE_KEY")
+            adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=FakeCognee())
+
+            with self.assertRaisesRegex(vivary_cognee.AdapterError, "VIVARY_TEST_COGNEE_KEY"):
+                asyncio.run(adapter.index(approved=True))
+
     def test_doctor_reports_unavailable_without_cognee_import(self):
         with temp_workspace() as root:
             write_workspace(root)
@@ -235,6 +303,41 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "unavailable")
         self.assertEqual(report["provider"], "cognee")
+
+    def test_doctor_configures_cognee_state_under_workspace_before_import(self):
+        with temp_workspace() as root:
+            write_workspace(root)
+            state_root = root / ".vivary" / "memory" / "cognee"
+
+            def fake_import():
+                self.assertEqual(os.environ["DATA_ROOT_DIRECTORY"], str(state_root / "data"))
+                self.assertEqual(os.environ["SYSTEM_ROOT_DIRECTORY"], str(state_root / "system"))
+                self.assertEqual(os.environ["CACHE_ROOT_DIRECTORY"], str(state_root / "cache"))
+                self.assertEqual(os.environ["COGNEE_LOGS_DIR"], str(state_root / "logs"))
+                return object()
+
+            with mock.patch.dict(os.environ, {}, clear=False):
+                with mock.patch.object(vivary_cognee, "_import_cognee", side_effect=fake_import):
+                    report = vivary_cognee.doctor(root)
+
+        self.assertEqual(report["status"], "stale")
+
+    def test_doctor_keeps_provider_import_chatter_off_stdout(self):
+        with temp_workspace() as root:
+            write_workspace(root)
+
+            def noisy_import():
+                print("cognee import noise")
+                return object()
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with mock.patch.object(vivary_cognee, "_import_cognee", side_effect=noisy_import):
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    report = vivary_cognee.doctor(root)
+
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(report["status"], "stale")
 
 
 if __name__ == "__main__":

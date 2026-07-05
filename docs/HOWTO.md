@@ -201,7 +201,9 @@ vivary-cognee recall "which notes explain the auth decision?" --root . --json
 ```
 
 The adapter sends privacy-filtered typed Tropo node packets and ignores recall hits
-that do not map back to known Vivary node ids.
+that do not map back to known Vivary node ids. Real provider writes/recalls are blocked
+until `memory.cognee.allow_network = true`; if `memory.cognee.api_key_env` is set, that
+environment variable must also exist.
 
 ## Use Vivary in CI
 

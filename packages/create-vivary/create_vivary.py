@@ -1489,7 +1489,8 @@ vivary-cognee index --root . --dry-run --json
 ```
 
 Do not run `vivary-cognee index --yes` until the human approves provider memory
-writes.
+writes, sets `memory.cognee.allow_network = true`, and configures the chosen provider
+credentials.
 """
     return f"""---
 project: {project}

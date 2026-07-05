@@ -8,6 +8,7 @@ This package keeps Vivary graph-first:
 - `vivary-cognee index` sends only privacy-filtered typed node packets to Cognee.
 - `vivary-cognee recall` accepts only hits that map back to known Vivary node ids.
 - provider state under `.vivary/memory/cognee/` is rebuildable cache.
+- Cognee runtime directories are scoped to the workspace `state_path`.
 
 Install this package only when a workspace explicitly opts into Cognee:
 
@@ -25,5 +26,10 @@ vivary-cognee recall "where is auth handled" --root . --json
 vivary-cognee forget --root . --yes --json
 ```
 
-Indexing and forgetting require `--yes` because they write provider memory. The
-adapter never imports Cognee from core Vivary packages.
+Indexing and forgetting require `--yes` because they write provider memory. Provider
+runtime calls also require `memory.cognee.allow_network = true`; the generated
+default is `false`, so dry-runs and doctor checks are safe until a human explicitly
+enables the Cognee/embedding provider path. If `memory.cognee.api_key_env` is set,
+that environment variable must be present before provider writes or recalls run.
+
+The adapter never imports Cognee from core Vivary packages.
