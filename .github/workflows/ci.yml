@@ -35,6 +35,57 @@ jobs:
         run: python packages/create-vivary/tests/test_strato_integrity.py
       - name: memory-cognee
         run: python packages/memory-cognee/tests/test_memory_cognee.py
+      - name: packaged optional semantic bridge smoke
+        shell: bash
+        run: |
+          python -m pip install --no-deps ./packages/tropo ./packages/memory-cognee
+          smoke="$(mktemp -d)"
+          mkdir -p "$smoke/ws/.vivary" "$smoke/ws/modules/auth"
+          cat > "$smoke/ws/tropo.toml" <<'EOF'
+          packs = ["repo-graph"]
+          EOF
+          cat > "$smoke/ws/.gitignore" <<'EOF'
+          .vivary/memory/
+          USER.md
+          MEMORY.md
+          EOF
+          cat > "$smoke/ws/.vivary/memory.toml" <<'EOF'
+          [memory]
+          enabled = true
+          mode = "semantic-provider"
+          provider = "cognee"
+
+          [memory.cognee]
+          state_path = ".vivary/memory/cognee"
+          allow_network = false
+          allow_without_api_key = true
+          EOF
+          cat > "$smoke/ws/modules/auth/index.md" <<'EOF'
+          ---
+          project: smoke
+          status: active
+          ---
+          # Auth
+
+          Authentication module.
+          EOF
+          set +e
+          tropo query "auth" --root "$smoke/ws" --mode semantic --json > "$smoke/out.json"
+          rc=$?
+          set -e
+          python - "$smoke/out.json" "$rc" <<'PY'
+          import json
+          import sys
+
+          data = json.loads(open(sys.argv[1], encoding="utf-8").read())
+          rc = int(sys.argv[2])
+          assert rc == 1, rc
+          assert data["mode"] == "semantic"
+          assert data["semantic"]["provider"] == "cognee"
+          assert data["semantic"]["status"] == "unavailable"
+          assert "allow_network" in data["semantic"]["detail"]
+          assert data["results"] == []
+          PY
       - name: assets parity
         run: python packages/create-vivary/tests/test_assets_parity.py
       - name: npm launcher

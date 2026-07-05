@@ -94,6 +94,40 @@ powershell -ExecutionPolicy Bypass -File scripts/install-local-clis.ps1
 The script uninstalls existing Vivary uv tools, then installs this checkout.
 This prevents stale global tools from silently testing an older package.
 
+### Pre-PR hardening and review SOP
+
+Before opening a PR for an optional provider, installer, filesystem, release, or
+agent-execution change, run a hostile review pass and turn repeat failures into
+tests or docs before pushing:
+
+- **Direct CLI execution:** run changed Python entry files directly, not only through
+  imports or mocks. A unit suite can miss script-only failures such as missing
+  `importlib.util`.
+- **Real optional dependency smoke:** when a feature wraps an optional package, create
+  an ignored disposable environment, install the real dependency there, run package
+  presence/dry-run/blocking smokes, and delete the disposable environment after
+  verification. Do not commit proof sandboxes.
+- **Packaged bridge smoke:** when source code imports an optional sibling package
+  through the installed CLI path, add a CI smoke that installs the local packages and
+  exercises the bridge. Use `--no-deps` only when the smoke is intentionally proving
+  package/import boundaries without provider runtime or network calls.
+- **No silent provider side effects:** optional providers must be explicit about
+  network, API-key, telemetry, dotenv, cache, log, and state-directory behavior.
+  Default to closed gates and workspace-scoped paths; add an explicit opt-in flag
+  for any third-party telemetry.
+- **Path and link abuse:** test symlinks, junctions, hard links, absolute paths,
+  nested roots, malformed config, stale manifests, repeated runs, and out-of-root
+  targets. Fail closed with a Vivary error, not a raw Python traceback.
+- **Security scan shape:** scan diffs for shell execution, encoded payloads, inline
+  PowerShell blobs, download-and-execute patterns, secret literals, and broad
+  filesystem deletion. Keep long prompts/instructions in reviewed files and pass
+  paths, not giant inline command strings.
+- **Docs and site truth:** update source docs, package READMEs, changelog, and synced
+  site docs in the same change. Run `cd site && npm run sync-docs && npm run build`.
+- **PR evidence:** include exact local commands, real-package smokes, known deferred
+  limits, and any reviewer-found issues in the PR body. If review found a real bug,
+  fix it before push or add the fix as a follow-up commit before merge.
+
 ## 5. Build and publish (human gate, one package at a time)
 
 Publishing is deliberate. Each publish below is its own explicit gate.

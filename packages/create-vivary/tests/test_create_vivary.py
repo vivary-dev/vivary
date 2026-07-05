@@ -1,6 +1,7 @@
 """Tests for the create-vivary workspace scaffold."""
 
 import io
+import importlib
 import json
 import os
 import sys
@@ -467,14 +468,178 @@ class CreateVivaryTests(unittest.TestCase):
             cfg = (target / ".vivary" / "memory.toml").read_text(encoding="utf-8")
             self.assertIn('provider = "cognee"', cfg)
             self.assertIn('allow_network = false', cfg)
+            self.assertIn('allow_without_api_key = false', cfg)
+            self.assertIn('allow_telemetry = false', cfg)
             doc = (target / "docs" / "semantic-memory.md").read_text(encoding="utf-8")
             self.assertIn("vivary-cognee index --root . --dry-run --json", doc)
             self.assertIn("known graph node ids", doc)
-            with mock.patch.object(create_vivary, "_is_importable", return_value=False):
+            with mock.patch.object(create_vivary, "_safe_cognee_adapter_available", return_value=False):
                 report = create_vivary.doctor_workspace(target, repo_root=ROOT)
             self.assertTrue(report["ok"], report)
             self.assertEqual(report["memory"]["provider"], "cognee")
             self.assertEqual(report["memory"]["status"], "unavailable")
+
+    def test_semantic_memory_cognee_reports_configured_when_adapter_installed(self):
+        with temp_workspace() as td:
+            target = Path(td) / "memory-cognee"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="second-brain",
+                memory="cognee",
+                force=False,
+                repo_root=ROOT,
+            )
+
+            with mock.patch.object(create_vivary, "_safe_cognee_adapter_available", return_value=True):
+                report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+        self.assertEqual(report["memory"]["provider"], "cognee")
+        self.assertEqual(report["memory"]["status"], "configured")
+        self.assertIn("vivary-memory-cognee", report["memory"]["detail"])
+
+    def test_semantic_memory_cognee_ignores_workspace_local_adapter_spoof(self):
+        with temp_workspace() as td:
+            target = Path(td) / "memory-cognee"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="second-brain",
+                memory="cognee",
+                force=False,
+                repo_root=ROOT,
+            )
+            (target / "vivary_cognee.py").write_text("raise RuntimeError('do not import')\n", encoding="utf-8")
+            importlib.invalidate_caches()
+            old_path = list(sys.path)
+            sys.path.insert(0, str(target))
+            try:
+                with mock.patch.object(
+                    create_vivary.importlib_metadata,
+                    "version",
+                    return_value="0.1.1",
+                ):
+                    report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            finally:
+                sys.path[:] = old_path
+                importlib.invalidate_caches()
+
+        self.assertEqual(report["memory"]["provider"], "cognee")
+        self.assertEqual(report["memory"]["status"], "unavailable")
+
+    def test_semantic_memory_cognee_requires_adapter_capability_markers(self):
+        with temp_workspace() as td:
+            target = Path(td) / "memory-cognee"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="second-brain",
+                memory="cognee",
+                force=False,
+                repo_root=ROOT,
+            )
+            fake_site = Path(td) / "fake-site"
+            fake_site.mkdir()
+            (fake_site / "vivary_cognee.py").write_text('__version__ = "0.1.1"\n', encoding="utf-8")
+            importlib.invalidate_caches()
+            old_path = list(sys.path)
+            old_module = sys.modules.pop("vivary_cognee", None)
+            sys.path.insert(0, str(fake_site))
+            try:
+                with mock.patch.object(
+                    create_vivary.importlib_metadata,
+                    "version",
+                    return_value="0.1.1",
+                ):
+                    report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            finally:
+                sys.path[:] = old_path
+                if old_module is not None:
+                    sys.modules["vivary_cognee"] = old_module
+                else:
+                    sys.modules.pop("vivary_cognee", None)
+                importlib.invalidate_caches()
+
+        self.assertEqual(report["memory"]["provider"], "cognee")
+        self.assertEqual(report["memory"]["status"], "unavailable")
+
+    def test_semantic_memory_cognee_requires_callable_adapter(self):
+        with temp_workspace() as td:
+            target = Path(td) / "memory-cognee"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="second-brain",
+                memory="cognee",
+                force=False,
+                repo_root=ROOT,
+            )
+            fake_site = Path(td) / "fake-site"
+            fake_site.mkdir()
+            (fake_site / "vivary_cognee.py").write_text(
+                '__version__ = "0.1.1"\n'
+                "TROPO_SEMANTIC_ADAPTER_API = 1\n"
+                "REQUIRES_EXPLICIT_PROVIDER_GATES = True\n"
+                "CogneeMemoryAdapter = None\n",
+                encoding="utf-8",
+            )
+            importlib.invalidate_caches()
+            old_path = list(sys.path)
+            old_module = sys.modules.pop("vivary_cognee", None)
+            sys.path.insert(0, str(fake_site))
+            try:
+                with mock.patch.object(
+                    create_vivary.importlib_metadata,
+                    "version",
+                    return_value="0.1.1",
+                ):
+                    report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            finally:
+                sys.path[:] = old_path
+                if old_module is not None:
+                    sys.modules["vivary_cognee"] = old_module
+                else:
+                    sys.modules.pop("vivary_cognee", None)
+                importlib.invalidate_caches()
+
+        self.assertEqual(report["memory"]["provider"], "cognee")
+        self.assertEqual(report["memory"]["status"], "unavailable")
+
+    def test_doctor_reports_invalid_memory_config_schema(self):
+        with temp_workspace() as td:
+            target = Path(td) / "bad-memory"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="writing",
+                memory="cognee",
+                force=False,
+                repo_root=ROOT,
+            )
+            (target / ".vivary" / "memory.toml").write_text(
+                '[memory]\nenabled = "false"\nprovider = "cognee"\n',
+                encoding="utf-8",
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+        self.assertEqual(report["memory"]["status"], "misconfigured")
+        self.assertIn("memory.enabled", report["memory"]["detail"])
+
+    def test_doctor_accepts_bom_prefixed_memory_config(self):
+        with temp_workspace() as td:
+            target = Path(td) / "bom-memory"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="writing",
+                memory="cognee",
+                force=False,
+                repo_root=ROOT,
+            )
+            (target / ".vivary" / "memory.toml").write_text(
+                '[memory]\nenabled = true\nmode = "semantic-provider"\nprovider = "cognee"\n',
+                encoding="utf-8-sig",
+            )
+            with mock.patch.object(create_vivary, "_is_importable", return_value=False):
+                report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+        self.assertEqual(report["memory"]["provider"], "cognee")
+        self.assertEqual(report["memory"]["status"], "unavailable")
 
     def test_capability_report_lists_memory_and_preset_specific_active_context(self):
         report = create_vivary.capability_report("knowledge-work")
