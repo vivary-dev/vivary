@@ -96,9 +96,7 @@ This prevents stale global tools from silently testing an older package.
 
 ## 5. Build and publish (human gate, one package at a time)
 
-Publishing is manual and deliberate — there is no CI publish automation
-(moving `@vivary/create` to npm trusted publishing is tracked in issue #42).
-Each publish below is its own explicit gate.
+Publishing is deliberate. Each publish below is its own explicit gate.
 
 PyPI, per changed package:
 
@@ -109,12 +107,30 @@ uv build                        # or: python -m build
 uv publish                      # or: twine upload dist/*  (PyPI token)
 ```
 
-npm, only when create-vivary changed (lockstep with the PyPI publish):
+npm, only when create-vivary changed (lockstep with the PyPI publish), uses
+Trusted Publishing from GitHub Actions OIDC instead of a stored npm automation
+token. Configure the trusted publisher once on npmjs.com for `@vivary/create`:
+
+- Provider: GitHub Actions
+- Organization / repository: `vivary-dev` / `vivary`
+- Workflow filename: `npm-trusted-publish.yml` (filename only; the file lives in
+  `.github/workflows/`)
+- Environment: `npm-publish`
+- Allowed action: `npm publish`
+
+Equivalent npm CLI setup, when using npm 11.15.0+ with a maintainer account that
+has package write access and account-level 2FA:
 
 ```bash
-cd packages/create-vivary/npm
-npm publish                     # publishConfig.access=public is set; expect the 2FA prompt
+npm trust github @vivary/create --repo vivary-dev/vivary --file npm-trusted-publish.yml --env npm-publish --allow-publish
 ```
+
+Keep the GitHub `npm-publish` environment protected with required reviewers.
+The workflow is manually dispatched, checks out the explicit release tag, verifies
+the tag/version match, verifies PyPI/npm `create-vivary` version lockstep, runs
+the create-vivary release checks, and runs `npm pack --dry-run`. Leave
+`publish=false` for the dry-run gate; rerun with `publish=true` only after the
+npm publish gate is approved.
 
 Order when multiple packages ship: dependencies first (`vivary-tropo` before
 `ozone`/`exo`/`memory-cognee` that pin it), `create-vivary` PyPI before
