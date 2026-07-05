@@ -467,6 +467,8 @@ class CreateVivaryTests(unittest.TestCase):
             cfg = (target / ".vivary" / "memory.toml").read_text(encoding="utf-8")
             self.assertIn('provider = "cognee"', cfg)
             self.assertIn('allow_network = false', cfg)
+            self.assertIn('allow_without_api_key = false', cfg)
+            self.assertIn('allow_telemetry = false', cfg)
             doc = (target / "docs" / "semantic-memory.md").read_text(encoding="utf-8")
             self.assertIn("vivary-cognee index --root . --dry-run --json", doc)
             self.assertIn("known graph node ids", doc)
@@ -475,6 +477,26 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertTrue(report["ok"], report)
             self.assertEqual(report["memory"]["provider"], "cognee")
             self.assertEqual(report["memory"]["status"], "unavailable")
+
+    def test_doctor_reports_invalid_memory_config_schema(self):
+        with temp_workspace() as td:
+            target = Path(td) / "bad-memory"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="writing",
+                memory="cognee",
+                force=False,
+                repo_root=ROOT,
+            )
+            (target / ".vivary" / "memory.toml").write_text(
+                '[memory]\nenabled = "false"\nprovider = "cognee"\n',
+                encoding="utf-8",
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+        self.assertEqual(report["memory"]["status"], "misconfigured")
+        self.assertIn("memory.enabled", report["memory"]["detail"])
 
     def test_capability_report_lists_memory_and_preset_specific_active_context(self):
         report = create_vivary.capability_report("knowledge-work")

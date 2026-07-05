@@ -568,9 +568,39 @@ def _memory_report(target: Path) -> dict:
         }
 
     memory = data.get("memory", {})
-    enabled = bool(memory.get("enabled", False))
-    provider = str(memory.get("provider", "none"))
-    mode = str(memory.get("mode", "none"))
+    if not isinstance(memory, dict):
+        return {
+            "enabled": False,
+            "provider": "unknown",
+            "mode": "unknown",
+            "status": "misconfigured",
+            "config": str(cfg_path),
+            "privacy": "unknown",
+            "detail": "memory must be a TOML table",
+        }
+    enabled = memory.get("enabled", False)
+    provider = memory.get("provider", "none")
+    mode = memory.get("mode", "none")
+    if not isinstance(enabled, bool):
+        return {
+            "enabled": False,
+            "provider": "unknown",
+            "mode": "unknown",
+            "status": "misconfigured",
+            "config": str(cfg_path),
+            "privacy": "unknown",
+            "detail": "memory.enabled must be true or false",
+        }
+    if not isinstance(provider, str) or not isinstance(mode, str):
+        return {
+            "enabled": False,
+            "provider": "unknown",
+            "mode": "unknown",
+            "status": "misconfigured",
+            "config": str(cfg_path),
+            "privacy": "unknown",
+            "detail": "memory.provider and memory.mode must be strings",
+        }
 
     if not enabled or provider == "none":
         status = "disabled"
@@ -1490,7 +1520,8 @@ vivary-cognee index --root . --dry-run --json
 
 Do not run `vivary-cognee index --yes` until the human approves provider memory
 writes, sets `memory.cognee.allow_network = true`, and configures the chosen provider
-credentials.
+credentials. Local no-key providers must explicitly set
+`memory.cognee.allow_without_api_key = true`.
 """
     return f"""---
 project: {project}
@@ -1819,6 +1850,8 @@ state_path = ".vivary/memory/cognee"
 allow_network = false
 require_explicit_index = true
 api_key_env = ""
+allow_without_api_key = false
+allow_telemetry = false
 """,
 }
 

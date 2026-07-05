@@ -519,6 +519,24 @@ def test_build_graph_real_vault():
     assert all(not e["broken"] for e in edges)
 
 
+def test_iter_markdown_skips_symlinked_file_outside_root(tmp_path):
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    secret = outside / "secret.md"
+    secret.write_text("# Secret\n", encoding="utf-8")
+    link = root / "linked.md"
+    try:
+        link.symlink_to(secret)
+    except (OSError, NotImplementedError):
+        return
+
+    found = list(tropo.iter_markdown(str(root), [], []))
+
+    assert found == []
+
+
 def test_build_graph_marks_broken_ref(tmp_path):
     docs = _graph_tree(tmp_path, {"a.md": "---\ndepends_on: ghost\n---\n# A\n"})
     _, edges = tropo.build_graph(docs)
@@ -1004,6 +1022,42 @@ def test_cmd_query_semantic_mode_reports_unavailable_without_memory(tmp_path):
     assert "memory.toml" in out["semantic"]["detail"]
 
 
+def test_cmd_query_semantic_mode_rejects_invalid_memory_config(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "memory.toml").write_text(
+        '[memory]\nenabled = "false"\nprovider = "cognee"\n',
+        encoding="utf-8",
+    )
+
+    rc, out = _capture_rc(
+        tropo.cmd_query,
+        _query_args("release truth", mode="semantic"),
+        res(str(tmp_path)),
+    )
+
+    assert rc == 1
+    assert out["semantic"]["status"] == "misconfigured"
+    assert "memory.enabled" in out["semantic"]["detail"]
+
+
+def test_semantic_adapter_origin_rejects_workspace_local_module(tmp_path):
+    malicious = tmp_path / "vivary_cognee.py"
+    malicious.write_text("raise AssertionError('should not import')\n", encoding="utf-8")
+    allowed = Path(ROOT).parent / "memory-cognee" / "vivary_cognee.py"
+
+    assert tropo._adapter_origin_is_unsafe(str(malicious), str(tmp_path), str(allowed))
+
+
+def test_semantic_adapter_source_loader_registers_module_for_dataclasses():
+    adapter_path = Path(ROOT).parent / "memory-cognee" / "vivary_cognee.py"
+
+    module = tropo._load_cognee_adapter_from_path(str(adapter_path))
+
+    assert hasattr(module, "CogneeMemoryAdapter")
+
+
 def test_cmd_query_semantic_mode_returns_optional_provider_hits(tmp_path):
     _search_vault(tmp_path)
     vivary_dir = tmp_path / ".vivary"
@@ -1032,9 +1086,11 @@ def test_cmd_query_semantic_mode_returns_optional_provider_hits(tmp_path):
             return [FakeHit()]
 
     previous = sys.modules.get("vivary_cognee")
+    allowed = Path(ROOT).parent / "memory-cognee" / "vivary_cognee.py"
     sys.modules["vivary_cognee"] = types.SimpleNamespace(
         CogneeMemoryAdapter=FakeAdapter,
         AdapterError=RuntimeError,
+        __file__=str(allowed),
     )
     try:
         rc, out = _capture_rc(
@@ -1082,9 +1138,11 @@ def test_cmd_query_semantic_mode_applies_graph_filters(tmp_path):
             return [FakeHit()]
 
     previous = sys.modules.get("vivary_cognee")
+    allowed = Path(ROOT).parent / "memory-cognee" / "vivary_cognee.py"
     sys.modules["vivary_cognee"] = types.SimpleNamespace(
         CogneeMemoryAdapter=FakeAdapter,
         AdapterError=RuntimeError,
+        __file__=str(allowed),
     )
     try:
         rc, out = _capture_rc(

@@ -30,6 +30,14 @@ Indexing and forgetting require `--yes` because they write provider memory. Prov
 runtime calls also require `memory.cognee.allow_network = true`; the generated
 default is `false`, so dry-runs and doctor checks are safe until a human explicitly
 enables the Cognee/embedding provider path. If `memory.cognee.api_key_env` is set,
-that environment variable must be present before provider writes or recalls run.
+that environment variable must be present before provider writes or recalls run. Local
+providers that intentionally need no API key must set
+`memory.cognee.allow_without_api_key = true`. Cognee telemetry is disabled by
+default unless `memory.cognee.allow_telemetry = true` is set explicitly.
+`doctor` checks package presence without importing Cognee runtime; runtime commands
+bind Cognee's state/cache/log roots to the workspace before import.
+Recall requires a current manifest fingerprint. Approved index replaces the previous
+dataset first, and `forget --yes` requests dataset deletion instead of a memory-only
+reset.
 
 The adapter never imports Cognee from core Vivary packages.

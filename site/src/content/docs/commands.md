@@ -449,15 +449,22 @@ vivary-cognee forget --root . --yes [--json]
 
 | Command | What it does |
 |---|---|
-| `doctor` | Reports Cognee adapter readiness, typed node count, manifest path, and stale/healthy/unavailable status. |
+| `doctor` | Reports Cognee adapter readiness, typed node count, manifest path, and stale/healthy/unavailable status without importing Cognee runtime. |
 | `index` | Builds privacy-filtered typed Tropo node packets and sends them to Cognee. Requires `--yes` unless `--dry-run` is set, and requires `memory.cognee.allow_network = true` before provider runtime calls. |
-| `recall <query>` | Calls Cognee recall when network/provider runtime is explicitly allowed, then returns only hits that contain known Vivary node ids from the current typed graph. |
+| `recall <query>` | Calls Cognee recall when network/provider runtime is explicitly allowed and the manifest fingerprint matches the current graph, then returns only hits that contain known Vivary node ids from the current typed graph. |
 | `forget` | Removes the workspace dataset from Cognee provider memory. Requires `--yes` and explicit provider runtime allowance. |
 
 The adapter uses `tropo` graph truth for ids, types, paths, and edges. Provider state
 under `.vivary/memory/cognee/` is rebuildable cache, not source truth. The generated
 Cognee policy starts with `allow_network = false`; that is an enforced gate so
-doctor/dry-run receipts can prove readiness without making embedding or LLM calls.
+doctor/dry-run receipts can prove readiness without importing provider runtime or
+making embedding or LLM calls. Runtime provider calls also require `api_key_env` or
+the explicit local-provider setting `allow_without_api_key = true`. Third-party
+Cognee telemetry is disabled by default unless the workspace explicitly sets
+`allow_telemetry = true`.
+Approved index replaces the prior dataset, and recall refuses stale
+or missing manifests so provider results cannot outrun Tropo graph truth. Tropo refuses
+workspace-local `vivary_cognee.py` adapter imports for semantic query mode.
 
 ```bash
 # Human flow — interactive wizard:

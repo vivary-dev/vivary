@@ -233,6 +233,8 @@ state_path = ".vivary/memory/cognee"
 require_explicit_index = true
 allow_network = false
 api_key_env = ""
+allow_without_api_key = false
+allow_telemetry = false
 ```
 
 Runtime/index state belongs under `.vivary/memory/` and should be ignored. The adapter
@@ -243,8 +245,16 @@ no secrets. API keys and hosted endpoints should use environment variables.
 
 `allow_network = false` is an enforced default. `vivary-cognee doctor` and
 `vivary-cognee index --dry-run` can still prove package readiness and packet counts,
-but provider writes/recalls/forgets require `allow_network = true`; if `api_key_env`
-is set, that environment variable must also exist.
+but provider writes/recalls/forgets require `allow_network = true`; they also require
+either a populated `api_key_env` whose environment variable exists, or the explicit
+local-provider escape hatch `allow_without_api_key = true`. Cognee telemetry is
+disabled by default through `allow_telemetry = false`; setting it to `true` is an
+explicit third-party telemetry opt-in.
+
+Provider recall is graph-fingerprint gated: if the manifest is missing or stale, recall
+refuses and asks for `vivary-cognee index --yes`. Approved index replaces the prior
+dataset before remembering current node packets, and `forget --yes` requests dataset
+deletion rather than a memory-only reset.
 
 Storage/database remains independently configured in `.vivary/storage.toml`. A user
 may choose file storage with Cognee disabled, embedded storage with no semantic memory,

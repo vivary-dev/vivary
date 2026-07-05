@@ -31,15 +31,32 @@ gates.
 - Enforced `memory.cognee.allow_network = true` before Cognee provider runtime calls
   so generated Cognee policy cannot accidentally index or recall through embedding/LLM
   providers.
-- Kept Cognee import chatter off JSON stdout receipts for `vivary-cognee doctor`.
+- Required either `memory.cognee.api_key_env` or explicit
+  `memory.cognee.allow_without_api_key = true` before provider runtime calls.
+- Disabled Cognee third-party telemetry by default with
+  `memory.cognee.allow_telemetry = false`, while still allowing an explicit opt-in.
+- Rejected invalid semantic-memory TOML schema instead of coercing truthy strings or
+  integers into safety gates.
+- Refused semantic provider snapshots that resolve Markdown files outside the workspace
+  through symlinks or Windows junctions.
+- Made provider recall require a current manifest fingerprint, and made approved index
+  replace the prior Cognee dataset before remembering current node packets.
+- Made `vivary-cognee forget` request full dataset deletion instead of memory-only
+  deletion.
+- Hardened `tropo query --mode semantic` against workspace-local `vivary_cognee.py`
+  import hijacking.
+- Kept `vivary-cognee doctor` package-presence-only, avoiding Cognee import side
+  effects, suppressed Cognee dotenv autoload during runtime import, and kept provider
+  import/call chatter off JSON stdout for runtime commands.
 
 ### Verification
 
 - `python packages/tropo/tests/test_tropo.py`
 - `python packages/memory-cognee/tests/test_memory_cognee.py`
-- Real installed `cognee 1.2.2` smoke: `vivary-cognee doctor --json` parsed as JSON,
-  `vivary-cognee index --dry-run --json` reported packet counts, and provider runtime
-  calls were refused while `allow_network = false`.
+- Real installed `cognee 1.2.2` smoke: `vivary-cognee doctor --json` reported the
+  installed package without importing provider runtime, `vivary-cognee index --dry-run
+  --json` reported packet counts, and provider runtime calls were refused while
+  `allow_network = false`.
 
 ## [Unreleased: local run receipts] — 2026-07-05
 

@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import hashlib
 import importlib
+import importlib.util
 import json
 import os
 import re
@@ -18,7 +19,7 @@ import tomllib
 from dataclasses import asdict, dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from typing import Any
 
 
@@ -34,6 +35,7 @@ DEFAULT_PRIVATE_PATTERNS = (
     ".git/**",
 )
 NODE_ID_RE = re.compile(r"\bvivary_node_id:\s*([A-Za-z0-9._-]+)\b")
+WORKSPACE_MARKERS = ("tropo.toml", MEMORY_CONFIG)
 
 
 class AdapterError(RuntimeError):
@@ -123,6 +125,56 @@ def _ignored_by_gitignore(rel_path: str, rules: list[tuple[bool, str]]) -> bool:
     return ignored
 
 
+def _resolve_workspace_root(target: str | Path) -> Path:
+    path = Path(target).resolve()
+    start = path if path.is_dir() else path.parent
+    for candidate in (start, *start.parents):
+        if any((candidate / marker).exists() for marker in WORKSPACE_MARKERS):
+            return candidate
+    return start
+
+
+def _looks_like_workspace(root: Path) -> bool:
+    return any((root / marker).exists() for marker in WORKSPACE_MARKERS)
+
+
+def _toml_table(value: Any, name: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise AdapterError(f"{name} must be a TOML table")
+    return dict(value)
+
+
+def _toml_bool(table: dict[str, Any], key: str, default: bool, table_name: str) -> bool:
+    if key not in table:
+        return default
+    value = table[key]
+    if not isinstance(value, bool):
+        raise AdapterError(f"{table_name}.{key} must be true or false")
+    return value
+
+
+def _toml_str(table: dict[str, Any], key: str, default: str, table_name: str) -> str:
+    if key not in table:
+        return default
+    value = table[key]
+    if not isinstance(value, str):
+        raise AdapterError(f"{table_name}.{key} must be a string")
+    return value
+
+
+def _toml_str_list(
+    table: dict[str, Any], key: str, default: list[str], table_name: str
+) -> list[str]:
+    if key not in table:
+        return list(default)
+    value = table[key]
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise AdapterError(f"{table_name}.{key} must be a list of strings")
+    return list(value)
+
+
 def _load_memory_config(root: Path) -> dict[str, Any]:
     path = root / MEMORY_CONFIG
     if not path.exists():
@@ -138,13 +190,50 @@ def _load_memory_config(root: Path) -> dict[str, Any]:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise AdapterError(f"invalid {MEMORY_CONFIG}: {exc}") from exc
-    memory = data.get("memory", {})
+    memory = _toml_table(data.get("memory", {}), "memory")
+    enabled = _toml_bool(memory, "enabled", False, "memory")
+    provider = _toml_str(memory, "provider", "none", "memory")
+    mode = _toml_str(memory, "mode", "none", "memory")
+    privacy = _toml_table(memory.get("privacy", {}), "memory.privacy")
+    cognee = _toml_table(memory.get("cognee", {}), "memory.cognee")
+    privacy.update(
+        {
+            "respect_gitignore": _toml_bool(
+                privacy, "respect_gitignore", True, "memory.privacy"
+            ),
+            "respect_vivary_private": _toml_bool(
+                privacy, "respect_vivary_private", True, "memory.privacy"
+            ),
+            "fail_closed": _toml_bool(privacy, "fail_closed", True, "memory.privacy"),
+            "private_paths": _toml_str_list(
+                privacy, "private_paths", [], "memory.privacy"
+            ),
+        }
+    )
+    cognee.update(
+        {
+            "state_path": _toml_str(
+                cognee, "state_path", ".vivary/memory/cognee", "memory.cognee"
+            ),
+            "allow_network": _toml_bool(cognee, "allow_network", False, "memory.cognee"),
+            "require_explicit_index": _toml_bool(
+                cognee, "require_explicit_index", True, "memory.cognee"
+            ),
+            "api_key_env": _toml_str(cognee, "api_key_env", "", "memory.cognee"),
+            "allow_without_api_key": _toml_bool(
+                cognee, "allow_without_api_key", False, "memory.cognee"
+            ),
+            "allow_telemetry": _toml_bool(
+                cognee, "allow_telemetry", False, "memory.cognee"
+            ),
+        }
+    )
     return {
-        "enabled": bool(memory.get("enabled", False)),
-        "provider": str(memory.get("provider", "none")),
-        "mode": str(memory.get("mode", "none")),
-        "privacy": dict(memory.get("privacy", {})),
-        "cognee": dict(memory.get("cognee", {})),
+        "enabled": enabled,
+        "provider": provider,
+        "mode": mode,
+        "privacy": privacy,
+        "cognee": cognee,
         "config": str(path),
     }
 
@@ -189,9 +278,48 @@ def _import_cognee():
     return importlib.import_module("cognee")
 
 
+def _cognee_available() -> bool:
+    return importlib.util.find_spec("cognee") is not None
+
+
+@contextmanager
+def _without_dotenv_autoload():
+    try:
+        dotenv = importlib.import_module("dotenv")
+    except ImportError:
+        yield
+        return
+    original = getattr(dotenv, "load_dotenv", None)
+    if original is None:
+        yield
+        return
+    dotenv.load_dotenv = lambda *args, **kwargs: False
+    try:
+        yield
+    finally:
+        dotenv.load_dotenv = original
+
+
 def _load_cognee_module():
-    with redirect_stdout(sys.stderr):
+    with redirect_stdout(sys.stderr), _without_dotenv_autoload():
         return _import_cognee()
+
+
+def _clear_cognee_config_caches() -> None:
+    cache_functions = {
+        "cognee.base_config": ("get_base_config",),
+        "cognee.infrastructure.databases.graph.config": ("get_graph_config",),
+        "cognee.infrastructure.databases.vector.config": ("get_vectordb_config",),
+        "cognee.infrastructure.llm.config": ("get_llm_config",),
+    }
+    for module_name, function_names in cache_functions.items():
+        module = sys.modules.get(module_name)
+        if module is None:
+            continue
+        for function_name in function_names:
+            cache_clear = getattr(getattr(module, function_name, None), "cache_clear", None)
+            if callable(cache_clear):
+                cache_clear()
 
 
 def _read_body(tropo: Any, full_path: str) -> str:
@@ -255,6 +383,20 @@ def _fingerprint(nodes: list[MemoryNode], edges: list[MemoryEdge]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _inside_root(root: Path, path: Path) -> bool:
+    try:
+        return os.path.commonpath([str(root), str(path)]) == str(root)
+    except ValueError:
+        return False
+
+
+def _resolve_public_file(root: Path, full_path: str | Path, rel_path: str) -> Path:
+    resolved = Path(full_path).resolve(strict=False)
+    if not _inside_root(root, resolved):
+        raise AdapterError(f"semantic memory refuses out-of-root file: {rel_path}")
+    return resolved
+
+
 def _dataset_name(root: Path, config: dict[str, Any]) -> str:
     configured = config.get("cognee", {}).get("dataset")
     if configured:
@@ -269,20 +411,25 @@ def build_snapshot(root: str | Path) -> MemorySnapshot:
     privacy = config.get("privacy", {})
     patterns = _privacy_patterns(config)
     gitignore_rules = _gitignore_rules(root_path)
-    respect_gitignore = bool(privacy.get("respect_gitignore", True))
+    respect_gitignore = privacy.get("respect_gitignore", True)
 
     tropo = _import_tropo()
     resolver = tropo.ConfigResolver(str(root_path), str(Path(tropo.__file__).parent))
-    docs = tropo.analyze(str(root_path), [], resolver)
-    graph_nodes, graph_edges = tropo.build_graph(docs)
+    try:
+        docs = tropo.analyze(str(root_path), [], resolver)
+        graph_nodes, graph_edges = tropo.build_graph(docs)
+    except Exception as exc:
+        raise AdapterError(f"failed to build Tropo graph: {exc}") from exc
 
     public_ids: set[str] = set()
     by_id: dict[str, Any] = {}
+    safe_full_paths: dict[str, Path] = {}
     for doc in docs:
         node_id = doc.derived.get("id")
         rel_path = _norm(doc.rel)
         if not node_id:
             continue
+        safe_full = _resolve_public_file(root_path, doc.full, rel_path)
         if _is_private_path(
             rel_path,
             patterns=patterns,
@@ -294,6 +441,7 @@ def build_snapshot(root: str | Path) -> MemorySnapshot:
             continue
         public_ids.add(node_id)
         by_id.setdefault(node_id, doc)
+        safe_full_paths.setdefault(node_id, safe_full)
 
     memory_edges = [
         MemoryEdge(source_id=edge["from"], field=edge["field"], target_id=edge["to"])
@@ -311,7 +459,7 @@ def build_snapshot(root: str | Path) -> MemorySnapshot:
             **{k: v for k, v in doc.derived.items() if k in {"title", "created", "updated"}},
             **dict(doc.declared),
         }
-        body = _read_body(tropo, doc.full)
+        body = _read_body(tropo, safe_full_paths[node_id])
         text = _node_text(
             node_id=node_id,
             node_type=graph_node.get("type"),
@@ -343,27 +491,18 @@ def build_snapshot(root: str | Path) -> MemorySnapshot:
     )
 
 
-def _as_bool(value: Any, *, default: bool = False) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-    if value is None:
-        return default
-    return bool(value)
-
-
 def _cognee_state_root(root: Path, config: dict[str, Any]) -> Path:
     state_path = str(config.get("cognee", {}).get("state_path") or ".vivary/memory/cognee")
     root = root.resolve()
     path = (root / state_path).resolve(strict=False)
-    if os.path.commonpath([str(root), str(path)]) != str(root):
+    if not _inside_root(root, path):
         raise AdapterError("memory.cognee.state_path must stay inside the workspace")
     return path
 
 
 def _configure_cognee_environment(root: Path, config: dict[str, Any]) -> None:
     state_root = _cognee_state_root(root, config)
+    cognee = config.get("cognee", {})
     env_paths = {
         "DATA_ROOT_DIRECTORY": state_root / "data",
         "SYSTEM_ROOT_DIRECTORY": state_root / "system",
@@ -374,6 +513,8 @@ def _configure_cognee_environment(root: Path, config: dict[str, Any]) -> None:
     for key, path in env_paths.items():
         os.environ[key] = str(path)
     os.environ.setdefault("COGNEE_TRACING_ENABLED", "false")
+    if not bool(cognee.get("allow_telemetry", False)):
+        os.environ["TELEMETRY_DISABLED"] = "1"
 
 
 def _manifest_path(root: Path, config: dict[str, Any]) -> Path:
@@ -395,6 +536,17 @@ def _write_manifest(root: Path, config: dict[str, Any], snapshot: MemorySnapshot
     return path
 
 
+def _manifest_is_current(root: Path, config: dict[str, Any], snapshot: MemorySnapshot) -> bool:
+    manifest = _manifest_path(root, config)
+    if not manifest.exists():
+        return False
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return data.get("fingerprint") == snapshot.fingerprint
+
+
 async def _maybe_await(value: Any) -> Any:
     if hasattr(value, "__await__"):
         return await value
@@ -404,6 +556,13 @@ async def _maybe_await(value: Any) -> Any:
 async def _run_provider_call(call: Any, *args: Any, **kwargs: Any) -> Any:
     with redirect_stdout(sys.stderr):
         return await _maybe_await(call(*args, **kwargs))
+
+
+def _is_missing_dataset_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "dataset" in message and (
+        "not found" in message or "not accessible" in message
+    )
 
 
 def _coerce_result_text(item: Any) -> str:
@@ -448,7 +607,7 @@ def _reason_from_text(text: str) -> str:
 
 class CogneeMemoryAdapter:
     def __init__(self, root: str | Path, *, cognee_client: Any | None = None):
-        self.root = Path(root).resolve()
+        self.root = _resolve_workspace_root(root)
         self.config = _load_memory_config(self.root)
         self._cognee_client = cognee_client
 
@@ -470,16 +629,24 @@ class CogneeMemoryAdapter:
             self._cognee_client = _load_cognee_module()
         except ImportError as exc:
             raise AdapterError("Cognee is not installed; install vivary-memory-cognee") from exc
+        _configure_cognee_environment(self.root, self.config)
+        _clear_cognee_config_caches()
         return self._cognee_client
 
     def _require_provider_runtime(self, action: str) -> None:
         cognee = self.config.get("cognee", {})
-        if not _as_bool(cognee.get("allow_network"), default=False):
+        if not cognee.get("allow_network", False):
             raise AdapterError(
                 f"{action} requires memory.cognee.allow_network = true because Cognee "
                 "may call embedding or LLM providers"
             )
         api_key_env = str(cognee.get("api_key_env") or "").strip()
+        allow_without_api_key = bool(cognee.get("allow_without_api_key", False))
+        if not api_key_env and not allow_without_api_key:
+            raise AdapterError(
+                f"{action} requires memory.cognee.api_key_env or "
+                "memory.cognee.allow_without_api_key = true"
+            )
         if api_key_env and not os.environ.get(api_key_env):
             raise AdapterError(f"{action} requires environment variable {api_key_env}")
 
@@ -505,6 +672,14 @@ class CogneeMemoryAdapter:
 
         self._require_provider_runtime("indexing provider memory")
         client = self._client()
+        forget = getattr(client, "forget", None)
+        if forget is None:
+            raise AdapterError("installed Cognee package has no forget() API")
+        try:
+            await _run_provider_call(forget, dataset=snapshot.dataset, memory_only=False)
+        except Exception as exc:
+            if not _is_missing_dataset_error(exc):
+                raise AdapterError(f"Cognee forget() failed before re-index: {exc}") from exc
         for node in snapshot.nodes:
             remember = getattr(client, "remember", None)
             if remember is None:
@@ -535,6 +710,8 @@ class CogneeMemoryAdapter:
             edges_by_source.setdefault(edge.source_id, []).append(edge)
 
         self._require_provider_runtime("recalling provider memory")
+        if not _manifest_is_current(self.root, self.config, snapshot):
+            raise AdapterError("Cognee index is stale; run vivary-cognee index --yes")
         client = self._client()
         recall = getattr(client, "recall", None)
         if recall is None:
@@ -582,7 +759,7 @@ class CogneeMemoryAdapter:
         if forget is None:
             raise AdapterError("installed Cognee package has no forget() API")
         try:
-            result = await _run_provider_call(forget, dataset=self.dataset, memory_only=True)
+            result = await _run_provider_call(forget, dataset=self.dataset, memory_only=False)
         except Exception as exc:
             raise AdapterError(f"Cognee forget() failed: {exc}") from exc
         manifest = _manifest_path(self.root, self.config)
@@ -598,7 +775,14 @@ class CogneeMemoryAdapter:
 
 
 def doctor(root: str | Path) -> dict[str, Any]:
-    root_path = Path(root).resolve()
+    root_path = _resolve_workspace_root(root)
+    if not _looks_like_workspace(root_path):
+        return {
+            "ok": False,
+            "provider": "unknown",
+            "status": "misconfigured",
+            "detail": "target is not a Vivary workspace",
+        }
     try:
         config = _load_memory_config(root_path)
     except AdapterError as exc:
@@ -631,10 +815,7 @@ def doctor(root: str | Path) -> dict[str, Any]:
             "status": "misconfigured",
             "detail": str(exc),
         }
-    try:
-        _configure_cognee_environment(root_path, config)
-        _load_cognee_module()
-    except ImportError:
+    if not _cognee_available():
         return {
             "ok": True,
             "provider": "cognee",
@@ -642,7 +823,7 @@ def doctor(root: str | Path) -> dict[str, Any]:
             "dataset": snapshot.dataset,
             "nodes": len(snapshot.nodes),
             "edges": len(snapshot.edges),
-            "detail": "Cognee is not importable",
+            "detail": "Cognee package is not installed",
         }
     manifest = _manifest_path(root_path, config)
     stale = True
@@ -662,7 +843,7 @@ def doctor(root: str | Path) -> dict[str, Any]:
         "edges": len(snapshot.edges),
         "fingerprint": snapshot.fingerprint,
         "manifest": str(manifest),
-        "detail": "Cognee import is available",
+        "detail": "Cognee package is installed",
     }
 
 

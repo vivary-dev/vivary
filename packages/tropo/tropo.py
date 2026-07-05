@@ -29,6 +29,7 @@ import asyncio
 import copy
 import datetime
 import importlib
+import importlib.util
 import json
 import math
 import os
@@ -762,23 +763,39 @@ def is_excluded(relpath, patterns):
     return False
 
 
+def _realpath_within(root_real, path):
+    try:
+        path_real = os.path.normcase(os.path.realpath(path))
+        return os.path.commonpath([root_real, path_real]) == root_real
+    except ValueError:
+        return False
+
+
 def iter_markdown(root, paths, exclude):
     targets = paths or [root]
+    root_real = os.path.normcase(os.path.realpath(root))
     seen = set()
     for target in targets:
         target = os.path.abspath(target)
+        if not _realpath_within(root_real, target):
+            continue
         if os.path.isfile(target):
             rel = os.path.relpath(target, root)
             if target.endswith((".md", ".markdown")) and not is_excluded(rel, exclude) \
-                    and target not in seen:
+                    and target not in seen and _realpath_within(root_real, target):
                 seen.add(target)
                 yield target, rel
             continue
         for dirpath, dirnames, filenames in os.walk(target):
+            if not _realpath_within(root_real, dirpath):
+                dirnames[:] = []
+                continue
             reldir = os.path.relpath(dirpath, root)
             reldir = "" if reldir == "." else reldir
             dirnames[:] = sorted(
-                d for d in dirnames if not is_excluded(os.path.join(reldir, d), exclude))
+                d for d in dirnames
+                if not is_excluded(os.path.join(reldir, d), exclude)
+                and _realpath_within(root_real, os.path.join(dirpath, d)))
             for f in sorted(filenames):
                 if not f.endswith((".md", ".markdown")):
                     continue
@@ -786,7 +803,7 @@ def iter_markdown(root, paths, exclude):
                 if is_excluded(rel, exclude):
                     continue
                 full = os.path.join(dirpath, f)
-                if full not in seen:
+                if full not in seen and _realpath_within(root_real, full):
                     seen.add(full)
                     yield full, rel
 
@@ -1196,8 +1213,29 @@ def _load_memory_query_config(root):
             "detail": f"invalid {STORAGE_DIR}/{MEMORY_CONFIG_NAME}: {e}",
         }
     memory = data.get("memory", {})
-    enabled = bool(memory.get("enabled", False))
-    provider = str(memory.get("provider", "none"))
+    if not isinstance(memory, dict):
+        return {
+            "enabled": False,
+            "provider": "unknown",
+            "status": "misconfigured",
+            "detail": f"{STORAGE_DIR}/{MEMORY_CONFIG_NAME}: memory must be a TOML table",
+        }
+    enabled = memory.get("enabled", False)
+    provider = memory.get("provider", "none")
+    if not isinstance(enabled, bool):
+        return {
+            "enabled": False,
+            "provider": "unknown",
+            "status": "misconfigured",
+            "detail": f"{STORAGE_DIR}/{MEMORY_CONFIG_NAME}: memory.enabled must be true or false",
+        }
+    if not isinstance(provider, str):
+        return {
+            "enabled": False,
+            "provider": "unknown",
+            "status": "misconfigured",
+            "detail": f"{STORAGE_DIR}/{MEMORY_CONFIG_NAME}: memory.provider must be a string",
+        }
     if not enabled or provider == "none":
         return {
             "enabled": enabled,
@@ -1641,20 +1679,54 @@ def _trim_context_to_budget(results, budget):
     return trimmed, _estimate_tokens(trimmed)
 
 
-def _import_optional_cognee_adapter():
+def _load_cognee_adapter_from_path(path):
+    module_name = "_vivary_cognee_adapter"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError("cannot load vivary-memory-cognee adapter")
+    module = importlib.util.module_from_spec(spec)
+    previous = sys.modules.get(module_name)
+    sys.modules[module_name] = module
     try:
-        return importlib.import_module("vivary_cognee")
-    except ImportError:
-        package_dir = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "memory-cognee")
-        )
-        if os.path.isdir(package_dir) and package_dir not in sys.path:
-            sys.path.insert(0, package_dir)
-            try:
-                return importlib.import_module("vivary_cognee")
-            except ImportError:
-                pass
+        spec.loader.exec_module(module)
+    except Exception:
+        if previous is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = previous
         raise
+    return module
+
+
+def _adapter_origin_is_unsafe(origin, workspace_root, allowed_source):
+    if not origin:
+        return True
+    origin_real = os.path.realpath(origin)
+    allowed_real = os.path.realpath(allowed_source)
+    if origin_real == allowed_real:
+        return False
+    roots = [workspace_root, os.getcwd()]
+    return any(_is_within(os.path.realpath(root), origin_real) for root in roots)
+
+
+def _import_optional_cognee_adapter(workspace_root):
+    package_file = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "memory-cognee", "vivary_cognee.py")
+    )
+    existing = sys.modules.get("vivary_cognee")
+    if existing is not None:
+        origin = getattr(existing, "__file__", None)
+        if _adapter_origin_is_unsafe(origin, workspace_root, package_file):
+            raise ImportError("refusing workspace-local vivary_cognee adapter")
+        return existing
+    if os.path.isfile(package_file):
+        return _load_cognee_adapter_from_path(package_file)
+    spec = importlib.util.find_spec("vivary_cognee")
+    if spec is None or spec.origin is None:
+        raise ImportError("vivary-memory-cognee is not installed")
+    if _adapter_origin_is_unsafe(spec.origin, workspace_root, package_file):
+        raise ImportError("refusing workspace-local vivary_cognee adapter")
+    return importlib.import_module("vivary_cognee")
 
 
 def _hit_value(hit, name, default=None):
@@ -1695,7 +1767,7 @@ def semantic_query(resolver, text, *, k=10, type_filters=None, path_filters=None
             "detail": f"semantic query provider {provider!r} is not supported by tropo",
         }
     try:
-        vivary_cognee = _import_optional_cognee_adapter()
+        vivary_cognee = _import_optional_cognee_adapter(resolver.root)
     except ImportError:
         return 1, [], {
             "enabled": True,
