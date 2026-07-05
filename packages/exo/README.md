@@ -20,6 +20,7 @@ python exo.py conflicts --root <workspace>   # who would collide
 python exo.py board     --root <workspace>   # what's in flight
 python exo.py claim local-ci-baseline --agent connie --root <workspace>
 python exo.py roles                          # the bounded worker contracts
+python exo.py board --root <workspace> --receipt .vivary/receipts.jsonl
 ```
 
 - **`conflicts`** — among `active` work items (changes with `status: active`), flags
@@ -37,6 +38,12 @@ python exo.py roles                          # the bounded worker contracts
 - **`roles`** — strato's role grammar as bounded contracts: Orchestrator · Scout ·
   Researcher · Builder · Verifier · Reviewer · Archivist. Workers get a bounded
   contract; they never become product owners.
+
+For local debugging, pass `--receipt PATH` or set `VIVARY_RECEIPT_LOG=PATH` to append
+a dependency-free JSONL run receipt. Receipts stay local and record only command
+envelope data such as tool version, command, flag names, exit code, duration, Python,
+and platform; they do not capture stdout, stderr, file contents, agent handles,
+target ids, local paths, or graph content.
 
 To enable claims, opt into the coordination field:
 

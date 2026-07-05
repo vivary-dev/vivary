@@ -71,6 +71,11 @@ Current command surface:
 - `vivary-cognee doctor` / `index` / `recall` / `forget` from the optional
   `vivary-memory-cognee` package
 
+For local debugging and bug reports, the core CLIs accept `--receipt PATH` or
+`VIVARY_RECEIPT_LOG=PATH` to append a dependency-free JSONL run receipt. Receipts stay
+local and do not capture stdout, stderr, file contents, raw query text, target ids, or
+paths.
+
 ## Quickstart
 
 Scaffold a workspace in one npm command. No Python package install first; the launcher
@@ -91,6 +96,7 @@ create-vivary capabilities --preset second-brain --json
 create-vivary doctor my-workspace
 uvx vivary-tropo check --root my-workspace
 uvx vivary-tropo find "where is release truth owned" --root my-workspace --json
+tropo check --root my-workspace --receipt .vivary/receipts.jsonl
 
 # Agent-mode — fully non-interactive, outputs JSON:
 create-vivary init . --preset coding --auto --size large --yes --json

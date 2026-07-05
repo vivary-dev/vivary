@@ -1,4 +1,7 @@
 """Tests for the tropo engine. Run: python -m pytest tests/ (or python tests/test_tropo.py)."""
+import contextlib
+import io
+import json
 import os
 import shutil
 import sys
@@ -41,6 +44,125 @@ def cfg(root=VAULT):
 def res(root=VAULT):
     """An overlay-aware resolver rooted at the nearest tropo.toml."""
     return tropo.ConfigResolver(tropo.find_root(root), SCRIPT_DIR)
+
+
+def test_run_receipt_redacts_paths_and_keeps_json_stdout():
+    with temp_workspace() as td:
+        secret_root = td / "--secret-project-name"
+        secret_root.mkdir()
+        (secret_root / "note.md").write_text("# Note\n", encoding="utf-8")
+        receipt = td / "receipts" / "runs.jsonl"
+        buf = io.StringIO()
+
+        with contextlib.redirect_stdout(buf):
+            rc = tropo.main([
+                "map",
+                "--root",
+                str(secret_root),
+                "--json",
+                "--receipt",
+                str(receipt),
+            ])
+
+        assert rc == 0
+        assert json.loads(buf.getvalue())["root"] == "--secret-project-name"
+        record = json.loads(receipt.read_text(encoding="utf-8").strip())
+        assert record["schema"] == "vivary.run_receipt.v1"
+        assert record["tool"] == "tropo"
+        assert record["command"] == "map"
+        assert record["exit_code"] == 0
+        assert record["ok"] is True
+        assert "--json" in record["flags"]
+        assert "--root" in record["flags"]
+        assert "--receipt" not in record["flags"]
+
+        serialized = json.dumps(record, sort_keys=True)
+        assert str(secret_root) not in serialized
+        assert "--secret-project-name" not in serialized
+
+
+def test_run_receipt_equals_form_allows_option_like_path_and_malformed_does_not_write():
+    with temp_workspace() as td:
+        secret_root = td / "workspace"
+        secret_root.mkdir()
+        (secret_root / "note.md").write_text("# Note\n", encoding="utf-8")
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(td)
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = tropo.main([
+                    "map",
+                    "--root",
+                    str(secret_root),
+                    "--json",
+                    "--receipt=--runs.jsonl",
+                ])
+            assert rc == 0
+            assert (td / "--runs.jsonl").is_file()
+
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                try:
+                    tropo.main(["map", "--receipt", "--json"])
+                    assert False, "expected argparse SystemExit"
+                except SystemExit:
+                    pass
+            assert not (td / "--json").exists()
+            assert "expected one argument" in err.getvalue()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_help_receipt_failure_exits_nonzero_without_raw_path():
+    with temp_workspace() as td:
+        bad_receipt = td / "not-a-file"
+        bad_receipt.mkdir()
+        err = io.StringIO()
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            with contextlib.redirect_stderr(err):
+                try:
+                    tropo.main(["--help", "--receipt", str(bad_receipt)])
+                    assert False, "expected SystemExit"
+                except SystemExit as exc:
+                    assert exc.code == 1
+
+        message = err.getvalue()
+        assert "receipt path must be a regular file" in message
+        assert str(bad_receipt) not in message
+
+
+def test_query_and_find_receipts_do_not_record_raw_search_text():
+    with temp_workspace() as td:
+        (td / "tropo.toml").write_text("[base]\nallow_untyped = true\n", encoding="utf-8")
+        (td / "note.md").write_text("# Billing Runbook\n\nprivate needle\n", encoding="utf-8")
+        receipt = td / "runs.jsonl"
+        secret_query = "private needle"
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert tropo.main([
+                "query",
+                secret_query,
+                "--root",
+                str(td),
+                "--json",
+                "--receipt",
+                str(receipt),
+            ]) == 0
+            assert tropo.main([
+                "find",
+                secret_query,
+                "--root",
+                str(td),
+                "--json",
+                "--receipt",
+                str(receipt),
+            ]) == 0
+
+        records = [json.loads(line) for line in receipt.read_text(encoding="utf-8").splitlines()]
+        assert [record["command"] for record in records] == ["query", "find"]
+        serialized = "\n".join(json.dumps(record, sort_keys=True) for record in records)
+        assert secret_query not in serialized
+        assert str(td) not in serialized
 
 
 # --- type resolution (folder-as-type) --------------------------------------

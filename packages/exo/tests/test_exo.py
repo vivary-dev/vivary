@@ -109,6 +109,70 @@ def _tropo_check_ok(root):
         return tropo.cmd_check(args, resolver) == 0
 
 
+def test_run_receipt_appends_jsonl_without_polluting_stdout():
+    with temp_workspace() as td:
+        receipt = td / "receipts" / "runs.jsonl"
+        rc, data = _run_json(["roles", "--json", "--receipt", str(receipt)])
+
+        assert rc == 0
+        assert "roles" in data
+        record = json.loads(receipt.read_text(encoding="utf-8").strip())
+        assert record["schema"] == "vivary.run_receipt.v1"
+        assert record["tool"] == "exo"
+        assert record["command"] == "roles"
+        assert record["exit_code"] == 0
+        assert record["ok"] is True
+        assert "--json" in record["flags"]
+        assert "--receipt" not in record["flags"]
+        assert str(td) not in json.dumps(record, sort_keys=True)
+
+
+def test_malformed_receipt_flag_does_not_create_option_named_file():
+    with temp_workspace() as td:
+        old_cwd = os.getcwd()
+        err = io.StringIO()
+        try:
+            os.chdir(td)
+            with contextlib.redirect_stderr(err):
+                code, _out = _run_exit(["roles", "--receipt", "--json"])
+        finally:
+            os.chdir(old_cwd)
+
+        assert code == 2
+        assert not (td / "--json").exists()
+        assert "expected one argument" in err.getvalue()
+
+
+def test_claim_receipt_does_not_record_agent_or_target():
+    with temp_workspace() as td:
+        _claim_vault(td)
+        receipt = td / "runs.jsonl"
+        secret_agent = "private-agent"
+        secret_target = "empty"
+
+        rc, data = _run_json([
+            "claim",
+            secret_target,
+            "--agent",
+            secret_agent,
+            "--root",
+            str(td),
+            "--json",
+            "--receipt",
+            str(receipt),
+        ])
+
+        assert rc == 0
+        assert data["assignee"] == secret_agent
+        record = json.loads(receipt.read_text(encoding="utf-8").strip())
+        serialized = json.dumps(record, sort_keys=True)
+        assert record["command"] == "claim"
+        assert "--agent" in record["flags"]
+        assert secret_agent not in serialized
+        assert secret_target not in serialized
+        assert str(td) not in serialized
+
+
 def test_roles_lists_seven():
     rc, data = _run_json(["roles", "--json"])
     assert rc == 0

@@ -33,12 +33,21 @@ npx @vivary/create@latest wizard my-workspace --auto --storage embedded --yes --
 
 # Show optional preset capabilities:
 npx @vivary/create@latest capabilities --preset knowledge-work --json
+
+# Append a local debug receipt without polluting JSON stdout:
+npx @vivary/create@latest doctor my-workspace --json --receipt .vivary/receipts.jsonl
 ```
 
 Presets: `coding` · `second-brain` · `knowledge-work` · `writing`.
 
 A bare `npm create @vivary@latest <name>` maps to the `init` subcommand; you can also
 pass `init` / `doctor` / `wizard` / `capabilities` explicitly (e.g. `npm create @vivary@latest doctor my-workspace`).
+
+For local debugging, pass `--receipt PATH` or set `VIVARY_RECEIPT_LOG=PATH` to append
+a dependency-free JSONL run receipt. Receipts stay local and record only command
+envelope data such as tool version, command, flag names, exit code, duration, Python,
+and platform; they do not capture stdout, stderr, file contents, preset values,
+target paths, or environment variables.
 
 On a terminal that supports input, `init` runs a short wizard to pick a storage tier.
 For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use

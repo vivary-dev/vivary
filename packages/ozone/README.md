@@ -24,6 +24,7 @@ python ozone.py review --root <workspace> --pack all
 python ozone.py review --root <workspace> --strict   # gate mode: exit 1 on warnings
 python ozone.py impact <id> --root <workspace> # what depends on <id> (blast radius)
 python ozone.py packs                          # list rule packs
+python ozone.py review --root <workspace> --receipt .vivary/receipts.jsonl
 ```
 
 `review` is **advisory by default** (exit 0) — a work-in-progress change legitimately
@@ -34,6 +35,12 @@ ozone is the relationship/impact review layered on top.
 `ozone review` defaults to `--pack structure` for stable CI. Use
 `--pack context-budget` to review context bloat surfaces, `--pack editorial` to review
 writing-workspace coverage, or `--pack all` to run every deterministic pack.
+
+For local debugging, pass `--receipt PATH` or set `VIVARY_RECEIPT_LOG=PATH` to append
+a dependency-free JSONL run receipt. Receipts stay local and record only command
+envelope data such as tool version, command, flag names, exit code, duration, Python,
+and platform; they do not capture stdout, stderr, file contents, target ids, local
+paths, or graph content.
 
 ## The `structure` pack
 

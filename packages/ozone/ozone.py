@@ -21,12 +21,30 @@ Exit codes: 0 clean (review is advisory by default) · 1 with --strict when warn
 exist, or on a usage/config error.
 """
 import argparse
+import datetime
 import importlib.util
 import json
 import os
+import platform
 import sys
+import time
 
 __version__ = "0.2.0"
+RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
+RECEIPT_SCHEMA = "vivary.run_receipt.v1"
+COMMANDS = ("review", "impact", "packs")
+RECEIPT_VALUE_FLAGS = {"--pack", "--receipt", "--root"}
+RECEIPT_KNOWN_FLAGS = RECEIPT_VALUE_FLAGS | {
+    "--help", "--json", "--strict", "--version", "-h",
+}
+RECEIPT_RESERVED_WINDOWS_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
 
 # Review role = the workspace folder a node lives in (folder-as-type), independent of
 # the resolved type *name* (e.g. a change may resolve to type `implementation_slice`,
@@ -491,12 +509,173 @@ def cmd_packs(args):
     return 0
 
 
-def main(argv=None):
+def _extract_receipt_path(argv):
+    for index, token in enumerate(argv):
+        if token == "--":
+            break
+        if token == "--receipt":
+            if index + 1 < len(argv) and not argv[index + 1].startswith("-"):
+                return argv[index + 1], "flag"
+            return None, None
+        if token.startswith("--receipt="):
+            path = token.split("=", 1)[1]
+            return (path, "flag") if path else (None, None)
+    env_path = os.environ.get(RECEIPT_ENV)
+    if env_path:
+        return env_path, "env"
+    return None, None
+
+
+def _receipt_flags(argv):
+    flags = set()
+    skip_value = False
+    for token in argv:
+        if token == "--":
+            break
+        if skip_value:
+            skip_value = False
+            continue
+        if token.startswith("--"):
+            name = token.split("=", 1)[0]
+            if name in RECEIPT_KNOWN_FLAGS and name != "--receipt":
+                flags.add(name)
+            if name in RECEIPT_VALUE_FLAGS and "=" not in token:
+                skip_value = True
+        elif token in RECEIPT_KNOWN_FLAGS:
+            flags.add(token)
+    return sorted(flags)
+
+
+def _receipt_command(argv):
+    if "--version" in argv:
+        return "version"
+    if any(token in ("-h", "--help") for token in argv):
+        return "help"
+    skip_value = False
+    for token in argv:
+        if token == "--":
+            break
+        if skip_value:
+            skip_value = False
+            continue
+        if token.startswith("--"):
+            name = token.split("=", 1)[0]
+            if name in RECEIPT_VALUE_FLAGS and "=" not in token:
+                skip_value = True
+            continue
+        if token in COMMANDS:
+            return token
+    return "review"
+
+
+def _exit_code_value(code):
+    if code is None:
+        return 0
+    if isinstance(code, int):
+        return code
+    return 1
+
+
+def _receipt_is_reserved_windows_path(path):
+    if os.name != "nt":
+        return False
+    stem = os.path.basename(os.path.normpath(path)).split(".", 1)[0].rstrip(" .").upper()
+    return stem in RECEIPT_RESERVED_WINDOWS_NAMES
+
+
+def _receipt_has_symlink_ancestor(path):
+    target = os.path.abspath(os.path.expanduser(path))
+    current = os.path.dirname(target) or os.getcwd()
+    while True:
+        if os.path.lexists(current) and (
+            os.path.islink(current)
+            or (
+                hasattr(os.path, "isjunction")
+                and os.path.isjunction(current)
+            )
+        ):
+            return True
+        parent = os.path.dirname(current)
+        if parent == current:
+            return False
+        current = parent
+
+
+def _receipt_error_message(exc):
+    message = str(exc)
+    safe_messages = {
+        "receipt path must not be a Windows device name",
+        "receipt path must not be a symlink",
+        "receipt path must be a regular file",
+        "receipt path must not contain a symlink or junction directory",
+    }
+    if message in safe_messages:
+        return message
+    return "could not write receipt; check that the receipt path is a writable regular file"
+
+
+def _append_run_receipt(
+    *,
+    tool,
+    version,
+    argv,
+    started_at,
+    exit_code,
+    receipt_path,
+    receipt_source,
+    error_type=None,
+):
+    if not receipt_path:
+        return True
+
+    target = os.path.expanduser(receipt_path)
+    parent = os.path.dirname(os.path.abspath(target)) or os.getcwd()
+    try:
+        if _receipt_is_reserved_windows_path(target):
+            raise OSError("receipt path must not be a Windows device name")
+        if _receipt_has_symlink_ancestor(target):
+            raise OSError("receipt path must not contain a symlink or junction directory")
+        if os.path.lexists(target):
+            if os.path.islink(target):
+                raise OSError("receipt path must not be a symlink")
+            if not os.path.isfile(target):
+                raise OSError("receipt path must be a regular file")
+        os.makedirs(parent, exist_ok=True)
+        if _receipt_has_symlink_ancestor(target):
+            raise OSError("receipt path must not contain a symlink or junction directory")
+
+        record = {
+            "schema": RECEIPT_SCHEMA,
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+            "tool": tool,
+            "version": version,
+            "command": _receipt_command(argv),
+            "flags": _receipt_flags(argv),
+            "arg_count": len(argv),
+            "exit_code": exit_code,
+            "ok": exit_code == 0,
+            "duration_ms": int((time.monotonic() - started_at) * 1000),
+            "python": platform.python_version(),
+            "platform": platform.system(),
+            "receipt_source": receipt_source,
+        }
+        if error_type:
+            record["error_type"] = error_type
+        with open(target, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write(json.dumps(record, sort_keys=True, separators=(",", ":")))
+            fh.write("\n")
+    except OSError as e:
+        print(f"{tool}: receipt: {_receipt_error_message(e)}", file=sys.stderr)
+        return False
+    return True
+
+
+def _main(argv=None):
     p = argparse.ArgumentParser(prog="ozone",
                                 description="The review layer over the tropo graph.")
     p.add_argument("--version", action="version", version=f"ozone {__version__}")
     p.add_argument("command", nargs="?", default="review",
-                   choices=["review", "impact", "packs"])
+                   choices=COMMANDS)
     p.add_argument("id", nargs="?", help="impact: the node id to analyze")
     p.add_argument("--root", default=None,
                    help="workspace root (default: walk up for tropo.toml)")
@@ -506,8 +685,57 @@ def main(argv=None):
     p.add_argument("--pack", default="structure",
                    choices=["structure", "context-budget", "editorial", "all"],
                    help="review: rule pack to run (default: structure)")
+    p.add_argument("--receipt", default=None, metavar="PATH",
+                   help=f"append a local privacy-preserving JSONL run receipt (or set {RECEIPT_ENV})")
     args = p.parse_args(argv)
     return {"review": cmd_review, "impact": cmd_impact, "packs": cmd_packs}[args.command](args)
+
+
+def main(argv=None):
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    started_at = time.monotonic()
+    receipt_path, receipt_source = _extract_receipt_path(raw_argv)
+    try:
+        rc = _main(raw_argv)
+    except SystemExit as e:
+        code = _exit_code_value(e.code)
+        receipt_ok = _append_run_receipt(
+            tool="ozone",
+            version=__version__,
+            argv=raw_argv,
+            started_at=started_at,
+            exit_code=code,
+            receipt_path=receipt_path,
+            receipt_source=receipt_source,
+            error_type="SystemExit" if code else None,
+        )
+        if not receipt_ok and code == 0:
+            raise SystemExit(1) from e
+        raise
+    except Exception as e:
+        _append_run_receipt(
+            tool="ozone",
+            version=__version__,
+            argv=raw_argv,
+            started_at=started_at,
+            exit_code=1,
+            receipt_path=receipt_path,
+            receipt_source=receipt_source,
+            error_type=type(e).__name__,
+        )
+        raise
+    receipt_ok = _append_run_receipt(
+        tool="ozone",
+        version=__version__,
+        argv=raw_argv,
+        started_at=started_at,
+        exit_code=_exit_code_value(rc),
+        receipt_path=receipt_path,
+        receipt_source=receipt_source,
+    )
+    if not receipt_ok and _exit_code_value(rc) == 0:
+        return 1
+    return rc
 
 
 if __name__ == "__main__":

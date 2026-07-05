@@ -26,6 +26,7 @@ create-vivary my-workbench --preset knowledge-work --memory local
 create-vivary my-codebase --preset coding --active-context cocoindex-code
 create-vivary capabilities --preset second-brain --json
 create-vivary doctor my-workspace
+create-vivary doctor my-workspace --receipt .vivary/receipts.jsonl
 
 # Agent-mode (no prompts, machine-readable output):
 create-vivary init . --preset coding --auto --size large --yes --json
@@ -58,6 +59,12 @@ stays inside the selected target. Use `--dry-run` to simulate without writing,
 installing, or cleaning stale files. For scripted storage selection, pass
 `--no-wizard --storage embedded --yes` or use `--auto`;
 in human mode, the wizard asks and its answers drive storage.
+
+For local debugging, pass `--receipt PATH` or set `VIVARY_RECEIPT_LOG=PATH` to append
+a dependency-free JSONL run receipt. Receipts stay local and record only command
+envelope data such as tool version, command, flag names, exit code, duration, Python,
+and platform; they do not capture stdout, stderr, file contents, preset values,
+target paths, or environment variables.
 
 Semantic memory is a separate optional capability. `--memory local` writes local-only
 policy and graph nodes; `--memory cognee` writes Cognee policy and verification docs.

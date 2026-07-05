@@ -20,6 +20,16 @@ Exit codes are uniform: **`0`** success · **`1`** findings/errors · **`2`** us
 error. Gate CI on the exit code; don't parse text. Every command takes `--json` for
 machine-readable output.
 
+Every core CLI also accepts `--receipt PATH`, or the equivalent
+`VIVARY_RECEIPT_LOG=PATH`, to append one local JSONL run receipt after the command
+finishes. This is **not telemetry**: Vivary does not send receipts anywhere, does not
+start a background process, and does not record stdout, stderr, environment variables,
+file contents, raw query text, target ids, or local paths. Receipts record only a small
+debug envelope: schema version, tool/version, command, flag names, argument count,
+exit code, duration, Python version, and platform. Receipt targets must be regular
+files; symlink targets, symlink/junction directory ancestors, directory targets, and
+Windows device names are refused.
+
 **The CLI is the agent API.** Every command an agent needs to run Vivary is here — no
 MCP server, no special protocol. Commands that interact or install also accept `--yes`
 (auto-confirm all prompts), `--auto` (agent selects from explicit storage/privacy/size
@@ -34,7 +44,7 @@ storage/migration commands.
 ```
 tropo [command] [paths...] [--lenient | --strict] [--json] [--quiet]
                 [--depth N] [--max-entries N] [--out FILE] [--packs a,b]
-                [--root DIR] [--config PATH]
+                [--root DIR] [--config PATH] [--receipt PATH]
                 [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]]
                 [--snippet N] [--explain] [--budget N]
 ```
@@ -208,7 +218,7 @@ packs = ["repo-graph", "coordination"]
 
 ```
 ozone [review | impact <id> | packs] [--root DIR] [--json] [--strict]
-      [--pack structure|context-budget|editorial|all]
+      [--pack structure|context-budget|editorial|all] [--receipt PATH]
 ```
 
 Where `tropo check` asks "is each document valid?", `ozone` reviews the **whole graph**
@@ -277,6 +287,7 @@ ozone impact human-gates --root . --json
 
 ```
 exo [conflicts | board | claim <id> --agent <handle> | roles] [--root DIR] [--json]
+    [--receipt PATH]
 ```
 
 The outermost, thinnest layer — engaged only when one agent becomes many. Graph-native
@@ -311,12 +322,14 @@ create-vivary init <target> [--preset coding|second-brain|knowledge-work|writing
                            [--storage auto|file|embedded|cloud] [--provider lancedb|sqlite-vec|qdrant|astra]
                            [--memory none|local|cognee]
                            [--auto] [--yes] [--dry-run] [--json]
-                           [--size small|medium|large] [--privacy local|cloud]
+                           [--size small|medium|large] [--privacy local|cloud] [--receipt PATH]
 create-vivary wizard <target> [--storage auto|file|embedded|cloud] [--provider lancedb|sqlite-vec|qdrant|astra]
-                              [--memory none|local|cognee] [--yes] [--dry-run] [--json]
+                              [--memory none|local|cognee] [--yes] [--dry-run] [--json] [--receipt PATH]
 create-vivary capabilities [--preset coding|second-brain|knowledge-work|writing] [--json]
-create-vivary doctor <target> [--json] [--trend]
+                            [--receipt PATH]
+create-vivary doctor <target> [--json] [--trend] [--receipt PATH]
 create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writing] [--yes] [--json]
+                           [--receipt PATH]
 ```
 
 | Command | What it does |

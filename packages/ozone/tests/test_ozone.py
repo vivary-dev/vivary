@@ -94,6 +94,49 @@ def _run_json(argv):
     return rc, json.loads(out)
 
 
+def test_run_receipt_appends_jsonl_without_polluting_stdout():
+    with temp_workspace() as td:
+        receipt = td / "receipts" / "runs.jsonl"
+        rc, data = _run_json(["packs", "--json", "--receipt", str(receipt)])
+
+        assert rc == 0
+        assert "packs" in data
+        record = json.loads(receipt.read_text(encoding="utf-8").strip())
+        assert record["schema"] == "vivary.run_receipt.v1"
+        assert record["tool"] == "ozone"
+        assert record["command"] == "packs"
+        assert record["exit_code"] == 0
+        assert record["ok"] is True
+        assert "--json" in record["flags"]
+        assert "--receipt" not in record["flags"]
+        assert str(td) not in json.dumps(record, sort_keys=True)
+
+
+def test_impact_receipt_does_not_record_target_id():
+    with temp_workspace() as td:
+        _vault(td)
+        receipt = td / "runs.jsonl"
+        secret_target = "c1"
+
+        rc, data = _run_json([
+            "impact",
+            secret_target,
+            "--root",
+            str(td),
+            "--json",
+            "--receipt",
+            str(receipt),
+        ])
+
+        assert rc == 0
+        assert data["target"] == secret_target
+        record = json.loads(receipt.read_text(encoding="utf-8").strip())
+        serialized = json.dumps(record, sort_keys=True)
+        assert record["command"] == "impact"
+        assert secret_target not in serialized
+        assert str(td) not in serialized
+
+
 def test_packs_lists_structure_and_context_budget():
     rc, data = _run_json(["packs", "--json"])
     assert rc == 0
