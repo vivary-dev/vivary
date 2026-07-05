@@ -13,6 +13,34 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Release workflow / @vivary/create trusted publishing] — 2026-07-05
+
+Affects GitHub Actions, release docs, and generated website docs only. No package
+release, npm publish, or PyPI publish is implied.
+
+### Added
+
+- Added a manually dispatched, release-tag-gated GitHub Actions workflow for
+  tokenless `@vivary/create` publishing through npm Trusted Publishing and the
+  protected `npm-publish` environment.
+- Added a CI guard that verifies the npm trusted publish workflow keeps OIDC
+  permissions, package checks, dry-run behavior, and avoids token-based publishing.
+
+### Changed
+
+- `docs/RELEASE-WORKFLOW.md` now documents the policy-level trusted publisher setup
+  for `@vivary/create` instead of public maintainer-specific npm auth steps.
+
+### Verification
+
+- `python scripts/check_npm_trusted_publish_workflow.py`
+- `python packages/create-vivary/tests/test_assets_parity.py`
+- `node packages/create-vivary/tests/test_npm_launcher.js`
+- `python packages/create-vivary/tests/test_create_vivary.py`
+- `cd site && npm run sync-docs && npm run build`
+- `cd packages/create-vivary/npm && npm pack --dry-run` reported the expected
+  three npm package files: `README.md`, `index.js`, and `package.json`.
+
 ## [Public stats snapshot] — 2026-07-05
 
 Affects README/site public signals only. No package release, changelog-worthy

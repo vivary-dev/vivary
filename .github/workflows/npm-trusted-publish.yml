@@ -1,0 +1,168 @@
+name: npm trusted publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "@vivary/create version to publish; must match package.json and release_tag."
+        required: true
+        type: string
+      release_tag:
+        description: "Existing release tag to publish from, e.g. v0.3.1."
+        required: true
+        type: string
+      publish:
+        description: "Actually publish to npm. Leave false for the dry-run gate."
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: "@vivary/create release checks"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v7.0.0
+        with:
+          ref: ${{ inputs.release_tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node for npm trusted publishing
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+
+      - name: Verify trusted publishing runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+          node -e "const [major] = process.versions.node.split('.').map(Number); if (major < 24) throw new Error('Node 24+ is required for this release workflow');"
+          node -e "const version = process.argv[1].split('.').map(Number); if (version[0] < 11 || (version[0] === 11 && (version[1] < 5 || (version[1] === 5 && version[2] < 1)))) throw new Error('npm 11.5.1+ is required for trusted publishing');" "$(npm --version)"
+
+      - name: Verify release tag and package versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ inputs.release_tag }}" = "v${{ inputs.version }}"
+          test "$(git rev-parse "refs/tags/${{ inputs.release_tag }}^{commit}")" = "$(git rev-parse HEAD)"
+          test "$(node -p "require('./packages/create-vivary/npm/package.json').version")" = "${{ inputs.version }}"
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          npm_version = json.loads(
+              Path("packages/create-vivary/npm/package.json").read_text(encoding="utf-8")
+          )["version"]
+          pyproject = Path("packages/create-vivary/pyproject.toml").read_text(encoding="utf-8")
+          match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.MULTILINE)
+          if not match:
+              raise SystemExit("missing create-vivary pyproject version")
+          pypi_version = match.group(1)
+          if pypi_version != npm_version:
+              raise SystemExit(
+                  f"create-vivary version mismatch: pyproject={pypi_version} npm={npm_version}"
+              )
+          PY
+
+      - name: Run create-vivary release checks
+        run: |
+          python packages/create-vivary/tests/test_create_vivary.py
+          python packages/create-vivary/tests/test_assets_parity.py
+          node packages/create-vivary/tests/test_npm_launcher.js
+
+      - name: Verify npm package contents
+        working-directory: packages/create-vivary/npm
+        run: npm pack --dry-run
+
+      - name: Stop before publish unless explicitly enabled
+        if: ${{ !inputs.publish }}
+        run: echo "Dry run complete. Re-run with publish=true only after the npm publish gate is approved."
+
+  publish:
+    name: "@vivary/create trusted publish"
+    if: ${{ inputs.publish }}
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v7.0.0
+        with:
+          ref: ${{ inputs.release_tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node for npm trusted publishing
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+
+      - name: Verify trusted publishing runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+          node -e "const [major] = process.versions.node.split('.').map(Number); if (major < 24) throw new Error('Node 24+ is required for this release workflow');"
+          node -e "const version = process.argv[1].split('.').map(Number); if (version[0] < 11 || (version[0] === 11 && (version[1] < 5 || (version[1] === 5 && version[2] < 1)))) throw new Error('npm 11.5.1+ is required for trusted publishing');" "$(npm --version)"
+
+      - name: Re-verify release tag and package versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ inputs.release_tag }}" = "v${{ inputs.version }}"
+          test "$(git rev-parse "refs/tags/${{ inputs.release_tag }}^{commit}")" = "$(git rev-parse HEAD)"
+          test "$(node -p "require('./packages/create-vivary/npm/package.json').version")" = "${{ inputs.version }}"
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          npm_version = json.loads(
+              Path("packages/create-vivary/npm/package.json").read_text(encoding="utf-8")
+          )["version"]
+          pyproject = Path("packages/create-vivary/pyproject.toml").read_text(encoding="utf-8")
+          match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.MULTILINE)
+          if not match:
+              raise SystemExit("missing create-vivary pyproject version")
+          pypi_version = match.group(1)
+          if pypi_version != npm_version:
+              raise SystemExit(
+                  f"create-vivary version mismatch: pyproject={pypi_version} npm={npm_version}"
+              )
+          PY
+
+      - name: Re-verify npm package contents
+        working-directory: packages/create-vivary/npm
+        run: npm pack --dry-run
+
+      - name: Publish @vivary/create with npm trusted publishing
+        working-directory: packages/create-vivary/npm
+        run: npm publish
