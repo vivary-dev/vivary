@@ -35,6 +35,8 @@ jobs:
         run: python packages/create-vivary/tests/test_strato_integrity.py
       - name: memory-cognee
         run: python packages/memory-cognee/tests/test_memory_cognee.py
+      - name: vivary meta CLI
+        run: python packages/vivary/tests/test_vivary_cli.py
       - name: packaged optional semantic bridge smoke
         shell: bash
         run: |
@@ -129,6 +131,9 @@ jobs:
           cache-dependency-path: site/package-lock.json
       - name: install
         run: npm ci
+        working-directory: site
+      - name: site support modal test
+        run: npm run test:support
         working-directory: site
       - name: build (re-syncs docs, then astro build)
         run: npm run build

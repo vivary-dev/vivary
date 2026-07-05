@@ -77,7 +77,9 @@ Current command surface:
 For local debugging and bug reports, the core CLIs accept `--receipt PATH` or
 `VIVARY_RECEIPT_LOG=PATH` to append a dependency-free JSONL run receipt. Receipts stay
 local and do not capture stdout, stderr, file contents, raw query text, target ids, or
-paths.
+paths. Install the `vivary` meta package to inspect those logs with `vivary logs` or
+build a local email draft with `vivary logs email`; Vivary never sends mail or telemetry
+by itself.
 
 ## Quickstart
 
@@ -100,6 +102,8 @@ create-vivary doctor my-workspace
 uvx vivary-tropo check --root my-workspace
 uvx vivary-tropo find "where is release truth owned" --root my-workspace --json
 tropo check --root my-workspace --receipt .vivary/receipts.jsonl
+vivary logs .vivary/receipts.jsonl
+vivary logs email .vivary/receipts.jsonl --to support@example.com --out .vivary/support.eml
 
 # Agent-mode — fully non-interactive, outputs JSON:
 create-vivary init . --preset coding --auto --size large --yes --json

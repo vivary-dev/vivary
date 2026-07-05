@@ -24,10 +24,13 @@ dependencies = [
     "vivary-exo>=0.2.2",
 ]
 
+[project.scripts]
+vivary = "vivary_cli:main"
+
 [project.urls]
 Homepage = "https://vivary.vercel.app/"
 Repository = "https://github.com/vivary-dev/vivary"
 Changelog = "https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md"
 
 [tool.setuptools]
-py-modules = []
+py-modules = ["vivary_cli"]

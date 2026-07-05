@@ -13,6 +13,45 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: local receipt log viewer] — 2026-07-05
+
+Affects the `vivary` meta package, CLI docs, package docs, and generated website
+docs. This is not published yet; the `vivary` version bump and registry publish remain
+release-train gates.
+
+### Added
+
+- Added the dependency-free `vivary` helper CLI to the meta package.
+- Added `vivary logs [PATH]` to summarize local JSONL run receipts as text or JSON.
+- Added `vivary logs email [PATH] --to ...` to create a local `.eml` support draft or
+  print a `mailto:` URL from whitelisted receipt fields.
+- Added a dependency-free website support modal with copy-email, copy-report, prefilled
+  `mailto:`, and GitHub issue fallbacks. The modal opens automatically for browser
+  errors noticed by the site and omits local `file://` paths from generated reports.
+- Pointed the website support flow at the bug issue form and set the form to assign
+  new bug reports to the maintainer account for GitHub notifications.
+
+### Security
+
+- `vivary logs` copies only receipt schema/tool/version/command/flags/count/status/timing
+  and runtime envelope fields. Unknown fields, stdout/stderr-like fields, file contents,
+  raw query text, target ids, and local paths are not included in summaries or email
+  drafts.
+- `vivary logs email --out` refuses directory targets, symlink targets,
+  symlink/junction ancestor directories, and Windows device names.
+- Vivary still never sends telemetry or email itself; users send the local draft with
+  their own mail client if they choose.
+- The website support modal is static-only and does not call SendGrid, Resend, SMTP, or
+  any other email provider.
+
+### Verification
+
+- `python packages/vivary/tests/test_vivary_cli.py`
+- `cd site && npm run test:support`
+- Real receipt smoke: `tropo check --root packages/tropo/examples/vault --receipt
+  sandboxes/observability-proof/receipts.jsonl`, then `vivary logs ... --json` and
+  `vivary logs email ... --out ... --json`.
+
 ## [Unreleased: tropo semantic query mode] — 2026-07-05
 
 Affects `vivary-tropo`, `vivary-memory-cognee`, CLI docs, package docs, and

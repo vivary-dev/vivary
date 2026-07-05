@@ -34,6 +34,19 @@ exit code, duration, Python version, and platform. Receipt targets must be regul
 files; symlink targets, symlink/junction directory ancestors, directory targets, and
 Windows device names are refused.
 
+Install the `vivary` meta package when you want a human-readable pull surface over
+those receipts:
+
+```bash
+tropo check --root . --receipt .vivary/receipts.jsonl
+vivary logs .vivary/receipts.jsonl
+vivary logs .vivary/receipts.jsonl --failed --tail 10 --json
+vivary logs email .vivary/receipts.jsonl --to support@example.com --out .vivary/support.eml
+```
+
+`vivary logs email` writes a local `.eml` draft or prints a `mailto:` URL. It does not
+connect to SMTP, call an API, upload logs, or send mail by itself.
+
 **The CLI is the agent API.** Every command an agent needs to run Vivary is here — no
 MCP server, no special protocol. Commands that interact or install also accept `--yes`
 (auto-confirm all prompts), `--auto` (agent selects from explicit storage/privacy/size
@@ -42,6 +55,29 @@ hints), and `--dry-run` (inspect without side effects). See
 storage/migration commands.
 
 ---
+
+## vivary — local visibility helpers
+
+```
+vivary logs [PATH] [--json] [--tail N] [--failed]
+vivary logs email [PATH] --to EMAIL [--subject TEXT] [--out FILE]
+                  [--json] [--tail N] [--failed]
+```
+
+The `vivary` meta package installs the four core CLIs and adds a tiny local helper for
+the receipt files they emit. `vivary logs` summarizes a JSONL receipt file as text or
+JSON. `vivary logs email` creates a redacted support email draft from the same
+whitelisted receipt fields. Unknown fields, malformed lines, stdout/stderr-like fields,
+file contents, raw query text, target ids, and local paths are not copied into the
+summary.
+
+| Command | Job |
+|---|---|
+| `logs [PATH]` | Read local JSONL receipts from `PATH`, `VIVARY_RECEIPT_LOG`, or `.vivary/receipts.jsonl` and print a summary. |
+| `logs --failed --tail 10` | Show only recent failed receipts. |
+| `logs --json` | Return `{summary, records}` for agents and bug-report tooling. |
+| `logs email ... --out FILE` | Write a local `.eml` draft; directory targets, symlink targets, symlink/junction ancestors, and Windows device names are refused. |
+| `logs email ...` | Without `--out`, print a `mailto:` URL for the user's mail client. |
 
 ## tropo — the typed knowledge graph
 
