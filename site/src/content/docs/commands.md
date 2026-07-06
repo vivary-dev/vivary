@@ -133,6 +133,15 @@ indexed by the user. It does not add Cognee or network calls to `vivary-tropo` c
 Use `create-vivary init ... --active-context cocoindex-code` when a coding workspace
 needs semantic code candidates.
 
+Simple rule: start with plain `tropo find` or `tropo query`. Reach for the other
+modes only when the plain graph search is not enough.
+
+| Mode | Use it when | What changes |
+|---|---|---|
+| `text` (default) | You want deterministic local search over the typed graph. | No setup, no index, no provider, no network. |
+| `vector` | You want local "close wording" ranking over graph nodes, but still no provider. | Requires explicit `[storage.embedding] provider = "local-hash"`; otherwise falls back to `text`. |
+| `semantic` | You already chose and indexed an optional semantic-memory provider. | Calls that provider, then filters hits back to known typed Vivary node ids. |
+
 Useful retrieval flags:
 
 | Flag | Effect |

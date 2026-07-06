@@ -18,6 +18,7 @@ Commands run locally:
 - [ ] `python packages/create-vivary/tests/test_assets_parity.py`
 - [ ] `node packages/create-vivary/tests/test_npm_launcher.js`
 - [ ] `python packages/tropo/tropo.py check --root packages/tropo/examples/vault`
+- [ ] `python scripts/check_line_endings.py`
 - [ ] `git diff --check`
 
 Notes:

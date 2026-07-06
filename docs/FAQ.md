@@ -105,19 +105,26 @@ tropo find "what should I read for auth?" --root my-workspace --budget 1200
 
 LanceDB is still available as the explicit embedded storage backend for migrated node
 rows, but published `tropo query` / `find` stay graph-first and zero-dependency in the
-current package line. On the unreleased `dev` branch, `tropo query --mode semantic`
-can call an explicitly configured optional semantic-memory provider while still
-returning typed Vivary node ids. That provider path is not part of default Tropo and
-does not add embeddings, network calls, or an index to core.
+current package line. On the unreleased `dev` branch, `tropo query --mode vector`
+adds local fuzzy ranking over typed graph nodes when a workspace explicitly enables
+`[storage.embedding] provider = "local-hash"`; without that config it falls back to
+normal text search. `tropo query --mode semantic` is the separate optional-provider
+path: it can call a configured semantic-memory adapter while still returning typed
+Vivary node ids. Neither path adds provider calls to the default search command.
 
 ### Does tropo do semantic search / embeddings?
 
 Published Tropo defaults to dependency-free typed graph/text search. Tropo owns the
 **typed** graph (explicit links) and keeps embeddings out of core so `check`, `graph`,
-`find`, and normal `query` stay deterministic. The unreleased `dev` branch adds
-`tropo query --mode semantic` as an optional-provider bridge: it can call a separately
-installed/configured semantic-memory adapter, then filters provider hits back to known
-Vivary node ids.
+`find`, and normal `query` stay deterministic.
+
+There are three retrieval layers:
+
+| Layer | What it means |
+|---|---|
+| `text` | Default graph search. No setup, no provider, no network. |
+| `vector` | Local hash-vector ranking over typed graph nodes. No provider; falls back to text if not explicitly enabled. |
+| `semantic` | Optional provider recall, such as Cognee, filtered back to known Vivary node ids. |
 
 ### Can Vivary set up semantic memory or Cognee?
 Yes, as optional setup policy. Use `create-vivary capabilities --preset knowledge-work

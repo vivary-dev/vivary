@@ -96,6 +96,8 @@ jobs:
         run: python scripts/check_npm_trusted_publish_workflow.py
       - name: tropo check (example vault, strict)
         run: python packages/tropo/tropo.py check --root packages/tropo/examples/vault
+      - name: line endings
+        run: python scripts/check_line_endings.py
       - name: diff hygiene
         run: git diff --check
 

@@ -162,6 +162,20 @@ frontmatter, path, body, and outbound edge context. They do not require LanceDB.
 Embedded storage is a separate opt-in backend for migrated node rows and future local
 retrieval work.
 
+Use modes in this order:
+
+| Need | Command |
+|---|---|
+| Read-this-first context packet | `tropo find "question" --root . --budget 1200 --json` |
+| Deterministic filtered graph search | `tropo query "question" --root . --type decision --json` |
+| Local fuzzy ranking without providers | `tropo query "question" --root . --mode vector --json` |
+| Optional provider-backed recall | `tropo query "question" --root . --mode semantic --json` |
+
+`vector` is still local and dependency-free; it only uses the explicit
+`[storage.embedding] provider = "local-hash"` policy and falls back to `text` when that
+policy is absent. `semantic` is different: it requires a configured optional memory
+provider such as `vivary-memory-cognee`.
+
 ## Agent self-configure a workspace
 
 Agents can scaffold and configure a workspace without any human interaction:

@@ -1,2 +1,14 @@
-README.md whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
-site/src/pages/index.astro whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+# Default repo policy: LF for text files on every platform. Windows shells can
+# run LF PowerShell scripts, and GitHub Actions/WSL/Linux all expect stable LF.
+* text=auto eol=lf
+
+# Batch files are the one Windows text format that still commonly expects CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets must never be normalized.
+*.webp binary
+*.woff2 binary
+
+README.md whitespace=blank-at-eol,blank-at-eof,space-before-tab
+site/src/pages/index.astro whitespace=blank-at-eol,blank-at-eof,space-before-tab
