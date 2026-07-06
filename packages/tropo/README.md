@@ -74,6 +74,14 @@ type, path glob, or outbound edge and explain whether a match came from id/title
 frontmatter, path, body, edge context, or typed vectors. Semantic mode returns
 provider hits as typed Vivary node ids instead of opaque chunks.
 
+Search mode mental model:
+
+| Mode | Boundary |
+|---|---|
+| `text` | Default deterministic graph search; no setup. |
+| `vector` | Local fuzzy ranking over typed graph nodes; no provider and falls back to `text` without explicit local vector policy. |
+| `semantic` | Optional provider bridge, filtered back to known typed Vivary node ids. |
+
 ## Overlays — tighten a subtree
 
 Drop a `tropo.toml` in any subdirectory to add stricter rules for that subtree

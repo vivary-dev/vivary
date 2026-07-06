@@ -49,6 +49,17 @@ release-train gates.
   sandboxes/observability-proof/receipts.jsonl`, then `vivary logs ... --json` and
   `vivary logs email ... --out ... --json`.
 
+## [Unreleased: retrieval mode docs polish] — 2026-07-05
+
+Affects public docs, generated website docs, and the `vivary-tropo` package README
+only. No package behavior changed.
+
+### Changed
+
+- Added a plain-English chooser for `tropo query` retrieval modes so users know when
+  to stay with default text search, when local vector ranking is useful, and when
+  optional provider-backed semantic recall is required.
+
 ## [Unreleased: getting-started proof walkthrough] — 2026-07-05
 
 Affects public docs and generated website docs only. No private dogfood workspace,
