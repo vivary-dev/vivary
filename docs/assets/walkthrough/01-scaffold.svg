@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="420" viewBox="0 0 1040 420" role="img" aria-labelledby="title desc">
+  <title id="title">Vivary scaffold terminal proof</title>
+  <desc id="desc">A generic terminal capture showing create-vivary scaffold output.</desc>
+  <rect width="1040" height="420" rx="16" fill="#101c22"/>
+  <rect x="1" y="1" width="1038" height="418" rx="15" fill="none" stroke="#7fbfa9" stroke-opacity="0.25"/>
+  <circle cx="34" cy="34" r="6" fill="#ff6b6b"/>
+  <circle cx="56" cy="34" r="6" fill="#ffd166"/>
+  <circle cx="78" cy="34" r="6" fill="#63d297"/>
+  <text x="28" y="78" fill="#8ee7c4" font-family="Consolas, 'JetBrains Mono', monospace" font-size="20">$ create-vivary init demo-vivary-workspace --preset coding --no-wizard</text>
+  <text x="28" y="126" fill="#e8fff7" font-family="Consolas, 'JetBrains Mono', monospace" font-size="20">create-vivary: wrote 38 file(s) to demo-vivary-workspace</text>
+  <text x="28" y="176" fill="#a9c9d0" font-family="Consolas, 'JetBrains Mono', monospace" font-size="18">AGENTS.md      STATE.md       SOUL.md        STRATO.md</text>
+  <text x="28" y="218" fill="#a9c9d0" font-family="Consolas, 'JetBrains Mono', monospace" font-size="18">tropo.toml     modules/       changes/       decisions/</text>
+  <text x="28" y="260" fill="#a9c9d0" font-family="Consolas, 'JetBrains Mono', monospace" font-size="18">verification/  gates/         .agents/       .claude/</text>
+  <text x="28" y="318" fill="#8ee7c4" font-family="Consolas, 'JetBrains Mono', monospace" font-size="20">Plain files. Typed graph. Agent operating loop.</text>
+</svg>
