@@ -103,7 +103,7 @@ says. `tropo.toml` declares the types.
 | `fix [--dry-run]` | Strip redundant frontmatter (`W210` — a field equal to its derived value). The only mechanical edit tropo makes. |
 | `init [DIR] [--packs a,b]` | Scaffold a `tropo.toml` (optionally composing reusable type packs). |
 | `find <text> [--budget N] [--k N] [--json]` | Human-friendly context packet: the smallest typed nodes/files worth opening first, with reasons and snippets trimmed to an approximate token budget. |
-| `query <text> [--k N] [--mode text\|vector\|semantic] [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]] [--snippet N] [--explain] [--json]` | Filtered graph search over typed nodes. Default `text` searches id/title, frontmatter, path, body, and outbound edge context. `vector` uses dependency-free local typed vectors when `.vivary/storage.toml` enables them and otherwise falls back to text search. `semantic` calls an explicitly configured optional semantic-memory provider and returns typed node ids. |
+| `query <text> [--k N] [--mode text\|vector\|semantic] [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]] [--snippet N] [--explain] [--json]` | Filtered graph search over typed nodes. Default `text` searches id/title, frontmatter, path, body, and outbound edge context. `vector` uses dependency-free local typed vectors when `.vivary/storage.toml` enables them, prefers stored embedded vectors when current rows exist, and otherwise falls back to text search. `semantic` calls an explicitly configured optional semantic-memory provider and returns typed node ids. |
 | `migrate --from file --to embedded [--dry-run] [--json]` | Move file-backed graph data into the configured embedded backend. When local vector policy is explicitly enabled, migrated rows also include typed-node vectors and provenance metadata. Cloud migration, non-file sources, backend installation, and `migrated_at` tracking are future 0.3.x work. |
 | `map [--root PATH] [--depth N] [--max-entries N] [--json]` | Read-only filesystem inventory of a repo/vault/docs tree — no `tropo.toml` required. See [Filesystem map](#filesystem-map-tropo-map) below. |
 
@@ -111,9 +111,8 @@ says. `tropo.toml` declares the types.
 `tropo query` is the lower-level filtered search primitive. By default both are
 graph/text retrieval, not the CocoIndex active-context sidecar. On the unreleased
 `dev` branch, `tropo query --mode vector` is a dependency-free typed-vector mode:
-it reads analyzed graph nodes, preserves type/path/edge filters, and returns typed
-Vivary node ids without installing an embedding provider. Enable it explicitly in
-`.vivary/storage.toml`:
+it preserves type/path/edge filters and returns typed Vivary node ids without
+installing an embedding provider. Enable it explicitly in `.vivary/storage.toml`:
 
 ```toml
 [storage.embedding]
@@ -122,12 +121,22 @@ provider = "local-hash"
 dimensions = 128
 ```
 
-Without that config, `--mode vector` reports `status: fallback` and uses the normal
-typed text search. `tropo query --mode semantic` is an optional-provider bridge: it
-requires `.vivary/memory.toml` to enable a supported semantic-memory provider, and
-today that means the separate `vivary-memory-cognee` package must be installed and
-indexed by the user. It does not add Cognee or network calls to `vivary-tropo` core.
-Use `create-vivary init ... --active-context cocoindex-code` when a coding workspace
+When the workspace is configured for embedded storage and current migrated vectors
+exist, JSON output reports `vector.source: "stored"` and `vector.index: "embedded"`.
+Stored-vector query validates compact metadata first and asks the backend for a
+bounded candidate set. If the embedded index is empty, stale, missing vectors,
+dimension mismatched, too large for conservative validation, or unavailable, `--mode
+vector` reports `status: fallback`, `fallback: "text"`, and a `detail` string, then
+returns deterministic typed text results.
+Workspaces that enable local vectors without embedded storage still use computed
+graph-node vectors and report `vector.source: "computed"`. Without local vector
+config, `--mode vector` falls back to the normal typed text search.
+
+`tropo query --mode semantic` is an optional-provider bridge: it requires
+`.vivary/memory.toml` to enable a supported semantic-memory provider, and today that
+means the separate `vivary-memory-cognee` package must be installed and indexed by
+the user. It does not add Cognee or network calls to `vivary-tropo` core. Use
+`create-vivary init ... --active-context cocoindex-code` when a coding workspace
 needs semantic code candidates.
 
 `tropo migrate --from file --to embedded --json` reports an `embedding` object.
@@ -137,8 +146,10 @@ nodes. With `enabled = true` and `provider = "local-hash"`, each migrated row ge
 `embedding_scope`, `embedding_text_fingerprint`, and `source_fingerprint`. Bad
 embedding config fails before backend writes. Root and nested `exclude` rules,
 symlink/junction pruning, and out-of-root path checks run before any text is
-embedded. Real file-to-embedded migration replaces the embedded node snapshot, so
-deleted, renamed, or newly excluded nodes do not leave stale embedded rows.
+embedded. Embedded storage paths must stay inside the workspace and avoid symlink or
+junction-backed directories. Real file-to-embedded migration replaces the embedded
+node snapshot, so deleted, renamed, or newly excluded nodes do not leave stale
+embedded rows.
 
 Simple rule: start with plain `tropo find` or `tropo query`. Reach for the other
 modes only when the plain graph search is not enough.
@@ -146,7 +157,7 @@ modes only when the plain graph search is not enough.
 | Mode | Use it when | What changes |
 |---|---|---|
 | `text` (default) | You want deterministic local search over the typed graph. | No setup, no index, no provider, no network. |
-| `vector` | You want local "close wording" ranking over graph nodes, but still no provider. | Requires explicit `[storage.embedding] provider = "local-hash"`; otherwise falls back to `text`. |
+| `vector` | You want local "close wording" ranking over graph nodes, but still no provider. | Requires explicit `[storage.embedding] provider = "local-hash"`; embedded workspaces use stored vectors when current, otherwise deterministic text fallback. |
 | `semantic` | You already chose and indexed an optional semantic-memory provider. | Calls that provider, then filters hits back to known typed Vivary node ids. |
 
 Useful retrieval flags:

@@ -1220,7 +1220,19 @@ _MIN_VECTOR_DIMENSIONS = 16
 _MAX_VECTOR_DIMENSIONS = 4096
 _VECTOR_CONTENT_CHARS = 4000
 _LOCAL_VECTOR_PROVIDER = "local-hash"
-_LOCAL_VECTOR_VERSION = "local-hash-v1"
+_LOCAL_VECTOR_VERSION = "local-hash-v2"
+_VECTOR_QUERY_MAX_VALIDATE_ROWS = 10_000
+_VECTOR_QUERY_MAX_CANDIDATES = 250
+_VECTOR_QUERY_FILTER_OVERFETCH = 5
+_VECTOR_METADATA_COLUMNS = [
+    "id",
+    "embedding_provider",
+    "embedding_dimensions",
+    "embedding_version",
+    "embedding_scope",
+    "embedding_text_fingerprint",
+    "source_fingerprint",
+]
 _QUERY_STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "do", "does", "for",
     "from", "how", "i", "in", "is", "it", "of", "on", "or", "our", "the",
@@ -1250,6 +1262,63 @@ def _load_storage_config(root):
     if not isinstance(storage, dict):
         raise ConfigError(f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: storage must be a TOML table")
     return storage
+
+
+def _storage_path_has_link_or_junction_ancestor(root, path):
+    root_abs = os.path.abspath(root)
+    current = os.path.abspath(path if os.path.lexists(path) else os.path.dirname(path))
+    while True:
+        if os.path.lexists(current) and (
+            os.path.islink(current)
+            or (
+                hasattr(os.path, "isjunction")
+                and os.path.isjunction(current)
+            )
+        ):
+            return True
+        if os.path.normcase(os.path.abspath(current)) == os.path.normcase(root_abs):
+            return False
+        parent = os.path.dirname(current)
+        if parent == current:
+            return False
+        current = parent
+
+
+def _resolve_embedded_storage_config(root, storage):
+    embedded = storage.get("embedded", {})
+    if embedded is None:
+        embedded = {}
+    if not isinstance(embedded, dict):
+        raise ConfigError(
+            f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: storage.embedded must be a TOML table"
+        )
+
+    provider = embedded.get("provider", "lancedb")
+    if not isinstance(provider, str):
+        raise ConfigError(
+            f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: storage.embedded.provider must be a string"
+        )
+
+    raw_path = embedded.get("path", os.path.join(STORAGE_DIR, "data"))
+    if not isinstance(raw_path, str) or not raw_path:
+        raise ConfigError(
+            f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: storage.embedded.path must be a non-empty string"
+        )
+
+    root_abs = os.path.abspath(root)
+    path = raw_path if os.path.isabs(raw_path) else os.path.join(root_abs, raw_path)
+    path = os.path.abspath(path)
+    root_real = os.path.normcase(os.path.realpath(root_abs))
+    if not _realpath_within(root_real, path):
+        raise ConfigError(
+            f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: storage.embedded.path must stay inside the workspace"
+        )
+    if _storage_path_has_link_or_junction_ancestor(root_abs, path):
+        raise ConfigError(
+            f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: storage.embedded.path must not use symlink or junction directories"
+        )
+
+    return {"provider": provider.strip().lower(), "path": path}
 
 
 def _vector_config_error(detail, provider="unknown"):
@@ -1412,16 +1481,27 @@ def _file_body(full_path, limit=_CONTENT_PREVIEW_CHARS):
     return body if limit is None else body[:limit]
 
 
-def _local_hash_vector(text, dimensions=_DEFAULT_VECTOR_DIMENSIONS):
-    vector = [0.0] * dimensions
+def _local_hash_features(text):
     tokens = re.findall(r"[a-z0-9]+", (text or "").lower())
     tokens = [token for token in tokens if token not in _QUERY_STOPWORDS]
-    if not tokens:
-        return vector
     for token in tokens:
-        digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
+        yield f"tok:{token}", 1.0
+        if len(token) >= 5:
+            yield f"prefix5:{token[:5]}", 0.75
+        if len(token) >= 4:
+            for index in range(0, len(token) - 3):
+                yield f"gram:{token[index:index + 4]}", 0.25
+
+
+def _local_hash_vector(text, dimensions=_DEFAULT_VECTOR_DIMENSIONS):
+    vector = [0.0] * dimensions
+    features = list(_local_hash_features(text))
+    if not features:
+        return vector
+    for feature, weight in features:
+        digest = hashlib.blake2b(feature.encode("utf-8"), digest_size=8).digest()
         index = int.from_bytes(digest, "big") % dimensions
-        vector[index] += 1.0
+        vector[index] += weight
     norm = math.sqrt(sum(value * value for value in vector))
     if norm <= 0:
         return vector
@@ -1430,6 +1510,22 @@ def _local_hash_vector(text, dimensions=_DEFAULT_VECTOR_DIMENSIONS):
 
 def _cosine_score(left, right):
     return sum(a * b for a, b in zip(left, right))
+
+
+def _coerce_vector(value):
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if not isinstance(value, (list, tuple)):
+        return None
+    vector = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            return None
+        number = float(item)
+        if not math.isfinite(number):
+            return None
+        vector.append(number)
+    return vector
 
 
 def _record_vector_text(record):
@@ -1644,6 +1740,36 @@ class _LanceBackend:
         rows = tbl.search().where(f"id = '{node_id}'").limit(1).to_list()
         return rows[0] if rows else None
 
+    def all_nodes(self):
+        tbl = self._table()
+        if tbl is None:
+            return []
+        return tbl.to_arrow().to_pylist()
+
+    def count_nodes(self):
+        tbl = self._table()
+        if tbl is None:
+            return 0
+        return tbl.count_rows()
+
+    def node_metadata(self, limit=None):
+        tbl = self._table()
+        if tbl is None:
+            return []
+        query = tbl.search().select(_VECTOR_METADATA_COLUMNS)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.to_list()
+
+    def vector_query(self, query_vector, k=10):
+        tbl = self._table()
+        if tbl is None:
+            return []
+        limit = max(0, k)
+        if limit == 0:
+            return []
+        return tbl.search(query_vector).select(["id", "vector", "_distance"]).limit(limit).to_list()
+
     def delete(self, node_id):
         tbl = self._table()
         if tbl:
@@ -1687,10 +1813,9 @@ def get_backend(root, *, allow_auto_fallback=True):
         return _FileBackend(root)
 
     if backend in ("embedded", "auto"):
-        emb = cfg.get("embedded", {})
-        raw_path = emb.get("path", os.path.join(STORAGE_DIR, "data"))
-        path = raw_path if os.path.isabs(raw_path) else os.path.join(root, raw_path)
-        provider = emb.get("provider", "lancedb")
+        emb = _resolve_embedded_storage_config(root, cfg)
+        path = emb["path"]
+        provider = emb["provider"]
         if provider == "lancedb":
             try:
                 return _LanceBackend(path)
@@ -1910,30 +2035,65 @@ def search_graph(resolver, text, *, k=10, type_filters=None, path_filters=None,
     return results[:max(0, k)]
 
 
-def vector_query(resolver, text, *, k=10, type_filters=None, path_filters=None,
-                 edge_filters=None, snippet_chars=_DEFAULT_SNIPPET_CHARS,
-                 explain=False):
-    """Dependency-free typed vector search over analyzed graph nodes."""
-    config = _load_vector_query_config(resolver.root)
-    if config["status"] == "fallback":
-        results = search_graph(
-            resolver,
-            text,
-            k=k,
-            type_filters=type_filters,
-            path_filters=path_filters,
-            edge_filters=edge_filters,
-            snippet_chars=snippet_chars,
-            explain=explain,
-        )
-        return 0, results, config
-    if config["status"] != "ok":
-        return 1, [], config
+def _text_vector_fallback(resolver, text, k, type_filters, path_filters, edge_filters,
+                          snippet_chars, explain, config, detail=None):
+    vector = dict(config)
+    vector["status"] = "fallback"
+    vector["fallback"] = "text"
+    vector["source"] = "text"
+    if detail:
+        vector["detail"] = detail
+    results = search_graph(
+        resolver,
+        text,
+        k=k,
+        type_filters=type_filters,
+        path_filters=path_filters,
+        edge_filters=edge_filters,
+        snippet_chars=snippet_chars,
+        explain=explain,
+    )
+    return 0, results, vector
 
+
+def _vector_result(record, score, config, source, snippet_chars, explain, edge_filters, query_text):
+    result = {
+        "id": record["id"],
+        "type": record["type"],
+        "path": record["path"],
+        "title": record["title"],
+        "score": round(score, 6),
+        "reason": f"{source} typed vector match via {config['provider']}",
+        "provider": config["provider"],
+        "source": source,
+    }
+    snippet = _best_snippet(record, query_text, _query_terms(query_text), snippet_chars)
+    if snippet:
+        result["snippet"] = snippet
+    if explain:
+        result["reasons"] = [
+            f"{source} typed vector match",
+            f"provider: {config['provider']}",
+            f"dimensions: {config.get('dimensions', _DEFAULT_VECTOR_DIMENSIONS)}",
+        ]
+    if explain or edge_filters:
+        result["edges"] = _typed_result_edges(record)
+    return result
+
+
+def _computed_vector_query(resolver, text, *, k, type_filters, path_filters, edge_filters,
+                           snippet_chars, explain, config):
     dimensions = config.get("dimensions", _DEFAULT_VECTOR_DIMENSIONS)
     query_vector = _local_hash_vector(text, dimensions)
+    vector = dict(config)
+    vector.update({
+        "source": "computed",
+        "index": "file-graph",
+        "embedding_version": _LOCAL_VECTOR_VERSION,
+    })
     if not any(query_vector):
-        return 0, [], config
+        vector["matched"] = 0
+        return 0, [], vector
 
     docs = analyze(resolver.root, [], resolver)
     nodes, edges = build_graph(docs)
@@ -1950,26 +2110,484 @@ def vector_query(resolver, text, *, k=10, type_filters=None, path_filters=None,
         score = _cosine_score(query_vector, record_vector)
         if score <= 0:
             continue
-        result = {
-            "id": record["id"],
-            "type": record["type"],
-            "path": record["path"],
-            "title": record["title"],
-            "score": round(score, 6),
-            "reason": f"typed vector match via {config['provider']}",
-            "provider": config["provider"],
-        }
-        snippet = _best_snippet(record, text, _query_terms(text), snippet_chars)
-        if snippet:
-            result["snippet"] = snippet
-        if explain:
-            result["reasons"] = ["typed vector match", f"provider: {config['provider']}"]
-        if explain or edge_filters:
-            result["edges"] = _typed_result_edges(record)
-        results.append(result)
+        results.append(_vector_result(
+            record,
+            score,
+            config,
+            "computed",
+            snippet_chars,
+            explain,
+            edge_filters,
+            text,
+        ))
 
     results.sort(key=lambda r: (-r["score"], r["path"], r["id"]))
-    return 0, results[:max(0, k)], config
+    results = results[:max(0, k)]
+    vector["indexed"] = len(records)
+    vector["matched"] = len(results)
+    return 0, results, vector
+
+
+def _redact_workspace_detail(detail, root):
+    detail = str(detail or "")
+    root_abs = os.path.abspath(root)
+    root_real = os.path.realpath(root)
+    replacements = {
+        root_abs,
+        root_real,
+        root,
+        "\\\\?\\" + root_abs,
+        "\\\\?\\" + root_real,
+    }
+    for value in sorted((v for v in replacements if v), key=len, reverse=True):
+        for variant in {value, value.replace("\\", "/")}:
+            detail = re.sub(re.escape(variant), "<workspace>", detail, flags=re.IGNORECASE)
+    return detail
+
+
+def _storage_backend_is_embedded(root):
+    try:
+        storage = _load_storage_config(root)
+    except ConfigError as e:
+        return False, str(e)
+    backend = storage.get("backend", "file")
+    return backend in ("embedded", "auto"), ""
+
+
+def _stored_vector_fallback(resolver, text, k, type_filters, path_filters, edge_filters,
+                            snippet_chars, explain, config, detail):
+    return _text_vector_fallback(
+        resolver,
+        text,
+        k,
+        type_filters,
+        path_filters,
+        edge_filters,
+        snippet_chars,
+        explain,
+        config,
+        detail,
+    )
+
+
+def _vector_candidate_limit(k, row_count, filters_present):
+    requested = max(0, k)
+    if requested == 0 or row_count <= 0:
+        return 0
+    if filters_present:
+        requested = max(
+            requested * _VECTOR_QUERY_FILTER_OVERFETCH,
+            requested + 20,
+            50,
+        )
+    return min(row_count, requested, _VECTOR_QUERY_MAX_CANDIDATES)
+
+
+def _stored_vector_query(resolver, text, *, k, type_filters, path_filters, edge_filters,
+                         snippet_chars, explain, config):
+    try:
+        backend = get_backend(resolver.root, allow_auto_fallback=False)
+    except ConfigError as e:
+        detail = _redact_workspace_detail(e, resolver.root)
+        return _stored_vector_fallback(
+            resolver,
+            text,
+            k,
+            type_filters,
+            path_filters,
+            edge_filters,
+            snippet_chars,
+            explain,
+            config,
+            f"embedded vector index unavailable: {detail}",
+        )
+    except Exception as e:
+        detail = _redact_workspace_detail(e, resolver.root) or e.__class__.__name__
+        return _stored_vector_fallback(
+            resolver,
+            text,
+            k,
+            type_filters,
+            path_filters,
+            edge_filters,
+            snippet_chars,
+            explain,
+            config,
+            f"embedded vector index unavailable: {detail}",
+        )
+
+    try:
+        if not hasattr(backend, "count_nodes") or not hasattr(backend, "node_metadata"):
+            return _stored_vector_fallback(
+                resolver,
+                text,
+                k,
+                type_filters,
+                path_filters,
+                edge_filters,
+                snippet_chars,
+                explain,
+                config,
+                "embedded backend does not expose stored node metadata",
+            )
+
+        try:
+            row_count = backend.count_nodes()
+        except Exception as e:
+            detail = _redact_workspace_detail(e, resolver.root) or e.__class__.__name__
+            return _stored_vector_fallback(
+                resolver,
+                text,
+                k,
+                type_filters,
+                path_filters,
+                edge_filters,
+                snippet_chars,
+                explain,
+                config,
+                f"embedded vector index row count could not be read: {detail}",
+            )
+
+        docs = analyze(resolver.root, [], resolver)
+        docs_by_id = {
+            d.derived.get("id"): d
+            for d in docs
+            if d.derived.get("id") is not None
+        }
+        nodes, edges = build_graph(docs)
+        records = _build_search_records(docs, nodes, edges, body_limit=_VECTOR_CONTENT_CHARS)
+        records_by_id = {record["id"]: record for record in records}
+        if not records_by_id:
+            if row_count == 0:
+                vector = dict(config)
+                vector.update({
+                    "source": "stored",
+                    "index": "embedded",
+                    "embedding_version": _LOCAL_VECTOR_VERSION,
+                    "indexed": 0,
+                    "matched": 0,
+                })
+                return 0, [], vector
+            return _stored_vector_fallback(
+                resolver,
+                text,
+                k,
+                type_filters,
+                path_filters,
+                edge_filters,
+                snippet_chars,
+                explain,
+                config,
+                f"embedded vector index is stale; contains {row_count} deleted node(s)",
+            )
+        if row_count == 0:
+            return _stored_vector_fallback(
+                resolver,
+                text,
+                k,
+                type_filters,
+                path_filters,
+                edge_filters,
+                snippet_chars,
+                explain,
+                config,
+                "embedded vector index is empty; run tropo migrate --from file --to embedded --yes",
+            )
+        if row_count > _VECTOR_QUERY_MAX_VALIDATE_ROWS:
+            return _stored_vector_fallback(
+                resolver,
+                text,
+                k,
+                type_filters,
+                path_filters,
+                edge_filters,
+                snippet_chars,
+                explain,
+                config,
+                f"embedded vector index has {row_count} row(s), above the conservative validation cap",
+            )
+
+        current_count = len(records_by_id)
+        if row_count != current_count:
+            detail = "embedded vector index is stale"
+            if row_count < current_count:
+                detail += f"; missing {current_count - row_count} current node(s)"
+            if row_count > current_count:
+                detail += f"; contains {row_count - current_count} deleted node(s)"
+            return _stored_vector_fallback(
+                resolver,
+                text,
+                k,
+                type_filters,
+                path_filters,
+                edge_filters,
+                snippet_chars,
+                explain,
+                config,
+                detail,
+            )
+
+        try:
+            metadata_rows = backend.node_metadata(limit=row_count + 1)
+        except Exception as e:
+            detail = _redact_workspace_detail(e, resolver.root) or e.__class__.__name__
+            return _stored_vector_fallback(
+                resolver,
+                text,
+                k,
+                type_filters,
+                path_filters,
+                edge_filters,
+                snippet_chars,
+                explain,
+                config,
+                f"embedded vector index metadata could not be read: {detail}",
+            )
+        if len(metadata_rows) != row_count:
+            return _stored_vector_fallback(
+                resolver,
+                text,
+                k,
+                type_filters,
+                path_filters,
+                edge_filters,
+                snippet_chars,
+                explain,
+                config,
+                "embedded vector index metadata row count does not match the table row count",
+            )
+
+        rows_by_id = {}
+        malformed_rows = 0
+        for row in metadata_rows:
+            node_id = str(row.get("id") or "")
+            if not node_id or node_id in rows_by_id:
+                malformed_rows += 1
+                continue
+            rows_by_id[node_id] = row
+        if malformed_rows:
+            return _stored_vector_fallback(
+                resolver,
+                text,
+                k,
+                type_filters,
+                path_filters,
+                edge_filters,
+                snippet_chars,
+                explain,
+                config,
+                "embedded vector index contains malformed or duplicate node rows",
+            )
+
+        current_ids = set(records_by_id)
+        stored_ids = set(rows_by_id)
+        missing = sorted(current_ids - stored_ids)
+        extra = sorted(stored_ids - current_ids)
+        if missing or extra:
+            detail = "embedded vector index is stale"
+            if missing:
+                detail += f"; missing {len(missing)} current node(s)"
+            if extra:
+                detail += f"; contains {len(extra)} deleted node(s)"
+            return _stored_vector_fallback(
+                resolver,
+                text,
+                k,
+                type_filters,
+                path_filters,
+                edge_filters,
+                snippet_chars,
+                explain,
+                config,
+                detail,
+            )
+
+        dimensions = config.get("dimensions", _DEFAULT_VECTOR_DIMENSIONS)
+        for node_id, record in records_by_id.items():
+            row = rows_by_id[node_id]
+            expected_metadata = {
+                "embedding_provider": config["provider"],
+                "embedding_dimensions": dimensions,
+                "embedding_version": _LOCAL_VECTOR_VERSION,
+                "embedding_scope": "typed-node",
+                "source_fingerprint": _source_fingerprint(docs_by_id.get(node_id), record),
+                "embedding_text_fingerprint": _sha256_text(_record_vector_text(record)),
+            }
+            for key, expected in expected_metadata.items():
+                if row.get(key) != expected:
+                    return _stored_vector_fallback(
+                        resolver,
+                        text,
+                        k,
+                        type_filters,
+                        path_filters,
+                        edge_filters,
+                        snippet_chars,
+                        explain,
+                        config,
+                        f"stored vector for {node_id!r} has stale {key}",
+                    )
+
+        query_vector = _local_hash_vector(text, dimensions)
+        vector_status = dict(config)
+        vector_status.update({
+            "source": "stored",
+            "index": "embedded",
+            "embedding_version": _LOCAL_VECTOR_VERSION,
+            "indexed": len(rows_by_id),
+        })
+        if not any(query_vector):
+            vector_status["matched"] = 0
+            return 0, [], vector_status
+
+        filters_present = bool(type_filters or path_filters or edge_filters)
+        candidate_limit = _vector_candidate_limit(k, row_count, filters_present)
+        try:
+            ranked_rows = backend.vector_query(query_vector, k=candidate_limit)
+        except Exception as e:
+            detail = _redact_workspace_detail(e, resolver.root) or e.__class__.__name__
+            return _stored_vector_fallback(
+                resolver,
+                text,
+                k,
+                type_filters,
+                path_filters,
+                edge_filters,
+                snippet_chars,
+                explain,
+                config,
+                f"embedded vector backend search failed: {detail}",
+            )
+        ranked_ids = []
+        seen = set()
+        vectors_by_id = {}
+        for row in ranked_rows:
+            node_id = str(row.get("id") or "")
+            if not node_id or node_id not in rows_by_id:
+                return _stored_vector_fallback(
+                    resolver,
+                    text,
+                    k,
+                    type_filters,
+                    path_filters,
+                    edge_filters,
+                    snippet_chars,
+                    explain,
+                    config,
+                    "embedded vector backend returned an unknown node candidate",
+                )
+            if node_id in seen:
+                continue
+            vector = _coerce_vector(row.get("vector"))
+            if vector is None or len(vector) != dimensions:
+                return _stored_vector_fallback(
+                    resolver,
+                    text,
+                    k,
+                    type_filters,
+                    path_filters,
+                    edge_filters,
+                    snippet_chars,
+                    explain,
+                    config,
+                    f"stored vector for {node_id!r} is missing, non-finite, or has the wrong dimensions",
+                )
+            ranked_ids.append(node_id)
+            vectors_by_id[node_id] = vector
+            seen.add(node_id)
+
+        type_filters = type_filters or []
+        path_filters = path_filters or []
+        edge_filters = edge_filters or []
+        results = []
+        for node_id in ranked_ids:
+            record = records_by_id[node_id]
+            if not _passes_search_filters(record, type_filters, path_filters, edge_filters):
+                continue
+            score = _cosine_score(query_vector, vectors_by_id[node_id])
+            if score <= 0:
+                continue
+            results.append(_vector_result(
+                record,
+                score,
+                config,
+                "stored",
+                snippet_chars,
+                explain,
+                edge_filters,
+                text,
+            ))
+
+        results.sort(key=lambda r: (-r["score"], r["path"], r["id"]))
+        results = results[:max(0, k)]
+        vector_status["matched"] = len(results)
+        vector_status["candidate_limit"] = candidate_limit
+        vector_status["candidates"] = len(ranked_rows)
+        return 0, results, vector_status
+    finally:
+        close = getattr(backend, "close", None)
+        if callable(close):
+            close()
+
+
+def vector_query(resolver, text, *, k=10, type_filters=None, path_filters=None,
+                 edge_filters=None, snippet_chars=_DEFAULT_SNIPPET_CHARS,
+                 explain=False):
+    """Typed vector search with stored embedded rows when they are current."""
+    config = _load_vector_query_config(resolver.root)
+    if config["status"] == "fallback":
+        return _text_vector_fallback(
+            resolver,
+            text,
+            k,
+            type_filters,
+            path_filters,
+            edge_filters,
+            snippet_chars,
+            explain,
+            config,
+            config.get("detail"),
+        )
+    if config["status"] != "ok":
+        return 1, [], config
+
+    embedded, detail = _storage_backend_is_embedded(resolver.root)
+    if embedded:
+        return _stored_vector_query(
+            resolver,
+            text,
+            k=k,
+            type_filters=type_filters,
+            path_filters=path_filters,
+            edge_filters=edge_filters,
+            snippet_chars=snippet_chars,
+            explain=explain,
+            config=config,
+        )
+    if detail:
+        return _stored_vector_fallback(
+            resolver,
+            text,
+            k,
+            type_filters,
+            path_filters,
+            edge_filters,
+            snippet_chars,
+            explain,
+            config,
+            detail,
+        )
+    return _computed_vector_query(
+        resolver,
+        text,
+        k=k,
+        type_filters=type_filters,
+        path_filters=path_filters,
+        edge_filters=edge_filters,
+        snippet_chars=snippet_chars,
+        explain=explain,
+        config=config,
+    )
 
 
 def _estimate_tokens(value):
