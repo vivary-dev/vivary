@@ -120,7 +120,9 @@ coverage after creation.
 `tropo find` returns small typed context packets for agents and humans to read first;
 `tropo query` provides filtered graph search, `tropo query --mode vector` adds
 dependency-free local typed-vector search when `.vivary/storage.toml` explicitly
-enables it, and `tropo migrate` handles backend switching. On the unreleased `dev`
+enables it, and `tropo migrate` handles backend switching. When local vector policy is
+enabled, embedded migration stores graph-shaped vectors with source/embedding
+fingerprints for stale-vector detection. On the unreleased `dev`
 branch, `tropo query --mode semantic` can call an explicitly configured optional
 semantic-memory provider while still returning typed Vivary node ids.
 

@@ -606,6 +606,30 @@ def _compose(root, script_dir, config_path=None):
     return composed
 
 
+def _rebase_overlay_config(raw, overlay_path, root):
+    data = copy.deepcopy(raw)
+    overlay_dir = os.path.dirname(os.path.abspath(overlay_path))
+    root_abs = os.path.abspath(root)
+    overlay_rel = os.path.relpath(overlay_dir, root_abs)
+    if overlay_rel in (".", "") or overlay_rel.startswith(".."):
+        return data
+    rebased = []
+    for pattern in data.get("exclude", []):
+        if not isinstance(pattern, str):
+            rebased.append(pattern)
+            continue
+        normalized = pattern.replace("\\", "/").strip()
+        if not normalized or normalized.startswith("/") or "/" not in normalized:
+            rebased.append(pattern)
+            continue
+        if normalized.startswith("./"):
+            normalized = normalized[2:]
+        rebased.append(f"{overlay_rel.replace(os.sep, '/')}/{normalized}")
+    if rebased:
+        data["exclude"] = rebased
+    return data
+
+
 def load_config(root, script_dir, config_path=None):
     return Config(_compose(root, script_dir, config_path), root)
 
@@ -643,7 +667,7 @@ class ConfigResolver:
             if overlays:
                 composed = copy.deepcopy(self._base_dict)
                 for ov in overlays:
-                    _merge_config(composed, _read_toml(ov))
+                    _merge_config(composed, _rebase_overlay_config(_read_toml(ov), ov, self.root))
                 self._cache[key] = Config(composed, self.root)
             else:
                 self._cache[key] = self.base
@@ -903,8 +927,12 @@ def analyze_file(full, rel, config):
 
 def analyze(root, paths, config):
     resolver = config if hasattr(config, "for_dir") else _StaticResolver(config)
-    docs = [analyze_file(full, rel, resolver.for_dir(os.path.dirname(full)))
-            for full, rel in iter_markdown(root, paths, resolver.base.exclude)]
+    docs = []
+    for full, rel in iter_markdown(root, paths, resolver.base.exclude):
+        effective = resolver.for_dir(os.path.dirname(full))
+        if is_excluded(rel, effective.exclude):
+            continue
+        docs.append(analyze_file(full, rel, effective))
     ids = set()
     for d in docs:
         ids.add(d.derived.get("id"))
@@ -1192,6 +1220,7 @@ _MIN_VECTOR_DIMENSIONS = 16
 _MAX_VECTOR_DIMENSIONS = 4096
 _VECTOR_CONTENT_CHARS = 4000
 _LOCAL_VECTOR_PROVIDER = "local-hash"
+_LOCAL_VECTOR_VERSION = "local-hash-v1"
 _QUERY_STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "do", "does", "for",
     "from", "how", "i", "in", "is", "it", "of", "on", "or", "our", "the",
@@ -1204,8 +1233,8 @@ def _load_storage_document(root):
     if not os.path.isfile(path):
         return {}
     try:
-        with open(path, "rb") as fh:
-            return tomllib.load(fh)
+        with open(path, encoding="utf-8-sig") as fh:
+            return tomllib.loads(fh.read())
     except OSError as e:
         detail = e.strerror or e.__class__.__name__
         raise ConfigError(f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: {detail}")
@@ -1215,7 +1244,12 @@ def _load_storage_document(root):
 
 def _load_storage_config(root):
     data = _load_storage_document(root)
-    return data.get("storage", {"backend": "file"})
+    storage = data.get("storage", {"backend": "file"})
+    if storage is None:
+        storage = {"backend": "file"}
+    if not isinstance(storage, dict):
+        raise ConfigError(f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: storage must be a TOML table")
+    return storage
 
 
 def _vector_config_error(detail, provider="unknown"):
@@ -1431,6 +1465,86 @@ def _doc_to_node(d):
     }
 
 
+def _sha256_bytes(data):
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def _sha256_text(text):
+    return _sha256_bytes((text or "").encode("utf-8"))
+
+
+def _source_fingerprint(doc, fallback_record):
+    if doc is not None:
+        try:
+            digest = hashlib.sha256()
+            with open(doc.full, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            return "sha256:" + digest.hexdigest()
+        except OSError:
+            pass
+    stable = json.dumps(fallback_record, ensure_ascii=False, sort_keys=True)
+    return _sha256_text(stable)
+
+
+def _embedding_summary(config, embedded=0):
+    if config["status"] == "ok":
+        return {
+            "status": "ok",
+            "provider": config["provider"],
+            "dimensions": config.get("dimensions", _DEFAULT_VECTOR_DIMENSIONS),
+            "embedded": embedded,
+        }
+    if config["status"] == "fallback":
+        return {
+            "status": "disabled",
+            "embedded": 0,
+            "detail": config["detail"],
+        }
+    return {
+        "status": config["status"],
+        "provider": config.get("provider", "unknown"),
+        "embedded": 0,
+        "detail": config.get("detail", ""),
+    }
+
+
+def _migrate_nodes_with_embeddings(docs, config):
+    graph_nodes, graph_edges = build_graph(docs)
+    plain_by_id = {
+        d.derived.get("id", ""): _doc_to_node(d)
+        for d in docs
+        if d.derived.get("id", "") is not None
+    }
+    if config["status"] != "ok":
+        return [plain_by_id[node_id] for node_id in sorted(plain_by_id)]
+
+    docs_by_id = {d.derived.get("id"): d for d in docs if d.derived.get("id") is not None}
+    dimensions = config.get("dimensions", _DEFAULT_VECTOR_DIMENSIONS)
+    records = _build_search_records(docs, graph_nodes, graph_edges, body_limit=_VECTOR_CONTENT_CHARS)
+    nodes = []
+    for record in records:
+        node = dict(plain_by_id.get(record["id"], {
+            "id": record["id"],
+            "type": record.get("type") or "",
+            "path": record.get("path", ""),
+            "title": record.get("title", ""),
+            "content": record.get("body", ""),
+        }))
+        text = _record_vector_text(record)
+        node.update({
+            "vector": _local_hash_vector(text, dimensions),
+            "embedding_provider": config["provider"],
+            "embedding_dimensions": dimensions,
+            "embedding_version": _LOCAL_VECTOR_VERSION,
+            "embedding_scope": "typed-node",
+            "embedding_text_fingerprint": _sha256_text(text),
+            "source_fingerprint": _source_fingerprint(docs_by_id.get(record["id"]), record),
+        })
+        nodes.append(node)
+    return nodes
+
+
 class _FileBackend:
     """Default: file-system graph is the store. query() is a text grep over .md files."""
     def __init__(self, root):
@@ -1511,6 +1625,17 @@ class _LanceBackend:
                 .execute(nodes))
         except AttributeError:
             tbl.add(nodes, mode="overwrite")
+        except ValueError as e:
+            if "not found in target schema" not in str(e):
+                raise
+            tbl.add(nodes, mode="overwrite")
+
+    def replace_all(self, nodes):
+        if self._table() is not None:
+            self._db.drop_table("nodes")
+            self._tbl = None
+        if nodes:
+            self._tbl = self._db.create_table("nodes", data=nodes)
 
     def get(self, node_id):
         tbl = self._table()
@@ -2811,24 +2936,52 @@ def cmd_init(args):
     return 0
 
 
+def _migrate_error(args, message, from_name, to_name, *, failed=0, embedding_config=None):
+    embedding = _embedding_summary(
+        embedding_config or _vector_config_fallback("embedding persistence is disabled")
+    )
+    if args.json:
+        print(json.dumps({"migrated": 0, "failed": failed, "error": message,
+                          "from": from_name, "to": to_name,
+                          "embedding": embedding}, indent=2))
+    else:
+        print(f"tropo migrate: {message}", file=sys.stderr)
+    return 1
+
+
 def cmd_migrate(args, resolver):
     """Move graph nodes from one storage backend to another."""
     import time as _time
     from_name = getattr(args, "from_backend", None) or "file"
     to_name = getattr(args, "to_backend", None) or "embedded"
+    embedding_config = _vector_config_fallback("embedding persistence is disabled")
 
     if from_name == to_name:
-        sys.exit("tropo migrate: --from and --to must be different backends")
+        return _migrate_error(
+            args, "--from and --to must be different backends", from_name, to_name
+        )
     if from_name != "file":
-        sys.exit(f"tropo migrate: --from {from_name!r} not yet supported; only 'file' is the supported source")
+        return _migrate_error(
+            args,
+            f"--from {from_name!r} not yet supported; only 'file' is the supported source",
+            from_name,
+            to_name,
+        )
     if to_name != "embedded":
-        sys.exit(f"tropo migrate: --to {to_name!r} not yet supported; only 'embedded' is the supported target")
+        return _migrate_error(
+            args,
+            f"--to {to_name!r} not yet supported; only 'embedded' is the supported target",
+            from_name,
+            to_name,
+        )
 
     vivary_cfg = os.path.join(resolver.root, STORAGE_DIR, STORAGE_CONFIG_NAME)
     if not os.path.isfile(vivary_cfg) and not args.dry_run:
-        sys.exit(
-            "tropo migrate: no .vivary/storage.toml found — "
-            "run `create-vivary wizard` to configure a storage backend first"
+        return _migrate_error(
+            args,
+            "no .vivary/storage.toml found — run `create-vivary wizard` to configure a storage backend first",
+            from_name,
+            to_name,
         )
 
     if not args.dry_run:
@@ -2841,21 +2994,30 @@ def cmd_migrate(args, resolver):
                     "run `create-vivary wizard` to configure embedded storage first"
                 )
         except ConfigError as e:
-            if args.json:
-                print(json.dumps({"migrated": 0, "failed": 0, "error": str(e),
-                                  "from": from_name, "to": to_name}, indent=2))
-            else:
-                print(f"tropo migrate: {e}", file=sys.stderr)
-            return 1
+            return _migrate_error(args, str(e), from_name, to_name)
+        embedding_config = _load_vector_query_config(resolver.root)
+        if embedding_config["status"] == "misconfigured":
+            return _migrate_error(
+                args,
+                embedding_config["detail"],
+                from_name,
+                to_name,
+                embedding_config=embedding_config,
+            )
 
     docs = analyze(resolver.root, [], resolver)
-    nodes = [_doc_to_node(d) for d in docs]
+    nodes = _migrate_nodes_with_embeddings(docs, embedding_config)
     n = len(nodes)
+    embedding_summary = _embedding_summary(
+        embedding_config,
+        embedded=n if embedding_config["status"] == "ok" else 0,
+    )
 
     if args.dry_run:
         if args.json:
             print(json.dumps({"migrated": n, "failed": 0, "duration_ms": 0,
-                              "from": from_name, "to": to_name, "dry_run": True}, indent=2))
+                              "from": from_name, "to": to_name, "dry_run": True,
+                              "embedding": embedding_summary}, indent=2))
         else:
             print(f"tropo migrate: would migrate {n} node(s) from {from_name} to {to_name} (dry run)")
         return 0
@@ -2863,12 +3025,16 @@ def cmd_migrate(args, resolver):
     t0 = _time.monotonic()
     try:
         dst = get_backend(resolver.root, allow_auto_fallback=False)
-        dst.upsert(nodes)
+        if hasattr(dst, "replace_all"):
+            dst.replace_all(nodes)
+        else:
+            dst.upsert(nodes)
         dst.close()
     except ConfigError as e:
         if args.json:
             print(json.dumps({"migrated": 0, "failed": n, "error": str(e),
-                              "from": from_name, "to": to_name}, indent=2))
+                              "from": from_name, "to": to_name,
+                              "embedding": embedding_summary}, indent=2))
         else:
             print(f"tropo migrate: {e}", file=sys.stderr)
         return 1
@@ -2876,9 +3042,13 @@ def cmd_migrate(args, resolver):
 
     if args.json:
         print(json.dumps({"migrated": n, "failed": 0, "duration_ms": elapsed,
-                          "from": from_name, "to": to_name, "dry_run": False}, indent=2))
+                          "from": from_name, "to": to_name, "dry_run": False,
+                          "embedding": embedding_summary}, indent=2))
     else:
-        print(f"tropo migrate: {n} node(s) migrated from {from_name} to {to_name} ({elapsed}ms)")
+        suffix = ""
+        if embedding_summary["status"] == "ok":
+            suffix = f"; embedded {embedding_summary['embedded']} local vector(s)"
+        print(f"tropo migrate: {n} node(s) migrated from {from_name} to {to_name} ({elapsed}ms){suffix}")
     return 0
 
 

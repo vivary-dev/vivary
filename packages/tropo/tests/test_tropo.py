@@ -875,6 +875,43 @@ def _query_args(query, **overrides):
     return argparse.Namespace(**data)
 
 
+def _migrate_args(**overrides):
+    data = {
+        "from_backend": "file",
+        "to_backend": "embedded",
+        "dry_run": False,
+        "json": True,
+        "yes": False,
+        "paths": [],
+        "strict": False,
+        "lenient": False,
+        "quiet": False,
+        "config": None,
+    }
+    data.update(overrides)
+    return argparse.Namespace(**data)
+
+
+class _RecordingBackend:
+    def __init__(self):
+        self.records = {}
+        self.upsert_calls = 0
+        self.replace_calls = 0
+        self.closed = False
+
+    def upsert(self, nodes):
+        self.upsert_calls += 1
+        for node in nodes:
+            self.records[node["id"]] = dict(node)
+
+    def replace_all(self, nodes):
+        self.replace_calls += 1
+        self.records = {node["id"]: dict(node) for node in nodes}
+
+    def close(self):
+        self.closed = True
+
+
 def test_file_backend_query_returns_matches(tmp_path):
     _minimal_vault(tmp_path)
     backend = tropo._FileBackend(str(tmp_path))
@@ -907,6 +944,69 @@ def test_lance_backend_raises_clear_error_when_not_installed(tmp_path):
         assert False, "expected ConfigError"
     except tropo.ConfigError as e:
         assert "pip install vivary-tropo[embedded]" in str(e)
+
+
+def test_lance_backend_overwrites_when_schema_expands_for_embeddings():
+    class SchemaMismatchTable:
+        def __init__(self):
+            self.added = None
+            self.mode = None
+
+        def merge_insert(self, key):
+            assert key == "id"
+            return self
+
+        def when_matched_update_all(self):
+            return self
+
+        def when_not_matched_insert_all(self):
+            return self
+
+        def execute(self, nodes):
+            raise ValueError("Field 'vector' not found in target schema")
+
+        def add(self, nodes, mode=None):
+            self.added = nodes
+            self.mode = mode
+
+    backend = object.__new__(tropo._LanceBackend)
+    table = SchemaMismatchTable()
+    backend._tbl = table
+
+    backend.upsert([{"id": "a", "vector": [1.0]}])
+
+    assert table.added == [{"id": "a", "vector": [1.0]}]
+    assert table.mode == "overwrite"
+
+
+def test_lance_backend_replace_all_recreates_table_for_full_snapshot():
+    class FakeDb:
+        def __init__(self):
+            self.dropped = []
+            self.created = []
+            self.opened = False
+
+        def open_table(self, name):
+            assert name == "nodes"
+            self.opened = True
+            return object()
+
+        def drop_table(self, name):
+            self.dropped.append(name)
+
+        def create_table(self, name, data):
+            self.created.append((name, data))
+            return {"name": name, "data": data}
+
+    backend = object.__new__(tropo._LanceBackend)
+    backend._db = FakeDb()
+    backend._tbl = None
+
+    backend.replace_all([{"id": "a", "vector": [1.0]}])
+
+    assert backend._db.dropped == ["nodes"]
+    assert backend._db.created == [("nodes", [{"id": "a", "vector": [1.0]}])]
+    assert backend._tbl == {"name": "nodes", "data": [{"id": "a", "vector": [1.0]}]}
 
 
 def test_get_backend_defaults_to_file(tmp_path):
@@ -1001,6 +1101,385 @@ def test_cmd_migrate_dry_run_ignores_malformed_embedding_config(tmp_path):
     assert rc == 0
     assert out["dry_run"] is True
     assert out["migrated"] >= 1
+
+
+def test_cmd_migrate_same_backend_reports_json_error(tmp_path):
+    _minimal_vault(tmp_path)
+
+    rc, out = _capture_rc(
+        tropo.cmd_migrate,
+        _migrate_args(from_backend="file", to_backend="file"),
+        res(str(tmp_path)),
+    )
+
+    assert rc == 1
+    assert out["migrated"] == 0
+    assert out["failed"] == 0
+    assert "--from and --to must be different backends" in out["error"]
+    assert out["embedding"]["status"] == "disabled"
+
+
+def test_storage_config_accepts_leading_utf8_bom(tmp_path):
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage.embedding]\n"
+        "enabled = true\n"
+        "provider = \"local-hash\"\n",
+        encoding="utf-8-sig",
+    )
+
+    config = tropo._load_vector_query_config(str(tmp_path))
+
+    assert config["status"] == "ok"
+    assert config["provider"] == "local-hash"
+
+
+def test_cmd_migrate_non_table_storage_config_reports_json_error(tmp_path):
+    _minimal_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        'storage = "embedded"\n',
+        encoding="utf-8",
+    )
+
+    rc, out = _capture_rc(
+        tropo.cmd_migrate,
+        _migrate_args(),
+        res(str(tmp_path)),
+    )
+
+    assert rc == 1
+    assert out["migrated"] == 0
+    assert out["failed"] == 0
+    assert "storage must be a TOML table" in out["error"]
+
+
+def test_cmd_migrate_missing_storage_config_reports_json_error(tmp_path):
+    _minimal_vault(tmp_path)
+
+    rc, out = _capture_rc(
+        tropo.cmd_migrate,
+        _migrate_args(),
+        res(str(tmp_path)),
+    )
+
+    assert rc == 1
+    assert out["migrated"] == 0
+    assert out["failed"] == 0
+    assert "no .vivary/storage.toml found" in out["error"]
+    assert out["embedding"]["status"] == "disabled"
+
+
+def test_cmd_migrate_embedded_without_embedding_config_persists_plain_nodes(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage]\n"
+        "backend = \"embedded\"\n",
+        encoding="utf-8",
+    )
+    backend = _RecordingBackend()
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(
+            tropo.cmd_migrate,
+            _migrate_args(),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 0
+    assert out["migrated"] == 3
+    assert out["embedding"]["status"] == "disabled"
+    assert backend.closed is True
+    assert backend.replace_calls == 1
+    assert "release-workflow" in backend.records
+    assert "vector" not in backend.records["release-workflow"]
+    assert "embedding_provider" not in backend.records["release-workflow"]
+
+
+def test_cmd_migrate_embedded_with_local_hash_stores_typed_node_embeddings(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage]\n"
+        "backend = \"embedded\"\n"
+        "[storage.embedding]\n"
+        "enabled = true\n"
+        "provider = \"local-hash\"\n"
+        "dimensions = 64\n",
+        encoding="utf-8",
+    )
+    backend = _RecordingBackend()
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(
+            tropo.cmd_migrate,
+            _migrate_args(),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 0
+    assert out["embedding"] == {
+        "status": "ok",
+        "provider": "local-hash",
+        "dimensions": 64,
+        "embedded": 3,
+    }
+    row = backend.records["release-workflow"]
+    assert row["id"] == "release-workflow"
+    assert row["type"] == "decision"
+    assert row["path"] == "decisions/release-workflow.md"
+    assert len(row["vector"]) == 64
+    assert any(row["vector"])
+    assert row["embedding_provider"] == "local-hash"
+    assert row["embedding_dimensions"] == 64
+    assert row["embedding_version"] == "local-hash-v1"
+    assert row["embedding_scope"] == "typed-node"
+    assert row["source_fingerprint"].startswith("sha256:")
+    assert row["embedding_text_fingerprint"].startswith("sha256:")
+
+
+def test_cmd_migrate_embedding_repeated_runs_update_by_node_id(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage]\n"
+        "backend = \"embedded\"\n"
+        "[storage.embedding]\n"
+        "enabled = true\n"
+        "provider = \"local-hash\"\n",
+        encoding="utf-8",
+    )
+    backend = _RecordingBackend()
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc1, out1 = _capture_rc(tropo.cmd_migrate, _migrate_args(), res(str(tmp_path)))
+        first_fingerprint = backend.records["release-workflow"]["source_fingerprint"]
+        (tmp_path / "decisions" / "release-workflow.md").write_text(
+            "---\n"
+            "status: accepted\n"
+            "affects: agent-workspace\n"
+            "---\n"
+            "# Release Workflow\n\n"
+            "Owns release truth, changelog verification, and a new benchmark proof.\n",
+            encoding="utf-8",
+        )
+        rc2, out2 = _capture_rc(tropo.cmd_migrate, _migrate_args(), res(str(tmp_path)))
+
+    assert rc1 == 0
+    assert rc2 == 0
+    assert out1["migrated"] == 3
+    assert out2["migrated"] == 3
+    assert backend.replace_calls == 2
+    assert sorted(backend.records) == ["agent-workspace", "release-workflow", "retrieval"]
+    assert backend.records["release-workflow"]["source_fingerprint"] != first_fingerprint
+
+
+def test_cmd_migrate_embedding_removes_deleted_or_newly_excluded_rows(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage]\n"
+        "backend = \"embedded\"\n"
+        "[storage.embedding]\n"
+        "enabled = true\n"
+        "provider = \"local-hash\"\n",
+        encoding="utf-8",
+    )
+    backend = _RecordingBackend()
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc1, out1 = _capture_rc(tropo.cmd_migrate, _migrate_args(), res(str(tmp_path)))
+        (tmp_path / "modules" / "retrieval.md").unlink()
+        rc2, out2 = _capture_rc(tropo.cmd_migrate, _migrate_args(), res(str(tmp_path)))
+
+    assert rc1 == 0
+    assert rc2 == 0
+    assert out1["migrated"] == 3
+    assert out2["migrated"] == 2
+    assert sorted(backend.records) == ["agent-workspace", "release-workflow"]
+    assert "retrieval" not in backend.records
+
+
+def test_cmd_migrate_embedding_bad_config_fails_before_backend_write(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage]\n"
+        "backend = \"embedded\"\n"
+        "[storage.embedding]\n"
+        "enabled = true\n"
+        "provider = \"remote-mystery\"\n",
+        encoding="utf-8",
+    )
+    backend = _RecordingBackend()
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend) as get_backend:
+        rc, out = _capture_rc(
+            tropo.cmd_migrate,
+            _migrate_args(),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 1
+    assert out["migrated"] == 0
+    assert out["failed"] == 0
+    assert out["embedding"]["status"] == "misconfigured"
+    assert "remote-mystery" in out["error"]
+    assert get_backend.call_count == 0
+    assert backend.records == {}
+
+
+def test_cmd_migrate_missing_embedded_dependency_reports_json_error(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage]\n"
+        "backend = \"embedded\"\n",
+        encoding="utf-8",
+    )
+
+    with mock.patch.object(
+        tropo,
+        "get_backend",
+        side_effect=tropo.ConfigError("LanceDB is not installed. Run: pip install vivary-tropo[embedded]"),
+    ):
+        rc, out = _capture_rc(
+            tropo.cmd_migrate,
+            _migrate_args(),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 1
+    assert out["migrated"] == 0
+    assert out["failed"] == 3
+    assert "pip install vivary-tropo[embedded]" in out["error"]
+    assert out["embedding"]["status"] == "disabled"
+
+
+def test_cmd_migrate_embedding_respects_root_privacy_excludes(tmp_path):
+    (tmp_path / "tropo.toml").write_text(
+        "exclude = ['private']\n"
+        "[base]\n"
+        "derive = ['id', 'title']\n"
+        "allow_untyped = true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "public.md").write_text("# Public\nRelease truth note.\n", encoding="utf-8")
+    (tmp_path / "private").mkdir()
+    (tmp_path / "private" / "secret.md").write_text(
+        "# Secret\nDo not embed this private note.\n",
+        encoding="utf-8",
+    )
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage]\n"
+        "backend = \"embedded\"\n"
+        "[storage.embedding]\n"
+        "enabled = true\n"
+        "provider = \"local-hash\"\n",
+        encoding="utf-8",
+    )
+    backend = _RecordingBackend()
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(tropo.cmd_migrate, _migrate_args(), res(str(tmp_path)))
+
+    assert rc == 0
+    assert out["embedding"]["embedded"] == 1
+    assert sorted(backend.records) == ["public"]
+    assert all("Secret" not in row.get("content", "") for row in backend.records.values())
+
+
+def test_cmd_migrate_embedding_respects_nested_privacy_excludes(tmp_path):
+    (tmp_path / "tropo.toml").write_text(
+        "[base]\n"
+        "derive = ['id', 'title']\n"
+        "allow_untyped = true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "tropo.toml").write_text(
+        "exclude = ['private/secret.md']\n"
+        "[base]\n"
+        "strict = true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "docs" / "public.md").write_text("# Public\nVisible docs note.\n", encoding="utf-8")
+    (tmp_path / "docs" / "private").mkdir()
+    (tmp_path / "docs" / "private" / "secret.md").write_text(
+        "# Secret\nNested private note must not be embedded.\n",
+        encoding="utf-8",
+    )
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage]\n"
+        "backend = \"embedded\"\n"
+        "[storage.embedding]\n"
+        "enabled = true\n"
+        "provider = \"local-hash\"\n",
+        encoding="utf-8",
+    )
+    backend = _RecordingBackend()
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(tropo.cmd_migrate, _migrate_args(), res(str(tmp_path)))
+
+    assert rc == 0
+    assert out["embedding"]["embedded"] == 1
+    assert sorted(backend.records) == ["public"]
+    assert all("Nested private" not in row.get("content", "") for row in backend.records.values())
+
+
+def test_cmd_migrate_embedding_respects_nested_dot_privacy_excludes(tmp_path):
+    (tmp_path / "tropo.toml").write_text(
+        "[base]\n"
+        "derive = ['id', 'title']\n"
+        "allow_untyped = true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "tropo.toml").write_text(
+        "exclude = ['.private/secret.md']\n"
+        "[base]\n"
+        "strict = true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "docs" / "public.md").write_text("# Public\nVisible docs note.\n", encoding="utf-8")
+    (tmp_path / "docs" / ".private").mkdir()
+    (tmp_path / "docs" / ".private" / "secret.md").write_text(
+        "# Secret\nDotted private note must not be embedded.\n",
+        encoding="utf-8",
+    )
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage]\n"
+        "backend = \"embedded\"\n"
+        "[storage.embedding]\n"
+        "enabled = true\n"
+        "provider = \"local-hash\"\n",
+        encoding="utf-8",
+    )
+    backend = _RecordingBackend()
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(tropo.cmd_migrate, _migrate_args(), res(str(tmp_path)))
+
+    assert rc == 0
+    assert out["embedding"]["embedded"] == 1
+    assert sorted(backend.records) == ["public"]
+    assert all("Dotted private" not in row.get("content", "") for row in backend.records.values())
 
 
 def test_cmd_query_returns_graph_aware_typed_matches(tmp_path):
