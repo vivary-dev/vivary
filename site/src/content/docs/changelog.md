@@ -52,6 +52,19 @@ release-train gates.
   sandboxes/observability-proof/receipts.jsonl`, then `vivary logs ... --json` and
   `vivary logs email ... --out ... --json`.
 
+## [Unreleased: repo line-ending standard] — 2026-07-05
+
+Affects contributor docs, PR hygiene, and CI only. No package behavior changed.
+
+### Added
+
+- Added `.gitattributes`, `.editorconfig`, and `scripts/check_line_endings.py` as the
+  repo standard for LF-normalized text files across Windows, WSL/Linux, and GitHub
+  Actions.
+- Added the line-ending check to CI, the PR template, and contributor guidance, with
+  an explicit temporary allowlist for legacy mixed/CRLF files that should be reduced
+  through deliberate cleanup PRs.
+
 ## [Unreleased: retrieval mode docs polish] — 2026-07-05
 
 Affects public docs, generated website docs, and the `vivary-tropo` package README

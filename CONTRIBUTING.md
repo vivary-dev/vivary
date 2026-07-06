@@ -38,6 +38,32 @@ truth changes, update the affected docs in the same PR. The website under `site/
 generated from `docs/`, so run the site sync/build when doc-source changes are in
 scope.
 
+## Line Endings
+
+Vivary normalizes text files to **LF** in both Git and the working tree. This keeps
+Windows, WSL/Linux, GitHub Actions, generated site docs, and package builds from
+turning tiny edits into noisy line-ending diffs. `.gitattributes` owns the Git rule,
+`.editorconfig` owns editor defaults, and `scripts/check_line_endings.py` enforces
+the policy.
+
+Rules:
+
+- Use LF for text files, including Markdown, Python, TOML, JSON, JavaScript, Astro,
+  SVG, and PowerShell.
+- Use CRLF only for `.bat` and `.cmd` files.
+- Do not hand-normalize unrelated legacy files inside a feature PR. If a touched file
+  is mixed, normalize that file in the same PR and call it out in verification.
+- The checker has a temporary legacy allowlist for files that already had CRLF or
+  mixed endings when the policy landed. Shrink the allowlist only through deliberate
+  cleanup PRs.
+
+Before pushing a PR that changes text files, run:
+
+```bash
+python scripts/check_line_endings.py
+git diff --check
+```
+
 ## Local Verification
 
 Use the smallest relevant checks while working, then run the applicable gate before
@@ -51,5 +77,6 @@ python packages/create-vivary/tests/test_create_vivary.py
 python packages/create-vivary/tests/test_assets_parity.py
 node packages/create-vivary/tests/test_npm_launcher.js
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault
+python scripts/check_line_endings.py
 git diff --check
 ```
