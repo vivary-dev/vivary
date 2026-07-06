@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="420" viewBox="0 0 1040 420" role="img" aria-labelledby="title desc">
+  <title id="title">Vivary review and board terminal proof</title>
+  <desc id="desc">A generic terminal capture showing ozone review and exo board output.</desc>
+  <rect width="1040" height="420" rx="16" fill="#101c22"/>
+  <rect x="1" y="1" width="1038" height="418" rx="15" fill="none" stroke="#7fbfa9" stroke-opacity="0.25"/>
+  <circle cx="34" cy="34" r="6" fill="#ff6b6b"/>
+  <circle cx="56" cy="34" r="6" fill="#ffd166"/>
+  <circle cx="78" cy="34" r="6" fill="#63d297"/>
+  <text x="28" y="78" fill="#8ee7c4" font-family="Consolas, 'JetBrains Mono', monospace" font-size="20">$ ozone review --root demo-vivary-workspace</text>
+  <text x="28" y="126" fill="#e8fff7" font-family="Consolas, 'JetBrains Mono', monospace" font-size="20">ozone: reviewed 9 node(s), 0 warning(s), 0 note(s)</text>
+  <text x="28" y="198" fill="#8ee7c4" font-family="Consolas, 'JetBrains Mono', monospace" font-size="20">$ exo board --root demo-vivary-workspace</text>
+  <text x="28" y="246" fill="#e8fff7" font-family="Consolas, 'JetBrains Mono', monospace" font-size="20">exo: 2 work item(s)</text>
+  <text x="28" y="288" fill="#a9c9d0" font-family="Consolas, 'JetBrains Mono', monospace" font-size="20">  [done]     scaffold-init</text>
+  <text x="28" y="330" fill="#a9c9d0" font-family="Consolas, 'JetBrains Mono', monospace" font-size="20">  [planned]  local-ci-baseline</text>
+</svg>

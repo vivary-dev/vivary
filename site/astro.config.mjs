@@ -25,6 +25,7 @@ export default defineConfig({
 						{ label: 'Home', link: '/' },
 						{ label: 'What is Vivary?', slug: 'concepts' },
 						{ label: 'Getting started', slug: 'getting-started' },
+						{ label: 'Getting started proof', slug: 'walkthrough' },
 						{ label: 'Blog', link: '/blog/' },
 					],
 				},

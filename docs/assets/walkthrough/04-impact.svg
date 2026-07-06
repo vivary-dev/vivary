@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="460" viewBox="0 0 1040 460" role="img" aria-labelledby="title desc">
+  <title id="title">Vivary impact terminal proof</title>
+  <desc id="desc">A generic terminal capture showing ozone impact output for a graph node.</desc>
+  <rect width="1040" height="460" rx="16" fill="#101c22"/>
+  <rect x="1" y="1" width="1038" height="458" rx="15" fill="none" stroke="#7fbfa9" stroke-opacity="0.25"/>
+  <circle cx="34" cy="34" r="6" fill="#ff6b6b"/>
+  <circle cx="56" cy="34" r="6" fill="#ffd166"/>
+  <circle cx="78" cy="34" r="6" fill="#63d297"/>
+  <text x="28" y="78" fill="#8ee7c4" font-family="Consolas, 'JetBrains Mono', monospace" font-size="20">$ ozone impact human-gates --root demo-vivary-workspace</text>
+  <text x="28" y="126" fill="#e8fff7" font-family="Consolas, 'JetBrains Mono', monospace" font-size="20">ozone: impact of 'human-gates' - 8 node(s) depend on it</text>
+  <text x="28" y="176" fill="#a9c9d0" font-family="Consolas, 'JetBrains Mono', monospace" font-size="18">1  agent-workspace       module, via gates</text>
+  <text x="28" y="214" fill="#a9c9d0" font-family="Consolas, 'JetBrains Mono', monospace" font-size="18">1  codebase              module, via gates</text>
+  <text x="28" y="252" fill="#a9c9d0" font-family="Consolas, 'JetBrains Mono', monospace" font-size="18">1  local-ci-baseline     implementation_slice, via gates</text>
+  <text x="28" y="290" fill="#a9c9d0" font-family="Consolas, 'JetBrains Mono', monospace" font-size="18">2  0001-vivary-baseline  decision, via related_modules</text>
+  <text x="28" y="328" fill="#a9c9d0" font-family="Consolas, 'JetBrains Mono', monospace" font-size="18">2  local-checks          verification, via related_modules</text>
+  <text x="28" y="390" fill="#8ee7c4" font-family="Consolas, 'JetBrains Mono', monospace" font-size="20">Change with blast radius visible.</text>
+</svg>

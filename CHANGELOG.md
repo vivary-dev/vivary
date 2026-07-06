@@ -49,6 +49,28 @@ release-train gates.
   sandboxes/observability-proof/receipts.jsonl`, then `vivary logs ... --json` and
   `vivary logs email ... --out ... --json`.
 
+## [Unreleased: getting-started proof walkthrough] — 2026-07-05
+
+Affects public docs and generated website docs only. No private dogfood workspace,
+package release, or provider runtime call is included.
+
+### Added
+
+- Added `docs/WALKTHROUGH.md`, a public, generic proof of the first Vivary product
+  cycle: scaffold, doctor health, `tropo check`, `ozone review`, `exo board`, and
+  `ozone impact`.
+- Added sanitized SVG terminal captures under `docs/assets/walkthrough/` and copied
+  docs assets into the generated site build.
+- Added the walkthrough to the website sidebar, docs index, getting-started next links,
+  and generated LLM documentation surfaces.
+
+### Verification
+
+- Generic disposable proof workspace: `create-vivary init`, `doctor`, `tropo check`,
+  `ozone review`, `exo board`, and `ozone impact human-gates` all completed without
+  private paths in the public artifacts.
+- `cd site && npm run build`
+
 ## [Unreleased: tropo semantic query mode] — 2026-07-05
 
 Affects `vivary-tropo`, `vivary-memory-cognee`, CLI docs, package docs, and

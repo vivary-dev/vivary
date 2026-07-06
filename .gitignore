@@ -30,6 +30,9 @@ sandboxes/*
 drafts/
 .release/private/
 HANDOFF.md
+
+# Generated from docs/assets during site builds
+/site/public/assets/walkthrough/
 # CocoIndex Code (ccc)
 /.cocoindex_code/
 

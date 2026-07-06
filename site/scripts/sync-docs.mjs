@@ -10,6 +10,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..');
 const docsDir = path.join(repoRoot, 'docs');
 const outDir = path.resolve(here, '..', 'src', 'content', 'docs');
+const docsWalkthroughAssetsDir = path.join(docsDir, 'assets', 'walkthrough');
+const publicWalkthroughAssetsDir = path.resolve(here, '..', 'public', 'assets', 'walkthrough');
 const GH = 'https://github.com/vivary-dev/vivary/blob/dev';
 
 const normalizeForCompare = (p) => {
@@ -21,6 +23,7 @@ const normalizeForCompare = (p) => {
 const pages = [
   ['CONCEPTS', 'concepts', 'What is Vivary?', 'Plain-language intro: what Vivary is, the core ideas, and a glossary. Start here.'],
   ['GETTING-STARTED', 'getting-started', 'Getting started', 'Install Vivary and run your first agent workspace.'],
+  ['WALKTHROUGH', 'walkthrough', 'Getting started proof', 'A public, generic product walkthrough showing Vivary scaffold, health, review, coordination, and impact checks.'],
   ['COMMANDS', 'commands', 'Command reference', 'Every CLI across Vivary: tropo, ozone, exo, create-vivary, and optional adapters.'],
   ['SKILLS', 'skills', 'Agent skills', 'The strato, tropo, and loops skills that operate a Vivary workspace.'],
   ['ACTIVE-CONTEXT', 'active-context', 'Active context', 'Optional CocoIndex-code sidecar guidance for semantic code retrieval.'],
@@ -39,6 +42,7 @@ const pages = [
 const rewrite = (s) =>
   s.replaceAll('](CONCEPTS.md)', '](/concepts/)')
    .replaceAll('](GETTING-STARTED.md)', '](/getting-started/)')
+   .replaceAll('](WALKTHROUGH.md)', '](/walkthrough/)')
    .replaceAll('](COMMANDS.md)', '](/commands/)')
    .replaceAll('](SKILLS.md)', '](/skills/)')
    .replaceAll('](ACTIVE-CONTEXT.md)', '](/active-context/)')
@@ -52,6 +56,7 @@ const rewrite = (s) =>
    .replaceAll('](ARCHITECTURE.md)', '](/architecture/)')
    .replaceAll('](OBSIDIAN.md)', '](/obsidian/)')
    .replaceAll('](README.md)', '](/)')
+   .replaceAll('](assets/walkthrough/', '](/assets/walkthrough/')
    .replaceAll('](../stats/usage-snapshot.svg)', '](/usage-snapshot.svg)')
    .replaceAll('](../packages/tropo/SPEC.md)', `](${GH}/packages/tropo/SPEC.md)`)
    .replaceAll('](../HANDOFF.md)', `](${GH}/HANDOFF.md)`);
@@ -100,6 +105,50 @@ const readCanonicalMarkdown = (root, relativePath, label) => {
   return fs.readFileSync(filePath, 'utf8');
 };
 
+const assertInside = (root, target, label) => {
+  const rootAbs = path.resolve(root);
+  const targetAbs = path.resolve(target);
+  const lexicalRel = path.relative(rootAbs, targetAbs);
+  if (lexicalRel.startsWith('..') || path.isAbsolute(lexicalRel)) {
+    throw new Error(`${label} must stay inside ${rootAbs}: ${targetAbs}`);
+  }
+
+  const rootReal = fs.realpathSync(root);
+  let targetParent = fs.existsSync(target) ? target : path.dirname(target);
+  while (!fs.existsSync(targetParent)) {
+    const next = path.dirname(targetParent);
+    if (next === targetParent) {
+      throw new Error(`${label} has no existing parent: ${targetAbs}`);
+    }
+    targetParent = next;
+  }
+  const targetReal = fs.realpathSync(targetParent);
+  const rel = path.relative(rootReal, targetReal);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`${label} resolves outside ${rootReal}: ${targetReal}`);
+  }
+};
+
+const copyRegularTree = (src, dest, label) => {
+  if (!fs.existsSync(src)) return;
+  assertRegularDirectory(src, label);
+  assertInside(path.resolve(here, '..', 'public'), dest, `${label} output`);
+  fs.rmSync(dest, { recursive: true, force: true });
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const from = path.join(src, entry.name);
+    const to = path.join(dest, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new Error(`${label} must not contain symlinks: ${from}`);
+    }
+    if (entry.isDirectory()) {
+      copyRegularTree(from, to, `${label}/${entry.name}`);
+    } else if (entry.isFile()) {
+      fs.copyFileSync(from, to);
+    }
+  }
+};
+
 // Render a canonical Markdown doc into a Starlight content page: drop the leading H1
 // (Starlight renders the frontmatter title), rewrite links, prepend frontmatter.
 // JSON.stringify gives a valid double-quoted YAML scalar (handles ':' etc.)
@@ -111,6 +160,7 @@ const render = (raw, title, desc) => {
 };
 
 assertRegularDirectory(docsDir, 'docs/');
+copyRegularTree(docsWalkthroughAssetsDir, publicWalkthroughAssetsDir, 'docs/assets/walkthrough');
 
 fs.mkdirSync(outDir, { recursive: true });
 for (const [src, slug, title, desc] of pages) {
@@ -244,4 +294,3 @@ llmsFullText += `\n---\n\n${changelogBody}\n`;
 
 fs.writeFileSync(path.join(publicDir, 'llms-full.txt'), llmsFullText);
 console.log('  generated site/public/llms-full.txt');
-
