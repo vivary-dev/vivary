@@ -86,7 +86,7 @@ tropo [command] [paths...] [--lenient | --strict] [--json] [--quiet]
                 [--depth N] [--max-entries N] [--out FILE] [--packs a,b]
                 [--root DIR] [--config PATH] [--receipt PATH]
                 [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]]
-                [--snippet N] [--explain] [--mode text|semantic] [--budget N]
+                [--snippet N] [--explain] [--mode text|vector|semantic] [--budget N]
 ```
 
 A document's **type is the folder it lives in** (`decisions/0001.md` → type
@@ -106,18 +106,30 @@ says. `tropo.toml` declares the types.
 | `fix [--dry-run]` | Strip redundant frontmatter (`W210` — a field equal to its derived value). The only mechanical edit tropo makes. |
 | `init [DIR] [--packs a,b]` | Scaffold a `tropo.toml` (optionally composing reusable type packs). |
 | `find <text> [--budget N] [--k N] [--json]` | Human-friendly context packet: the smallest typed nodes/files worth opening first, with reasons and snippets trimmed to an approximate token budget. |
-| `query <text> [--k N] [--mode text\|semantic] [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]] [--snippet N] [--explain] [--json]` | Filtered graph search over typed nodes. Default `text` searches id/title, frontmatter, path, body, and outbound edge context. `semantic` is unreleased dev-branch behavior that calls an explicitly configured optional semantic-memory provider and returns typed node ids. |
+| `query <text> [--k N] [--mode text\|vector\|semantic] [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]] [--snippet N] [--explain] [--json]` | Filtered graph search over typed nodes. Default `text` searches id/title, frontmatter, path, body, and outbound edge context. `vector` uses dependency-free local typed vectors when `.vivary/storage.toml` enables them and otherwise falls back to text search. `semantic` calls an explicitly configured optional semantic-memory provider and returns typed node ids. |
 | `migrate --from file --to embedded [--dry-run] [--json]` | Move file-backed graph data into the configured embedded backend. Cloud migration, non-file sources, backend installation, and `migrated_at` tracking are future 0.3.x work. |
 | `map [--root PATH] [--depth N] [--max-entries N] [--json]` | Read-only filesystem inventory of a repo/vault/docs tree — no `tropo.toml` required. See [Filesystem map](#filesystem-map-tropo-map) below. |
 
 `tropo find` is the default "what should I read first?" command for humans and agents.
 `tropo query` is the lower-level filtered search primitive. By default both are
 graph/text retrieval, not the CocoIndex active-context sidecar. On the unreleased
-`dev` branch, `tropo query --mode semantic` is an optional-provider bridge: it
+`dev` branch, `tropo query --mode vector` is a dependency-free typed-vector mode:
+it reads analyzed graph nodes, preserves type/path/edge filters, and returns typed
+Vivary node ids without installing an embedding provider. Enable it explicitly in
+`.vivary/storage.toml`:
+
+```toml
+[storage.embedding]
+enabled = true
+provider = "local-hash"
+dimensions = 128
+```
+
+Without that config, `--mode vector` reports `status: fallback` and uses the normal
+typed text search. `tropo query --mode semantic` is an optional-provider bridge: it
 requires `.vivary/memory.toml` to enable a supported semantic-memory provider, and
 today that means the separate `vivary-memory-cognee` package must be installed and
-indexed by the user. It does not add Cognee, embeddings, network calls, or an index to
-`vivary-tropo` core.
+indexed by the user. It does not add Cognee or network calls to `vivary-tropo` core.
 Use `create-vivary init ... --active-context cocoindex-code` when a coding workspace
 needs semantic code candidates.
 
@@ -130,7 +142,7 @@ Useful retrieval flags:
 | `--edge FIELD[:TARGET]` | Require an outbound graph edge field, optionally pointing at a target id. |
 | `--snippet N` | Include up to `N` snippet characters per result; `0` disables snippets. |
 | `--explain` | Include stable match reasons such as title/id, frontmatter, path, body, or edge context. |
-| `--mode text\|semantic` | `query` only: use dependency-free graph/text search, or on the unreleased `dev` branch call the configured optional semantic-memory provider. |
+| `--mode text\|vector\|semantic` | `query` only: use dependency-free graph/text search, dependency-free local typed-vector search, or call the configured optional semantic-memory provider. |
 | `--budget N` | `find` only: approximate token budget for the returned context packet. |
 
 ```bash
@@ -138,6 +150,7 @@ tropo find "where is release truth owned" --root . --budget 800 --json
 tropo query "release truth" --type decision --path "decisions/*" --explain --json
 tropo query "agent workspace" --edge affects:agent-workspace
 # Unreleased dev branch until the next package publish:
+tropo query "release truth" --mode vector --json
 tropo query "release truth" --mode semantic --json
 ```
 

@@ -17,7 +17,8 @@ Before 0.2.0 there was no storage configuration, migration command, guided onboa
 for users who do not know the primitives, or machine-readable init path for agents.
 0.2.0 shipped the storage layer, backend migration, setup wizard, and agent-mode flags.
 The current public retrieval commands (`tropo find` / `query`) are graph-first and
-zero-dependency; cloud adapters and vector retrieval remain future work.
+zero-dependency; cloud adapters and provider-backed embedding services remain future
+work.
 
 ---
 
@@ -112,14 +113,16 @@ tropo find "where is auth release truth owned" --budget 800 --json
 ## Architecture: why NOT naive RAG
 
 The shipped 0.2.0 layer is storage/search infrastructure, not a chunked-RAG system.
-If Vivary adds vector retrieval later, it should preserve this boundary.
+The local vector retrieval slice preserves this boundary: it computes typed vectors
+from bounded graph-node text at query time and keeps provider-backed embedding/index
+mechanics outside tropo core.
 
 **This is NOT chunked-text RAG.** Naive RAG = chunk arbitrary documents into ~500-token blobs, embed each chunk, retrieve top-k at query time. This throws away all the structure in a knowledge graph — relationships, types, hierarchy — and produces chunking artifacts that hurt retrieval quality.
 
-**Future vector retrieval should be graph-shaped.** Vivary already has a typed
-knowledge graph (tropo: folder-as-type, each node is a typed entity). Any future
-embedding layer should operate on graph nodes, preserve relationships and types, and
-return typed graph nodes for agents to follow.
+**Vector retrieval should be graph-shaped.** Vivary already has a typed knowledge
+graph (tropo: folder-as-type, each node is a typed entity). Vector layers operate on
+graph nodes, preserve relationships and types, and return typed graph nodes for agents
+to follow.
 
 **For code specifically:** CocoIndex (already in Vivary as of PR #40) provides
 structured active-context indexing — ASTs, call graphs, import graphs, hot context.
@@ -139,19 +142,19 @@ The provider boundary for that future work lives in
 typed nodes and edges, then returns typed node candidates for the agent to inspect.
 Cognee is evaluated there as an optional provider, not a storage default.
 
-**Future retrieval notes by workspace type:**
+**Retrieval notes by workspace type:**
 
 | Workspace | Retrieval approach | Role of LanceDB |
 |---|---|---|
 | Coding | CocoIndex active context first; tropo graph search for docs/decisions | Future persistence target for structured code context |
-| Second brain | Graph traversal (tropo edges), with possible typed-node embeddings later | Future local index for graph-node retrieval |
-| Writing | Text graph search now; typed-node vectors later if corpus scale needs it | Future local index for graph-node retrieval |
+| Second brain | Graph traversal (tropo edges), with optional local typed-node vectors | Local graph-node vector retrieval |
+| Writing | Text graph search now; typed-node vectors if corpus scale needs it | Local graph-node vector retrieval |
 
 **Critical nuance for coding:** For coding workspaces, avoid a separate
 tropo-to-vector pipeline for source code. CocoIndex owns structured code indexing;
 tropo owns the typed workspace graph.
 
-Naive chunked-text RAG on code achieves ~2% task accuracy vs. 50–80% for AST-based structured indexing (SWE-bench class). Future tropo typed-node embeddings would be materially better than naive RAG because node type is preserved as a filter dimension — a `decision` node and a `reference` node don't collapse into identical-looking text chunks.
+Naive chunked-text RAG on code achieves ~2% task accuracy vs. 50–80% for AST-based structured indexing (SWE-bench class). Tropo typed-node vectors keep one important advantage over naive RAG: node type is preserved as a filter dimension, so a `decision` node and a `reference` node don't collapse into identical-looking text chunks.
 
 Full GraphRAG (Microsoft-style community summarization) is overkill for local workspaces. A future tropo graph + LanceDB node-embedding layer can provide the same structural benefit without the cost.
 
@@ -208,12 +211,15 @@ tropo migrate --from file --to embedded
 Non-file sources, cloud targets, automatic backend installation, and `migrated_at`
 tracking are future 0.3.x work.
 
-**No embeddings in tropo migration.** The embedded backend stores indexed node content
-and can be queried at the backend layer, but migration does not create vectors, call
-providers, or index private content. Public `tropo find` and default `tropo query`
-search the analyzed typed graph directly. `tropo query --mode semantic` delegates to
-an explicitly configured optional semantic-memory provider and returns typed node ids;
-it is unavailable until the user installs and indexes that provider.
+**No provider embeddings in tropo migration.** The embedded backend stores indexed
+node content and can be queried at the backend layer, but migration does not create
+stored vectors, call providers, or override the workspace's `tropo.toml` exclusions.
+Public `tropo find` and default `tropo query` search the analyzed typed graph
+directly. `tropo query --mode vector` uses dependency-free local typed vectors at
+query time or falls back to text search when no vector config is present.
+`tropo query --mode semantic` delegates to an explicitly configured optional
+semantic-memory provider and returns typed node ids; it is unavailable until the user
+installs and indexes that provider.
 
 ---
 
@@ -287,10 +293,13 @@ provider = "lancedb"        # lancedb | sqlite-vec
 # api_key = "${VIVARY_CLOUD_API_KEY}"
 # collection = "my-workspace"
 
-# Future 0.3.x:
 # migrated_at = ""          # set by `tropo migrate` on completion
-# [embedding]               # owned by future graphify/semantic layer, not tropo 0.2
-# provider = "local"
+
+# Optional local typed vectors for `tropo query --mode vector`:
+# [storage.embedding]
+# enabled = true
+# provider = "local-hash"
+# dimensions = 128
 ```
 
 `.vivary/` should be in `.gitignore` by default (contains runtime data + secrets). The scaffold adds it.
@@ -415,7 +424,7 @@ Welcome to Vivary! Let's set up your workspace.
 - `tropo migrate --from file --to embedded`
 - Reports migrated/failed counts and duration
 - `--dry-run` preview mode
-- Uses indexed node content; no embeddings in tropo migration
+- Uses indexed node content; no provider embeddings or stored vector search in migration
 
 ### Future — Cloud adapters (0.3.x)
 
@@ -434,12 +443,13 @@ Welcome to Vivary! Let's set up your workspace.
 - mem0 / Zep as storage primitives — layers above storage; document as optional integrations.
 - Automatic migration on install — migration is always explicit via `tropo migrate`.
 - Multi-backend writes simultaneously.
-- Embeddings model ownership — tropo delegates; optional semantic-memory providers own
-  embedding/index mechanics.
+- Provider embedding model ownership — tropo delegates; optional semantic-memory
+  providers own external embedding/index mechanics.
 - Chunked-text RAG — not this product. Semantic retrieval should operate over typed
   nodes or active-context sidecars, not arbitrary chunks.
 
 ---
 
 _Historical note: this plan was approved and shipped as the 0.2.0 data-layer slice.
-Future cloud/vector work still requires fresh plan+alignment before implementation._
+Future cloud/provider-vector work still requires fresh plan+alignment before
+implementation._

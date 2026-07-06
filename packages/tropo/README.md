@@ -31,6 +31,7 @@ python tropo.py view   --root examples/vault --out examples/vault/graph.html
 python tropo.py fix    --dry-run                 # preview redundant-frontmatter removal
 python tropo.py find "folder as type decision" --root examples/vault --json  # read-this-first packet
 python tropo.py query "meeting notes" --root examples/vault --type meeting --explain
+python tropo.py query "meeting notes" --root examples/vault --mode vector --json
 python tropo.py query "meeting notes" --root examples/vault --mode semantic --json
 python tropo.py map    --root examples/vault    # read-only filesystem inventory, no tropo.toml required
 python tropo.py migrate --from file --to embedded --root my-vault --yes  # switch to LanceDB
@@ -41,10 +42,14 @@ python tests/test_tropo.py                       # run the test suite
 Requires Python 3.11+ (stdlib `tomllib`), zero third-party dependencies for the core.
 Optional extras: `pip install vivary-tropo[embedded]` for LanceDB embedded storage
 and backend-level experiments. Public `tropo find` and default `tropo query` stay
-zero-dependency and read the typed graph directly. `tropo query --mode semantic`
-is an optional-provider bridge: it only runs when `.vivary/memory.toml` enables a
-supported semantic-memory provider, currently the separate `vivary-memory-cognee`
-package. Tropo core does not bundle Cognee, embeddings, network calls, or indexing.
+zero-dependency and read the typed graph directly. `tropo query --mode vector`
+is also zero-dependency: when `.vivary/storage.toml` explicitly enables
+`[storage.embedding] provider = "local-hash"`, it computes local typed vectors over
+bounded graph-node text and preserves type/path/edge filters; without that config it
+falls back to text search. `tropo query --mode semantic` is an optional-provider bridge: it only
+runs when `.vivary/memory.toml` enables a supported semantic-memory provider,
+currently the separate `vivary-memory-cognee` package. Tropo core does not bundle
+Cognee, network calls, or provider indexing.
 Cloud extras are reserved for future adapter work.
 
 Built-in packs are embedded in the single-file engine, so installed wheels can resolve
@@ -66,8 +71,8 @@ target ids, or paths.
 typed nodes/files to open first, with reasons, snippets, and an approximate token
 budget. `tropo query` is the lower-level filtered search primitive; it can filter by
 type, path glob, or outbound edge and explain whether a match came from id/title,
-frontmatter, path, body, or edge context. Semantic mode returns provider hits as typed
-Vivary node ids instead of opaque chunks.
+frontmatter, path, body, edge context, or typed vectors. Semantic mode returns
+provider hits as typed Vivary node ids instead of opaque chunks.
 
 ## Overlays — tighten a subtree
 

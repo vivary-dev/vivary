@@ -10,6 +10,7 @@ import types
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import tropo  # noqa: E402
@@ -954,6 +955,54 @@ def test_cmd_migrate_dry_run(tmp_path):
     assert out["to"] == "embedded"
 
 
+def test_cmd_migrate_refuses_vector_only_storage_config(tmp_path):
+    _minimal_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage.embedding]\n"
+        "enabled = true\n"
+        "provider = \"local-hash\"\n",
+        encoding="utf-8",
+    )
+    rc, out = _capture_rc(
+        tropo.cmd_migrate,
+        argparse.Namespace(from_backend="file", to_backend="embedded",
+                           dry_run=False, json=True, yes=False,
+                           paths=[], strict=False, lenient=False,
+                           quiet=False, config=None),
+        res(str(tmp_path)),
+    )
+    assert rc == 1
+    assert out["migrated"] == 0
+    assert out["failed"] == 0
+    assert "configured storage backend" in out["error"]
+
+
+def test_cmd_migrate_dry_run_ignores_malformed_embedding_config(tmp_path):
+    _minimal_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage]\n"
+        "backend = \"file\"\n"
+        "[storage.embedding]\n"
+        "enabled = \"yes\"\n",
+        encoding="utf-8",
+    )
+    rc, out = _capture_rc(
+        tropo.cmd_migrate,
+        argparse.Namespace(from_backend="file", to_backend="embedded",
+                           dry_run=True, json=True, yes=False,
+                           paths=[], strict=False, lenient=False,
+                           quiet=False, config=None),
+        res(str(tmp_path)),
+    )
+    assert rc == 0
+    assert out["dry_run"] is True
+    assert out["migrated"] >= 1
+
+
 def test_cmd_query_returns_graph_aware_typed_matches(tmp_path):
     _search_vault(tmp_path)
     rc, out = _capture_rc(
@@ -1035,6 +1084,171 @@ def test_cmd_query_no_results(tmp_path):
     )
     assert rc == 0
     assert out["results"] == []
+
+
+def test_cmd_query_vector_mode_falls_back_without_embedding_config(tmp_path):
+    _search_vault(tmp_path)
+    rc, out = _capture_rc(
+        tropo.cmd_query,
+        _query_args("release truth", mode="vector"),
+        res(str(tmp_path)),
+    )
+    assert rc == 0
+    assert out["mode"] == "vector"
+    assert out["vector"]["status"] == "fallback"
+    assert out["vector"]["fallback"] == "text"
+    assert out["results"][0]["id"] == "release-workflow"
+    assert out["results"][0]["type"] == "decision"
+
+
+def test_cmd_query_vector_mode_returns_typed_local_hash_matches(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage.embedding]\n"
+        "enabled = true\n"
+        "provider = \"local-hash\"\n"
+        "dimensions = 64\n",
+        encoding="utf-8",
+    )
+    rc, out = _capture_rc(
+        tropo.cmd_query,
+        _query_args("changelog verification", mode="vector", explain=True),
+        res(str(tmp_path)),
+    )
+    assert rc == 0
+    assert out["mode"] == "vector"
+    assert out["vector"]["status"] == "ok"
+    assert out["vector"]["provider"] == "local-hash"
+    assert out["vector"]["dimensions"] == 64
+    assert out["results"][0]["id"] == "release-workflow"
+    assert out["results"][0]["type"] == "decision"
+    assert out["results"][0]["provider"] == "local-hash"
+    assert out["results"][0]["score"] > 0
+    assert "typed vector match" in out["results"][0]["reason"]
+
+
+def test_cmd_query_vector_mode_applies_graph_filters(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage.embedding]\n"
+        "enabled = true\n"
+        "provider = \"local-hash\"\n",
+        encoding="utf-8",
+    )
+    rc, out = _capture_rc(
+        tropo.cmd_query,
+        _query_args(
+            "release",
+            mode="vector",
+            type=["decision"],
+            path=["decisions/*"],
+            edge=["affects:agent-workspace"],
+        ),
+        res(str(tmp_path)),
+    )
+    assert rc == 0
+    assert [r["id"] for r in out["results"]] == ["release-workflow"]
+    assert out["results"][0]["edges"] == [
+        {"from": "release-workflow", "field": "affects", "to": "agent-workspace"}
+    ]
+
+
+def test_cmd_query_vector_mode_rejects_invalid_embedding_config(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage.embedding]\n"
+        "enabled = \"yes\"\n"
+        "provider = \"local-hash\"\n",
+        encoding="utf-8",
+    )
+    rc, out = _capture_rc(
+        tropo.cmd_query,
+        _query_args("release truth", mode="vector"),
+        res(str(tmp_path)),
+    )
+    assert rc == 1
+    assert out["vector"]["status"] == "misconfigured"
+    assert "embedding.enabled" in out["vector"]["detail"]
+    assert out["results"] == []
+
+
+def test_cmd_query_vector_mode_rejects_too_small_dimensions(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage.embedding]\n"
+        "enabled = true\n"
+        "provider = \"local-hash\"\n"
+        "dimensions = 1\n",
+        encoding="utf-8",
+    )
+    rc, out = _capture_rc(
+        tropo.cmd_query,
+        _query_args("release truth", mode="vector"),
+        res(str(tmp_path)),
+    )
+    assert rc == 1
+    assert out["vector"]["status"] == "misconfigured"
+    assert "embedding.dimensions" in out["vector"]["detail"]
+    assert out["results"] == []
+
+
+def test_cmd_query_vector_mode_redacts_malformed_storage_config_path(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage.embedding\n"
+        "enabled = true\n",
+        encoding="utf-8",
+    )
+    rc, out = _capture_rc(
+        tropo.cmd_query,
+        _query_args("release truth", mode="vector"),
+        res(str(tmp_path)),
+    )
+    assert rc == 1
+    assert out["vector"]["status"] == "misconfigured"
+    assert ".vivary/storage.toml" in out["vector"]["detail"]
+    assert str(tmp_path) not in out["vector"]["detail"]
+    assert out["results"] == []
+
+
+def test_cmd_query_vector_mode_reports_invalid_utf8_storage_config(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_bytes(b"\xff\xfe\x00")
+    rc, out = _capture_rc(
+        tropo.cmd_query,
+        _query_args("release truth", mode="vector"),
+        res(str(tmp_path)),
+    )
+    assert rc == 1
+    assert out["vector"]["status"] == "misconfigured"
+    assert ".vivary/storage.toml" in out["vector"]["detail"]
+    assert str(tmp_path) not in out["vector"]["detail"]
+    assert out["results"] == []
+
+
+def test_vector_storage_config_oserror_redacts_path(tmp_path):
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    storage_path = vivary_dir / "storage.toml"
+    storage_path.write_text("[storage.embedding]\n", encoding="utf-8")
+    error = PermissionError(13, "Access is denied", str(storage_path))
+    with mock.patch("builtins.open", side_effect=error):
+        config = tropo._load_vector_query_config(str(tmp_path))
+    assert config["status"] == "misconfigured"
+    assert ".vivary/storage.toml" in config["detail"]
+    assert str(tmp_path) not in config["detail"]
 
 
 def test_cmd_query_semantic_mode_reports_unavailable_without_memory(tmp_path):
