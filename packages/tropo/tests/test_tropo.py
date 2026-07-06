@@ -897,6 +897,8 @@ class _RecordingBackend:
         self.records = {}
         self.upsert_calls = 0
         self.replace_calls = 0
+        self.vector_query_calls = 0
+        self.vector_query_limits = []
         self.closed = False
 
     def upsert(self, nodes):
@@ -907,6 +909,37 @@ class _RecordingBackend:
     def replace_all(self, nodes):
         self.replace_calls += 1
         self.records = {node["id"]: dict(node) for node in nodes}
+
+    def all_nodes(self):
+        return [dict(row) for row in self.records.values()]
+
+    def count_nodes(self):
+        return len(self.records)
+
+    def node_metadata(self, limit=None):
+        rows = [
+            {
+                key: value
+                for key, value in row.items()
+                if key in tropo._VECTOR_METADATA_COLUMNS
+            }
+            for row in self.records.values()
+        ]
+        if limit is None:
+            return rows
+        return rows[:limit]
+
+    def vector_query(self, query_vector, k=10):
+        self.vector_query_calls += 1
+        self.vector_query_limits.append(k)
+        rows = self.all_nodes()
+        rows.sort(
+            key=lambda row: -tropo._cosine_score(
+                query_vector,
+                tropo._coerce_vector(row.get("vector")) or [],
+            )
+        )
+        return rows[:max(0, k)]
 
     def close(self):
         self.closed = True
@@ -1156,6 +1189,52 @@ def test_cmd_migrate_non_table_storage_config_reports_json_error(tmp_path):
     assert "storage must be a TOML table" in out["error"]
 
 
+def test_cmd_migrate_non_table_embedded_config_reports_json_error(tmp_path):
+    _minimal_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage]\n"
+        "backend = \"embedded\"\n"
+        "embedded = \"bad\"\n",
+        encoding="utf-8",
+    )
+
+    rc, out = _capture_rc(
+        tropo.cmd_migrate,
+        _migrate_args(),
+        res(str(tmp_path)),
+    )
+
+    assert rc == 1
+    assert out["migrated"] == 0
+    assert "storage.embedded must be a TOML table" in out["error"]
+
+
+def test_cmd_migrate_rejects_out_of_root_embedded_storage_path(tmp_path):
+    _minimal_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "storage.toml").write_text(
+        "[storage]\n"
+        "backend = \"embedded\"\n"
+        "[storage.embedded]\n"
+        "path = \"../outside-db\"\n",
+        encoding="utf-8",
+    )
+
+    rc, out = _capture_rc(
+        tropo.cmd_migrate,
+        _migrate_args(),
+        res(str(tmp_path)),
+    )
+
+    assert rc == 1
+    assert out["migrated"] == 0
+    assert "storage.embedded.path must stay inside the workspace" in out["error"]
+    assert not (tmp_path.parent / "outside-db").exists()
+
+
 def test_cmd_migrate_missing_storage_config_reports_json_error(tmp_path):
     _minimal_vault(tmp_path)
 
@@ -1237,7 +1316,7 @@ def test_cmd_migrate_embedded_with_local_hash_stores_typed_node_embeddings(tmp_p
     assert any(row["vector"])
     assert row["embedding_provider"] == "local-hash"
     assert row["embedding_dimensions"] == 64
-    assert row["embedding_version"] == "local-hash-v1"
+    assert row["embedding_version"] == "local-hash-v2"
     assert row["embedding_scope"] == "typed-node"
     assert row["source_fingerprint"].startswith("sha256:")
     assert row["embedding_text_fingerprint"].startswith("sha256:")
@@ -1634,6 +1713,361 @@ def test_cmd_query_vector_mode_applies_graph_filters(tmp_path):
     assert out["results"][0]["edges"] == [
         {"from": "release-workflow", "field": "affects", "to": "agent-workspace"}
     ]
+
+
+def _write_embedded_vector_config(tmp_path, dimensions=64):
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir(exist_ok=True)
+    (vivary_dir / "storage.toml").write_text(
+        "[storage]\n"
+        "backend = \"embedded\"\n"
+        "[storage.embedding]\n"
+        "enabled = true\n"
+        "provider = \"local-hash\"\n"
+        f"dimensions = {dimensions}\n",
+        encoding="utf-8",
+    )
+
+
+def _stored_vector_backend(tmp_path):
+    config = tropo._load_vector_query_config(str(tmp_path))
+    docs = tropo.analyze(str(tmp_path), [], res(str(tmp_path)))
+    backend = _RecordingBackend()
+    backend.replace_all(tropo._migrate_nodes_with_embeddings(docs, config))
+    return backend
+
+
+def test_cmd_query_vector_mode_uses_stored_embedded_vectors_for_wording_drift(tmp_path):
+    _search_vault(tmp_path)
+    _write_embedded_vector_config(tmp_path, dimensions=64)
+    backend = _stored_vector_backend(tmp_path)
+
+    rc_text, out_text = _capture_rc(
+        tropo.cmd_query,
+        _query_args("verify"),
+        res(str(tmp_path)),
+    )
+    assert rc_text == 0
+    assert out_text["results"] == []
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("verify", mode="vector", explain=True),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 0
+    assert out["vector"]["status"] == "ok"
+    assert out["vector"]["source"] == "stored"
+    assert out["vector"]["index"] == "embedded"
+    assert out["vector"]["embedding_version"] == "local-hash-v2"
+    assert out["results"][0]["id"] == "release-workflow"
+    assert out["results"][0]["source"] == "stored"
+    assert "stored typed vector match" in out["results"][0]["reason"]
+    assert backend.vector_query_calls == 1
+    assert backend.closed is True
+
+
+def test_cmd_query_vector_mode_stored_vectors_keep_filters_and_windows_path_shapes(tmp_path):
+    _search_vault(tmp_path)
+    _write_embedded_vector_config(tmp_path, dimensions=64)
+    backend = _stored_vector_backend(tmp_path)
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args(
+                "release",
+                mode="vector",
+                k=1_000_000,
+                type=["decision"],
+                path=["decisions\\*"],
+                edge=["affects:agent-workspace"],
+            ),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 0
+    assert out["vector"]["source"] == "stored"
+    assert [r["id"] for r in out["results"]] == ["release-workflow"]
+    assert out["results"][0]["edges"] == [
+        {"from": "release-workflow", "field": "affects", "to": "agent-workspace"}
+    ]
+    assert backend.vector_query_limits == [3]
+
+
+def test_cmd_query_vector_mode_limits_stored_vector_candidates(tmp_path):
+    (tmp_path / "tropo.toml").write_text(
+        "[base]\n"
+        "derive = ['id', 'title']\n"
+        "allow_untyped = true\n",
+        encoding="utf-8",
+    )
+    for index in range(300):
+        (tmp_path / f"note-{index:03}.md").write_text(
+            f"# Note {index:03}\nRelease verification note {index:03}.\n",
+            encoding="utf-8",
+        )
+    _write_embedded_vector_config(tmp_path, dimensions=64)
+    backend = _stored_vector_backend(tmp_path)
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release", mode="vector", k=1_000_000),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 0
+    assert out["vector"]["source"] == "stored"
+    assert out["vector"]["candidate_limit"] == 250
+    assert backend.vector_query_limits == [250]
+    assert len(out["results"]) == 250
+
+
+def test_cmd_query_vector_mode_empty_stored_index_falls_back_to_text(tmp_path):
+    _search_vault(tmp_path)
+    _write_embedded_vector_config(tmp_path, dimensions=64)
+    backend = _RecordingBackend()
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="vector"),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 0
+    assert out["vector"]["status"] == "fallback"
+    assert out["vector"]["fallback"] == "text"
+    assert "empty" in out["vector"]["detail"]
+    assert out["results"][0]["id"] == "release-workflow"
+
+
+def test_cmd_query_vector_mode_missing_stored_vector_falls_back_to_text(tmp_path):
+    _search_vault(tmp_path)
+    _write_embedded_vector_config(tmp_path, dimensions=64)
+    backend = _stored_vector_backend(tmp_path)
+    backend.records["release-workflow"].pop("vector")
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="vector"),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 0
+    assert out["vector"]["status"] == "fallback"
+    assert "missing" in out["vector"]["detail"]
+    assert out["results"][0]["id"] == "release-workflow"
+
+
+def test_cmd_query_vector_mode_bad_stored_dimensions_falls_back_to_text(tmp_path):
+    _search_vault(tmp_path)
+    _write_embedded_vector_config(tmp_path, dimensions=64)
+    backend = _stored_vector_backend(tmp_path)
+    backend.records["release-workflow"]["vector"] = [1.0]
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="vector"),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 0
+    assert out["vector"]["status"] == "fallback"
+    assert "wrong dimensions" in out["vector"]["detail"]
+    assert out["results"][0]["id"] == "release-workflow"
+
+
+def test_cmd_query_vector_mode_non_finite_stored_vector_falls_back_to_text(tmp_path):
+    _search_vault(tmp_path)
+    _write_embedded_vector_config(tmp_path, dimensions=64)
+    backend = _stored_vector_backend(tmp_path)
+    backend.records["release-workflow"]["vector"] = [float("nan")] * 64
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="vector"),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 0
+    assert out["vector"]["status"] == "fallback"
+    assert "non-finite" in out["vector"]["detail"]
+    assert out["results"][0]["id"] == "release-workflow"
+
+
+def test_cmd_query_vector_mode_stale_stored_fingerprint_falls_back_to_text(tmp_path):
+    _search_vault(tmp_path)
+    _write_embedded_vector_config(tmp_path, dimensions=64)
+    backend = _stored_vector_backend(tmp_path)
+    (tmp_path / "decisions" / "release-workflow.md").write_text(
+        "---\n"
+        "status: accepted\n"
+        "affects: agent-workspace\n"
+        "---\n"
+        "# Release Workflow\n\n"
+        "Owns release truth, changelog verification, and updated launch proof.\n",
+        encoding="utf-8",
+    )
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="vector"),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 0
+    assert out["vector"]["status"] == "fallback"
+    assert "source_fingerprint" in out["vector"]["detail"]
+    assert out["results"][0]["id"] == "release-workflow"
+
+
+def test_cmd_query_vector_mode_deleted_stored_rows_fall_back_to_text(tmp_path):
+    _search_vault(tmp_path)
+    _write_embedded_vector_config(tmp_path, dimensions=64)
+    backend = _stored_vector_backend(tmp_path)
+    (tmp_path / "modules" / "retrieval.md").unlink()
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="vector"),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 0
+    assert out["vector"]["status"] == "fallback"
+    assert "deleted node" in out["vector"]["detail"]
+    assert out["results"][0]["id"] == "release-workflow"
+
+
+def test_cmd_query_vector_mode_all_deleted_stored_rows_fall_back_to_text(tmp_path):
+    _search_vault(tmp_path)
+    _write_embedded_vector_config(tmp_path, dimensions=64)
+    backend = _stored_vector_backend(tmp_path)
+    shutil.rmtree(tmp_path / "decisions")
+    shutil.rmtree(tmp_path / "modules")
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="vector"),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 0
+    assert out["vector"]["status"] == "fallback"
+    assert "deleted node" in out["vector"]["detail"]
+    assert out["results"] == []
+
+
+def test_cmd_query_vector_mode_old_stored_version_falls_back_to_text(tmp_path):
+    _search_vault(tmp_path)
+    _write_embedded_vector_config(tmp_path, dimensions=64)
+    backend = _stored_vector_backend(tmp_path)
+    backend.records["release-workflow"]["embedding_version"] = "local-hash-v1"
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="vector"),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 0
+    assert out["vector"]["status"] == "fallback"
+    assert "embedding_version" in out["vector"]["detail"]
+    assert out["results"][0]["id"] == "release-workflow"
+
+
+def test_cmd_query_vector_mode_backend_search_failure_falls_back_to_text(tmp_path):
+    _search_vault(tmp_path)
+    _write_embedded_vector_config(tmp_path, dimensions=64)
+
+    class SearchFailBackend(_RecordingBackend):
+        def vector_query(self, query_vector, k=10):
+            raise RuntimeError(f"cannot search {tmp_path / '.vivary' / 'data'}")
+
+    backend = SearchFailBackend()
+    backend.records = _stored_vector_backend(tmp_path).records
+
+    with mock.patch.object(tropo, "get_backend", return_value=backend):
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="vector"),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 0
+    assert out["vector"]["status"] == "fallback"
+    assert "backend search failed" in out["vector"]["detail"]
+    assert "<workspace>" in out["vector"]["detail"]
+    assert str(tmp_path) not in out["vector"]["detail"]
+    assert out["results"][0]["id"] == "release-workflow"
+
+
+def test_cmd_query_vector_mode_embedded_backend_unavailable_falls_back_to_text(tmp_path):
+    _search_vault(tmp_path)
+    _write_embedded_vector_config(tmp_path, dimensions=64)
+
+    with mock.patch.object(
+        tropo,
+        "get_backend",
+        side_effect=tropo.ConfigError("LanceDB is not installed. Run: pip install vivary-tropo[embedded]"),
+    ):
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="vector"),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 0
+    assert out["vector"]["status"] == "fallback"
+    assert "unavailable" in out["vector"]["detail"]
+    assert "pip install vivary-tropo[embedded]" in out["vector"]["detail"]
+    assert out["results"][0]["id"] == "release-workflow"
+
+
+def test_vector_detail_redaction_handles_windows_case_and_extended_prefix(tmp_path):
+    root = str(tmp_path)
+    lower = root.lower()
+    slash_lower = lower.replace("\\", "/")
+    detail = f"cannot open \\\\?\\{lower}\\.vivary\\data or {slash_lower}/secret"
+
+    redacted = tropo._redact_workspace_detail(detail, root)
+
+    assert "<workspace>" in redacted
+    assert lower not in redacted.lower()
+
+
+def test_cmd_query_vector_mode_backend_crash_falls_back_without_absolute_path(tmp_path):
+    _search_vault(tmp_path)
+    _write_embedded_vector_config(tmp_path, dimensions=64)
+
+    with mock.patch.object(
+        tropo,
+        "get_backend",
+        side_effect=RuntimeError(f"cannot open {tmp_path / '.vivary' / 'data'}"),
+    ):
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="vector"),
+            res(str(tmp_path)),
+        )
+
+    assert rc == 0
+    assert out["vector"]["status"] == "fallback"
+    assert "unavailable" in out["vector"]["detail"]
+    assert "<workspace>" in out["vector"]["detail"]
+    assert str(tmp_path) not in out["vector"]["detail"]
+    assert out["results"][0]["id"] == "release-workflow"
 
 
 def test_cmd_query_vector_mode_rejects_invalid_embedding_config(tmp_path):

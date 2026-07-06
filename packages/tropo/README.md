@@ -42,11 +42,12 @@ python tests/test_tropo.py                       # run the test suite
 Requires Python 3.11+ (stdlib `tomllib`), zero third-party dependencies for the core.
 Optional extras: `pip install vivary-tropo[embedded]` for LanceDB embedded storage
 and backend-level experiments. Public `tropo find` and default `tropo query` stay
-zero-dependency and read the typed graph directly. `tropo query --mode vector`
-is also zero-dependency: when `.vivary/storage.toml` explicitly enables
-`[storage.embedding] provider = "local-hash"`, it computes local typed vectors over
-bounded graph-node text and preserves type/path/edge filters; without that config it
-falls back to text search. `tropo query --mode semantic` is an optional-provider bridge: it only
+zero-dependency and read the typed graph directly. `tropo query --mode vector` uses
+zero-dependency computed vectors for file-backed workspaces; when optional embedded
+storage is configured and current migrated vectors exist, it uses those stored rows
+through the embedded backend. In both cases it preserves type/path/edge filters and
+falls back to typed text search with an explicit JSON status when the vector index is
+not trustworthy. `tropo query --mode semantic` is an optional-provider bridge: it only
 runs when `.vivary/memory.toml` enables a supported semantic-memory provider,
 currently the separate `vivary-memory-cognee` package. Tropo core does not bundle
 Cognee, network calls, or provider indexing.
@@ -55,11 +56,11 @@ Cloud extras are reserved for future adapter work.
 `tropo migrate --from file --to embedded --json` reports embedding persistence
 explicitly. With no `[storage.embedding]` table, rows stay plain typed nodes. With
 `enabled = true` and `provider = "local-hash"`, migrated rows include a `vector` plus
-source and embedding fingerprints, so later ANN/community work can detect stale
-vectors without re-chunking the workspace. Invalid embedding config fails before any
-embedded backend write. Real file-to-embedded migration replaces the embedded node
-snapshot, so deleted, renamed, newly excluded, or vector-schema-changed nodes do not
-leave stale embedded rows behind.
+source and embedding fingerprints, so stored vector query can refuse stale rows
+without re-chunking the workspace. Invalid embedding config and unsafe embedded
+storage paths fail before any embedded backend write. Real file-to-embedded migration
+replaces the embedded node snapshot, so deleted, renamed, newly excluded, or
+vector-schema-changed nodes do not leave stale embedded rows behind.
 
 Built-in packs are embedded in the single-file engine, so installed wheels can resolve
 starter packs without a repo-local `packs/` directory. Workspace-local

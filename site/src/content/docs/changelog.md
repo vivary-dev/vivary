@@ -13,6 +13,59 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: stored vector query] — 2026-07-06
+
+Affects `vivary-tropo` query behavior and docs. This is not published yet.
+
+### Added
+
+- `tropo query --mode vector` now prefers current stored vectors from embedded
+  storage when `.vivary/storage.toml` enables local-hash embeddings and the embedded
+  backend has migrated rows.
+- Vector JSON now reports whether results came from `source: "stored"`,
+  `source: "computed"`, or `source: "text"` fallback, plus embedded index metadata
+  when stored rows are used.
+
+### Changed
+
+- The dependency-free local-hash vector shape is now `local-hash-v2`, adding a small
+  prefix/character feature signal so local vector search can catch simple wording
+  drift such as `verify` matching `verification`.
+
+### Fixed
+
+- Stored vector query refuses stale, partial, deleted, old-version, or
+  dimension-mismatched embedded rows and falls back to deterministic typed text
+  results with an explicit `detail`.
+- Stored vector query now validates compact metadata before fetching bounded vector
+  candidates, so huge or corrupt embedded tables do not silently force full-table
+  vector materialization.
+- Embedded storage config now rejects malformed `[storage.embedded]` values,
+  out-of-root paths, and symlink/junction-backed storage paths before backend writes.
+- Backend vector-search failures now fall back to typed text results with redacted
+  diagnostics instead of being reported as healthy stored-vector search.
+- Stored vector query keeps the existing type, path, edge, snippet, `--k`, and
+  `--explain` result shape, including Windows-style path globs.
+
+### Verification
+
+- `python packages/tropo/tests/test_tropo.py`
+- Real LanceDB dogfood: fresh `create-vivary init ... --preset coding --storage
+  embedded --provider lancedb --auto --yes --json`, local-hash embedding enablement,
+  file-to-embedded migration, stored vector query with `source: "stored"`, stale
+  `source_fingerprint` fallback after editing a source file, re-migration, and
+  Windows-style path/edge filter query.
+- Wording-drift proof: text query for `verify` returned no results after removing the
+  exact word, while stored vector query returned the `verification` node after
+  re-migration.
+- Timing smoke on the dogfood workspace: 8 in-process loops for text and stored-vector
+  query paths to catch obvious regressions. Release-grade benchmark work remains
+  tracked separately.
+- Adversarial review hardening: added regression coverage for malformed embedded
+  storage config, out-of-root storage paths, case-insensitive Windows path redaction,
+  all-deleted stale rows, non-finite vectors, backend vector-search failure, and
+  candidate limiting for large `--k`.
+
 ## [Unreleased: embedded typed-node embeddings] — 2026-07-06
 
 Affects `vivary-tropo` migration behavior and docs. This is not published yet.

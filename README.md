@@ -122,7 +122,9 @@ coverage after creation.
 dependency-free local typed-vector search when `.vivary/storage.toml` explicitly
 enables it, and `tropo migrate` handles backend switching. When local vector policy is
 enabled, embedded migration stores graph-shaped vectors with source/embedding
-fingerprints for stale-vector detection. On the unreleased `dev`
+fingerprints; `--mode vector` uses those stored rows when they are current and
+falls back to deterministic typed text results when the embedded index is missing,
+stale, or partial. On the unreleased `dev`
 branch, `tropo query --mode semantic` can call an explicitly configured optional
 semantic-memory provider while still returning typed Vivary node ids.
 
@@ -133,7 +135,8 @@ hits that map back to known Vivary node ids. It is not part of the default insta
 provider writes require explicit approval. `tropo query --mode semantic --json` uses
 that same optional provider bridge after the workspace has been configured and indexed.
 For users who only want local typed vector ranking, `--mode vector` stays inside the
-typed graph and falls back to text search when no local vector config is present.
+typed graph, reports whether results came from stored or computed vectors, and falls
+back to text search when no trustworthy local vector index is present.
 
 For coding workspaces that need richer source retrieval, `--active-context
 cocoindex-code` adds optional CocoIndex-code guidance and graph nodes. It does not
