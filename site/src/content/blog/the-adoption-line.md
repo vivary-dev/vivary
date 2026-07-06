@@ -4,8 +4,7 @@ description: "Vivary only ever worked on an empty folder. That was a demo, not a
 date: 2026-07-06
 author: "Jeff Kazzee"
 tags: ["release", "adoption", "adopt"]
-draft: true
----
+draft: false---
 
 For the first few months, Vivary only worked if you started from nothing.
 
