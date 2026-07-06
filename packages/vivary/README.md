@@ -13,5 +13,16 @@ That pulls the four layers, each still usable on its own:
 - `ozone` (`vivary-ozone`) — graph-aware review
 - `exo` (`vivary-exo`) — multi-agent coordination
 
-This package contains no code of its own; it pins compatible minimum versions
-of the real packages. Docs: https://vivary.vercel.app/
+It also installs the small `vivary` helper CLI for local receipt visibility:
+
+```bash
+tropo check --root . --receipt .vivary/receipts.jsonl
+vivary logs .vivary/receipts.jsonl
+vivary logs email .vivary/receipts.jsonl --to support@example.com --out .vivary/support.eml
+```
+
+`vivary logs email` writes a local draft or prints a `mailto:` URL. It does not send
+mail, upload telemetry, or include stdout/stderr, file contents, raw query text, target
+ids, or local paths.
+
+Docs: https://vivary.vercel.app/

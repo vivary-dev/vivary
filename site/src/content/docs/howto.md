@@ -253,6 +253,25 @@ tracking; it writes `.vivary/doctor-state.json`, so commit that file (or cache i
 between runs) if you want deltas across CI runs rather than a "first recorded run"
 every time.
 
+## Pull logs without a GUI
+
+Vivary visibility is just local receipts plus a tiny reader; no service, account, or
+dashboard is required.
+
+```bash
+export VIVARY_RECEIPT_LOG=.vivary/receipts.jsonl
+create-vivary doctor . --json
+tropo check --root . --json
+ozone review --strict --root . --json
+
+vivary logs .vivary/receipts.jsonl
+vivary logs .vivary/receipts.jsonl --failed --tail 20 --json
+vivary logs email .vivary/receipts.jsonl --to support@example.com --out .vivary/support.eml
+```
+
+The email command creates a local draft or `mailto:` URL only. It never sends the email
+for you, and it only includes whitelisted receipt fields.
+
 ## First run in an agent (bootstrap)
 
 Open the workspace in Claude Code or Codex and say **"bootstrap the workspace"** — the

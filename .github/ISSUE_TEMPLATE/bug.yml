@@ -2,6 +2,8 @@ name: Bug report
 description: Report broken behavior, install failures, or incorrect docs.
 title: "[Bug]: "
 labels: ["bug"]
+assignees:
+  - Jeff-Kazee
 body:
   - type: textarea
     id: summary

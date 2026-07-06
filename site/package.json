@@ -9,6 +9,7 @@
     "start": "astro dev",
     "prebuild": "node scripts/sync-docs.mjs",
     "build": "astro build",
+    "test:support": "node tests/support-modal.test.mjs",
     "preview": "astro preview",
     "astro": "astro"
   },

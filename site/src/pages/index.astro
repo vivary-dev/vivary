@@ -1,6 +1,25 @@
 ---
 // Vivary — landing. Custom page (Starlight owns the /docs routes).
 const repo = 'https://github.com/vivary-dev/vivary';
+const supportEmail = 'support@vivary.dev';
+const supportSubject = 'Vivary support request';
+const supportIssueUrl = `${repo}/issues/new?template=bug.yml&labels=bug&title=${encodeURIComponent('[Bug]: Vivary problem report')}`;
+const supportBody = [
+  'Hi Vivary team,',
+  '',
+  'I hit a problem with Vivary.',
+  '',
+  'What I ran:',
+  '',
+  'What happened:',
+  '',
+  'What I expected:',
+  '',
+  'Vivary version or command output:',
+  '',
+  'Relevant receipt/log summary:',
+].join('\n');
+const supportMailto = `mailto:${supportEmail}?subject=${encodeURIComponent(supportSubject)}&body=${encodeURIComponent(supportBody)}`;
 const layers = [
   { id: 'exo',    name: 'exo',    alt: 'exosphere',    role: 'Coordination and claims when one agent becomes many.', y: 0 },
   { id: 'ozone',  name: 'ozone',  alt: 'the filter',   role: 'Graph-aware review, by blast radius.',       y: 1 },
@@ -306,6 +325,7 @@ billing  →  4 node(s) depend on it
 <span class="g">$ create-vivary init . --auto --yes --json</span>   <span class="dim"># agent-mode: zero prompts</span></pre>
       <div class="cta">
         <a class="btn primary" href="/getting-started/">Read the docs</a>
+        <button class="btn" type="button" data-support-open>Report a problem</button>
         <a class="btn" href={repo}>GitHub</a>
       </div>
     </section>
@@ -322,11 +342,158 @@ billing  →  4 node(s) depend on it
     </nav>
   </footer>
 
+  <div class="support-modal" data-support-modal hidden>
+    <div class="support-backdrop" data-support-close aria-hidden="true"></div>
+    <section class="support-dialog" role="dialog" aria-modal="true" aria-labelledby="support-title" aria-describedby="support-description">
+      <button class="support-close" type="button" data-support-close aria-label="Close support dialog">×</button>
+      <p class="support-eyebrow">Support</p>
+      <h2 id="support-title">Send a useful problem report</h2>
+      <p id="support-description">
+        Copy the address or the prepared report. The email button is prefilled, and the copy controls still work when no mail app is configured.
+      </p>
+      <div class="support-field" data-support-email>
+        <span>{supportEmail}</span>
+        <button class="copy" type="button" data-copy={supportEmail}>copy</button>
+      </div>
+      <label class="support-report-label" for="support-report">Report draft</label>
+      <textarea id="support-report" class="support-report" data-support-report readonly>{supportBody}</textarea>
+      <div class="support-actions">
+        <button class="btn primary" type="button" data-copy-support>Copy report</button>
+        <a class="btn" href={supportMailto}>Open email</a>
+        <a class="btn" href={supportIssueUrl}>GitHub issue</a>
+      </div>
+    </section>
+  </div>
+
   <script is:inline>
-    document.querySelectorAll('.copy').forEach((b) => {
+    const copyToClipboard = async (text) => {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      const field = document.createElement('textarea');
+      field.value = text;
+      field.setAttribute('readonly', '');
+      field.style.position = 'fixed';
+      field.style.left = '-9999px';
+      field.style.top = '0';
+      document.body.appendChild(field);
+      field.select();
+      const copied = document.execCommand('copy');
+      field.remove();
+      if (!copied) throw new Error('copy failed');
+    };
+
+    const flashButton = (button, label) => {
+      const original = button.dataset.copyLabel || button.textContent || label;
+      button.dataset.copyLabel = original;
+      button.textContent = label;
+      setTimeout(() => (button.textContent = original), 1400);
+    };
+
+    document.querySelectorAll('[data-copy]').forEach((b) => {
       b.addEventListener('click', async () => {
-        try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'copied'; setTimeout(() => (b.textContent = 'copy'), 1400); } catch (e) {}
+        try {
+          await copyToClipboard(b.dataset.copy || '');
+          flashButton(b, 'copied');
+        } catch (e) {
+          flashButton(b, 'failed');
+        }
       });
+    });
+
+    const modal = document.querySelector('[data-support-modal]');
+    const report = document.querySelector('[data-support-report]');
+    const reportCopy = document.querySelector('[data-copy-support]');
+    const defaultReport = report?.value || '';
+    let lastFocus = null;
+
+    const safePage = () => {
+      const href = window.location.href;
+      return href.startsWith('http://') || href.startsWith('https://') ? href : '(local page omitted)';
+    };
+
+    const safeSource = (value) => {
+      if (!value) return '(unknown source)';
+      return value.startsWith('http://') || value.startsWith('https://') ? value : '(local source omitted)';
+    };
+
+    const safeDetail = (value) => String(value || '(none)')
+      .replace(/file:\/\/\/[^)\s'"]+/gi, '(local path omitted)')
+      .replace(/[A-Z]:[\\/][^)\s'"]+/gi, '(local path omitted)')
+      .replace(/\\\\[^)\s'"]+/g, '(network path omitted)');
+
+    const buildProblemReport = (summary, detail) => [
+      defaultReport,
+      '',
+      'Detected by website:',
+      summary,
+      '',
+      'Detail:',
+      safeDetail(detail),
+      '',
+      `Page: ${safePage()}`,
+    ].join('\n');
+
+    const openSupport = (problem) => {
+      if (!modal) return;
+      lastFocus = document.activeElement;
+      if (typeof problem === 'string' && report) report.value = problem;
+      modal.hidden = false;
+      document.body.classList.add('support-open');
+      document.querySelector('main')?.setAttribute('inert', '');
+      document.querySelector('.nav')?.setAttribute('inert', '');
+      document.querySelector('.foot')?.setAttribute('inert', '');
+      modal.querySelector('.support-close')?.focus();
+    };
+
+    const closeSupport = () => {
+      if (!modal) return;
+      modal.hidden = true;
+      document.body.classList.remove('support-open');
+      document.querySelector('main')?.removeAttribute('inert');
+      document.querySelector('.nav')?.removeAttribute('inert');
+      document.querySelector('.foot')?.removeAttribute('inert');
+      if (lastFocus && lastFocus.focus) lastFocus.focus();
+    };
+
+    document.querySelectorAll('[data-support-open]').forEach((b) => b.addEventListener('click', () => openSupport()));
+    modal?.addEventListener('click', (event) => {
+      if (event.target.closest('[data-support-close]')) closeSupport();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (!modal || modal.hidden) return;
+      if (event.key === 'Escape') closeSupport();
+      if (event.key !== 'Tab') return;
+      const focusable = Array.from(modal.querySelectorAll('a[href], button:not([disabled]), textarea:not([disabled])'));
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+    window.addEventListener('error', (event) => {
+      openSupport(buildProblemReport(
+        'Browser error noticed by the Vivary website.',
+        `${event.message || 'unknown error'} ${safeSource(event.filename || '')}:${event.lineno || ''}:${event.colno || ''}`.trim(),
+      ));
+    });
+    window.addEventListener('unhandledrejection', (event) => {
+      const reason = event.reason instanceof Error ? event.reason.message : String(event.reason || 'unknown rejection');
+      openSupport(buildProblemReport('Unhandled browser promise rejection noticed by the Vivary website.', reason));
+    });
+    reportCopy?.addEventListener('click', async () => {
+      try {
+        await copyToClipboard(report?.value || '');
+        flashButton(reportCopy, 'copied');
+      } catch (e) {
+        flashButton(reportCopy, 'failed');
+      }
     });
   </script>
 
@@ -523,6 +690,25 @@ billing  →  4 node(s) depend on it
       border-top: 1px solid var(--line); font-family: var(--mono); font-size: 13px; color: var(--faint); }
     .foot nav { display: flex; gap: 22px; } .foot a:hover { color: var(--accent); }
 
+    body.support-open { overflow: hidden; }
+    .support-modal[hidden] { display: none; }
+    .support-modal { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; }
+    .support-backdrop { position: absolute; inset: 0; background: oklch(0.08 0.035 240 / .76); backdrop-filter: blur(8px); }
+    .support-dialog { position: relative; width: min(100%, 640px); max-height: calc(100vh - 40px); overflow: auto;
+      border: 1px solid var(--line-strong); border-radius: 14px; background: oklch(0.16 0.045 220 / .98);
+      box-shadow: 0 24px 80px oklch(0.04 0.02 240 / .42); padding: clamp(22px, 4vw, 34px); text-align: left; }
+    .support-close { position: absolute; top: 14px; right: 14px; width: 34px; height: 34px; border-radius: 9px;
+      border: 1px solid var(--line); color: var(--muted); background: transparent; font-size: 24px; line-height: 1; cursor: pointer; }
+    .support-close:hover { color: var(--accent); border-color: var(--line-strong); }
+    .support-eyebrow { margin: 0 0 8px; font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: 0.05em; text-transform: uppercase; }
+    .support-dialog h2 { margin: 0 0 10px; font-family: var(--serif); font-size: clamp(26px, 4vw, 38px); line-height: 1.05; letter-spacing: -0.015em; }
+    .support-dialog p { margin: 0 0 18px; color: var(--muted); max-width: 58ch; }
+    .support-field { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px;
+      border: 1px solid var(--line); border-radius: 10px; background: oklch(0.13 0.035 220 / .72); font-family: var(--mono); color: var(--ink); overflow-wrap: anywhere; }
+    .support-report-label { display: block; margin: 18px 0 8px; font-family: var(--mono); font-size: 12px; color: var(--faint); letter-spacing: 0.05em; text-transform: uppercase; }
+    .support-report { width: 100%; min-height: 220px; resize: vertical; border: 1px solid var(--line); border-radius: 10px;
+      background: oklch(0.12 0.03 220 / .82); color: var(--muted); padding: 14px; font: 13px/1.6 var(--mono); }
+    .support-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
 
     /* search section */
     .search-head { text-align: center; margin-bottom: clamp(28px, 4vw, 48px); }
@@ -560,6 +746,9 @@ billing  →  4 node(s) depend on it
       .strip span { overflow-wrap: anywhere; }
       .term { font-size: 12px; padding: 16px; }
       .term.big { font-size: 12px; }
+      .support-dialog { padding: 22px; }
+      .support-field { align-items: flex-start; flex-direction: column; }
+      .support-report { min-height: 180px; }
     }
     @media (max-width: 420px) {
       main { padding-inline: 20px; }
