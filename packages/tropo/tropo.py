@@ -15,7 +15,7 @@ Usage:
   tropo blast <id> [--depth N] [--json]
   tropo view [graph | blast <id>] [--out FILE]
   tropo plan <change-spec.toml> [--json]
-  tropo query <text> [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]]
+  tropo query <text> [--mode text|vector|semantic] [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]]
   tropo find <text> [--budget N] [--json]
   tropo map [PATH | --root PATH] [--depth N] [--max-entries N] [--json]
 
@@ -28,6 +28,7 @@ import argparse
 import asyncio
 import copy
 import datetime
+import hashlib
 import importlib
 import importlib.util
 import json
@@ -1186,6 +1187,11 @@ MEMORY_CONFIG_NAME = "memory.toml"
 _CONTENT_PREVIEW_CHARS = 1000
 _DEFAULT_SNIPPET_CHARS = 160
 _DEFAULT_FIND_BUDGET = 1200
+_DEFAULT_VECTOR_DIMENSIONS = 128
+_MIN_VECTOR_DIMENSIONS = 16
+_MAX_VECTOR_DIMENSIONS = 4096
+_VECTOR_CONTENT_CHARS = 4000
+_LOCAL_VECTOR_PROVIDER = "local-hash"
 _QUERY_STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "do", "does", "for",
     "from", "how", "i", "in", "is", "it", "of", "on", "or", "our", "the",
@@ -1193,16 +1199,105 @@ _QUERY_STOPWORDS = {
 }
 
 
-def _load_storage_config(root):
+def _load_storage_document(root):
     path = os.path.join(root, STORAGE_DIR, STORAGE_CONFIG_NAME)
     if not os.path.isfile(path):
-        return {"backend": "file"}
+        return {}
     try:
         with open(path, "rb") as fh:
-            data = tomllib.load(fh)
-    except (OSError, tomllib.TOMLDecodeError) as e:
-        raise ConfigError(f"{path}: {e}")
+            return tomllib.load(fh)
+    except OSError as e:
+        detail = e.strerror or e.__class__.__name__
+        raise ConfigError(f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: {detail}")
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
+        raise ConfigError(f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: {e}")
+
+
+def _load_storage_config(root):
+    data = _load_storage_document(root)
     return data.get("storage", {"backend": "file"})
+
+
+def _vector_config_error(detail, provider="unknown"):
+    return {
+        "enabled": False,
+        "provider": provider,
+        "status": "misconfigured",
+        "detail": detail,
+    }
+
+
+def _vector_config_fallback(detail):
+    return {
+        "enabled": False,
+        "provider": "none",
+        "status": "fallback",
+        "fallback": "text",
+        "detail": detail,
+    }
+
+
+def _load_vector_query_config(root):
+    try:
+        data = _load_storage_document(root)
+    except ConfigError as e:
+        return _vector_config_error(str(e))
+    storage = data.get("storage", {})
+    if storage is None:
+        storage = {}
+    if not isinstance(storage, dict):
+        return _vector_config_error(f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: storage must be a TOML table")
+
+    embedding = storage.get("embedding")
+    if embedding is None:
+        return _vector_config_fallback(
+            f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME} does not enable local vector search"
+        )
+    if not isinstance(embedding, dict):
+        return _vector_config_error(
+            f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: embedding must be a TOML table"
+        )
+
+    enabled = embedding.get("enabled", False)
+    if not isinstance(enabled, bool):
+        return _vector_config_error(
+            f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: embedding.enabled must be true or false"
+        )
+    provider = embedding.get("provider", _LOCAL_VECTOR_PROVIDER)
+    if not isinstance(provider, str):
+        return _vector_config_error(
+            f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: embedding.provider must be a string"
+        )
+    provider = provider.strip().lower()
+    if not enabled:
+        return _vector_config_fallback(
+            f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME} embedding is disabled"
+        )
+    if provider != _LOCAL_VECTOR_PROVIDER:
+        return _vector_config_error(
+            f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: embedding.provider {provider!r} is not supported by tropo",
+            provider=provider,
+        )
+
+    dimensions = embedding.get("dimensions", _DEFAULT_VECTOR_DIMENSIONS)
+    if isinstance(dimensions, bool) or not isinstance(dimensions, int):
+        return _vector_config_error(
+            f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: embedding.dimensions must be an integer",
+            provider=provider,
+        )
+    if dimensions < _MIN_VECTOR_DIMENSIONS or dimensions > _MAX_VECTOR_DIMENSIONS:
+        return _vector_config_error(
+            f"{STORAGE_DIR}/{STORAGE_CONFIG_NAME}: embedding.dimensions must be between {_MIN_VECTOR_DIMENSIONS} and {_MAX_VECTOR_DIMENSIONS}",
+            provider=provider,
+        )
+
+    return {
+        "enabled": True,
+        "provider": provider,
+        "status": "ok",
+        "detail": "",
+        "dimensions": dimensions,
+    }
 
 
 def _load_memory_query_config(root):
@@ -1265,12 +1360,65 @@ def _load_memory_query_config(root):
 
 def _file_body(full_path, limit=_CONTENT_PREVIEW_CHARS):
     try:
-        text = open(full_path, encoding="utf-8", errors="replace").read()
+        with open(full_path, encoding="utf-8", errors="replace") as fh:
+            if limit is None:
+                text = fh.read()
+            else:
+                read_limit = max(0, limit) + 8192
+                text = fh.read(read_limit)
     except OSError:
         return ""
     m, text = _frontmatter_match(text)
-    body = text[m.end():] if m else text
+    if m:
+        body = text[m.end():]
+    elif limit is not None and text.startswith("---\n") and len(text) >= read_limit:
+        body = ""
+    else:
+        body = text
     return body if limit is None else body[:limit]
+
+
+def _local_hash_vector(text, dimensions=_DEFAULT_VECTOR_DIMENSIONS):
+    vector = [0.0] * dimensions
+    tokens = re.findall(r"[a-z0-9]+", (text or "").lower())
+    tokens = [token for token in tokens if token not in _QUERY_STOPWORDS]
+    if not tokens:
+        return vector
+    for token in tokens:
+        digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
+        index = int.from_bytes(digest, "big") % dimensions
+        vector[index] += 1.0
+    norm = math.sqrt(sum(value * value for value in vector))
+    if norm <= 0:
+        return vector
+    return [round(value / norm, 6) for value in vector]
+
+
+def _cosine_score(left, right):
+    return sum(a * b for a, b in zip(left, right))
+
+
+def _record_vector_text(record):
+    edge_text = " ".join(f"{edge['field']} {edge['to']}" for edge in record["edges"])
+    return " ".join(
+        str(value or "")
+        for value in (
+            record.get("id"),
+            record.get("type"),
+            record.get("path"),
+            record.get("title"),
+            record.get("frontmatter_text"),
+            edge_text,
+            record.get("body"),
+        )
+    )
+
+
+def _typed_result_edges(record):
+    return [
+        {"from": record["id"], "field": edge["field"], "to": edge["to"]}
+        for edge in record.get("edges", [])
+    ]
 
 
 def _doc_to_node(d):
@@ -1405,7 +1553,7 @@ class _LanceBackend:
         self._db = None
 
 
-def get_backend(root):
+def get_backend(root, *, allow_auto_fallback=True):
     """Return the configured StorageBackend for the workspace at root."""
     cfg = _load_storage_config(root)
     backend = cfg.get("backend", "file")
@@ -1422,7 +1570,7 @@ def get_backend(root):
             try:
                 return _LanceBackend(path)
             except ConfigError:
-                if backend == "auto":
+                if backend == "auto" and allow_auto_fallback:
                     print("tropo: lancedb not installed, falling back to file backend",
                           file=sys.stderr)
                     return _FileBackend(root)
@@ -1478,7 +1626,7 @@ def _edge_filter_matches(edges, spec):
     return False
 
 
-def _build_search_records(docs, nodes, edges):
+def _build_search_records(docs, nodes, edges, body_limit=None):
     docs_by_id = {d.derived.get("id"): d for d in docs if d.derived.get("id") is not None}
     outbound = {}
     for edge in edges:
@@ -1497,7 +1645,7 @@ def _build_search_records(docs, nodes, edges):
             f"{key}: {_stringify_field_value(value)}"
             for key, value in sorted(fields.items())
         )
-        body = _file_body(doc.full, limit=None) if doc is not None else ""
+        body = _file_body(doc.full, limit=body_limit) if doc is not None else ""
         title = (doc.derived.get("title") if doc is not None else "") or nid
         records.append({
             "id": nid,
@@ -1576,7 +1724,7 @@ def search_graph(resolver, text, *, k=10, type_filters=None, path_filters=None,
                  explain=False):
     docs = analyze(resolver.root, [], resolver)
     nodes, edges = build_graph(docs)
-    records = _build_search_records(docs, nodes, edges)
+    records = _build_search_records(docs, nodes, edges, body_limit=None)
     terms = _query_terms(text)
     type_filters = type_filters or []
     path_filters = path_filters or []
@@ -1635,6 +1783,68 @@ def search_graph(resolver, text, *, k=10, type_filters=None, path_filters=None,
 
     results.sort(key=lambda r: (-r["score"], r["path"], r["id"]))
     return results[:max(0, k)]
+
+
+def vector_query(resolver, text, *, k=10, type_filters=None, path_filters=None,
+                 edge_filters=None, snippet_chars=_DEFAULT_SNIPPET_CHARS,
+                 explain=False):
+    """Dependency-free typed vector search over analyzed graph nodes."""
+    config = _load_vector_query_config(resolver.root)
+    if config["status"] == "fallback":
+        results = search_graph(
+            resolver,
+            text,
+            k=k,
+            type_filters=type_filters,
+            path_filters=path_filters,
+            edge_filters=edge_filters,
+            snippet_chars=snippet_chars,
+            explain=explain,
+        )
+        return 0, results, config
+    if config["status"] != "ok":
+        return 1, [], config
+
+    dimensions = config.get("dimensions", _DEFAULT_VECTOR_DIMENSIONS)
+    query_vector = _local_hash_vector(text, dimensions)
+    if not any(query_vector):
+        return 0, [], config
+
+    docs = analyze(resolver.root, [], resolver)
+    nodes, edges = build_graph(docs)
+    records = _build_search_records(docs, nodes, edges, body_limit=_VECTOR_CONTENT_CHARS)
+    type_filters = type_filters or []
+    path_filters = path_filters or []
+    edge_filters = edge_filters or []
+    results = []
+
+    for record in records:
+        if not _passes_search_filters(record, type_filters, path_filters, edge_filters):
+            continue
+        record_vector = _local_hash_vector(_record_vector_text(record), dimensions)
+        score = _cosine_score(query_vector, record_vector)
+        if score <= 0:
+            continue
+        result = {
+            "id": record["id"],
+            "type": record["type"],
+            "path": record["path"],
+            "title": record["title"],
+            "score": round(score, 6),
+            "reason": f"typed vector match via {config['provider']}",
+            "provider": config["provider"],
+        }
+        snippet = _best_snippet(record, text, _query_terms(text), snippet_chars)
+        if snippet:
+            result["snippet"] = snippet
+        if explain:
+            result["reasons"] = ["typed vector match", f"provider: {config['provider']}"]
+        if explain or edge_filters:
+            result["edges"] = _typed_result_edges(record)
+        results.append(result)
+
+    results.sort(key=lambda r: (-r["score"], r["path"], r["id"]))
+    return 0, results[:max(0, k)], config
 
 
 def _estimate_tokens(value):
@@ -2611,6 +2821,8 @@ def cmd_migrate(args, resolver):
         sys.exit("tropo migrate: --from and --to must be different backends")
     if from_name != "file":
         sys.exit(f"tropo migrate: --from {from_name!r} not yet supported; only 'file' is the supported source")
+    if to_name != "embedded":
+        sys.exit(f"tropo migrate: --to {to_name!r} not yet supported; only 'embedded' is the supported target")
 
     vivary_cfg = os.path.join(resolver.root, STORAGE_DIR, STORAGE_CONFIG_NAME)
     if not os.path.isfile(vivary_cfg) and not args.dry_run:
@@ -2618,6 +2830,23 @@ def cmd_migrate(args, resolver):
             "tropo migrate: no .vivary/storage.toml found — "
             "run `create-vivary wizard` to configure a storage backend first"
         )
+
+    if not args.dry_run:
+        try:
+            storage_cfg = _load_storage_config(resolver.root)
+            configured_backend = storage_cfg.get("backend", "file")
+            if configured_backend not in ("embedded", "auto"):
+                raise ConfigError(
+                    f"configured storage backend is {configured_backend!r}; "
+                    "run `create-vivary wizard` to configure embedded storage first"
+                )
+        except ConfigError as e:
+            if args.json:
+                print(json.dumps({"migrated": 0, "failed": 0, "error": str(e),
+                                  "from": from_name, "to": to_name}, indent=2))
+            else:
+                print(f"tropo migrate: {e}", file=sys.stderr)
+            return 1
 
     docs = analyze(resolver.root, [], resolver)
     nodes = [_doc_to_node(d) for d in docs]
@@ -2633,7 +2862,7 @@ def cmd_migrate(args, resolver):
 
     t0 = _time.monotonic()
     try:
-        dst = get_backend(resolver.root)
+        dst = get_backend(resolver.root, allow_auto_fallback=False)
         dst.upsert(nodes)
         dst.close()
     except ConfigError as e:
@@ -2666,6 +2895,44 @@ def cmd_query(args, resolver):
     type_filters = getattr(args, "type", None) or []
     path_filters = getattr(args, "path", None) or []
     edge_filters = getattr(args, "edge", None) or []
+
+    if mode == "vector":
+        rc, results, vector = vector_query(
+            resolver,
+            text,
+            k=k,
+            type_filters=type_filters,
+            path_filters=path_filters,
+            edge_filters=edge_filters,
+            snippet_chars=snippet,
+            explain=explain,
+        )
+        if args.json:
+            print(json.dumps({
+                "query": text,
+                "k": k,
+                "mode": mode,
+                "vector": vector,
+                "filters": {
+                    "type": type_filters,
+                    "path": path_filters,
+                    "edge": edge_filters,
+                },
+                "results": results,
+            }, indent=2))
+            return rc
+        if rc != 0:
+            print(f"tropo query: vector search unavailable: {vector['detail']}")
+            return rc
+        if vector["status"] == "fallback":
+            print(f"tropo query: vector search fallback ({vector['detail']})")
+        print(f"tropo query: {len(results)} vector result(s) for {text!r}")
+        for i, r in enumerate(results, 1):
+            typ = f"[{r['type']}] " if r.get("type") else ""
+            print(f"{i:2}. {typ}{r['id']} - {r['path']}")
+            if r.get("reason"):
+                print(f"    why: {r['reason']}")
+        return 0
 
     if mode == "semantic":
         rc, results, semantic = semantic_query(
@@ -2988,8 +3255,8 @@ def _main(argv=None):
     p.add_argument("--yes", action="store_true", help="auto-confirm prompts (agent/CI use)")
     p.add_argument("--k", type=int, default=None,
                    help="query/find: number of results (query default: 10, find default: 5)")
-    p.add_argument("--mode", choices=["text", "semantic"], default="text",
-                   help="query: text graph search (default) or optional semantic-memory provider search")
+    p.add_argument("--mode", choices=["text", "vector", "semantic"], default="text",
+                   help="query: text graph search (default), local typed vector search, or optional semantic-memory provider search")
     p.add_argument("--type", action="append", default=[],
                    help="query/find: restrict results to a document type; repeatable")
     p.add_argument("--path", action="append", default=[],
