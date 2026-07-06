@@ -13,6 +13,39 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: embedded typed-node embeddings] — 2026-07-06
+
+Affects `vivary-tropo` migration behavior and docs. This is not published yet.
+
+### Added
+
+- `tropo migrate --from file --to embedded --json` now reports an `embedding` object.
+- When `.vivary/storage.toml` explicitly enables `[storage.embedding]` with
+  `provider = "local-hash"`, embedded migration stores graph-shaped vectors on typed
+  node rows, plus source and embedding fingerprints for stale-vector detection.
+
+### Fixed
+
+- Nested `tropo.toml` `exclude` rules now filter analysis candidates after overlay
+  resolution, so private nested notes are not analyzed or embedded.
+- Invalid embedding config fails before backend writes during real migration; dry-run
+  migration remains conservative and write-free.
+- Real embedded migration now replaces the node snapshot, preventing deleted,
+  renamed, newly excluded, or vector-schema-changed nodes from leaving stale rows.
+
+### Verification
+
+- `python packages/tropo/tests/test_tropo.py`
+- Fresh scaffold dogfood: `create-vivary init ... --preset coding --storage embedded
+  --provider lancedb --auto --yes --json`, followed by plain embedded migration,
+  explicit local-hash embedding enablement, rerun migration, and LanceDB row-shape
+  inspection.
+- Brownfield dogfood: `create-vivary adopt ... --preset coding --yes --json`,
+  explicit embedded/local-hash storage config, migration, and LanceDB row-shape
+  inspection.
+- Real LanceDB idempotence smoke: repeated migration kept row count stable while
+  preserving 64-dimension vectors and embedding/source fingerprints.
+
 ## [Unreleased: local receipt log viewer] — 2026-07-05
 
 Affects the `vivary` meta package, CLI docs, package docs, and generated website

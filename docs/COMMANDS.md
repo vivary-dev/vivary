@@ -104,7 +104,7 @@ says. `tropo.toml` declares the types.
 | `init [DIR] [--packs a,b]` | Scaffold a `tropo.toml` (optionally composing reusable type packs). |
 | `find <text> [--budget N] [--k N] [--json]` | Human-friendly context packet: the smallest typed nodes/files worth opening first, with reasons and snippets trimmed to an approximate token budget. |
 | `query <text> [--k N] [--mode text\|vector\|semantic] [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]] [--snippet N] [--explain] [--json]` | Filtered graph search over typed nodes. Default `text` searches id/title, frontmatter, path, body, and outbound edge context. `vector` uses dependency-free local typed vectors when `.vivary/storage.toml` enables them and otherwise falls back to text search. `semantic` calls an explicitly configured optional semantic-memory provider and returns typed node ids. |
-| `migrate --from file --to embedded [--dry-run] [--json]` | Move file-backed graph data into the configured embedded backend. Cloud migration, non-file sources, backend installation, and `migrated_at` tracking are future 0.3.x work. |
+| `migrate --from file --to embedded [--dry-run] [--json]` | Move file-backed graph data into the configured embedded backend. When local vector policy is explicitly enabled, migrated rows also include typed-node vectors and provenance metadata. Cloud migration, non-file sources, backend installation, and `migrated_at` tracking are future 0.3.x work. |
 | `map [--root PATH] [--depth N] [--max-entries N] [--json]` | Read-only filesystem inventory of a repo/vault/docs tree — no `tropo.toml` required. See [Filesystem map](#filesystem-map-tropo-map) below. |
 
 `tropo find` is the default "what should I read first?" command for humans and agents.
@@ -129,6 +129,16 @@ today that means the separate `vivary-memory-cognee` package must be installed a
 indexed by the user. It does not add Cognee or network calls to `vivary-tropo` core.
 Use `create-vivary init ... --active-context cocoindex-code` when a coding workspace
 needs semantic code candidates.
+
+`tropo migrate --from file --to embedded --json` reports an `embedding` object.
+Without `[storage.embedding]`, the status is `disabled` and rows stay plain typed
+nodes. With `enabled = true` and `provider = "local-hash"`, each migrated row gets a
+`vector` plus `embedding_provider`, `embedding_dimensions`, `embedding_version`,
+`embedding_scope`, `embedding_text_fingerprint`, and `source_fingerprint`. Bad
+embedding config fails before backend writes. Root and nested `exclude` rules,
+symlink/junction pruning, and out-of-root path checks run before any text is
+embedded. Real file-to-embedded migration replaces the embedded node snapshot, so
+deleted, renamed, or newly excluded nodes do not leave stale embedded rows.
 
 Simple rule: start with plain `tropo find` or `tropo query`. Reach for the other
 modes only when the plain graph search is not enough.

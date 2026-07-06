@@ -52,6 +52,15 @@ currently the separate `vivary-memory-cognee` package. Tropo core does not bundl
 Cognee, network calls, or provider indexing.
 Cloud extras are reserved for future adapter work.
 
+`tropo migrate --from file --to embedded --json` reports embedding persistence
+explicitly. With no `[storage.embedding]` table, rows stay plain typed nodes. With
+`enabled = true` and `provider = "local-hash"`, migrated rows include a `vector` plus
+source and embedding fingerprints, so later ANN/community work can detect stale
+vectors without re-chunking the workspace. Invalid embedding config fails before any
+embedded backend write. Real file-to-embedded migration replaces the embedded node
+snapshot, so deleted, renamed, newly excluded, or vector-schema-changed nodes do not
+leave stale embedded rows behind.
+
 Built-in packs are embedded in the single-file engine, so installed wheels can resolve
 starter packs without a repo-local `packs/` directory. Workspace-local
 `.tropo/packs/<name>.toml` files still take precedence.
