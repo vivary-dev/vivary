@@ -52,6 +52,37 @@ release-train gates.
   sandboxes/observability-proof/receipts.jsonl`, then `vivary logs ... --json` and
   `vivary logs email ... --out ... --json`.
 
+## [Unreleased: tropo typed vector query mode] — 2026-07-05
+
+Affects `vivary-tropo`, CLI docs, package docs, and generated website docs. This is
+not published yet; the `vivary-tropo` version bump and registry publish remain
+release-train gates.
+
+### Added
+
+- Added `tropo query --mode vector`, a dependency-free local typed-vector search mode
+  over analyzed tropo graph nodes.
+- Added explicit `.vivary/storage.toml` opt-in for local vectors via `[storage.embedding]
+  enabled = true`, `provider = "local-hash"`, and optional `dimensions`.
+- Kept vector results graph-shaped: typed node ids, paths, types, scores, provider
+  markers, snippets, and type/path/edge filters are preserved.
+- This is a local query-time vector slice only; it does not add stored embeddings,
+  ANN search over an embedded backend, or clustering/community graph views.
+
+### Hardened
+
+- `--mode vector` falls back to dependency-free text graph search when no embedding
+  config is present instead of failing or installing anything.
+- Invalid embedding config is reported as structured `misconfigured` JSON without
+  attempting provider calls, network access, or package installation.
+- Malformed storage config reports relative `.vivary/storage.toml` details instead of
+  absolute local paths, and `tropo migrate --to embedded` refuses to silently use the
+  file backend when embedded storage is not configured.
+
+### Verification
+
+- `python packages/tropo/tests/test_tropo.py`
+
 ## [Unreleased: tropo semantic query mode] — 2026-07-05
 
 Affects `vivary-tropo`, `vivary-memory-cognee`, CLI docs, package docs, and
