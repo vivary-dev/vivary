@@ -1,10 +1,10 @@
 {
   "date": "2026-07-06",
-  "generated_at": "2026-07-06T12:58:09Z",
+  "generated_at": "2026-07-06T14:04:08Z",
   "github": {
     "forks": 1,
-    "open_issues": 2,
-    "pushed_at": "2026-07-06T12:33:20Z",
+    "open_issues": 17,
+    "pushed_at": "2026-07-06T12:58:36Z",
     "stale": false,
     "stars": 3,
     "watchers": 0
@@ -38,10 +38,10 @@
   "pypi": {
     "packages": {
       "create-vivary": {
-        "last_day": 333,
-        "last_month": 1820,
-        "last_week": 475,
-        "stale": true
+        "last_day": 47,
+        "last_month": 1867,
+        "last_week": 512,
+        "stale": false
       },
       "vivary-exo": {
         "last_day": 40,
@@ -50,30 +50,26 @@
         "stale": false
       },
       "vivary-ozone": {
-        "last_day": 111,
-        "last_month": 401,
-        "last_week": 130,
-        "stale": true
+        "last_day": 40,
+        "last_month": 441,
+        "last_week": 170,
+        "stale": false
       },
       "vivary-tropo": {
-        "last_day": 602,
-        "last_month": 2775,
-        "last_week": 719,
-        "stale": true
+        "last_day": 84,
+        "last_month": 2859,
+        "last_week": 770,
+        "stale": false
       }
     },
-    "weekly_total": 1504
+    "weekly_total": 1632
   },
-  "pypi_weekly": 1504,
-  "status": "stale",
+  "pypi_weekly": 1632,
+  "status": "ok",
   "totals": {
     "npm_weekly": 319,
-    "package_weekly": 1823,
-    "pypi_weekly": 1504
+    "package_weekly": 1951,
+    "pypi_weekly": 1632
   },
-  "warnings": [
-    "pypi:create-vivary: stale previous value used after fetch failure (https://pypistats.org/api/packages/create-vivary/recent -> HTTP Error 429: Too Many Requests)",
-    "pypi:vivary-tropo: stale previous value used after fetch failure (https://pypistats.org/api/packages/vivary-tropo/recent -> HTTP Error 429: Too Many Requests)",
-    "pypi:vivary-ozone: stale previous value used after fetch failure (https://pypistats.org/api/packages/vivary-ozone/recent -> HTTP Error 429: Too Many Requests)"
-  ]
+  "warnings": []
 }
