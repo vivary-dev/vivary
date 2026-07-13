@@ -13,6 +13,30 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: proof-first harness strategy] — 2026-07-13
+
+Affects public product strategy, roadmap status, and generated website docs only. No
+package behavior changed.
+
+### Changed
+
+- Added a primary-source competitive review and proof-first route from Vivary's
+  workspace standard toward a portable Task Capsule, Execution Receipt, and gated
+  Learning Inbox.
+- Kept agent execution, hosted control-plane work, connector breadth, and automatic
+  memory promotion out of the next product bet.
+- Made the existing token/context benchmark and a five-user brownfield adoption trial
+  explicit gates before a new context-exchange interface is implemented.
+- Reconciled the product roadmap so `tropo map`, brownfield `adopt`, `doctor --trend`,
+  and Strato integrity checks are marked as shipped foundation rather than open P1
+  work.
+
+### Verification
+
+- `cd site && npm run sync-docs && npm run build`
+- `python scripts/check_line_endings.py`
+- `git diff --check`
+
 ## [Unreleased: stored vector query] — 2026-07-06
 
 Affects `vivary-tropo` query behavior and docs. This is not published yet.

@@ -14,6 +14,41 @@ lost in chat. The filter is first-principles Vivary:
 - test locally before release, with disposable fixtures or sandboxes when needed;
 - never turn optional integrations into always-on bloat.
 
+## Direction set 2026-07-13: prove the context exchange
+
+The long-term harness ambition now has a strict proof-first route. Vivary should not
+become an agent runner, managed control plane, or general memory platform before its
+current context-compression thesis is proven on real work.
+
+The near-term wedge is:
+
+> Inspectable, Git-native project truth -> policy-controlled task context -> any agent
+> harness. Learned memory remains a separate, subordinate overlay.
+
+Immediate order:
+
+1. publish the token/context benchmark already tracked below;
+2. run a five-user brownfield adoption trial;
+3. if both pass, formalize a portable Task Capsule contract;
+4. add runtime-neutral Execution Receipts and a gated Learning Inbox in later slices;
+5. reconsider Vivary-owned execution only after repeated user demand.
+
+The research, debate, metrics, kill criteria, and phase plan live in
+[Harness strategy](/harness-strategy/). This direction does not cancel the current
+release gate; it prevents the next roadmap from becoming a broad competitor-feature
+checklist before the product has repeat-use proof.
+
+## Shipped adoption foundation
+
+The following items from the original P1 adoption line are now shipped on `dev`:
+
+- `tropo map` read-only filesystem inventory;
+- non-destructive `create-vivary adopt` with dry-run planning;
+- `create-vivary doctor --trend` drift tracking;
+- Strato scaffold and integrity checks in CI.
+
+They remain documented below as product intent and test history, not as unstarted work.
+
 ## Current release slice
 
 The context-compression release covers the first concrete slice:
@@ -40,7 +75,7 @@ be *felt* on an existing messy repo before anyone commits. Everything in P1
 either lets Vivary work on brownfield projects, proves the token thesis with a
 number, or gives an adopter a reason to come back.
 
-### P1.1 Large filesystem map (`tropo map`)
+### P1.1 Large filesystem map (`tropo map`) — shipped
 
 Goal: let agents understand a large repo, vault, docs tree, or file system
 without opening hundreds of files. This is the brownfield wedge — the first
@@ -61,7 +96,7 @@ High-value tests:
 - ignored/private paths stay out of the map;
 - output remains stable enough for agents to cite and diff.
 
-### P1.2 Brownfield adopt (`create-vivary adopt .`)
+### P1.2 Brownfield adopt (`create-vivary adopt .`) — shipped
 
 Goal: turn the map into an adoption path for existing repos and vaults, so the
 product motion becomes "point Vivary at your mess" instead of "start a new
@@ -126,11 +161,11 @@ High-value tests:
 - works against a scaffolded and an adopted workspace;
 - core packages remain installable and testable without the MCP package.
 
-### P1.5 Doctor as the retention loop
+### P1.5 Doctor as the retention loop — first slice shipped
 
-Goal: give adopters a reason to run Vivary weekly, not once. Today `doctor`
-has no drift-tracking — nothing compares workspace health across runs or gives
-an adopter a reason to re-run it.
+Goal: give adopters a reason to run Vivary weekly, not once. The first slice now
+ships `doctor --trend`; the remaining product question is whether drift evidence
+actually creates repeat use instead of another health command users forget to run.
 
 Shape:
 
@@ -167,11 +202,11 @@ High-value tests:
 - friction found while dogfooding lands as tracked issues against P1.1/P1.2,
   not private notes.
 
-### P1.7 Strato as a verifiable agent OS
+### P1.7 Strato as a verifiable agent OS — first slice shipped
 
 Goal: the conceptual core of the product — the agent OS layer — must be as
-testable as the code layers. Today strato is unversioned Markdown with no
-checks.
+testable as the code layers. Scaffold and integrity checks now cover the first
+slice; versioning and real cross-runtime behavior remain product proof work.
 
 Shape:
 

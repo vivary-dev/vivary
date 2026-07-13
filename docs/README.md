@@ -13,6 +13,7 @@ Start here.
 | [LLM-ACTIVE-CONTEXT.md](LLM-ACTIVE-CONTEXT.md) | Copyable LLM instructions for graph-first CocoIndex-code retrieval. |
 | [SEMANTIC-MEMORY.md](SEMANTIC-MEMORY.md) | Architecture and optional adapter plan for semantic memory providers such as Cognee. |
 | [PRODUCT-ROADMAP.md](PRODUCT-ROADMAP.md) | High-leverage product backlog for context compression, maps, recall, and optional integrations. |
+| [HARNESS-STRATEGY.md](HARNESS-STRATEGY.md) | Research-backed path from workspace standard to a portable Task Capsule, receipt, and gated-learning loop. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The layer model (tropo → strato → ozone → exo) and the why. |
 | [OBSIDIAN.md](OBSIDIAN.md) | Optional Obsidian setup for fans (never required). |
 | [SIGNALS.md](SIGNALS.md) | Public npm, PyPI, and GitHub metrics snapshots. |
