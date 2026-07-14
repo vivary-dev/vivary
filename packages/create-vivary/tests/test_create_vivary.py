@@ -218,8 +218,12 @@ class CreateVivaryTests(unittest.TestCase):
                 "templates/AGENTS.md",
                 ".claude/skills/strato/SKILL.md",
                 ".claude/skills/loops/SKILL.md",
+                ".claude/skills/grug/SKILL.md",
+                ".claude/skills/grug/agents/openai.yaml",
                 ".agents/skills/strato/SKILL.md",
                 ".agents/skills/loops/SKILL.md",
+                ".agents/skills/grug/SKILL.md",
+                ".agents/skills/grug/agents/openai.yaml",
                 "modules/index.md",
                 "modules/agent-workspace/index.md",
                 "changes/scaffold-init.md",
@@ -241,6 +245,20 @@ class CreateVivaryTests(unittest.TestCase):
                 target / "modules" / "codebase" / "index.md"
             ).read_text(encoding="utf-8")
             self.assertIn("Keep canonical details in the linked files", module_index)
+
+            grug = (target / ".agents" / "skills" / "grug" / "SKILL.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("Think hard. Speak small.", grug)
+            self.assertIn("compression mode, not stupid mode", grug)
+            self.assertIn("tests for vibes", grug)
+            self.assertIn("tropo find", grug)
+
+            grug_metadata = (
+                target / ".agents" / "skills" / "grug" / "agents" / "openai.yaml"
+            ).read_text(encoding="utf-8")
+            self.assertIn('display_name: "Grug"', grug_metadata)
+            self.assertIn("$grug", grug_metadata)
 
             gitignore = (target / ".gitignore").read_text(encoding="utf-8")
             self.assertIn("USER.md", gitignore)

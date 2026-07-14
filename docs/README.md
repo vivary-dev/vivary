@@ -8,7 +8,7 @@ Start here.
 | [WALKTHROUGH.md](WALKTHROUGH.md) | Public, generic proof of the product loop: scaffold, health, review, coordination, impact. |
 | [COMMANDS.md](COMMANDS.md) | Full CLI reference for `tropo` · `ozone` · `exo` · `create-vivary`. |
 | [HOWTO.md](HOWTO.md) | Task recipes: add a type, see blast radius, review, CI, multi-agent, … |
-| [SKILLS.md](SKILLS.md) | The agent skills: strato (bootstrap/heartbeat/self-improve), tropo, loops. |
+| [SKILLS.md](SKILLS.md) | The agent skills: strato (bootstrap/heartbeat/self-improve), Grug, tropo, loops. |
 | [ACTIVE-CONTEXT.md](ACTIVE-CONTEXT.md) | Optional CocoIndex-code sidecar for active semantic code context. |
 | [LLM-ACTIVE-CONTEXT.md](LLM-ACTIVE-CONTEXT.md) | Copyable LLM instructions for graph-first CocoIndex-code retrieval. |
 | [SEMANTIC-MEMORY.md](SEMANTIC-MEMORY.md) | Architecture and optional adapter plan for semantic memory providers such as Cognee. |

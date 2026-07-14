@@ -1,0 +1,4 @@
+interface:
+  display_name: "Grug"
+  short_description: "First principles with maximum context headroom"
+  default_prompt: "Use $grug to reduce this task to first principles and give me the shortest clear next move."

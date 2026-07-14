@@ -1,7 +1,8 @@
 # create-vivary
 
 Scaffold a complete Vivary agent workspace: tropo config, strato workspace files,
-runtime skills, private-memory boundaries, progressive module indexes, and a starter
+runtime skills including Grug's first-principles compression mode, private-memory
+boundaries, progressive module indexes, and a starter
 typed graph.
 
 **Current release:** 0.3.1. Use 0.3.1 for new installs; no migration is expected

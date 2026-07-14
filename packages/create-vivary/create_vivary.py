@@ -79,8 +79,10 @@ REQUIRED_WORKSPACE_FILES = (
     "modules/agent-workspace/index.md",
     "templates/AGENTS.md",
     ".claude/skills/strato/SKILL.md",
+    ".claude/skills/grug/SKILL.md",
     ".claude/skills/loops/SKILL.md",
     ".agents/skills/strato/SKILL.md",
+    ".agents/skills/grug/SKILL.md",
     ".agents/skills/loops/SKILL.md",
 )
 
@@ -762,6 +764,7 @@ def _source_paths(root: Path) -> dict[str, Path]:
         "strato": root / "packages" / "strato" / "STRATO.md",
         "strato_templates": root / "packages" / "strato" / "templates",
         "strato_skill": root / "packages" / "strato" / ".claude" / "skills" / "strato",
+        "grug_skill": root / "packages" / "strato" / ".claude" / "skills" / "grug",
         "active_context_skill": (
             root / "packages" / "strato" / ".claude" / "skills" / "active-context"
         ),
@@ -775,6 +778,7 @@ def _source_paths(root: Path) -> dict[str, Path]:
         "strato": assets / "STRATO.md",
         "strato_templates": assets / "templates",
         "strato_skill": assets / "strato-skill",
+        "grug_skill": assets / "grug-skill",
         "active_context_skill": assets / "active-context-skill",
         "claude_loops_skill": assets / "loops-skill",
         "agents_loops_skill": assets / "loops-skill",
@@ -831,6 +835,8 @@ def _copy_plan(
     copy_tree(templates, target / "templates")
     copy_tree(sources["strato_skill"], target / ".claude" / "skills" / "strato")
     copy_tree(sources["strato_skill"], target / ".agents" / "skills" / "strato")
+    copy_tree(sources["grug_skill"], target / ".claude" / "skills" / "grug")
+    copy_tree(sources["grug_skill"], target / ".agents" / "skills" / "grug")
     copy_tree(sources["claude_loops_skill"], target / ".claude" / "skills" / "loops")
     copy_tree(sources["agents_loops_skill"], target / ".agents" / "skills" / "loops")
     if active_context == "cocoindex-code":

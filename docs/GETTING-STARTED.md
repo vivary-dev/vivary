@@ -114,7 +114,7 @@ tropo.toml         the rules for the typed graph
 modules/index.md   the router that tells agents which module index to open
 modules/<id>/index.md  lightweight module routers; deep context lives behind links
 changes/ decisions/ verification/ gates/   the starter knowledge graph
-.claude/skills/  .agents/skills/   ready-made skills for Claude Code + Codex
+.claude/skills/  .agents/skills/   strato, loops, and Grug for Claude Code + Codex
 ```
 
 With `--active-context cocoindex-code`, the workspace also includes
@@ -224,7 +224,7 @@ graph is wrong. Run `tropo fix` to clear redundant frontmatter.
 - [Getting started proof](/walkthrough/) — a generic, public walkthrough of the product loop.
 - [Command reference](/commands/) — every CLI, flag, exit code, and data storage options.
 - [How-to recipes](/howto/) — review a change, multi-agent, CI, embedded storage, and more.
-- [Agent skills](/skills/) — bootstrap, heartbeat, self-improve, loops.
+- [Agent skills](/skills/) — bootstrap, heartbeat, self-improve, loops, and Grug.
 - [Active context](/active-context/) — optional CocoIndex-code sidecar for code search.
 - [LLM active-context guide](/llm-active-context/) — copyable graph-first retrieval prompt.
 - [Architecture](/architecture/) — the layer model and the reasoning behind it.

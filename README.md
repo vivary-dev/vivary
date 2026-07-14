@@ -111,7 +111,8 @@ create-vivary init . --preset coding --auto --size large --yes --json
 
 The scaffolder writes a full workspace shell: `AGENTS.md`, `STATE.md`, `SOUL.md`,
 private `USER.md`/`MEMORY.md` boundaries, private heartbeat report storage, strato
-runtime skills for Claude/Codex-style agents, a `tropo.toml`, a starter typed graph,
+runtime skills plus Grug's first-principles compression mode for Claude/Codex-style
+agents, a `tropo.toml`, a starter typed graph,
 and optional `.vivary/storage.toml` / `.vivary/memory.toml` capability config. Generated
 modules are directories with `index.md` routers (`modules/<id>/index.md`) so agents
 load the smallest useful context first. `doctor` validates the shell, active privacy

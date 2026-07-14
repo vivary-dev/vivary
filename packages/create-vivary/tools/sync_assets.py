@@ -1,9 +1,10 @@
 """Sync create-vivary's bundled scaffold assets from their canonical repo sources.
 
 create-vivary must be self-contained when pip-installed, so it ships a copy of the
-strato templates/skills and the loops skill inside the `create_vivary_assets` data
-package. Those copies are the *only* duplication in the repo; this script regenerates
-them and `tests/test_assets_parity.py` fails if they ever drift from canonical.
+strato templates/skills, the Grug skill, and the loops skill inside the
+`create_vivary_assets` data package. Those copies are the *only* duplication in the
+repo; this script regenerates them and `tests/test_assets_parity.py` fails if they ever
+drift from canonical.
 
 Run from anywhere:  python packages/create-vivary/tools/sync_assets.py
 """
@@ -21,6 +22,7 @@ SOURCES = {
     REPO_ROOT / "packages" / "strato" / "STRATO.md": "STRATO.md",
     REPO_ROOT / "packages" / "strato" / "templates": "templates",
     REPO_ROOT / "packages" / "strato" / ".claude" / "skills" / "strato": "strato-skill",
+    REPO_ROOT / "packages" / "strato" / ".claude" / "skills" / "grug": "grug-skill",
     REPO_ROOT
     / "packages"
     / "strato"

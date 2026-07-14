@@ -47,6 +47,12 @@ def test_package_data_includes_template_gitignore():
     assert "templates/.gitignore" in package_data
 
 
+def test_package_data_includes_grug_metadata():
+    pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
+    package_data = pyproject["tool"]["setuptools"]["package-data"]["create_vivary_assets"]
+    assert "grug-skill/agents/openai.yaml" in package_data
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

@@ -125,5 +125,6 @@ lives in the loops skill (`.claude/skills/loops/`) — recommend, don't default.
 ## Files
 
 `README.md` (human front door) · `STRATO.md` (this model) · `templates/` (WS starters)
-· `.claude/skills/strato/` (the executable bootstrap/heartbeat/self-improve). Anything
-else folds into this model unless it earns its own load cost.
+· `.claude/skills/strato/` (the executable bootstrap/heartbeat/self-improve) ·
+`.claude/skills/grug/` (opt-in first-principles compression). Anything else folds into
+this model unless it earns its own load cost.

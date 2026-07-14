@@ -182,6 +182,8 @@ class StratoSurfaceCompletenessTests(unittest.TestCase):
     CANONICAL_DIRS = (
         ".claude/skills/strato",
         ".agents/skills/strato",
+        ".claude/skills/grug",
+        ".agents/skills/grug",
     )
 
     def test_canonical_strato_surface_exists_per_preset(self):

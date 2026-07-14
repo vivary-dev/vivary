@@ -27,6 +27,7 @@ copies.
 | [`STRATO.md`](STRATO.md) | The compressed model — the always-on agent OS (read this) |
 | [`templates/`](templates/) | A workspace's starters: `AGENTS.md`, `SOUL.md`, `USER`/`MEMORY`/`STATE` templates, `bug-risk-playbook.md` |
 | [`.claude/skills/strato/`](.claude/skills/strato/) | The executable: `bootstrap` / `heartbeat` / `self-improve` modes |
+| [`.claude/skills/grug/`](.claude/skills/grug/) | First-principles compression mode: think hard, speak small, preserve headroom |
 | [`.claude/skills/active-context/`](.claude/skills/active-context/) | Optional CocoIndex-code sidecar decision/retrieval policy |
 
 ## How it's used

@@ -13,6 +13,28 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: Grug workspace skill] — 2026-07-13
+
+Affects `create-vivary`, bundled Strato skills, scaffolded workspaces, package docs,
+and generated website docs. This is not published yet.
+
+### Added
+
+- Added the opt-in **Grug** skill to every preset for first-principles reasoning,
+  short caveman-style communication, and maximum context-window headroom.
+- Kept Grug precise: exact technical identifiers, uncertainty, privacy, human gates,
+  and verification always outrank the voice.
+- Scaffolded the same canonical skill into `.claude/skills/grug` and
+  `.agents/skills/grug`, including Codex UI metadata.
+
+### Verification
+
+- `python packages/create-vivary/tests/test_create_vivary.py`
+- `python packages/create-vivary/tests/test_strato_integrity.py`
+- `python packages/create-vivary/tests/test_assets_parity.py`
+- `cd site && npm run sync-docs && npm run build`
+- `git diff --check`
+
 ## [Unreleased: proof-first harness strategy] — 2026-07-13
 
 Affects public product strategy, roadmap status, and generated website docs only. No

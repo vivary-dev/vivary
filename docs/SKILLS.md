@@ -3,8 +3,8 @@
 Vivary ships **agent skills**: load-on-demand procedures that tell an agent *how* to
 operate the workspace. They live next to the workspace (`.claude/skills/` for Claude
 Code, `.agents/skills/` for Codex) and load only when relevant, so they cost nothing
-until needed (the minimalism law). A generated workspace includes the **strato** and
-**loops** skills; the **tropo** skill ships with the tropo package. Coding workspaces
+until needed (the minimalism law). A generated workspace includes the **strato**,
+**loops**, and **Grug** skills; the **tropo** skill ships with the tropo package. Coding workspaces
 created with `--active-context cocoindex-code` also include the optional
 **active-context** skill.
 
@@ -51,6 +51,26 @@ the workspace", "tend the workspace", "this happened again", "strato".
 **Gates (never batched):** never delete/move a file without per-item confirmation; never
 modify SOUL/USER/AGENTS after bootstrap or change an existing skill without approval;
 never publish/push/send externally without explicit approval.
+
+---
+
+## Grug — first principles, tiny words
+
+**What it's for:** preserving context-window headroom while keeping the reasoning
+smart. Grug reduces a task to goal, truth, constraint, smallest change, proof, and one
+next move. It uses short concrete sentences and light caveman grammar without changing
+technical identifiers or dropping uncertainty, tests, privacy, or human gates.
+
+Default loop: **Want → Know → Need → Do → Prove → Next.** Start with the owning file,
+module router, or `tropo find`; never bulk-read the workspace for the bit. Prefer one
+small verified slice over a giant plan.
+
+**Triggers:** "Grug", "Grug mode", "caveman", "keep it simple", "first principles",
+"preserve headroom", "stop overthinking", or a request for an unusually terse plan,
+explanation, implementation slice, review, or status update.
+
+Grug is compression mode, not stupid mode. For high-stakes technical details or
+polished external writing, clarity and the requested artifact voice win over the bit.
 
 ---
 
