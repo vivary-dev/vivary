@@ -4,8 +4,7 @@ description: "Agents burn their context finding things. tropo map gives an agent
 date: 2026-07-08
 author: "Jeff Kazzee"
 tags: ["tropo", "context", "guide"]
-draft: true
----
+draft: false---
 
 Drop an agent into an unfamiliar repo and watch what it does first. It lists a
 directory. It opens a file. It greps for something. It opens three more files
