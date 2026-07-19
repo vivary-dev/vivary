@@ -1,6 +1,7 @@
 ---
 title: "Architecture"
 description: "The four-layer model and the principles behind Vivary."
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/ARCHITECTURE.md"
 ---
 
 This page explains how Vivary is put together and why. It's the deep version; for the

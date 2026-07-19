@@ -10,7 +10,8 @@ export default defineConfig({
 			title: 'Vivary',
 			description:
 				'Typed memory and gates for AI-agent projects. Scaffold a workspace your agent can navigate, verify, and trust: typed project memory, visible state, reusable skills, private boundaries, and gates. Plain Markdown. Any editor. Any agent.',
-			logo: { src: './src/assets/vivary.svg', alt: 'Vivary' },
+			logo: { src: './src/assets/vivary-mark.png', alt: 'Vivary' },
+			favicon: '/favicon.png',
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/vivary-dev/vivary' },
 			],
@@ -26,6 +27,8 @@ export default defineConfig({
 						{ label: 'What is Vivary?', slug: 'concepts' },
 						{ label: 'Getting started', slug: 'getting-started' },
 						{ label: 'Getting started proof', slug: 'walkthrough' },
+						{ label: 'White paper', slug: 'white-paper' },
+						{ label: 'Roadmap', link: '/roadmap/' },
 						{ label: 'Blog', link: '/blog/' },
 					],
 				},
@@ -36,7 +39,6 @@ export default defineConfig({
 						{ label: 'Agent skills', slug: 'skills' },
 						{ label: 'Active context', slug: 'active-context' },
 						{ label: 'LLM active-context guide', slug: 'llm-active-context' },
-						{ label: 'Product roadmap', slug: 'product-roadmap' },
 						{ label: 'Public signals', slug: 'signals' },
 					],
 				},
@@ -45,7 +47,6 @@ export default defineConfig({
 					items: [
 						{ label: 'Command reference', slug: 'commands' },
 						{ label: 'Architecture', slug: 'architecture' },
-						{ label: 'FAQ', slug: 'faq' },
 						{ label: 'Obsidian (optional)', slug: 'obsidian' },
 						{ label: 'Changelog', slug: 'changelog' },
 					],

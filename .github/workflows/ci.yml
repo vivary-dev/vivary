@@ -134,9 +134,12 @@ jobs:
       - name: install
         run: npm ci
         working-directory: site
-      - name: site support modal test
-        run: npm run test:support
+      - name: site behavior and information architecture tests
+        run: npm run test:site
         working-directory: site
       - name: build (re-syncs docs, then astro build)
         run: npm run build
+        working-directory: site
+      - name: check built links and anchors
+        run: npm run test:links
         working-directory: site

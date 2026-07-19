@@ -1,5 +1,4 @@
-/* Vivary docs theme — matched to the landing page: self-hosted fonts, Bricolage
-   display headings, accent greens/teals, a deep-space dark surface. */
+/* Vivary docs theme — the same living-strata identity as the product homepage. */
 
 @font-face {
 	font-family: 'Bricolage Grotesque';
@@ -7,15 +6,17 @@
 	font-display: swap;
 	src: url('/fonts/bricolage-grotesque-latin.woff2') format('woff2');
 }
+
 @font-face {
 	font-family: 'Hanken Grotesk';
-	font-weight: 400 600;
+	font-weight: 400 700;
 	font-display: swap;
 	src: url('/fonts/hanken-grotesk-latin.woff2') format('woff2');
 }
+
 @font-face {
 	font-family: 'JetBrains Mono';
-	font-weight: 400 500;
+	font-weight: 400 600;
 	font-display: swap;
 	src: url('/fonts/jetbrains-mono-latin.woff2') format('woff2');
 }
@@ -23,105 +24,119 @@
 :root {
 	--sl-font: 'Hanken Grotesk', system-ui, sans-serif;
 	--sl-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+	--sl-text-h1: clamp(2.5rem, 1.5rem + 3vw, 4.2rem);
+	--sl-text-h2: clamp(1.7rem, 1.2rem + 1.5vw, 2.55rem);
+	--sl-text-h3: clamp(1.25rem, 1.05rem + 0.75vw, 1.65rem);
 
-	/* Louder display scale for headings */
-	--sl-text-h1: clamp(2.3rem, 1.4rem + 3vw, 3.4rem);
-	--sl-text-h2: clamp(1.6rem, 1.2rem + 1.6vw, 2.2rem);
-	--sl-text-h3: clamp(1.25rem, 1.05rem + 0.9vw, 1.6rem);
-
-	/* Accent — atmosphere greens. Overrides Starlight's accent. */
-	--sl-color-accent-low: #102b22;
-	--sl-color-accent: #1f9d72;
-	--sl-color-accent-high: #9fe7c9;
-	--sl-color-white: #f4f8f6;
-	--sl-color-gray-1: #e3ece8;
-	--sl-color-gray-2: #b6c4be;
-	--sl-color-gray-3: #7c8d86;
-	--sl-color-gray-4: #475852;
-	--sl-color-gray-5: #2a3a34;
-	--sl-color-gray-6: #1a2622;
-	--sl-color-black: #131c19;
+	--sl-color-accent-low: #0d3028;
+	--sl-color-accent: #49e1b1;
+	--sl-color-accent-high: #b8f7d8;
+	--sl-color-white: #f1f7f3;
+	--sl-color-gray-1: #d7e4df;
+	--sl-color-gray-2: #a9bbb5;
+	--sl-color-gray-3: #738981;
+	--sl-color-gray-4: #455e55;
+	--sl-color-gray-5: #263e35;
+	--sl-color-gray-6: #13291f;
+	--sl-color-black: #020916;
 }
 
-/* Dark (default): deep-space surface to match the landing gradient. */
 :root[data-theme='dark'] {
-	--sl-color-bg: oklch(0.15 0.045 262);
-	--sl-color-bg-nav: oklch(0.15 0.045 262 / 0.82);
-	--sl-color-bg-sidebar: oklch(0.135 0.043 268);
+	--sl-color-bg: #020916;
+	--sl-color-bg-nav: #020916;
+	--sl-color-bg-sidebar: #04111b;
 	--sl-color-text-accent: var(--sl-color-accent-high);
-	--sl-color-hairline-shade: oklch(0.7 0.04 185 / 0.14);
+	--sl-color-hairline-shade: rgba(176, 229, 207, 0.16);
 }
 
 :root[data-theme='light'] {
-	--sl-color-accent-low: #c8efdd;
-	--sl-color-accent: #16805d;
-	--sl-color-accent-high: #0c3a2a;
-	--sl-color-white: #131c19;
-	--sl-color-gray-1: #1f2a26;
-	--sl-color-gray-2: #38453f;
-	--sl-color-gray-3: #5c6b64;
-	--sl-color-gray-4: #8b9a93;
-	--sl-color-gray-5: #c2cec9;
-	--sl-color-gray-6: #eef3f1;
-	--sl-color-gray-7: #f6faf8;
+	--sl-color-accent-low: #c9f3df;
+	--sl-color-accent: #137a59;
+	--sl-color-accent-high: #083929;
+	--sl-color-white: #07120e;
+	--sl-color-gray-1: #14251e;
+	--sl-color-gray-2: #30453d;
+	--sl-color-gray-3: #5d7169;
+	--sl-color-gray-4: #8fa098;
+	--sl-color-gray-5: #c4d0cb;
+	--sl-color-gray-6: #edf4f1;
+	--sl-color-gray-7: #f7faf8;
 	--sl-color-black: #ffffff;
-	--sl-color-bg: #f6faf8;
+	--sl-color-bg: #f7faf8;
 }
 
-/* A faint accent glow in the top corner — atmosphere, kept subtle for legibility. */
-:root[data-theme='dark'] body::before {
-	content: '';
-	position: fixed;
-	inset: 0;
-	z-index: 0;
-	pointer-events: none;
-	background:
-		radial-gradient(50% 32% at 84% -4%, oklch(0.84 0.16 168 / 0.08), transparent 70%),
-		radial-gradient(44% 30% at 8% 4%, oklch(0.7 0.14 250 / 0.06), transparent 72%);
-}
-
-/* Display headings: Bricolage, tighter tracking, a louder page title. */
 .sl-markdown-content :is(h1, h2, h3, h4),
 .site-title,
 h1#_top,
 .content-panel h1 {
 	font-family: 'Bricolage Grotesque', var(--sl-font);
-	letter-spacing: -0.022em;
+	letter-spacing: -0.035em;
+	text-wrap: balance;
 }
+
 .sl-markdown-content h1,
 .content-panel h1 {
-	font-weight: 800;
-	line-height: 1.02;
+	font-weight: 780;
+	line-height: 0.98;
 }
+
 .sl-markdown-content h2 {
-	font-weight: 700;
-	margin-top: 2.2rem;
+	margin-top: 2.7rem;
+	font-weight: 720;
 }
+
 .site-title {
-	font-weight: 700;
 	font-size: 1.35rem;
+	font-weight: 740;
 }
 
-/* Accent-tint the current sidebar item and inline links a touch louder. */
+.site-title img {
+	width: 2rem;
+	height: 2rem;
+	object-fit: contain;
+}
+
+.sl-markdown-content {
+	font-size: 1rem;
+	line-height: 1.7;
+}
+
+.sl-markdown-content p,
+.sl-markdown-content li {
+	max-width: 72ch;
+}
+
 .sl-markdown-content a {
-	text-underline-offset: 0.18em;
+	text-decoration-thickness: 0.08em;
+	text-underline-offset: 0.2em;
 }
 
-/* Code blocks that scroll sideways (narrow viewports): keep the OS scrollbar
-   off the last line of code and theme it instead of inheriting the platform
-   accent color. */
-.expressive-code pre {
-	scrollbar-width: thin;
-	scrollbar-color: oklch(0.55 0.06 168 / 0.55) transparent;
-	padding-bottom: 0.6rem;
+.sl-markdown-content blockquote {
+	border-inline-start-color: var(--sl-color-accent);
+	background: rgba(73, 225, 177, 0.045);
 }
+
+.expressive-code pre {
+	padding-bottom: 0.65rem;
+	scrollbar-color: rgba(73, 225, 177, 0.5) transparent;
+	scrollbar-width: thin;
+}
+
 .expressive-code pre::-webkit-scrollbar {
 	height: 8px;
 }
+
 .expressive-code pre::-webkit-scrollbar-track {
 	background: transparent;
 }
+
 .expressive-code pre::-webkit-scrollbar-thumb {
-	background: oklch(0.55 0.06 168 / 0.55);
 	border-radius: 999px;
+	background: rgba(73, 225, 177, 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	* {
+		scroll-behavior: auto !important;
+	}
 }

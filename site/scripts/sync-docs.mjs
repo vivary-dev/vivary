@@ -29,35 +29,43 @@ const pages = [
   ['ACTIVE-CONTEXT', 'active-context', 'Active context', 'Optional CocoIndex-code sidecar guidance for semantic code retrieval.'],
   ['LLM-ACTIVE-CONTEXT', 'llm-active-context', 'LLM active-context guide', 'Copyable agent instructions for graph-first CocoIndex-code retrieval.'],
   ['SEMANTIC-MEMORY', 'semantic-memory', 'Optional semantic memory', 'Architecture and adapter plan for optional semantic memory providers such as Cognee.'],
-  ['PRODUCT-ROADMAP', 'product-roadmap', 'Product roadmap', 'High-leverage product backlog for context compression, maps, recall, and optional integrations.'],
+  ['WHITE-PAPER', 'white-paper', 'White paper', 'The technical case for a minimal, portable standard for agent-native workspaces.'],
   ['HOWTO', 'howto', 'How-to recipes', 'Task recipes: add a type, see blast radius, review, CI, multi-agent.'],
   ['SIGNALS', 'signals', 'Public signals', 'Public npm, PyPI, and GitHub metrics snapshots.'],
   ['RELEASE-WORKFLOW', 'release-workflow', 'Release workflow', 'End-of-update checklist for Vivary release truth, docs, publishing, and post copy.'],
-  ['FAQ', 'faq', 'FAQ', 'Common questions about Vivary.'],
   ['ARCHITECTURE', 'architecture', 'Architecture', 'The four-layer model and the principles behind Vivary.'],
   ['OBSIDIAN', 'obsidian', 'Obsidian (optional)', 'Optional Obsidian setup for fans, never required.'],
 ];
+
+const retiredGeneratedSlugs = ['brand', 'content-roadmap', 'faq', 'product-roadmap'];
 
 // rewrite relative repo-doc links to site routes; off-site files to GitHub blobs
 const rewrite = (s) =>
   s.replaceAll('](CONCEPTS.md)', '](/concepts/)')
    .replaceAll('](GETTING-STARTED.md)', '](/getting-started/)')
    .replaceAll('](WALKTHROUGH.md)', '](/walkthrough/)')
+   .replaceAll('](COMMANDS.md#', '](/commands/#')
    .replaceAll('](COMMANDS.md)', '](/commands/)')
    .replaceAll('](SKILLS.md)', '](/skills/)')
    .replaceAll('](ACTIVE-CONTEXT.md)', '](/active-context/)')
    .replaceAll('](LLM-ACTIVE-CONTEXT.md)', '](/llm-active-context/)')
    .replaceAll('](SEMANTIC-MEMORY.md)', '](/semantic-memory/)')
-   .replaceAll('](PRODUCT-ROADMAP.md)', '](/product-roadmap/)')
+   .replaceAll('](WHITE-PAPER.md)', '](/white-paper/)')
+   .replaceAll('](PRODUCT-ROADMAP.md)', '](/roadmap/)')
+   .replaceAll('](CONTENT-ROADMAP.md)', `](${GH}/docs/CONTENT-ROADMAP.md)`)
    .replaceAll('](HOWTO.md)', '](/howto/)')
    .replaceAll('](SIGNALS.md)', '](/signals/)')
    .replaceAll('](RELEASE-WORKFLOW.md)', '](/release-workflow/)')
-   .replaceAll('](FAQ.md)', '](/faq/)')
+   .replaceAll('](FAQ.md)', '](/#faq)')
    .replaceAll('](ARCHITECTURE.md)', '](/architecture/)')
    .replaceAll('](OBSIDIAN.md)', '](/obsidian/)')
+   .replaceAll('](../CHANGELOG.md)', '](/changelog/)')
    .replaceAll('](README.md)', '](/)')
    .replaceAll('](assets/walkthrough/', '](/assets/walkthrough/')
    .replaceAll('](../stats/usage-snapshot.svg)', '](/usage-snapshot.svg)')
+   .replaceAll('](../stats/latest.json)', `](${GH}/stats/latest.json)`)
+   .replaceAll('](../stats/history.csv)', `](${GH}/stats/history.csv)`)
+   .replaceAll('](SPEC-data-layer.md)', `](${GH}/docs/SPEC-data-layer.md)`)
    .replaceAll('](../packages/tropo/SPEC.md)', `](${GH}/packages/tropo/SPEC.md)`)
    .replaceAll('](../HANDOFF.md)', `](${GH}/HANDOFF.md)`);
 
@@ -152,20 +160,28 @@ const copyRegularTree = (src, dest, label) => {
 // Render a canonical Markdown doc into a Starlight content page: drop the leading H1
 // (Starlight renders the frontmatter title), rewrite links, prepend frontmatter.
 // JSON.stringify gives a valid double-quoted YAML scalar (handles ':' etc.)
-const render = (raw, title, desc) => {
+const render = (raw, title, desc, editUrl) => {
   const lines = raw.split('\n');
   if (lines[0]?.startsWith('# ')) lines.shift();
   const body = rewrite(lines.join('\n')).replace(/^[\r\n]+/, '');
-  return `---\ntitle: ${JSON.stringify(title)}\ndescription: ${JSON.stringify(desc)}\n---\n\n${body}`;
+  return `---\ntitle: ${JSON.stringify(title)}\ndescription: ${JSON.stringify(desc)}\neditUrl: ${JSON.stringify(editUrl)}\n---\n\n${body}`;
 };
 
 assertRegularDirectory(docsDir, 'docs/');
 copyRegularTree(docsWalkthroughAssetsDir, publicWalkthroughAssetsDir, 'docs/assets/walkthrough');
 
 fs.mkdirSync(outDir, { recursive: true });
+for (const slug of retiredGeneratedSlugs) {
+  const stale = path.join(outDir, `${slug}.md`);
+  if (fs.existsSync(stale)) {
+    fs.rmSync(stale);
+    console.log(`  removed retired generated route ${slug}.md`);
+  }
+}
 for (const [src, slug, title, desc] of pages) {
   const raw = readCanonicalMarkdown(docsDir, `${src}.md`, `docs/${src}.md`);
-  fs.writeFileSync(path.join(outDir, `${slug}.md`), render(raw, title, desc));
+  const editUrl = `https://github.com/vivary-dev/vivary/edit/dev/docs/${src}.md`;
+  fs.writeFileSync(path.join(outDir, `${slug}.md`), render(raw, title, desc, editUrl));
   console.log(`  synced docs/${src}.md -> ${slug}.md`);
 }
 
@@ -174,7 +190,12 @@ for (const [src, slug, title, desc] of pages) {
 const changelog = readCanonicalMarkdown(repoRoot, 'CHANGELOG.md', 'CHANGELOG.md');
 fs.writeFileSync(
   path.join(outDir, 'changelog.md'),
-  render(changelog, 'Changelog', 'Release history for the Vivary packages.'),
+  render(
+    changelog,
+    'Changelog',
+    'Release history for the Vivary packages.',
+    'https://github.com/vivary-dev/vivary/edit/dev/CHANGELOG.md',
+  ),
 );
 console.log('  synced CHANGELOG.md -> changelog.md');
 
@@ -206,7 +227,10 @@ const cogneeVersion = readPythonVersion('memory-cognee');
 
 const coreDocsList = pages
   .map(([_, slug, title]) => `- ${title}: https://vivary.vercel.app/${slug}/`)
-  .join('\n') + '\n- Changelog: https://vivary.vercel.app/changelog/';
+  .join('\n') +
+  '\n- Product roadmap: https://vivary.vercel.app/roadmap/' +
+  '\n- FAQ: https://vivary.vercel.app/#faq' +
+  '\n- Changelog: https://vivary.vercel.app/changelog/';
 
 const llmsText = `# Vivary
 

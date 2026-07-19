@@ -10,6 +10,8 @@
     "prebuild": "node scripts/sync-docs.mjs",
     "build": "astro build",
     "test:support": "node tests/support-modal.test.mjs",
+    "test:site": "node --test tests/*.test.mjs",
+    "test:links": "node scripts/check-built-links.mjs",
     "preview": "astro preview",
     "astro": "astro"
   },

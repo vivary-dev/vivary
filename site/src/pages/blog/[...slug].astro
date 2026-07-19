@@ -21,7 +21,7 @@ const fmt = (d) => d.toLocaleDateString('en-US', { year: 'numeric', month: 'long
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{post.data.title} — Vivary</title>
   <meta name="description" content={post.data.description} />
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="/favicon.png" type="image/png" />
   <link rel="preload" href="/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="preload" href="/fonts/hanken-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="preload" href="/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin />
@@ -32,14 +32,7 @@ const fmt = (d) => d.toLocaleDateString('en-US', { year: 'numeric', month: 'long
 
   <header class="nav">
     <a class="brand" href="/">
-      <svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-        <rect width="32" height="32" rx="8" fill="url(#g)" />
-        <path d="M6 22.5c3-2 7-2 10 0s7 2 10 0" stroke="#fff" stroke-width="1.6" stroke-linecap="round" opacity=".55" />
-        <path d="M6 17c3-2 7-2 10 0s7 2 10 0" stroke="#fff" stroke-width="1.7" stroke-linecap="round" opacity=".78" />
-        <path d="M6 11.5c3-2 7-2 10 0s7 2 10 0" stroke="#fff" stroke-width="1.8" stroke-linecap="round" />
-        <circle cx="16" cy="8.5" r="1.7" fill="#fff" />
-        <defs><linearGradient id="g" x1="0" y1="0" x2="32" y2="32"><stop stop-color="#1f9d72" /><stop offset="1" stop-color="#1b6fa8" /></linearGradient></defs>
-      </svg>
+      <img src="/media/vivary-mark.png" alt="" width="26" height="26" />
       <span>Vivary</span>
     </a>
     <nav>
@@ -110,6 +103,7 @@ const fmt = (d) => d.toLocaleDateString('en-US', { year: 'numeric', month: 'long
 
     .nav { display: flex; align-items: center; justify-content: space-between; max-width: 1100px; margin: 0 auto; padding: 22px clamp(20px,5vw,44px); }
     .brand { display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-weight: 700; font-size: 19px; }
+    .brand img { object-fit: contain; }
     .nav nav { display: flex; gap: clamp(14px,2.6vw,28px); align-items: center; font-size: 15px; color: var(--muted); }
     .nav nav a:hover { color: var(--ink); }
     .nav .pill { color: var(--ink); border: 1px solid var(--line-strong); border-radius: 999px; padding: 8px 16px; }
