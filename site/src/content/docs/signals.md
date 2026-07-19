@@ -1,6 +1,7 @@
 ---
 title: "Public signals"
 description: "Public npm, PyPI, and GitHub metrics snapshots."
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/SIGNALS.md"
 ---
 
 Vivary tracks a small public metrics snapshot so the README and site can show real
@@ -14,8 +15,8 @@ distribution signals without a private analytics dashboard.
 | PyPI weekly downloads | `https://pypistats.org/api/packages/<package>/recent` | Public recent downloads for `create-vivary`, `vivary-tropo`, `vivary-ozone`, and `vivary-exo`. PyPI stats can lag, rate-limit, and filter mirrors/bots. |
 | GitHub repo signals | `https://api.github.com/repos/vivary-dev/vivary` | Public repository stars, forks, issues, and pushed time. |
 
-The latest checked-in values live in [`stats/latest.json`](../stats/latest.json). The
-history lives in [`stats/history.csv`](../stats/history.csv).
+The latest checked-in values live in [`stats/latest.json`](https://github.com/vivary-dev/vivary/blob/dev/stats/latest.json). The
+history lives in [`stats/history.csv`](https://github.com/vivary-dev/vivary/blob/dev/stats/history.csv).
 
 ![Vivary public usage snapshot](/usage-snapshot.svg)
 

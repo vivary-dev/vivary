@@ -31,9 +31,10 @@ Then set the production domain. To enable the sitemap/canonical URLs, set
 ```
 src/
   content/docs/      generated docs routes; edit ../docs/ and run sync-docs
-  assets/vivary.svg  logo
+  assets/vivary-mark.png  docs-site logo
   styles/theme.css   brand colours (atmosphere greens/teals)
 public/
+  media/             product mark and living-strata illustrations used by the site
   llms.txt           LLM/crawler summary of current package and docs truth
   robots.txt         crawler policy and sitemap pointer
 astro.config.mjs     title, sidebar, social, theme
@@ -42,3 +43,8 @@ astro.config.mjs     title, sidebar, social, theme
 Docs routes are generated from `../docs/`; edit canonical docs and run
 `npm run sync-docs`. The landing page and blog posts are edited directly under
 `src/pages/` and `src/content/blog/`.
+
+The homepage FAQ and first-class roadmap page are marketing-site surfaces under
+`src/pages/`; they are intentionally not generated Starlight documentation. The
+canonical product and content roadmaps remain repo documents under `../docs/`, while
+only the product roadmap is summarized publicly at `/roadmap/`.

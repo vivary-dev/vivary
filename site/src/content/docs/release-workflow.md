@@ -1,6 +1,7 @@
 ---
 title: "Release workflow"
 description: "End-of-update checklist for Vivary release truth, docs, publishing, and post copy."
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/RELEASE-WORKFLOW.md"
 ---
 
 Use this at the end of every Vivary update that changes behavior, packaging,
@@ -52,7 +53,7 @@ Update every surface that names versions or the command set, in the repo,
   "Publishing remains a manual human gate." After publishing, change that same
   entry to "Published and verified" with exact versions;
 - package `README.md`s whose status lines name versions;
-- `docs/COMMANDS.md` for CLI changes; `docs/FAQ.md` / `docs/PORTFOLIO.md` if
+- `docs/COMMANDS.md` for CLI changes; the homepage FAQ / `docs/PORTFOLIO.md` if
   they name versions or surfaces (grep for the old version string);
 - `site/src/pages/index.astro` if the homepage names versions, commands, or
   package surfaces — `grep -nE "0\.[0-9]+\.[0-9]+|tropo |create-vivary" site/src/pages/index.astro`

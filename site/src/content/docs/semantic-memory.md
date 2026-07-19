@@ -1,6 +1,7 @@
 ---
 title: "Optional semantic memory"
 description: "Architecture and adapter plan for optional semantic memory providers such as Cognee."
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/SEMANTIC-MEMORY.md"
 ---
 
 Status: architecture note plus first optional Cognee adapter slice
@@ -437,7 +438,7 @@ Conflict rules:
 Files touched by the setup slice and likely files for the Cognee adapter PR:
 
 - `docs/SEMANTIC-MEMORY.md` - this architecture and setup note.
-- `docs/COMMANDS.md`, `docs/GETTING-STARTED.md`, `docs/HOWTO.md`, `docs/FAQ.md` -
+- `docs/COMMANDS.md`, `docs/GETTING-STARTED.md`, `docs/HOWTO.md`, and the homepage FAQ -
   user-facing setup and command docs.
 - `docs/ARCHITECTURE.md` and `docs/SPEC-data-layer.md` - boundary updates.
 - `site/scripts/sync-docs.mjs` and generated `site/src/content/docs/*` - website docs.

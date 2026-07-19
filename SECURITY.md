@@ -7,10 +7,12 @@ target the current public release line:
 
 | Package | Supported line |
 |---|---|
-| `create-vivary` / `@vivary/create` | `0.2.x` |
-| `vivary-tropo` | `0.2.x` |
-| `vivary-ozone` | `0.1.x` |
+| `vivary` | `0.1.x` |
+| `create-vivary` / `@vivary/create` | `0.3.x` |
+| `vivary-tropo` | `0.4.x` |
+| `vivary-ozone` | `0.2.x` |
 | `vivary-exo` | `0.2.x` |
+| `vivary-memory-cognee` | `0.1.x` |
 
 Older versions may receive a note in the changelog, but fixes are expected to land in
 the current line.

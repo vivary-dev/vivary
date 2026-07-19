@@ -587,4 +587,5 @@ small surface before deeper context:
 ---
 
 See [GETTING-STARTED.md](GETTING-STARTED.md) for a first run, [HOWTO.md](HOWTO.md) for
-task recipes, [SKILLS.md](SKILLS.md) for the agent skills, and [FAQ.md](FAQ.md).
+task recipes, [SKILLS.md](SKILLS.md) for the agent skills, and the
+[homepage FAQ](https://vivary.vercel.app/#faq).

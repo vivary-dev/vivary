@@ -1,0 +1,750 @@
+---
+const repo = 'https://github.com/vivary-dev/vivary';
+const canonicalRoadmap = `${repo}/blob/dev/docs/PRODUCT-ROADMAP.md`;
+
+const loops = [
+  ['Comprehension', 'Understand the system and run something useful.'],
+  ['Adoption', 'Feel value on the project you already have.'],
+  ['Retention', 'Return because the workspace gets healthier.'],
+  ['Evidence', 'Inspect and reproduce the claims.'],
+];
+
+const now = [
+  {
+    number: '01',
+    title: 'Publish the benchmark',
+    body: 'Measure tokens, turns, files opened, wrong files opened, and answer quality on a fixed public repository.',
+    proof: 'Methodology, raw results, charts, and known limitations.',
+  },
+  {
+    number: '02',
+    title: 'Make brownfield adoption the default',
+    body: 'Tighten the read-first path from map to dry-run adoption to a clean doctor result on real projects.',
+    proof: 'Code, docs, and private-vault fixtures across Windows and Unix paths.',
+  },
+  {
+    number: '03',
+    title: 'Turn doctor into the return loop',
+    body: 'Show what drifted, what it costs, and which reviewable repair has the highest expected value.',
+    proof: 'Repeat runs and repaired drift—not install counts.',
+  },
+  {
+    number: '04',
+    title: 'Publish one honest case study',
+    body: 'Show the exact starting mess, approved writes, before-and-after map, friction, and follow-up issues.',
+    proof: 'A real project that was not arranged to flatter Vivary.',
+  },
+];
+
+const next = [
+  ['Context-budget repair proposals', 'Turn Ozone findings into safe, report-first actions.'],
+  ['Module index planner', 'Propose useful routers without reorganizing the project.'],
+  ['Privacy-safe proof packets', 'Leave a compact artifact another human or agent can inspect.'],
+  ['Starter workflows', 'Ship a few verified recurring loops instead of a pile of presets.'],
+];
+
+const later = [
+  ['Read-only vivary-mcp', 'Expose find, query, and check on the rails agents already use.'],
+  ['Typed recall providers', 'Improve optional semantic recall without creating a second truth store.'],
+  ['Integration proof matrix', 'Make install, network, storage, approval, and removal boundaries explicit.'],
+];
+
+const deferred = [
+  'hosted control plane',
+  'default cloud sync',
+  'write-capable MCP',
+  'ambient semantic indexing',
+  'autonomous workspace reorganization',
+  'team telemetry',
+  'visual graph editor',
+  'plugin marketplace',
+];
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vivary roadmap — prove the loop before expanding the surface</title>
+    <meta
+      name="description"
+      content="Vivary's public product roadmap: the evidence, adoption, retention, and integration work that matters next."
+    />
+    <meta property="og:title" content="Vivary product roadmap" />
+    <meta
+      property="og:description"
+      content="Prove comprehension, brownfield adoption, retention, and evidence before expanding the surface."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://vivary.vercel.app/roadmap/" />
+    <meta property="og:site_name" content="Vivary" />
+    <meta property="og:image" content="https://vivary.vercel.app/media/hero-living-strata.webp" />
+    <meta
+      property="og:image:alt"
+      content="A living world in luminous layers, with typed roots leading toward a protected gate."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Vivary product roadmap" />
+    <meta
+      name="twitter:description"
+      content="Prove the loop before expanding the product surface."
+    />
+    <meta name="twitter:image" content="https://vivary.vercel.app/media/hero-living-strata.webp" />
+    <link rel="canonical" href="https://vivary.vercel.app/roadmap/" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="preload" href="/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/hanken-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Vivary home">
+        <img src="/media/vivary-mark.png" alt="" width="40" height="40" />
+        <span>Vivary</span>
+      </a>
+      <nav class="desktop-nav" aria-label="Primary navigation">
+        <a href="/getting-started/">Docs</a>
+        <a href="/white-paper/">White paper</a>
+        <a href="/roadmap/" aria-current="page">Roadmap</a>
+        <a href="/#faq">FAQ</a>
+        <a href={repo}>GitHub</a>
+        <a class="nav-cta" href="/getting-started/">Get started</a>
+      </nav>
+      <details class="mobile-nav">
+        <summary>Menu</summary>
+        <nav aria-label="Mobile navigation">
+          <a href="/getting-started/">Docs</a>
+          <a href="/white-paper/">White paper</a>
+          <a href="/roadmap/" aria-current="page">Roadmap</a>
+          <a href="/#faq">FAQ</a>
+          <a href={repo}>GitHub</a>
+        </nav>
+      </details>
+    </header>
+
+    <main id="main">
+      <section class="roadmap-hero">
+        <p class="eyebrow">Public product roadmap · July 2026</p>
+        <h1>Prove the loop before expanding the surface.</h1>
+        <p class="lede">
+          This is an outcome map, not a feature warehouse. Vivary wins when an agent
+          finds project truth with less context, acts with a visible blast radius,
+          and stops at the right human gates.
+        </p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="#now">See what is now</a>
+          <a class="button" href={canonicalRoadmap}>Read the canonical repo document</a>
+        </div>
+      </section>
+
+      <section class="loops band" aria-labelledby="loops-title">
+        <div class="section-heading">
+          <p class="eyebrow">What progress means</p>
+          <h2 id="loops-title">Four loops. Every item must strengthen one.</h2>
+        </div>
+        <ol class="loop-grid">
+          {loops.map(([title, body], index) => (
+            <li>
+              <span>0{index + 1}</span>
+              <h3>{title}</h3>
+              <p>{body}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section class="phase band" id="now" aria-labelledby="now-title">
+        <div class="phase-heading">
+          <p class="eyebrow">Now · prove the adoption line</p>
+          <h2 id="now-title">Make the value visible on real work.</h2>
+          <p>
+            The architecture exists. The current bottleneck is whether a new person
+            can understand it, use it on an existing project, return, and verify the
+            claim.
+          </p>
+        </div>
+        <ol class="now-grid">
+          {now.map((item) => (
+            <li>
+              <span>{item.number}</span>
+              <h3>{item.title}</h3>
+              <p>{item.body}</p>
+              <strong>Proof</strong>
+              <p>{item.proof}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section class="phase band" aria-labelledby="next-title">
+        <div class="phase-heading">
+          <p class="eyebrow">Next · make the value compound</p>
+          <h2 id="next-title">Turn findings into safe, repeatable action.</h2>
+        </div>
+        <ol class="compact-list">
+          {next.map(([title, body], index) => (
+            <li>
+              <span>0{index + 5}</span>
+              <div>
+                <h3>{title}</h3>
+                <p>{body}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section class="phase band" aria-labelledby="later-title">
+        <div class="phase-heading">
+          <p class="eyebrow">Later · meet agents on existing rails</p>
+          <h2 id="later-title">Integrate only after the core proof is strong.</h2>
+        </div>
+        <ol class="compact-list">
+          {later.map(([title, body], index) => (
+            <li>
+              <span>{index + 9}</span>
+              <div>
+                <h3>{title}</h3>
+                <p>{body}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section class="deferred band" aria-labelledby="deferred-title">
+        <div>
+          <p class="eyebrow">Deliberately deferred</p>
+          <h2 id="deferred-title">Weight is not progress.</h2>
+          <p>
+            These ideas are not forbidden. They wait until repeated evidence shows a
+            problem the current plain-file and CLI surfaces cannot solve.
+          </p>
+        </div>
+        <ul>
+          {deferred.map((item) => <li>{item}</li>)}
+        </ul>
+      </section>
+
+      <section class="roadmap-cta band">
+        <p class="eyebrow">The working truth lives with the code</p>
+        <h2>Inspect the complete roadmap, stop rules, and review cadence.</h2>
+        <div class="hero-actions">
+          <a class="button button-primary" href={canonicalRoadmap}>Open the repo document</a>
+          <a class="button" href={`${repo}/issues`}>See the issues</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand" href="/" aria-label="Vivary home">
+        <img src="/media/vivary-mark.png" alt="" width="30" height="30" loading="lazy" />
+        <span>Vivary</span>
+      </a>
+      <nav aria-label="Footer navigation">
+        <a href="/getting-started/">Docs</a>
+        <a href="/blog/">Blog</a>
+        <a href="/white-paper/">White paper</a>
+        <a href="/#faq">FAQ</a>
+        <a href={repo}>GitHub</a>
+      </nav>
+      <p>A flagship from The Little AI Company.</p>
+    </footer>
+
+    <style is:global>
+      @font-face {
+        font-family: 'Bricolage Grotesque';
+        src: url('/fonts/bricolage-grotesque-latin.woff2') format('woff2');
+        font-display: swap;
+      }
+
+      @font-face {
+        font-family: 'Hanken Grotesk';
+        src: url('/fonts/hanken-grotesk-latin.woff2') format('woff2');
+        font-display: swap;
+      }
+
+      @font-face {
+        font-family: 'JetBrains Mono';
+        src: url('/fonts/jetbrains-mono-latin.woff2') format('woff2');
+        font-display: swap;
+      }
+
+      :root {
+        color-scheme: dark;
+        --ink: #020916;
+        --ink-soft: #061521;
+        --surface: #0a1c29;
+        --bone: #edf5f1;
+        --muted: #9db5b2;
+        --mint: #39e3b2;
+        --mint-pale: #a9f8df;
+        --blue: #70bce9;
+        --line: rgba(169, 248, 223, 0.16);
+        --line-strong: rgba(169, 248, 223, 0.34);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        background: var(--ink);
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background: var(--ink);
+        color: var(--bone);
+        font: 16px/1.6 'Hanken Grotesk', system-ui, sans-serif;
+        text-rendering: optimizeLegibility;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      :focus-visible {
+        outline: 3px solid var(--mint-pale);
+        outline-offset: 4px;
+      }
+
+      .skip-link {
+        position: fixed;
+        z-index: 100;
+        top: 0.75rem;
+        left: 0.75rem;
+        padding: 0.65rem 0.9rem;
+        background: var(--bone);
+        color: var(--ink);
+        transform: translateY(-150%);
+      }
+
+      .skip-link:focus {
+        transform: translateY(0);
+      }
+
+      .site-header,
+      .site-footer,
+      .roadmap-hero,
+      .band {
+        width: min(1376px, calc(100% - 64px));
+        margin-inline: auto;
+      }
+
+      .site-header {
+        min-height: 72px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.7rem;
+        font-family: 'Bricolage Grotesque', sans-serif;
+        font-size: 1.42rem;
+        font-weight: 750;
+        letter-spacing: -0.035em;
+        text-decoration: none;
+      }
+
+      .site-header nav,
+      .site-footer nav {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: 1.3rem;
+      }
+
+      .site-header nav a,
+      .site-footer nav a {
+        color: var(--muted);
+        font-size: 0.93rem;
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .site-header nav a:hover,
+      .site-header nav a[aria-current='page'],
+      .site-footer nav a:hover {
+        color: var(--bone);
+      }
+
+      .site-header .nav-cta {
+        padding: 0.65rem 1rem;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        color: var(--bone);
+      }
+
+      .mobile-nav {
+        display: none;
+      }
+
+      .roadmap-hero {
+        padding: clamp(88px, 11vw, 160px) 0 clamp(80px, 10vw, 140px);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .eyebrow {
+        margin: 0 0 1.15rem;
+        color: var(--mint);
+        font: 600 0.76rem 'JetBrains Mono', monospace;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+        font-family: 'Bricolage Grotesque', sans-serif;
+        text-wrap: balance;
+      }
+
+      h1 {
+        max-width: 1050px;
+        font-size: clamp(4rem, 7.4vw, 7.6rem);
+        font-weight: 770;
+        letter-spacing: -0.07em;
+        line-height: 0.9;
+      }
+
+      h2 {
+        font-size: clamp(2.5rem, 4.3vw, 4.7rem);
+        font-weight: 720;
+        letter-spacing: -0.05em;
+        line-height: 0.98;
+      }
+
+      h3 {
+        font-size: 1.42rem;
+        letter-spacing: -0.025em;
+      }
+
+      .lede,
+      .phase-heading > p:last-child,
+      .deferred > div > p:last-child {
+        max-width: 720px;
+        margin: 2rem 0 0;
+        color: var(--muted);
+        font-size: clamp(1.05rem, 1.4vw, 1.28rem);
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.85rem;
+        margin-top: 2rem;
+      }
+
+      .button {
+        display: inline-flex;
+        min-height: 50px;
+        align-items: center;
+        justify-content: center;
+        padding: 0.8rem 1.15rem;
+        border: 1px solid var(--line-strong);
+        border-radius: 0.4rem;
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      .button:hover {
+        border-color: var(--mint);
+        color: var(--mint);
+      }
+
+      .button-primary {
+        border-color: var(--mint);
+        background: var(--mint);
+        color: var(--ink);
+      }
+
+      .button-primary:hover {
+        background: var(--mint-pale);
+        color: var(--ink);
+      }
+
+      .band {
+        padding-block: clamp(72px, 10vw, 140px);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .section-heading,
+      .phase-heading {
+        display: grid;
+        grid-template-columns: 0.75fr 1.25fr;
+        gap: 2rem 5rem;
+        align-items: start;
+      }
+
+      .section-heading .eyebrow,
+      .phase-heading .eyebrow {
+        grid-column: 1 / -1;
+      }
+
+      .phase-heading > p:last-child {
+        margin-top: 0;
+      }
+
+      .loop-grid,
+      .now-grid,
+      .compact-list {
+        margin: 4rem 0 0;
+        padding: 0;
+        border-top: 1px solid var(--line);
+        list-style: none;
+      }
+
+      .loop-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+      }
+
+      .loop-grid li {
+        min-height: 220px;
+        padding: 1.6rem;
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .loop-grid li:last-child {
+        border-right: 0;
+      }
+
+      .loop-grid span,
+      .now-grid > li > span,
+      .compact-list > li > span {
+        display: block;
+        margin-bottom: 2.7rem;
+        color: var(--mint);
+        font: 0.75rem 'JetBrains Mono', monospace;
+      }
+
+      .loop-grid p,
+      .now-grid p,
+      .compact-list p {
+        color: var(--muted);
+      }
+
+      .now-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .now-grid li {
+        min-height: 330px;
+        padding: clamp(1.5rem, 3vw, 2.6rem);
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .now-grid li:nth-child(even) {
+        border-right: 0;
+      }
+
+      .now-grid strong {
+        display: block;
+        margin-top: 1.6rem;
+        color: var(--mint-pale);
+        font: 600 0.7rem 'JetBrains Mono', monospace;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .now-grid strong + p {
+        margin-top: 0.45rem;
+      }
+
+      .compact-list li {
+        display: grid;
+        grid-template-columns: 100px 1fr;
+        gap: 1.5rem;
+        padding: 1.5rem 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .compact-list > li > span {
+        margin: 0;
+      }
+
+      .compact-list p {
+        margin: 0.45rem 0 0;
+      }
+
+      .deferred {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: clamp(3rem, 8vw, 8rem);
+        background: var(--ink-soft);
+        padding-inline: clamp(1.5rem, 3.5vw, 3.5rem);
+      }
+
+      .deferred ul {
+        display: flex;
+        flex-wrap: wrap;
+        align-content: flex-start;
+        gap: 0.7rem;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .deferred li {
+        padding: 0.6rem 0.8rem;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        font: 0.78rem 'JetBrains Mono', monospace;
+      }
+
+      .roadmap-cta {
+        text-align: center;
+      }
+
+      .roadmap-cta h2 {
+        max-width: 900px;
+        margin-inline: auto;
+      }
+
+      .roadmap-cta .hero-actions {
+        justify-content: center;
+      }
+
+      .site-footer {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: 2rem;
+        align-items: center;
+        min-height: 150px;
+      }
+
+      .site-footer p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.82rem;
+        text-align: right;
+      }
+
+      @media (max-width: 960px) {
+        .desktop-nav {
+          display: none;
+        }
+
+        .mobile-nav {
+          display: block;
+          position: relative;
+        }
+
+        .mobile-nav summary {
+          cursor: pointer;
+          color: var(--muted);
+          font-weight: 700;
+          list-style: none;
+        }
+
+        .mobile-nav summary::-webkit-details-marker {
+          display: none;
+        }
+
+        .mobile-nav nav {
+          position: absolute;
+          z-index: 10;
+          right: 0;
+          top: 2.2rem;
+          display: grid;
+          min-width: 190px;
+          padding: 1rem;
+          border: 1px solid var(--line-strong);
+          background: var(--surface);
+        }
+
+        .mobile-nav a {
+          padding: 0.6rem;
+        }
+
+        .section-heading,
+        .phase-heading,
+        .deferred {
+          grid-template-columns: 1fr;
+          gap: 1.5rem;
+        }
+
+        .phase-heading > p:last-child {
+          margin-top: 0.5rem;
+        }
+
+        .loop-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+
+        .loop-grid li:nth-child(2) {
+          border-right: 0;
+        }
+
+        .site-footer {
+          grid-template-columns: 1fr;
+          padding: 2.5rem 0;
+          text-align: center;
+        }
+
+        .site-footer .brand,
+        .site-footer nav {
+          justify-content: center;
+        }
+
+        .site-footer p {
+          text-align: center;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .site-header,
+        .site-footer,
+        .roadmap-hero,
+        .band {
+          width: min(100% - 36px, 1376px);
+        }
+
+        h1 {
+          font-size: clamp(3.3rem, 16vw, 5.2rem);
+        }
+
+        .hero-actions {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .loop-grid,
+        .now-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .loop-grid li,
+        .loop-grid li:nth-child(2),
+        .now-grid li {
+          min-height: 0;
+          border-right: 0;
+        }
+
+        .compact-list li {
+          grid-template-columns: 56px 1fr;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+      }
+    </style>
+  </body>
+</html>

@@ -1,6 +1,7 @@
 ---
 title: "Getting started"
 description: "Install Vivary and run your first agent workspace."
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/GETTING-STARTED.md"
 ---
 
 This page takes you from nothing to a working **agent-native workspace**: a project
@@ -139,7 +140,7 @@ create-vivary adopt . --yes       # apply it
 there (an existing `README.md` or `AGENTS.md` is reported "exists, kept"), and it
 auto-detects a preset from your file mix. Markdown-heavy directories it finds get a
 thin router under `modules/` instead of being touched directly. See
-[COMMANDS.md](COMMANDS.md#adopt--point-vivary-at-your-mess) for the full behavior.
+[COMMANDS.md](/commands/#adopt--point-vivary-at-your-mess) for the full behavior.
 
 ## 3. Check that it's healthy
 
@@ -231,4 +232,4 @@ graph is wrong. Run `tropo fix` to clear redundant frontmatter.
 - [Active context](/active-context/) — optional CocoIndex-code sidecar for code search.
 - [LLM active-context guide](/llm-active-context/) — copyable graph-first retrieval prompt.
 - [Architecture](/architecture/) — the layer model and the reasoning behind it.
-- [FAQ](/faq/)
+- [Homepage FAQ](https://vivary.vercel.app/#faq)

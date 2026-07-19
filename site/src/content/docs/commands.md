@@ -1,6 +1,7 @@
 ---
 title: "Command reference"
 description: "Every CLI across Vivary: tropo, ozone, exo, create-vivary, and optional adapters."
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/COMMANDS.md"
 ---
 
 This is the full, technical list of every command. If you're just starting, you only
@@ -51,7 +52,7 @@ connect to SMTP, call an API, upload logs, or send mail by itself.
 MCP server, no special protocol. Commands that interact or install also accept `--yes`
 (auto-confirm all prompts), `--auto` (agent selects from explicit storage/privacy/size
 hints), and `--dry-run` (inspect without side effects). See
-[SPEC-data-layer.md](SPEC-data-layer.md) for the full agent CLI contract and the new
+[SPEC-data-layer.md](https://github.com/vivary-dev/vivary/blob/dev/docs/SPEC-data-layer.md) for the full agent CLI contract and the new
 storage/migration commands.
 
 ---
@@ -590,4 +591,5 @@ small surface before deeper context:
 ---
 
 See [GETTING-STARTED.md](/getting-started/) for a first run, [HOWTO.md](/howto/) for
-task recipes, [SKILLS.md](/skills/) for the agent skills, and [FAQ.md](/faq/).
+task recipes, [SKILLS.md](/skills/) for the agent skills, and the
+[homepage FAQ](https://vivary.vercel.app/#faq).

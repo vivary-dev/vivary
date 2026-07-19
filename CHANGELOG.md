@@ -10,6 +10,45 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: Vivary product identity and proof spine] — 2026-07-18
+
+Affects documentation, site verification, and the website only. No package versions
+change.
+
+### Added
+
+- Added a distinct Vivary visual identity with an abstract strata-and-gate mark,
+  living-world hero illustration, and architecture-layer asset.
+- Added a full-length technical white paper defining the workspace failure mode,
+  terminology, requirements, system invariants, architecture, operating protocol,
+  threat model, evidence ledger, limitations, governance, and reproducible evaluation
+  standard, grounded in primary references.
+- Added the white paper to the generated Starlight documentation and
+  machine-readable docs surfaces.
+
+### Changed
+
+- Rebuilt the public homepage around the brownfield adoption path, product thesis,
+  four-layer architecture, measurable proof, and quiet company endorsement.
+- Reframed the canonical repo roadmap around comprehension, adoption, retention, and
+  evidence loops, then surfaced it as a first-class website page outside the guides.
+- Replaced the long-form docs FAQ with concise homepage answers about adoption,
+  privacy, lock-in, optional providers, and the current evidence boundary.
+- Replaced the generic blog backlog with a proof-led content system tied to runnable
+  commands, canonical docs, and repeat use; the plan remains repo-only.
+- Preserved the static support-report flow through the redesigned homepage, aligned
+  the blog and docs favicon/mark surfaces, repaired generated-site link rewrites, and
+  brought the security policy's supported package lines up to current registry truth.
+
+### Verification
+
+- `cd site && npm audit`
+- `cd site && npm run test:site`
+- `cd site && npm run sync-docs`
+- `cd site && npm run build`
+- Desktop and mobile browser checks, primary-link checks, command-copy interaction,
+  FAQ disclosure checks, roadmap-page checks, and console review.
+
 ## [Unreleased: stored vector query] — 2026-07-06
 
 Affects `vivary-tropo` query behavior and docs. This is not published yet.

@@ -1,6 +1,7 @@
 ---
 title: "How-to recipes"
 description: "Task recipes: add a type, see blast radius, review, CI, multi-agent."
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/HOWTO.md"
 ---
 
 Short, copy-paste recipes for common tasks. New to Vivary? Do the [getting started

@@ -228,4 +228,4 @@ graph is wrong. Run `tropo fix` to clear redundant frontmatter.
 - [Active context](/active-context/) — optional CocoIndex-code sidecar for code search.
 - [LLM active-context guide](/llm-active-context/) — copyable graph-first retrieval prompt.
 - [Architecture](/architecture/) — the layer model and the reasoning behind it.
-- [FAQ](/faq/)
+- [Homepage FAQ](https://vivary.vercel.app/#faq)

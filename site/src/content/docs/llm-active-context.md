@@ -1,6 +1,7 @@
 ---
 title: "LLM active-context guide"
 description: "Copyable agent instructions for graph-first CocoIndex-code retrieval."
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/LLM-ACTIVE-CONTEXT.md"
 ---
 
 Copy this into an agent when a Vivary coding workspace was created with
