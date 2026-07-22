@@ -4,8 +4,7 @@ description: "Capture, type, link, retrieve: the practical loop, scaffolding or 
 date: 2026-07-22
 author: "Jeff Kazzee"
 tags: ["second-brain", "howto", "tropo"]
-draft: true
----
+draft: false---
 
 Knowing why unstructured notes rot doesn't tell you what to actually do on a
 Tuesday when you have a thought worth keeping. I covered the "why" in [why a
