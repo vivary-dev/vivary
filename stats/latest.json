@@ -1,75 +1,77 @@
 {
-  "date": "2026-07-06",
-  "generated_at": "2026-07-06T14:04:08Z",
+  "date": "2026-07-22",
+  "generated_at": "2026-07-22T11:19:30Z",
   "github": {
     "forks": 1,
-    "open_issues": 17,
-    "pushed_at": "2026-07-06T12:58:36Z",
+    "open_issues": 23,
+    "pushed_at": "2026-07-22T03:56:11Z",
     "stale": false,
-    "stars": 3,
+    "stars": 4,
     "watchers": 0
   },
   "github_forks": 1,
-  "github_stars": 3,
+  "github_stars": 4,
   "npm": {
     "packages": {
       "@vivary/create": {
-        "end": "2026-07-05",
-        "last_week": 319,
+        "end": "2026-07-21",
+        "last_week": 83,
         "stale": false,
-        "start": "2026-06-29",
+        "start": "2026-07-15",
         "versions_last_week": {
-          "0.1.0": 4,
-          "0.1.1": 5,
-          "0.2.0": 4,
-          "0.2.2": 4,
-          "0.2.3": 3,
-          "0.2.5": 14,
-          "0.2.6": 21,
-          "0.2.7": 22,
-          "0.2.8": 52,
-          "0.3.1": 190
+          "0.1.0": 3,
+          "0.1.1": 4,
+          "0.2.0": 3,
+          "0.2.2": 2,
+          "0.2.3": 4,
+          "0.2.5": 3,
+          "0.2.6": 2,
+          "0.2.7": 1,
+          "0.2.8": 1,
+          "0.3.1": 60
         }
       }
     },
-    "weekly_total": 319
+    "weekly_total": 83
   },
-  "npm_weekly": 319,
+  "npm_weekly": 83,
   "pypi": {
     "packages": {
       "create-vivary": {
-        "last_day": 47,
-        "last_month": 1867,
-        "last_week": 512,
+        "last_day": 26,
+        "last_month": 1735,
+        "last_week": 147,
         "stale": false
       },
       "vivary-exo": {
-        "last_day": 40,
-        "last_month": 675,
-        "last_week": 180,
+        "last_day": 0,
+        "last_month": 836,
+        "last_week": 102,
         "stale": false
       },
       "vivary-ozone": {
         "last_day": 40,
         "last_month": 441,
         "last_week": 170,
-        "stale": false
+        "stale": true
       },
       "vivary-tropo": {
-        "last_day": 84,
-        "last_month": 2859,
-        "last_week": 770,
+        "last_day": 2,
+        "last_month": 2784,
+        "last_week": 121,
         "stale": false
       }
     },
-    "weekly_total": 1632
+    "weekly_total": 540
   },
-  "pypi_weekly": 1632,
-  "status": "ok",
+  "pypi_weekly": 540,
+  "status": "stale",
   "totals": {
-    "npm_weekly": 319,
-    "package_weekly": 1951,
-    "pypi_weekly": 1632
+    "npm_weekly": 83,
+    "package_weekly": 623,
+    "pypi_weekly": 540
   },
-  "warnings": []
+  "warnings": [
+    "pypi:vivary-ozone: stale previous value used after fetch failure (https://pypistats.org/api/packages/vivary-ozone/recent -> HTTP Error 429: Too Many Requests)"
+  ]
 }
