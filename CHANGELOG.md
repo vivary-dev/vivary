@@ -25,6 +25,12 @@ change.
   standard, grounded in primary references.
 - Added the white paper to the generated Starlight documentation and
   machine-readable docs surfaces.
+- Added Learn Vivary: a 17-lesson, source-grounded course with retrieval practice,
+  browser-local progress, balanced-answer quizzes, two sequencing exercises, and
+  explicit baseline, optional, planned, and experimental boundaries.
+- Added canonical Markdown editions for every lesson, an ordered agent index, a
+  complete course bundle, a public Lattice architecture reference, and course
+  discovery in `llms.txt` / `llms-full.txt`.
 
 ### Changed
 
@@ -39,6 +45,9 @@ change.
 - Preserved the static support-report flow through the redesigned homepage, aligned
   the blog and docs favicon/mark surfaces, repaired generated-site link rewrites, and
   brought the security policy's supported package lines up to current registry truth.
+- Added Learn navigation across the homepage, roadmap, blog, documentation sidebar,
+  and responsive site chrome while keeping the course's visual system native to the
+  existing Vivary strata-and-gate identity.
 
 ### Verification
 
@@ -48,6 +57,13 @@ change.
 - `cd site && npm run build`
 - Desktop and mobile browser checks, primary-link checks, command-copy interaction,
   FAQ disclosure checks, roadmap-page checks, and console review.
+- Course contract check: 17 ordered lessons, 52 multiple-choice retrieval checks, two
+  sequencing exercises, exactly one correct answer per quiz, and equal word counts
+  across every quiz's four options.
+- Course browser checks at desktop and 390 px: no horizontal overflow, visible skip
+  links, persistent local completion, minimum sampled text contrast of 5.9:1, and
+  successful Markdown responses for the lesson index, individual lessons, complete
+  bundle, `llms.txt`, and `llms-full.txt`.
 
 ## [Unreleased: stored vector query] — 2026-07-06
 

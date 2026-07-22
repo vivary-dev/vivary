@@ -10,6 +10,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..');
 const docsDir = path.join(repoRoot, 'docs');
 const outDir = path.resolve(here, '..', 'src', 'content', 'docs');
+const courseDir = path.resolve(here, '..', 'src', 'content', 'course');
 const docsWalkthroughAssetsDir = path.join(docsDir, 'assets', 'walkthrough');
 const publicWalkthroughAssetsDir = path.resolve(here, '..', 'public', 'assets', 'walkthrough');
 const GH = 'https://github.com/vivary-dev/vivary/blob/dev';
@@ -217,6 +218,33 @@ const readNpmVersion = (packagePath) => {
   const pkg = JSON.parse(content);
   return pkg.version;
 };
+const readCourseFrontmatterField = (raw, field, file) => {
+  const match = raw.match(new RegExp(`^${field}:\\s*(.+)$`, 'm'));
+  if (!match) throw new Error(`Could not find ${field} in ${file}`);
+  const value = match[1].trim();
+  return value.startsWith('"') ? JSON.parse(value) : value;
+};
+
+assertRegularDirectory(courseDir, 'course content directory');
+
+const courseLessons = fs.readdirSync(courseDir)
+  .filter((file) => file.endsWith('.md'))
+  .map((file) => {
+    const raw = readCanonicalMarkdown(courseDir, file, `course/${file}`);
+    return {
+      file,
+      raw,
+      order: Number(readCourseFrontmatterField(raw, 'order', file)),
+      title: readCourseFrontmatterField(raw, 'title', file),
+      description: readCourseFrontmatterField(raw, 'description', file),
+      status: readCourseFrontmatterField(raw, 'status', file),
+    };
+  })
+  .sort((a, b) => a.order - b.order);
+
+const courseList = courseLessons
+  .map((lesson) => `- ${String(lesson.order).padStart(2, '0')}. [${lesson.title}](https://vivary.vercel.app/learn/${lesson.file.slice(0, -3)}.md): ${lesson.status}. ${lesson.description}`)
+  .join('\n');
 
 const createVivaryPyPI = readPythonVersion('create-vivary');
 const createVivaryNpm = readNpmVersion('create-vivary/npm');
@@ -266,6 +294,14 @@ pip install vivary
 
 ${coreDocsList}
 
+## Learn Vivary course
+
+Course home: https://vivary.vercel.app/learn/
+Agent-readable course index: https://vivary.vercel.app/learn/index.md
+Complete Markdown course: https://vivary.vercel.app/learn/course.md
+
+${courseList}
+
 ## Agent retrieval
 
 Start with graph-first context:
@@ -298,9 +334,9 @@ const makeAbsolute = (body) => {
   return body.replaceAll('](/', '](https://vivary.vercel.app/');
 };
 
-let llmsFullText = `# Vivary (Full Documentation)
+let llmsFullText = `# Vivary (Full Documentation and Course)
 
-This file contains the complete documentation suite for Vivary.
+This file contains the complete documentation suite and Learn Vivary course.
 
 ${llmsText}
 
@@ -311,6 +347,17 @@ for (const [src, slug, title] of pages) {
   const body = makeAbsolute(rewrite(raw));
   llmsFullText += `\n---\n\n${body}\n`;
 }
+llmsFullText += '\n---\n\n# Learn Vivary course\n';
+for (const lesson of courseLessons) {
+  llmsFullText += `\n---\n\n${makeAbsolute(lesson.raw)}\n`;
+}
+
+const latticeReference = readCanonicalMarkdown(
+  outDir,
+  path.join('learn', 'reference', 'lattice-architecture.md'),
+  'Lattice architecture reference',
+);
+llmsFullText += `\n---\n\n${makeAbsolute(latticeReference)}\n`;
 
 // Append the Changelog to llms-full.txt
 const changelogBody = makeAbsolute(rewrite(changelog));

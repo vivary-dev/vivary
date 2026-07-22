@@ -1,0 +1,16 @@
+---
+import { getCollection, render } from 'astro:content';
+import CourseShell from '../../layouts/CourseShell.astro';
+
+export async function getStaticPaths() {
+  const lessons = (await getCollection('course')).sort((a, b) => a.data.order - b.data.order);
+  return lessons.map((lesson) => ({ params: { slug: lesson.id }, props: { lesson, lessons } }));
+}
+
+const { lesson, lessons } = Astro.props;
+const { Content } = await render(lesson);
+---
+
+<CourseShell lesson={lesson} lessons={lessons}>
+  <Content />
+</CourseShell>

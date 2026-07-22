@@ -1,0 +1,657 @@
+---
+import { getCollection } from 'astro:content';
+import '../../styles/course.css';
+
+const repo = 'https://github.com/vivary-dev/vivary';
+const lessons = (await getCollection('course')).sort((a, b) => a.data.order - b.data.order);
+const modules = [] as Array<{ id: string; title: string; lessons: typeof lessons }>;
+for (const lesson of lessons) {
+  let module = modules.find((entry) => entry.id === lesson.data.module);
+  if (!module) {
+    module = { id: lesson.data.module, title: lesson.data.moduleTitle, lessons: [] };
+    modules.push(module);
+  }
+  module.lessons.push(lesson);
+}
+const totalMinutes = lessons.reduce((total, lesson) => total + lesson.data.minutes, 0);
+const courseJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Course',
+  name: 'Learn Vivary',
+  description: 'A source-grounded course on graph truth, agent operating loops, trust controls, coordination, sidecars, and governed context.',
+  url: 'https://vivary.vercel.app/learn/',
+  provider: {
+    '@type': 'Organization',
+    name: 'The Little AI Company',
+  },
+  isAccessibleForFree: true,
+  hasPart: lessons.map((lesson) => ({
+    '@type': 'LearningResource',
+    name: lesson.data.title,
+    position: lesson.data.order,
+    timeRequired: `PT${lesson.data.minutes}M`,
+    url: `https://vivary.vercel.app/learn/${lesson.id}/`,
+  })),
+};
+const courseJsonLdText = JSON.stringify(courseJsonLd).replaceAll('<', '\\u003c');
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Learn Vivary — from blank folder to trustworthy agent workspace</title>
+    <meta name="description" content="A free, source-grounded, interactive course for learning Vivary: graph truth, operating loops, trust controls, coordination, sidecars, and governed context." />
+    <meta name="theme-color" content="#020916" />
+    <meta property="og:title" content="Learn Vivary — your agent is not psychic" />
+    <meta property="og:description" content="Seventeen short lessons. Real commands, retrieval checks, and source-linked claims." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://vivary.vercel.app/media/architecture-layers.webp" />
+    <link rel="canonical" href="https://vivary.vercel.app/learn/" />
+    <link rel="alternate" type="text/markdown" href="/learn/index.md" title="Agent-readable course index" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="preload" href="/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/hanken-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <script type="application/ld+json" set:html={courseJsonLdText} />
+  </head>
+  <body class="learn-index">
+    <a class="skip-link" href="#course-route">Skip to course route</a>
+    <div class="course-atmosphere" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Vivary home">
+        <img src="/media/vivary-mark.png" alt="" width="40" height="40" />
+        <span>Vivary</span>
+      </a>
+      <nav class="desktop-nav" aria-label="Primary navigation">
+        <a href="/getting-started/">Docs</a>
+        <a href="/learn/" aria-current="page">Learn</a>
+        <a href="/white-paper/">White paper</a>
+        <a href="/roadmap/">Roadmap</a>
+        <a href="/#faq">FAQ</a>
+        <a href={repo}>GitHub</a>
+        <a class="nav-cta" href="#course-route">Start learning</a>
+      </nav>
+      <details class="mobile-nav">
+        <summary>Menu</summary>
+        <nav aria-label="Mobile navigation">
+          <a href="/getting-started/">Docs</a>
+          <a href="/learn/" aria-current="page">Learn</a>
+          <a href="/white-paper/">White paper</a>
+          <a href="/roadmap/">Roadmap</a>
+          <a href="/#faq">FAQ</a>
+          <a href={repo}>GitHub</a>
+        </nav>
+      </details>
+    </header>
+
+    <main>
+      <section class="learn-hero">
+        <div class="learn-hero-copy">
+          <p class="learn-eyebrow">Free · source-grounded · no account</p>
+          <h1>Your agent is not psychic. Stop making it cosplay as one.</h1>
+          <p class="learn-lede">
+            Dropping an AI into an undocumented project is like hiring a brilliant
+            operator, turning off the lights, and hiding the fire exits. Vivary gives
+            the workspace a map, a memory, and doors that still require a human key.
+          </p>
+          <div class="hero-actions">
+            <a class="learn-button primary" href={lessons[0] ? `/learn/${lessons[0].id}/` : '#course-route'} data-resume-course>Begin with the whole habitat</a>
+            <a class="learn-button" href="/learn/index.md">Markdown for agents</a>
+          </div>
+          <dl class="course-facts">
+            <div><dt>Lessons</dt><dd>{lessons.length}</dd></div>
+            <div><dt>Modules</dt><dd>{modules.length}</dd></div>
+            <div><dt>Practice</dt><dd>54 checks</dd></div>
+            <div><dt>Reading</dt><dd>{totalMinutes} min</dd></div>
+          </dl>
+        </div>
+        <figure class="learn-hero-art">
+          <img src="/media/architecture-layers.webp" alt="Vivary's layered architecture, from graph truth through coordination and human gates." width="1254" height="1254" fetchpriority="high" />
+          <figcaption>One substrate. Four layers. Zero permission to invent authority.</figcaption>
+        </figure>
+      </section>
+
+      <section class="course-promise">
+        <p class="learn-eyebrow">The mental model</p>
+        <div>
+          <h2>First the map. Then the locks. Then the bouncers.</h2>
+          <p>
+            The route starts with the whole habitat, earns graph fluency, adds an
+            operating loop, separates three trust controls, and only then opens the
+            optional and experimental rooms. No jargon avalanche. No “just vibe it”
+            architecture. Every status claim links back to a public source.
+          </p>
+        </div>
+      </section>
+
+      <section class="course-dashboard" id="course-route" aria-labelledby="course-route-title">
+        <header class="dashboard-heading">
+          <div>
+            <p class="learn-eyebrow">Your route</p>
+            <h2 id="course-route-title">Seventeen small wins. One system you can defend.</h2>
+          </div>
+          <div class="dashboard-progress" aria-live="polite">
+            <span data-dashboard-progress>0 of 17 complete</span>
+            <div class="progress-track" aria-hidden="true"><span data-dashboard-progress-bar></span></div>
+            <button type="button" data-reset-course>Reset progress</button>
+          </div>
+        </header>
+
+        <div class="module-list">
+          {modules.map((module) => (
+            <section class="module-row" aria-labelledby={`module-${module.id}`}>
+              <header>
+                <span>{module.id}</span>
+                <h3 id={`module-${module.id}`}>{module.title}</h3>
+              </header>
+              <ol>
+                {module.lessons.map((lesson) => (
+                  <li data-course-card={lesson.id}>
+                    <a href={`/learn/${lesson.id}/`}>
+                      <span class="lesson-number">{String(lesson.data.order).padStart(2, '0')}</span>
+                      <span class="lesson-card-copy">
+                        <strong>{lesson.data.title}</strong>
+                        <small>{lesson.data.description}</small>
+                      </span>
+                      <span class="lesson-card-meta">
+                        <em>{lesson.data.status}</em>
+                        <span>{lesson.data.minutes} min</span>
+                      </span>
+                    </a>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ))}
+        </div>
+      </section>
+
+      <section class="agent-edition">
+        <div>
+          <p class="learn-eyebrow">Humans get the interface. Agents get the source.</p>
+          <h2>Same lesson. Same claims. No copy-paste twins plotting against each other.</h2>
+        </div>
+        <p>
+          Every lesson is canonical Markdown. The website renders the human edition;
+          each <code>.md</code> route exposes the same lesson, sources, outcomes, and
+          answer model for AI agents and retrieval systems. Start with the
+          <a href="/learn/index.md">agent-readable course index</a>, fetch the
+          <a href="/learn/course.md">complete Markdown bundle</a>, or use the
+          <a href="/llms.txt">site-wide llms.txt</a>.
+        </p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-brand">
+        <img src="/media/vivary-mark.png" alt="" width="30" height="30" loading="lazy" />
+        <span>Vivary</span>
+      </div>
+      <nav aria-label="Footer navigation">
+        <a href="/getting-started/">Docs</a>
+        <a href="/learn/">Learn</a>
+        <a href="/blog/">Blog</a>
+        <a href="/white-paper/">White paper</a>
+        <a href="/roadmap/">Roadmap</a>
+        <a href="/#faq">FAQ</a>
+        <a href={repo}>GitHub</a>
+      </nav>
+      <p>A flagship from The Little AI Company.</p>
+    </footer>
+
+    <script>
+      const progressKey = 'vivary-learn-progress-v1';
+      const cards = [...document.querySelectorAll('[data-course-card]')];
+      const resume = document.querySelector('[data-resume-course]');
+      const progressLabel = document.querySelector('[data-dashboard-progress]');
+      const progressBar = document.querySelector('[data-dashboard-progress-bar]');
+      const reset = document.querySelector('[data-reset-course]');
+      let resetArmed = false;
+      let resetTimer;
+
+      const readProgress = () => {
+        try {
+          const stored = JSON.parse(localStorage.getItem(progressKey) || '[]');
+          return Array.isArray(stored) ? new Set(stored.filter((id) => typeof id === 'string')) : new Set();
+        } catch {
+          return new Set();
+        }
+      };
+
+      const renderDashboard = () => {
+        const completed = readProgress();
+        cards.forEach((card) => card.toggleAttribute('data-complete', completed.has(card.dataset.courseCard)));
+        const count = cards.filter((card) => completed.has(card.dataset.courseCard)).length;
+        if (progressLabel) progressLabel.textContent = `${count} of ${cards.length} complete`;
+        if (progressBar instanceof HTMLElement) progressBar.style.width = `${cards.length ? count / cards.length * 100 : 0}%`;
+        const next = cards.find((card) => !completed.has(card.dataset.courseCard))?.querySelector('a');
+        if (resume instanceof HTMLAnchorElement && next instanceof HTMLAnchorElement) {
+          resume.href = next.href;
+          resume.textContent = count ? 'Continue where you left off' : 'Begin with the whole habitat';
+        }
+        if (resume && count === cards.length) resume.textContent = 'Course complete — revisit any lesson';
+      };
+
+      reset?.addEventListener('click', () => {
+        if (!resetArmed) {
+          resetArmed = true;
+          reset.textContent = 'Press again to reset';
+          clearTimeout(resetTimer);
+          resetTimer = window.setTimeout(() => {
+            resetArmed = false;
+            reset.textContent = 'Reset progress';
+          }, 5000);
+          return;
+        }
+        localStorage.removeItem(progressKey);
+        resetArmed = false;
+        reset.textContent = 'Progress reset';
+        renderDashboard();
+      });
+
+      renderDashboard();
+    </script>
+
+    <style>
+      main {
+        position: relative;
+        z-index: 1;
+      }
+
+      .learn-hero,
+      .course-promise,
+      .course-dashboard,
+      .agent-edition {
+        width: min(100% - 4rem, 1376px);
+        margin: 0 auto;
+      }
+
+      .learn-hero {
+        min-height: min(760px, calc(100vh - 5.5rem));
+        display: grid;
+        grid-template-columns: minmax(0, 0.92fr) minmax(24rem, 0.72fr);
+        align-items: center;
+        gap: clamp(2rem, 7vw, 7rem);
+        padding: clamp(4rem, 9vw, 8rem) 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .learn-eyebrow {
+        margin: 0;
+        color: var(--mint);
+        font-family: var(--mono);
+        font-size: 0.69rem;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .learn-hero h1 {
+        max-width: 12ch;
+        margin: 1rem 0 0;
+        font-family: var(--display);
+        font-size: clamp(3.6rem, 8.2vw, 8.7rem);
+        font-weight: 800;
+        letter-spacing: -0.065em;
+        line-height: 0.86;
+        text-wrap: balance;
+      }
+
+      .learn-lede {
+        max-width: 54ch;
+        margin: 1.8rem 0 0;
+        color: var(--muted);
+        font-size: clamp(1.05rem, 1.7vw, 1.3rem);
+        line-height: 1.5;
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-top: 2rem;
+      }
+
+      .learn-button {
+        min-height: 50px;
+        display: inline-flex;
+        align-items: center;
+        padding: 0.7rem 1.1rem;
+        color: var(--bone);
+        border: 1px solid var(--line-strong);
+        border-radius: 0.65rem;
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      .learn-button:hover {
+        border-color: var(--mint);
+        transform: translateY(-2px);
+      }
+
+      .learn-button.primary {
+        color: var(--ink);
+        background: var(--mint);
+        border-color: var(--mint);
+      }
+
+      .course-facts {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 1px;
+        margin: 2.5rem 0 0;
+        background: var(--line);
+        border: 1px solid var(--line);
+      }
+
+      .course-facts div {
+        padding: 0.8rem;
+        background: rgba(2, 9, 22, 0.82);
+      }
+
+      .course-facts dt {
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 0.63rem;
+        text-transform: uppercase;
+      }
+
+      .course-facts dd {
+        margin: 0.15rem 0 0;
+        font-family: var(--display);
+        font-size: 1.25rem;
+        font-weight: 700;
+      }
+
+      .learn-hero-art {
+        position: relative;
+        margin: 0;
+      }
+
+      .learn-hero-art::before {
+        position: absolute;
+        inset: 8% 8%;
+        z-index: -1;
+        content: '';
+        background: rgba(73, 225, 177, 0.14);
+        border-radius: 50%;
+        filter: blur(5rem);
+      }
+
+      .learn-hero-art img {
+        width: 100%;
+        height: auto;
+        display: block;
+        filter: saturate(0.88) contrast(1.04);
+      }
+
+      .learn-hero-art figcaption {
+        margin-top: -0.5rem;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 0.67rem;
+        text-align: center;
+      }
+
+      .course-promise,
+      .agent-edition {
+        display: grid;
+        grid-template-columns: minmax(12rem, 0.45fr) minmax(0, 1fr);
+        gap: clamp(2rem, 9vw, 9rem);
+        padding: clamp(4rem, 10vw, 8rem) 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .course-promise h2,
+      .dashboard-heading h2,
+      .agent-edition h2 {
+        max-width: 16ch;
+        margin: 0;
+        font-family: var(--display);
+        font-size: clamp(2.3rem, 5vw, 4.9rem);
+        letter-spacing: -0.055em;
+        line-height: 0.94;
+        text-wrap: balance;
+      }
+
+      .course-promise > div > p {
+        max-width: 55ch;
+        color: var(--muted);
+        font-size: clamp(1rem, 1.6vw, 1.2rem);
+      }
+
+      .course-dashboard {
+        padding: clamp(4rem, 10vw, 8rem) 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .dashboard-heading {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(14rem, 20rem);
+        align-items: end;
+        gap: 2rem;
+        padding-bottom: 2.5rem;
+      }
+
+      .dashboard-heading h2 {
+        max-width: 18ch;
+        margin-top: 0.7rem;
+      }
+
+      .dashboard-progress > span {
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 0.72rem;
+      }
+
+      .dashboard-progress button {
+        min-height: 48px;
+        margin-top: 0.4rem;
+        padding: 0;
+        color: var(--faint);
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+        font-family: var(--mono);
+        font-size: 0.67rem;
+        text-decoration: underline;
+        text-underline-offset: 0.2rem;
+      }
+
+      .dashboard-progress button:hover {
+        color: var(--bone);
+      }
+
+      .module-row {
+        display: grid;
+        grid-template-columns: minmax(12rem, 0.35fr) minmax(0, 1fr);
+        gap: clamp(1.5rem, 5vw, 5rem);
+        padding: 1.5rem 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .module-row > header {
+        display: grid;
+        grid-template-columns: 2rem 1fr;
+        align-content: start;
+        gap: 0.7rem;
+      }
+
+      .module-row > header > span {
+        color: var(--mint);
+        font-family: var(--mono);
+        font-size: 0.7rem;
+      }
+
+      .module-row h3 {
+        margin: 0;
+        font-family: var(--display);
+        font-size: clamp(1.25rem, 2.3vw, 1.7rem);
+        line-height: 1.1;
+      }
+
+      .module-row ol {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .module-row li + li {
+        border-top: 1px solid var(--line);
+      }
+
+      .module-row li[data-complete] .lesson-number::after {
+        color: var(--mint);
+        content: ' ✓';
+      }
+
+      .module-row a {
+        min-height: 5.5rem;
+        display: grid;
+        grid-template-columns: 2.5rem minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.75rem 0;
+        text-decoration: none;
+      }
+
+      .module-row a:hover strong {
+        color: var(--mint-pale);
+      }
+
+      .lesson-number {
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 0.68rem;
+      }
+
+      .lesson-card-copy {
+        display: grid;
+        gap: 0.25rem;
+      }
+
+      .lesson-card-copy strong {
+        font-family: var(--display);
+        font-size: 1.1rem;
+        line-height: 1.2;
+      }
+
+      .lesson-card-copy small {
+        max-width: 60ch;
+        color: var(--muted);
+        font-size: 0.78rem;
+        line-height: 1.4;
+      }
+
+      .lesson-card-meta {
+        display: grid;
+        justify-items: end;
+        gap: 0.25rem;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 0.64rem;
+      }
+
+      .lesson-card-meta em {
+        color: var(--mint-pale);
+        font-style: normal;
+      }
+
+      .agent-edition {
+        align-items: start;
+      }
+
+      .agent-edition h2 {
+        margin-top: 0.7rem;
+      }
+
+      .agent-edition > p {
+        max-width: 58ch;
+        margin: 0;
+        color: var(--muted);
+        font-size: 1.05rem;
+      }
+
+      .agent-edition code {
+        color: var(--mint-pale);
+        font-family: var(--mono);
+      }
+
+      .agent-edition a {
+        color: var(--mint-pale);
+        text-underline-offset: 0.2rem;
+      }
+
+      @media (max-width: 960px) {
+        .learn-hero {
+          grid-template-columns: 1fr;
+        }
+
+        .learn-hero-copy {
+          position: relative;
+          z-index: 1;
+        }
+
+        .learn-hero-art {
+          width: min(100%, 34rem);
+          margin: -4rem auto 0;
+          opacity: 0.65;
+        }
+
+        .course-promise,
+        .agent-edition,
+        .module-row {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 680px) {
+        .learn-hero,
+        .course-promise,
+        .course-dashboard,
+        .agent-edition {
+          width: min(100% - 2.25rem, 1376px);
+        }
+
+        .learn-hero {
+          padding-top: 3rem;
+        }
+
+        .learn-hero h1 {
+          font-size: clamp(3.2rem, 18vw, 5.5rem);
+        }
+
+        .hero-actions {
+          display: grid;
+        }
+
+        .learn-button {
+          justify-content: center;
+        }
+
+        .course-facts {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .dashboard-heading {
+          grid-template-columns: 1fr;
+        }
+
+        .module-row a {
+          grid-template-columns: 2rem minmax(0, 1fr);
+        }
+
+        .lesson-card-meta {
+          grid-column: 2;
+          justify-items: start;
+          grid-auto-flow: column;
+          justify-content: start;
+          gap: 0.75rem;
+        }
+      }
+    </style>
+  </body>
+</html>

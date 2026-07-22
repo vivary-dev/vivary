@@ -1,0 +1,266 @@
+---
+import '../styles/course.css';
+import CourseActivities from '../components/CourseActivities.astro';
+
+
+const repo = 'https://github.com/vivary-dev/vivary';
+const { lesson, lessons } = Astro.props;
+const currentIndex = lessons.findIndex((entry) => entry.id === lesson.id);
+const previous = currentIndex > 0 ? lessons[currentIndex - 1] : undefined;
+const next = currentIndex < lessons.length - 1 ? lessons[currentIndex + 1] : undefined;
+const number = String(lesson.data.order).padStart(2, '0');
+const lessonHref = (entry) => `/learn/${entry.id}/`;
+const lessonJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'LearningResource',
+  name: lesson.data.title,
+  description: lesson.data.description,
+  learningResourceType: 'lesson',
+  timeRequired: `PT${lesson.data.minutes}M`,
+  position: lesson.data.order,
+  url: `https://vivary.vercel.app/learn/${lesson.id}/`,
+  isPartOf: {
+    '@type': 'Course',
+    name: 'Learn Vivary',
+    url: 'https://vivary.vercel.app/learn/',
+  },
+};
+const lessonJsonLdText = JSON.stringify(lessonJsonLd).replaceAll('<', '\\u003c');
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{lesson.data.title} — Learn Vivary</title>
+    <meta name="description" content={lesson.data.description} />
+    <meta name="theme-color" content="#020916" />
+    <meta property="og:title" content={`${lesson.data.title} — Learn Vivary`} />
+    <meta property="og:description" content={lesson.data.description} />
+    <meta property="og:type" content="article" />
+    <link rel="canonical" href={`https://vivary.vercel.app/learn/${lesson.id}/`} />
+    <link rel="alternate" type="text/markdown" href={`/learn/${lesson.id}.md`} title="Agent-readable Markdown" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="preload" href="/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/hanken-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <script type="application/ld+json" set:html={lessonJsonLdText} />
+  </head>
+  <body data-course-lesson={lesson.id}>
+    <a class="skip-link" href="#lesson-content">Skip to lesson</a>
+    <div class="course-atmosphere" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Vivary home">
+        <img src="/media/vivary-mark.png" alt="" width="40" height="40" />
+        <span>Vivary</span>
+      </a>
+      <nav class="desktop-nav" aria-label="Primary navigation">
+        <a href="/getting-started/">Docs</a>
+        <a href="/learn/" aria-current="page">Learn</a>
+        <a href="/white-paper/">White paper</a>
+        <a href="/roadmap/">Roadmap</a>
+        <a href="/#faq">FAQ</a>
+        <a href={repo}>GitHub</a>
+        <a class="nav-cta" href="/getting-started/">Get started</a>
+      </nav>
+      <details class="mobile-nav">
+        <summary>Menu</summary>
+        <nav aria-label="Mobile navigation">
+          <a href="/getting-started/">Docs</a>
+          <a href="/learn/" aria-current="page">Learn</a>
+          <a href="/white-paper/">White paper</a>
+          <a href="/roadmap/">Roadmap</a>
+          <a href="/#faq">FAQ</a>
+          <a href={repo}>GitHub</a>
+        </nav>
+      </details>
+    </header>
+
+    <main class="lesson-layout">
+      <aside class="course-rail" aria-label="Course route">
+        <a class="rail-home" href="/learn/">
+          <span>Learn Vivary</span>
+          <strong>Your agent is not psychic.</strong>
+        </a>
+        <div class="rail-progress" aria-live="polite">
+          <div class="rail-progress-copy">
+            <span>Course progress</span>
+            <strong data-progress-label>0 / 17</strong>
+          </div>
+          <div class="progress-track" aria-hidden="true"><span data-progress-bar></span></div>
+        </div>
+        <details class="route-menu" open>
+          <summary>Seventeen short lessons</summary>
+          <ol>
+            {lessons.map((entry) => (
+              <li data-route-id={entry.id}>
+                <a href={lessonHref(entry)} aria-current={entry.id === lesson.id ? 'page' : undefined}>
+                  <span>{String(entry.data.order).padStart(2, '0')}</span>
+                  <span>{entry.data.shortTitle}</span>
+                </a>
+              </li>
+            ))}
+          </ol>
+        </details>
+      </aside>
+
+      <article class="lesson" id="lesson-content">
+        <a class="back-link" href="/learn/">← Course map</a>
+        <header class="lesson-header">
+          <div class="lesson-kicker">
+            <span>Lesson {number}</span>
+            <span>Module {lesson.data.module}: {lesson.data.moduleTitle}</span>
+          </div>
+          <h1>{lesson.data.title}</h1>
+          <p class="standfirst">{lesson.data.description}</p>
+          <div class="lesson-meta" aria-label="Lesson details">
+            <span>{lesson.data.status}</span>
+            <span>{lesson.data.minutes} minutes</span>
+            <a href={`/learn/${lesson.id}.md`}>Markdown for agents ↗</a>
+          </div>
+          <section class="outcomes" aria-labelledby="outcomes-title">
+            <p id="outcomes-title">By the end, you can</p>
+            <ul>
+              {lesson.data.outcomes.map((outcome) => <li>{outcome}</li>)}
+            </ul>
+          </section>
+        </header>
+
+        <div class="lesson-prose">
+          <slot />
+        </div>
+        <CourseActivities activities={lesson.data.interactions} />
+
+
+        <section class="completion-card" aria-labelledby="completion-title">
+          <div>
+            <p class="completion-eyebrow">Retrieval beats rereading</p>
+            <h2 id="completion-title">Can you explain it without this page?</h2>
+            <p>Finish the checks, close the lesson, then say the core rule out loud. Recognition is cheap; recall is the muscle.</p>
+          </div>
+          <button type="button" data-complete-lesson disabled>Complete the retrieval checks</button>
+          <p class="completion-status" data-completion-status role="status"></p>
+        </section>
+
+
+        <nav class="lesson-nav" aria-label="Lesson navigation">
+          {previous ? (
+            <a href={lessonHref(previous)}>
+              <span>Previous</span>
+              <strong>{previous.data.shortTitle}</strong>
+            </a>
+          ) : <span></span>}
+          {next ? (
+            <a class="next" href={lessonHref(next)}>
+              <span>Next</span>
+              <strong>{next.data.shortTitle}</strong>
+            </a>
+          ) : (
+            <a class="next" href="/learn/">
+              <span>Finished</span>
+              <strong>Return to the course map</strong>
+            </a>
+          )}
+        </nav>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-brand">
+        <img src="/media/vivary-mark.png" alt="" width="30" height="30" loading="lazy" />
+        <span>Vivary</span>
+      </div>
+      <nav aria-label="Footer navigation">
+        <a href="/getting-started/">Docs</a>
+        <a href="/learn/">Learn</a>
+        <a href="/blog/">Blog</a>
+        <a href="/white-paper/">White paper</a>
+        <a href="/roadmap/">Roadmap</a>
+        <a href="/#faq">FAQ</a>
+        <a href={repo}>GitHub</a>
+      </nav>
+      <p>A flagship from The Little AI Company.</p>
+    </footer>
+
+    <script>
+      const progressKey = 'vivary-learn-progress-v1';
+      const lessonId = document.body.dataset.courseLesson;
+      const completeButton = document.querySelector('[data-complete-lesson]');
+      const completionStatus = document.querySelector('[data-completion-status]');
+      const activityIds = new Set(
+        [...document.querySelectorAll('[data-activity-id]')]
+          .map((activity) => activity.getAttribute('data-activity-id'))
+          .filter(Boolean),
+      );
+      const finishedActivities = new Set();
+
+      const readProgress = () => {
+        try {
+          const stored = JSON.parse(localStorage.getItem(progressKey) || '[]');
+          return Array.isArray(stored) ? new Set(stored.filter((id) => typeof id === 'string')) : new Set();
+        } catch {
+          return new Set();
+        }
+      };
+
+      const saveCompletedLesson = () => {
+        if (!lessonId) return;
+        const completed = readProgress();
+        completed.add(lessonId);
+        localStorage.setItem(progressKey, JSON.stringify([...completed]));
+      };
+
+      const renderProgress = () => {
+        const completed = readProgress();
+        const routeIds = new Set(
+          [...document.querySelectorAll('[data-route-id]')]
+            .map((item) => item.getAttribute('data-route-id'))
+            .filter((id) => id),
+        );
+        const count = [...completed].filter((id) => routeIds.has(id)).length;
+        const total = routeIds.size;
+        const label = document.querySelector('[data-progress-label]');
+        const bar = document.querySelector('[data-progress-bar]');
+        if (label) label.textContent = `${count} / ${total}`;
+        if (bar instanceof HTMLElement) bar.style.width = `${total ? count / total * 100 : 0}%`;
+        document.querySelectorAll('[data-route-id]').forEach((item) => {
+          item.toggleAttribute('data-complete', completed.has(item.getAttribute('data-route-id') || ''));
+        });
+
+        const isComplete = Boolean(lessonId && completed.has(lessonId));
+        const remaining = Math.max(0, activityIds.size - finishedActivities.size);
+        if (completeButton instanceof HTMLButtonElement) {
+          completeButton.disabled = !isComplete;
+          completeButton.textContent = isComplete
+            ? 'Completed — reset'
+            : `${remaining} ${remaining === 1 ? 'check' : 'checks'} left`;
+        }
+        if (completionStatus) {
+          completionStatus.textContent = isComplete
+            ? 'Lesson saved as complete in this browser.'
+            : 'Completion unlocks only after every retrieval check passes.';
+        }
+      };
+
+      document.addEventListener('vivary:activity-complete', (event) => {
+        const activity = event.target instanceof Element ? event.target.closest('[data-activity-id]') : null;
+        const activityId = activity?.getAttribute('data-activity-id');
+        if (activityId) finishedActivities.add(activityId);
+        if (activityIds.size > 0 && finishedActivities.size === activityIds.size) saveCompletedLesson();
+        renderProgress();
+      });
+
+      completeButton?.addEventListener('click', () => {
+        if (!lessonId || !readProgress().has(lessonId)) return;
+        const completed = readProgress();
+        completed.delete(lessonId);
+        localStorage.setItem(progressKey, JSON.stringify([...completed]));
+        window.location.reload();
+      });
+
+      renderProgress();
+    </script>
+  </body>
+</html>

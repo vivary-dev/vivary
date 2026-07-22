@@ -1,0 +1,161 @@
+---
+const { activities } = Astro.props;
+---
+
+<section class="retrieval-lab" aria-labelledby="retrieval-lab-title">
+  <div class="retrieval-lab-heading">
+    <p>Practice, not page furniture</p>
+    <h2 id="retrieval-lab-title">Make the call before the answer makes it look obvious.</h2>
+  </div>
+
+  {activities.map((activity, activityIndex) => (
+    <article
+      class="activity"
+      data-activity
+      data-activity-id={activity.id}
+      data-activity-kind={activity.kind}
+    >
+      <header>
+        <span>Check {String(activityIndex + 1).padStart(2, '0')}</span>
+        <h3>{activity.prompt}</h3>
+      </header>
+
+      {activity.kind === 'multiple-choice' ? (
+        <div class="activity-options" data-quiz-options>
+          {activity.options.map((option) => (
+            <button
+              type="button"
+              data-quiz-answer
+              data-correct={String(option.correct)}
+              data-feedback={option.feedback}
+            >
+              {option.text}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div class="sequence-activity">
+          <p class="sequence-instruction">Choose the next stage. The machine is picky because causality is picky.</p>
+          <ol class="sequence-chosen" data-sequence-chosen aria-label="Stages placed in order"></ol>
+          <div class="activity-options" data-sequence-pool>
+            {activity.items.map((item, index) => (
+              <button
+                type="button"
+                data-sequence-item
+                data-order={index + 1}
+                data-feedback={item.feedback}
+              >
+                {item.text}
+              </button>
+            ))}
+          </div>
+          <button class="sequence-reset" type="button" data-sequence-reset>Reset sequence</button>
+        </div>
+      )}
+
+      <p class="activity-feedback" data-activity-feedback role="status"></p>
+      <div class="activity-reveal" data-activity-reveal hidden role="status" aria-live="polite" aria-atomic="true">
+        <strong>{activity.success}</strong>
+        <p>{activity.reveal}</p>
+      </div>
+    </article>
+  ))}
+</section>
+
+<script>
+  const shuffle = (container) => {
+    const items = [...container.children];
+    for (let index = items.length - 1; index > 0; index -= 1) {
+      const values = new Uint32Array(1);
+      crypto.getRandomValues(values);
+      const swap = values[0] % (index + 1);
+      [items[index], items[swap]] = [items[swap], items[index]];
+    }
+    items.forEach((item) => container.append(item));
+  };
+
+  const completeActivity = (activity) => {
+    if (activity.hasAttribute('data-activity-complete')) return;
+    activity.setAttribute('data-activity-complete', '');
+    const reveal = activity.querySelector('[data-activity-reveal]');
+    if (reveal) reveal.hidden = false;
+    activity.dispatchEvent(new CustomEvent('vivary:activity-complete', { bubbles: true }));
+  };
+
+  document.querySelectorAll('[data-activity]').forEach((activity) => {
+    const feedback = activity.querySelector('[data-activity-feedback]');
+    const options = activity.querySelector('[data-quiz-options]');
+    if (options) {
+      shuffle(options);
+      options.addEventListener('click', (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const button = target.closest('[data-quiz-answer]');
+        if (!(button instanceof HTMLButtonElement) || button.disabled) return;
+        const correct = button.dataset.correct === 'true';
+        if (correct) {
+          options.querySelectorAll('button').forEach((answer) => {
+            answer.disabled = true;
+            answer.setAttribute('aria-pressed', String(answer === button));
+          });
+          button.classList.add('is-correct');
+          if (feedback) feedback.textContent = 'Correct. The boundary holds.';
+          completeActivity(activity);
+          return;
+        }
+        button.disabled = true;
+        button.classList.add('is-wrong');
+        if (feedback) feedback.textContent = button.dataset.feedback || 'Not this one. Try again.';
+        const next = options.querySelector('button:not([disabled])');
+        if (next instanceof HTMLButtonElement) next.focus();
+      });
+      return;
+    }
+
+    const pool = activity.querySelector('[data-sequence-pool]');
+    const chosen = activity.querySelector('[data-sequence-chosen]');
+    const reset = activity.querySelector('[data-sequence-reset]');
+    if (!pool || !chosen) return;
+    const originalItems = [...pool.querySelectorAll('[data-sequence-item]')];
+    let expected = 1;
+
+    const resetSequence = () => {
+      expected = 1;
+      chosen.replaceChildren();
+      originalItems.forEach((item) => {
+        if (!(item instanceof HTMLButtonElement)) return;
+        item.disabled = false;
+        item.classList.remove('is-wrong');
+        pool.append(item);
+      });
+      shuffle(pool);
+      if (feedback) feedback.textContent = 'Sequence reset. Start with the action that changes nothing.';
+    };
+
+    shuffle(pool);
+    pool.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const button = target.closest('[data-sequence-item]');
+      if (!(button instanceof HTMLButtonElement) || button.disabled) return;
+      if (Number(button.dataset.order) !== expected) {
+        button.classList.add('is-wrong');
+        if (feedback) feedback.textContent = button.dataset.feedback || 'That stage belongs later.';
+        return;
+      }
+      button.classList.remove('is-wrong');
+      button.disabled = true;
+      const placed = document.createElement('li');
+      placed.textContent = button.textContent;
+      chosen.append(placed);
+      expected += 1;
+      if (feedback) feedback.textContent = `Stage ${expected - 1} placed.`;
+      if (expected > originalItems.length) {
+        pool.querySelectorAll('button').forEach((item) => { item.disabled = true; });
+        if (reset instanceof HTMLButtonElement) reset.disabled = true;
+        completeActivity(activity);
+      }
+    });
+    reset?.addEventListener('click', resetSequence);
+  });
+</script>
