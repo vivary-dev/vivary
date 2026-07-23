@@ -1,0 +1,311 @@
+{
+  "capsule_id": "capsule_481869784fa29bff",
+  "schema": "vivary.task-capsule/v0",
+  "task": {
+    "question": "Which local checkout of the shared origin reflects current repository truth?",
+    "scope": [
+      "/lab/parity/canonical",
+      "/lab/parity/dirty",
+      "/lab/parity/no-origin",
+      "/lab/parity/stale-neighbor"
+    ]
+  },
+  "workspace": {
+    "fingerprint": "sha256:4122e7bb85859d3fce723a3cc2435ff64e7a9c95bff1846fcdcb2d03eb9f7c63",
+    "observed_at": "2026-07-20T15:00:00.000Z"
+  },
+  "claims": [
+    {
+      "id": "claim_513c7162e890c9cf",
+      "subject": "checkout_1779eac304096aaf",
+      "subject_path": "/lab/parity/stale-neighbor",
+      "claim": "HEAD revision is a8af2e578a202212f6a7def11bdef308acabeefa",
+      "fact": "head_revision",
+      "status": "known",
+      "evidence": [
+        {
+          "command": "git --no-optional-locks -C /lab/parity/stale-neighbor rev-parse HEAD"
+        }
+      ],
+      "selection_reason": "subject is a side of an unresolved divergent_checkouts conflict; the task question turns on which side is current",
+      "selection": {
+        "tier": "conflict_side",
+        "signals": [
+          {
+            "signal": "conflict_side",
+            "conflict": "conflict_221b122f1c3c803d"
+          },
+          {
+            "signal": "question_term_match",
+            "term": "origin",
+            "field": "repository"
+          }
+        ]
+      }
+    },
+    {
+      "id": "claim_7469353e08e9cb23",
+      "subject": "checkout_a2fc1ac102c62b19",
+      "subject_path": "/lab/parity/canonical",
+      "claim": "HEAD revision is c17b987691cf00fbeca2533a22ab6efbdd3b9767",
+      "fact": "head_revision",
+      "status": "known",
+      "evidence": [
+        {
+          "command": "git --no-optional-locks -C /lab/parity/canonical rev-parse HEAD"
+        }
+      ],
+      "selection_reason": "subject is a side of an unresolved divergent_checkouts conflict; the task question turns on which side is current",
+      "selection": {
+        "tier": "conflict_side",
+        "signals": [
+          {
+            "signal": "conflict_side",
+            "conflict": "conflict_221b122f1c3c803d"
+          },
+          {
+            "signal": "question_term_match",
+            "term": "origin",
+            "field": "repository"
+          }
+        ]
+      }
+    },
+    {
+      "id": "claim_e05baca2933204c7",
+      "subject": "checkout_1779eac304096aaf",
+      "subject_path": "/lab/parity/stale-neighbor",
+      "claim": "HEAD is on branch 'main'",
+      "fact": "head_ref",
+      "status": "known",
+      "evidence": [
+        {
+          "command": "git --no-optional-locks -C /lab/parity/stale-neighbor symbolic-ref --short -q HEAD"
+        }
+      ],
+      "selection_reason": "subject is a side of an unresolved divergent_checkouts conflict; the task question turns on which side is current",
+      "selection": {
+        "tier": "conflict_side",
+        "signals": [
+          {
+            "signal": "conflict_side",
+            "conflict": "conflict_221b122f1c3c803d"
+          },
+          {
+            "signal": "question_term_match",
+            "term": "origin",
+            "field": "repository"
+          }
+        ]
+      }
+    },
+    {
+      "id": "claim_50e5dac09a8de28a",
+      "subject": "checkout_a2fc1ac102c62b19",
+      "subject_path": "/lab/parity/canonical",
+      "claim": "HEAD is on branch 'main'",
+      "fact": "head_ref",
+      "status": "known",
+      "evidence": [
+        {
+          "command": "git --no-optional-locks -C /lab/parity/canonical symbolic-ref --short -q HEAD"
+        }
+      ],
+      "selection_reason": "subject is a side of an unresolved divergent_checkouts conflict; the task question turns on which side is current",
+      "selection": {
+        "tier": "conflict_side",
+        "signals": [
+          {
+            "signal": "conflict_side",
+            "conflict": "conflict_221b122f1c3c803d"
+          },
+          {
+            "signal": "question_term_match",
+            "term": "origin",
+            "field": "repository"
+          }
+        ]
+      }
+    }
+  ],
+  "conflicts": [
+    {
+      "id": "conflict_221b122f1c3c803d",
+      "kind": "divergent_checkouts",
+      "repository": "repository_44fbe29bc3ee0dd4",
+      "question": "Which checkout reflects current repository truth?",
+      "sides": [
+        {
+          "checkout": "checkout_a2fc1ac102c62b19",
+          "path": "/lab/parity/canonical",
+          "head_revision": "c17b987691cf00fbeca2533a22ab6efbdd3b9767",
+          "head_ref": {
+            "kind": "branch",
+            "name": "main"
+          },
+          "last_fetch": "2026-07-02T00:00:00.000Z",
+          "evidence": {
+            "command": "git --no-optional-locks -C /lab/parity/canonical rev-parse HEAD"
+          }
+        },
+        {
+          "checkout": "checkout_1779eac304096aaf",
+          "path": "/lab/parity/stale-neighbor",
+          "head_revision": "a8af2e578a202212f6a7def11bdef308acabeefa",
+          "head_ref": {
+            "kind": "branch",
+            "name": "main"
+          },
+          "last_fetch": null,
+          "evidence": {
+            "command": "git --no-optional-locks -C /lab/parity/stale-neighbor rev-parse HEAD"
+          }
+        }
+      ],
+      "status": "unresolved",
+      "reason_codes": [
+        "value_conflict",
+        "identity_unresolved"
+      ],
+      "decision": "review_required"
+    }
+  ],
+  "unknowns": [
+    {
+      "checkout": "checkout_e244c1fa04010ec0",
+      "path": "/lab/parity/dirty",
+      "fact": "last_fetch",
+      "reason": "no_fetch_recorded"
+    },
+    {
+      "checkout": "checkout_e244c1fa04010ec0",
+      "path": "/lab/parity/dirty",
+      "fact": "upstream",
+      "reason": "no_upstream_configured"
+    },
+    {
+      "checkout": "checkout_92f70e2a2c2b6e09",
+      "path": "/lab/parity/no-origin",
+      "fact": "last_fetch",
+      "reason": "no_fetch_recorded"
+    },
+    {
+      "checkout": "checkout_92f70e2a2c2b6e09",
+      "path": "/lab/parity/no-origin",
+      "fact": "upstream",
+      "reason": "no_upstream_configured"
+    },
+    {
+      "checkout": "checkout_1779eac304096aaf",
+      "path": "/lab/parity/stale-neighbor",
+      "fact": "last_fetch",
+      "reason": "no_fetch_recorded"
+    }
+  ],
+  "omissions": [
+    {
+      "kind": "ignored_paths_excluded",
+      "reason": "git-ignored paths are excluded from observation by policy and never enter a capsule"
+    },
+    {
+      "kind": "claims_over_budget",
+      "reason": "claim budget 4 reached; cuts ranked by relevance tier, weakest evidence first",
+      "omitted_count": 14,
+      "omitted": [
+        {
+          "subject_path": "/lab/parity/stale-neighbor",
+          "fact": "is_dirty",
+          "tier": "conflict_side"
+        },
+        {
+          "subject_path": "/lab/parity/canonical",
+          "fact": "is_dirty",
+          "tier": "conflict_side"
+        },
+        {
+          "subject_path": "/lab/parity/stale-neighbor",
+          "fact": "remotes",
+          "tier": "conflict_side"
+        },
+        {
+          "subject_path": "/lab/parity/canonical",
+          "fact": "remotes",
+          "tier": "conflict_side"
+        },
+        {
+          "subject_path": "/lab/parity/canonical",
+          "fact": "last_fetch",
+          "tier": "conflict_side"
+        },
+        {
+          "subject_path": "/lab/parity/no-origin",
+          "fact": "head_revision",
+          "tier": "question_match"
+        },
+        {
+          "subject_path": "/lab/parity/no-origin",
+          "fact": "head_ref",
+          "tier": "question_match"
+        },
+        {
+          "subject_path": "/lab/parity/no-origin",
+          "fact": "is_dirty",
+          "tier": "question_match"
+        },
+        {
+          "subject_path": "/lab/parity/no-origin",
+          "fact": "remotes",
+          "tier": "question_match"
+        },
+        {
+          "subject_path": "/lab/parity/dirty",
+          "fact": "head_revision",
+          "tier": "allowlisted"
+        },
+        {
+          "subject_path": "/lab/parity/dirty",
+          "fact": "head_ref",
+          "tier": "allowlisted"
+        },
+        {
+          "subject_path": "/lab/parity/dirty",
+          "fact": "is_dirty",
+          "tier": "allowlisted"
+        },
+        {
+          "subject_path": "/lab/parity/dirty",
+          "fact": "dirty_entries",
+          "tier": "allowlisted"
+        },
+        {
+          "subject_path": "/lab/parity/dirty",
+          "fact": "remotes",
+          "tier": "allowlisted"
+        }
+      ]
+    },
+    {
+      "kind": "refused_root",
+      "reason": "outside_allowlist",
+      "path": "/lab/parity/outside/disallowed"
+    }
+  ],
+  "required_checks": [
+    {
+      "name": "unit-and-contract-tests",
+      "command": "npm test"
+    },
+    {
+      "name": "vivary-graph-doctor",
+      "command": "npx create-vivary doctor . --json"
+    },
+    {
+      "name": "entire-status",
+      "command": "entire status --json"
+    }
+  ],
+  "budget": {
+    "max_claims": 4
+  },
+  "fingerprint": "sha256:846c38f0e2186acf6862fd11cb4335f19220b0cd13cb4a2c7c94b49f40e79d86"
+}
