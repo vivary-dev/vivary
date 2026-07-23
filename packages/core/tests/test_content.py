@@ -1,0 +1,401 @@
+"""Pytest translation of tests/content.test.mjs (slice 2, ticket #84,
+decision 0008).
+
+Builds the same real git fixtures as tests/helpers/fixtures.mjs's
+buildFixtures/hashTree (pinned identity/date, isolated global/system
+config), re-expressed as local helpers for this one owned file - mirroring
+python/tests/test_evidence.py's precedent of self-contained per-file fixture
+plumbing rather than a shared fixtures module.
+
+Node's content.test.mjs builds one shared fixture tree in a single
+suite-level `before()` and reuses it for every test in the file; this
+translation keeps that shape (a module-scoped pytest fixture) rather than
+per-test isolation, since several assertions (byte-identical .git trees,
+shared canonical checkout) depend on the same on-disk fixtures every other
+test in this file also touches.
+
+The fixture tree is built under the OS temp directory (tempfile.mkdtemp,
+with no `dir=` pointing back into this repo) rather than a fixed path under
+python/tests/ - a fixed path nested inside this repo's own working tree
+means that if a fixture checkout's .git is ever momentarily unreadable
+(e.g. a transient lock), git's directory-discovery walk climbs past it and
+lands on this repo's OWN .git instead of failing, silently substituting the
+real vivary-lattice-lab repository's identity for the fixture's. Building
+outside any enclosing git repository makes that escape structurally
+impossible rather than merely unlikely (observed once during this port's
+own verification: see PR discussion).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timezone
+
+import pytest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+
+from vivary_core.workspace_content import (  # noqa: E402
+    CONTENT_SCHEMA,
+    MAX_EXCERPT_LENGTH,
+    MAX_FILES_PER_CHECKOUT,
+    MAX_MATCHES_PER_FILE,
+    observe_content,
+)
+
+FIXED_DATE = "2026-07-01T12:00:00Z"
+FETCH_STAMP = datetime(2026, 7, 2, 0, 0, 0, tzinfo=timezone.utc)
+
+
+def NOW():
+    return "2026-07-21T00:00:00.000Z"
+
+
+# --- fixture plumbing (mirrors tests/helpers/fixtures.mjs) -------------------
+
+
+def _rmtree_force(path):
+    # On Windows, git object files are read-only and a plain rmtree fails on
+    # them (ignore_errors=True would silently LEAK the temp repo instead) -
+    # clear the read-only bit and retry, then fail loudly if still stuck.
+    def _on_error(func, target, exc_info):
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+
+    if os.path.isdir(path):
+        shutil.rmtree(path, onerror=_on_error)
+
+
+def _git_env(base_dir):
+    env = dict(os.environ)
+    env.update(
+        {
+            "GIT_AUTHOR_NAME": "Lattice Fixture",
+            "GIT_AUTHOR_EMAIL": "fixture@lattice.local",
+            "GIT_COMMITTER_NAME": "Lattice Fixture",
+            "GIT_COMMITTER_EMAIL": "fixture@lattice.local",
+            "GIT_AUTHOR_DATE": FIXED_DATE,
+            "GIT_COMMITTER_DATE": FIXED_DATE,
+            "GIT_CONFIG_GLOBAL": os.path.join(base_dir, "empty-gitconfig"),
+            "GIT_CONFIG_SYSTEM": os.path.join(base_dir, "empty-gitconfig"),
+        }
+    )
+    return env
+
+
+def _git(base_dir, cwd, args):
+    proc = subprocess.run(
+        ["git", *args], cwd=cwd, env=_git_env(base_dir), capture_output=True, text=True, check=True
+    )
+    return proc.stdout.strip()
+
+
+def _write(path, content):
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(content)
+
+
+def _commit_file(base_dir, repo, file_name, content, message):
+    _write(os.path.join(repo, file_name), content)
+    _git(base_dir, repo, ["add", file_name])
+    _git(base_dir, repo, ["commit", "-q", "-m", message])
+    return _git(base_dir, repo, ["rev-parse", "HEAD"])
+
+
+def build_fixtures(base_dir):
+    _rmtree_force(base_dir)
+    os.makedirs(base_dir, exist_ok=True)
+    _write(os.path.join(base_dir, "empty-gitconfig"), "")
+
+    paths = {
+        "base": base_dir,
+        "origin": os.path.join(base_dir, "origin.git"),
+        "canonical": os.path.join(base_dir, "canonical"),
+        "staleNeighbor": os.path.join(base_dir, "stale-neighbor"),
+        "dirty": os.path.join(base_dir, "dirty"),
+        "detached": os.path.join(base_dir, "detached"),
+        "noOrigin": os.path.join(base_dir, "no-origin"),
+        "spaced": os.path.join(base_dir, "path with spaces", "spaced repo"),
+        "disallowed": os.path.join(base_dir, "outside", "disallowed"),
+    }
+
+    # Shared origin with two checkouts: canonical at commit B, the stale
+    # neighbor cloned while origin was still at commit A. Both are clean;
+    # they simply disagree about where main is. That ambiguity is the
+    # fixture.
+    _git(base_dir, base_dir, ["init", "-q", "--bare", "-b", "main", paths["origin"]])
+    _git(base_dir, base_dir, ["clone", "-q", paths["origin"], paths["canonical"]])
+    commit_a = _commit_file(base_dir, paths["canonical"], "README.md", "# canonical\n", "commit A")
+    _git(base_dir, paths["canonical"], ["push", "-q", "origin", "main"])
+    _git(base_dir, base_dir, ["clone", "-q", paths["origin"], paths["staleNeighbor"]])
+    commit_b = _commit_file(base_dir, paths["canonical"], "NOTES.md", "commit B content\n", "commit B")
+    _git(base_dir, paths["canonical"], ["push", "-q", "origin", "main"])
+
+    # Give canonical a deterministic FETCH_HEAD so last_fetch has a known
+    # value; the stale neighbor keeps none, so its freshness stays an
+    # explicit unknown.
+    canonical_fetch_head = os.path.join(paths["canonical"], ".git", "FETCH_HEAD")
+    _write(canonical_fetch_head, f"{commit_b}\t\tbranch 'main' of {paths['origin']}\n")
+    fetch_epoch = FETCH_STAMP.timestamp()
+    os.utime(canonical_fetch_head, (fetch_epoch, fetch_epoch))
+    stale_fetch_head = os.path.join(paths["staleNeighbor"], ".git", "FETCH_HEAD")
+    if os.path.exists(stale_fetch_head):
+        os.remove(stale_fetch_head)
+
+    # Dirty worktree with a modified file, an untracked file, and a
+    # git-ignored private path that must never leak into any packet.
+    _git(base_dir, base_dir, ["init", "-q", "-b", "main", paths["dirty"]])
+    _write(os.path.join(paths["dirty"], ".gitignore"), "secrets/\n")
+    _git(base_dir, paths["dirty"], ["add", ".gitignore"])
+    _commit_file(base_dir, paths["dirty"], "tracked.md", "original\n", "dirty base")
+    _write(os.path.join(paths["dirty"], "tracked.md"), "modified\n")
+    _write(os.path.join(paths["dirty"], "untracked.md"), "untracked\n")
+    os.makedirs(os.path.join(paths["dirty"], "secrets"), exist_ok=True)
+    _write(os.path.join(paths["dirty"], "secrets", "private-note.md"), "PRIVATE_FIXTURE_MARKER\n")
+
+    # Detached HEAD at the first of two commits.
+    _git(base_dir, base_dir, ["init", "-q", "-b", "main", paths["detached"]])
+    detached_first = _commit_file(base_dir, paths["detached"], "one.md", "one\n", "first")
+    _commit_file(base_dir, paths["detached"], "two.md", "two\n", "second")
+    _git(base_dir, paths["detached"], ["checkout", "-q", detached_first])
+
+    # No remotes configured at all.
+    _git(base_dir, base_dir, ["init", "-q", "-b", "main", paths["noOrigin"]])
+    _commit_file(base_dir, paths["noOrigin"], "solo.md", "solo\n", "solo")
+
+    # Windows path containing spaces.
+    os.makedirs(paths["spaced"], exist_ok=True)
+    _git(base_dir, base_dir, ["init", "-q", "-b", "main", paths["spaced"]])
+    _commit_file(base_dir, paths["spaced"], "spaced.md", "spaced\n", "spaced")
+
+    # A perfectly valid repository that sits outside the allowlist.
+    _git(base_dir, base_dir, ["init", "-q", "-b", "main", paths["disallowed"]])
+    _commit_file(base_dir, paths["disallowed"], "nope.md", "nope\n", "disallowed")
+
+    return {"paths": paths, "shas": {"commitA": commit_a, "commitB": commit_b, "detachedFirst": detached_first}}
+
+
+def hash_tree(root):
+    # Content hash of an entire directory tree (paths + bytes), used to
+    # prove the scanner mutated nothing inside .git.
+    files = []
+
+    def walk(dir_, rel):
+        with os.scandir(dir_) as entries:
+            entry_list = sorted(entries, key=lambda e: e.name)
+        for entry in entry_list:
+            abs_path = os.path.join(dir_, entry.name)
+            rel_path = f"{rel}/{entry.name}" if rel else entry.name
+            if entry.is_dir():
+                walk(abs_path, rel_path)
+            else:
+                with open(abs_path, "rb") as handle:
+                    files.append((rel_path, handle.read()))
+
+    walk(root, "")
+    digest = hashlib.sha256()
+    for rel_path, content in files:
+        digest.update(rel_path.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(content)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+@pytest.fixture(scope="module")
+def fx():
+    base_dir = tempfile.mkdtemp(prefix="vivary-content-fixtures-")
+    data = build_fixtures(base_dir)
+    yield data
+    _rmtree_force(base_dir)
+
+
+@pytest.fixture(scope="module")
+def allowlist(fx):
+    p = fx["paths"]
+    return [p["canonical"], p["staleNeighbor"], p["dirty"], p["detached"], p["noOrigin"]]
+
+
+# --- tests --------------------------------------------------------------------
+
+
+def test_real_fixture_tracked_content_match_reports_file_line_excerpt_term_and_evidence_command(fx, allowlist):
+    result = observe_content([fx["paths"]["canonical"]], allowlist=allowlist, terms=["content"], now=NOW)
+    assert result["schema"] == CONTENT_SCHEMA
+    checkout = result["checkouts"][0]
+    assert checkout["status"] == "observed"
+    assert len(checkout["matches"]) == 1
+    match = checkout["matches"][0]
+    assert match["path"] == "NOTES.md"
+    assert match["line"] == 1
+    assert match["term"] == "content"
+    assert re.search(r"commit b content", match["excerpt"], re.IGNORECASE)
+    assert re.match(r"^git .*grep .*-e content", match["evidence"]["command"])
+
+
+def test_tracked_files_only_git_ignored_and_untracked_content_never_appears_in_a_match(fx, allowlist):
+    result = observe_content(
+        [fx["paths"]["dirty"]], allowlist=allowlist, terms=["untracked", "private", "marker"], now=NOW
+    )
+    checkout = result["checkouts"][0]
+    assert checkout["matches"] == []
+    serialized = json.dumps(result)
+    assert "private-note" not in serialized
+    assert "private_fixture_marker" not in serialized.lower()
+
+
+def test_tracked_uncommitted_working_tree_edit_is_still_searched(fx, allowlist):
+    result = observe_content([fx["paths"]["dirty"]], allowlist=allowlist, terms=["modified"], now=NOW)
+    checkout = result["checkouts"][0]
+    assert len(checkout["matches"]) == 1
+    assert checkout["matches"][0]["path"] == "tracked.md"
+
+
+def test_no_question_terms_configured_no_git_command_runs_every_checkout_reports_no_question_terms(fx, allowlist):
+    invoked = []
+
+    def spy_run_git(path, args):
+        invoked.append({"path": path, "args": args})
+        return {"ok": True, "stdout": "", "command": "git " + " ".join(args)}
+
+    result = observe_content(
+        [fx["paths"]["canonical"]], allowlist=allowlist, terms=[], now=NOW, run_git=spy_run_git
+    )
+    assert invoked == []
+    assert result["checkouts"][0]["status"] == "observed"
+    assert result["checkouts"][0]["reason"] == "no_question_terms"
+    assert result["checkouts"][0]["matches"] == []
+
+
+def test_a_root_outside_the_allowlist_is_refused_and_no_git_command_runs_against_it(fx, allowlist):
+    invoked = []
+
+    def spy_run_git(path, args):
+        invoked.append(path)
+        return {"ok": True, "stdout": "", "command": "git " + " ".join(args)}
+
+    result = observe_content(
+        [fx["paths"]["disallowed"]], allowlist=allowlist, terms=["nope"], now=NOW, run_git=spy_run_git
+    )
+    assert result["checkouts"] == []
+    assert len(result["refusals"]) == 1
+    assert result["refusals"][0]["reason"] == "outside_allowlist"
+    assert invoked == []
+
+
+def test_an_explicit_allowlist_is_mandatory(fx):
+    with pytest.raises(ValueError, match="allowlist"):
+        observe_content([fx["paths"]["canonical"]], terms=["x"])
+
+
+# --- #71: bad allowlist ENTRIES are rejected at construction, not silently
+# treated as a wildcard (mirrors observe.test.mjs's identical guard) ---------
+
+
+def test_an_empty_string_allowlist_entry_is_refused_outright_not_silently_admitted_as_a_wildcard_71(fx):
+    with pytest.raises(ValueError, match="non-empty absolute path"):
+        observe_content([fx["paths"]["canonical"]], allowlist=[""], terms=["content"], now=NOW)
+
+
+def test_a_relative_allowlist_entry_is_refused_outright(fx):
+    with pytest.raises(ValueError, match="non-empty absolute path"):
+        observe_content([fx["paths"]["canonical"]], allowlist=["relative/path"], terms=["content"], now=NOW)
+
+
+def test_a_normal_absolute_allowlist_is_unaffected_by_the_71_validation(fx):
+    result = observe_content(
+        [fx["paths"]["canonical"]], allowlist=[fx["paths"]["canonical"]], terms=["content"], now=NOW
+    )
+    assert len(result["checkouts"]) == 1
+    assert len(result["refusals"]) == 0
+
+
+def test_git_grep_failure_not_merely_no_matches_is_reported_as_structured_unknown_never_thrown(fx, allowlist):
+    def fail_run_git(path, args):
+        return {"ok": False, "stdout": "", "stderr": "fatal: not a git repository", "command": "git " + " ".join(args)}
+
+    result = observe_content(
+        [fx["paths"]["canonical"]], allowlist=allowlist, terms=["content"], now=NOW, run_git=fail_run_git
+    )
+    checkout = result["checkouts"][0]
+    assert checkout["status"] == "unknown"
+    assert checkout["reason"] == "grep_unavailable"
+    assert checkout["matches"] == []
+
+
+def test_bounded_matched_files_per_checkout_matched_lines_per_file_and_excerpt_length_are_all_capped_with_omissions(
+    fx, allowlist
+):
+    file_count = MAX_FILES_PER_CHECKOUT + 3
+    lines_per_file = MAX_MATCHES_PER_FILE + 2
+    long_line = "x" * (MAX_EXCERPT_LENGTH + 50) + " needle"
+    lines = []
+    for f in range(file_count):
+        name = f"file-{f:02d}.md"
+        for l in range(lines_per_file):
+            lines.append(f"{name}:{l + 1}:{long_line}")
+    big_stdout = "\n".join(lines) + "\n"
+
+    def big_run_git(path, args):
+        return {"ok": True, "stdout": big_stdout, "command": "git " + " ".join(args)}
+
+    result = observe_content(
+        [fx["paths"]["canonical"]], allowlist=allowlist, terms=["needle"], now=NOW, run_git=big_run_git
+    )
+    checkout = result["checkouts"][0]
+
+    paths_seen = {m["path"] for m in checkout["matches"]}
+    assert len(paths_seen) == MAX_FILES_PER_CHECKOUT
+    for path in paths_seen:
+        count = sum(1 for m in checkout["matches"] if m["path"] == path)
+        assert count == MAX_MATCHES_PER_FILE
+    for match in checkout["matches"]:
+        assert len(match["excerpt"]) <= MAX_EXCERPT_LENGTH + 1, "excerpt must respect the length cap (plus ellipsis)"
+
+    files_truncated = next(o for o in checkout["omissions"] if o["kind"] == "content_files_truncated")
+    assert files_truncated is not None
+    assert files_truncated["omitted_count"] == 3
+    assert files_truncated["total_files_matched"] == file_count
+
+    lines_truncated = [o for o in checkout["omissions"] if o["kind"] == "content_lines_truncated"]
+    assert len(lines_truncated) == MAX_FILES_PER_CHECKOUT
+    for omission in lines_truncated:
+        assert omission["omitted_count"] == 2
+        assert omission["path"]
+
+
+def test_observation_is_strictly_read_only_git_trees_are_byte_identical_before_and_after(fx, allowlist):
+    target = fx["paths"]["canonical"]
+    before_hash = hash_tree(os.path.join(target, ".git"))
+    observe_content([target], allowlist=allowlist, terms=["content"], now=NOW)
+    after_hash = hash_tree(os.path.join(target, ".git"))
+    assert after_hash == before_hash
+
+
+def test_real_fixture_real_git_grep_a_term_with_no_matches_anywhere_is_a_clean_empty_result_not_an_error(
+    fx, allowlist
+):
+    result = observe_content([fx["paths"]["canonical"]], allowlist=allowlist, terms=["nonexistentzzz"], now=NOW)
+    checkout = result["checkouts"][0]
+    assert checkout["status"] == "observed"
+    assert checkout["matches"] == []
+    assert checkout["omissions"] == []
+
+
+def test_observation_is_deterministic_under_an_injected_clock(fx, allowlist):
+    a = observe_content(
+        [fx["paths"]["canonical"], fx["paths"]["dirty"]], allowlist=allowlist, terms=["content"], now=NOW
+    )
+    b = observe_content(
+        [fx["paths"]["canonical"], fx["paths"]["dirty"]], allowlist=allowlist, terms=["content"], now=NOW
+    )
+    assert a == b
