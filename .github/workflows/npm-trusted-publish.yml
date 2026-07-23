@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout release tag
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ inputs.release_tag }}
           fetch-depth: 0
@@ -106,7 +106,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout release tag
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ inputs.release_tag }}
           fetch-depth: 0
