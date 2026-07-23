@@ -1,0 +1,29 @@
+{
+  "note": "Oracle outputs captured from the Node reference over tokenized capsules. Python must reproduce every *.expected.* byte-for-byte.",
+  "cases": [
+    {
+      "capsule": "capsule-basic.json",
+      "profiles": [
+        "default",
+        "table"
+      ],
+      "checks": [
+        "checks_passed",
+        "checks_mixed",
+        "checks_empty"
+      ]
+    },
+    {
+      "capsule": "capsule-tight-budget.json",
+      "profiles": [
+        "default",
+        "table"
+      ],
+      "checks": [
+        "checks_passed",
+        "checks_mixed",
+        "checks_empty"
+      ]
+    }
+  ]
+}
