@@ -4,8 +4,7 @@ description: "How a Vivary turn actually runs, what each gate is for, and why th
 date: 2026-07-15
 author: "Jeff Kazzee"
 tags: ["loop", "gates", "process"]
-draft: true
----
+draft: false---
 
 `AGENTS.md` in a Vivary workspace opens with one line that's supposed to
 govern every turn an agent takes:
