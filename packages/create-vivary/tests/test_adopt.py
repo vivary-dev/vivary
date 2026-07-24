@@ -413,6 +413,26 @@ class AdoptApplyTests(unittest.TestCase):
         finally:
             shutil.rmtree(target)
 
+    def test_cli_yes_mode_json_reports_failed_doctor_as_not_ok(self):
+        target = temp_dir()
+        try:
+            make_brownfield_fixture(target)
+            write(target / ".gitignore", "node_modules/\n")
+
+            rc, out = run_cli(["adopt", str(target), "--repo-root", str(ROOT), "--yes", "--json"])
+
+            self.assertEqual(rc, 1)
+            payload = json.loads(out)
+            self.assertEqual(payload["mode"], "applied")
+            self.assertFalse(payload["ok"])
+            self.assertFalse(payload["doctor"]["ok"])
+            self.assertTrue(payload["followups"])
+            self.assertTrue(
+                any("privacy ignore missing" in e for e in payload["doctor"]["errors"])
+            )
+        finally:
+            shutil.rmtree(target)
+
     def test_cli_dry_run_json_shape(self):
         target = temp_dir()
         try:

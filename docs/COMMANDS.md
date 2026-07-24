@@ -415,7 +415,7 @@ create-vivary wizard <target> [--storage auto|file|embedded|cloud] [--provider l
                               [--memory none|local|cognee] [--yes] [--dry-run] [--json] [--receipt PATH]
 create-vivary capabilities [--preset coding|second-brain|knowledge-work|writing] [--json]
                             [--receipt PATH]
-create-vivary doctor <target> [--json] [--trend] [--receipt PATH]
+create-vivary doctor <target> [--json] [--trend] [--repair] [--yes] [--receipt PATH]
 create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writing] [--yes] [--json]
                            [--receipt PATH]
 ```
@@ -443,12 +443,29 @@ create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writin
 | `--json` | Machine-readable output. Reports `ok`, `root`, `preset`, `storage`, `provider`, `memory`, capability metadata, `installed`, `files`, config paths, and `dry_run`. |
 | `--size small\|medium\|large` | Hint for `--auto` storage decisions. Agents can pass this after inspecting the repo. |
 | `--privacy local\|cloud` | Hint for `--auto` storage decisions. |
+| `--repair` | Doctor-only. Include a conservative guided repair plan. Dry-run by default; writes nothing without `--yes`. |
+| `--yes` | With `doctor --repair`, apply deterministic safe repairs, rerun doctor, and keep a nonzero exit if the workspace is still invalid. |
 
-`doctor` checks that `USER.md`, `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`
-are actively ignored. Comments, negations, and unrelated patterns that merely contain
-those names do not count. If `.vivary/memory.toml` exists, `doctor` reports semantic
-memory as `disabled`, `healthy`, `configured`, `unavailable`, `misconfigured`, or
-`privacy-failed` without requiring optional Cognee support to be installed.
+`doctor` checks that `USER.md`, `MEMORY.md`, `memory/*`, `heartbeat-reports/*`, and
+`.strato/private/` are actively ignored. Comments, negations, and unrelated patterns
+that merely contain those names do not count. If `.vivary/memory.toml` exists,
+`doctor` reports semantic memory as `disabled`, `healthy`, `configured`,
+`unavailable`, `misconfigured`, or `privacy-failed` without requiring optional Cognee
+support to be installed.
+
+`doctor --repair` is guided and conservative. Plain `doctor` stays read-only.
+`doctor --repair --json` reports `repair.actions` without writing. Each action has
+`kind`, `status`, `path`, `summary`, and `applied`, with extra details when useful.
+`doctor --repair --yes --json` applies only deterministic safe repairs, then reruns
+doctor and returns that final report. Safe repairs are limited to regenerating missing
+ignored private/runtime placeholders (`USER.md`, `MEMORY.md`, `memory/.gitkeep`,
+`heartbeat-reports/.gitkeep`), appending missing privacy ignore lines, and removing
+simple single-line W210 redundant derived metadata. Non-workspace targets, symlinked,
+junctioned, hardlinked, non-file, and non-UTF-8 repair targets are refused or kept as
+manual guidance. Lower-level `.gitignore` negations that unignore private paths are
+reported as manual cleanup instead of being papered over by another root ignore block.
+Complex YAML W210 cases, broken refs (W220), exo active-work conflicts, and missing
+coordination-pack setup are manual guidance only; they are never auto-mutated.
 
 `doctor --trend` is opt-in and is the only thing that writes `.vivary/doctor-state.json`
 (plain `doctor` stays read-only). It compares this run's graph health, module-index

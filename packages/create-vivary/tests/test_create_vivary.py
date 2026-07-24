@@ -34,7 +34,33 @@ def temp_workspace():
         shutil.rmtree(path)
 
 
+def run_doctor_json(target: Path, *args: str) -> tuple[int, dict]:
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = create_vivary.main([
+            "doctor",
+            str(target),
+            *args,
+            "--json",
+            "--repo-root",
+            str(ROOT),
+        ])
+    return rc, json.loads(buf.getvalue())
+
+
 class CreateVivaryTests(unittest.TestCase):
+    def test_symlink_or_junction_uses_windows_reparse_fallback(self):
+        class FakeStat:
+            st_file_attributes = getattr(
+                create_vivary.stat,
+                "FILE_ATTRIBUTE_REPARSE_POINT",
+                0x400,
+            )
+
+        with mock.patch.object(Path, "is_symlink", return_value=False), \
+             mock.patch.object(create_vivary.os, "stat", return_value=FakeStat()):
+            self.assertTrue(create_vivary._is_symlink_or_junction(Path("linked-dir")))
+
     def test_receipt_flag_appends_privacy_preserving_jsonl_without_polluting_stdout(self):
         with temp_workspace() as td:
             receipt = td / "receipts" / "runs.jsonl"
@@ -247,6 +273,8 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertIn("MEMORY.md", gitignore)
             self.assertIn("memory/*", gitignore)
             self.assertIn("heartbeat-reports/*", gitignore)
+            self.assertIn(".strato/private/", gitignore)
+            self.assertIn("*.vivary-tmp", gitignore)
 
             resolver = tropo.ConfigResolver(str(target), str(TROPO))
             docs = tropo.analyze(str(target), [], resolver)
@@ -1036,6 +1064,7 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertIn("privacy ignore missing: MEMORY.md", report["errors"])
             self.assertIn("privacy ignore missing: memory/*", report["errors"])
             self.assertIn("privacy ignore missing: heartbeat-reports/*", report["errors"])
+            self.assertIn("privacy ignore missing: .strato/private/", report["errors"])
 
     def test_doctor_accepts_root_privacy_ignores_with_gitkeep_exception(self):
         with temp_workspace() as td:
@@ -1050,7 +1079,9 @@ class CreateVivaryTests(unittest.TestCase):
                 "/memory/*\n"
                 "!memory/.gitkeep\n"
                 "/heartbeat-reports/*\n"
-                "!heartbeat-reports/.gitkeep\n",
+                "!heartbeat-reports/.gitkeep\n"
+                ".strato/private/\n"
+                "*.vivary-tmp\n",
                 encoding="utf-8",
             )
 
@@ -1071,6 +1102,7 @@ class CreateVivaryTests(unittest.TestCase):
                 "!memory/.gitkeep\n"
                 "/heartbeat-reports/*\n"
                 "!heartbeat-reports/.gitkeep\n"
+                ".strato/private/\n"
                 "!*.md\n"
                 "!memory/*.md\n",
                 encoding="utf-8",
@@ -1094,7 +1126,8 @@ class CreateVivaryTests(unittest.TestCase):
                 " USER.md\n"
                 " MEMORY.md\n"
                 " memory/*\n"
-                " heartbeat-reports/*\n",
+                " heartbeat-reports/*\n"
+                " .strato/private/\n",
                 encoding="utf-8",
             )
 
@@ -1118,7 +1151,8 @@ class CreateVivaryTests(unittest.TestCase):
                 "/memory/*\n"
                 "!memory/.gitkeep\n"
                 "/heartbeat-reports/*\n"
-                "!heartbeat-reports/.gitkeep\n",
+                "!heartbeat-reports/.gitkeep\n"
+                ".strato/private/\n",
                 encoding="utf-8",
             )
             (target / "memory" / ".gitignore").write_text("!secret.md\n", encoding="utf-8")
@@ -1127,6 +1161,38 @@ class CreateVivaryTests(unittest.TestCase):
 
             self.assertFalse(report["ok"])
             self.assertIn("privacy ignore missing: memory/*", report["errors"])
+
+    def test_doctor_rejects_nested_strato_private_gitignore_negation(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / ".strato").mkdir()
+            (target / ".strato" / ".gitignore").write_text(
+                "!private/secret.md\n", encoding="utf-8"
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertFalse(report["ok"])
+            self.assertIn("privacy ignore missing: .strato/private/", report["errors"])
+
+    def test_doctor_ignores_unrelated_gitignore_negation(self):
+        with temp_workspace() as td:
+            target = Path(td) / "agent-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            gitignore = target / ".gitignore"
+            gitignore.write_text(
+                gitignore.read_text(encoding="utf-8") + "!README.md\n",
+                encoding="utf-8",
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertTrue(report["ok"], report)
 
     def test_doctor_reports_missing_module_index(self):
         with temp_workspace() as td:
@@ -1192,6 +1258,487 @@ class CreateVivaryTests(unittest.TestCase):
                 create_vivary.main(["doctor", str(target), "--repo-root", str(ROOT)]),
                 1,
             )
+
+    def test_doctor_repair_dry_run_reports_safe_and_manual_actions_without_writing(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-dry-run"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / "USER.md").unlink()
+            (target / "MEMORY.md").unlink()
+            (target / "memory" / ".gitkeep").unlink()
+            (target / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+
+            module = target / "modules" / "codebase" / "index.md"
+            module.write_text(
+                module.read_text(encoding="utf-8").replace(
+                    "project: repair-dry-run\n",
+                    "title: Codebase\nproject: repair-dry-run\n",
+                    1,
+                ).replace(
+                    "related_modules: [agent-workspace]\n",
+                    "related_modules: [agent-workspace, missing-module]\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            rc, out = run_doctor_json(target, "--repair")
+
+            self.assertEqual(rc, 1)
+            actions = out["repair"]["actions"]
+            self.assertEqual(out["repair"]["mode"], "dry-run")
+            self.assertTrue(any(a["kind"] == "placeholder" and a["path"] == "USER.md" for a in actions))
+            self.assertTrue(any(a["kind"] == "gitignore" and a["status"] == "safe" for a in actions))
+            self.assertTrue(any(a["kind"] == "tropo-w210" and a["status"] == "safe" for a in actions))
+            w220 = [a for a in actions if a["kind"] == "tropo-w220"]
+            self.assertEqual(len(w220), 1)
+            self.assertEqual(w220[0]["status"], "manual")
+            self.assertIn("related_modules", w220[0]["summary"])
+            self.assertIn("missing-module", w220[0]["summary"])
+            self.assertFalse((target / "USER.md").exists())
+            self.assertNotIn("USER.md", (target / ".gitignore").read_text(encoding="utf-8"))
+            self.assertIn("title: Codebase", module.read_text(encoding="utf-8"))
+
+    def test_doctor_repair_yes_applies_safe_repairs_and_reruns_doctor(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-apply"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / "USER.md").write_text("existing private note\n", encoding="utf-8")
+            (target / "MEMORY.md").unlink()
+            (target / "memory" / ".gitkeep").unlink()
+            (target / "heartbeat-reports" / ".gitkeep").unlink()
+            (target / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+            module = target / "modules" / "codebase" / "index.md"
+            module.write_text(
+                module.read_text(encoding="utf-8").replace(
+                    "project: repair-apply\n",
+                    "title: Codebase\nproject: repair-apply\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            rc, out = run_doctor_json(target, "--repair", "--yes", "--trend")
+
+            self.assertEqual(rc, 0, out)
+            self.assertTrue(out["ok"], out)
+            actions = out["repair"]["actions"]
+            self.assertEqual(out["repair"]["mode"], "applied")
+            self.assertTrue(any(a["kind"] == "placeholder" and a["path"] == "MEMORY.md" and a["applied"] for a in actions))
+            self.assertTrue(any(a["kind"] == "placeholder" and a["path"] == "memory/.gitkeep" and a["applied"] for a in actions))
+            self.assertTrue(any(a["kind"] == "tropo-w210" and a["applied"] for a in actions))
+            self.assertEqual((target / "USER.md").read_text(encoding="utf-8"), "existing private note\n")
+            self.assertTrue((target / "MEMORY.md").exists())
+            self.assertTrue((target / "memory" / ".gitkeep").exists())
+            gitignore = (target / ".gitignore").read_text(encoding="utf-8")
+            for pattern in (
+                "USER.md",
+                "MEMORY.md",
+                "memory/*",
+                "heartbeat-reports/*",
+                ".strato/private/",
+                "*.vivary-tmp",
+            ):
+                self.assertIn(pattern, gitignore)
+            self.assertNotIn("title: Codebase", module.read_text(encoding="utf-8"))
+
+    def test_doctor_repair_yes_does_not_mutate_non_vivary_directory(self):
+        with temp_workspace() as td:
+            target = Path(td) / "empty-directory"
+            target.mkdir()
+
+            rc, out = run_doctor_json(target, "--repair", "--yes", "--trend")
+
+            self.assertEqual(rc, 1)
+            actions = out["repair"]["actions"]
+            self.assertEqual(len(actions), 1)
+            self.assertEqual(actions[0]["kind"], "workspace")
+            self.assertEqual(actions[0]["status"], "manual")
+            self.assertIsNone(out["trend"])
+            self.assertFalse((target / ".gitignore").exists())
+            self.assertFalse((target / "USER.md").exists())
+            self.assertFalse((target / ".vivary" / "doctor-state.json").exists())
+
+    def test_doctor_repair_reports_nested_gitignore_negation_as_manual(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-nested-gitignore"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / "memory" / ".gitignore").write_text("!secret.md\n", encoding="utf-8")
+
+            rc, out = run_doctor_json(target, "--repair", "--yes")
+
+            self.assertEqual(rc, 1)
+            root_repairs = [
+                a for a in out["repair"]["actions"]
+                if a["kind"] == "gitignore" and a["path"] == ".gitignore" and a["applied"]
+            ]
+            nested_manual = [
+                a for a in out["repair"]["actions"]
+                if a["kind"] == "gitignore" and a["status"] == "manual"
+            ]
+            self.assertEqual(root_repairs, [])
+            self.assertEqual(len(nested_manual), 1)
+            self.assertIn("memory/*", nested_manual[0]["details"]["missing"])
+
+    def test_doctor_repair_refuses_hardlinked_gitignore_without_cloning_content(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-hardlink-gitignore"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            victim = Path(td) / "outside-ignore"
+            victim.write_text("private outside ignore\n", encoding="utf-8")
+            (target / ".gitignore").unlink()
+            try:
+                os.link(victim, target / ".gitignore")
+            except OSError:
+                return
+
+            rc, out = run_doctor_json(target, "--repair", "--yes")
+
+            self.assertEqual(rc, 1)
+            refused = [
+                a for a in out["repair"]["actions"]
+                if a["path"] == ".gitignore" and a["status"] == "refused"
+            ]
+            self.assertEqual(len(refused), 1)
+            self.assertEqual(victim.read_text(encoding="utf-8"), "private outside ignore\n")
+            self.assertEqual(
+                (target / ".gitignore").read_text(encoding="utf-8"),
+                "private outside ignore\n",
+            )
+
+    def test_doctor_repair_yes_never_autofixes_broken_refs(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-broken-ref"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            module = target / "modules" / "codebase" / "index.md"
+            module.write_text(
+                module.read_text(encoding="utf-8").replace(
+                    "related_modules: [agent-workspace]\n",
+                    "related_modules: [agent-workspace, missing-module]\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            rc, out = run_doctor_json(target, "--repair", "--yes")
+
+            self.assertEqual(rc, 1)
+            self.assertFalse(out["ok"])
+            w220 = [a for a in out["repair"]["actions"] if a["kind"] == "tropo-w220"]
+            self.assertEqual(len(w220), 1)
+            self.assertFalse(w220[0]["applied"])
+            self.assertIn("missing-module", module.read_text(encoding="utf-8"))
+
+    def test_doctor_repair_reports_exo_conflicts_without_mutating(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-exo-conflict"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            first = target / "changes" / "local-ci-baseline.md"
+            first.write_text(
+                first.read_text(encoding="utf-8").replace(
+                    "status: planned\n", "status: active\n", 1
+                ),
+                encoding="utf-8",
+            )
+            second = target / "changes" / "parallel-codebase-slice.md"
+            second.write_text(
+                "---\n"
+                "project: repair-exo-conflict\n"
+                "status: active\n"
+                "slice: parallel codebase touch\n"
+                "related_modules: [codebase]\n"
+                "---\n"
+                "# Parallel Codebase Slice\n",
+                encoding="utf-8",
+            )
+
+            rc, out = run_doctor_json(target, "--repair", "--yes")
+
+            self.assertEqual(rc, 0, out)
+            conflicts = [a for a in out["repair"]["actions"] if a["kind"] == "exo-conflict"]
+            self.assertEqual(len(conflicts), 1)
+            self.assertEqual(conflicts[0]["status"], "manual")
+            self.assertFalse(conflicts[0]["applied"])
+            self.assertIn("claim", conflicts[0]["summary"])
+            self.assertIn("defer", conflicts[0]["summary"])
+            self.assertIn("split", conflicts[0]["summary"])
+            pack = [a for a in out["repair"]["actions"] if a["kind"] == "exo-coordination-pack"]
+            self.assertEqual(len(pack), 1)
+            self.assertFalse(pack[0]["applied"])
+            self.assertNotIn("assignee", first.read_text(encoding="utf-8"))
+
+    def test_doctor_repair_reports_shared_gate_exo_edges(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-exo-gate-only"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            first = target / "changes" / "local-ci-baseline.md"
+            first.write_text(
+                first.read_text(encoding="utf-8").replace(
+                    "status: planned\n", "status: active\n", 1
+                ),
+                encoding="utf-8",
+            )
+            second = target / "changes" / "parallel-gate-only.md"
+            second.write_text(
+                "---\n"
+                "project: repair-exo-gate-only\n"
+                "status: active\n"
+                "slice: parallel gate reference\n"
+                "gates: [human-gates]\n"
+                "---\n"
+                "# Parallel Gate Only\n",
+                encoding="utf-8",
+            )
+
+            rc, out = run_doctor_json(target, "--repair")
+
+            self.assertEqual(rc, 0, out)
+            conflicts = [a for a in out["repair"]["actions"] if a["kind"] == "exo-conflict"]
+            self.assertEqual(len(conflicts), 1)
+            self.assertEqual(conflicts[0]["details"]["shared"], ["human-gates"])
+
+    def test_doctor_repair_reports_shared_related_change_exo_edges(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-exo-related-change-only"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            first = target / "changes" / "local-ci-baseline.md"
+            first.write_text(
+                first.read_text(encoding="utf-8").replace(
+                    "status: planned\n", "status: active\n", 1
+                ),
+                encoding="utf-8",
+            )
+            second = target / "changes" / "parallel-bookkeeping-ref.md"
+            second.write_text(
+                "---\n"
+                "project: repair-exo-related-change-only\n"
+                "status: active\n"
+                "slice: parallel bookkeeping reference\n"
+                "related_changes: [scaffold-init]\n"
+                "---\n"
+                "# Parallel Bookkeeping Ref\n",
+                encoding="utf-8",
+            )
+
+            rc, out = run_doctor_json(target, "--repair")
+
+            self.assertEqual(rc, 0, out)
+            conflicts = [a for a in out["repair"]["actions"] if a["kind"] == "exo-conflict"]
+            self.assertEqual(len(conflicts), 1)
+            self.assertEqual(conflicts[0]["details"]["shared"], ["scaffold-init"])
+
+    def test_doctor_repair_excludes_strato_private_from_graph_and_actions(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-private-exclude"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            private_dir = target / ".strato" / "private"
+            private_dir.mkdir(parents=True)
+            (private_dir / "session.md").write_text(
+                "---\n"
+                "title: Session\n"
+                "related_modules: [missing-private-module]\n"
+                "---\n"
+                "# Session\n\nprivate scratch\n",
+                encoding="utf-8",
+            )
+
+            rc, out = run_doctor_json(target, "--repair")
+
+            self.assertEqual(rc, 0, out)
+            rendered = json.dumps(out)
+            self.assertNotIn(".strato/private", rendered)
+            self.assertEqual(out["graph"]["broken"], 0)
+
+    def test_doctor_repair_keeps_complex_w210_manual(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-complex-w210"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            module = target / "modules" / "codebase" / "index.md"
+            module.write_text(
+                module.read_text(encoding="utf-8").replace(
+                    "project: repair-complex-w210\n",
+                    "title: >\n  Codebase\nproject: repair-complex-w210\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            rc, out = run_doctor_json(target, "--repair", "--yes")
+
+            self.assertEqual(rc, 1)
+            actions = [a for a in out["repair"]["actions"] if a["kind"] == "tropo-w210"]
+            self.assertEqual(len(actions), 1)
+            self.assertEqual(actions[0]["status"], "manual")
+            self.assertFalse(actions[0]["applied"])
+            self.assertIn("title: >", module.read_text(encoding="utf-8"))
+
+    def test_doctor_repair_keeps_non_utf8_w210_manual(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-non-utf8-w210"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            module = target / "modules" / "codebase" / "index.md"
+            text = module.read_text(encoding="utf-8").replace(
+                "project: repair-non-utf8-w210\n",
+                "title: Codebase\nproject: repair-non-utf8-w210\n",
+                1,
+            )
+            module.write_bytes(text.encode("utf-8") + b"\xff")
+
+            rc, out = run_doctor_json(target, "--repair", "--yes")
+
+            self.assertEqual(rc, 1)
+            actions = [a for a in out["repair"]["actions"] if a["kind"] == "tropo-w210"]
+            self.assertEqual(len(actions), 1)
+            self.assertEqual(actions[0]["status"], "manual")
+            self.assertFalse(actions[0]["applied"])
+            self.assertTrue(module.read_bytes().endswith(b"\xff"))
+
+    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
+    def test_doctor_repair_refuses_symlinked_repair_targets(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-symlink"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            shutil.rmtree(target / "memory")
+            try:
+                (target / "memory").symlink_to(outside, target_is_directory=True)
+            except OSError:
+                return
+
+            rc, out = run_doctor_json(target, "--repair", "--yes")
+
+            self.assertEqual(rc, 1)
+            refused = [
+                a for a in out["repair"]["actions"]
+                if a["path"] == "memory/.gitkeep" and a["status"] == "refused"
+            ]
+            self.assertEqual(len(refused), 1)
+            self.assertFalse(refused[0]["applied"])
+            self.assertFalse((outside / ".gitkeep").exists())
+
+    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
+    def test_doctor_repair_dry_run_refuses_symlinked_private_placeholder(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-private-link"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            outside = Path(td) / "outside-user.md"
+            outside.write_text("private elsewhere\n", encoding="utf-8")
+            (target / "USER.md").unlink()
+            try:
+                (target / "USER.md").symlink_to(outside)
+            except OSError:
+                return
+
+            rc, out = run_doctor_json(target, "--repair")
+
+            self.assertEqual(rc, 1)
+            refused = [
+                a for a in out["repair"]["actions"]
+                if a["path"] == "USER.md" and a["status"] == "refused"
+            ]
+            self.assertEqual(len(refused), 1)
+            self.assertFalse(refused[0]["applied"])
+            self.assertEqual(outside.read_text(encoding="utf-8"), "private elsewhere\n")
+
+    def test_doctor_repair_refuses_non_file_gitignore_without_traceback(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-gitignore-directory"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / ".gitignore").unlink()
+            (target / ".gitignore").mkdir()
+
+            rc, out = run_doctor_json(target, "--repair", "--yes")
+
+            self.assertEqual(rc, 1)
+            refused = [
+                a for a in out["repair"]["actions"]
+                if a["path"] == ".gitignore" and a["status"] == "refused"
+            ]
+            self.assertEqual(len(refused), 1)
+            self.assertIn("privacy ignore missing: USER.md", out["errors"])
+            self.assertTrue((target / ".gitignore").is_dir())
+
+    def test_doctor_repair_refuses_symlinked_workspace_root(self):
+        with temp_workspace() as td:
+            real = Path(td) / "real-workspace"
+            create_vivary.scaffold_workspace(
+                real, preset="coding", force=False, repo_root=ROOT
+            )
+            (real / "MEMORY.md").unlink()
+            link = Path(td) / "workspace-link"
+            link_created = False
+            try:
+                try:
+                    link.symlink_to(real, target_is_directory=True)
+                    link_created = True
+                except OSError:
+                    if os.name != "nt":
+                        return
+                    result = subprocess.run(
+                        ["cmd", "/c", "mklink", "/J", str(link), str(real)],
+                        capture_output=True,
+                        text=True,
+                    )
+                    if result.returncode != 0:
+                        return
+                    link_created = True
+
+                rc, out = run_doctor_json(link, "--repair", "--yes", "--trend")
+
+                self.assertEqual(rc, 1)
+                self.assertRegex(" ".join(out["errors"]), "symlinked|junction")
+                self.assertIsNone(out["trend"])
+                self.assertFalse((real / "MEMORY.md").exists())
+                self.assertFalse((real / ".vivary" / "doctor-state.json").exists())
+            finally:
+                if link_created and (link.exists() or link.is_symlink()):
+                    if os.name == "nt":
+                        subprocess.run(["cmd", "/c", "rmdir", str(link)], capture_output=True)
+                    else:
+                        link.unlink()
+
+    def test_doctor_repair_trend_dry_run_writes_no_state_file(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-trend-dry-run"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+
+            rc, out = run_doctor_json(target, "--repair", "--trend")
+
+            self.assertEqual(rc, 0, out)
+            self.assertIsNone(out["trend"])
+            self.assertIn("repair dry-run", " ".join(out["warnings"]))
+            self.assertFalse((target / ".vivary" / "doctor-state.json").exists())
 
 
 class TestAgentFlags(unittest.TestCase):
@@ -1304,6 +1851,39 @@ class TestAgentFlags(unittest.TestCase):
             self.assertEqual(out["storage"], "embedded")
             self.assertEqual(out["installed"], [])
             self.assertTrue(out["dry_run"])
+            self.assertFalse(target.exists(), "dry-run must not create any files")
+
+    def test_init_dry_run_json_with_explicit_flags_skips_prompts_in_tty(self):
+        with temp_workspace() as td:
+            target = Path(td) / "dry-run-agent-proof"
+            buf = io.StringIO()
+
+            with mock.patch.object(create_vivary.sys.stdin, "isatty", return_value=True), \
+                 mock.patch.object(
+                     create_vivary.sys.stdin,
+                     "readline",
+                     side_effect=AssertionError("init prompted during agent JSON proof"),
+                 ), \
+                 redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "init",
+                    str(target),
+                    "--dry-run",
+                    "--json",
+                    "--storage",
+                    "file",
+                    "--privacy",
+                    "local",
+                    "--size",
+                    "small",
+                    "--repo-root",
+                    str(ROOT),
+                ])
+
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertTrue(out["dry_run"])
+            self.assertEqual(out["storage"], "file")
             self.assertFalse(target.exists(), "dry-run must not create any files")
 
     def test_embedded_backend_install_falls_back_to_uv_when_pip_is_unavailable(self):
@@ -1728,6 +2308,33 @@ class TestAgentFlags(unittest.TestCase):
             self.assertFalse(out["ok"])
             self.assertRegex(" ".join(out["errors"]), "symlinked|outside")
             self.assertEqual(victim.read_text(encoding="utf-8"), "{}")
+
+    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
+    def test_doctor_trend_refuses_symlinked_workspace_root(self):
+        with temp_workspace() as td:
+            real = Path(td) / "real-trend-root"
+            create_vivary.scaffold_workspace(
+                real, preset="coding", repo_root=ROOT
+            )
+            link = Path(td) / "linked-trend-root"
+            try:
+                link.symlink_to(real, target_is_directory=True)
+            except OSError:
+                return
+
+            import io, contextlib
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = create_vivary.main([
+                    "doctor", str(link), "--trend", "--json", "--repo-root", str(ROOT)
+                ])
+
+            self.assertEqual(rc, 1)
+            out = json.loads(buf.getvalue())
+            self.assertFalse(out["ok"])
+            self.assertRegex(" ".join(out["errors"]), "symlinked target")
+            self.assertIsNone(out["trend"])
+            self.assertFalse((real / ".vivary" / "doctor-state.json").exists())
 
     def test_doctor_trend_reports_state_write_oserror_cleanly(self):
         with temp_workspace() as td:

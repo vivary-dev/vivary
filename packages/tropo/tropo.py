@@ -36,6 +36,7 @@ import math
 import os
 import platform
 import re
+import stat
 import subprocess
 import sys
 import sysconfig
@@ -2881,29 +2882,77 @@ def _map_is_index(filename):
     return filename.lower() in MAP_INDEX_NAMES
 
 
+def _is_link_or_reparse(path):
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    if stat.S_ISLNK(st.st_mode):
+        return True
+    attrs = getattr(st, "st_file_attributes", 0)
+    return bool(attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+
+
+def _has_multiple_hardlinks(path):
+    try:
+        return os.path.isfile(path) and os.stat(path, follow_symlinks=False).st_nlink > 1
+    except (AttributeError, OSError):
+        try:
+            return os.path.isfile(path) and os.stat(path).st_nlink > 1
+        except OSError:
+            return False
+
+
 def _map_walk(root, skip_patterns):
     """Walk the full tree from `root` (no depth limit — aggregate counts need
     the whole tree). Reuses `is_excluded` so skip semantics match `check`/`graph`
     (dotted dir-name patterns and path-anchored patterns both work). Directories
-    whose *real* path was already visited are pruned, so NTFS junctions and
-    symlink cycles never loop or double-count (os.walk's followlinks=False alone
-    does not stop junctions — Windows does not classify them as symlinks).
-    Yields (dirpath, reldir, dirnames, filenames) with dirnames pruned in place."""
+    whose *real* path was already visited, or whose real path resolves outside
+    `root`, are pruned before recursing — so NTFS junctions and symlink cycles
+    never loop, double-count, or leak outside-root content into the inventory
+    (os.walk's followlinks=False alone does not stop junctions — Windows does
+    not classify them as symlinks). Files that are themselves links/reparse
+    points, multi-hardlinked, or whose real path resolves outside `root` are
+    skipped for the same reason. Yields (dirpath, reldir, dirnames, filenames)
+    with dirnames/filenames pruned in place."""
+    root_abs = os.path.abspath(root)
+    root_real = os.path.normcase(os.path.realpath(root_abs))
     seen = set()
-    for dirpath, dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root_abs):
         real = os.path.normcase(os.path.realpath(dirpath))
-        if real in seen:
-            dirnames[:] = []  # already inventoried under its real path
+        if not _realpath_within(root_real, dirpath) or real in seen:
+            dirnames[:] = []  # outside root or already inventoried under its real path
             continue
         seen.add(real)
-        reldir = os.path.relpath(dirpath, root)
+        reldir = os.path.relpath(dirpath, root_abs)
         reldir = "" if reldir == "." else reldir.replace("\\", "/")
-        dirnames.sort()
-        dirnames[:] = [
-            d for d in dirnames
-            if not is_excluded((f"{reldir}/{d}" if reldir else d), skip_patterns)
-        ]
-        filenames.sort()
+        keep_dirs = []
+        for d in sorted(dirnames):
+            rel_child = f"{reldir}/{d}" if reldir else d
+            full_child = os.path.join(dirpath, d)
+            if _is_link_or_reparse(full_child):
+                continue
+            if is_excluded(rel_child, skip_patterns):
+                continue
+            if not _realpath_within(root_real, full_child):
+                continue
+            real_child = os.path.normcase(os.path.realpath(full_child))
+            if real_child in seen:
+                continue
+            keep_dirs.append(d)
+        dirnames[:] = keep_dirs
+        keep_files = []
+        for f in sorted(filenames):
+            rel_file = f"{reldir}/{f}" if reldir else f
+            if is_excluded(rel_file, skip_patterns):
+                continue
+            full_file = os.path.join(dirpath, f)
+            if _is_link_or_reparse(full_file) or _has_multiple_hardlinks(full_file):
+                continue
+            if not _realpath_within(root_real, full_file):
+                continue
+            keep_files.append(f)
+        filenames[:] = keep_files
         yield dirpath, reldir, dirnames, filenames
 
 
@@ -3199,7 +3248,7 @@ def cmd_check(args, resolver):
         }, indent=2))
     else:
         for f in sorted(findings, key=lambda x: (x.path, x.line)):
-            if args.quiet and f.level == "warning":
+            if args.quiet and f.code.startswith("W"):
                 continue
             print(f.render())
         print(f"\ntropo: {len(docs)} document(s), "

@@ -86,7 +86,16 @@ indexes, semantic-memory status, and typed graph:
 
 ```bash
 python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo --json
+python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo --repair --json
 ```
+
+In source builds and the next package release, `doctor --repair --json` previews a
+guided repair plan without writing. After approval, `doctor --repair --yes`
+regenerates missing ignored private placeholders, appends missing privacy ignore
+lines, removes simple W210 redundant metadata, and reruns doctor. Non-workspace,
+symlinked, junctioned, hardlinked, non-file, or non-UTF-8 repair targets are refused
+or kept manual. Complex YAML W210 cases, broken refs, and exo conflicts stay manual
+guidance.
 
 ## Developing from source
 

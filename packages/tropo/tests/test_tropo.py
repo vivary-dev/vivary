@@ -386,6 +386,20 @@ def test_check_lenient_allows_warnings():
         assert _check_rc(str(td), lenient=True) == 0  # warnings shown, exit 0
 
 
+def test_check_quiet_hides_warning_codes_after_strict_promotion():
+    with temp_workspace() as td:
+        _bad_vault(td)
+        buf = io.StringIO()
+        args = argparse.Namespace(paths=[], strict=False, lenient=False,
+                                  json=False, quiet=True)
+        with contextlib.redirect_stdout(buf):
+            rc = tropo.cmd_check(args, res(str(td)))
+        out = buf.getvalue()
+        assert rc == 1
+        assert "W201" not in out and "W202" not in out and "W220" not in out
+        assert "3 error(s)" in out
+
+
 def test_check_strict_config_false_relaxes_and_flag_overrides():
     with temp_workspace() as td:
         _bad_vault(td)
@@ -2824,6 +2838,57 @@ def test_map_junction_cycle_not_double_counted(tmp_path):
         assert not any("loop" in f["path"] for f in out["summary"]["largest_files"])
     finally:
         os.rmdir(link)  # removes the junction only, never its target's contents
+
+
+def test_map_prunes_junction_to_outside_root(tmp_path):
+    """A junction inside the mapped tree must not leak outside-root files into
+    the inventory. Skips gracefully where NTFS junctions cannot be created."""
+    import subprocess
+    if os.name != "nt":
+        return
+    _map_tree(tmp_path)
+    outside = tmp_path.parent / f"outside-map-{uuid.uuid4().hex}"
+    outside.mkdir()
+    link = tmp_path / "src" / "outside"
+    try:
+        (outside / "leak.md").write_text("# Secret\n" * 500, encoding="utf-8")
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(outside)],
+            capture_output=True, timeout=15)
+        if result.returncode != 0:
+            return
+
+        rc, out = _capture_rc(tropo.cmd_map, _map_args(str(tmp_path)))
+
+        assert rc == 0
+        assert out["summary"]["total_files"] == 8
+        assert not any("outside" in d["path"] for d in out["directories"])
+        assert not any("outside" in f["path"] for f in out["summary"]["largest_files"])
+        assert not any("leak" in f["path"] for f in out["summary"]["largest_files"])
+    finally:
+        if link.exists():
+            os.rmdir(link)
+        shutil.rmtree(outside, ignore_errors=True)
+
+
+def test_map_skips_hardlinked_private_file(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / ".strato" / "private").mkdir(parents=True)
+    secret = tmp_path / ".strato" / "private" / "secret.md"
+    secret.write_text("# Secret\n" * 500, encoding="utf-8")
+    public_link = tmp_path / "src" / "private-view.md"
+    try:
+        os.link(secret, public_link)
+    except (AttributeError, OSError):
+        return
+    (tmp_path / "src" / "open.md").write_text("# Open\n", encoding="utf-8")
+
+    rc, out = _capture_rc(tropo.cmd_map, _map_args(str(tmp_path)))
+
+    assert rc == 0
+    assert out["summary"]["total_files"] == 1
+    assert not any("private-view" in f["path"] for f in out["summary"]["largest_files"])
+    assert not any("secret" in f["path"] for f in out["summary"]["largest_files"])
 
 
 def test_map_markdown_escapes_table_cells():
