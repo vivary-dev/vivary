@@ -40,6 +40,20 @@ The governed-context shared seam every Vivary role package will speak through:
   extracted from the reference runtime and verified on ~2.1M probe pairs;
   characters outside the pinned domain fail loud rather than silently
   diverging.
+- **`policy_*`** (Strato) — budgets, capsule/receipt gates, and the loop
+  step, all fail-closed with pinned reason codes; consumes an optional
+  Ozone verdict without ever importing the verify layer.
+- **`verify_*`** (Ozone) — receipt-integrity verdicts (fingerprint
+  recomputation for tamper detection), gate sufficiency, and bounded
+  context-repair proposals as pure dry-run JSON: every proposed write
+  named, `requires_gate` on each.
+- **`control_*`** (Exo) — claims, leases, handoffs, dependency cycles,
+  execution evidence, and task views over caller-owned state; one active
+  claim per scope; completing a task is architecturally unable to erase a
+  failed verification edge.
+- **`recall_*`** (Bellamente) — the near-neighbor recall firewall: learned
+  recall can corroborate or route to review, never silently rewrite
+  authored truth; no network or embedding dependencies, ever.
 
 Zero runtime dependencies. Python 3.11+.
 
