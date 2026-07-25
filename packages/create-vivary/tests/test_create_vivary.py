@@ -1386,6 +1386,74 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertEqual(len(nested_manual), 1)
             self.assertIn("memory/*", nested_manual[0]["details"]["missing"])
 
+    def test_doctor_repair_reports_nested_negation_when_root_rule_also_missing(self):
+        """A nested negation must be reported even when the root rule is absent too.
+
+        Regression for the case where `missing_with_nested` and `missing_root_only` both
+        contain the pattern, so the set subtraction dropped it from `nested_only`:
+        repair appended the root rule, reported success with no manual action, and the
+        nested negation still unignored the private file. Doctor must not look repaired
+        while the workspace still leaks.
+        """
+        with temp_workspace() as td:
+            target = Path(td) / "repair-nested-and-root-missing"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            gitignore = target / ".gitignore"
+            kept = [
+                line
+                for line in gitignore.read_text(encoding="utf-8").splitlines()
+                if line.strip() not in {"memory/*", "!memory/.gitkeep"}
+            ]
+            gitignore.write_text("\n".join(kept) + "\n", encoding="utf-8")
+            (target / "memory" / ".gitignore").write_text("!secret.md\n", encoding="utf-8")
+
+            rc, out = run_doctor_json(target, "--repair", "--yes")
+
+            nested_manual = [
+                a for a in out["repair"]["actions"]
+                if a["kind"] == "gitignore" and a["status"] == "manual"
+            ]
+            self.assertEqual(
+                len(nested_manual),
+                1,
+                "nested negation must still be reported as manual when the root rule "
+                "was missing as well",
+            )
+            self.assertIn("memory/*", nested_manual[0]["details"]["missing"])
+            self.assertEqual(
+                rc, 1, "doctor must not pass while the nested negation still unignores"
+            )
+
+    def test_doctor_repair_restores_private_files_from_canonical_templates(self):
+        """Repair must regenerate USER.md/MEMORY.md as scaffold would, not as stubs.
+
+        Regression for `PRIVATE_PLACEHOLDER_TEXT` carrying a second, hardcoded definition
+        of these files: doctor passed on a workspace stripped of its identity, privacy,
+        decision and open-loop prompts, and template changes never reached the copy.
+        """
+        with temp_workspace() as td:
+            target = Path(td) / "repair-private-templates"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            expected = {
+                name: (target / name).read_text(encoding="utf-8")
+                for name in ("USER.md", "MEMORY.md")
+            }
+            for name in expected:
+                (target / name).unlink()
+
+            run_doctor_json(target, "--repair", "--yes")
+
+            for name, original in expected.items():
+                self.assertEqual(
+                    (target / name).read_text(encoding="utf-8"),
+                    original,
+                    f"{name} must be restored from its canonical template, not a stub",
+                )
+
     def test_doctor_repair_refuses_hardlinked_gitignore_without_cloning_content(self):
         with temp_workspace() as td:
             target = Path(td) / "repair-hardlink-gitignore"
