@@ -87,9 +87,21 @@ REQUIRED_WORKSPACE_FILES = (
     ".agents/skills/loops/SKILL.md",
 )
 
-PRIVATE_PLACEHOLDER_TEXT = {
-    "USER.md": "# USER\n\nPrivate user context for this workspace. Keep ignored.\n",
-    "MEMORY.md": "# MEMORY\n\nPrivate durable workspace memory. Keep ignored.\n",
+# Private placeholders repair can regenerate, in report order. `USER.md` and `MEMORY.md`
+# resolve to the same canonical templates `_copy_plan` scaffolds from — repair must not
+# carry a second definition of them (see `_private_placeholder_text`). The `.gitkeep`
+# files have no template; empty is their canonical content.
+PRIVATE_PLACEHOLDER_PATHS = (
+    "USER.md",
+    "MEMORY.md",
+    "memory/.gitkeep",
+    "heartbeat-reports/.gitkeep",
+)
+PRIVATE_PLACEHOLDER_TEMPLATES = {
+    "USER.md": "USER.template.md",
+    "MEMORY.md": "MEMORY.template.md",
+}
+PRIVATE_PLACEHOLDER_LITERALS = {
     "memory/.gitkeep": "",
     "heartbeat-reports/.gitkeep": "",
 }
@@ -633,9 +645,27 @@ def _looks_like_vivary_workspace(target: Path) -> bool:
     return all((target / marker).exists() for marker in REPAIR_WORKSPACE_MARKERS)
 
 
+def _private_placeholder_text(root: Path, rel: str) -> str:
+    """Canonical content for a private placeholder.
+
+    `USER.md` and `MEMORY.md` are read from the same templates `_copy_plan` scaffolds
+    from, so a repaired workspace gets exactly what a fresh one would — including the
+    identity, privacy-boundary, decision and open-loop prompts — and future template
+    edits reach repaired workspaces instead of drifting away from a second copy.
+    """
+    template = PRIVATE_PLACEHOLDER_TEMPLATES.get(rel)
+    if template is None:
+        return PRIVATE_PLACEHOLDER_LITERALS[rel]
+    source = _source_paths(root)["strato_templates"] / template
+    try:
+        return source.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ScaffoldError(f"could not read canonical template {source}: {exc}")
+
+
 def _private_placeholder_repair_actions(target: Path) -> list[dict]:
     actions: list[dict] = []
-    for rel in PRIVATE_PLACEHOLDER_TEXT:
+    for rel in PRIVATE_PLACEHOLDER_PATHS:
         path = target / rel
         unsafe = _unsafe_repair_component(target, path)
         if unsafe is not None:
@@ -726,9 +756,7 @@ def _privacy_gitignore_repair_actions(target: Path) -> list[dict]:
         if not gitignore.exists()
         else _missing_privacy_ignores(target, include_nested=False)
     )
-    nested_only = [
-        pattern for pattern in missing_with_nested if pattern not in set(missing_root_only)
-    ]
+    nested_only = _nested_privacy_blockers(target, missing_with_nested)
     actions: list[dict] = []
     if missing_root_only:
         actions.append(
@@ -959,7 +987,9 @@ def _apply_doctor_repair_action(target: Path, root: Path, action: dict) -> None:
     kind = action["kind"]
     if kind == "placeholder":
         _write_text_no_follow(
-            target, target / action["path"], PRIVATE_PLACEHOLDER_TEXT[action["path"]]
+            target,
+            target / action["path"],
+            _private_placeholder_text(root, action["path"]),
         )
         return
     if kind == "gitignore":
@@ -1298,6 +1328,52 @@ def _missing_privacy_ignores(target: Path, *, include_nested: bool = True) -> li
     if "memory/*" not in missing and _has_unsafe_memory_exception(memory_rules):
         missing.append("memory/*")
     return missing
+
+
+def _nested_privacy_blockers(target: Path, patterns: list[str]) -> list[str]:
+    """Patterns a root `.gitignore` append cannot fix, because a lower-level ignore file
+    unignores them.
+
+    Decided by simulating the repair: apply the lines the append would add on top of the
+    existing root rules, then the nested rules (Git gives deeper ignore files
+    precedence), and check every probe. Anything still unignored is reported `manual`.
+
+    This is deliberately independent of whether the root rule was missing as well. The
+    previous subtraction of `missing_root_only` from `missing_with_nested` silently
+    dropped exactly that case, so repair appended the root rule, reported success, and
+    left the private path exposed.
+    """
+    root_rules = _privacy_rules_at_base(target, "")
+    blocked: list[str] = []
+    for pattern in patterns:
+        repaired_root = list(root_rules)
+        for raw_line in PRIVACY_IGNORE_REPAIR_LINES[pattern].splitlines():
+            line = raw_line.rstrip(" ")
+            if not line or line.startswith("#"):
+                continue
+            negated = line.startswith("!")
+            body = line[1:] if negated else line
+            if body:
+                repaired_root.append(("", negated, body.replace("\\", "/")))
+        for probe in PRIVACY_IGNORE_PROBES[pattern]:
+            nested = _nested_privacy_rules_for_probe(target, probe)
+            if not nested:
+                continue
+            if not _ignored_by_rules(repaired_root + nested, probe):
+                blocked.append(pattern)
+                break
+    return blocked
+
+
+def _nested_privacy_rules_for_probe(
+    target: Path, rel_path: str
+) -> list[tuple[str, bool, str]]:
+    """Rules contributed only by `.gitignore` files below the workspace root."""
+    rules: list[tuple[str, bool, str]] = []
+    parts = rel_path.replace("\\", "/").split("/")
+    for depth in range(1, len(parts)):
+        rules.extend(_privacy_rules_at_base(target, "/".join(parts[:depth])))
+    return rules
 
 
 def _privacy_rules_for_probe(
