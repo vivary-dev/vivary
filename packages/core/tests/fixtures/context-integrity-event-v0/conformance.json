@@ -1,0 +1,235 @@
+{
+  "note": "Frozen conformance fixtures for the ContextIntegrityEvent v0 seam (docs/ARCHITECTURE.md). Any implementation of the envelope must reproduce these decisions and reason codes exactly. Changing an expectation here is a schema version bump, not an edit. Each case appends its event to a fresh sink.",
+  "schema_under_test": "vivary.context-integrity-event/v0",
+  "sink": { "project": "vivary-lattice-lab", "visibility": "local", "policy_version": "policy/v0" },
+  "cases": [
+    {
+      "name": "minimal-valid-event-is-accepted",
+      "event": {
+        "schema": "vivary.context-integrity-event/v0",
+        "event_id": "evt_fx_minimal",
+        "event_type": "workspace.observed",
+        "occurred_at": "2026-07-20T15:00:00.000Z",
+        "recorded_at": "2026-07-20T15:00:01.000Z",
+        "producer": { "module": "tropo", "version": "0.0.0" },
+        "actor": { "kind": "agent", "id": "claude-code:vivary-lattice" },
+        "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+        "subject": { "kind": "workspace", "id": "lab://fixtures" },
+        "scope": { "project": "vivary-lattice-lab", "visibility": "local" },
+        "payload": {}
+      },
+      "expect": { "decision": "accepted", "reason_codes": [] }
+    },
+    {
+      "name": "full-envelope-with-fingerprinted-evidence-and-extensions-is-accepted",
+      "event": {
+        "schema": "vivary.context-integrity-event/v0",
+        "event_id": "evt_fx_full",
+        "event_type": "memory.assertion.proposed",
+        "occurred_at": "2026-07-20T15:00:00.000Z",
+        "recorded_at": "2026-07-20T15:00:01.000Z",
+        "producer": { "module": "bellamente", "version": "0.0.0" },
+        "actor": { "kind": "agent", "id": "codex:task-123" },
+        "workspace": { "id": "ws_lattice_fixture", "revision": "git:abc123" },
+        "subject": { "kind": "repository", "id": "repo_vivary" },
+        "scope": { "project": "vivary-lattice-lab", "visibility": "local" },
+        "causation_id": "receipt_fx_0001",
+        "correlation_id": "task_fx_0001",
+        "policy": {
+          "authority": "learned",
+          "decision": "review_required",
+          "reason_codes": ["identity_unresolved", "value_conflict"]
+        },
+        "evidence": [
+          { "kind": "file", "ref": "docs/source.md", "digest": "sha256:0f9c2a" }
+        ],
+        "payload": { "assertion": "canonical checkout is lab://fixtures/canonical" },
+        "extensions": { "bellamente": { "recall_trace": "trace_fx_0001" } }
+      },
+      "expect": { "decision": "accepted", "reason_codes": [] }
+    },
+    {
+      "name": "unknown-schema-version-fails-closed",
+      "event": {
+        "schema": "vivary.context-integrity-event/v1",
+        "event_id": "evt_fx_wrong_version",
+        "event_type": "workspace.observed",
+        "occurred_at": "2026-07-20T15:00:00.000Z",
+        "recorded_at": "2026-07-20T15:00:01.000Z",
+        "producer": { "module": "tropo", "version": "0.0.0" },
+        "actor": { "kind": "agent", "id": "claude-code:vivary-lattice" },
+        "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+        "subject": { "kind": "workspace", "id": "lab://fixtures" },
+        "scope": { "project": "vivary-lattice-lab", "visibility": "local" },
+        "payload": {}
+      },
+      "expect": { "decision": "rejected", "reason_codes": ["unsupported_schema"] }
+    },
+    {
+      "name": "missing-event-id-is-rejected",
+      "event": {
+        "schema": "vivary.context-integrity-event/v0",
+        "event_type": "workspace.observed",
+        "occurred_at": "2026-07-20T15:00:00.000Z",
+        "recorded_at": "2026-07-20T15:00:01.000Z",
+        "producer": { "module": "tropo", "version": "0.0.0" },
+        "actor": { "kind": "agent", "id": "claude-code:vivary-lattice" },
+        "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+        "subject": { "kind": "workspace", "id": "lab://fixtures" },
+        "scope": { "project": "vivary-lattice-lab", "visibility": "local" },
+        "payload": {}
+      },
+      "expect": { "decision": "rejected", "reason_codes": ["missing_event_id"] }
+    },
+    {
+      "name": "actor-without-id-is-rejected",
+      "event": {
+        "schema": "vivary.context-integrity-event/v0",
+        "event_id": "evt_fx_anonymous",
+        "event_type": "workspace.observed",
+        "occurred_at": "2026-07-20T15:00:00.000Z",
+        "recorded_at": "2026-07-20T15:00:01.000Z",
+        "producer": { "module": "tropo", "version": "0.0.0" },
+        "actor": { "kind": "agent" },
+        "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+        "subject": { "kind": "workspace", "id": "lab://fixtures" },
+        "scope": { "project": "vivary-lattice-lab", "visibility": "local" },
+        "payload": {}
+      },
+      "expect": { "decision": "rejected", "reason_codes": ["missing_actor_identity"] }
+    },
+    {
+      "name": "missing-producer-is-rejected",
+      "event": {
+        "schema": "vivary.context-integrity-event/v0",
+        "event_id": "evt_fx_no_producer",
+        "event_type": "workspace.observed",
+        "occurred_at": "2026-07-20T15:00:00.000Z",
+        "recorded_at": "2026-07-20T15:00:01.000Z",
+        "actor": { "kind": "agent", "id": "claude-code:vivary-lattice" },
+        "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+        "subject": { "kind": "workspace", "id": "lab://fixtures" },
+        "scope": { "project": "vivary-lattice-lab", "visibility": "local" },
+        "payload": {}
+      },
+      "expect": { "decision": "rejected", "reason_codes": ["missing_producer"] }
+    },
+    {
+      "name": "missing-subject-is-rejected",
+      "event": {
+        "schema": "vivary.context-integrity-event/v0",
+        "event_id": "evt_fx_no_subject",
+        "event_type": "workspace.observed",
+        "occurred_at": "2026-07-20T15:00:00.000Z",
+        "recorded_at": "2026-07-20T15:00:01.000Z",
+        "producer": { "module": "tropo", "version": "0.0.0" },
+        "actor": { "kind": "agent", "id": "claude-code:vivary-lattice" },
+        "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+        "scope": { "project": "vivary-lattice-lab", "visibility": "local" },
+        "payload": {}
+      },
+      "expect": { "decision": "rejected", "reason_codes": ["missing_subject"] }
+    },
+    {
+      "name": "missing-scope-is-rejected",
+      "event": {
+        "schema": "vivary.context-integrity-event/v0",
+        "event_id": "evt_fx_no_scope",
+        "event_type": "workspace.observed",
+        "occurred_at": "2026-07-20T15:00:00.000Z",
+        "recorded_at": "2026-07-20T15:00:01.000Z",
+        "producer": { "module": "tropo", "version": "0.0.0" },
+        "actor": { "kind": "agent", "id": "claude-code:vivary-lattice" },
+        "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+        "subject": { "kind": "workspace", "id": "lab://fixtures" },
+        "payload": {}
+      },
+      "expect": { "decision": "rejected", "reason_codes": ["missing_scope"] }
+    },
+    {
+      "name": "unparseable-occurred-at-is-rejected",
+      "event": {
+        "schema": "vivary.context-integrity-event/v0",
+        "event_id": "evt_fx_bad_occurred",
+        "event_type": "workspace.observed",
+        "occurred_at": "yesterday-ish",
+        "recorded_at": "2026-07-20T15:00:01.000Z",
+        "producer": { "module": "tropo", "version": "0.0.0" },
+        "actor": { "kind": "agent", "id": "claude-code:vivary-lattice" },
+        "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+        "subject": { "kind": "workspace", "id": "lab://fixtures" },
+        "scope": { "project": "vivary-lattice-lab", "visibility": "local" },
+        "payload": {}
+      },
+      "expect": { "decision": "rejected", "reason_codes": ["invalid_occurred_at"] }
+    },
+    {
+      "name": "missing-recorded-at-is-rejected",
+      "event": {
+        "schema": "vivary.context-integrity-event/v0",
+        "event_id": "evt_fx_no_recorded",
+        "event_type": "workspace.observed",
+        "occurred_at": "2026-07-20T15:00:00.000Z",
+        "producer": { "module": "tropo", "version": "0.0.0" },
+        "actor": { "kind": "agent", "id": "claude-code:vivary-lattice" },
+        "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+        "subject": { "kind": "workspace", "id": "lab://fixtures" },
+        "scope": { "project": "vivary-lattice-lab", "visibility": "local" },
+        "payload": {}
+      },
+      "expect": { "decision": "rejected", "reason_codes": ["invalid_recorded_at"] }
+    },
+    {
+      "name": "evidence-without-digest-is-rejected",
+      "event": {
+        "schema": "vivary.context-integrity-event/v0",
+        "event_id": "evt_fx_bare_evidence",
+        "event_type": "memory.assertion.proposed",
+        "occurred_at": "2026-07-20T15:00:00.000Z",
+        "recorded_at": "2026-07-20T15:00:01.000Z",
+        "producer": { "module": "bellamente", "version": "0.0.0" },
+        "actor": { "kind": "agent", "id": "codex:task-123" },
+        "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+        "subject": { "kind": "repository", "id": "repo_vivary" },
+        "scope": { "project": "vivary-lattice-lab", "visibility": "local" },
+        "evidence": [{ "kind": "file", "ref": "docs/source.md" }],
+        "payload": {}
+      },
+      "expect": { "decision": "rejected", "reason_codes": ["evidence_not_fingerprinted"] }
+    },
+    {
+      "name": "cross-project-write-fails-closed",
+      "event": {
+        "schema": "vivary.context-integrity-event/v0",
+        "event_id": "evt_fx_foreign",
+        "event_type": "workspace.observed",
+        "occurred_at": "2026-07-20T15:00:00.000Z",
+        "recorded_at": "2026-07-20T15:00:01.000Z",
+        "producer": { "module": "tropo", "version": "0.0.0" },
+        "actor": { "kind": "agent", "id": "claude-code:vivary-lattice" },
+        "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+        "subject": { "kind": "workspace", "id": "lab://fixtures" },
+        "scope": { "project": "some-other-project", "visibility": "local" },
+        "payload": {}
+      },
+      "expect": { "decision": "rejected", "reason_codes": ["cross_project_write"] }
+    },
+    {
+      "name": "private-event-into-broader-sink-fails-closed",
+      "event": {
+        "schema": "vivary.context-integrity-event/v0",
+        "event_id": "evt_fx_private",
+        "event_type": "memory.assertion.proposed",
+        "occurred_at": "2026-07-20T15:00:00.000Z",
+        "recorded_at": "2026-07-20T15:00:01.000Z",
+        "producer": { "module": "bellamente", "version": "0.0.0" },
+        "actor": { "kind": "human", "id": "jeff" },
+        "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+        "subject": { "kind": "repository", "id": "repo_vivary" },
+        "scope": { "project": "vivary-lattice-lab", "visibility": "private" },
+        "payload": {}
+      },
+      "expect": { "decision": "rejected", "reason_codes": ["private_to_public_write"] }
+    }
+  ]
+}

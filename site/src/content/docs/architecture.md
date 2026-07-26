@@ -1,6 +1,7 @@
 ---
 title: "Architecture"
 description: "The four-layer model and the principles behind Vivary."
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/ARCHITECTURE.md"
 ---
 
 This page explains how Vivary is put together and why. It's the deep version; for the
@@ -90,6 +91,45 @@ npm/PyPI package today.
 
 Baseline = **tropo + strato** (knowledge + the self-improving loop over it).
 `ozone` and `exo` snap on as needed.
+
+### The shared seam: `vivary-core`
+
+The four layers above are the *vertical* column. `vivary-core` is the horizontal
+seam beneath them — the governed-context primitives every role package speaks
+through, so that "what is true, and how do we know" has exactly one implementation
+rather than four that drift.
+
+It is a library, not a layer and not a CLI. Nothing about the baseline changes
+because it exists: you still install and run `tropo`, `strato`, `ozone`, `exo`.
+
+```
+   exo · ozone · strato · tropo      ── the layers, each with its own CLI
+   ─────────────────────────────
+          vivary-core               ── the seam they share (library, no CLI)
+```
+
+What it owns:
+
+- **Determinism** — canonical JSON, sha256 fingerprints, deterministic IDs. Same
+  input, same bytes, on every machine.
+- **Observation** — read-only checkout observation over explicit allowlisted roots.
+  Never fetches, never writes, never crawls.
+- **Projection** — observations into a typed evidence graph, where divergent
+  checkouts become explicit unresolved conflicts with both sides preserved, never
+  auto-resolved.
+- **Capsules** — bounded task context, every claim carrying its evidence and its
+  selection reason, every omission recorded.
+- **Receipts and evidence** — what actually ran, bound to the exact capsule and
+  workspace fingerprint it ran against, in an append-only store.
+
+The governing rule is the same one the rest of Vivary follows: it never resolves an
+ambiguity it merely observed. Conflicts are handed to review, not to confidence, and
+anything unproven is reported `unknown` rather than guessed.
+
+**Status:** merged into `dev` and not yet reachable from any shipping CLI — wiring it
+outward is tracked in [#207](https://github.com/vivary-dev/vivary/issues/207). Until
+that lands, treat this section as describing the seam's contract, not a user-facing
+feature.
 
 ## 4. The moat
 

@@ -12,12 +12,21 @@ Start here.
 | [ACTIVE-CONTEXT.md](ACTIVE-CONTEXT.md) | Optional CocoIndex-code sidecar for active semantic code context. |
 | [LLM-ACTIVE-CONTEXT.md](LLM-ACTIVE-CONTEXT.md) | Copyable LLM instructions for graph-first CocoIndex-code retrieval. |
 | [SEMANTIC-MEMORY.md](SEMANTIC-MEMORY.md) | Architecture and optional adapter plan for semantic memory providers such as Cognee. |
-| [PRODUCT-ROADMAP.md](PRODUCT-ROADMAP.md) | High-leverage product backlog for context compression, maps, recall, and optional integrations. |
+| [WHITE-PAPER.md](WHITE-PAPER.md) | Technical argument, minimal architecture, human-gate model, and proof standard. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The layer model (tropo → strato → ozone → exo) and the why. |
 | [OBSIDIAN.md](OBSIDIAN.md) | Optional Obsidian setup for fans (never required). |
 | [SIGNALS.md](SIGNALS.md) | Public npm, PyPI, and GitHub metrics snapshots. |
 | [RELEASE-WORKFLOW.md](RELEASE-WORKFLOW.md) | End-of-update release truth, docs/site sync, publishing, and post-copy checklist. |
-| [FAQ.md](FAQ.md) | Common questions. |
+
+## Project planning (repo only)
+
+These are working documents for maintainers. They are not generated into the
+Starlight guides.
+
+| Document | What it covers |
+|---|---|
+| [PRODUCT-ROADMAP.md](PRODUCT-ROADMAP.md) | Canonical outcome map behind the public [roadmap page](https://vivary.vercel.app/roadmap/). |
+| [CONTENT-ROADMAP.md](CONTENT-ROADMAP.md) | Internal proof-led content and publishing plan. |
 
 Deeper, per-package: [tropo SPEC](../packages/tropo/SPEC.md) (the normative
 folder-as-type model), and each package's `README.md`.

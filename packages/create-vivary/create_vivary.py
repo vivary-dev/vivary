@@ -9,13 +9,14 @@ import importlib.util
 import json
 import os
 import platform
+import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import time
 from datetime import date, datetime, timezone
-from fnmatch import fnmatchcase
 from pathlib import Path
 
 
@@ -50,6 +51,7 @@ RECEIPT_KNOWN_FLAGS = RECEIPT_VALUE_FLAGS | {
     "--json",
     "--no-wizard",
     "--obsidian",
+    "--repair",
     "--trend",
     "--version",
     "--yes",
@@ -82,6 +84,60 @@ REQUIRED_WORKSPACE_FILES = (
     ".claude/skills/loops/SKILL.md",
     ".agents/skills/strato/SKILL.md",
     ".agents/skills/loops/SKILL.md",
+)
+
+# Private placeholders repair can regenerate, in report order. `USER.md` and `MEMORY.md`
+# resolve to the same canonical templates `_copy_plan` scaffolds from — repair must not
+# carry a second definition of them (see `_private_placeholder_text`). The `.gitkeep`
+# files have no template; empty is their canonical content.
+PRIVATE_PLACEHOLDER_PATHS = (
+    "USER.md",
+    "MEMORY.md",
+    "memory/.gitkeep",
+    "heartbeat-reports/.gitkeep",
+)
+PRIVATE_PLACEHOLDER_TEMPLATES = {
+    "USER.md": "USER.template.md",
+    "MEMORY.md": "MEMORY.template.md",
+}
+PRIVATE_PLACEHOLDER_LITERALS = {
+    "memory/.gitkeep": "",
+    "heartbeat-reports/.gitkeep": "",
+}
+
+PRIVACY_IGNORE_PROBES = {
+    "USER.md": ("USER.md",),
+    "MEMORY.md": ("MEMORY.md",),
+    "memory/*": ("memory/private.md", "memory/private.txt", "memory/secret.md"),
+    "heartbeat-reports/*": (
+        "heartbeat-reports/private.md",
+        "heartbeat-reports/private.txt",
+        "heartbeat-reports/summary.json",
+    ),
+    ".strato/private/": (
+        ".strato/private/secret.md",
+        ".strato/private/session.json",
+    ),
+    "*.vivary-tmp": (
+        ".USER.md.abc.vivary-tmp",
+        "modules/codebase/.index.md.abc.vivary-tmp",
+    ),
+}
+
+PRIVACY_IGNORE_REPAIR_LINES = {
+    "USER.md": "USER.md",
+    "MEMORY.md": "MEMORY.md",
+    "memory/*": "memory/*\n!memory/.gitkeep",
+    "heartbeat-reports/*": "heartbeat-reports/*\n!heartbeat-reports/.gitkeep",
+    ".strato/private/": ".strato/private/",
+    "*.vivary-tmp": "*.vivary-tmp",
+}
+
+REPAIR_WORKSPACE_MARKERS = (
+    "tropo.toml",
+    "AGENTS.md",
+    "STRATO.md",
+    "modules/index.md",
 )
 
 PRESET_STARTERS = {
@@ -152,8 +208,81 @@ class ScaffoldError(RuntimeError):
     """Raised when a workspace cannot be scaffolded safely."""
 
 
+class RepairRefusal(ScaffoldError):
+    """Raised when a repair is refused for a reason worth reporting by name.
+
+    Subclasses `ScaffoldError` so every existing `except ScaffoldError` handler keeps
+    working unchanged; `reason_code` is what lets a caller say *why* it refused rather
+    than guessing at a single catch-all cause.
+    """
+
+    def __init__(self, message: str, *, reason_code: str) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+
+
 def default_repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def _is_symlink_or_junction(path: Path) -> bool:
+    try:
+        if path.is_symlink():
+            return True
+    except OSError:
+        pass
+
+    try:
+        attrs = os.stat(path, follow_symlinks=False).st_file_attributes
+    except (AttributeError, OSError):
+        attrs = 0
+    if attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400):
+        return True
+
+    is_junction = getattr(path, "is_junction", None)
+    if is_junction is None:
+        return False
+    try:
+        return bool(is_junction())
+    except OSError:
+        return False
+
+
+def _reparse_point_is_dir(path: Path) -> bool:
+    """Whether `path` is a reparse point that the OS treats as a directory.
+
+    Windows junctions and directory symlinks must be removed with `rmdir`, not
+    `unlink`. Returns `False` on POSIX — `st_file_attributes` does not exist there, and
+    routing a symlink-to-directory to `os.rmdir` would raise ENOTDIR.
+    """
+    try:
+        st = os.stat(path, follow_symlinks=False)
+        attrs = st.st_file_attributes
+    except (AttributeError, OSError):
+        return False
+    reparse = attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    directory = attrs & getattr(stat, "FILE_ATTRIBUTE_DIRECTORY", 0x10)
+    return bool(reparse and directory)
+
+
+def _has_multiple_hardlinks(path: Path) -> bool:
+    try:
+        return path.exists() and path.is_file() and os.stat(path).st_nlink > 1
+    except OSError:
+        return False
+
+
+def _read_repair_text(path: Path) -> str:
+    if _has_multiple_hardlinks(path):
+        raise RepairRefusal(
+            f"refusing to rewrite multi-linked file: {path}", reason_code="hardlinked"
+        )
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise RepairRefusal(
+            f"refusing to rewrite non-UTF-8 file: {path}", reason_code="non-utf8"
+        ) from exc
 
 
 def _resolve_scaffold_target(target: str | Path) -> Path:
@@ -163,10 +292,28 @@ def _resolve_scaffold_target(target: str | Path) -> Path:
     parts = absolute.parts[1:] if absolute.anchor else absolute.parts
     for part in parts:
         current = current / part
-        if current.exists() or current.is_symlink():
-            if current.is_symlink():
+        if current.exists() or _is_symlink_or_junction(current):
+            if _is_symlink_or_junction(current):
                 raise ScaffoldError(
-                    "refusing to scaffold through symlinked target path: "
+                    "refusing to scaffold through symlinked target path or junction: "
+                    f"{current}"
+                )
+        else:
+            break
+    return absolute.resolve(strict=False)
+
+
+def _resolve_doctor_repair_target(target: str | Path) -> Path:
+    requested = Path(target)
+    absolute = requested if requested.is_absolute() else Path.cwd() / requested
+    current = Path(absolute.anchor) if absolute.anchor else Path()
+    parts = absolute.parts[1:] if absolute.anchor else absolute.parts
+    for part in parts:
+        current = current / part
+        if current.exists() or _is_symlink_or_junction(current):
+            if _is_symlink_or_junction(current):
+                raise ScaffoldError(
+                    "refusing to repair through symlinked target path or junction: "
                     f"{current}"
                 )
         else:
@@ -353,11 +500,8 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
     findings: list[str] = []
     if not errors:
         try:
-            tropo = _load_tropo(root)
-            resolver = tropo.ConfigResolver(str(target), str(Path(tropo.__file__).parent))
-            docs = tropo.analyze(str(target), [], resolver)
+            _tropo, _resolver, docs, nodes, edges = _doctor_graph_context(target, root)
             findings = [f.render() for doc in docs for f in doc.findings]
-            nodes, edges = tropo.build_graph(docs)
             graph = {
                 "nodes": len(nodes),
                 "edges": len(edges),
@@ -401,6 +545,631 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         "backend": backend_name,
         "memory": memory_report,
     }
+
+
+def doctor_repair_workspace(
+    target: str | Path,
+    *,
+    repo_root: str | Path | None = None,
+    yes: bool = False,
+) -> dict:
+    """Plan or apply deterministic doctor repairs, then return a doctor report."""
+    root = Path(repo_root) if repo_root is not None else default_repo_root()
+    root = root.resolve()
+    try:
+        target = _resolve_doctor_repair_target(target)
+    except ScaffoldError as exc:
+        return _doctor_repair_error_report(target, yes=yes, error=exc)
+
+    actions = _doctor_repair_actions(target, root)
+    if yes:
+        for action in actions:
+            if action["status"] != "safe":
+                continue
+            try:
+                _apply_doctor_repair_action(target, root, action)
+            except (OSError, ScaffoldError) as exc:
+                action["status"] = "refused"
+                action["applied"] = False
+                action["summary"] = f"{action['summary']} Refused: {exc}"
+            else:
+                action["status"] = "applied"
+                action["applied"] = True
+
+    report = doctor_workspace(target, repo_root=root)
+    report["repair"] = {
+        "mode": "applied" if yes else "dry-run",
+        "actions": actions,
+    }
+    refused = [a for a in actions if a["status"] == "refused"]
+    if refused:
+        report["errors"].extend(
+            f"repair refused: {a['path']}: {a['summary']}" for a in refused
+        )
+        report["ok"] = False
+    return report
+
+
+def _doctor_repair_error_report(target: str | Path, *, yes: bool, error: Exception) -> dict:
+    return {
+        "ok": False,
+        "root": str(target),
+        "errors": [f"doctor --repair: {error}"],
+        "warnings": [],
+        "graph": {"nodes": 0, "edges": 0, "broken": 0},
+        "backend": "unknown",
+        "memory": {
+            "enabled": False,
+            "provider": "none",
+            "mode": "none",
+            "status": "disabled",
+            "config": None,
+            "privacy": "not-indexed",
+            "detail": "doctor repair refused to inspect target",
+        },
+        "repair": {
+            "mode": "applied" if yes else "dry-run",
+            "actions": [],
+        },
+    }
+
+
+def _doctor_graph_context(target: Path, root: Path):
+    tropo = _load_tropo(root)
+    resolver = tropo.ConfigResolver(str(target), str(Path(tropo.__file__).parent))
+    docs = tropo.analyze(str(target), [], resolver)
+    nodes, edges = tropo.build_graph(docs)
+    return tropo, resolver, docs, nodes, edges
+
+
+def _repair_action(
+    kind: str,
+    status: str,
+    path: str,
+    summary: str,
+    *,
+    details: dict | None = None,
+) -> dict:
+    action = {
+        "kind": kind,
+        "status": status,
+        "path": path.replace("\\", "/"),
+        "summary": summary,
+        "applied": False,
+    }
+    if details:
+        action["details"] = details
+    return action
+
+
+def _doctor_repair_actions(target: Path, root: Path) -> list[dict]:
+    actions: list[dict] = []
+    if not target.exists() or not target.is_dir():
+        return actions
+    if not _looks_like_vivary_workspace(target):
+        return [
+            _repair_action(
+                "workspace",
+                "manual",
+                ".",
+                (
+                    "Target does not look like a Vivary workspace; run "
+                    "`create-vivary init` for a new workspace or "
+                    "`create-vivary adopt` for an existing project."
+                ),
+                details={"required_markers": list(REPAIR_WORKSPACE_MARKERS)},
+            )
+        ]
+
+    actions.extend(_private_placeholder_repair_actions(target))
+    actions.extend(_privacy_gitignore_repair_actions(target))
+
+    try:
+        _tropo, resolver, docs, _nodes, edges = _doctor_graph_context(target, root)
+    except Exception:
+        return actions
+
+    actions.extend(_tropo_repair_actions(docs))
+    actions.extend(_exo_guidance_actions(resolver, docs, edges))
+    return actions
+
+
+def _looks_like_vivary_workspace(target: Path) -> bool:
+    return all((target / marker).exists() for marker in REPAIR_WORKSPACE_MARKERS)
+
+
+def _private_placeholder_text(root: Path, rel: str) -> str:
+    """Canonical content for a private placeholder.
+
+    `USER.md` and `MEMORY.md` are read from the same templates `_copy_plan` scaffolds
+    from, so a repaired workspace gets exactly what a fresh one would — including the
+    identity, privacy-boundary, decision and open-loop prompts — and future template
+    edits reach repaired workspaces instead of drifting away from a second copy.
+    """
+    template = PRIVATE_PLACEHOLDER_TEMPLATES.get(rel)
+    if template is None:
+        return PRIVATE_PLACEHOLDER_LITERALS[rel]
+    source = _source_paths(root)["strato_templates"] / template
+    try:
+        return source.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        # `UnicodeDecodeError` is a `ValueError`, so it escaped the old `OSError`-only
+        # handler here *and* the apply loop's `except (OSError, ScaffoldError)`. Not
+        # `_read_repair_text`: that adds a multi-hardlink refusal, which is meaningful
+        # for a workspace file being rewritten and wrong for a read-only template.
+        raise ScaffoldError(f"could not read canonical template {source}: {exc}")
+
+
+def _private_placeholder_repair_actions(target: Path) -> list[dict]:
+    actions: list[dict] = []
+    for rel in PRIVATE_PLACEHOLDER_PATHS:
+        path = target / rel
+        unsafe = _unsafe_repair_component(target, path)
+        if unsafe is not None:
+            actions.append(
+                _repair_action(
+                    "placeholder",
+                    "refused",
+                    rel,
+                    (
+                        "Refusing to repair private/runtime placeholder through "
+                        f"unsafe existing path component `{unsafe}`."
+                    ),
+                )
+            )
+        elif path.exists() and not path.is_file():
+            actions.append(
+                _repair_action(
+                    "placeholder",
+                    "refused",
+                    rel,
+                    "Refusing to replace existing non-file private/runtime placeholder.",
+                )
+            )
+        elif not path.exists():
+            actions.append(
+                _repair_action(
+                    "placeholder",
+                    "safe",
+                    rel,
+                    f"Regenerate missing ignored private/runtime placeholder `{rel}`.",
+                )
+            )
+    return actions
+
+
+def _unsafe_repair_component(target: Path, path: Path) -> Path | None:
+    for component in _existing_components(target, path):
+        if component == target:
+            continue
+        if _is_symlink_or_junction(component):
+            return component
+        if component == path and _has_multiple_hardlinks(component):
+            return component
+        if component != path and component.is_file():
+            return component
+    return None
+
+
+def _privacy_gitignore_repair_actions(target: Path) -> list[dict]:
+    gitignore = target / ".gitignore"
+    if _is_symlink_or_junction(gitignore):
+        return [
+            _repair_action(
+                "gitignore",
+                "refused",
+                ".gitignore",
+                "Refusing to inspect or edit symlinked `.gitignore`.",
+            )
+        ]
+    if gitignore.exists() and not gitignore.is_file():
+        return [
+            _repair_action(
+                "gitignore",
+                "refused",
+                ".gitignore",
+                "Refusing to inspect or edit non-file `.gitignore`.",
+            )
+        ]
+    if gitignore.exists():
+        try:
+            _read_repair_text(gitignore)
+        except ScaffoldError as exc:
+            return [
+                _repair_action(
+                    "gitignore",
+                    "refused",
+                    ".gitignore",
+                    f"Refusing to inspect or edit `.gitignore`: {exc}",
+                )
+            ]
+    missing_with_nested = (
+        list(PRIVACY_IGNORE_REPAIR_LINES)
+        if not gitignore.exists()
+        else _missing_privacy_ignores(target)
+    )
+    missing_root_only = (
+        missing_with_nested
+        if not gitignore.exists()
+        else _missing_privacy_ignores(target, include_nested=False)
+    )
+    nested_only = _unfixable_privacy_blockers(target, missing_with_nested)
+    # An append that provably will not fix the pattern must not be offered as `safe`,
+    # or repair rewrites `.gitignore` on every run without ever converging.
+    missing_root_only = [
+        pattern for pattern in missing_root_only if pattern not in set(nested_only)
+    ]
+    actions: list[dict] = []
+    if missing_root_only:
+        actions.append(
+            _repair_action(
+                "gitignore",
+                "safe",
+                ".gitignore",
+                "Append missing privacy ignore rules without removing existing rules.",
+                details={"missing": missing_root_only},
+            )
+        )
+    if nested_only:
+        actions.append(
+            _repair_action(
+                "gitignore",
+                "manual",
+                ".",
+                (
+                    "Lower-level `.gitignore` rules still unignore private/runtime "
+                    "paths; inspect nested ignore files before rerunning repair."
+                ),
+                details={"missing": nested_only},
+            )
+        )
+    return actions
+
+
+def _tropo_repair_actions(docs) -> list[dict]:
+    actions: list[dict] = []
+    for doc in docs:
+        rel = doc.rel.replace("\\", "/")
+        w210_findings = [finding for finding in doc.findings if finding.code == "W210"]
+        if w210_findings:
+            safe, manual = _w210_removal_plan(doc, w210_findings)
+        else:
+            safe, manual = [], []
+        if safe:
+            actions.append(
+                _repair_action(
+                    "tropo-w210",
+                    "safe",
+                    rel,
+                    "Remove redundant derived frontmatter fields reported as W210.",
+                    details={
+                        "remove": [item["key"] for item in safe],
+                        "lines": [item["line"] for item in safe],
+                    },
+                )
+            )
+        if manual:
+            actions.append(
+                _repair_action(
+                    "tropo-w210",
+                    "manual",
+                    rel,
+                    _w210_manual_summary(manual),
+                    details={"manual": manual},
+                )
+            )
+        for finding in doc.findings:
+            if finding.code != "W220":
+                continue
+            field, missing = _parse_w220_message(finding.message)
+            summary = (
+                f"Broken ref in `{field}` points to missing id `{missing}`. "
+                "Manual options: create the missing typed node, rename the ref, "
+                "or remove the edge."
+            )
+            actions.append(
+                _repair_action(
+                    "tropo-w220",
+                    "manual",
+                    finding.path,
+                    summary,
+                    details={
+                        "field": field,
+                        "missing_id": missing,
+                        "line": finding.line,
+                        "options": [
+                            "create the missing typed node",
+                            "rename the ref",
+                            "remove the edge",
+                        ],
+                    },
+                )
+            )
+    return actions
+
+
+# A W210 field can only be removed automatically when its line is a simple top-level
+# scalar. These indicators open a block scalar, whose value continues onto following
+# lines, so deleting the one line would silently orphan the rest. Shared by the planner
+# and `_apply_w210_fix`: if the two definitions drifted, the planner would call a field
+# safe and the apply step would then refuse it.
+W210_BLOCK_SCALAR_INDICATORS = {"|", ">", "|-", ">-", "|+", ">+"}
+
+W210_COMPLEX_SUMMARY = "W210 derived metadata uses complex YAML; remove it manually."
+W210_MANUAL_REASON_TEXT = {
+    "complex": "the field is not a simple top-level scalar",
+    "stale": "the reported line no longer matches the field",
+    "hardlinked": "the file has multiple hard links",
+    "non-utf8": "the file is not UTF-8",
+    "unreadable": "the file could not be read",
+}
+W210_MANUAL_REASON_ORDER = ("complex", "stale", "hardlinked", "non-utf8", "unreadable")
+W210_MANUAL_UNKNOWN_TEXT = "it could not be repaired automatically"
+
+
+def _w210_manual_summary(manual: list[dict]) -> str:
+    """Name the actual reason a W210 field was left for a human.
+
+    Every failure used to report "complex YAML", so a user whose file was non-UTF-8,
+    hard-linked or unreadable was told to hand-edit YAML that was not the problem.
+    Human mode omits `details`, so this sentence is all they get.
+    """
+    codes = {entry.get("reason_code") for entry in manual}
+    if codes == {"complex"}:
+        return W210_COMPLEX_SUMMARY
+    reasons = [
+        W210_MANUAL_REASON_TEXT[code] for code in W210_MANUAL_REASON_ORDER if code in codes
+    ]
+    if codes - set(W210_MANUAL_REASON_ORDER):
+        reasons.append(W210_MANUAL_UNKNOWN_TEXT)
+    if not reasons:
+        reasons = [W210_MANUAL_UNKNOWN_TEXT]
+    if len(reasons) == 1:
+        joined = reasons[0]
+    else:
+        joined = ", ".join(reasons[:-1]) + f" and {reasons[-1]}"
+    return (
+        "Cannot remove W210 derived metadata automatically because "
+        f"{joined}; remove it manually."
+    )
+
+
+def _w210_removal_plan(doc, findings: list) -> tuple[list[dict], list[dict]]:
+    try:
+        lines = _read_repair_text(Path(doc.full)).splitlines()
+    except (OSError, ScaffoldError) as exc:
+        reason_code = getattr(exc, "reason_code", "unreadable")
+        return [], [
+            {
+                "key": _parse_w210_key(f.message),
+                "line": f.line,
+                "reason": str(exc),
+                "reason_code": reason_code,
+            }
+            for f in findings
+        ]
+
+    safe: list[dict] = []
+    manual: list[dict] = []
+    for finding in findings:
+        key = _parse_w210_key(finding.message)
+        index = finding.line - 1
+        line = lines[index] if 0 <= index < len(lines) else ""
+        holds_key = re.match(rf"^{re.escape(key)}\s*:", line)
+        match = re.match(rf"^{re.escape(key)}\s*:\s*(.+?)\s*$", line)
+        if match and match.group(1).strip() not in W210_BLOCK_SCALAR_INDICATORS:
+            safe.append({"key": key, "line": finding.line})
+        else:
+            # The line still holds the reported field but is not a plain scalar
+            # (block scalar, or a nested mapping whose value starts below) — that is
+            # "complex". A line that does not hold the field at all means the report
+            # no longer describes the file, which is a different problem to explain.
+            reason_code = "complex" if holds_key else "stale"
+            manual.append(
+                {
+                    "key": key,
+                    "line": finding.line,
+                    "reason": W210_MANUAL_REASON_TEXT[reason_code],
+                    "reason_code": reason_code,
+                }
+            )
+    return safe, manual
+
+
+def _parse_w210_key(message: str) -> str:
+    match = re.search(r"field '([^']+)' equals", message)
+    return match.group(1) if match else "unknown"
+
+
+def _parse_w220_message(message: str) -> tuple[str, str]:
+    match = re.search(r"field '([^']+)': ref '([^']+)'", message)
+    if match:
+        return match.group(1), match.group(2)
+    return "unknown", "unknown"
+
+
+def _exo_guidance_actions(resolver, docs, edges: list[dict]) -> list[dict]:
+    info: dict[str, dict] = {}
+    for doc in docs:
+        nid = doc.derived.get("id")
+        if nid is None:
+            continue
+        fields = doc.fields or {}
+        rel = doc.rel.replace("\\", "/")
+        info[nid] = {
+            "id": nid,
+            "type": doc.type,
+            "path": rel,
+            "role": _exo_role_for_path(rel),
+            "status": fields.get("status"),
+            "assignee": fields.get("assignee"),
+        }
+
+    out: dict[str, set[str]] = {}
+    for edge in edges:
+        out.setdefault(edge["from"], set()).add(edge["to"])
+
+    active = sorted(
+        nid
+        for nid, node in info.items()
+        if node["role"] == "change" and node["status"] == "active"
+    )
+    actions: list[dict] = []
+    for i, first in enumerate(active):
+        for second in active[i + 1:]:
+            shared = [
+                target
+                for target in sorted(out.get(first, set()) & out.get(second, set()))
+            ]
+            if not shared:
+                continue
+            actions.append(
+                _repair_action(
+                    "exo-conflict",
+                    "manual",
+                    info[first]["path"],
+                    (
+                        f"Active work items `{first}` and `{second}` both touch "
+                        f"{', '.join(shared)}. Manual options: claim, defer, or split."
+                    ),
+                    details={
+                        "a": first,
+                        "b": second,
+                        "a_path": info[first]["path"],
+                        "b_path": info[second]["path"],
+                        "shared": shared,
+                        "options": ["claim", "defer", "split"],
+                    },
+                )
+            )
+
+    has_conflicts = any(action["kind"] == "exo-conflict" for action in actions)
+    if active and has_conflicts and not _coordination_pack_declares_assignee(resolver):
+        actions.append(
+            _repair_action(
+                "exo-coordination-pack",
+                "manual",
+                "tropo.toml",
+                (
+                    'Claiming active work needs the coordination pack; add '
+                    '`packs = ["coordination"]` to `tropo.toml` if you want '
+                    "exo claim/assignee fields."
+                ),
+                details={"suggested_toml": 'packs = ["coordination"]'},
+            )
+        )
+    return actions
+
+
+def _exo_role_for_path(rel: str) -> str | None:
+    parts = rel.split("/")
+    if len(parts) < 2:
+        return None
+    return {
+        "changes": "change",
+        "modules": "module",
+        "decisions": "decision",
+        "verification": "verification",
+        "gates": "gate",
+    }.get(parts[0])
+
+
+def _coordination_pack_declares_assignee(resolver) -> bool:
+    try:
+        _required, known = resolver.for_dir(str(Path(resolver.root) / "changes")).fields_for(
+            "implementation_slice"
+        )
+    except Exception:
+        return False
+    return "assignee" in known
+
+
+def _apply_doctor_repair_action(target: Path, root: Path, action: dict) -> None:
+    kind = action["kind"]
+    if kind == "placeholder":
+        _write_text_no_follow(
+            target,
+            target / action["path"],
+            _private_placeholder_text(root, action["path"]),
+        )
+        return
+    if kind == "gitignore":
+        _append_privacy_gitignore_lines(target, action["details"]["missing"])
+        return
+    if kind == "tropo-w210":
+        tropo = _load_tropo(root)
+        _apply_w210_fix(
+            target,
+            tropo,
+            action["path"],
+            action["details"]["remove"],
+            action["details"].get("lines", []),
+        )
+        return
+    raise ScaffoldError(f"no automatic repair for {kind}")
+
+
+def _append_privacy_gitignore_lines(target: Path, missing: list[str]) -> None:
+    dst = target / ".gitignore"
+    _ensure_safe_destinations(target, [dst], force=True)
+    existing = _read_repair_text(dst) if dst.exists() else ""
+    text = existing
+    if text and not text.endswith("\n"):
+        text += "\n"
+    if text and not text.endswith("\n\n"):
+        text += "\n"
+    text += "# Vivary private runtime context\n"
+    for pattern in missing:
+        repair_lines = PRIVACY_IGNORE_REPAIR_LINES.get(pattern)
+        if repair_lines:
+            text += repair_lines + "\n"
+    _write_text_no_follow(target, dst, text)
+
+
+def _apply_w210_fix(
+    target: Path,
+    tropo,
+    rel: str,
+    keys: list[str],
+    lines: list[int],
+) -> None:
+    dst = target / rel
+    _ensure_safe_destinations(target, [dst], force=True)
+    text = _read_repair_text(dst)
+    match, normalized = tropo._frontmatter_match(text)
+    if not match:
+        return
+    line_numbers = set(lines)
+    key_set = set(keys)
+    if not line_numbers:
+        raise ScaffoldError(f"refusing W210 repair without exact line data: {rel}")
+    kept = []
+    for index, line in enumerate(match.group(1).split("\n")):
+        doc_line = index + 2
+        if doc_line in line_numbers:
+            matched_key = next(
+                (
+                    key
+                    for key in key_set
+                    if re.match(rf"^{re.escape(key)}\s*:\s*(.+?)\s*$", line)
+                ),
+                None,
+            )
+            if matched_key is None:
+                raise ScaffoldError(f"refusing stale W210 repair for {rel}:{doc_line}")
+            value = re.match(rf"^{re.escape(matched_key)}\s*:\s*(.+?)\s*$", line)
+            if value is None or value.group(1).strip() in W210_BLOCK_SCALAR_INDICATORS:
+                raise ScaffoldError(f"refusing complex W210 repair for {rel}:{doc_line}")
+            continue
+        kept.append(line)
+    new_frontmatter = "\n".join(kept).strip("\n")
+    body = normalized[match.end():]
+    new_text = (
+        "---\n" + new_frontmatter + "\n---\n" + body
+        if new_frontmatter.strip()
+        else body.lstrip("\n")
+    )
+    _write_text_no_follow(target, dst, new_text)
 
 
 # ---------------------------------------------------------------------------
@@ -635,7 +1404,7 @@ def _memory_report(target: Path) -> dict:
 
 
 
-def _missing_privacy_ignores(target: Path) -> list[str]:
+def _missing_privacy_ignores(target: Path, *, include_nested: bool = True) -> list[str]:
     """Return privacy ignore patterns that are not active .gitignore rules.
 
     Doctor should reject comments, negated patterns, and larger unrelated patterns that
@@ -643,55 +1412,181 @@ def _missing_privacy_ignores(target: Path) -> list[str]:
     broad negations and nested memory/.gitignore files, since Git gives lower-level
     ignore files precedence over parent rules.
     """
-    rules = _privacy_ignore_rules(target / ".gitignore", base="")
-    memory_gitignore = target / "memory" / ".gitignore"
-    if memory_gitignore.exists():
-        rules.extend(_privacy_ignore_rules(memory_gitignore, base="memory"))
-
-    probes = {
-        "USER.md": ("USER.md",),
-        "MEMORY.md": ("MEMORY.md",),
-        "memory/*": ("memory/private.md", "memory/private.txt", "memory/secret.md"),
-        "heartbeat-reports/*": (
-            "heartbeat-reports/private.md",
-            "heartbeat-reports/private.txt",
-            "heartbeat-reports/summary.json",
-        ),
-    }
-
-    missing = [
+    return [
         required
-        for required, paths in probes.items()
-        if not all(_ignored_by_rules(rules, path) for path in paths)
+        for required, paths in PRIVACY_IGNORE_PROBES.items()
+        if not all(
+            _probe_is_ignored(target, path, include_nested=include_nested)
+            for path in paths
+        )
     ]
-    if "memory/*" not in missing and _has_unsafe_memory_exception(rules):
-        missing.append("memory/*")
-    return missing
+
+
+def _unfixable_privacy_blockers(target: Path, patterns: list[str]) -> list[str]:
+    """Patterns a root `.gitignore` append provably cannot fix.
+
+    Decided by simulating the append and re-asking `_probe_is_ignored` — the same
+    predicate doctor passes on — so the planner can never report success for a change
+    the follow-up check will reject.
+
+    Anything listed here is reported `manual` *and* withheld from the `safe` append
+    list. Withholding is what makes repair converge: previously an unfixable pattern
+    stayed missing forever, so every run appended another identical block.
+    """
+    blocked: list[str] = []
+    for pattern in patterns:
+        extra = tuple(_repair_line_rules(pattern))
+        if any(
+            not _probe_is_ignored(target, probe, extra_root_rules=extra)
+            for probe in PRIVACY_IGNORE_PROBES[pattern]
+        ):
+            blocked.append(pattern)
+    return blocked
+
+
+def _probe_is_ignored(
+    target: Path,
+    rel_path: str,
+    *,
+    include_nested: bool = True,
+    extra_root_rules: tuple[tuple[str, bool, str], ...] = (),
+) -> bool:
+    """Whether Git would ignore `rel_path` in this workspace.
+
+    One predicate, shared by doctor's pass criterion, the repair planner's prediction
+    of success, and adopt's follow-ups — so the planner can never claim a fix the
+    check it is trying to satisfy will reject.
+
+    Walks the root file first, then downward. Git never descends into an excluded
+    directory, so once a directory component is excluded the answer is settled and a
+    deeper negation cannot re-include the file.
+
+    `extra_root_rules` simulates lines a repair would append to the root file.
+    """
+    rel_path = rel_path.replace("\\", "/")
+    rules = _privacy_rules_at_base(target, "") + list(extra_root_rules)
+    if not include_nested:
+        return _ignored_by_rules(rules, rel_path)
+
+    parts = rel_path.split("/")
+    for depth in range(1, len(parts)):
+        base = "/".join(parts[:depth])
+        if _ignored_by_rules(rules, base):
+            return True
+        rules.extend(_privacy_rules_at_base(target, base))
+    return _ignored_by_rules(rules, rel_path)
+
+
+def _strip_unescaped_trailing_spaces(line: str) -> str:
+    """Drop trailing spaces the way Git does — unless they are backslash-escaped.
+
+    `USER.md\\ ` names the file "USER.md " (with the space). Stripping it
+    unconditionally credited that line with protecting `USER.md`, which Git leaves
+    committable.
+    """
+    end = len(line)
+    while end > 0 and line[end - 1] == " ":
+        preceding_backslashes = 0
+        index = end - 2
+        while index >= 0 and line[index] == "\\":
+            preceding_backslashes += 1
+            index -= 1
+        if preceding_backslashes % 2:
+            break  # escaped: this space belongs to the pattern
+        end -= 1
+    return line[:end]
+
+
+def _parse_gitignore_line(raw_line: str) -> tuple[bool, str] | None:
+    """One `.gitignore` line as `(negated, pattern)`, or `None` when it is not a rule.
+
+    A backslash is Git's escape character, **not** a path separator — rewriting it to
+    `/` corrupted every escaped pattern. Separator normalization belongs to the paths
+    being tested, not to the rules.
+    """
+    line = _strip_unescaped_trailing_spaces(raw_line)
+    if not line or line.startswith("#"):
+        return None
+    negated = line.startswith("!")
+    pattern = line[1:] if negated else line
+    if not pattern:
+        return None
+    return negated, pattern
+
+
+def _repair_line_rules(pattern: str) -> list[tuple[str, bool, str]]:
+    """The root-level rules a `gitignore` repair would append for `pattern`."""
+    rules: list[tuple[str, bool, str]] = []
+    for raw_line in PRIVACY_IGNORE_REPAIR_LINES[pattern].splitlines():
+        parsed = _parse_gitignore_line(raw_line)
+        if parsed is not None:
+            rules.append(("", parsed[0], parsed[1]))
+    return rules
+
+
+def _privacy_rules_at_base(target: Path, base: str) -> list[tuple[str, bool, str]]:
+    gitignore = target / base / ".gitignore" if base else target / ".gitignore"
+    if _is_symlink_or_junction(gitignore) or not gitignore.exists() or not gitignore.is_file():
+        return []
+    return _privacy_ignore_rules(gitignore, base=base)
 
 
 def _privacy_ignore_rules(gitignore: Path, *, base: str) -> list[tuple[str, bool, str]]:
     rules: list[tuple[str, bool, str]] = []
     for raw_line in gitignore.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = raw_line.rstrip(" ")
-        if not line or line.startswith("#"):
-            continue
-
-        negated = line.startswith("!")
-        pattern = line[1:] if negated else line
-        if pattern:
-            rules.append((base, negated, pattern.replace("\\", "/")))
+        parsed = _parse_gitignore_line(raw_line)
+        if parsed is not None:
+            rules.append((base, parsed[0], parsed[1]))
     return rules
+
+
+def _has_case_sensitive_bracket(pattern: str) -> bool:
+    """Whether `pattern` contains a bracket expression holding an ASCII letter.
+
+    Git case-folds the path being tested but not the literal characters inside a
+    bracket set, so `[U]SER.md` stops matching `USER.md` wherever `core.ignorecase`
+    is on — which is the default on Windows and macOS. A bracket holding only digits
+    or punctuation is unaffected by folding and stays trustworthy.
+    """
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "[":
+            close = pattern.find("]", index + 2)
+            if close == -1:
+                return False
+            body = pattern[index + 1 : close]
+            if any(c.isascii() and c.isalpha() for c in body):
+                return True
+            index = close + 1
+            continue
+        index += 1
+    return False
 
 
 def _ignored_by_rules(rules: list[tuple[str, bool, str]], rel_path: str) -> bool:
     ignored = False
     for base, negated, pattern in rules:
-        if _ignore_rule_matches(base, pattern, rel_path):
+        # Fail closed on a positive rule whose protection depends on `core.ignorecase`.
+        # A negation spelled this way is still honoured, so an unignore is never missed.
+        if not negated and _has_case_sensitive_bracket(pattern):
+            continue
+        # Negations match case-insensitively so a `!user.md` style re-include is never
+        # missed on a case-insensitive checkout; positive rules stay case-sensitive so
+        # a differently-cased rule is never credited with protecting anything. Both
+        # directions fail closed, and the check stays pure — no `git config` read — so
+        # `adopt` can use it on a directory that is not a repository yet.
+        if _ignore_rule_matches(base, pattern, rel_path, fold_case=negated):
             ignored = not negated
     return ignored
 
 
-def _ignore_rule_matches(base: str, pattern: str, rel_path: str) -> bool:
+def _ignore_rule_matches(
+    base: str, pattern: str, rel_path: str, *, fold_case: bool = False
+) -> bool:
     rel_path = rel_path.replace("\\", "/")
     if base:
         prefix = f"{base}/"
@@ -701,33 +1596,68 @@ def _ignore_rule_matches(base: str, pattern: str, rel_path: str) -> bool:
     else:
         scoped = rel_path
 
-    pattern = pattern.rstrip("/")
-    if pattern.startswith("/"):
-        pattern = pattern[1:]
+    body = pattern.rstrip("/")
+    if body.startswith("/"):
+        body = body[1:]
+    if not body:
+        return False
 
-    if "/" not in pattern:
-        return fnmatchcase(Path(scoped).name, pattern)
-    return fnmatchcase(scoped, pattern)
+    regex = _wildmatch_regex(body)
+    if "/" not in body:
+        # A pattern with no separator matches by basename at any depth.
+        regex = r"(?:.*/)?" + regex
+    # A match also covers everything beneath it: `foo/` and bare `foo` name a
+    # directory, and Git excludes a directory's whole subtree.
+    flags = re.IGNORECASE if fold_case else 0
+    return re.match(rf"(?:{regex})(?:/.*)?\Z", scoped, flags) is not None
 
 
-def _has_unsafe_memory_exception(rules: list[tuple[str, bool, str]]) -> bool:
-    allowed = {"memory/.gitkeep", "/memory/.gitkeep", ".gitkeep", "/.gitkeep"}
-    for base, negated, pattern in rules:
-        if not negated:
-            continue
-        normalized = pattern.lstrip("/")
-        if base == "memory":
-            if normalized not in {".gitkeep"}:
-                return True
-            continue
-        if normalized in {"memory/.gitkeep"}:
-            continue
-        if normalized.startswith("memory/"):
-            return True
-        if "/" not in normalized and normalized not in allowed:
-            return True
+def _wildmatch_regex(pattern: str) -> str:
+    """Translate a gitignore pattern into a regex with Git's wildmatch semantics.
 
-    return False
+    `*` and `?` never cross `/`; `**/` matches zero or more leading segments; `**`
+    elsewhere matches anything. `fnmatch` gets all of that wrong — its `*` crosses
+    separators, and it compiles `**/USER.md` into a pattern requiring a literal slash,
+    so `!**/USER.md` was invisible here while Git honoured it and left the file
+    committable.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(pattern):
+        char = pattern[i]
+        if char == "*":
+            if pattern[i : i + 3] == "**/":
+                out.append("(?:[^/]+/)*")
+                i += 3
+            elif pattern[i : i + 2] == "**":
+                out.append(".*")
+                i += 2
+            else:
+                out.append("[^/]*")
+                i += 1
+        elif char == "?":
+            out.append("[^/]")
+            i += 1
+        elif char == "\\" and i + 1 < len(pattern):
+            # Git's escape: the next character is a literal, stripped of any special
+            # meaning. A trailing lone backslash falls through to `re.escape` below.
+            out.append(re.escape(pattern[i + 1]))
+            i += 2
+        elif char == "[":
+            close = pattern.find("]", i + 2)
+            if close == -1:
+                out.append(re.escape(char))
+                i += 1
+            else:
+                body = pattern[i + 1 : close]
+                if body[:1] in ("!", "^"):
+                    body = "^" + body[1:]
+                out.append(f"[{body}]")
+                i = close + 1
+        else:
+            out.append(re.escape(char))
+            i += 1
+    return "".join(out)
 
 
 def _obsidian_writes(target: Path) -> list[tuple[Path, str]]:
@@ -852,7 +1782,7 @@ def _ensure_safe_destinations(target: Path, paths: list[Path], force: bool) -> N
             component
             for path in paths
             for component in _existing_components(target, path)
-            if component.is_symlink()
+            if _is_symlink_or_junction(component)
         }
     )
     if symlinks:
@@ -914,24 +1844,42 @@ def _existing_components(target: Path, path: Path) -> list[Path]:
     try:
         relative = path.relative_to(target)
     except ValueError:
-        return [path] if path.exists() or path.is_symlink() else []
+        return [path] if path.exists() or _is_symlink_or_junction(path) else []
 
     components: list[Path] = []
     current = target
-    if current.exists() or current.is_symlink():
+    if current.exists() or _is_symlink_or_junction(current):
         components.append(current)
     for part in relative.parts:
         current = current / part
-        if current.exists() or current.is_symlink():
+        if current.exists() or _is_symlink_or_junction(current):
             components.append(current)
         else:
             break
     return components
 
 
+def _existing_regular_file_mode(path: Path) -> int | None:
+    """The permission bits of an existing regular file, or `None`.
+
+    `& 0o777` deliberately drops setuid/setgid/sticky rather than restoring them onto
+    a file this tool just rewrote.
+    """
+    try:
+        st = path.lstat()
+    except OSError:
+        return None
+    if not stat.S_ISREG(st.st_mode):
+        return None
+    return stat.S_IMODE(st.st_mode) & 0o777
+
+
 def _write_text_no_follow(target: Path, dst: Path, text: str) -> None:
     _ensure_safe_destinations(target, [dst], force=True)
     dst.parent.mkdir(parents=True, exist_ok=True)
+    # Read the mode before `mkstemp`, which always creates at 0600. Without this, an
+    # atomic replace of an existing 0644 file silently makes it owner-only on POSIX.
+    mode = _existing_regular_file_mode(dst)
     fd, tmp_name = tempfile.mkstemp(
         prefix=f".{dst.name}.", suffix=".vivary-tmp", dir=dst.parent
     )
@@ -939,6 +1887,12 @@ def _write_text_no_follow(target: Path, dst: Path, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(text)
+            if mode is not None and hasattr(os, "fchmod"):
+                try:
+                    os.fchmod(fh.fileno(), mode)
+                except OSError:
+                    # A mode we cannot restore must not abort an otherwise good repair.
+                    pass
         os.replace(tmp, dst)
     finally:
         if tmp.exists() or tmp.is_symlink():
@@ -1034,10 +1988,21 @@ def _ensure_safe_cleanup_targets(root: Path, paths: list[Path]) -> None:
 def _remove_path(root: Path, path: Path) -> None:
     if not _is_safe_cleanup_target(root, path):
         raise ScaffoldError(f"refusing to clean unsafe scaffold path: {path}")
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-    elif path.exists() or path.is_symlink():
-        path.unlink()
+    link = _is_symlink_or_junction(path)
+    try:
+        if path.is_dir() and not link:
+            shutil.rmtree(path)
+        elif link and _reparse_point_is_dir(path):
+            # A junction or directory symlink: `rmdir` removes the link itself and
+            # leaves whatever it points at alone. `unlink` is for the file case.
+            os.rmdir(path)
+        elif path.exists() or link:
+            path.unlink()
+    except OSError as exc:
+        # Never let a raw OSError escape: `scaffold_workspace` is reached from `init`,
+        # whose only error handler catches `ScaffoldError`. Uncaught, `--json` prints a
+        # traceback and no JSON at all.
+        raise ScaffoldError(f"failed to clean stale scaffold path: {path}: {exc}") from exc
 
 
 def _is_safe_cleanup_target(root: Path, path: Path) -> bool:
@@ -1049,7 +2014,7 @@ def _is_safe_cleanup_target(root: Path, path: Path) -> bool:
     for parent in path.parents:
         if parent == root:
             return True
-        if parent.is_symlink():
+        if _is_symlink_or_junction(parent):
             return False
     return False
 
@@ -1156,6 +2121,7 @@ heartbeat-reports/*
 # Vivary runtime data (storage.toml/memory.toml are committed; data/indexes are not)
 .vivary/data/
 .vivary/memory/
+*.vivary-tmp
 
 # Local secrets and tool state
 .env
@@ -1181,6 +2147,7 @@ _WORKSPACE_TROPO_EXCLUDES = (
     ".git",
     ".claude",
     ".agents",
+    ".strato",
     "docs",
     "templates",
     "memory",
@@ -1431,8 +2398,8 @@ of truth. Source files plus `tropo check` win when provider state disagrees.
 ## Gates
 
 Ask before installing providers, indexing files, embedding content, enabling network
-access, or recalling from private paths. `USER.md`, `MEMORY.md`, `memory/**`, and
-`heartbeat-reports/**` must stay outside every memory index.
+access, or recalling from private paths. `USER.md`, `MEMORY.md`, `memory/**`,
+`heartbeat-reports/**`, and `.strato/private/**` must stay outside every memory index.
 
 ## Retrieval Order
 
@@ -1826,7 +2793,7 @@ provider = "vivary-local"
 [memory.privacy]
 respect_gitignore = true
 respect_vivary_private = true
-private_paths = ["USER.md", "MEMORY.md", "memory/**", "heartbeat-reports/**"]
+private_paths = ["USER.md", "MEMORY.md", "memory/**", "heartbeat-reports/**", ".strato/private/**"]
 fail_closed = true
 
 [memory.local]
@@ -1843,7 +2810,7 @@ provider = "cognee"
 [memory.privacy]
 respect_gitignore = true
 respect_vivary_private = true
-private_paths = ["USER.md", "MEMORY.md", "memory/**", "heartbeat-reports/**"]
+private_paths = ["USER.md", "MEMORY.md", "memory/**", "heartbeat-reports/**", ".strato/private/**"]
 fail_closed = true
 
 [memory.cognee]
@@ -1995,7 +2962,15 @@ def _run_wizard(args) -> dict:
         return {"storage": storage, "provider": provider, "memory": requested_memory}
 
     auto = getattr(args, "auto", False)
-    interactive = not auto and sys.stdin.isatty()
+    explicit_agent_dry_run = (
+        getattr(args, "dry_run", False)
+        and getattr(args, "json", False)
+        and any(
+            getattr(args, name, None) is not None
+            for name in ("storage", "privacy", "size")
+        )
+    )
+    interactive = not auto and not explicit_agent_dry_run and sys.stdin.isatty()
 
     if not interactive:
         storage, provider = _auto_pick_storage(args)
@@ -2394,15 +3369,32 @@ def _adopt_tropo_config(
 def _adopt_gitignore_followups(target: Path) -> list[str]:
     """Missing privacy-ignore lines to hand the human when `.gitignore` already
     exists and adopt refuses to edit it. Maps the same probe keys `doctor` uses
-    to the literal lines a human would add."""
-    lines_by_pattern = {
-        "USER.md": "USER.md",
-        "MEMORY.md": "MEMORY.md",
-        "memory/*": "memory/*\n!memory/.gitkeep",
-        "heartbeat-reports/*": "heartbeat-reports/*\n!heartbeat-reports/.gitkeep",
-    }
+    to the literal lines a human would add.
+
+    Patterns that a root-level edit provably cannot fix get their own line instead.
+    Git gives a deeper `.gitignore` precedence, so advising "add `memory/*`" when a
+    nested `!secret.md` is what unignores the file recommends a fix that will not
+    work — and the same defect made adopt answer a negation with another negation.
+    """
     missing = _missing_privacy_ignores(target)
-    return [lines_by_pattern[pattern] for pattern in missing if pattern in lines_by_pattern]
+    unfixable = set(_unfixable_privacy_blockers(target, missing))
+    followups = [
+        PRIVACY_IGNORE_REPAIR_LINES[pattern]
+        for pattern in missing
+        if pattern in PRIVACY_IGNORE_REPAIR_LINES and pattern not in unfixable
+    ]
+    if unfixable:
+        blocked = ", ".join(
+            f"`{PRIVACY_IGNORE_PROBES[pattern][0]}`"
+            for pattern in missing
+            if pattern in unfixable and PRIVACY_IGNORE_PROBES.get(pattern)
+        )
+        followups.append(
+            "A lower-level `.gitignore` unignores private/runtime paths "
+            f"({blocked}); no root-level rule can override it. Inspect and remove "
+            "those nested negations, then rerun `create-vivary doctor`."
+        )
+    return followups
 
 
 def plan_adopt(
@@ -2605,8 +3597,11 @@ def adopt_workspace(
 
 def _adopt_report_to_json(result: dict, *, mode: str) -> dict:
     inventory: BrownfieldInventory = result["inventory"]
+    ok = True
+    if mode == "applied" and result.get("doctor") is not None:
+        ok = bool(result["doctor"].get("ok"))
     payload = {
-        "ok": True,
+        "ok": ok,
         "mode": mode,
         "root": str(result["target"]),
         "preset": result["preset"],
@@ -2675,6 +3670,50 @@ def _print_adopt_report(result: dict, *, mode: str) -> None:
             print(f"  warning: {warning}")
 
 
+# Import name for each installable requirement, keyed by the exact string used in a
+# capability's `requires_install`. An extra maps to what the extra actually provides
+# (`vivary-tropo[embedded]` is only useful once lancedb is importable), and a
+# distribution whose import name differs from its package name is spelled out. A
+# requirement absent from this map falls back to the usual `-` → `_` normalization.
+REQUIREMENT_IMPORTS = {
+    "vivary-tropo[embedded]": "lancedb",
+    "vivary-tropo": "tropo",
+    "vivary-memory-cognee": "vivary_cognee",
+    "cocoindex-code[full]": "cocoindex_code",
+    "vivary-core": "vivary_core",
+}
+
+
+def _requirement_importable(requirement: str) -> bool:
+    module = REQUIREMENT_IMPORTS.get(requirement)
+    if module is None:
+        module = requirement.split("[", 1)[0].replace("-", "_")
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError, AttributeError):
+        return False
+
+
+def _capability_installed(capability: dict) -> bool:
+    """Whether everything a capability declares it needs is actually importable.
+
+    Derived from the capability's own `requires_install` rather than a parallel map,
+    which is what keeps the answer honest: a second hand-maintained list can disagree
+    with the declaration it is supposed to describe, and the first version of this did
+    exactly that — reporting a capability needing `vivary-memory-cognee` as installed
+    while reporting one needing nothing as absent.
+
+    A capability requiring nothing is always present. Declared intent is not install
+    truth: the report is only actionable if it says what is present *here*. Absence is
+    never an error — these are optional by construction, and calling an optional
+    package's absence "broken" is precisely what this report exists to avoid.
+    """
+    return all(
+        _requirement_importable(requirement)
+        for requirement in capability.get("requires_install") or []
+    )
+
+
 def capability_report(preset: str = "coding") -> dict:
     if preset not in PRESETS:
         raise ScaffoldError(f"unknown preset {preset!r}; expected one of {', '.join(PRESETS)}")
@@ -2737,6 +3776,23 @@ def capability_report(preset: str = "coding") -> dict:
                 "network": "provider-dependent, default local guidance",
             }
         )
+
+    # The governed-context seam. Local-only and approval-free: it reads a workspace
+    # and never writes, fetches, or reaches a provider. Not a default — it is not
+    # published yet, and nothing in the baseline install requires it (#207).
+    capabilities.append(
+        {
+            "id": "governed-context:core",
+            "label": "Governed context seam (vivary-core)",
+            "default": False,
+            "requires_install": ["vivary-core"],
+            "requires_approval": False,
+            "network": False,
+        }
+    )
+
+    for capability in capabilities:
+        capability["installed"] = _capability_installed(capability)
 
     return {
         "ok": True,
@@ -2826,6 +3882,16 @@ def build_parser() -> argparse.ArgumentParser:
     _add_receipt_argument(doctor)
     doctor.add_argument("target", help="workspace directory to validate")
     doctor.add_argument("--json", action="store_true", help="print a JSON report")
+    doctor.add_argument(
+        "--repair",
+        action="store_true",
+        help="include a conservative repair plan; dry-run unless --yes is also passed",
+    )
+    doctor.add_argument(
+        "--yes",
+        action="store_true",
+        help="with --repair, apply deterministic safe repairs before rerunning doctor",
+    )
     doctor.add_argument(
         "--trend",
         action="store_true",
@@ -3078,28 +4144,67 @@ def _main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "doctor":
-        report = doctor_workspace(args.target, repo_root=args.repo_root)
+        if getattr(args, "repair", False):
+            report = doctor_repair_workspace(
+                args.target,
+                repo_root=args.repo_root,
+                yes=getattr(args, "yes", False),
+            )
+        else:
+            report = doctor_workspace(args.target, repo_root=args.repo_root)
         trend_lines: list[str] = []
         if getattr(args, "trend", False):
-            target_path = Path(args.target)
-            if target_path.is_dir():
+            repair_actions = report.get("repair", {}).get("actions", [])
+            repair_target_refused = getattr(args, "repair", False) and (
+                any(
+                    error.startswith("doctor --repair: refusing to repair")
+                    for error in report["errors"]
+                )
+                or any(
+                    action.get("kind") == "workspace" and action.get("status") == "manual"
+                    for action in repair_actions
+                )
+            )
+            if repair_target_refused:
+                report["trend"] = None
+                report["warnings"].append(
+                    "doctor --trend skipped because repair target was refused"
+                )
+                trend_lines = ["trend: skipped because repair target was refused"]
+            elif getattr(args, "repair", False) and not getattr(args, "yes", False):
+                report["trend"] = None
+                report["warnings"].append(
+                    "doctor --trend skipped during repair dry-run; add --yes to write trend state"
+                )
+                trend_lines = [
+                    "trend: skipped during repair dry-run (add --yes to write state)"
+                ]
+            else:
                 try:
-                    trend_result = _apply_doctor_trend(report, target_path.resolve())
-                except (ScaffoldError, OSError) as exc:
+                    target_path = _resolve_scaffold_target(args.target)
+                except ScaffoldError as exc:
                     report["errors"].append(f"doctor --trend: {exc}")
                     report["ok"] = False
                     report["trend"] = None
                 else:
-                    report["trend"] = trend_result["trend"]
-                    if trend_result["state_warning"]:
-                        # kept out of report["warnings"] so a corrupt state file
-                        # never inflates the stored warning_count
-                        report["trend_warning"] = trend_result["state_warning"]
-                    trend_lines = _format_doctor_trend(
-                        trend_result["trend"], trend_result["state_warning"]
-                    )
-            else:
-                report["trend"] = None
+                    if target_path.is_dir():
+                        try:
+                            trend_result = _apply_doctor_trend(report, target_path)
+                        except (ScaffoldError, OSError) as exc:
+                            report["errors"].append(f"doctor --trend: {exc}")
+                            report["ok"] = False
+                            report["trend"] = None
+                        else:
+                            report["trend"] = trend_result["trend"]
+                            if trend_result["state_warning"]:
+                                # kept out of report["warnings"] so a corrupt state file
+                                # never inflates the stored warning_count
+                                report["trend_warning"] = trend_result["state_warning"]
+                            trend_lines = _format_doctor_trend(
+                                trend_result["trend"], trend_result["state_warning"]
+                            )
+                    else:
+                        report["trend"] = None
         if args.json:
             print(json.dumps(report, indent=2))
         else:
@@ -3330,6 +4435,15 @@ def _print_doctor_report(report: dict) -> None:
         print(f"warning: {warning}")
     for error in report["errors"]:
         print(f"error: {error}")
+    repair = report.get("repair")
+    if repair:
+        print(f"repair: {repair['mode']} ({len(repair['actions'])} action(s))")
+        for action in repair["actions"]:
+            applied = "applied" if action["applied"] else action["status"]
+            print(
+                f"repair {applied}: {action['kind']} {action['path']} - "
+                f"{action['summary']}"
+            )
 
 
 if __name__ == "__main__":

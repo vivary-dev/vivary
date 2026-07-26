@@ -1,6 +1,7 @@
 ---
 title: "Getting started proof"
 description: "A public, generic product walkthrough showing Vivary scaffold, health, review, coordination, and impact checks."
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/WALKTHROUGH.md"
 ---
 
 This is a public, generic proof of the first Vivary work cycle. It uses a disposable

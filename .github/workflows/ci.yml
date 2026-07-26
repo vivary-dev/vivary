@@ -31,12 +31,20 @@ jobs:
         run: python packages/exo/tests/test_exo.py
       - name: create-vivary
         run: python packages/create-vivary/tests/test_create_vivary.py
+      - name: create-vivary adopt
+        run: python packages/create-vivary/tests/test_adopt.py
+      - name: create-vivary privacy (differential vs real git check-ignore)
+        run: python packages/create-vivary/tests/test_privacy_differential.py
       - name: strato integrity (scaffold smokes, link/parity checks)
         run: python packages/create-vivary/tests/test_strato_integrity.py
       - name: memory-cognee
         run: python packages/memory-cognee/tests/test_memory_cognee.py
       - name: vivary meta CLI
         run: python packages/vivary/tests/test_vivary_cli.py
+      - name: core (governed-context seam; suite is the ported reference tests)
+        run: |
+          python -m pip install pytest
+          python -m pytest packages/core/tests/ -q
       - name: packaged optional semantic bridge smoke
         shell: bash
         run: |
@@ -134,9 +142,12 @@ jobs:
       - name: install
         run: npm ci
         working-directory: site
-      - name: site support modal test
-        run: npm run test:support
+      - name: site behavior and information architecture tests
+        run: npm run test:site
         working-directory: site
       - name: build (re-syncs docs, then astro build)
         run: npm run build
+        working-directory: site
+      - name: check built links and anchors
+        run: npm run test:links
         working-directory: site

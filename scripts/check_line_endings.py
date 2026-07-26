@@ -34,7 +34,6 @@ LEGACY_LINE_ENDING_ALLOWLIST = {
     "docs/RELEASE-WORKFLOW.md",
     "packages/create-vivary/create_vivary_assets/__init__.py",
     "packages/tropo/examples/vault/projects/tropo/decisions/0001-folder-as-type.md",
-    "packages/tropo/tests/test_tropo.py",
     "site/package-lock.json",
     "site/package.json",
     "site/src/content/blog/adopt-dont-rebuild.md",

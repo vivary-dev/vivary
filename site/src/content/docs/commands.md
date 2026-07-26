@@ -1,6 +1,7 @@
 ---
 title: "Command reference"
 description: "Every CLI across Vivary: tropo, ozone, exo, create-vivary, and optional adapters."
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/COMMANDS.md"
 ---
 
 This is the full, technical list of every command. If you're just starting, you only
@@ -51,7 +52,7 @@ connect to SMTP, call an API, upload logs, or send mail by itself.
 MCP server, no special protocol. Commands that interact or install also accept `--yes`
 (auto-confirm all prompts), `--auto` (agent selects from explicit storage/privacy/size
 hints), and `--dry-run` (inspect without side effects). See
-[SPEC-data-layer.md](SPEC-data-layer.md) for the full agent CLI contract and the new
+[SPEC-data-layer.md](https://github.com/vivary-dev/vivary/blob/dev/docs/SPEC-data-layer.md) for the full agent CLI contract and the new
 storage/migration commands.
 
 ---
@@ -246,9 +247,17 @@ files) — a missing or invalid config never blocks the map. When the map root
 sits below the config root, path-anchored excludes are rebased onto the map
 root, so `exclude = ["docs/private"]` still hides `private/` when you run
 `tropo map docs`. Directory junctions and symlink cycles are pruned by real
-path, so a looping tree never inflates counts. "Likely modules without an
-index" = directories at depth 1-2 with 5 or more files (recursive count) and
-no `index.md`/`README.md`.
+path, so a looping tree never inflates counts. Individual **files** that are
+themselves symlinks or reparse points are skipped for the same reason — each is
+an alternate route to content the walk may already have counted. Hard-linked
+files are **not** skipped: a hard link is an ordinary directory entry, so both
+paths are counted. That means totals are a count of *paths* and size is the sum
+of per-path sizes — `map` does not report disk usage, and two hard links to one
+file contribute twice. To leave something out of the map deliberately, use
+`exclude` or the skipped-directory list above; link type is not a privacy
+control. `map` reads no file contents — only names, sizes and structure.
+"Likely modules without an index" = directories at depth 1-2 with 5 or more
+files (recursive count) and no `index.md`/`README.md`.
 
 ```
 $ tropo map --root . --depth 2
@@ -418,7 +427,7 @@ create-vivary wizard <target> [--storage auto|file|embedded|cloud] [--provider l
                               [--memory none|local|cognee] [--yes] [--dry-run] [--json] [--receipt PATH]
 create-vivary capabilities [--preset coding|second-brain|knowledge-work|writing] [--json]
                             [--receipt PATH]
-create-vivary doctor <target> [--json] [--trend] [--receipt PATH]
+create-vivary doctor <target> [--json] [--trend] [--repair] [--yes] [--receipt PATH]
 create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writing] [--yes] [--json]
                            [--receipt PATH]
 ```
@@ -446,12 +455,29 @@ create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writin
 | `--json` | Machine-readable output. Reports `ok`, `root`, `preset`, `storage`, `provider`, `memory`, capability metadata, `installed`, `files`, config paths, and `dry_run`. |
 | `--size small\|medium\|large` | Hint for `--auto` storage decisions. Agents can pass this after inspecting the repo. |
 | `--privacy local\|cloud` | Hint for `--auto` storage decisions. |
+| `--repair` | Doctor-only. Include a conservative guided repair plan. Dry-run by default; writes nothing without `--yes`. |
+| `--yes` | With `doctor --repair`, apply deterministic safe repairs, rerun doctor, and keep a nonzero exit if the workspace is still invalid. |
 
-`doctor` checks that `USER.md`, `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`
-are actively ignored. Comments, negations, and unrelated patterns that merely contain
-those names do not count. If `.vivary/memory.toml` exists, `doctor` reports semantic
-memory as `disabled`, `healthy`, `configured`, `unavailable`, `misconfigured`, or
-`privacy-failed` without requiring optional Cognee support to be installed.
+`doctor` checks that `USER.md`, `MEMORY.md`, `memory/*`, `heartbeat-reports/*`,
+`.strato/private/`, and `*.vivary-tmp` are actively ignored. Comments, negations, and
+unrelated patterns that merely contain those names do not count. If `.vivary/memory.toml` exists,
+`doctor` reports semantic memory as `disabled`, `healthy`, `configured`,
+`unavailable`, `misconfigured`, or `privacy-failed` without requiring optional Cognee
+support to be installed.
+
+`doctor --repair` is guided and conservative. Plain `doctor` stays read-only.
+`doctor --repair --json` reports `repair.actions` without writing. Each action has
+`kind`, `status`, `path`, `summary`, and `applied`, with extra details when useful.
+`doctor --repair --yes --json` applies only deterministic safe repairs, then reruns
+doctor and returns that final report. Safe repairs are limited to regenerating missing
+ignored private/runtime placeholders (`USER.md`, `MEMORY.md`, `memory/.gitkeep`,
+`heartbeat-reports/.gitkeep`), appending missing privacy ignore lines, and removing
+simple single-line W210 redundant derived metadata. Non-workspace targets, symlinked,
+junctioned, hardlinked, non-file, and non-UTF-8 repair targets are refused or kept as
+manual guidance. Lower-level `.gitignore` negations that unignore private paths are
+reported as manual cleanup instead of being papered over by another root ignore block.
+Complex YAML W210 cases, broken refs (W220), exo active-work conflicts, and missing
+coordination-pack setup are manual guidance only; they are never auto-mutated.
 
 `doctor --trend` is opt-in and is the only thing that writes `.vivary/doctor-state.json`
 (plain `doctor` stays read-only). It compares this run's graph health, module-index
@@ -479,8 +505,26 @@ disturbing anything already there.
 would create already exists, it is skipped and reported "exists, kept" — this
 includes `README.md`, `AGENTS.md`, `CLAUDE.md`, and any other file already at that
 path. If `.gitignore` already exists, `adopt` leaves it untouched and instead prints
-a manual follow-up listing the privacy lines (`USER.md`, `MEMORY.md`, `memory/*`,
-`heartbeat-reports/*`) it's missing.
+a manual follow-up listing the privacy lines it's missing, drawn from the same set
+`doctor` checks:
+
+```gitignore
+USER.md
+MEMORY.md
+memory/*
+!memory/.gitkeep
+heartbeat-reports/*
+!heartbeat-reports/.gitkeep
+.strato/private/
+*.vivary-tmp
+```
+
+Only the missing lines are printed, so paste what you get rather than the whole
+block. One case is **not** fixable this way: if a lower-level `.gitignore` unignores
+a private path, Git gives the deeper rule precedence and no root-level line can
+override it. `adopt` reports those separately, naming the paths still exposed and
+telling you to remove the nested negations — adding more root-level rules would not
+help, and neither would answering a negation with another negation.
 
 The analyze phase does a light, read-only inventory of the tree (skipping `.git`,
 `node_modules`, `__pycache__`, `.venv`, `venv`, `dist`, `build`, `.astro`, `.next`,
@@ -590,4 +634,5 @@ small surface before deeper context:
 ---
 
 See [GETTING-STARTED.md](/getting-started/) for a first run, [HOWTO.md](/howto/) for
-task recipes, [SKILLS.md](/skills/) for the agent skills, and [FAQ.md](/faq/).
+task recipes, [SKILLS.md](/skills/) for the agent skills, and the
+[homepage FAQ](https://vivary.vercel.app/#faq).

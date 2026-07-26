@@ -37,6 +37,7 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 | `vivary-ozone` | 0.2.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
 | `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
 | `vivary-memory-cognee` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-memory-cognee/) |
+| `vivary-core` (not published) | unreleased | in-repo: `packages/core/` |
 | Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
@@ -61,7 +62,8 @@ sources and caveats.
 `tropo` (typed knowledge graph + search + storage), `strato` (agent OS), `ozone`
 (graph-aware review), and `exo` (coordination) are composed by `create-vivary`. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full model and
-[docs/PORTFOLIO.md](docs/PORTFOLIO.md) for proof and case-study material. The
+[docs/WHITE-PAPER.md](docs/WHITE-PAPER.md) for the technical argument.
+[docs/PORTFOLIO.md](docs/PORTFOLIO.md) holds proof and case-study material. The
 high-leverage backlog lives in [docs/PRODUCT-ROADMAP.md](docs/PRODUCT-ROADMAP.md).
 
 Current command surface:
@@ -169,7 +171,7 @@ Set up Vivary (https://vivary.vercel.app) in this project.
 2. You need Python 3.11+ and uv (or pipx). Tell me if something is missing before installing it.
 3. If this folder already has content, this is an adoption: run `uvx create-vivary adopt .`, show me the dry-run plan, and apply with `--yes` only after I approve. Adopt only adds files — it never touches existing ones.
    If this folder is new or empty, it is a fresh workspace: ask me which preset fits (coding / second brain / knowledge work / writing), then run `uvx create-vivary init . --preset <choice>`.
-4. Verify with `uvx create-vivary doctor .` and `uvx --from vivary-tropo tropo check --root .` — both must pass; show me the results.
+4. After an adoption, handle any `.gitignore` privacy follow-ups first: either add the listed lines yourself, or if your installed `create-vivary` supports guided repair, show me `uvx create-vivary doctor . --repair --json` and ask before applying `--repair --yes` for deterministic safe fixes. Then verify with `uvx create-vivary doctor .` and `uvx --from vivary-tropo tropo check --root .` — both must pass; show me the results.
 5. Read the generated AGENTS.md, then follow it for all future work here.
 ```
 
@@ -217,9 +219,9 @@ down `tropo` + `strato` and whichever optional layers fit. See
 
 - [Getting started](docs/GETTING-STARTED.md) — install → workspace → loop
 - [Command reference](docs/COMMANDS.md) — every CLI, flag, and exit code
-- [How-to recipes](docs/HOWTO.md) · [Agent skills](docs/SKILLS.md) · [FAQ](docs/FAQ.md)
+- [How-to recipes](docs/HOWTO.md) · [Agent skills](docs/SKILLS.md) · [Homepage FAQ](https://vivary.vercel.app/#faq) · [White paper](docs/WHITE-PAPER.md)
 - [Active context](docs/ACTIVE-CONTEXT.md) · [LLM active-context guide](docs/LLM-ACTIVE-CONTEXT.md)
-- [Architecture](docs/ARCHITECTURE.md) · [Semantic memory](docs/SEMANTIC-MEMORY.md) · [Obsidian (optional)](docs/OBSIDIAN.md)
+- [Architecture](docs/ARCHITECTURE.md) · [Product roadmap](docs/PRODUCT-ROADMAP.md) · [Semantic memory](docs/SEMANTIC-MEMORY.md) · [Obsidian (optional)](docs/OBSIDIAN.md)
 - [Release workflow](docs/RELEASE-WORKFLOW.md) — end-of-update release truth, docs/site sync, and publish checks
 - [Portfolio proof](docs/PORTFOLIO.md) — shipped surfaces, screenshots, and case-study notes
 

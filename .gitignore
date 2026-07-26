@@ -6,6 +6,8 @@ dist/
 dist_*/
 build/
 *.egg-info/
+.pytest_cache/
+packages/core/tests/.fixtures/
 
 # Node
 node_modules/

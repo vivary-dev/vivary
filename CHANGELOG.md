@@ -10,6 +10,163 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: vivary-core, the governed-context seam] — 2026-07-26
+
+Adds `vivary-core`, an in-repo library under `packages/core/`. **Not published to PyPI
+and not reachable from any shipping CLI**: wiring it outward is
+[#207](https://github.com/vivary-dev/vivary/issues/207). No existing package changes
+version, and nothing about installing or running Vivary changes because it exists.
+
+### Added
+
+- `vivary-core` — the shared seam the role packages will speak through, so "what is
+  true, and how do we know" has one implementation rather than four that drift.
+  Canonical JSON, sha256 fingerprints and deterministic IDs; read-only checkout
+  observation over explicit allowlisted roots; projection into a typed evidence graph
+  where divergent checkouts stay unresolved conflicts with both sides preserved;
+  bounded task capsules where every claim carries its evidence and selection reason;
+  and receipts bound to the exact capsule and workspace fingerprint they ran against.
+  Documented in [the architecture page](/architecture/). (Site-absolute route, not a
+  repo-relative path: `CHANGELOG.md` is mirrored to `/changelog/`, where `docs/…`
+  would resolve against that route and 404. Same convention the docs pages use.)
+
+### Fixed
+
+Findings from the `vivary-core` review, all pre-release and none user-reachable:
+
+- **Git environment injection.** Observation dropped four `GIT_*` variables, so
+  command-scope config (`GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_*` / `GIT_CONFIG_VALUE_*`)
+  could make a repository with no remotes observe as having an attacker-supplied
+  origin — which then became the repository identity used for grouping, conflicts and
+  fingerprints. The environment is now pinned rather than filtered.
+- **Credential disclosure.** A remote URL embedding credentials was stored verbatim as
+  both a fact and the repository identity, reaching observations, graphs, capsules and
+  fingerprints. Userinfo is now stripped before storage.
+- **Remote-less repositories are first-class.** Identity fell back to the checkout
+  path, so each linked worktree of a repository without a remote became its own
+  repository node and their divergence never surfaced. Identity now falls back to
+  Git's common directory, which every linked worktree shares.
+- **Capsule scope is enforced, not decorative.** `task.scope` was copied into the
+  output but never applied, so a capsule could declare one scope and carry claims,
+  conflicts and unknowns from outside it.
+- **Content evidence is bound to the snapshot it was observed at**, so an excerpt from
+  an earlier scan can no longer be presented as evidence about a later state.
+- **Failed content searches are visible.** A search that could not run was
+  indistinguishable from a search that found nothing.
+- **Required checks are derived, not hardcoded.** Every workspace was told to run
+  `npm test`, `npx create-vivary doctor` and `entire status`. Checks are now derived
+  from observed markers with their evidence attached, an undeterminable test command
+  is reported as an unknown rather than guessed, and `task.required_checks` overrides.
+- Windows allowlist paths compare case-insensitively; a corrupt symbolic HEAD reports
+  `unknown` instead of "detached"; the git output bound is enforced while the process
+  runs rather than after; search terms are matched as fixed strings, not regexes; and
+  negative claim budgets fail closed instead of silently widening the capsule.
+
+## [Unreleased: guided doctor repair and truthful map counts] — 2026-07-25
+
+Affects `create-vivary` / `@vivary/create` and `vivary-tropo`. Published versions stay
+at **0.3.1** and **0.4.1** in this entry; the bumps are deferred to the unified release
+line tracked in #149, where `create-vivary` / `@vivary/create` take a **minor** and
+`vivary-tropo` a **patch**. `strato` is versionless and rides the create-vivary train.
+Publishing remains a manual human gate.
+
+### Added
+
+- `create-vivary doctor --repair` — a guided, conservative repair plan. Dry-run by
+  default; `--yes` applies only deterministic safe repairs, reruns doctor, and keeps a
+  nonzero exit if the workspace is still invalid. Safe repairs are limited to
+  regenerating missing private/runtime placeholders from the canonical templates,
+  appending missing privacy ignore lines, and removing simple single-line W210
+  redundant derived metadata.
+- `create-vivary doctor --trend` — opt-in drift tracking against a prior recorded run.
+
+### Fixed
+
+- **Privacy probes now match `.gitignore` the way Git does.** The matcher used
+  `fnmatchcase`, so `*` crossed `/`, `**/` and `/**` were not honoured, directory rules
+  like `.strato/*/` never matched, and an excluded directory did not exclude its
+  contents. Doctor could therefore report a leaking workspace as clean — including the
+  `!**/USER.md` case, which stayed green even after the first nested-negation fix
+  because that fix inherited the same matcher bug.
+- **A backslash in a `.gitignore` pattern is treated as Git's escape character, not a
+  path separator.** `USER.md\ ` names the file "USER.md " — with the space — so it does
+  not protect `USER.md`, but the parser stripped the trailing space unconditionally and
+  rewrote the backslash to `/`, crediting the rule and reporting the workspace clean.
+- **A bracket expression is no longer credited with protecting a private file.**
+  `[U]SER.md` is honoured only where `core.ignorecase` is off, so on the default
+  Windows and macOS configuration such a rule silently protects nothing. Positive rules
+  that depend on case folding now fail closed; negations spelled that way are still
+  honoured, so an unignore is never missed.
+- **`doctor --repair --yes` converges.** It previously appended a duplicate privacy
+  block on every run without ever fixing the workspace, because the planner predicted
+  success using a different rule than doctor used to pass. Patterns an append provably
+  cannot fix are now withheld from the safe list and reported as manual instead.
+- **Nested `.gitignore` negations are reported, not papered over.** A lower-level rule
+  that unignores a private path takes precedence in Git, so no root-level line can
+  override it. Both `doctor` and `adopt` now say so and name the exposed paths, rather
+  than recommending a root-level fix that cannot work — or, in adopt's case, answering
+  a negation with another negation.
+- **`doctor --repair` reports the real reason a W210 field was left for a human.**
+  Every failure previously said "complex YAML", so a user whose file was non-UTF-8,
+  hard-linked or unreadable was told to hand-edit YAML that was not the problem.
+- **`doctor --repair` preserves file modes.** Atomic replacement went through
+  `mkstemp`, which creates at `0600`, silently making an existing `0644` file
+  owner-only on POSIX and breaking shared workspaces and service accounts.
+- **Stale-scaffold cleanup no longer crashes.** A raw `OSError` from an unremovable
+  path escaped the `init` error handler, producing a traceback and — under `--json` —
+  no JSON at all. Directory reparse points are now removed with `rmdir`.
+- **Private placeholders no longer crash on an undecodable template.**
+  `UnicodeDecodeError` is a `ValueError`, so it slipped past the `OSError` handler and
+  the repair apply loop alike.
+- **`tropo map` counts hard-linked files.** They were skipped as though they were
+  symlinks, which silently removed ordinary public files from totals, largest-file,
+  index detection and module candidates. Symlinks and reparse points are still omitted;
+  a hard link is an ordinary directory entry, not an alternate route to already-counted
+  content. `map` counts paths and sums per-path sizes — it does not report disk usage.
+- Documented the full privacy ignore set in `docs/COMMANDS.md`. Three enforced lines
+  (`*.vivary-tmp`, `!memory/.gitkeep`, `!heartbeat-reports/.gitkeep`) appeared nowhere
+  in the docs, so a user following them could not make the post-adopt check pass. A
+  test now derives the expectation from the code so the two cannot drift again.
+
+## [Unreleased: Vivary product identity and proof spine] — 2026-07-18
+
+Affects documentation, site verification, and the website only. No package versions
+change.
+
+### Added
+
+- Added a distinct Vivary visual identity with an abstract strata-and-gate mark,
+  living-world hero illustration, and architecture-layer asset.
+- Added a full-length technical white paper defining the workspace failure mode,
+  terminology, requirements, system invariants, architecture, operating protocol,
+  threat model, evidence ledger, limitations, governance, and reproducible evaluation
+  standard, grounded in primary references.
+- Added the white paper to the generated Starlight documentation and
+  machine-readable docs surfaces.
+
+### Changed
+
+- Rebuilt the public homepage around the brownfield adoption path, product thesis,
+  four-layer architecture, measurable proof, and quiet company endorsement.
+- Reframed the canonical repo roadmap around comprehension, adoption, retention, and
+  evidence loops, then surfaced it as a first-class website page outside the guides.
+- Replaced the long-form docs FAQ with concise homepage answers about adoption,
+  privacy, lock-in, optional providers, and the current evidence boundary.
+- Replaced the generic blog backlog with a proof-led content system tied to runnable
+  commands, canonical docs, and repeat use; the plan remains repo-only.
+- Preserved the static support-report flow through the redesigned homepage, aligned
+  the blog and docs favicon/mark surfaces, repaired generated-site link rewrites, and
+  brought the security policy's supported package lines up to current registry truth.
+
+### Verification
+
+- `cd site && npm audit`
+- `cd site && npm run test:site`
+- `cd site && npm run sync-docs`
+- `cd site && npm run build`
+- Desktop and mobile browser checks, primary-link checks, command-copy interaction,
+  FAQ disclosure checks, roadmap-page checks, and console review.
+
 ## [Unreleased: stored vector query] — 2026-07-06
 
 Affects `vivary-tropo` query behavior and docs. This is not published yet.

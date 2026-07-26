@@ -1,301 +1,282 @@
 # Vivary product roadmap
 
-This is the durable backlog for high-leverage Vivary upgrades that should not be
-lost in chat. The filter is first-principles Vivary:
-
-- reduce the tokens an agent spends finding, storing, and reusing specific
-  information;
-- prefer typed graph truth, public routing surfaces, and progressive disclosure;
-- keep core deterministic and zero-dependency unless a capability is explicitly
-  optional;
-- test locally before release, with disposable fixtures or sandboxes when needed;
-- never turn optional integrations into always-on bloat.
-
-## Current release slice
+This roadmap is an outcome map, not a feature warehouse. Vivary wins when an agent
+finds project truth with less context, acts with a visible blast radius, and stops at
+the right human gates.
 
-The context-compression release covers the first concrete slice:
-
-- `tropo find` returns typed context packets: ranked files/nodes to open first,
-  with type, path, reason, snippet, JSON, and a rough token budget.
-- `tropo query` searches analyzed graph nodes instead of raw files and supports
-  type, path, edge, snippet, and explain filters.
-- `ozone review --pack context-budget` flags missing module indexes, large public
-  routing surfaces, duplicate routing blocks, and bulk-load cues.
-- `create-vivary --active-context cocoindex-code` gives agents simpler
-  graph-first CocoIndex-code guidance without installing, indexing, or enabling
-  MCP by default.
-- Local LanceDB, CocoIndex-code, and Cognee-policy smokes proved the optional
-  surfaces can be exercised without making them core dependencies.
-- The first Cognee adapter slice now lives in `packages/memory-cognee/`, returning
-  typed Vivary node hits only and keeping provider state rebuildable.
+## The four product loops
 
-## P1 — the adoption line (set 2026-07-03)
+| Loop | User outcome | Product signal |
+|---|---|---|
+| Comprehension | “I understand what this is and can run something useful.” | docs-to-command completion |
+| Adoption | “It helped on the project I already have.” | map → dry-run adopt → doctor-clean |
+| Retention | “My workspace is healthier because I reran it.” | repeat doctor runs and repaired drift |
+| Evidence | “The claims are inspectable and reproducible.” | public benchmark, walkthroughs, and case studies |
 
-The product diagnosis behind this priority: installs far outnumber engagement,
-the current funnel only pays off on greenfield scaffolds, and the value has to
-be *felt* on an existing messy repo before anyone commits. Everything in P1
-either lets Vivary work on brownfield projects, proves the token thesis with a
-number, or gives an adopter a reason to come back.
+Every roadmap item must strengthen at least one loop without violating the product
+laws:
 
-### P1.1 Large filesystem map (`tropo map`)
+- minimal always-on context;
+- typed graph truth and progressive disclosure;
+- deterministic, dependency-light core;
+- optional capabilities at explicit edges;
+- read-only and dry-run paths before mutation;
+- no hidden network, indexing, daemon, MCP, or provider behavior;
+- one human approval per consequential action.
 
-Goal: let agents understand a large repo, vault, docs tree, or file system
-without opening hundreds of files. This is the brownfield wedge — the first
-Vivary command that is useful on a workspace Vivary did not create.
+## Current truth
 
-Shape:
+The current product line already proves the basic architecture:
 
-- add a read-only command that inventories major folders, file counts, obvious
-  language/doc surfaces, large files, and existing index files;
-- identify likely module boundaries and missing `index.md` routing surfaces;
-- output a compact Markdown and JSON map;
-- do not write or rearrange the workspace in the first slice.
+- `tropo find` returns bounded typed context packets;
+- `tropo query` provides graph-aware filtering and explain output;
+- `tropo map` inventories a large repo, vault, or docs tree read-only;
+- `create-vivary adopt` offers an additive brownfield path with dry-run first;
+- `create-vivary doctor --trend` reports workspace-health drift;
+- Ozone includes graph-aware review and context-budget checks;
+- Strato scaffold, link-integrity, and Claude/Codex parity checks run in CI;
+- the optional Cognee adapter returns typed Vivary node hits rather than a second
+  truth store;
+- optional embedded storage and stored-vector work remain explicit capabilities.
 
-High-value tests:
+The bottleneck is no longer “can the pieces exist?” It is whether a new person can
+understand the category, feel value on an existing project, return for a second use,
+and verify the claims.
 
-- fixture with nested code, docs, ignored folders, and oversized files;
-- Windows-safe path behavior;
-- ignored/private paths stay out of the map;
-- output remains stable enough for agents to cite and diff.
+## Now: prove the adoption line
 
-### P1.2 Brownfield adopt (`create-vivary adopt .`)
+### 1. Publish the benchmark
 
-Goal: turn the map into an adoption path for existing repos and vaults, so the
-product motion becomes "point Vivary at your mess" instead of "start a new
-world from scratch."
+**Outcome:** turn “less context waste” from positioning into a number people can
+inspect and rerun.
 
-Shape:
+Build one fixed harness over a public repository with questions such as:
 
-- read the filesystem map of an existing workspace;
-- propose (dry-run first, always) a `tropo.toml`, a starter typed graph, the
-  strato surface files, and `index.md` routing surfaces for the likely modules;
-- explicit write gate before any file is created; never move, rename, or edit
-  existing content in the first slice — adopt only *adds*, and only behind the
-  gate;
-- `doctor` must pass on an adopted workspace the same way it does on a
-  scaffolded one.
+- where is release truth owned?
+- what depends on this module or decision?
+- which file should an agent open first?
+- what changed and what must be reviewed?
 
-High-value tests:
+Run each task with raw file search and with Vivary retrieval. Record:
 
-- dry-run JSON names every proposed write and nothing else gets written;
-- adopt refuses symlinked/out-of-root targets (same hardening line as 0.2.5);
-- existing files are byte-identical after adopt;
-- adopted workspace passes `doctor` and `tropo check`.
+- model and date;
+- repository revision;
+- token input/output;
+- turns;
+- files opened;
+- wrong files opened;
+- supported or unsupported answer;
+- time to verified answer.
 
-### P1.3 Token-savings benchmark
+Publish methodology, raw results, summary charts, and known threats to validity.
 
-Goal: measure the thesis instead of asserting it. The entire product filter is
-"reduce the tokens an agent spends finding information" — that claim needs a
-published number.
+**Stop rule:** do not add a new retrieval provider to improve the headline number
+until the deterministic baseline has a reproducible result.
 
-Shape:
+### 2. Make brownfield adoption the default first experience
 
-- fixed task set (e.g. "where is X owned?", "what breaks if Y changes?") on a
-  real public repo, run two ways: agent with `tropo find`/`query` vs. agent
-  with raw file search;
-- record tokens, turns, and wrong-files-opened per task;
-- publish methodology + results as `docs/BENCHMARK.md`, a site chart, and a
-  blog post; keep the harness re-runnable so the number stays honest across
-  releases.
+**Outcome:** a user can point Vivary at a real project and feel value before allowing
+it to write.
 
-High-value tests:
+Tighten the path:
 
-- benchmark harness is deterministic in task order and reporting format;
-- results clearly label model, date, and repo revision;
-- a regression in the number is visible release-over-release.
+```bash
+tropo map --root .
+create-vivary adopt .
+create-vivary doctor . --trend
+```
 
-### P1.4 `vivary-mcp` (optional package)
+Required proof:
 
-Goal: meet agents on the rail they already ride. Claude Code, Codex, and Cursor
-users should be able to use the typed graph without CLI plumbing.
+- a small code repo;
+- a large code repo;
+- a documentation tree;
+- a personal vault fixture with active privacy ignores;
+- Windows paths, junctions, symlinks, and out-of-root attacks.
 
-Shape:
+The map should produce a compact action-oriented summary: likely modules, missing
+routing surfaces, oversized files, ignored/private boundaries, and a bounded “open
+these first” list.
 
-- a separate, opt-in package (never core — the no-hidden-MCP law stands)
-  exposing read-only `find`, `query`, and `check` over MCP;
-- no write tools in the first slice;
-- same privacy-ignore rules as the CLIs; provider returns typed node hits only.
+**Stop rule:** adoption remains additive. Do not move, rename, rewrite, or
+auto-reorganize existing content in this phase.
 
-High-value tests:
+### 3. Turn doctor into the return loop
 
-- server exposes exactly the three read-only tools and nothing else;
-- private/ignored paths never appear in tool results;
-- works against a scaffolded and an adopted workspace;
-- core packages remain installable and testable without the MCP package.
+**Outcome:** a person has a concrete reason to rerun Vivary weekly.
 
-### P1.5 Doctor as the retention loop
+Doctor should answer:
 
-Goal: give adopters a reason to run Vivary weekly, not once. Today `doctor`
-has no drift-tracking — nothing compares workspace health across runs or gives
-an adopter a reason to re-run it.
+- did graph health improve or regress?
+- did routing/context cost grow?
+- are private boundaries still active?
+- did module coverage or link integrity change?
+- which repair has the highest expected context savings?
 
-Shape:
+Add one explicit repair workflow for each high-confidence diagnosis. Start with
+reviewable proposals, not silent auto-fixes.
 
-- teach `doctor` drift: compare graph health, routing-surface size, and
-  context-budget findings against the previous run and report the trend;
-- ship a copy-paste GitHub Action recipe running `tropo check` and
-  `ozone review --strict` as a CI gate;
-- keep all of it read-only; trend state lives in one small, inspectable file.
+**Metric:** percentage of doctor runs after the first week and percentage of detected
+drift that is repaired.
 
-High-value tests:
+### 4. Publish one honest brownfield case study
 
-- trend output is stable and diffable;
-- first run (no prior state) degrades gracefully;
-- CI recipe fails the build on a broken graph and passes on a clean one.
+**Outcome:** a builder can see the exact before/after without reading a category
+essay.
 
-### P1.6 Dogfood program
+The case study must include:
 
-Goal: every active repo the maintainer touches runs Vivary, and one public
-walkthrough proves it (issue #24: run the Vivary site repo as a Vivary
-workspace and publish the WALKTHROUGH).
+- repository revision and starting state;
+- commands run;
+- proposed and approved writes;
+- before/after file map;
+- doctor and Tropo results;
+- what remained awkward;
+- issues created from the friction.
 
-Shape:
+Do not use a toy project that was already arranged to flatter the product.
 
-- adopt-in-place (P1.2) is the mechanism; the dogfood repos are its first
-  users and its bug reports;
-- publish one honest WALKTHROUGH.md from a real repo, including what was
-  awkward;
-- fold friction found here straight back into P1.1/P1.2.
+## Next: make the value compound
 
-High-value tests:
+### 5. Context-budget repair proposals
 
-- the walkthrough is reproducible: a reader can run the same commands and
-  reach doctor-clean on their own repo;
-- friction found while dogfooding lands as tracked issues against P1.1/P1.2,
-  not private notes.
+**Outcome:** Ozone findings lead to a safe, understandable next action.
 
-### P1.7 Strato as a verifiable agent OS
+Group proposals by:
 
-Goal: the conceptual core of the product — the agent OS layer — must be as
-testable as the code layers. Today strato is unversioned Markdown with no
-checks.
+- open first;
+- split;
+- deduplicate;
+- route through an index;
+- move private;
+- leave alone.
 
-Shape:
+Estimate token savings using the same dependency-free approximation as Tropo. Label
+the estimate as approximate and show the files behind it.
 
-- scaffold smoke in CI: `init` → `doctor` → `tropo check` green on every
-  preset, every commit;
-- template integrity tests (no stale cross-references, private files ignored,
-  skills present for both Claude and Codex runtimes);
-- decide and document versioning: strato rides create-vivary's release train,
-  and the changelog says so when templates change.
+First slice is report-only. Any write path needs a dry run, exact file list, and
+human gate.
 
-High-value tests:
+### 6. Module index planner
 
-- CI fails when any preset scaffold stops passing `doctor` or `tropo check`;
-- template cross-references resolve in every generated workspace;
-- Claude and Codex runtime skill trees stay structurally in sync.
+**Outcome:** an existing workspace gets useful progressive-disclosure routers without
+an agent inventing the structure from scratch.
 
-## P2 — next candidates
+The planner reads `tropo map` and context-budget findings, then proposes module
+ownership, purpose, and links. Suggestions must be deterministic enough to diff and
+must never promote ignored/private paths into public routers.
 
-Sequenced behind the adoption line. The module index planner is deliberately
-*not* P1: it builds on `tropo map` output and comes after the map has real
-users.
+### 7. Proof packets
 
-### P2.1 Module index planner
+**Outcome:** every successful Vivary run leaves a small, privacy-safe artifact a
+human or another agent can inspect.
 
-Goal: turn missing-index findings into safe, reviewable routing proposals instead
-of making an agent invent a repo map from scratch.
+A proof packet should contain:
 
-Shape:
+- command and version;
+- root-relative surfaces touched or read;
+- counts and status;
+- verification;
+- gate decisions;
+- no raw private content, query text, stdout/stderr dump, or absolute user path.
 
-- read the large filesystem map and Ozone context-budget findings;
-- propose `modules/<name>/index.md` surfaces with ownership, purpose, and links;
-- detect legacy `modules/<name>.md` files and propose non-destructive migration
-  steps;
-- require an explicit write gate before creating or changing files.
+This builds on local receipt work without turning receipts into telemetry.
 
-High-value tests:
+### 8. Starter workflows, not more presets
 
-- missing index suggestions are deterministic;
-- private/ignored surfaces are never proposed as public routers;
-- dry-run JSON names every proposed write;
-- write mode refuses symlink/out-of-root paths.
+**Outcome:** a user reaches a recurring useful loop after installation.
 
-### P2.2 Structured content query
+Ship copyable, verified workflows for:
 
-Goal: make `tropo query` better at answering "where is this fact owned?" without
-semantic search.
+- release-truth maintenance;
+- large-refactor impact review;
+- research synthesis with claim ownership;
+- second-brain decision retrieval;
+- long-form writing continuity;
+- multi-agent claims and conflict checks.
 
-Shape:
+Each workflow must name the input, verifier, stop rule, and gate. Prefer five strong
+workflows to twenty superficial presets.
 
-- add frontmatter-specific filters such as field existence and exact value;
-- add body-only, title-only, path-only, and frontmatter-only query modes;
-- return which section or field matched when possible;
-- keep `tropo find` friendly and make the extra controls power-user flags.
+## Later: meet agents on their existing rails
 
-High-value tests:
+### 9. Read-only `vivary-mcp`
 
-- frontmatter fields match without body false positives;
-- body-only excludes title/path/frontmatter matches;
-- JSON explain output is stable;
-- snippets remain bounded by `--snippet` and context budgets.
+**Outcome:** Claude Code, Codex, Cursor, and other MCP clients can use the typed graph
+without shell glue.
 
-### P2.3 Typed recall provider contract
+First slice exposes exactly:
 
-Goal: define the boundary between Vivary graph truth and optional recall engines
-without importing embeddings, Cognee, LanceDB, or CocoIndex into core.
+- `find`;
+- `query`;
+- `check`.
 
-Shape:
+No write tools, no server in the core package, no auto-enable behavior, and the same
+privacy/ignore rules as the CLI.
 
-- define a provider contract that returns typed node hits only: id, type, path,
-  score, reason, and optional snippet;
-- ship fake-provider tests for deterministic adapter behavior;
-- make `tropo find` able to merge provider hits after graph-first retrieval;
-- keep providers opt-in and inspectable.
+### 10. Typed recall provider contract
 
-High-value tests:
+**Outcome:** optional semantic memory improves recall without becoming project truth.
 
-- fake provider merge order is deterministic;
-- provider hits cannot invent nodes outside the graph;
-- missing/unavailable providers degrade to graph-only results;
-- no network or embedding dependency is imported by default.
+Provider results must include known node id, type, path, score, reason, and bounded
+snippet. Unknown-node results are rejected. Missing providers degrade cleanly to
+graph-only retrieval.
 
-### P2.4 Optional integration proof pass
+### 11. Optional integration proof matrix
 
-Goal: keep LanceDB, CocoIndex-code, and Cognee useful without letting them become
-ambient risk.
+**Outcome:** users can see what an integration actually changes before enabling it.
 
-Shape:
+For LanceDB, CocoIndex-code, Cognee, and future providers, publish:
 
-- LanceDB: smoke embedded storage migration and query from a fresh scaffold;
-- CocoIndex-code: smoke active-context setup against a tiny fixture and document
-  exact-path filtering;
-- Cognee: smoke import/doctor/policy behavior behind the optional
-  `vivary-memory-cognee` adapter;
-- report proof as local verification, not as a claim that integration is always
-  installed or enabled.
+- install boundary;
+- local/network behavior;
+- state/cache/log paths;
+- data sent;
+- approval gates;
+- disposable smoke command;
+- degradation behavior;
+- uninstall/rebuild path.
 
-High-value tests:
+The matrix is a trust surface, not a partner-logo page.
 
-- each integration can be tested in a disposable sandbox;
-- core test suites pass with none of them installed;
-- doctor output distinguishes configured, unavailable, stale, and privacy-failed;
-- docs state the gate before install/index/network/MCP.
+## Deliberately deferred
 
-### P2.5 Context-budget repair workflow
+These items are not automatically bad; they are deferred because they can add more
+weight than leverage:
 
-Goal: help humans fix token bloat after Ozone finds it.
+- hosted Vivary control plane;
+- default cloud sync;
+- write-capable MCP;
+- autonomous workspace reorganization;
+- ambient semantic indexing;
+- team analytics or telemetry;
+- a visual graph editor before retrieval/adoption evidence is strong;
+- more named layers or a plugin marketplace.
 
-Shape:
+Reconsider only when repeated user evidence shows a problem the current plain-file
+and CLI surfaces cannot solve.
 
-- add a report that groups findings by "open first", "split", "deduplicate", and
-  "route through an index";
-- estimate token savings with the same no-dependency approximation used by Tropo;
-- propose edits, but do not auto-apply in the first slice.
+## Explicitly out of scope for the core
 
-High-value tests:
+- default embeddings;
+- hidden databases, daemons, MCP servers, providers, or network calls;
+- automatic indexing of source code or personal notes;
+- commands that tell an agent to bulk-read a repo or vault;
+- a second canonical truth store;
+- workspace mutation without a preview and human gate;
+- model-vendor or editor lock-in;
+- replacing Git, issue trackers, documentation tools, or agent runtimes.
 
-- info-only reports do not fail strict mode;
-- warn findings still gate under `--strict`;
-- savings estimates are approximate and clearly labeled;
-- duplicate-routing suggestions cite both paths.
+## Roadmap review cadence
 
-## Explicitly out of scope for core
+Review the roadmap after each meaningful proof event:
 
-- no default embeddings;
-- no hidden LanceDB, Cognee, CocoIndex-code, MCP, daemon, or network behavior
-  (`vivary-mcp` is a separate opt-in package, never a core dependency);
-- no automatic indexing of source code or personal notes;
-- no command that tells an agent to read the whole repo, whole docs tree, or
-  everything "just in case";
-- no workspace mutation without a dry-run path and a human gate.
+- benchmark run;
+- brownfield case study;
+- ten external adoption attempts;
+- a release with repeat doctor data;
+- a security/privacy failure;
+- a major agent-runtime change.
+
+At review, remove stale work rather than carrying it indefinitely. The roadmap should
+stay smaller as product truth gets sharper.

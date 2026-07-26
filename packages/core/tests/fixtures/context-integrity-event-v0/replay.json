@@ -1,0 +1,148 @@
+{
+  "note": "Frozen replay fixture for the ContextIntegrityEvent v0 seam. Appending these events in order to a fresh sink must reproduce append_outcomes exactly; the accepted subset must rebuild the frozen projection byte-for-byte. Acceptance order is the replay order - the out-of-order occurred_at on the last event must not reorder history, and its unknown namespaced extension must not change the projection. The projection fingerprint is sha256 over canonical JSON (object keys sorted, arrays in order, no whitespace) of the projection body without the fingerprint field.",
+  "sink": { "project": "vivary-lattice-lab", "visibility": "local", "policy_version": "policy/v0" },
+  "events": [
+    {
+      "schema": "vivary.context-integrity-event/v0",
+      "event_id": "evt_fx_replay_observe",
+      "event_type": "workspace.observed",
+      "occurred_at": "2026-07-20T15:00:00.000Z",
+      "recorded_at": "2026-07-20T15:00:01.000Z",
+      "producer": { "module": "tropo", "version": "0.0.0" },
+      "actor": { "kind": "agent", "id": "claude-code:vivary-lattice" },
+      "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+      "subject": { "kind": "workspace", "id": "lab://fixtures" },
+      "scope": { "project": "vivary-lattice-lab", "visibility": "local" },
+      "payload": { "checkouts_observed": 2, "roots_refused": 1 }
+    },
+    {
+      "schema": "vivary.context-integrity-event/v0",
+      "event_id": "evt_fx_replay_capsule",
+      "event_type": "capsule.compiled",
+      "occurred_at": "2026-07-20T15:00:02.000Z",
+      "recorded_at": "2026-07-20T15:00:03.000Z",
+      "producer": { "module": "tropo", "version": "0.0.0" },
+      "actor": { "kind": "agent", "id": "claude-code:vivary-lattice" },
+      "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+      "subject": { "kind": "capsule", "id": "capsule_fx_0001" },
+      "scope": { "project": "vivary-lattice-lab", "visibility": "local" },
+      "correlation_id": "capsule_fx_0001",
+      "payload": { "claims": 3 }
+    },
+    {
+      "schema": "vivary.context-integrity-event/v0",
+      "event_id": "evt_fx_replay_observe",
+      "event_type": "workspace.observed",
+      "occurred_at": "2026-07-20T15:00:00.000Z",
+      "recorded_at": "2026-07-20T15:00:01.000Z",
+      "producer": { "module": "tropo", "version": "0.0.0" },
+      "actor": { "kind": "agent", "id": "claude-code:vivary-lattice" },
+      "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+      "subject": { "kind": "workspace", "id": "lab://fixtures" },
+      "scope": { "project": "vivary-lattice-lab", "visibility": "local" },
+      "payload": { "checkouts_observed": 2, "roots_refused": 1 }
+    },
+    {
+      "schema": "vivary.context-integrity-event/v0",
+      "event_id": "evt_fx_replay_capsule",
+      "event_type": "capsule.recompiled",
+      "occurred_at": "2026-07-20T15:00:04.000Z",
+      "recorded_at": "2026-07-20T15:00:04.000Z",
+      "producer": { "module": "tropo", "version": "0.0.0" },
+      "actor": { "kind": "agent", "id": "claude-code:vivary-lattice" },
+      "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+      "subject": { "kind": "capsule", "id": "capsule_fx_0001" },
+      "scope": { "project": "vivary-lattice-lab", "visibility": "local" },
+      "payload": { "claims": 4 }
+    },
+    {
+      "schema": "vivary.context-integrity-event/v0",
+      "event_id": "evt_fx_replay_foreign",
+      "event_type": "workspace.observed",
+      "occurred_at": "2026-07-20T15:00:04.000Z",
+      "recorded_at": "2026-07-20T15:00:05.000Z",
+      "producer": { "module": "tropo", "version": "0.0.0" },
+      "actor": { "kind": "agent", "id": "claude-code:vivary-lattice" },
+      "workspace": { "id": "ws_other_fixture", "revision": "lab://elsewhere" },
+      "subject": { "kind": "workspace", "id": "lab://elsewhere" },
+      "scope": { "project": "some-other-project", "visibility": "local" },
+      "payload": {}
+    },
+    {
+      "schema": "vivary.context-integrity-event/v0",
+      "event_id": "evt_fx_replay_private",
+      "event_type": "memory.assertion.proposed",
+      "occurred_at": "2026-07-20T15:00:05.000Z",
+      "recorded_at": "2026-07-20T15:00:06.000Z",
+      "producer": { "module": "bellamente", "version": "0.0.0" },
+      "actor": { "kind": "human", "id": "jeff" },
+      "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+      "subject": { "kind": "repository", "id": "repo_vivary" },
+      "scope": { "project": "vivary-lattice-lab", "visibility": "private" },
+      "payload": {}
+    },
+    {
+      "schema": "vivary.context-integrity-event/v0",
+      "event_id": "evt_fx_replay_receipt",
+      "event_type": "receipt.created",
+      "occurred_at": "2026-07-20T14:00:00.000Z",
+      "recorded_at": "2026-07-20T15:00:07.000Z",
+      "producer": { "module": "exo", "version": "0.0.0" },
+      "actor": { "kind": "agent", "id": "codex:task-123" },
+      "workspace": { "id": "ws_lattice_fixture", "revision": "lab://fixtures" },
+      "subject": { "kind": "receipt", "id": "receipt_fx_0001" },
+      "scope": { "project": "vivary-lattice-lab", "visibility": "local" },
+      "causation_id": "evt_fx_replay_capsule",
+      "correlation_id": "capsule_fx_0001",
+      "payload": { "checks_passed": 3 },
+      "extensions": { "future-module": { "experimental": true, "weight": 42 } }
+    }
+  ],
+  "expect": {
+    "append_outcomes": [
+      { "decision": "accepted", "reason_codes": [] },
+      { "decision": "accepted", "reason_codes": [] },
+      { "decision": "duplicate", "reason_codes": [] },
+      { "decision": "rejected", "reason_codes": ["event_id_reuse"] },
+      { "decision": "rejected", "reason_codes": ["cross_project_write"] },
+      { "decision": "rejected", "reason_codes": ["private_to_public_write"] },
+      { "decision": "accepted", "reason_codes": [] }
+    ],
+    "accepted_event_ids": [
+      "evt_fx_replay_observe",
+      "evt_fx_replay_capsule",
+      "evt_fx_replay_receipt"
+    ],
+    "projection": {
+      "schema": "vivary.event-projection/v0",
+      "policy_version": "policy/v0",
+      "event_count": 3,
+      "event_types": {
+        "workspace.observed": 1,
+        "capsule.compiled": 1,
+        "receipt.created": 1
+      },
+      "subjects": {
+        "workspace:lab://fixtures": {
+          "event_count": 1,
+          "last_sequence": 1,
+          "last_event_id": "evt_fx_replay_observe",
+          "last_event_type": "workspace.observed"
+        },
+        "capsule:capsule_fx_0001": {
+          "event_count": 1,
+          "last_sequence": 2,
+          "last_event_id": "evt_fx_replay_capsule",
+          "last_event_type": "capsule.compiled"
+        },
+        "receipt:receipt_fx_0001": {
+          "event_count": 1,
+          "last_sequence": 3,
+          "last_event_id": "evt_fx_replay_receipt",
+          "last_event_type": "receipt.created"
+        }
+      },
+      "fingerprint": "sha256:0dc1f380f461b83f1b204c6bb2d101df0418acdd27ef6c997e788c339e79a162"
+    }
+  }
+}

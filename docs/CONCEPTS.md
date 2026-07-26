@@ -91,4 +91,4 @@ are even named for the layers of the sky.
 - [Why I built Vivary](/blog/why-i-built-vivary/) — the motivation, in story form.
 - [What is an agent-native workspace?](/blog/what-is-an-agent-native-workspace/) — the
   concept, in more depth.
-- [FAQ](/faq/) — quick answers.
+- [Homepage FAQ](https://vivary.vercel.app/#faq) — quick answers.
