@@ -665,3 +665,65 @@ def test_absent_content_is_byte_identical_to_explicit_none_and_empty_checkouts()
     assert omitted["fingerprint"] == explicit_none["fingerprint"]
     empty_content = compile_task_capsule(task=TIERED_TASK, graph=graph, content={"checkouts": []})
     assert omitted["fingerprint"] == empty_content["fingerprint"]
+
+
+def test_scope_narrower_than_the_graph_excludes_out_of_scope_checkouts(graph, fx):
+    """A capsule must not carry claims about checkouts its own scope excludes.
+
+    The scope was only copied into the output, never applied to selection, so a
+    capsule could declare scope ['/a'] while including claims from '/b' — and a
+    downstream agent may act on context the capsule itself says is out of scope.
+    """
+    in_scope = fx["paths"]["canonical"]
+
+    capsule = compile_task_capsule(
+        task={**TASK, "scope": [in_scope]}, graph=graph
+    )
+
+    assert capsule["claims"], "scoping must not empty the capsule"
+    out_of_scope = [
+        claim for claim in capsule["claims"]
+        if not claim.get("subject_path", "").lower().startswith(in_scope.replace("\\", "/").lower())
+    ]
+    assert out_of_scope == [], (
+        f"claims outside the declared scope leaked into the capsule: "
+        f"{[c['subject_path'] for c in out_of_scope]}"
+    )
+
+
+def test_negative_claim_budget_is_rejected_rather_than_inverted(graph):
+    """Negative slicing quietly includes almost everything.
+
+    `max_claims=-1` selected all claims but the last and emitted the contradictory
+    reason 'claim budget -1 reached', so a malformed budget silently *expanded* the
+    context instead of failing closed.
+    """
+    with pytest.raises(ValueError, match="max_claims"):
+        compile_task_capsule(task=TASK, graph=graph, budget={"max_claims": -1})
+
+
+def test_content_search_failure_becomes_a_capsule_unknown(graph, fx):
+    """A failed search must not be indistinguishable from a search with no matches.
+
+    Compilation read only per-checkout `omissions`, so a checkout reporting
+    `grep_unavailable`, or a root refused outright by `observe_content`, vanished
+    from the capsule entirely.
+    """
+    path = fx["paths"]["canonical"]
+    content = {
+        "checkouts": [
+            {"path": path, "status": "unknown", "reason": "grep_unavailable",
+             "matches": [], "omissions": []}
+        ],
+        "refusals": [{"path": fx["paths"]["disallowed"], "reason": "outside_allowlist"}],
+    }
+
+    capsule = compile_task_capsule(task=TASK, graph=graph, content=content)
+
+    recorded = json.dumps(capsule["unknowns"]) + json.dumps(capsule["omissions"])
+    assert "grep_unavailable" in recorded, (
+        "a failed content search left no trace in the capsule"
+    )
+    assert "outside_allowlist" in recorded, (
+        "a refused content root left no trace in the capsule"
+    )

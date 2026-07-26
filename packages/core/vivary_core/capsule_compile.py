@@ -29,7 +29,7 @@ Language mapping notes (decision 0008 / documented rules for this slice):
 
 from __future__ import annotations
 
-from vivary_core.canonical import deterministic_id, fingerprint
+from vivary_core.canonical import deterministic_id, fingerprint, is_within_allowlist
 from vivary_core.capsule_select import select_claims
 from vivary_core.collation import locale_sort_key
 
@@ -173,11 +173,28 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     max_claims = budget.get("max_claims")
     if max_claims is None:
         max_claims = 24
+    # Python's negative slicing would quietly include almost every candidate: -1
+    # selects all but the last claim and then reports "claim budget -1 reached".
+    # A malformed budget must fail closed, not expand the context.
+    if isinstance(max_claims, bool) or not isinstance(max_claims, int) or max_claims < 0:
+        raise ValueError(
+            f"budget.max_claims must be a non-negative integer (got {max_claims!r})"
+        )
     checkouts = [
         n
         for n in graph.get("nodes", [])
         if n.get("kind") == "checkout" and ((n.get("facts") or {}).get("is_git_repository") or {}).get("value") is True
     ]
+    # A declared scope narrower than the graph's allowlist must actually bound what
+    # the capsule carries. Copying it into the output alone let a capsule declare
+    # scope ['/a'] while including claims from '/b', so a downstream agent could act
+    # on context the capsule itself says is out of scope.
+    declared_scope = task.get("scope")
+    if declared_scope:
+        checkouts = [
+            n for n in checkouts
+            if any(is_within_allowlist(root, n.get("path") or "") for root in declared_scope)
+        ]
     checkouts_by_path = {n.get("path"): n for n in checkouts}
 
     truncation_omissions: list[dict] = []
@@ -243,6 +260,7 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         )
     for refusal in graph.get("refusals") or []:
         omissions.append({"kind": "refused_root", "reason": refusal.get("reason"), "path": refusal.get("path")})
+    content_unknowns: list[dict] = []
     for checkout_content in (content.get("checkouts") if content else None) or []:
         node = checkouts_by_path.get(checkout_content.get("path"))
         for content_omission in checkout_content.get("omissions") or []:
@@ -250,6 +268,29 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
             entry["subject"] = node.get("id") if node is not None else None
             entry["subject_path"] = checkout_content.get("path")
             omissions.append(entry)
+        # A search that could not run is not a search that found nothing. Reading
+        # only `omissions` made `grep_unavailable` — and a root `observe_content`
+        # refused outright — vanish from the capsule, so a failed search was
+        # indistinguishable from a clean miss.
+        if checkout_content.get("status") not in (None, "observed"):
+            content_unknowns.append(
+                {
+                    "kind": "content_search_incomplete",
+                    "subject": node.get("id") if node is not None else None,
+                    "subject_path": checkout_content.get("path"),
+                    "status": checkout_content.get("status"),
+                    "reason": checkout_content.get("reason") or "content_search_unavailable",
+                    "evidence": [checkout_content["evidence"]] if checkout_content.get("evidence") else [],
+                }
+            )
+    for refusal in (content.get("refusals") if content else None) or []:
+        omissions.append(
+            {
+                "kind": "content_root_refused",
+                "reason": refusal.get("reason"),
+                "path": refusal.get("path"),
+            }
+        )
 
     # Conflicts and unknowns pass through unreduced: a capsule may narrate them,
     # never resolve them. Every conflict is handed to review, not to confidence.
@@ -274,7 +315,7 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         },
         "claims": included,
         "conflicts": conflicts,
-        "unknowns": graph["unknowns"],
+        "unknowns": [*graph["unknowns"], *content_unknowns],
         "omissions": omissions,
         "required_checks": DEFAULT_REQUIRED_CHECKS,
         "budget": {"max_claims": max_claims},
