@@ -36,6 +36,8 @@ memory, MCP, install, or publication action occurs.
   approved dataset, and Doctor remains module-level and provider-free.
   Recall documentation now names Cognee's fixed `source = "provider"` label, with the
   package contract test asserting that value.
+  Current Doctor ordering is now explicit: `unavailable` short-circuits state-path
+  validation, so that status does not attest path safety.
 - Routed the nested Bellamente contract from the documentation index and the generated
   semantic-memory page without creating an unsupported site route.
 

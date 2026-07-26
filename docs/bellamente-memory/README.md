@@ -15,44 +15,17 @@ and governs [#190](https://github.com/vivary-dev/vivary/pull/190).
 | [CONTEXT.md](CONTEXT.md) | Canonical vocabulary, authority rules, privacy, gates, and test-tier terms. |
 | [SPEC-bellamente-memory.md](SPEC-bellamente-memory.md) | The normative future implementation contract. |
 
-## Contract at a glance
+## Contract routes
 
-- **Three seams:** `SemanticMemoryAdapter` is a privacy-filtered `tropo`
-  projection; `AgentLTM` is Bellamente's independent store; and
-  `CandidateRecallProvider` normalizes prior assertions for the `vivary-core`
-  firewall.
-- **Default none:** scaffold/adopt may write only disabled `[agent-ltm]` policy,
-  inert instructions, and the `.bellamente/` runtime-data ignore entry. It must not
-  install, activate, create a live store, enable MCP, add generated `AGENTS.md`
-  content, or mutate memory.
-- **Separate stores:** AgentLTM data belongs only at `.bellamente/data/`. It never
-  shares a physical store with `tropo`, semantic provider state, or Vivary core.
-- **Fail closed:** `USER.md`, `MEMORY.md`, `memory/**`, `heartbeat-reports/**`, and
-  `.strato/private/**` cannot enter indexing, ingest, AgentLTM, or normalized
-  candidates.
-- **Governed crossing:** Bellamente candidates need typed evidence/provenance and a
-  known stable `tropo` node ID. Duplicate, corroboration, explicit correction,
-  conflict/identity ambiguity, staleness, and degradation remain distinct outcomes;
-  learned memory never replaces authored truth automatically.
-- **Human gates:** installation, activation, MCP enablement, every write/correct/
-  forget/ingest action, and the real write → recall → trace proof are separately
-  approved. The proof is release dogfood, never an installer side effect or unit test.
+This page routes; it does not restate the normative requirements:
 
-## Current public surface
-
-Use the existing command contract only:
-
-```bash
-create-vivary capabilities --json
-create-vivary doctor <target> --json
-```
-
-Future capability discovery must declare `requires_external_executable: ["bella"]`
-without probing or executing it and must report `installed: false`; a differently
-named future runtime field may describe separately approved external readiness.
-Future Doctor behavior is likewise declarative, uses namespaced AgentLTM policy
-states, and never calls the executable. Inert documentation may explain a future
-manual MCP decision, but it must not create an active server configuration.
+- [ADR decision — AgentLTM beside Tropo and the three seams](ADR-0001-bellamente-agent-ltm-beside-tropo.md#decision)
+- [Canonical vocabulary and authority model](CONTEXT.md)
+- [SPEC §3 — default policy, storage, and privacy](SPEC-bellamente-memory.md#3-default-policy-storage-and-privacy)
+- [SPEC §4 — explicit human gates](SPEC-bellamente-memory.md#4-explicit-human-gates)
+- [SPEC §5 — capability and Doctor requirements](SPEC-bellamente-memory.md#5-capability-and-doctor-requirements)
+- [SPEC §6 — `CandidateRecallProvider` contract](SPEC-bellamente-memory.md#6-candidaterecallprovider-contract)
+- [SPEC §7 — verification tiers](SPEC-bellamente-memory.md#7-verification-tiers)
 
 ## Canonical dependencies and decisions
 

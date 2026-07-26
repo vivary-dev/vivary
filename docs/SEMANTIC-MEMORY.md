@@ -173,7 +173,8 @@ Minimum current contract:
 - `CogneeMemoryAdapter(root)` resolves the workspace. `index` and `recall` each build
   their own current, privacy-filtered snapshot; they do not accept caller-supplied
   nodes, edges, or recall filters.
-- `index(dry_run=True)` reports the whole snapshot without provider writes.
+- `index(dry_run=True)` reports node/edge counts and the fingerprint for the whole
+  snapshot without returning its contents or performing provider writes.
   A non-dry-run index is an async whole-dataset refresh: after the configured approval
   gate, it removes the prior dataset and remembers every current snapshot node.
 - `recall` is async and returns only typed hits whose stable node IDs occur in the
@@ -404,8 +405,15 @@ remote services merely because a capability exists.
 `vivary_cognee.doctor(root)` is the current module-level, read-only semantic-memory
 report. It is separate from `CogneeMemoryAdapter`: it resolves the workspace, parses
 the memory config, builds the privacy-filtered Tropo snapshot, checks Cognee
-availability without importing it, and compares the manifest. It does not construct an
-adapter or make provider, embedding, or LLM calls.
+availability without importing it, and, when Cognee is available, resolves and
+compares the manifest. It does not construct an adapter or make provider, embedding,
+or LLM calls.
+
+Package unavailability short-circuits manifest and `state_path` resolution. An
+`unavailable` report therefore confirms only that Cognee is configured and absent; it
+does **not** attest that the configured state path is safe. Live adapter operations
+always validate the path before use, and Doctor reports an unsafe path as
+`misconfigured` once Cognee is available.
 
 Its current states are:
 
@@ -413,8 +421,8 @@ Its current states are:
 |---|---|
 | `disabled` | semantic memory is disabled or its provider is `none` |
 | `not-cognee` | another enabled provider is configured; this adapter does not handle it |
-| `unavailable` | Cognee is configured but its package is not installed |
-| `misconfigured` | root, config, snapshot, or state-path validation failed |
+| `unavailable` | Cognee is configured but its package is not installed; manifest and state-path validation have not run |
+| `misconfigured` | root, config, or snapshot validation failed, or state-path validation failed while Cognee was available |
 | `stale` | Cognee is available but the manifest is absent, unreadable, or does not match the current snapshot |
 | `healthy` | Cognee is available and the manifest matches the current snapshot |
 
