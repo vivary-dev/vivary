@@ -14,6 +14,11 @@ ADAPTATION - completed-work ordering: when a receipt is present, evaluate
 its gate before returning for budget exhaustion. The decision still carries
 ``budget_exhausted`` and never permits another action, but failed evidence
 cannot be hidden behind the boundary stop.
+
+ADAPTATION - completed receipts retain capsule gates: unlike the frozen Node
+oracle, a clean receipt cannot erase capsule-intrinsic evidence or budget
+omissions. Non-blocked receipt and capsule gate evidence are merged before the
+loop decides whether to stop or request a human gate.
 """
 
 from __future__ import annotations
@@ -30,6 +35,33 @@ from vivary_core.policy_reason_codes import LOOP_DECISION, LOOP_REASON
 _UNSET = object()
 
 __all__ = ["LOOP_DECISION", "LOOP_REASON", "next_loop_step"]
+
+
+def _dedupe(codes):
+    return list(dict.fromkeys(codes))
+
+
+def _dedupe_requests(requests):
+    deduped = []
+    for request in requests:
+        if request not in deduped:
+            deduped.append(request)
+    return deduped
+
+
+def _merge_nonblocked_gates(*, receipt_gate, capsule_gate):
+    return {
+        "decision": (
+            GATE_DECISION["GATE_REQUIRED"]
+            if (
+                receipt_gate["decision"] == GATE_DECISION["GATE_REQUIRED"]
+                or capsule_gate["decision"] == GATE_DECISION["GATE_REQUIRED"]
+            )
+            else GATE_DECISION["CLEAR"]
+        ),
+        "reason_codes": _dedupe([*receipt_gate["reason_codes"], *capsule_gate["reason_codes"]]),
+        "gate_requests": _dedupe_requests([*receipt_gate["gate_requests"], *capsule_gate["gate_requests"]]),
+    }
 
 
 def next_loop_step(*, capsule, receipt=_UNSET, verdict=None, state=None, limits=None):
@@ -79,18 +111,20 @@ def next_loop_step(*, capsule, receipt=_UNSET, verdict=None, state=None, limits=
                 "budget": budget,
                 "gate": receipt_gate,
             }
-        if receipt_gate["decision"] == GATE_DECISION["GATE_REQUIRED"]:
+
+        gate = _merge_nonblocked_gates(receipt_gate=receipt_gate, capsule_gate=capsule_gate)
+        if gate["decision"] == GATE_DECISION["GATE_REQUIRED"]:
             return {
                 "decision": LOOP_DECISION["REQUEST_GATE"],
                 "reason_codes": [LOOP_REASON["GATE_REQUIRED"], *budget_reason_codes],
                 "budget": budget,
-                "gate": receipt_gate,
+                "gate": gate,
             }
         return {
             "decision": LOOP_DECISION["STOP"],
             "reason_codes": [LOOP_REASON["ALL_CHECKS_CLEAR"], *budget_reason_codes],
             "budget": budget,
-            "gate": receipt_gate,
+            "gate": gate,
         }
 
     if budget_exhausted:

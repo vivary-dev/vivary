@@ -19,13 +19,11 @@ real verdict via `evaluateGateSufficiency` (src/verify/sufficiency.mjs).
 That module is not part of this slice (not in the owned-files list, and not
 one of the already-ported "capsule_compile, receipt, workspace_*" modules
 this task's rules call out as importable). Rather than port the whole Ozone
-sufficiency module speculatively, `_ozone_verdict_stub` emits the verdict
-fields Strato consumes: `outcome`, `reason_codes`, and `failing_checks`.
-It matches sufficiency.mjs's required-check loop: missing ->
-{"actual": "missing"}, present but not "passed" -> {"actual": <outcome>},
-with `insufficient` whenever either occurs. The "without a verdict,
-behavior is unchanged" test is the self-check that the stub's specific
-check failures match the no-verdict re-derivation fallback.
+sufficiency module speculatively, `_ozone_verdict_stub` emits the bound verdict
+fields Strato consumes: `capsule`, `receipt_id`, `outcome`, `reason_codes`, and
+`failing_checks`. It mirrors Ozone's missing/failed check classification while
+leaving Strato's independently derived receipt checks observable as a baseline
+that a valid Ozone verdict can only augment.
 """
 
 from __future__ import annotations
@@ -290,6 +288,14 @@ def base_receipt_like(capsule, overrides=None):
 # -- ADAPTATION: scoped Ozone gate-verdict stub (see module docstring) ----------------
 
 
+def _bound_verdict(*, capsule, receipt, **fields):
+    return {
+        **fields,
+        "capsule": {"id": capsule["capsule_id"], "fingerprint": capsule["fingerprint"]},
+        "receipt_id": receipt["receipt_id"],
+    }
+
+
 def _ozone_verdict_stub(*, capsule, receipt, required_checks):
     outcome_by_name = {c["name"]: c.get("outcome") for c in receipt.get("checks", [])}
     failing_checks = []
@@ -301,11 +307,13 @@ def _ozone_verdict_stub(*, capsule, receipt, required_checks):
         elif outcome_by_name[name] != "passed":
             failing_checks.append({"name": name, "expected": "passed", "actual": outcome_by_name[name]})
             reason_codes.append("required_check_failed")
-    return {
-        "outcome": "insufficient" if failing_checks else "sufficient",
-        "reason_codes": list(dict.fromkeys(reason_codes)),
-        "failing_checks": failing_checks,
-    }
+    return _bound_verdict(
+        capsule=capsule,
+        receipt=receipt,
+        outcome="insufficient" if failing_checks else "sufficient",
+        reason_codes=list(dict.fromkeys(reason_codes)),
+        failing_checks=failing_checks,
+    )
 
 
 # -- reason-code vocabulary is pinned -------------------------------------------------
@@ -341,6 +349,7 @@ def test_gate_reason_code_vocabulary_is_pinned():
         "UNKNOWN_CAPSULE_SHAPE": "unknown_capsule_shape",
         "UNKNOWN_RECEIPT_SHAPE": "unknown_receipt_shape",
         "VERDICT_INSUFFICIENT": "verdict_insufficient",
+        "VERDICT_BINDING_MISMATCH": "verdict_binding_mismatch",
     }
     with pytest.raises(TypeError):
         GATE_DECISION["CLEAR"] = "nope"
@@ -522,13 +531,9 @@ def test_evaluate_receipt_gate_gate_required_when_a_required_check_failed():
     assert request["outcome"] == "failed"
 
 
-# -- gate-seam harmonization: consuming an Ozone verdict instead of re-deriving --
-# (wave-2 seam obligation: Strato decides policy FROM verdicts; only Ozone
-# evaluates sufficiency and recomputes fingerprints - see src/verify/sufficiency.mjs.
-# `_ozone_verdict_stub` replaces `evaluateGateSufficiency` here; see the module
-# docstring ADAPTATION note.)
+# -- gate-seam harmonization: unioning bound Ozone verdict evidence with receipt checks --
 
-def test_evaluate_receipt_gate_given_an_ozone_gate_verdict_consumes_its_failing_checks_instead_of_re_deriving_them():
+def test_evaluate_receipt_gate_given_an_ozone_gate_verdict_unions_its_failing_checks_with_receipt_derivation():
     capsule = build_clean_capsule()
     receipt = create_integrity_receipt(
         capsule=capsule,
@@ -570,6 +575,34 @@ def test_evaluate_receipt_gate_an_ozone_verdict_reporting_a_failed_not_missing_c
     assert request["outcome"] == "failed"
 
 
+
+def test_evaluate_receipt_gate_preserves_ozone_non_check_reasons_alongside_specific_check_failures():
+    capsule = build_clean_capsule()
+    checks = [
+        {"name": check["name"], "command": check["command"], "outcome": "failed" if index == 0 else "passed"}
+        for index, check in enumerate(capsule["required_checks"])
+    ]
+    receipt = create_integrity_receipt(
+        capsule=capsule, runtime={"harness": "test", "actor": "test-actor"}, checks=checks, now=NOW
+    )
+    verdict = _bound_verdict(
+        capsule=capsule,
+        receipt=receipt,
+        outcome="insufficient",
+        reason_codes=["claims_not_fully_verified"],
+        failing_checks=[
+            {"name": capsule["required_checks"][0]["name"], "expected": "passed", "actual": "failed"},
+        ],
+    )
+
+    outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict)
+
+    assert GATE_REASON["REQUIRED_CHECK_FAILED"] in outcome["reason_codes"]
+    assert GATE_REASON["VERDICT_INSUFFICIENT"] in outcome["reason_codes"]
+    verdict_request = next(
+        request for request in outcome["gate_requests"] if request["reason_code"] == GATE_REASON["VERDICT_INSUFFICIENT"]
+    )
+    assert verdict_request["verdict_reason_codes"] == ["claims_not_fully_verified"]
 def test_evaluate_receipt_gate_a_sufficient_ozone_verdict_clears_the_required_checks_portion_of_the_gate():
     capsule = build_clean_capsule()
     receipt = create_integrity_receipt(
@@ -596,11 +629,13 @@ def test_evaluate_receipt_gate_honors_an_insufficient_verdict_with_no_failing_ch
         ],
         now=NOW,
     )
-    verdict = {
-        "outcome": "insufficient",
-        "reason_codes": ["claims_not_fully_verified"],
-        "failing_checks": [],
-    }
+    verdict = _bound_verdict(
+        capsule=capsule,
+        receipt=receipt,
+        outcome="insufficient",
+        reason_codes=["claims_not_fully_verified"],
+        failing_checks=[],
+    )
 
     outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict)
 
@@ -615,29 +650,30 @@ def test_evaluate_receipt_gate_honors_an_insufficient_verdict_with_no_failing_ch
     ]
 
 
-def test_evaluate_receipt_gate_a_supplied_verdict_is_actually_consumed_not_ignored_it_can_disagree_with_what_re_deriving_from_the_receipt_would_say():
+def test_evaluate_receipt_gate_rejects_an_unbound_verdict_without_trusting_its_failing_checks():
     capsule = build_clean_capsule()
-    # Every required check actually passed on the receipt - re-deriving from
-    # capsule["required_checks"] vs receipt["checks"] alone would say "clear".
     receipt = create_integrity_receipt(
         capsule=capsule,
         runtime={"harness": "test", "actor": "test-actor"},
         checks=[{"name": c["name"], "command": c["command"], "outcome": "passed"} for c in capsule["required_checks"]],
         now=NOW,
     )
-    # A hand-built Ozone verdict (as evaluateGateSufficiency's shape - not
-    # re-derived here) disagrees: it reports one required check missing.
-    verdict = {"failing_checks": [{"name": capsule["required_checks"][0]["name"], "expected": "passed", "actual": "missing"}]}
+    verdict = {
+        "outcome": "insufficient",
+        "reason_codes": ["claims_not_fully_verified"],
+        "failing_checks": [{"name": capsule["required_checks"][0]["name"], "expected": "passed", "actual": "missing"}],
+    }
 
     outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict)
-    assert outcome["decision"] == GATE_DECISION["GATE_REQUIRED"], "must follow the supplied verdict, not re-derive from the receipt"
-    assert GATE_REASON["REQUIRED_CHECK_MISSING"] in outcome["reason_codes"]
-    assert outcome["gate_requests"] == [
-        {"reason_code": GATE_REASON["REQUIRED_CHECK_MISSING"], "check": capsule["required_checks"][0]["name"]}
-    ]
+
+    assert outcome == {
+        "decision": GATE_DECISION["GATE_REQUIRED"],
+        "reason_codes": [GATE_REASON["VERDICT_BINDING_MISMATCH"]],
+        "gate_requests": [{"reason_code": GATE_REASON["VERDICT_BINDING_MISMATCH"]}],
+    }
 
 
-def test_evaluate_receipt_gate_without_a_verdict_behavior_is_unchanged_it_still_re_derives_from_capsule_required_checks_backward_compatible_default():
+def test_evaluate_receipt_gate_a_bound_verdict_augments_but_never_weakens_receipt_derived_checks():
     capsule = build_clean_capsule()
     receipt = create_integrity_receipt(
         capsule=capsule,
@@ -652,7 +688,10 @@ def test_evaluate_receipt_gate_without_a_verdict_behavior_is_unchanged_it_still_
     )
     with_verdict = evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict)
     without_verdict = evaluate_receipt_gate(capsule=capsule, receipt=receipt)
-    assert with_verdict == without_verdict
+
+    assert set(without_verdict["reason_codes"]) <= set(with_verdict["reason_codes"])
+    assert all(request in with_verdict["gate_requests"] for request in without_verdict["gate_requests"])
+    assert GATE_REASON["VERDICT_INSUFFICIENT"] in with_verdict["reason_codes"]
 
 
 def test_next_loop_step_threads_an_optional_verdict_through_to_evaluate_receipt_gate_unchanged():
@@ -674,6 +713,134 @@ def test_next_loop_step_threads_an_optional_verdict_through_to_evaluate_receipt_
     assert with_verdict["gate"] == direct
 
 
+
+def test_evaluate_receipt_gate_derives_required_checks_even_when_a_bound_verdict_claims_sufficient():
+    capsule = build_clean_capsule()
+    receipt = create_integrity_receipt(
+        capsule=capsule,
+        runtime={"harness": "test", "actor": "test-actor"},
+        checks=[
+            {"name": check["name"], "command": check["command"], "outcome": "passed"}
+            for check in capsule["required_checks"][1:]
+        ],
+        now=NOW,
+    )
+    verdict = _bound_verdict(
+        capsule=capsule, receipt=receipt, outcome="sufficient", reason_codes=[], failing_checks=[]
+    )
+
+    outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict)
+
+    assert outcome["decision"] == GATE_DECISION["GATE_REQUIRED"]
+    assert GATE_REASON["REQUIRED_CHECK_MISSING"] in outcome["reason_codes"]
+    assert GATE_REASON["VERDICT_BINDING_MISMATCH"] not in outcome["reason_codes"]
+
+
+def test_evaluate_receipt_gate_unions_distinct_bound_verdict_failures_with_receipt_failures():
+    capsule = build_clean_capsule()
+    checks = [
+        {"name": check["name"], "command": check["command"], "outcome": "failed" if index == 0 else "passed"}
+        for index, check in enumerate(capsule["required_checks"])
+    ]
+    receipt = create_integrity_receipt(
+        capsule=capsule, runtime={"harness": "test", "actor": "test-actor"}, checks=checks, now=NOW
+    )
+    verdict = _bound_verdict(
+        capsule=capsule,
+        receipt=receipt,
+        outcome="insufficient",
+        reason_codes=["claims_not_fully_verified"],
+        failing_checks=[
+            {"name": capsule["required_checks"][1]["name"], "expected": "passed", "actual": "missing"},
+        ],
+    )
+
+    outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict)
+
+    assert any(
+        request["reason_code"] == GATE_REASON["REQUIRED_CHECK_FAILED"]
+        and request["check"] == capsule["required_checks"][0]["name"]
+        for request in outcome["gate_requests"]
+    )
+    assert any(
+        request["reason_code"] == GATE_REASON["REQUIRED_CHECK_MISSING"]
+        and request["check"] == capsule["required_checks"][1]["name"]
+        for request in outcome["gate_requests"]
+    )
+
+
+def test_evaluate_receipt_gate_rejects_missing_or_mismatched_verdict_bindings():
+    capsule = build_clean_capsule()
+    receipt = create_integrity_receipt(
+        capsule=capsule,
+        runtime={"harness": "test", "actor": "test-actor"},
+        checks=[{"name": check["name"], "command": check["command"], "outcome": "passed"} for check in capsule["required_checks"]],
+        now=NOW,
+    )
+    valid = _bound_verdict(capsule=capsule, receipt=receipt, outcome="sufficient", reason_codes=[], failing_checks=[])
+    missing_receipt_id = {key: value for key, value in valid.items() if key != "receipt_id"}
+    invalid_verdicts = [
+        {**valid, "capsule": {"fingerprint": capsule["fingerprint"]}},
+        {**valid, "capsule": {"id": "capsule_other", "fingerprint": capsule["fingerprint"]}},
+        {**valid, "capsule": {"id": capsule["capsule_id"], "fingerprint": "sha256:other"}},
+        missing_receipt_id,
+        {**valid, "receipt_id": "receipt_other"},
+    ]
+
+    for verdict in invalid_verdicts:
+        outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict)
+        assert outcome == {
+            "decision": GATE_DECISION["GATE_REQUIRED"],
+            "reason_codes": [GATE_REASON["VERDICT_BINDING_MISMATCH"]],
+            "gate_requests": [{"reason_code": GATE_REASON["VERDICT_BINDING_MISMATCH"]}],
+        }
+
+
+def test_evaluate_receipt_gate_duplicate_matching_checks_cannot_mask_a_failure():
+    capsule = build_clean_capsule()
+    required = capsule["required_checks"][0]
+    checks = [
+        {"name": required["name"], "command": required["command"], "outcome": "failed"},
+        {"name": required["name"], "command": required["command"], "outcome": "passed"},
+        *[
+            {"name": check["name"], "command": check["command"], "outcome": "passed"}
+            for check in capsule["required_checks"][1:]
+        ],
+    ]
+    receipt = create_integrity_receipt(
+        capsule=capsule, runtime={"harness": "test", "actor": "test-actor"}, checks=checks, now=NOW
+    )
+
+    outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt)
+
+    assert any(
+        request["reason_code"] == GATE_REASON["REQUIRED_CHECK_FAILED"]
+        and request["check"] == required["name"]
+        and request["outcome"] == "failed"
+        for request in outcome["gate_requests"]
+    )
+
+
+def test_evaluate_receipt_gate_requires_a_matching_check_command():
+    capsule = build_clean_capsule()
+    required = capsule["required_checks"][0]
+    checks = [
+        {"name": required["name"], "command": "not-the-required-command", "outcome": "passed"},
+        *[
+            {"name": check["name"], "command": check["command"], "outcome": "passed"}
+            for check in capsule["required_checks"][1:]
+        ],
+    ]
+    receipt = create_integrity_receipt(
+        capsule=capsule, runtime={"harness": "test", "actor": "test-actor"}, checks=checks, now=NOW
+    )
+
+    outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt)
+
+    assert any(
+        request["reason_code"] == GATE_REASON["REQUIRED_CHECK_MISSING"] and request["check"] == required["name"]
+        for request in outcome["gate_requests"]
+    )
 def test_evaluate_receipt_gate_gate_required_when_the_receipt_binds_to_a_different_capsule_fingerprint():
     capsule = build_clean_capsule()
     receipt = base_receipt_like(
@@ -697,6 +864,44 @@ def test_evaluate_receipt_gate_all_checks_passing_does_not_clear_unresolved_conf
     assert GATE_REASON["UNRESOLVED_UNKNOWN"] in outcome["reason_codes"]
 
 
+
+def test_evaluate_capsule_gate_blocks_malformed_collection_entries_and_required_fields():
+    malformed_capsules = [
+        {"claims": [None]},
+        {"claims": [{"evidence": []}]},
+        {"conflicts": [{"id": "conflict"}]},
+        {"unknowns": ["unknown"]},
+        {"omissions": [{}]},
+        {"required_checks": [{"name": "check"}]},
+    ]
+
+    for overrides in malformed_capsules:
+        outcome = evaluate_capsule_gate(capsule=base_capsule_like(overrides))
+        assert outcome == {
+            "decision": GATE_DECISION["BLOCKED"],
+            "reason_codes": [GATE_REASON["UNKNOWN_CAPSULE_SHAPE"]],
+            "gate_requests": [],
+        }
+
+
+def test_evaluate_receipt_gate_blocks_malformed_collection_entries_and_required_fields():
+    capsule = base_capsule_like()
+    malformed_receipts = [
+        {"checks": [None]},
+        {"checks": [{"name": "check", "outcome": "passed"}]},
+        {"unresolved_conflicts": [None]},
+        {"unresolved_unknowns": ["unknown"]},
+        {"capsule": {"fingerprint": capsule["fingerprint"]}},
+        {"receipt_id": ""},
+    ]
+
+    for overrides in malformed_receipts:
+        outcome = evaluate_receipt_gate(capsule=capsule, receipt=base_receipt_like(capsule, overrides))
+        assert outcome == {
+            "decision": GATE_DECISION["BLOCKED"],
+            "reason_codes": [GATE_REASON["UNKNOWN_RECEIPT_SHAPE"]],
+            "gate_requests": [],
+        }
 def test_evaluate_receipt_gate_fails_closed_on_an_unrecognized_receipt_or_capsule_shape():
     capsule = build_clean_capsule()
     good_receipt = base_receipt_like(capsule)
@@ -753,6 +958,25 @@ def test_next_loop_step_stop_with_all_checks_clear_once_a_receipt_clears_every_g
     outcome = next_loop_step(capsule=capsule, receipt=receipt)
     assert outcome["decision"] == LOOP_DECISION["STOP"]
     assert outcome["reason_codes"] == [LOOP_REASON["ALL_CHECKS_CLEAR"]]
+
+
+def test_next_loop_step_retains_capsule_evidence_and_budget_gates_after_a_clean_receipt():
+    capsule = base_capsule_like(
+        {
+            "claims": [{"id": "claim_missing_evidence", "evidence": []}],
+            "omissions": [{"kind": "claims_over_budget", "omitted_count": 2}],
+        }
+    )
+    receipt = base_receipt_like(capsule)
+
+    outcome = next_loop_step(capsule=capsule, receipt=receipt)
+
+    assert outcome["decision"] == LOOP_DECISION["REQUEST_GATE"]
+    assert outcome["reason_codes"] == [LOOP_REASON["GATE_REQUIRED"]]
+    assert GATE_REASON["CLAIM_MISSING_EVIDENCE"] in outcome["gate"]["reason_codes"]
+    assert GATE_REASON["CAPSULE_OVER_BUDGET"] in outcome["gate"]["reason_codes"]
+    assert {"reason_code": GATE_REASON["CLAIM_MISSING_EVIDENCE"], "target": "claim_missing_evidence"} in outcome["gate"]["gate_requests"]
+    assert {"reason_code": GATE_REASON["CAPSULE_OVER_BUDGET"], "omitted_count": 2} in outcome["gate"]["gate_requests"]
 
 
 def test_next_loop_step_request_gate_after_a_receipt_with_a_failed_required_check():

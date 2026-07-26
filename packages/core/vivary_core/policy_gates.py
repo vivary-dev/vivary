@@ -22,6 +22,11 @@ ADAPTATION - capsule identity: gate and budget shape checks both require
 ``capsule_id`` so the loop cannot accept a capsule that its budget policy
 refuses.
 
+ADAPTATION - bound Ozone verdicts: unlike the frozen Node oracle, a supplied
+verdict must bind its capsule identity and receipt ID. Strato independently
+derives required-check outcomes from the receipt and unions bound Ozone evidence,
+so a verdict can add gate evidence but can never waive it.
+
 Language mapping (documented, per python/README.md):
 - JS `conflict.id ?? null` / `claim.id ?? null` -> ``dict.get("id")``, which
   already collapses an absent key or an explicit ``None`` to ``None`` -
@@ -44,34 +49,96 @@ __all__ = [
 ]
 
 
+def _is_non_empty_string(value) -> bool:
+    return isinstance(value, str) and len(value) > 0
+
+
+def _is_collection_of_dicts(collection) -> bool:
+    return all(isinstance(entry, dict) for entry in collection)
+
+
 def _is_capsule_shape(capsule) -> bool:
-    return (
+    if not (
         isinstance(capsule, dict)
         and capsule.get("schema") == CAPSULE_SCHEMA
-        and isinstance(capsule.get("capsule_id"), str)
+        and _is_non_empty_string(capsule.get("capsule_id"))
+        and _is_non_empty_string(capsule.get("fingerprint"))
         and isinstance(capsule.get("claims"), list)
         and isinstance(capsule.get("conflicts"), list)
         and isinstance(capsule.get("unknowns"), list)
         and isinstance(capsule.get("omissions"), list)
         and isinstance(capsule.get("required_checks"), list)
-        and isinstance(capsule.get("fingerprint"), str)
+    ):
+        return False
+
+    return (
+        _is_collection_of_dicts(capsule["claims"])
+        and all(_is_non_empty_string(claim.get("id")) for claim in capsule["claims"])
+        and _is_collection_of_dicts(capsule["conflicts"])
+        and all(
+            _is_non_empty_string(conflict.get("id")) and _is_non_empty_string(conflict.get("decision"))
+            for conflict in capsule["conflicts"]
+        )
+        and _is_collection_of_dicts(capsule["unknowns"])
+        and _is_collection_of_dicts(capsule["omissions"])
+        and all(_is_non_empty_string(omission.get("kind")) for omission in capsule["omissions"])
+        and _is_collection_of_dicts(capsule["required_checks"])
+        and all(
+            _is_non_empty_string(required_check.get("name"))
+            and _is_non_empty_string(required_check.get("command"))
+            for required_check in capsule["required_checks"]
+        )
     )
 
 
 def _is_receipt_shape(receipt) -> bool:
-    return (
+    if not (
         isinstance(receipt, dict)
         and receipt.get("schema") == RECEIPT_SCHEMA
+        and _is_non_empty_string(receipt.get("receipt_id"))
+        and _is_non_empty_string(receipt.get("fingerprint"))
         and isinstance(receipt.get("checks"), list)
         and isinstance(receipt.get("unresolved_conflicts"), list)
         and isinstance(receipt.get("unresolved_unknowns"), list)
         and isinstance(receipt.get("capsule"), dict)
-        and isinstance(receipt["capsule"].get("fingerprint"), str)
+        and _is_non_empty_string(receipt["capsule"].get("id"))
+        and _is_non_empty_string(receipt["capsule"].get("fingerprint"))
+    ):
+        return False
+
+    return (
+        _is_collection_of_dicts(receipt["checks"])
+        and all(
+            _is_non_empty_string(check.get("name"))
+            and _is_non_empty_string(check.get("command"))
+            and _is_non_empty_string(check.get("outcome"))
+            for check in receipt["checks"]
+        )
+        and _is_collection_of_dicts(receipt["unresolved_conflicts"])
+        and _is_collection_of_dicts(receipt["unresolved_unknowns"])
     )
 
 
 def _dedupe(codes):
     return list(dict.fromkeys(codes))
+
+
+def _dedupe_requests(requests):
+    deduped = []
+    for request in requests:
+        if request not in deduped:
+            deduped.append(request)
+    return deduped
+
+
+def _has_matching_verdict_bindings(*, verdict, capsule, receipt) -> bool:
+    return (
+        isinstance(verdict, dict)
+        and isinstance(verdict.get("capsule"), dict)
+        and verdict["capsule"].get("id") == capsule["capsule_id"]
+        and verdict["capsule"].get("fingerprint") == capsule["fingerprint"]
+        and verdict.get("receipt_id") == receipt["receipt_id"]
+    )
 
 
 def evaluate_capsule_gate(*, capsule):
@@ -120,7 +187,7 @@ def evaluate_capsule_gate(*, capsule):
     return {
         "decision": GATE_DECISION["CLEAR"] if len(codes) == 0 else GATE_DECISION["GATE_REQUIRED"],
         "reason_codes": codes,
-        "gate_requests": gate_requests,
+        "gate_requests": _dedupe_requests(gate_requests),
     }
 
 
@@ -128,20 +195,21 @@ def evaluate_receipt_gate(*, capsule, receipt, verdict=None):
     """Decide whether an Execution Receipt clears its capsule's required
     checks and unresolved state well enough to proceed without a human gate.
 
-    Gate-seam harmonization (#13): Ozone's evaluateGateSufficiency
-    (src/verify/sufficiency.mjs) already owns evidence sufficiency behind its
-    GATE_SPEC seam. When a caller passes that verdict in, this function
-    consumes its outcome, reason codes, and failing checks instead of
-    treating an empty ``failing_checks`` list as proof of sufficiency.
-    Strato decides policy FROM verdicts; only Ozone evaluates sufficiency and
-    recomputes fingerprints; neither runs checks. ``verdict`` remains
-    optional and duck-typed, so this module stays decoupled from src/verify/'s
-    schema and reason constants; omitting it keeps the original self-contained
-    re-derivation unchanged for backward compatibility.
+    A supplied Ozone verdict is usable only when it binds the exact capsule
+    (ID and fingerprint) and receipt ID. Strato always independently derives
+    each capsule-required check from the receipt, then unions that result with
+    any bound verdict failure. Ozone's non-check insufficiency reasons remain
+    attached to the returned gate request even when check failures also exist.
+
+    ADAPTATION - independent required checks: the frozen Node oracle allowed a
+    supplied verdict to replace receipt-derived checks. This policy keeps the
+    receipt as an independent fail-closed source and accepts Ozone only as
+    additional, bound evidence.
 
     capsule  the Task Capsule the receipt claims to run against
     receipt  the Execution Receipt to evaluate
-    verdict  {"outcome": str, "reason_codes": [str],
+    verdict  {"capsule": {"id": str, "fingerprint": str}, "receipt_id": str,
+              "outcome": str, "reason_codes": [str],
               "failing_checks": [{"name": str, "expected": str, "actual": str}]}
              (optional) - an Ozone gate-verdict covering the same pair.
 
@@ -163,62 +231,72 @@ def evaluate_receipt_gate(*, capsule, receipt, verdict=None):
     reason_codes = []
     gate_requests = []
 
-    if receipt["capsule"]["fingerprint"] != capsule["fingerprint"]:
+    if (
+        receipt["capsule"]["id"] != capsule["capsule_id"]
+        or receipt["capsule"]["fingerprint"] != capsule["fingerprint"]
+    ):
         reason_codes.append(GATE_REASON["RECEIPT_CAPSULE_MISMATCH"])
         gate_requests.append({"reason_code": GATE_REASON["RECEIPT_CAPSULE_MISMATCH"]})
 
-    failing_checks = verdict.get("failing_checks") if isinstance(verdict, dict) else None
-    has_specific_failure = False
-    if isinstance(failing_checks, list):
-        for failing in failing_checks:
-            if not isinstance(failing, dict):
+    # The receipt remains an independent source of required-check evidence.
+    # A matching name is not enough: every matching name-and-command entry
+    # must have passed, so duplicate entries cannot mask a failure.
+    for required in capsule["required_checks"]:
+        found_matching_check = False
+        for check in receipt["checks"]:
+            if check["name"] != required["name"] or check["command"] != required["command"]:
                 continue
-            has_specific_failure = True
-            if failing.get("actual") == "missing":
-                reason_codes.append(GATE_REASON["REQUIRED_CHECK_MISSING"])
-                gate_requests.append({"reason_code": GATE_REASON["REQUIRED_CHECK_MISSING"], "check": failing.get("name")})
-            else:
-                reason_codes.append(GATE_REASON["REQUIRED_CHECK_FAILED"])
-                gate_requests.append(
-                    {
-                        "reason_code": GATE_REASON["REQUIRED_CHECK_FAILED"],
-                        "check": failing.get("name"),
-                        "outcome": failing.get("actual"),
-                    }
-                )
-    else:
-        check_by_name = {c["name"]: c for c in receipt["checks"]}
-        for required in capsule["required_checks"]:
-            found = check_by_name.get(required["name"])
-            if found is None:
-                reason_codes.append(GATE_REASON["REQUIRED_CHECK_MISSING"])
-                gate_requests.append({"reason_code": GATE_REASON["REQUIRED_CHECK_MISSING"], "check": required["name"]})
-            elif found.get("outcome") != "passed":
+            found_matching_check = True
+            if check["outcome"] != "passed":
                 reason_codes.append(GATE_REASON["REQUIRED_CHECK_FAILED"])
                 gate_requests.append(
                     {
                         "reason_code": GATE_REASON["REQUIRED_CHECK_FAILED"],
                         "check": required["name"],
-                        "outcome": found.get("outcome"),
+                        "outcome": check["outcome"],
                     }
                 )
+        if not found_matching_check:
+            reason_codes.append(GATE_REASON["REQUIRED_CHECK_MISSING"])
+            gate_requests.append({"reason_code": GATE_REASON["REQUIRED_CHECK_MISSING"], "check": required["name"]})
 
-    if (
-        isinstance(verdict, dict)
-        and verdict.get("outcome") != "sufficient"
-        and not has_specific_failure
-    ):
-        verdict_reason_codes = verdict.get("reason_codes")
-        if not isinstance(verdict_reason_codes, list):
-            verdict_reason_codes = []
-        reason_codes.append(GATE_REASON["VERDICT_INSUFFICIENT"])
-        gate_requests.append(
-            {
-                "reason_code": GATE_REASON["VERDICT_INSUFFICIENT"],
-                "verdict_outcome": verdict.get("outcome"),
-                "verdict_reason_codes": verdict_reason_codes,
-            }
-        )
+    if verdict is not None:
+        if not _has_matching_verdict_bindings(verdict=verdict, capsule=capsule, receipt=receipt):
+            reason_codes.append(GATE_REASON["VERDICT_BINDING_MISMATCH"])
+            gate_requests.append({"reason_code": GATE_REASON["VERDICT_BINDING_MISMATCH"]})
+        else:
+            failing_checks = verdict.get("failing_checks")
+            if isinstance(failing_checks, list):
+                for failing in failing_checks:
+                    if not isinstance(failing, dict):
+                        continue
+                    if failing.get("actual") == "missing":
+                        reason_codes.append(GATE_REASON["REQUIRED_CHECK_MISSING"])
+                        gate_requests.append(
+                            {"reason_code": GATE_REASON["REQUIRED_CHECK_MISSING"], "check": failing.get("name")}
+                        )
+                    else:
+                        reason_codes.append(GATE_REASON["REQUIRED_CHECK_FAILED"])
+                        gate_requests.append(
+                            {
+                                "reason_code": GATE_REASON["REQUIRED_CHECK_FAILED"],
+                                "check": failing.get("name"),
+                                "outcome": failing.get("actual"),
+                            }
+                        )
+
+            if verdict.get("outcome") != "sufficient":
+                verdict_reason_codes = verdict.get("reason_codes")
+                if not isinstance(verdict_reason_codes, list):
+                    verdict_reason_codes = []
+                reason_codes.append(GATE_REASON["VERDICT_INSUFFICIENT"])
+                gate_requests.append(
+                    {
+                        "reason_code": GATE_REASON["VERDICT_INSUFFICIENT"],
+                        "verdict_outcome": verdict.get("outcome"),
+                        "verdict_reason_codes": verdict_reason_codes,
+                    }
+                )
 
     if len(receipt["unresolved_conflicts"]) > 0:
         reason_codes.append(GATE_REASON["UNRESOLVED_CONFLICT"])
@@ -235,5 +313,5 @@ def evaluate_receipt_gate(*, capsule, receipt, verdict=None):
     return {
         "decision": GATE_DECISION["CLEAR"] if len(codes) == 0 else GATE_DECISION["GATE_REQUIRED"],
         "reason_codes": codes,
-        "gate_requests": gate_requests,
+        "gate_requests": _dedupe_requests(gate_requests),
     }
