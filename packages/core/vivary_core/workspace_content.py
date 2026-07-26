@@ -44,6 +44,7 @@ from vivary_core.canonical import (
     _utf16_sort_key,
     is_absolute_root,
     is_within,
+    is_within_allowlist,
     normalize_path,
 )
 
@@ -340,7 +341,7 @@ def observe_content(
     refusals: List[Dict[str, Any]] = []
 
     for raw_path in paths:
-        if not any(is_within(root, raw_path) for root in allowlist):
+        if not any(is_within_allowlist(root, raw_path) for root in allowlist):
             refusals.append(
                 {"raw_path": raw_path, "path": normalize_path(raw_path), "status": "refused", "reason": "outside_allowlist"}
             )
@@ -363,7 +364,7 @@ def observe_content(
             toplevel = run_git(raw_path, ["rev-parse", "--show-toplevel"])
             if toplevel["ok"]:
                 resolved = normalize_path(toplevel["stdout"].strip())
-                if not any(is_within(root, resolved) for root in allowlist):
+                if not any(is_within_allowlist(root, resolved) for root in allowlist):
                     refusals.append(
                         {"raw_path": raw_path, "path": path, "status": "refused", "reason": "resolved_outside_allowlist"}
                     )

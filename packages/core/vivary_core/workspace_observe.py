@@ -27,6 +27,7 @@ from vivary_core.canonical import (
     _utf16_sort_key,
     is_absolute_root,
     is_within,
+    is_within_allowlist,
     normalize_path,
 )
 from vivary_core.collation import locale_cmp_key
@@ -113,7 +114,8 @@ def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
             env=_sanitized_git_env(),
         )
     except OSError as error:
-        return {"ok": False, "stdout": "", "stderr": str(error)[:400], "command": command}
+        return {"ok": False, "stdout": "", "stderr": str(error)[:400], "command": command,
+                "code": None}
 
     stdout_bytes = proc.stdout or b""
     # Replicate Node's execFile maxBuffer: if the captured stdout exceeds the
@@ -126,12 +128,14 @@ def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
             "stdout": "",
             "stderr": "stdout maxBuffer length exceeded"[:400],
             "command": command,
+            "code": proc.returncode,
         }
 
     if proc.returncode != 0:
         stderr_bytes = proc.stderr or b""
         stderr_text = stderr_bytes.decode("utf-8", errors="replace")
-        return {"ok": False, "stdout": "", "stderr": stderr_text[:400], "command": command}
+        return {"ok": False, "stdout": "", "stderr": stderr_text[:400], "command": command,
+                "code": proc.returncode}
 
     stdout_text = stdout_bytes.decode("utf-8", errors="replace")
     return {"ok": True, "stdout": stdout_text.replace("\r\n", "\n"), "command": command}
@@ -253,11 +257,22 @@ def _observe_one(raw_path: str, run_git: RunGit) -> Dict[str, Any]:
     )
 
     branch = run_git(path, ["symbolic-ref", "--short", "-q", "HEAD"])
-    facts["head_ref"] = (
-        _known({"kind": "branch", "name": branch["stdout"].strip()}, branch["command"])
-        if branch["ok"] and branch["stdout"].strip()
-        else _known({"kind": "detached"}, branch["command"])
-    )
+    if branch["ok"] and branch["stdout"].strip():
+        facts["head_ref"] = _known(
+            {"kind": "branch", "name": branch["stdout"].strip()}, branch["command"]
+        )
+    else:
+        # `-q` suppresses the message only for the expected "not a symbolic ref"
+        # case, which exits 1. Anything else — an invalid symbolic HEAD such as
+        # `ref: refs/heads/foo.lock` exits 128 — is corruption, and reporting it as
+        # a known detached HEAD turns a broken repository into a confident fact.
+        # An injected runner that reports no exit code keeps the historical
+        # reading, so custom runners are not silently reclassified.
+        code = branch.get("code")
+        if code is None or code == 1:
+            facts["head_ref"] = _known({"kind": "detached"}, branch["command"])
+        else:
+            facts["head_ref"] = _unknown("head_ref_unresolvable", branch["command"])
 
     status = run_git(path, ["status", "--porcelain"])
     if status["ok"]:
@@ -341,7 +356,7 @@ def observe_checkouts(
     refusals: List[Dict[str, Any]] = []
 
     for raw_path in paths:
-        if not any(is_within(root, raw_path) for root in allowlist):
+        if not any(is_within_allowlist(root, raw_path) for root in allowlist):
             refusals.append(
                 {
                     "raw_path": raw_path,
@@ -381,7 +396,7 @@ def observe_checkouts(
             and worktree_root_fact.get("status") == "known"
         ):
             resolved = worktree_root_fact["value"]
-            if not any(is_within(root, resolved) for root in allowlist):
+            if not any(is_within_allowlist(root, resolved) for root in allowlist):
                 refusals.append(
                     {
                         "raw_path": raw_path,

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 import re
 
 # JS String.prototype.trim's exact character set: WhiteSpace (TAB, VT, FF,
@@ -282,3 +283,30 @@ def is_within(root, child) -> bool:
     collapsed_root = _collapse_absolute_dot_segments(r)
     collapsed_child = _collapse_absolute_dot_segments(c)
     return collapsed_child == collapsed_root or collapsed_child.startswith(collapsed_root + "/")
+
+
+def _fold_path_case(path) -> str:
+    """Lowercase a path where the platform's filesystem is case-insensitive.
+
+    Kept separate from `normalize_path`, which lowercases only the drive letter and
+    whose output is used for reporting — a refusal record should still echo the
+    path the caller actually passed.
+    """
+    return path.lower() if os.name == "nt" and isinstance(path, str) else path
+
+
+def is_within_allowlist(root, child) -> bool:
+    """`is_within`, but case-insensitive on Windows.
+
+    On Windows `C:/Repo` and `c:/repo` are the same directory, so a case-sensitive
+    comparison refused legitimate checkouts — either because the caller's allowlist
+    casing differed from the path they passed, or because Git reported canonical
+    casing back that differed from the caller's input, which tripped the
+    post-resolution re-check.
+
+    Case folding is applied to both sides before delegating, so `is_within`'s
+    separator-boundary and `..`-collapsing behaviour is inherited unchanged: this
+    widens *only* the character comparison, and only where the filesystem already
+    treats those paths as identical. On POSIX it is exactly `is_within`.
+    """
+    return is_within(_fold_path_case(root), _fold_path_case(child))

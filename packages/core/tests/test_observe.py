@@ -410,6 +410,62 @@ def test_ambient_git_object_env_is_scrubbed():
     assert "GIT_CONFIG_COUNT" not in env and "GIT_DIR" not in env
 
 
+def test_corrupt_symbolic_head_is_unknown_not_detached():
+    """`symbolic-ref -q` exits 1 for a genuinely detached HEAD and 128 for a broken
+    one. Treating every failure as detachment reports corruption as a known fact."""
+    from vivary_core.workspace_observe import _observe_one
+
+    def run_git(path, args):
+        command = f"git {' '.join(args)}"
+        if args[0] == "symbolic-ref":
+            return {"ok": False, "stdout": "", "stderr": "fatal: bad ref", "code": 128,
+                    "command": command}
+        if args[0] == "rev-parse" and "--show-toplevel" in args:
+            return {"ok": True, "stdout": path + "\n", "command": command, "code": 0}
+        return {"ok": True, "stdout": "\n", "command": command, "code": 0}
+
+    facts = _observe_one(os.path.abspath("repo"), run_git)["facts"]
+    assert facts["head_ref"]["status"] == "unknown", (
+        "a corrupt symbolic HEAD must not be reported as a known detached HEAD"
+    )
+
+
+def test_genuinely_detached_head_still_reads_as_detached():
+    """Exit 1 is the documented 'not a symbolic ref' result and stays detached."""
+    from vivary_core.workspace_observe import _observe_one
+
+    def run_git(path, args):
+        command = f"git {' '.join(args)}"
+        if args[0] == "symbolic-ref":
+            return {"ok": False, "stdout": "", "stderr": "", "code": 1, "command": command}
+        if args[0] == "rev-parse" and "--show-toplevel" in args:
+            return {"ok": True, "stdout": path + "\n", "command": command, "code": 0}
+        return {"ok": True, "stdout": "\n", "command": command, "code": 0}
+
+    facts = _observe_one(os.path.abspath("repo"), run_git)["facts"]
+    assert facts["head_ref"]["status"] == "known"
+    assert facts["head_ref"]["value"] == {"kind": "detached"}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows path casing")
+def test_allowlist_admits_a_windows_path_differing_only_in_case(fx):
+    """On Windows `C:/Repo` and `c:/repo` are the same directory.
+
+    Normalization lowercased only the drive letter, so a caller whose allowlist
+    casing differs from the path they pass — or from the canonical casing Git
+    reports back — had legitimate checkouts refused.
+    """
+    canonical = fx["paths"]["canonical"]
+    shouted = canonical.upper()
+
+    result = observe_checkouts([canonical], allowlist=[shouted], now=NOW)
+
+    assert result["refusals"] == [], (
+        f"case-only difference refused a legitimate checkout: {result['refusals']}"
+    )
+    assert len(result["checkouts"]) == 1
+
+
 def test_remote_url_credentials_are_redacted(fx, allowlist):
     """A configured HTTPS remote embedding credentials must not be stored verbatim.
 
