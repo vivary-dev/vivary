@@ -1,17 +1,16 @@
 #!/usr/bin/env node
 // create-vivary (npm): a thin launcher for the Python `create-vivary` scaffolder.
 // `npm create @vivary@latest` / `npx @vivary/create@latest` -> runs the published PyPI package via
-// uv (uvx) or pipx, so users get the create-t3-app experience without a manual
-// `pip install`. The scaffolder itself is one source of truth in Python.
+// uv (uvx) or pipx, so users get one-command setup without a manual `pip install`.
 "use strict";
 
 const { spawnSync } = require("node:child_process");
 const { version } = require("./package.json");
 
-// The documented UX is `npm create @vivary@latest my-workspace` (create-t3-app style),
-// but the Python CLI expects an explicit `init`/`doctor` subcommand. Default a
-// bare target to `init` so the documented form works; an explicit subcommand or a
-// leading flag (e.g. `-h`/`--help`) passes through unchanged.
+// The documented UX permits the bare-target form
+// `npm create @vivary@latest my-workspace`, but the Python CLI expects an explicit
+// `init`/`doctor` subcommand. Default a bare target to `init`; an explicit subcommand
+// or leading flag (e.g. `-h`/`--help`) passes through unchanged.
 const SUBCOMMANDS = new Set(["init", "doctor", "wizard", "capabilities"]);
 
 function mapArgs(args) {

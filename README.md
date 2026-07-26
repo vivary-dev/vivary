@@ -12,8 +12,8 @@
 **Typed memory and gates for AI-agent projects.** A standard plus a scaffolder that
 wires up a normalized, agent-native workspace from standalone modules — typed project
 memory, visible state, reusable skills, private boundaries, and verification gates —
-whether the workspace is a second brain, a coding project, knowledge-work bench, or a writing project. Think
-`create-t3-app`, but for an AI agent's workspace instead of a web app.
+whether the workspace is a second brain, a coding project, knowledge-work bench, or a
+writing project.
 
 A *vivary* is an archaic word for a vivarium: a self-contained world where living
 things are kept, in stacked layers. That's the metaphor — your project lives
