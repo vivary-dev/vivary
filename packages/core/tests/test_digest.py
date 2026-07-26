@@ -11,6 +11,20 @@ instead:
   - capsule-tight-budget.json <-> the Node suite's budget-2 "tight" capsule
                                  built inline for the claims_over_budget test
 
+These fixtures are frozen INPUTS captured from the Node reference, not snapshots
+of what this port's compiler currently emits, and the two have deliberately
+diverged: `compile_task_capsule` no longer hardcodes `required_checks` (it derives
+them from the observed workspace and drops `entire status`, which is not a Vivary
+command), so the `required_checks` recorded in these fixtures is Node's old shape.
+That is intentional and does not weaken them - they exist to pin *digest
+serialization* byte-for-byte against Node, and the digest reads
+`required_checks` through `.get("name")`, so the divergence never reaches it.
+
+What the fixtures cannot cover, because they are inputs rather than outputs, is
+that the digest still serializes what the compiler actually produces today. That
+is proved separately by test_compiled_capsule_serializes_through_the_digest below,
+which runs the real observe -> project -> compile -> digest path.
+
 The Node suite's "dogfood capsule" describe block (site/data/dogfood.json,
 pinned ratio/marginal-byte magic constants measured against the Node
 reference) is intentionally NOT translated: that file is not one of this
@@ -483,3 +497,48 @@ def test_claim_text_with_tabs_newlines_backslashes_round_trips_exactly():
     rows = decode_claims_table(digest["claims_table"])
     assert rows[0]["claim"] == tricky, "claim text with tabs/newlines/backslashes must round-trip exactly"
     assert rows[0]["evidenceRef"] is None
+
+
+def test_compiled_capsule_serializes_through_the_digest(tmp_path):
+    """The digest must handle what the compiler emits today, not only frozen inputs.
+
+    Every other test in this file loads a captured Node fixture, so nothing proved
+    that a capsule built by *this* port's `compile_task_capsule` still serializes.
+    That gap mattered the moment `required_checks` stopped being a hardcoded list of
+    `{name, command}` and became derived entries carrying `evidence`: the fixtures
+    could not have caught a digest that choked on the new shape, because they still
+    hold the old one.
+    """
+    import subprocess
+
+    from vivary_core.workspace_model import project_workspace_graph
+    from vivary_core.workspace_observe import observe_checkouts
+    from vivary_core.capsule_compile import compile_task_capsule
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env = {**os.environ, "GIT_AUTHOR_NAME": "F", "GIT_AUTHOR_EMAIL": "f@x",
+           "GIT_COMMITTER_NAME": "F", "GIT_COMMITTER_EMAIL": "f@x"}
+    def git(*args):
+        subprocess.run(["git", *args], cwd=repo, env=env, capture_output=True, check=True)
+    git("init", "-q", "-b", "main", ".")
+    (repo / "tropo.toml").write_text("[base]\nallow_untyped = true\n", encoding="utf-8")
+    (repo / "package.json").write_text('{"scripts": {"test": "vitest run"}}\n', encoding="utf-8")
+    (repo / "a.md").write_text("# A\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "seed")
+
+    graph = project_workspace_graph(
+        observe_checkouts([str(repo)], allowlist=[str(repo)], now=lambda: "2026-07-26T00:00:00.000Z")
+    )
+    capsule = compile_task_capsule(task={"question": "what is here?"}, graph=graph)
+
+    # The derived checks are the new shape, evidence and all.
+    assert capsule["required_checks"], "expected derived checks for a governed workspace"
+    assert any(c.get("evidence") for c in capsule["required_checks"])
+
+    digest = json.loads(serialize_capsule_digest(capsule))
+
+    assert digest["required_checks"] == [c["name"] for c in capsule["required_checks"]]
+    assert digest["capsule_fingerprint"] == capsule["fingerprint"]
+    assert json.loads(serialize_capsule_digest(capsule)) == digest, "digest must be deterministic"

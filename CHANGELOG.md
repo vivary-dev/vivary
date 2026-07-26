@@ -26,9 +26,9 @@ version, and nothing about installing or running Vivary changes because it exist
   where divergent checkouts stay unresolved conflicts with both sides preserved;
   bounded task capsules where every claim carries its evidence and selection reason;
   and receipts bound to the exact capsule and workspace fingerprint they ran against.
-  Documented in `docs/ARCHITECTURE.md`. (Plain text, not a link: `CHANGELOG.md` is
-  mirrored to the site's `/changelog/` route, where a repo-relative path resolves
-  against that route and breaks the built-link check.)
+  Documented in [the architecture page](/architecture/). (Site-absolute route, not a
+  repo-relative path: `CHANGELOG.md` is mirrored to `/changelog/`, where `docs/…`
+  would resolve against that route and 404. Same convention the docs pages use.)
 
 ### Fixed
 
