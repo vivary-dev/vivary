@@ -162,8 +162,9 @@ The brand owns the namespace; current package truth is:
   `vivary-ozone`, `vivary-exo`, `create-vivary`, and the optional
   `vivary-memory-cognee`.
 - `vivary-core` is declared in-repo and remains unpublished during development. It
-  publishes only in the final comprehensive coordinated release train, together with
-  every dependent role package and never ahead of them.
+  ships only as part of the final comprehensive coordinated release train, never in an
+  earlier release line than its dependent roles; within that train, dependencies upload
+  before dependents, so core uploads first.
 - `strato` is bundled source/templates, not a published npm or PyPI package.
 - GitHub: `vivary-dev/vivary` holds the public repo.
 

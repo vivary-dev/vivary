@@ -48,8 +48,11 @@ Bump rules (semver-ish, pre-1.0):
 Update every surface that names versions or the command set, in the repo,
 **before** publishing:
 
-- `packages/<pkg>/pyproject.toml` — `version = "..."` **and the module's `__version__` constant** (they must match — a parity test enforces it), plus dependency floors if
-  a package now needs a newer sibling (e.g. ozone requiring `vivary-tropo>=0.4.0`);
+- `packages/<pkg>/pyproject.toml` — update `version = "..."` and any dependency floors.
+  When the package exposes a module `__version__` constant, update that too; its parity
+  test must match the manifest.
+- `vivary-core` has no module `__version__`; `packages/core/pyproject.toml` is its sole
+  in-repo version declaration, and step 6 verifies the installed distribution version.
 - `packages/create-vivary/npm/package.json` — lockstep version;
 - root `README.md` — the release-status blockquote, the surface/version table,
   and the "Current command surface" list;
@@ -173,9 +176,10 @@ the create-vivary release checks, and runs `npm pack --dry-run`. Leave
 `publish=false` for the dry-run gate; rerun with `publish=true` only after the
 npm publish gate is approved.
 
-Order when multiple packages ship: dependencies first (`vivary-tropo` before
-`ozone`/`exo`/`memory-cognee` that pin it), `create-vivary` PyPI before
-`@vivary/create` npm (the launcher installs the PyPI package at run time).
+Order when multiple packages ship: dependencies first. Publish `vivary-core` before
+every role package that depends on it; then publish `vivary-tropo` before
+`ozone`/`exo`/`memory-cognee` packages that pin tropo. Publish `create-vivary` PyPI
+before `@vivary/create` npm (the launcher installs the PyPI package at run time).
 
 ## 6. Verify from the public registries after publish
 
@@ -183,6 +187,9 @@ Check the package pages and run cache-resistant install smokes for every
 changed package:
 
 ```bash
+uv run --isolated --no-project --no-cache --index-url https://pypi.org/simple \
+  --with vivary-core==<ver> python -c \
+  "from importlib.metadata import version; import vivary_core; assert version('vivary-core') == '<ver>'"
 uvx --no-cache --index-url https://pypi.org/simple --from vivary-tropo==<ver> tropo --version
 uvx --no-cache --index-url https://pypi.org/simple --from vivary-ozone==<ver> ozone --version
 uvx --no-cache --index-url https://pypi.org/simple --from vivary-exo==<ver> exo --version

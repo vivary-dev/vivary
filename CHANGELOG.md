@@ -58,6 +58,11 @@ coordinated release train is complete and separately approved.
   tense that every role package speaks through core — none does yet.
 - The architecture opening now uses Vivary's settled governed-context description
   instead of the retired `create-t3-app` comparison.
+- The release workflow now treats core as the library it is: its manifest is the sole
+  in-repo version declaration, it ships in the same final release train as its dependent
+  roles while uploading first inside that train, and its registry smoke imports
+  `vivary_core` and checks distribution metadata instead of assuming a CLI or module
+  `__version__`.
 
 ### Fixed
 
@@ -94,6 +99,10 @@ Findings from the `vivary-core` review, all pre-release and none user-reachable:
 ### Verification
 
 - `python -m pytest packages/core/tests/ -q` — **256 passed**.
+- `uv run --isolated --no-project --no-cache --with ./packages/core python -c
+  "from importlib.metadata import version; import vivary_core; assert
+  version('vivary-core') == '0.1.0'"` — local wheel-equivalent import and distribution
+  metadata smoke passed.
 - `python scripts/tests/test_package_docs_parity.py` — **10/10 passed**.
 - `python scripts/check_package_docs_parity.py` — architecture matches **6** published
   manifests with **1** deliberately unpublished distribution allowlisted.
