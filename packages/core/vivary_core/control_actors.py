@@ -10,6 +10,10 @@ This module never grants anything itself; it only answers "could this actor
 kind ever hold this authority class," which control_claims.py and
 control_handoffs.py consult before granting or binding. Pure, no I/O, no
 persistence.
+
+ADAPTATION - closed authority vocabulary: reject authority classes outside
+``AUTHORITY_CLASS`` instead of letting arbitrary privileged-looking values
+enter claims and handoffs through the permissive translated fallthrough.
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ ACTOR_KIND = MappingProxyType(
 # surface (claim or handoff), no matter what a request asks for.
 _OWNERSHIP_CAPABLE_KINDS = {ACTOR_KIND["HUMAN"]}
 _KNOWN_KINDS = set(ACTOR_KIND.values())
+_KNOWN_AUTHORITY_CLASSES = set(AUTHORITY_CLASS.values())
 
 
 def can_hold_authority(actor, authority_class):
@@ -50,9 +55,11 @@ def can_hold_authority(actor, authority_class):
     @param authority_class  one of AUTHORITY_CLASS
     @returns {allowed, reason_codes}
     """
-    kind = (actor or {}).get("kind")
-    if kind not in _KNOWN_KINDS:
+    kind = actor.get("kind") if isinstance(actor, dict) else None
+    if not isinstance(kind, str) or kind not in _KNOWN_KINDS:
         return {"allowed": False, "reason_codes": [AUTHORITY_REASON["UNKNOWN_ACTOR_KIND"]]}
+    if not isinstance(authority_class, str) or authority_class not in _KNOWN_AUTHORITY_CLASSES:
+        return {"allowed": False, "reason_codes": [AUTHORITY_REASON["UNKNOWN_AUTHORITY_CLASS"]]}
     if authority_class == AUTHORITY_CLASS["OWNER"] and kind not in _OWNERSHIP_CAPABLE_KINDS:
         return {"allowed": False, "reason_codes": [AUTHORITY_REASON["WORKERS_CANNOT_OWN"]]}
     return {"allowed": True, "reason_codes": []}

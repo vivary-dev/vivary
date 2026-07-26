@@ -28,6 +28,7 @@ AUTHORITY_REASON = MappingProxyType(
     {
         "WORKERS_CANNOT_OWN": "workers_cannot_own",
         "UNKNOWN_ACTOR_KIND": "unknown_actor_kind",
+        "UNKNOWN_AUTHORITY_CLASS": "unknown_authority_class",
     }
 )
 
@@ -44,6 +45,7 @@ CLAIM_REASON = MappingProxyType(
         "SCOPE_CONFLICT": "scope_conflict",
         "WORKERS_CANNOT_OWN": AUTHORITY_REASON["WORKERS_CANNOT_OWN"],
         "UNKNOWN_ACTOR_KIND": AUTHORITY_REASON["UNKNOWN_ACTOR_KIND"],
+        "UNKNOWN_AUTHORITY_CLASS": AUTHORITY_REASON["UNKNOWN_AUTHORITY_CLASS"],
         "UNKNOWN_REQUEST_SHAPE": "unknown_request_shape",
         "CLAIM_NOT_FOUND": "claim_not_found",
         "NOT_CLAIM_HOLDER": "not_claim_holder",
@@ -86,6 +88,7 @@ HANDOFF_REASON = MappingProxyType(
         "RECEIPT_CAPSULE_MISMATCH": "receipt_capsule_mismatch",
         "WORKSPACE_REVISION_MISMATCH": "workspace_revision_mismatch",
         "WORKERS_CANNOT_OWN": AUTHORITY_REASON["WORKERS_CANNOT_OWN"],
+        "UNKNOWN_AUTHORITY_CLASS": AUTHORITY_REASON["UNKNOWN_AUTHORITY_CLASS"],
     }
 )
 

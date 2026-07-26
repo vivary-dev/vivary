@@ -164,6 +164,13 @@ def test_can_hold_authority_fails_closed_on_an_unrecognized_actor_kind():
     assert result["allowed"] is False
     assert result["reason_codes"] == [AUTHORITY_REASON["UNKNOWN_ACTOR_KIND"]]
 
+def test_can_hold_authority_fails_closed_on_an_unrecognized_authority_class():
+    for authority_class in ("root", {}, []):
+        result = can_hold_authority(HUMAN, authority_class)
+
+        assert result["allowed"] is False
+        assert result["reason_codes"] == [AUTHORITY_REASON["UNKNOWN_AUTHORITY_CLASS"]]
+
 
 # -- control_claims.py: narrow-writer law -------------------------------------------------
 
