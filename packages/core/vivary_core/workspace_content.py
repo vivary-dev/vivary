@@ -70,31 +70,79 @@ _AMBIENT_GIT_ENV_KEYS = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMM
 RunGit = Callable[[str, List[str]], Dict[str, Any]]
 
 
-def _sanitized_git_env() -> Dict[str, str]:
-    env = dict(os.environ)
-    for key in _AMBIENT_GIT_ENV_KEYS:
-        env.pop(key, None)
-    return env
+# Deliberately the *same* hardened environment the observation layer builds, not a
+# second copy: the four-key denylist above was bypassable through command-scope
+# config injection here for exactly the same reason, and two independent copies of
+# a security control drift.
+from vivary_core.workspace_observe import _sanitized_git_env  # noqa: E402
+
+
+_READ_CHUNK = 64 * 1024
+
+
+def _capped_run(argv: List[str], env: Dict[str, str], limit: int) -> Dict[str, Any]:
+    """Run `argv`, streaming stdout and killing the child once `limit` is passed.
+
+    `capture_output=True` buffers the whole of stdout *before* any length check can
+    run, so the advertised bound never bounded memory — a broad term matching
+    heavily in a large repository could exhaust the worker first. Reading
+    incrementally and terminating on breach makes the limit real.
+    """
+    try:
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    except OSError as error:
+        return {"error": str(error), "stdout": b"", "stderr": b"", "code": None, "exceeded": False}
+
+    chunks: List[bytes] = []
+    total = 0
+    exceeded = False
+    try:
+        assert proc.stdout is not None
+        while True:
+            chunk = proc.stdout.read(_READ_CHUNK)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > limit:
+                exceeded = True
+                proc.kill()
+                break
+            chunks.append(chunk)
+    finally:
+        # `communicate` drains whatever remains on both pipes and reaps the child,
+        # so a killed producer cannot leave a zombie or a blocked stderr writer.
+        try:
+            _, stderr_bytes = proc.communicate()
+        except (OSError, ValueError):
+            stderr_bytes = b""
+            proc.kill()
+
+    return {
+        "error": None,
+        "stdout": b"".join(chunks),
+        "stderr": stderr_bytes or b"",
+        "code": proc.returncode,
+        "exceeded": exceeded,
+    }
 
 
 def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
     full_args = ["--no-optional-locks", "-C", checkout_path, *args]
     command = "git " + " ".join(full_args)
-    try:
-        proc = subprocess.run(["git", *full_args], capture_output=True, env=_sanitized_git_env())
-    except OSError as error:
-        return {"ok": False, "stdout": "", "stderr": str(error)[:400], "command": command}
+    outcome = _capped_run(["git", *full_args], _sanitized_git_env(), _MAX_GIT_OUTPUT_BYTES)
+    if outcome["error"] is not None:
+        return {"ok": False, "stdout": "", "stderr": outcome["error"][:400], "command": command}
 
-    stdout_bytes = proc.stdout or b""
-    stderr_bytes = proc.stderr or b""
+    stdout_bytes = outcome["stdout"]
+    stderr_bytes = outcome["stderr"]
 
-    if len(stdout_bytes) > _MAX_GIT_OUTPUT_BYTES:
+    if outcome["exceeded"]:
         return {"ok": False, "stdout": "", "stderr": "stdout maxBuffer length exceeded"[:400], "command": command}
 
-    if proc.returncode != 0:
+    if outcome["code"] != 0:
         # `git grep` exits 1 to mean "no matches" - that is a successful
         # search, not a failure, and must never be reported as one.
-        if proc.returncode == 1 and not stdout_bytes and not stderr_bytes:
+        if outcome["code"] == 1 and not stdout_bytes and not stderr_bytes:
             return {"ok": True, "stdout": "", "command": command}
         stderr_text = stderr_bytes.decode("utf-8", errors="replace")
         return {"ok": False, "stdout": "", "stderr": stderr_text[:400], "command": command}
@@ -265,7 +313,12 @@ def _observe_one_content(raw_path: str, terms: List[str], run_git: RunGit) -> Di
             "reason": "no_question_terms",
         }
 
-    args = ["grep", "-n", "-I", "-i"]
+    # `-F`: question terms are literal text, not patterns. `git grep -h` documents
+    # `-G` (basic regular expressions) as the default, so without this a term like
+    # `foo.bar` matched `fooXbar`, and `.*` made nearly every tracked line look
+    # relevant to the question — silently widening what the capsule claims as
+    # evidence. Regex terms are not an advertised part of this API.
+    args = ["grep", "-n", "-I", "-i", "-F"]
     for term in terms:
         args += ["-e", term]
     result = run_git(path, args)
