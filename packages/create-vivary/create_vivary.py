@@ -1477,17 +1477,50 @@ def _probe_is_ignored(
     return _ignored_by_rules(rules, rel_path)
 
 
+def _strip_unescaped_trailing_spaces(line: str) -> str:
+    """Drop trailing spaces the way Git does — unless they are backslash-escaped.
+
+    `USER.md\\ ` names the file "USER.md " (with the space). Stripping it
+    unconditionally credited that line with protecting `USER.md`, which Git leaves
+    committable.
+    """
+    end = len(line)
+    while end > 0 and line[end - 1] == " ":
+        preceding_backslashes = 0
+        index = end - 2
+        while index >= 0 and line[index] == "\\":
+            preceding_backslashes += 1
+            index -= 1
+        if preceding_backslashes % 2:
+            break  # escaped: this space belongs to the pattern
+        end -= 1
+    return line[:end]
+
+
+def _parse_gitignore_line(raw_line: str) -> tuple[bool, str] | None:
+    """One `.gitignore` line as `(negated, pattern)`, or `None` when it is not a rule.
+
+    A backslash is Git's escape character, **not** a path separator — rewriting it to
+    `/` corrupted every escaped pattern. Separator normalization belongs to the paths
+    being tested, not to the rules.
+    """
+    line = _strip_unescaped_trailing_spaces(raw_line)
+    if not line or line.startswith("#"):
+        return None
+    negated = line.startswith("!")
+    pattern = line[1:] if negated else line
+    if not pattern:
+        return None
+    return negated, pattern
+
+
 def _repair_line_rules(pattern: str) -> list[tuple[str, bool, str]]:
     """The root-level rules a `gitignore` repair would append for `pattern`."""
     rules: list[tuple[str, bool, str]] = []
     for raw_line in PRIVACY_IGNORE_REPAIR_LINES[pattern].splitlines():
-        line = raw_line.rstrip(" ")
-        if not line or line.startswith("#"):
-            continue
-        negated = line.startswith("!")
-        body = line[1:] if negated else line
-        if body:
-            rules.append(("", negated, body.replace("\\", "/")))
+        parsed = _parse_gitignore_line(raw_line)
+        if parsed is not None:
+            rules.append(("", parsed[0], parsed[1]))
     return rules
 
 
@@ -1501,20 +1534,46 @@ def _privacy_rules_at_base(target: Path, base: str) -> list[tuple[str, bool, str
 def _privacy_ignore_rules(gitignore: Path, *, base: str) -> list[tuple[str, bool, str]]:
     rules: list[tuple[str, bool, str]] = []
     for raw_line in gitignore.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = raw_line.rstrip(" ")
-        if not line or line.startswith("#"):
-            continue
-
-        negated = line.startswith("!")
-        pattern = line[1:] if negated else line
-        if pattern:
-            rules.append((base, negated, pattern.replace("\\", "/")))
+        parsed = _parse_gitignore_line(raw_line)
+        if parsed is not None:
+            rules.append((base, parsed[0], parsed[1]))
     return rules
+
+
+def _has_case_sensitive_bracket(pattern: str) -> bool:
+    """Whether `pattern` contains a bracket expression holding an ASCII letter.
+
+    Git case-folds the path being tested but not the literal characters inside a
+    bracket set, so `[U]SER.md` stops matching `USER.md` wherever `core.ignorecase`
+    is on — which is the default on Windows and macOS. A bracket holding only digits
+    or punctuation is unaffected by folding and stays trustworthy.
+    """
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "[":
+            close = pattern.find("]", index + 2)
+            if close == -1:
+                return False
+            body = pattern[index + 1 : close]
+            if any(c.isascii() and c.isalpha() for c in body):
+                return True
+            index = close + 1
+            continue
+        index += 1
+    return False
 
 
 def _ignored_by_rules(rules: list[tuple[str, bool, str]], rel_path: str) -> bool:
     ignored = False
     for base, negated, pattern in rules:
+        # Fail closed on a positive rule whose protection depends on `core.ignorecase`.
+        # A negation spelled this way is still honoured, so an unignore is never missed.
+        if not negated and _has_case_sensitive_bracket(pattern):
+            continue
         # Negations match case-insensitively so a `!user.md` style re-include is never
         # missed on a case-insensitive checkout; positive rules stay case-sensitive so
         # a differently-cased rule is never credited with protecting anything. Both
@@ -1579,6 +1638,11 @@ def _wildmatch_regex(pattern: str) -> str:
         elif char == "?":
             out.append("[^/]")
             i += 1
+        elif char == "\\" and i + 1 < len(pattern):
+            # Git's escape: the next character is a literal, stripped of any special
+            # meaning. A trailing lone backslash falls through to `re.escape` below.
+            out.append(re.escape(pattern[i + 1]))
+            i += 2
         elif char == "[":
             close = pattern.find("]", i + 2)
             if close == -1:

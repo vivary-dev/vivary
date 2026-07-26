@@ -1685,6 +1685,96 @@ class CreateVivaryTests(unittest.TestCase):
             )
             self.assertIn("USER.md", create_vivary._missing_privacy_ignores(target))
 
+    def test_doctor_rejects_escaped_trailing_space_as_covering(self):
+        """`USER.md\\ ` names the file "USER.md " — with the space — not `USER.md`.
+
+        Found by the #218 adversarial pass, differential-tested against
+        `git check-ignore --no-index`, which reports USER.md as NOT ignored:
+
+            $ printf 'USER.md\\\\ \\n' > .gitignore
+            $ git check-ignore --no-index -q -- USER.md ; echo $?
+            1
+
+        Git strips trailing whitespace from a pattern *unless* it is backslash-escaped.
+        The parser stripped unconditionally and then rewrote `\\` to `/`, so this line
+        was credited with protecting USER.md while Git left the file committable —
+        and `--repair --yes` then reported the workspace ok. Platform-independent:
+        unlike the case-variant rule, this does not depend on `core.ignorecase`.
+        """
+        with temp_workspace() as td:
+            target = Path(td) / "privacy-escaped-space"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            gitignore = target / ".gitignore"
+            gitignore.write_text(
+                gitignore.read_text(encoding="utf-8").replace(
+                    "USER.md\n", "USER.md\\ \n", 1
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertIn("USER.md", create_vivary._missing_privacy_ignores(target))
+
+    def test_doctor_does_not_credit_a_lettered_bracket_expression(self):
+        """`[U]SER.md` protects USER.md only where `core.ignorecase` is off.
+
+        Found by the #218 adversarial pass. Verified against git 2.54 both ways:
+
+            core.ignorecase=true   [U]SER.md -> NOT ignored,  [A-Z]SER.md -> ignored
+            core.ignorecase=false  [U]SER.md -> ignored,      [A-Z]SER.md -> ignored
+
+        Git case-folds the probe path but not the literal characters inside a bracket
+        set, so such a rule silently stops protecting anything on the *default*
+        Windows and macOS configuration. Crediting it would let doctor report a
+        workspace clean while Git would commit the file.
+
+        Fails closed on every platform, exactly as the case-variant rule above does,
+        and for the same reason: the predicate stays pure — no `git config` read — so
+        `adopt` can still use it on a directory that is not a repository yet. The cost
+        is a false red for a rule spelled this way, which the user clears by adding a
+        plain rule.
+        """
+        with temp_workspace() as td:
+            target = Path(td) / "privacy-bracket"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            gitignore = target / ".gitignore"
+            gitignore.write_text(
+                gitignore.read_text(encoding="utf-8").replace(
+                    "USER.md\n", "[U]SER.md\n", 1
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertIn("USER.md", create_vivary._missing_privacy_ignores(target))
+
+    def test_bracket_expression_without_letters_still_counts(self):
+        """The fail-closed rule is scoped to what case folding can actually break."""
+        self.assertTrue(create_vivary._has_case_sensitive_bracket("[U]SER.md"))
+        self.assertTrue(create_vivary._has_case_sensitive_bracket("[A-Z]SER.md"))
+        self.assertFalse(create_vivary._has_case_sensitive_bracket("report[0-9].md"))
+        self.assertFalse(create_vivary._has_case_sensitive_bracket("USER.md"))
+        # An escaped bracket is a literal, not a bracket expression.
+        self.assertFalse(create_vivary._has_case_sensitive_bracket("\\[U]SER.md"))
+
+    def test_backslash_escapes_the_next_character_rather_than_separating_paths(self):
+        """A backslash in a gitignore pattern is an escape, not a path separator."""
+        matches = create_vivary._ignore_rule_matches
+
+        # An escaped space is part of the name, so the unspaced file does not match.
+        self.assertFalse(matches("", "USER.md\\ ", "USER.md"))
+        self.assertTrue(matches("", "USER.md\\ ", "USER.md "))
+
+        # Escaping strips a metacharacter of its special meaning.
+        self.assertTrue(matches("", "USER\\*.md", "USER*.md"))
+        self.assertFalse(matches("", "USER\\*.md", "USERx.md"))
+
+        # Unescaped patterns keep behaving exactly as before.
+        self.assertTrue(matches("", "USER.md", "USER.md"))
+        self.assertTrue(matches("", "memory/*", "memory/private.md"))
+
     def test_doctor_does_not_treat_wildcard_as_crossing_directories(self):
         """`*` must not cross `/`. `.strato/*se*` matches nothing Git would match."""
         with temp_workspace() as td:
