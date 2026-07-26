@@ -243,9 +243,17 @@ files) — a missing or invalid config never blocks the map. When the map root
 sits below the config root, path-anchored excludes are rebased onto the map
 root, so `exclude = ["docs/private"]` still hides `private/` when you run
 `tropo map docs`. Directory junctions and symlink cycles are pruned by real
-path, so a looping tree never inflates counts. "Likely modules without an
-index" = directories at depth 1-2 with 5 or more files (recursive count) and
-no `index.md`/`README.md`.
+path, so a looping tree never inflates counts. Individual **files** that are
+themselves symlinks or reparse points are skipped for the same reason — each is
+an alternate route to content the walk may already have counted. Hard-linked
+files are **not** skipped: a hard link is an ordinary directory entry, so both
+paths are counted. That means totals are a count of *paths* and size is the sum
+of per-path sizes — `map` does not report disk usage, and two hard links to one
+file contribute twice. To leave something out of the map deliberately, use
+`exclude` or the skipped-directory list above; link type is not a privacy
+control. `map` reads no file contents — only names, sizes and structure.
+"Likely modules without an index" = directories at depth 1-2 with 5 or more
+files (recursive count) and no `index.md`/`README.md`.
 
 ```
 $ tropo map --root . --depth 2
@@ -446,9 +454,9 @@ create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writin
 | `--repair` | Doctor-only. Include a conservative guided repair plan. Dry-run by default; writes nothing without `--yes`. |
 | `--yes` | With `doctor --repair`, apply deterministic safe repairs, rerun doctor, and keep a nonzero exit if the workspace is still invalid. |
 
-`doctor` checks that `USER.md`, `MEMORY.md`, `memory/*`, `heartbeat-reports/*`, and
-`.strato/private/` are actively ignored. Comments, negations, and unrelated patterns
-that merely contain those names do not count. If `.vivary/memory.toml` exists,
+`doctor` checks that `USER.md`, `MEMORY.md`, `memory/*`, `heartbeat-reports/*`,
+`.strato/private/`, and `*.vivary-tmp` are actively ignored. Comments, negations, and
+unrelated patterns that merely contain those names do not count. If `.vivary/memory.toml` exists,
 `doctor` reports semantic memory as `disabled`, `healthy`, `configured`,
 `unavailable`, `misconfigured`, or `privacy-failed` without requiring optional Cognee
 support to be installed.
@@ -493,8 +501,26 @@ disturbing anything already there.
 would create already exists, it is skipped and reported "exists, kept" — this
 includes `README.md`, `AGENTS.md`, `CLAUDE.md`, and any other file already at that
 path. If `.gitignore` already exists, `adopt` leaves it untouched and instead prints
-a manual follow-up listing the privacy lines (`USER.md`, `MEMORY.md`, `memory/*`,
-`heartbeat-reports/*`) it's missing.
+a manual follow-up listing the privacy lines it's missing, drawn from the same set
+`doctor` checks:
+
+```gitignore
+USER.md
+MEMORY.md
+memory/*
+!memory/.gitkeep
+heartbeat-reports/*
+!heartbeat-reports/.gitkeep
+.strato/private/
+*.vivary-tmp
+```
+
+Only the missing lines are printed, so paste what you get rather than the whole
+block. One case is **not** fixable this way: if a lower-level `.gitignore` unignores
+a private path, Git gives the deeper rule precedence and no root-level line can
+override it. `adopt` reports those separately, naming the paths still exposed and
+telling you to remove the nested negations — adding more root-level rules would not
+help, and neither would answering a negation with another negation.
 
 The analyze phase does a light, read-only inventory of the tree (skipping `.git`,
 `node_modules`, `__pycache__`, `.venv`, `venv`, `dist`, `build`, `.astro`, `.next`,

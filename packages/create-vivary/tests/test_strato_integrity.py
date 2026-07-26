@@ -213,6 +213,44 @@ class StratoSurfaceCompletenessTests(unittest.TestCase):
                     )
 
 
+class PrivacyDocumentationTests(unittest.TestCase):
+    """1e: the documented privacy contract must match the enforced one.
+
+    A user who cannot make the post-adopt doctor check pass from the docs has been
+    handed an incomplete privacy contract. This guards the direction that actually
+    rots: the code grows a probe and the prose keeps the old list.
+    """
+
+    def test_commands_doc_lists_every_privacy_probe(self):
+        doc = (ROOT / "docs" / "COMMANDS.md").read_text(encoding="utf-8")
+
+        missing = [
+            line
+            for lines in create_vivary.PRIVACY_IGNORE_REPAIR_LINES.values()
+            for line in lines.split("\n")
+            if line not in doc
+        ]
+        self.assertEqual(
+            missing,
+            [],
+            "docs/COMMANDS.md omits privacy ignore lines that create-vivary enforces; "
+            f"a user pasting from the docs cannot pass doctor: {missing}",
+        )
+
+    def test_scaffolded_gitignore_covers_every_privacy_probe(self):
+        """The generated `.gitignore` must satisfy every probe doctor checks, so a
+        fresh workspace is never born failing its own privacy gate."""
+        with temp_workspace() as td:
+            target = Path(td) / "privacy-coverage"
+            _scaffold("coding", target)
+
+            self.assertEqual(
+                create_vivary._missing_privacy_ignores(target),
+                [],
+                "a freshly scaffolded workspace must satisfy every privacy probe",
+            )
+
+
 class RuntimeParityTests(unittest.TestCase):
     """1d: .claude/skills and .agents/skills stay structurally in lockstep.
 

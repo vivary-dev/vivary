@@ -206,6 +206,30 @@ class AdoptDryRunTests(unittest.TestCase):
         finally:
             shutil.rmtree(target)
 
+    def test_nested_negation_gets_a_distinct_followup(self):
+        """A nested `.gitignore` negation cannot be fixed by pasting root-level lines.
+
+        Telling the user to add `memory/*` when a lower-level `!secret.md` is what
+        unignores the file advises a fix that provably will not work — and Git gives
+        the deeper rule precedence, so the second run fails identically. Doctor
+        already reports this as manual; adopt must say it too.
+        """
+        target = temp_dir()
+        try:
+            make_brownfield_fixture(target)
+            write(target / ".gitignore", "node_modules/\n")
+            (target / "memory").mkdir(exist_ok=True)
+            write(target / "memory" / ".gitignore", "!secret.md\n")
+
+            result = create_vivary.plan_adopt(target, repo_root=ROOT)
+
+            joined = "\n".join(result["followups"])
+            self.assertIn("lower-level", joined.lower())
+            self.assertIn("memory", joined)
+
+        finally:
+            shutil.rmtree(target)
+
     def test_no_gitignore_means_no_followups(self):
         target = temp_dir()
         try:

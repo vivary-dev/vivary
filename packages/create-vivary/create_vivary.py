@@ -3305,13 +3305,32 @@ def _adopt_tropo_config(
 def _adopt_gitignore_followups(target: Path) -> list[str]:
     """Missing privacy-ignore lines to hand the human when `.gitignore` already
     exists and adopt refuses to edit it. Maps the same probe keys `doctor` uses
-    to the literal lines a human would add."""
+    to the literal lines a human would add.
+
+    Patterns that a root-level edit provably cannot fix get their own line instead.
+    Git gives a deeper `.gitignore` precedence, so advising "add `memory/*`" when a
+    nested `!secret.md` is what unignores the file recommends a fix that will not
+    work — and the same defect made adopt answer a negation with another negation.
+    """
     missing = _missing_privacy_ignores(target)
-    return [
+    unfixable = set(_unfixable_privacy_blockers(target, missing))
+    followups = [
         PRIVACY_IGNORE_REPAIR_LINES[pattern]
         for pattern in missing
-        if pattern in PRIVACY_IGNORE_REPAIR_LINES
+        if pattern in PRIVACY_IGNORE_REPAIR_LINES and pattern not in unfixable
     ]
+    if unfixable:
+        blocked = ", ".join(
+            f"`{PRIVACY_IGNORE_PROBES[pattern][0]}`"
+            for pattern in missing
+            if pattern in unfixable and PRIVACY_IGNORE_PROBES.get(pattern)
+        )
+        followups.append(
+            "A lower-level `.gitignore` unignores private/runtime paths "
+            f"({blocked}); no root-level rule can override it. Inspect and remove "
+            "those nested negations, then rerun `create-vivary doctor`."
+        )
+    return followups
 
 
 def plan_adopt(
