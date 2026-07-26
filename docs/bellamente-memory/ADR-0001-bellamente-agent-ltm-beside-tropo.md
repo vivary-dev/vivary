@@ -23,10 +23,9 @@ AgentLTM. If AgentLTM data crosses into Vivary, it crosses through a future
 
 ## Authority, privacy, and storage
 
-- **Default is none.** Scaffold and adopt may create only disabled AgentLTM policy,
-  inert setup documentation, and the `.bellamente/` runtime-data ignore entry. They
-  do not activate Bellamente, install anything, create a live store, configure MCP,
-  or mutate memory.
+- **Default is none.** Opt-in policy creation, permitted scaffold/adopt output, and
+  prohibited automatic behavior are owned only by
+  [SPEC §§3.1 and 4](SPEC-bellamente-memory.md#31-disabled-by-default).
 - **No provider collision.** AgentLTM policy is separate from the `[memory]`
   semantic-provider slot. Bellamente is never selected as a semantic provider merely
   because its policy exists.
@@ -36,37 +35,23 @@ AgentLTM. If AgentLTM data crosses into Vivary, it crosses through a future
   enforcement boundary live only in [SPEC §3.3](SPEC-bellamente-memory.md#33-fail-closed-private-set);
   this ADR does not restate them. Current shipped semantic-adapter behavior and known
   limitations live in [Semantic Memory](../SEMANTIC-MEMORY.md#privacy-boundary).
-- **No automatic promotion.** Exact duplicates preserve the prior assertion;
-  corroboration records evidence rather than truth; conflict or identity ambiguity
-  preserves both sides and returns `review_required`. An explicit correction remains
-  an explicit, approved operation and never automatically overwrites authored truth.
+- **No automatic promotion.** Truth and mutation outcomes are owned only by
+  [SPEC §6.2](SPEC-bellamente-memory.md#62-required-distinct-results); this ADR fixes
+  only the architectural rule that learned memory never silently replaces authored
+  truth.
 
 ## Gates and observability
 
-External installation, activation, MCP enablement, and each write, correct, forget,
-ingest, and live proof require separate human approval. Generated `AGENTS.md` content
-is out of scope; MCP material is inert setup guidance only, never an active server
-configuration.
-
-Future capability discovery remains declarative: it advertises disabled AgentLTM
-policy without probing or executing Bellamente and must report `installed: false`.
-A separately approved runtime diagnostic may report external readiness under a
-differently named field. Future Doctor behavior is likewise declarative; its
-namespaced state vocabulary is owned only by
-[SPEC §5](SPEC-bellamente-memory.md#5-capability-and-doctor-requirements). Doctor never
-probes or calls the external runtime.
-
-The real write → recall → trace demonstration is release dogfood after its own human
-gate. It is neither an installer side effect nor a unit-test substitute.
+The normative gate matrix, capability/Doctor behavior, and release-dogfood boundary
+live only in [SPEC §§4–7](SPEC-bellamente-memory.md#4-explicit-human-gates). This ADR
+does not restate their actions, state vocabulary, or verification tiers.
 
 ## Consequences
 
 A future integration may add a bridge, policy parser, capability entry, Doctor section,
 or explicit MCP activation flow; this ADR does not preselect package placement or
-claim any of those surfaces exist. Such work must satisfy the normalized outcomes in
-[#205](https://github.com/vivary-dev/vivary/issues/205): duplicate, corroboration,
-explicit correction, unresolved identity, incompatible value, staleness, and provider
-degradation remain distinct and visible.
+claim any of those surfaces exist. Such work must implement the normalized outcomes
+owned by [SPEC §6.2](SPEC-bellamente-memory.md#62-required-distinct-results).
 
 ## References
 

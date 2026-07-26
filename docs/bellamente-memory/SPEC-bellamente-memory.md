@@ -127,11 +127,19 @@ executable. A separately approved future runtime diagnostic may report external
 readiness under a differently named field. `installed` must never imply that `bella`
 is present or usable.
 
-A future Doctor section is similarly declarative. It may parse AgentLTM policy,
-validate the fail-closed private set, and report namespaced states:
-`agent-ltm-disabled`, `agent-ltm-policy-present`, `agent-ltm-privacy-failed`, or
-`agent-ltm-misconfigured`. It never locates, probes, imports, or calls `bella`.
-Absent optional external runtime must not make a normal Vivary workspace broken.
+A future Doctor section is similarly declarative. It may parse AgentLTM policy and
+validate the fail-closed private set, then reports exactly one namespaced state:
+
+| State | Meaning |
+|---|---|
+| `agent-ltm-disabled` | No AgentLTM policy exists. |
+| `agent-ltm-policy-present` | A valid policy exists with `enabled = false`. |
+| `agent-ltm-enabled` | A valid policy exists with `enabled = true` after separate human approval; external runtime readiness is not attested. |
+| `agent-ltm-privacy-failed` | The policy fails the required private-set contract. |
+| `agent-ltm-misconfigured` | The policy is invalid for another reason. |
+
+Doctor never locates, probes, imports, or calls `bella`. An absent optional external
+runtime must not make a normal Vivary workspace broken.
 
 Until that future wiring exists, use only current public commands:
 

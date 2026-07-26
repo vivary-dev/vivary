@@ -270,21 +270,27 @@ Current scaffold output diverges: it writes `enabled = true` with runtime gates 
 indexes nothing, and makes no provider call, but does not yet meet the approved
 disabled-policy contract.
 
-In the current adapter, privacy filtering is owned by `build_snapshot`: built-in
-private patterns always apply, and Git ignore rules apply when `respect_gitignore`
-(default `true`) is enabled. `respect_vivary_private` and `fail_closed` are accepted
-and type-checked policy fields, but they are not current filtering switches. Before
-that path filtering, snapshot construction refuses linked, out-of-root, hard-linked,
-or unstatable source files; it raises rather than silently skipping them.
+In the source checkout's unreleased `vivary-memory-cognee` 0.1.1 adapter, privacy
+filtering is owned by `build_snapshot`: built-in private patterns always apply, and
+Git ignore rules apply when `respect_gitignore` (default `true`) is enabled.
+`respect_vivary_private` and `fail_closed` are accepted and type-checked policy fields,
+but they are not current filtering switches. Before path filtering, snapshot
+construction refuses linked, out-of-root, hard-linked, or unstatable source files; it
+raises rather than silently skipping them.
 
 ### Privacy boundary
 
-The built-in private floor and literal workspace-relative
-`memory.privacy.private_paths` are filtered before provider calls. The current
-dependency-free `.gitignore` matcher is not fully Git-equivalent: backslash-escaped
-patterns and some complex `**` or anchored patterns can disagree with Git. Until
-[#236](https://github.com/vivary-dev/vivary/issues/236) lands, do not use
-`respect_gitignore` as the sole privacy boundary for such paths. Add each sensitive
+The source checkout and next `vivary-memory-cognee` release include
+`.strato/private/**` in the built-in floor and compare privacy patterns
+case-insensitively on Windows. The currently published 0.1.0 package lacks that
+built-in `.strato/private/**` entry; its generated Vivary configuration lists the path
+in `memory.privacy.private_paths`, but hand-written or older configurations must add
+it explicitly before indexing.
+
+The dependency-free `.gitignore` matcher is not fully Git-equivalent:
+backslash-escaped patterns and some complex `**` or anchored patterns can disagree
+with Git. Until [#236](https://github.com/vivary-dev/vivary/issues/236) lands, do not
+use `respect_gitignore` as the sole privacy boundary for such paths. Add each sensitive
 path to `memory.privacy.private_paths` as an unescaped workspace-relative literal or
 simple glob, and do not approve indexing when privacy depends on unsupported Git
 pattern syntax.

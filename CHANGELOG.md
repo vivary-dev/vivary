@@ -13,8 +13,9 @@ the `v0.1.0` line.
 ## [Unreleased: Bellamente predecessor contract and semantic adapter truth] — 2026-07-26
 
 Affects public documentation, its generated website mirror, future implementation
-contracts, and the `vivary-memory-cognee` built-in privacy floor. No version change,
-provider call, memory mutation, MCP, install, or publication action occurs.
+contracts, and the source checkout's unreleased `vivary-memory-cognee` 0.1.1 privacy
+floor. The published release remains 0.1.0; no provider call, memory mutation, MCP,
+install, version, publication, or deployment action occurs.
 
 ### Changed
 
@@ -38,16 +39,19 @@ provider call, memory mutation, MCP, install, or publication action occurs.
 - Routed the nested Bellamente contract from the documentation index and the generated
   semantic-memory page without creating an unsupported site route.
 - Made `docs/bellamente-memory/SPEC-bellamente-memory.md` the sole owner of the
-  private-set and Doctor-state contracts, aligned summaries to its
-  known-ID-or-unresolved-marker boundary, and kept exact-duplicate preserve as a
-  read-only result rather than a mutation gate. The adapter's built-in floor now
-  includes `.strato/private/**`; the shipped Git-ignore matcher's escaped/complex
-  pattern limitation is explicit and tracked by
+  private-set, Doctor-state, normalized-input, and firewall-result contracts; the ADR
+  and glossary now route instead of restating them. The specification defines the
+  enabled-policy Doctor state, keeps exact-duplicate preserve read-only, and requires
+  explicit opt-in before policy creation.
+- The source checkout's unreleased adapter floor includes `.strato/private/**` and now
+  matches privacy paths case-insensitively on Windows, with snapshot-level regression
+  coverage. Public docs distinguish that behavior from published 0.1.0. The remaining
+  escaped/complex Git-ignore limitation stays explicit and tracked by
   [#236](https://github.com/vivary-dev/vivary/issues/236).
 
 ### Verification
 
-- `python packages/memory-cognee/tests/test_memory_cognee.py` — **49/49** adapter
+- `python packages/memory-cognee/tests/test_memory_cognee.py` — **50/50** adapter
   tests passed.
 - `cd site && npm run test:site` — **8/8** site tests passed.
 - `cd site && npm run build && npm run test:links` — **23** pages built; **1,644**
@@ -56,8 +60,9 @@ provider call, memory mutation, MCP, install, or publication action occurs.
   checked; **8** legacy files remain explicitly allowlisted.
 - `git diff --check origin/dev...HEAD` — clean.
 - Rendered `/semantic-memory/` browser smoke — all three seams, current/future
-  divergence, absolute Bellamente contract link, the `#privacy-boundary` limitation
-  and #236 link, updated metadata, and no horizontal overflow verified.
+  divergence, absolute Bellamente contract link, published-0.1.0 versus unreleased
+  privacy behavior, Windows matching, the #236 link, and no horizontal overflow
+  verified.
 
 ## [Unreleased: vivary-core, the governed-context seam] — 2026-07-26
 

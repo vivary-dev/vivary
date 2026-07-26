@@ -12,7 +12,7 @@ and governs [#190](https://github.com/vivary-dev/vivary/pull/190).
 | File | Authority |
 |---|---|
 | [ADR-0001-bellamente-agent-ltm-beside-tropo.md](ADR-0001-bellamente-agent-ltm-beside-tropo.md) | The architectural decision and the three seam boundary. |
-| [CONTEXT.md](CONTEXT.md) | Canonical vocabulary, authority rules, privacy, gates, and test-tier terms. |
+| [CONTEXT.md](CONTEXT.md) | Canonical vocabulary and routes to the owning contract sections. |
 | [SPEC-bellamente-memory.md](SPEC-bellamente-memory.md) | The normative future implementation contract. |
 
 ## Contract routes
