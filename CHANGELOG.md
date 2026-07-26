@@ -33,7 +33,10 @@ version, and nothing about installing or running Vivary changes because it exist
   list on [the architecture page](/architecture/) from `packages/*/pyproject.toml` plus
   one explicit `UNPUBLISHED` allowlist, so documented package truth cannot drift behind
   the manifests again. It caught two published packages missing from that list on the
-  very commit that introduced it.
+  very commit that introduced it. Covered by `scripts/tests/test_package_docs_parity.py`
+  (10 cases), which pins the wrapping behaviour of that prose bullet — reading only its
+  first physical line would report wrapped names as missing and redden CI on a correct
+  doc.
 
 ### Changed
 
