@@ -248,6 +248,13 @@ def test_a_receipt_bound_to_a_different_capsule_is_insufficient_with_capsule_bin
     assert verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
     assert verdict["reason_codes"] == [REASON_CODES["CAPSULE_BINDING_MISMATCH"]]
 
+@pytest.mark.parametrize("malformed_capsule", ["not-a-capsule", []])
+def test_a_malformed_capsule_binding_is_insufficient_without_raising(receipt, malformed_capsule):
+    verdict = verify_receipt_integrity(receipt=receipt, capsule=malformed_capsule)
+
+    assert verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
+    assert verdict["reason_codes"] == [REASON_CODES["CAPSULE_BINDING_MISMATCH"]]
+
 
 def test_receipt_verification_is_deterministic(capsule, receipt):
     a = verify_receipt_integrity(receipt=receipt, capsule=capsule)

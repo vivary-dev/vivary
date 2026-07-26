@@ -130,8 +130,8 @@ def verify_receipt_integrity(*, receipt=None, capsule=None):
         receipt_workspace = receipt.get("workspace")
         capsule_workspace = _optional(capsule, "workspace")
         bound = (
-            _optional(receipt_capsule, "id") == capsule.get("capsule_id")
-            and _optional(receipt_capsule, "fingerprint") == capsule.get("fingerprint")
+            _optional(receipt_capsule, "id") == _optional(capsule, "capsule_id")
+            and _optional(receipt_capsule, "fingerprint") == _optional(capsule, "fingerprint")
             and _optional(receipt_workspace, "fingerprint") == _optional(capsule_workspace, "fingerprint")
         )
         if not bound:
