@@ -50,7 +50,6 @@ sys.path.insert(0, PY_ROOT)
 
 from vivary_core.capsule_compile import (  # noqa: E402
     CAPSULE_SCHEMA,
-    DEFAULT_REQUIRED_CHECKS,
     compile_task_capsule,
 )
 from vivary_core.receipt import RECEIPT_SCHEMA, create_integrity_receipt  # noqa: E402
@@ -75,6 +74,10 @@ def NOW():
 
 
 TASK = {"question": "Which local checkout of the shared origin reflects current repository truth?"}
+SYNTHETIC_REQUIRED_CHECKS = [
+    {"name": "unit-and-contract-tests", "command": "python -m pytest"},
+    {"name": "vivary-graph-doctor", "command": "create-vivary doctor . --json"},
+]
 
 
 # -- fixture plumbing (mirrors tests/helpers/fixtures.mjs / test_capsule.py's copy) --
@@ -232,6 +235,7 @@ def build_clean_capsule():
             ),
             "upstream": _known("origin/main", "git rev-parse --abbrev-ref --symbolic-full-name @{upstream}"),
             "last_fetch": _known("2026-07-01T00:00:00.000Z", "fs.stat FETCH_HEAD"),
+            "workspace_markers": _known(["tropo.toml"], "fs.stat workspace markers"),
         },
     }
     observation = {
@@ -259,7 +263,7 @@ def base_capsule_like(overrides=None):
         "conflicts": [],
         "unknowns": [],
         "omissions": [],
-        "required_checks": DEFAULT_REQUIRED_CHECKS,
+        "required_checks": SYNTHETIC_REQUIRED_CHECKS,
         "budget": {"max_claims": 24},
     }
     capsule.update(overrides or {})
