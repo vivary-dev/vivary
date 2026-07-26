@@ -41,6 +41,7 @@ REASON_CODES = {
     "CAPSULE_BINDING_MISMATCH": "capsule_binding_mismatch",
     "RECEIPT_INVALID": "receipt_invalid",
     # Evidence-sufficiency failures (fail closed to "insufficient").
+    "MALFORMED_GATE": "malformed_gate",
     "RECEIPT_MISSING_FOR_REQUIRED_CHECKS": "receipt_missing_for_required_checks",
     "RECEIPT_MISSING_FOR_CLAIMS_VERIFICATION": "receipt_missing_for_claims_verification",
     "REQUIRED_CHECK_MISSING": "required_check_missing",

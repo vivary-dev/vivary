@@ -35,10 +35,18 @@ ADAPTATION - verified claim coverage: the Python seam fails closed unless
 ``receipt.claims_verified`` names every capsule claim. The frozen Node oracle
 only compares list lengths, which lets duplicate or unrelated IDs satisfy a
 gate; preserving that behavior would violate Ozone's evidence contract.
+
+ADAPTATION - malformed gate constraints: the Python seam refuses a present
+constraint unless it has the declared type and finite numeric range. The
+frozen Node oracle silently ignores malformed constraints, which can make
+insufficient evidence appear sufficient.
 """
 
 from __future__ import annotations
 
+import math
+
+from vivary_core.capsule_compile import CAPSULE_SCHEMA
 from vivary_core.canonical import fingerprint as compute_fingerprint
 from vivary_core.verify_reasons import OUTCOMES, REASON_CODES
 from vivary_core.verify_receipt import verify_receipt_integrity
@@ -62,6 +70,23 @@ def _is_plain_object(value):
     return isinstance(value, dict)
 
 
+def _string_or_none(value):
+    return value if isinstance(value, str) else None
+
+
+def _capsule_binding(capsule):
+    return {
+        "id": _string_or_none(capsule.get("capsule_id")) if _is_plain_object(capsule) else None,
+        "fingerprint": _string_or_none(capsule.get("fingerprint")) if _is_plain_object(capsule) else None,
+    }
+
+
+def _receipt_id_binding(receipt):
+    if receipt is _NO_RECEIPT_PASSED:
+        return None
+    return verify_receipt_integrity(receipt=receipt).get("receipt_id")
+
+
 def _is_valid_capsule(capsule):
     return (
         _is_plain_object(capsule)
@@ -71,30 +96,70 @@ def _is_valid_capsule(capsule):
     )
 
 
-def _is_number(value):
-    # JS `typeof x === "number"`; Python bool is an int subclass and must be
-    # excluded (JS `typeof true === "boolean"`, never "number").
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+def _is_finite_number(value):
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, float) and math.isfinite(value)
+
+
+def _has_malformed_constraints(gate):
+    required_checks = gate.get("required_checks")
+    if required_checks is not None and (
+        not isinstance(required_checks, list) or not all(isinstance(name, str) for name in required_checks)
+    ):
+        return True
+    for key in ("max_unresolved_conflicts", "max_unresolved_unknowns"):
+        if gate.get(key) is not None and not _is_finite_number(gate.get(key)):
+            return True
+    return False
 
 
 def evaluate_gate_sufficiency(*, gate=None, capsule=None, receipt=_NO_RECEIPT_PASSED):
     """Evaluate whether a capsule's evidence (and, when required, a bound
     receipt's execution evidence) is sufficient for a gate. Never raises: a
-    missing capsule or malformed gate is a typed refusal, not an exception.
+    missing capsule is a typed refusal and malformed constraints are a typed
+    insufficiency, never an exception.
 
     gate     {"name": str, "required_checks": [str]?, "require_claims_verified": bool?,
               "max_unresolved_conflicts": number?, "max_unresolved_unknowns": number?}
     capsule  compiled Task Capsule
     receipt  Execution Receipt claimed to cover the capsule
     """
+    capsule_binding = _capsule_binding(capsule)
     if not _is_valid_capsule(capsule):
         return _verdict(
-            gate=gate.get("name") if isinstance(gate, dict) else None,
+            gate=_string_or_none(gate.get("name")) if isinstance(gate, dict) else None,
+            capsule=capsule_binding,
+            receipt_id=_receipt_id_binding(receipt),
             outcome=OUTCOMES["REFUSED"],
             reason_codes=[REASON_CODES["MISSING_CAPSULE"]],
         )
+    if capsule.get("schema") != CAPSULE_SCHEMA:
+        return _verdict(
+            gate=_string_or_none(gate.get("name")) if isinstance(gate, dict) else None,
+            capsule=capsule_binding,
+            receipt_id=_receipt_id_binding(receipt),
+            outcome=OUTCOMES["REFUSED"],
+            reason_codes=[REASON_CODES["UNSUPPORTED_SCHEMA"]],
+        )
     if not _is_plain_object(gate) or not isinstance(gate.get("name"), str) or len(gate.get("name")) == 0:
-        return _verdict(gate=None, outcome=OUTCOMES["REFUSED"], reason_codes=[REASON_CODES["MISSING_GATE"]])
+        return _verdict(
+            gate=None,
+            capsule=capsule_binding,
+            receipt_id=_receipt_id_binding(receipt),
+            outcome=OUTCOMES["REFUSED"],
+            reason_codes=[REASON_CODES["MISSING_GATE"]],
+        )
+    if _has_malformed_constraints(gate):
+        return _verdict(
+            gate=gate["name"],
+            capsule=capsule_binding,
+            receipt_id=_receipt_id_binding(receipt),
+            outcome=OUTCOMES["INSUFFICIENT"],
+            reason_codes=[REASON_CODES["MALFORMED_GATE"]],
+        )
 
     reason_codes = []
 
@@ -106,11 +171,11 @@ def evaluate_gate_sufficiency(*, gate=None, capsule=None, receipt=_NO_RECEIPT_PA
 
     unresolved_conflicts = len(capsule["conflicts"])
     max_unresolved_conflicts = gate.get("max_unresolved_conflicts")
-    if _is_number(max_unresolved_conflicts) and unresolved_conflicts > max_unresolved_conflicts:
+    if max_unresolved_conflicts is not None and not (unresolved_conflicts <= max_unresolved_conflicts):
         add_reason(REASON_CODES["UNRESOLVED_CONFLICTS_EXCEED_LIMIT"])
     unresolved_unknowns = len(capsule["unknowns"])
     max_unresolved_unknowns = gate.get("max_unresolved_unknowns")
-    if _is_number(max_unresolved_unknowns) and unresolved_unknowns > max_unresolved_unknowns:
+    if max_unresolved_unknowns is not None and not (unresolved_unknowns <= max_unresolved_unknowns):
         add_reason(REASON_CODES["UNRESOLVED_UNKNOWNS_EXCEED_LIMIT"])
 
     # A receipt only counts as usable evidence once it proves it is itself
@@ -124,9 +189,7 @@ def evaluate_gate_sufficiency(*, gate=None, capsule=None, receipt=_NO_RECEIPT_PA
         else:
             add_reason(REASON_CODES["RECEIPT_INVALID"])
 
-    required_checks = gate.get("required_checks")
-    if not isinstance(required_checks, list):
-        required_checks = []
+    required_checks = gate.get("required_checks") or []
     if len(required_checks) > 0:
         if effective_receipt is None:
             add_reason(REASON_CODES["RECEIPT_MISSING_FOR_REQUIRED_CHECKS"])
@@ -134,8 +197,11 @@ def evaluate_gate_sufficiency(*, gate=None, capsule=None, receipt=_NO_RECEIPT_PA
             checks = effective_receipt.get("checks")
             outcome_by_name = {}
             for check in checks if isinstance(checks, list) else []:
-                if isinstance(check, dict):
-                    outcome_by_name[check.get("name")] = check.get("outcome")
+                if isinstance(check, dict) and isinstance(check.get("name"), str):
+                    check_outcome = check.get("outcome")
+                    outcome_by_name[check["name"]] = (
+                        check_outcome if check_outcome in ("passed", "failed", "skipped") else "failed"
+                    )
             for name in required_checks:
                 if name not in outcome_by_name:
                     failing_checks.append({"name": name, "expected": "passed", "actual": "missing"})
@@ -165,6 +231,8 @@ def evaluate_gate_sufficiency(*, gate=None, capsule=None, receipt=_NO_RECEIPT_PA
 
     return _verdict(
         gate=gate["name"],
+        capsule=capsule_binding,
+        receipt_id=receipt_verdict["receipt_id"] if receipt_verdict is not None else None,
         outcome=outcome,
         reason_codes=reason_codes,
         failing_checks=failing_checks,
