@@ -1,85 +1,45 @@
-"""Pure near-neighbor write-policy classifier (docs/NEAR-NEIGHBOR-POLICY.md).
-No I/O, no writes: classify_candidate(graph, candidate, neighbors) -> decision
-is a pure function of its inputs, mirroring the house pattern in the Node
-reference's src/router/propose.mjs ("proposals are data that name a write; no
-write happens here, ever") and src/event/contract.mjs's machine-readable,
-never-throw verdict style.
+"""Pure CandidateRecallProvider classifier.
 
-Reference-guided Python port of src/recall/classify.mjs (graduation slice 6,
-ticket #12, decision 0008). The Node module is the frozen executable oracle:
-every branch, reason code, and ordering rule below is translated function-for-
-function; nothing is redesigned.
+This module evaluates normalized prior assertions without I/O, mutation, clocks,
+or provider calls.  ``docs/bellamente-memory/SPEC-bellamente-memory.md`` §6
+owns its result contract.
 
-ADAPTATION - malformed neighbors: provider-returned entries without a stable
-string ``id`` cannot support an auditable related-assertion decision. Reject
-that set as ``review_required`` instead of raising or silently classifying a
-partial set.
-
-A candidate is the incoming assertion someone (an agent, Bellamente) wants to
-record. A neighbor is a *prior* assertion, already known to the caller
-(returned by an external recall provider - never fetched, embedded, or
-looked up here), that the candidate might duplicate, corroborate, conflict
-with, or explicitly correct. Neither a candidate nor a neighbor is truth by
-itself: only the graph's own nodes are. A candidate's subject must resolve to
-a real, identity-proven graph node before anything else is considered -
-"candidates may only reference existing graph nodes by identity."
-
-Scope: this module implements exactly the three outcomes ticket #12 asks for
-(see recall_outcomes.py for why identity_unresolved is a reason code, not a
-fourth outcome). Matrix rows outside that scope (exact duplicate, brand-new/
-no-neighbor claims, cross-project quarantine, etc.) never fabricate one of
-the three write outcomes: they return `outcome: None` with a reason code that
-says exactly why nothing was decided. The policy doc is explicit that
-treating harmless novelty or duplication as review_required floods the
-review queue - so `None` here, not noise.
-
-Language mapping (python/README.md's documented rules, applied here):
-- JS `a?.b?.c` (optional chaining) is reproduced by `_get_path`, which walks
-  a chain of dict lookups and returns the `_MISSING` sentinel the instant any
-  link is not a dict or the key is absent - the same short-circuit optional
-  chaining gives on `null`/`undefined`. `_MISSING` is distinct from `None`
-  (JS `undefined` vs `null`), so `=== `/`!==` comparisons against a
-  `_get_path` result stay byte-faithful to the Node reference.
-- `x ?? y` is reproduced by treating `_MISSING` and `None` alike (both are
-  JS "nullish"), never by falsy-coalescing 0/""/False.
-- `Boolean(x)` (used only in `_required_supersession_inputs_present`) is
-  reproduced by `_js_truthy`, which mirrors JS falsiness (`None`/`_MISSING`,
-  `False`, `0`/`NaN`, `""`) - not Python truthiness.
-- `[...new Set(xs)].sort()` (plain, comparator-less `Array#sort` on strings)
-  is reproduced with `sorted(set(xs), key=_utf16_sort_key)` -
-  `canonical._utf16_sort_key` is the UTF-16-code-unit comparator plain JS
-  `.sort()` uses, not `collation.locale_sort_key`.
+ADAPTATION: the frozen Node oracle previously modeled corroboration recording
+and immediate learned-assertion supersession.  §6 deliberately replaces those
+write-shaped outcomes with accepted evaluations and gated correction proposals;
+this classifier never activates or rewrites truth.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from vivary_core.canonical import _utf16_sort_key, canonicalize
 from vivary_core.recall_outcomes import (
-    ACTIVE_TRUTH_NEW_VERSION_ACTIVE,
+    ACCEPTED,
     ACTIVE_TRUTH_UNCHANGED,
-    CORROBORATION_RECORDED,
-    REASON_ACTOR_NOT_AUTHORIZED,
-    REASON_AUTHORED_TRUTH_PROTECTED,
-    REASON_CONFLICTS_WITH,
-    REASON_EXACT_DUPLICATE_OUT_OF_SCOPE,
+    REASON_CORRECTION_INPUTS_INCOMPLETE,
+    REASON_CORRECTION_NOT_AUTHORIZED,
+    REASON_CORRECTION_SUBJECT_MISMATCH,
+    REASON_CORRECTION_TARGET_MISSING,
+    REASON_CORROBORATION,
+    REASON_EVIDENCE_NOT_FINGERPRINTED,
+    REASON_EXACT_DUPLICATE,
     REASON_EXPLICIT_CORRECTION,
     REASON_IDENTITY_UNRESOLVED,
-    REASON_INDEPENDENT_EVIDENCE,
-    REASON_NO_SIMILAR_NEIGHBOR,
-    REASON_RECALL_PROVIDER_FAILED,
-    REASON_SUPERSESSION_INPUTS_INCOMPLETE,
-    REASON_SUPERSESSION_SUBJECT_MISMATCH,
-    REASON_SUPERSESSION_TARGET_MISSING,
+    REASON_PROVIDER_DEGRADED,
+    REASON_STALE,
+    REASON_VALUE_CONFLICT,
+    REJECTED,
     REVIEW_REQUIRED,
-    SUPERSEDED_EXPLICITLY,
 )
 
-# Sentinel distinguishing "the chain resolved to undefined" (key absent, or
-# some link along the way was not an object) from "the chain resolved to an
-# explicit null" - exactly the distinction JS optional chaining preserves.
 _MISSING = object()
+_CANDIDATE_AUTHORITY_CLASS = "learned"
+_KNOWN_NEIGHBOR_AUTHORITY_CLASSES = frozenset({"authored", "learned"})
+_CURRENT_FRESHNESS = "current"
+_STALE_FRESHNESS = "stale"
+_INVALID_FRESHNESS = "invalid"
 
 
 def _get_path(value: Any, *keys: str) -> Any:
@@ -91,243 +51,356 @@ def _get_path(value: Any, *keys: str) -> Any:
     return cur
 
 
-def _nullish_to_none(value: Any) -> Any:
-    # JS `x ?? null`/`x ?? []`: only nullish (undefined or null) values are
-    # replaced - falsy-but-present values (0, "", False) pass through.
-    return None if (value is _MISSING or value is None) else value
+def _nonempty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value)
 
 
-def _js_truthy(value: Any) -> bool:
-    if value is _MISSING or value is None or value is False:
+def _stable_fingerprint(value: Any) -> bool:
+    """Accept the stable, algorithm-labelled fingerprints normalized by §6.1."""
+    return _nonempty_string(value) and value.startswith("sha256:") and len(value) > len("sha256:")
+
+
+def _safe_evidence(candidate: Any) -> Any:
+    source = _get_path(candidate, "source")
+    evidence = source.get("evidence") if isinstance(source, dict) else None
+    return evidence if isinstance(evidence, list) else []
+
+
+def _has_fingerprinted_evidence(assertion: Any) -> bool:
+    """Require stable provenance before any comparison or correction path."""
+    source = _get_path(assertion, "source")
+    if not isinstance(source, dict) or not _stable_fingerprint(source.get("fingerprint")):
         return False
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return value == value and value != 0  # excludes NaN and 0
-    if isinstance(value, str):
-        return len(value) > 0
-    return True  # dict/list/etc. are always truthy in JS
+    evidence = source.get("evidence")
+    if not isinstance(evidence, list) or not evidence:
+        return False
+    return all(
+        isinstance(item, dict)
+        and _stable_fingerprint(item.get("digest"))
+        and (
+            "fingerprint" not in item
+            or _stable_fingerprint(item.get("fingerprint"))
+        )
+        for item in evidence
+    )
 
 
-# A node "resolves" a candidate's subject when it exists in the graph and,
-# for node kinds that carry a proven-vs-unproven identity signal (repository
-# nodes: identity_status "known" | "inferred" | "unknown", per
-# workspace_model.py), that identity is proven. Node kinds with no such field
-# (checkout, revision, branch, ...) carry a deterministic content-hash id and
-# are resolved by construction - there is nothing left to disambiguate.
-def _resolve_subject(graph: Any, candidate: Any) -> Dict[str, Any]:
+def _freshness_state(value: Any, *, required: bool) -> str:
+    """Normalize a current/stale marker without consulting a wall clock."""
+    if not isinstance(value, dict):
+        return _INVALID_FRESHNESS
+    raw = value.get("freshness", _MISSING)
+    if raw is _MISSING:
+        return _INVALID_FRESHNESS if required else _CURRENT_FRESHNESS
+    if isinstance(raw, dict):
+        raw = raw.get("status", raw.get("state", _MISSING))
+    if raw in ("current", "fresh"):
+        return _CURRENT_FRESHNESS
+    if raw == "stale":
+        return _STALE_FRESHNESS
+    return _INVALID_FRESHNESS
+
+
+def _assertion_freshness(assertion: Dict[str, Any]) -> str:
+    """Return current, stale, or invalid for assertion/source/evidence data."""
+    states = [_freshness_state(assertion, required=True)]
+    source = assertion.get("source")
+    if not isinstance(source, dict):
+        return _INVALID_FRESHNESS
+    states.append(_freshness_state(source, required=False))
+    evidence = source.get("evidence")
+    if not isinstance(evidence, list):
+        return _INVALID_FRESHNESS
+    states.extend(_freshness_state(item, required=False) for item in evidence)
+    if _INVALID_FRESHNESS in states:
+        return _INVALID_FRESHNESS
+    if _STALE_FRESHNESS in states:
+        return _STALE_FRESHNESS
+    return _CURRENT_FRESHNESS
+
+
+def _canonical_value_is_valid(assertion: Dict[str, Any]) -> bool:
+    value = assertion.get("value")
+    if not isinstance(value, dict) or "normalized" not in value:
+        return False
+    try:
+        canonicalize(value["normalized"])
+    except Exception:
+        return False
+    return True
+
+
+def _is_normalized_assertion(assertion: Any, *, candidate: bool) -> bool:
+    """Validate only the provider-normalized assertion boundary from §6.1."""
+    if not isinstance(assertion, dict):
+        return False
+
+    subject = assertion.get("subject")
+    if not isinstance(subject, dict):
+        return False
+    node_id = subject.get("node_id")
+    if candidate:
+        # An absent node id remains the fail-closed unresolved-identity path.
+        if node_id is not None and not _nonempty_string(node_id):
+            return False
+    elif not _nonempty_string(node_id):
+        return False
+
+    if not _nonempty_string(assertion.get("predicate")) or not _canonical_value_is_valid(assertion):
+        return False
+
+    scope = assertion.get("scope")
+    if not isinstance(scope, dict) or not _nonempty_string(scope.get("project")) or not _nonempty_string(
+        scope.get("visibility")
+    ):
+        return False
+
+    authority = assertion.get("authority")
+    if not isinstance(authority, dict):
+        return False
+    authority_class = authority.get("class")
+    if candidate:
+        if authority_class != _CANDIDATE_AUTHORITY_CLASS:
+            return False
+    elif authority_class not in _KNOWN_NEIGHBOR_AUTHORITY_CLASSES:
+        return False
+
+    observed_time = assertion.get("observed_time")
+    if not isinstance(observed_time, dict) or not _nonempty_string(observed_time.get("at")):
+        return False
+
+    return _freshness_state(assertion, required=True) != _INVALID_FRESHNESS
+
+
+def _resolve_subject(graph: Any, candidate: Any) -> Tuple[Optional[Dict[str, Any]], bool]:
     node_id = _get_path(candidate, "subject", "node_id")
-    if not isinstance(node_id, str) or len(node_id) == 0:
-        return {"node": None, "resolved": False}
-    nodes = _get_path(graph, "nodes")
+    if not _nonempty_string(node_id):
+        return None, False
+    nodes = graph.get("nodes") if isinstance(graph, dict) else None
     if not isinstance(nodes, list):
-        nodes = []
-    node = next((n for n in nodes if isinstance(n, dict) and n.get("id") == node_id), None)
+        return None, False
+    node = next((item for item in nodes if isinstance(item, dict) and item.get("id") == node_id), None)
     if node is None:
-        return {"node": None, "resolved": False}
-    if "identity_status" in node and node["identity_status"] != "known":
-        return {"node": node, "resolved": False}
-    return {"node": node, "resolved": True}
+        return None, False
+    if "identity_status" in node and node.get("identity_status") != "known":
+        return node, False
+    return node, True
 
 
-def _values_compatible(a: Any, b: Any) -> bool:
-    a_normalized = a.get("normalized") if isinstance(a, dict) else None
-    b_normalized = b.get("normalized") if isinstance(b, dict) else None
-    return canonicalize(a_normalized) == canonicalize(b_normalized)
+def _subject_info(graph: Any, candidate: Any) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]], bool]:
+    try:
+        node, resolved = _resolve_subject(graph, candidate)
+        node_id = _get_path(candidate, "subject", "node_id")
+        return {"node_id": node_id if _nonempty_string(node_id) else None, "resolved": resolved}, node, resolved
+    except Exception:
+        return {"node_id": None, "resolved": False}, None, False
 
 
-# "A supersession decision is invalid unless the comparison has" - the policy
-# doc's required-comparison-inputs checklist, applied to the candidate side
-# of an explicit-correction attempt.
-def _required_supersession_inputs_present(candidate: Any) -> bool:
-    evidence = _get_path(candidate, "source", "evidence")
-    checks = [
-        _js_truthy(_get_path(candidate, "subject", "node_id")),
-        _js_truthy(_get_path(candidate, "predicate")),
-        _get_path(candidate, "value", "normalized") is not _MISSING,
-        _js_truthy(_get_path(candidate, "authority", "class")),
-        _js_truthy(_get_path(candidate, "authority", "actor", "id")),
-        _js_truthy(_get_path(candidate, "scope", "project")),
-        _js_truthy(_get_path(candidate, "scope", "visibility")),
-        _js_truthy(_get_path(candidate, "valid_time", "from")),
-        _js_truthy(_get_path(candidate, "observed_time", "at")),
-        isinstance(evidence, list),
-        isinstance(evidence, list) and len(evidence) > 0,
-        _js_truthy(_get_path(candidate, "source", "fingerprint")),
-        _js_truthy(_get_path(candidate, "target_assertion_id")),
-    ]
-    return all(checks)
+def _node_freshness(node: Optional[Dict[str, Any]]) -> str:
+    if node is None:
+        return _CURRENT_FRESHNESS
+    return _freshness_state(node, required=False)
 
 
-# "A caller should never have to infer whether a write replaced something" -
-# active_truth is derived from the outcome, never left implicit. Only
-# SUPERSEDED_EXPLICITLY ever activates a new version; every other outcome
-# (including a refused correction attempt) leaves active truth unchanged.
-def _active_truth_for(outcome: Optional[str]) -> str:
-    return ACTIVE_TRUTH_NEW_VERSION_ACTIVE if outcome == SUPERSEDED_EXPLICITLY else ACTIVE_TRUTH_UNCHANGED
+def _values_compatible(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
+    try:
+        return canonicalize(left["value"]["normalized"]) == canonicalize(right["value"]["normalized"])
+    except Exception:
+        # Public ``classify_candidate`` contains this as provider degradation.
+        return False
+
+
+def _correction_authorized(candidate: Dict[str, Any]) -> bool:
+    authority = candidate.get("authority")
+    if not isinstance(authority, dict) or authority.get("authorized") is not True:
+        return False
+    actor = authority.get("actor")
+    return isinstance(actor, dict) and _nonempty_string(actor.get("kind")) and _nonempty_string(actor.get("id"))
+
+
+def _correction_inputs_complete(candidate: Dict[str, Any]) -> bool:
+    valid_time = candidate.get("valid_time")
+    return isinstance(valid_time, dict) and _nonempty_string(valid_time.get("from"))
 
 
 def _decision(
-    outcome: Optional[str],
+    outcome: str,
     reason_codes: List[str],
     subject: Dict[str, Any],
     evidence: Any,
+    *,
     related_assertion_ids: Optional[List[str]] = None,
+    proposal: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     return {
         "outcome": outcome,
         "reason_codes": sorted(set(reason_codes), key=_utf16_sort_key),
         "related_assertion_ids": sorted(set(related_assertion_ids or []), key=_utf16_sort_key),
-        "active_truth": _active_truth_for(outcome),
+        "active_truth": ACTIVE_TRUTH_UNCHANGED,
         "subject": subject,
-        "evidence": evidence if evidence is not None else [],
+        "evidence": evidence,
+        "proposal": proposal,
     }
+
+
+def _provider_degraded_decision(graph: Any, candidate: Any) -> Dict[str, Any]:
+    subject, _, _ = _subject_info(graph, candidate)
+    return _decision(
+        REJECTED,
+        [REASON_PROVIDER_DEGRADED],
+        subject,
+        _safe_evidence(candidate),
+    )
+
+
+def _classify_candidate(graph: Any, candidate: Any, neighbors: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    subject, subject_node, resolved = _subject_info(graph, candidate)
+    evidence = _safe_evidence(candidate)
+
+    if not isinstance(candidate, dict):
+        return _provider_degraded_decision(graph, candidate)
+    if neighbors is None:
+        neighbors = []
+    if not isinstance(neighbors, list) or any(not isinstance(neighbor, dict) for neighbor in neighbors):
+        return _provider_degraded_decision(graph, candidate)
+
+    # Stable evidence is a prerequisite for every comparison and correction.
+    # It intentionally outranks identity resolution so malformed provenance
+    # cannot reach any other evaluation path.
+    if not _has_fingerprinted_evidence(candidate) or any(
+        not _has_fingerprinted_evidence(neighbor) for neighbor in neighbors
+    ):
+        return _decision(REJECTED, [REASON_EVIDENCE_NOT_FINGERPRINTED], subject, evidence)
+
+    # The provider owns normalization.  Unknown candidate authority classes and
+    # unknown neighbor authority classes are malformed provider data; neither
+    # may slip past authored-truth protection.
+    if not _is_normalized_assertion(candidate, candidate=True) or any(
+        not _is_normalized_assertion(neighbor, candidate=False) or not _nonempty_string(neighbor.get("id"))
+        for neighbor in neighbors
+    ):
+        return _provider_degraded_decision(graph, candidate)
+
+    freshness_states = [
+        _assertion_freshness(candidate),
+        *(_assertion_freshness(neighbor) for neighbor in neighbors),
+        _node_freshness(subject_node),
+    ]
+    # A malformed freshness marker is provider degradation even when another
+    # entry is stale.  This fixed precedence keeps a permutation of provider
+    # data from changing the decision.
+    if _INVALID_FRESHNESS in freshness_states:
+        return _provider_degraded_decision(graph, candidate)
+    if _STALE_FRESHNESS in freshness_states:
+        return _decision(REJECTED, [REASON_STALE], subject, evidence)
+
+    # An unresolved identity is only a review result; it never reaches the
+    # duplicate, corroboration, conflict, or correction paths below.
+    if not resolved:
+        return _decision(REVIEW_REQUIRED, [REASON_IDENTITY_UNRESOLVED], subject, evidence)
+
+    target_assertion_id = candidate.get("target_assertion_id")
+    if target_assertion_id is not None:
+        if not _nonempty_string(target_assertion_id):
+            return _decision(REVIEW_REQUIRED, [REASON_CORRECTION_INPUTS_INCOMPLETE], subject, evidence)
+        target = next((neighbor for neighbor in neighbors if neighbor.get("id") == target_assertion_id), None)
+        if target is None:
+            return _decision(REVIEW_REQUIRED, [REASON_CORRECTION_TARGET_MISSING], subject, evidence)
+        if _get_path(target, "subject", "node_id") != _get_path(candidate, "subject", "node_id"):
+            return _decision(
+                REVIEW_REQUIRED,
+                [REASON_CORRECTION_SUBJECT_MISMATCH],
+                subject,
+                evidence,
+                related_assertion_ids=[target["id"]],
+            )
+        if not _correction_authorized(candidate):
+            return _decision(
+                REVIEW_REQUIRED,
+                [REASON_CORRECTION_NOT_AUTHORIZED],
+                subject,
+                evidence,
+                related_assertion_ids=[target["id"]],
+            )
+        if not _correction_inputs_complete(candidate):
+            return _decision(
+                REVIEW_REQUIRED,
+                [REASON_CORRECTION_INPUTS_INCOMPLETE],
+                subject,
+                evidence,
+                related_assertion_ids=[target["id"]],
+            )
+        return _decision(
+            REVIEW_REQUIRED,
+            [REASON_EXPLICIT_CORRECTION],
+            subject,
+            evidence,
+            related_assertion_ids=[target["id"]],
+            proposal={
+                "kind": REASON_EXPLICIT_CORRECTION,
+                "target_assertion_id": target["id"],
+                "requires_human_approval": True,
+            },
+        )
+
+    candidate_node_id = _get_path(candidate, "subject", "node_id")
+    candidate_predicate = candidate["predicate"]
+    candidate_scope = candidate["scope"]
+
+    matches = [
+        neighbor
+        for neighbor in neighbors
+        if _get_path(neighbor, "subject", "node_id") == candidate_node_id
+        and neighbor.get("predicate") == candidate_predicate
+        and _get_path(neighbor, "scope", "project") == candidate_scope["project"]
+        and _get_path(neighbor, "scope", "visibility") == candidate_scope["visibility"]
+    ]
+    compatible = [neighbor for neighbor in matches if _values_compatible(neighbor, candidate)]
+    if compatible:
+        candidate_fingerprint = candidate["source"]["fingerprint"]
+        independent = [
+            neighbor for neighbor in compatible if neighbor["source"]["fingerprint"] != candidate_fingerprint
+        ]
+        if independent:
+            return _decision(
+                ACCEPTED,
+                [REASON_CORROBORATION],
+                subject,
+                evidence,
+                related_assertion_ids=[neighbor["id"] for neighbor in independent],
+            )
+        return _decision(
+            ACCEPTED,
+            [REASON_EXACT_DUPLICATE],
+            subject,
+            evidence,
+            related_assertion_ids=[neighbor["id"] for neighbor in compatible],
+        )
+
+    if matches:
+        return _decision(
+            REVIEW_REQUIRED,
+            [REASON_VALUE_CONFLICT],
+            subject,
+            evidence,
+            related_assertion_ids=[neighbor["id"] for neighbor in matches],
+        )
+
+    # A normalized candidate with no recalled match was still evaluated
+    # successfully.  It is neither an automatic write nor a review reason.
+    return _decision(ACCEPTED, [], subject, evidence)
 
 
 def classify_candidate(
     *, graph: Any, candidate: Any, neighbors: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
-    """Classify one candidate against the evidence graph and a set of
-    neighbor candidates already recalled by the caller. Pure, deterministic,
-    never throws, never mutates the graph, the candidate, or any neighbor.
+    """Return one deterministic §6 result without mutating caller-owned data.
 
-    graph: output of project_workspace_graph
-    candidate: the incoming assertion to evaluate
-    neighbors: prior assertions the recall provider surfaced; each one only
-        ever REFERENCES a graph node - it is data, never itself treated as
-        truth.
+    Direct callers receive a fail-closed ``rejected/provider_degraded`` result
+    for malformed provider-shaped data rather than an exception.  The firewall
+    repeats that containment around its provider callback boundary.
     """
-    resolved = _resolve_subject(graph, candidate)["resolved"]
-    subject_info = {"node_id": _nullish_to_none(_get_path(candidate, "subject", "node_id")), "resolved": resolved}
-    evidence = _nullish_to_none(_get_path(candidate, "source", "evidence"))
-    if evidence is None:
-        evidence = []
-
-    if not resolved:
-        return _decision(REVIEW_REQUIRED, [REASON_IDENTITY_UNRESOLVED], subject_info, evidence)
-
-    neighbors = neighbors if neighbors is not None else []
-    if not isinstance(neighbors, list) or any(
-        not isinstance(neighbor, dict)
-        or not isinstance(neighbor.get("id"), str)
-        or not neighbor["id"]
-        for neighbor in neighbors
-    ):
-        return _decision(
-            REVIEW_REQUIRED,
-            [REASON_RECALL_PROVIDER_FAILED],
-            subject_info,
-            evidence,
-        )
-
-    # Explicit, authorized correction: "explicit correction targeting an
-    # assertion, authorized actor -> append new version and supersedes edge".
-    target_assertion_id = _get_path(candidate, "target_assertion_id")
-    if _js_truthy(target_assertion_id):
-        target = next(
-            (n for n in neighbors if isinstance(n, dict) and n.get("id") == target_assertion_id), None
-        )
-        if target is None:
-            return _decision(REVIEW_REQUIRED, [REASON_SUPERSESSION_TARGET_MISSING], subject_info, evidence)
-        if _get_path(target, "subject", "node_id") != _get_path(candidate, "subject", "node_id"):
-            return _decision(
-                REVIEW_REQUIRED,
-                [REASON_SUPERSESSION_SUBJECT_MISMATCH],
-                subject_info,
-                evidence,
-                related_assertion_ids=[target["id"]],
-            )
-        # "inferred claim challenging authored truth -> store as candidate/
-        # challenge only -> authored truth unchanged." Similarity, an explicit
-        # target, and even an authorized actor still grant no overwrite right
-        # over authored truth.
-        if _get_path(target, "authority", "class") == "authored":
-            return _decision(
-                REVIEW_REQUIRED,
-                [REASON_AUTHORED_TRUTH_PROTECTED],
-                subject_info,
-                evidence,
-                related_assertion_ids=[target["id"]],
-            )
-        if _get_path(candidate, "authority", "authorized") is not True:
-            return _decision(
-                REVIEW_REQUIRED,
-                [REASON_ACTOR_NOT_AUTHORIZED],
-                subject_info,
-                evidence,
-                related_assertion_ids=[target["id"]],
-            )
-        if not _required_supersession_inputs_present(candidate):
-            return _decision(
-                REVIEW_REQUIRED,
-                [REASON_SUPERSESSION_INPUTS_INCOMPLETE],
-                subject_info,
-                evidence,
-                related_assertion_ids=[target["id"]],
-            )
-        return _decision(
-            SUPERSEDED_EXPLICITLY,
-            [REASON_EXPLICIT_CORRECTION],
-            subject_info,
-            evidence,
-            related_assertion_ids=[target["id"]],
-        )
-
-    # No explicit target: compare against same-subject/predicate/scope
-    # neighbors to tell corroboration from conflict from genuine novelty.
-    candidate_node_id = _get_path(candidate, "subject", "node_id")
-    candidate_predicate = _get_path(candidate, "predicate")
-    candidate_scope_project = _get_path(candidate, "scope", "project")
-    candidate_scope_visibility = _get_path(candidate, "scope", "visibility")
-
-    def _is_match(n: Any) -> bool:
-        return (
-            _get_path(n, "subject", "node_id") == candidate_node_id
-            and _get_path(n, "predicate") == candidate_predicate
-            and _get_path(n, "scope", "project") == candidate_scope_project
-            and _get_path(n, "scope", "visibility") == candidate_scope_visibility
-        )
-
-    matches = [n for n in neighbors if isinstance(n, dict) and _is_match(n)]
-
-    candidate_value = _get_path(candidate, "value")
-    compatible = [n for n in matches if _values_compatible(n.get("value"), candidate_value)]
-    if len(compatible) > 0:
-        # "same claim, new independent evidence -> append corroborates evidence"
-        candidate_fingerprint = _get_path(candidate, "source", "fingerprint")
-        independent = [n for n in compatible if _get_path(n, "source", "fingerprint") != candidate_fingerprint]
-        if len(independent) > 0:
-            return _decision(
-                CORROBORATION_RECORDED,
-                [REASON_INDEPENDENT_EVIDENCE],
-                subject_info,
-                evidence,
-                related_assertion_ids=[n["id"] for n in independent],
-            )
-        # "exact duplicate, same evidence -> idempotent no-op" (duplicate_ignored)
-        # is out of this ticket's scope; the honest answer is "no decision made
-        # here", not a fabricated corroboration or review-queue entry.
-        return _decision(
-            None,
-            [REASON_EXACT_DUPLICATE_OUT_OF_SCOPE],
-            subject_info,
-            evidence,
-            related_assertion_ids=[n["id"] for n in compatible],
-        )
-
-    incompatible = [n for n in matches if not _values_compatible(n.get("value"), candidate_value)]
-    if len(incompatible) > 0:
-        # "same subject/predicate, incompatible value -> preserve both, add
-        # conflicts_with ... return review_required"
-        return _decision(
-            REVIEW_REQUIRED,
-            [REASON_CONFLICTS_WITH],
-            subject_info,
-            evidence,
-            related_assertion_ids=[n["id"] for n in incompatible],
-        )
-
-    # Nothing near this candidate at all: recorded_new is out of this
-    # ticket's scope, and the doc is explicit that harmless novelty must not
-    # become review-queue noise. Return no decision, not a fabricated one.
-    return _decision(None, [REASON_NO_SIMILAR_NEIGHBOR], subject_info, evidence)
+    try:
+        return _classify_candidate(graph, candidate, neighbors)
+    except Exception:
+        return _provider_degraded_decision(graph, candidate)

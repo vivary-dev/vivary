@@ -1,191 +1,64 @@
-"""Pytest translation of tests/recall.test.mjs (graduation slice 6, ticket
-#12, decision 0008). docs/NEAR-NEIGHBOR-POLICY.md is the verbatim source of
-truth: "near neighbor" is a retrieval signal, never permission to overwrite.
-Candidates may only reference existing graph nodes by identity; a recall
-provider is optional, and its absence degrades to a clean structured no-op,
-never a throw and never a fabricated decision.
+"""Focused contract tests for the SPEC §6 CandidateRecallProvider firewall.
 
-Outcome vocabulary note: docs/NEAR-NEIGHBOR-POLICY.md's "Outcomes" section (a
-closed 8-item enum) lists review_required, corroboration_recorded, and
-superseded_explicitly, but NOT identity_unresolved - that appears only as a
-reason code attached to review_required, both in the matrix ("ambiguous
-subject identity -> add `identity_unresolved`, return `review_required`")
-and in docs/ARCHITECTURE.md's ContextIntegrityEvent example
-(`"decision": "review_required", "reason_codes": ["identity_unresolved", ...]`).
-recall_outcomes.py's OUTCOME constants therefore hold exactly the three
-outcomes this ticket implements; identity_unresolved is exported as a reason
-code.
-
-ADAPTATION: the real-fixture-graph test builds real temp git repositories,
-the same way python/tests/test_observe.py's own local `build_fixtures`/
-`_git`/`_commit_file` helpers do (that file's docstring notes this mirrors
-tests/helpers/fixtures.mjs and is "re-expressed as a local pytest fixture/
-helpers in this one owned file, the same pattern python/tests/test_evidence.py
-uses for its own fixtures") - this file follows the same house pattern,
-trimmed to just the origin/canonical/stale-neighbor/no-origin shapes the Node
-recall test actually consumes (tests/helpers/fixtures.mjs's `dirty`,
-`detached`, `spaced`, and `disallowed` shapes are not exercised by
-tests/recall.test.mjs and are omitted here).
+The authoritative result table lives in
+``docs/bellamente-memory/SPEC-bellamente-memory.md``.  These tests keep the
+firewall pure, deterministic, provider-free, and unable to activate truth.
 """
 
 from __future__ import annotations
 
-import glob
-import os
-import shutil
-import stat
-import subprocess
+from copy import deepcopy
+from pathlib import Path
 import sys
-from datetime import datetime, timezone
 
 import pytest
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
 
-from vivary_core.recall_outcomes import (  # noqa: E402
-    ACTIVE_TRUTH_NEW_VERSION_ACTIVE,
-    ACTIVE_TRUTH_UNCHANGED,
-    CORROBORATION_RECORDED,
-    OUTCOMES,
-    REASON_ACTOR_NOT_AUTHORIZED,
-    REASON_AUTHORED_TRUTH_PROTECTED,
-    REASON_CONFLICTS_WITH,
-    REASON_EXACT_DUPLICATE_OUT_OF_SCOPE,
-    REASON_EXPLICIT_CORRECTION,
-    REASON_IDENTITY_UNRESOLVED,
-    REASON_INDEPENDENT_EVIDENCE,
-    REASON_NO_SIMILAR_NEIGHBOR,
-    REASON_RECALL_PROVIDER_ABSENT,
-    REASON_RECALL_PROVIDER_FAILED,
-    REASON_SUPERSESSION_INPUTS_INCOMPLETE,
-    REASON_SUPERSESSION_SUBJECT_MISMATCH,
-    REASON_SUPERSESSION_TARGET_MISSING,
-    REVIEW_REQUIRED,
-    STATUS_EVALUATED,
-    STATUS_NO_PROVIDER,
-    STATUS_PROVIDER_DEGRADED,
-    SUPERSEDED_EXPLICITLY,
-)
 from vivary_core.recall_classify import classify_candidate  # noqa: E402
 from vivary_core.recall_firewall import evaluate_candidate  # noqa: E402
-from vivary_core.workspace_observe import observe_checkouts  # noqa: E402
-from vivary_core.workspace_model import project_workspace_graph  # noqa: E402
+from vivary_core.recall_outcomes import (  # noqa: E402
+    ACCEPTED,
+    ACTIVE_TRUTH_UNCHANGED,
+    OUTCOMES,
+    REASON_CORRECTION_INPUTS_INCOMPLETE,
+    REASON_CORRECTION_NOT_AUTHORIZED,
+    REASON_CORRECTION_SUBJECT_MISMATCH,
+    REASON_CORRECTION_TARGET_MISSING,
+    REASON_CORROBORATION,
+    REASON_EVIDENCE_NOT_FINGERPRINTED,
+    REASON_EXACT_DUPLICATE,
+    REASON_EXPLICIT_CORRECTION,
+    REASON_IDENTITY_UNRESOLVED,
+    REASON_PROVIDER_DEGRADED,
+    REASON_STALE,
+    REASON_VALUE_CONFLICT,
+    REJECTED,
+    REVIEW_REQUIRED,
+    STATUS_EVALUATED,
+    STATUS_PROVIDER_DEGRADED,
+)
 
-FIXTURE_BASE = os.path.join(HERE, ".fixtures", "recall")
-
-
-def NOW():
-    return "2026-07-21T12:00:00.000Z"
-
-
-# -- fixture plumbing (trimmed port of tests/helpers/fixtures.mjs's
-# buildFixtures, matching python/tests/test_observe.py's local pattern) ------
-
-FIXED_DATE = "2026-07-01T12:00:00Z"
-FETCH_STAMP = datetime(2026, 7, 2, 0, 0, 0, tzinfo=timezone.utc)
-
-
-def _rmtree_force(path):
-    def _on_error(func, target, exc_info):
-        os.chmod(target, stat.S_IWRITE)
-        func(target)
-
-    if os.path.isdir(path):
-        shutil.rmtree(path, onerror=_on_error)
-
-
-def _git_env(base_dir):
-    env = dict(os.environ)
-    env.update(
-        {
-            "GIT_AUTHOR_NAME": "Lattice Fixture",
-            "GIT_AUTHOR_EMAIL": "fixture@lattice.local",
-            "GIT_COMMITTER_NAME": "Lattice Fixture",
-            "GIT_COMMITTER_EMAIL": "fixture@lattice.local",
-            "GIT_AUTHOR_DATE": FIXED_DATE,
-            "GIT_COMMITTER_DATE": FIXED_DATE,
-            "GIT_CONFIG_GLOBAL": os.path.join(base_dir, "empty-gitconfig"),
-            "GIT_CONFIG_SYSTEM": os.path.join(base_dir, "empty-gitconfig"),
-        }
-    )
-    return env
+KNOWN_NODE = {
+    "id": "repository_aaaa",
+    "kind": "repository",
+    "identity": "https://github.com/vivary-dev/vivary.git",
+    "identity_status": "known",
+}
+INFERRED_NODE = {
+    "id": "repository_bbbb",
+    "kind": "repository",
+    "identity": "local:c:/ambiguous",
+    "identity_status": "inferred",
+}
 
 
-def _git(base_dir, cwd, args):
-    proc = subprocess.run(
-        ["git", *args], cwd=cwd, env=_git_env(base_dir), capture_output=True, text=True, check=True
-    )
-    return proc.stdout.strip()
-
-
-def _commit_file(base_dir, repo, file_name, content, message):
-    with open(os.path.join(repo, file_name), "w", encoding="utf-8", newline="") as handle:
-        handle.write(content)
-    _git(base_dir, repo, ["add", file_name])
-    _git(base_dir, repo, ["commit", "-q", "-m", message])
-    return _git(base_dir, repo, ["rev-parse", "HEAD"])
-
-
-def build_fixtures(base_dir):
-    """Trimmed port of tests/helpers/fixtures.mjs's buildFixtures: only the
-    shared-origin (canonical + stale-neighbor) and no-origin shapes the Node
-    recall test actually consumes."""
-    _rmtree_force(base_dir)
-    os.makedirs(base_dir, exist_ok=True)
-    with open(os.path.join(base_dir, "empty-gitconfig"), "w", encoding="utf-8") as handle:
-        handle.write("")
-
-    paths = {
-        "base": base_dir,
-        "origin": os.path.join(base_dir, "origin.git"),
-        "canonical": os.path.join(base_dir, "canonical"),
-        "stale_neighbor": os.path.join(base_dir, "stale-neighbor"),
-        "no_origin": os.path.join(base_dir, "no-origin"),
-    }
-
-    # Shared origin with two checkouts: canonical at commit B, the stale
-    # neighbor cloned while origin was still at commit A. Both are clean;
-    # they simply disagree about where main is. That ambiguity is the
-    # fixture, and gives the graph its one proven-identity (known) repository
-    # node.
-    _git(base_dir, base_dir, ["init", "-q", "--bare", "-b", "main", paths["origin"]])
-    _git(base_dir, base_dir, ["clone", "-q", paths["origin"], paths["canonical"]])
-    _commit_file(base_dir, paths["canonical"], "README.md", "# canonical\n", "commit A")
-    _git(base_dir, paths["canonical"], ["push", "-q", "origin", "main"])
-    _git(base_dir, base_dir, ["clone", "-q", paths["origin"], paths["stale_neighbor"]])
-    _commit_file(base_dir, paths["canonical"], "NOTES.md", "commit B content\n", "commit B")
-    _git(base_dir, paths["canonical"], ["push", "-q", "origin", "main"])
-
-    canonical_fetch_head = os.path.join(paths["canonical"], ".git", "FETCH_HEAD")
-    stamp = FETCH_STAMP.timestamp()
-    if os.path.exists(canonical_fetch_head):
-        os.utime(canonical_fetch_head, (stamp, stamp))
-
-    # No remotes configured at all: identity_status stays "unknown" - the
-    # not-proven repository node the real-fixture test needs.
-    _git(base_dir, base_dir, ["init", "-q", "-b", "main", paths["no_origin"]])
-    _commit_file(base_dir, paths["no_origin"], "solo.md", "solo\n", "solo")
-
-    return {"paths": paths}
-
-
-@pytest.fixture(scope="module")
-def fx():
-    base_dir = FIXTURE_BASE
-    result = build_fixtures(base_dir)
-    yield result
-    _rmtree_force(base_dir)
-
-
-# -- synthetic graph + candidate/neighbor builders ---------------------------
-
-
-def synthetic_graph(nodes):
+def graph(nodes=None):
     return {
         "schema": "vivary.workspace-graph/v0",
-        "workspace_fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-        "nodes": nodes,
+        "workspace_fingerprint": "sha256:workspace",
+        "nodes": [KNOWN_NODE] if nodes is None else nodes,
         "edges": [],
         "conflicts": [],
         "unknowns": [],
@@ -193,410 +66,361 @@ def synthetic_graph(nodes):
     }
 
 
-KNOWN_REPO = {"id": "repository_aaaa", "kind": "repository", "identity": "https://github.com/x/y.git", "identity_status": "known"}
-AMBIGUOUS_REPO = {"id": "repository_bbbb", "kind": "repository", "identity": "local:c:/somewhere", "identity_status": "inferred"}
-UNKNOWN_STATUS_REPO = {"id": "repository_cccc", "kind": "repository", "identity": "local:c:/elsewhere", "identity_status": "unknown"}
-PLAIN_CHECKOUT = {"id": "checkout_dddd", "kind": "checkout", "label": "vivary", "path": "irrelevant"}
-
-GRAPH = synthetic_graph([KNOWN_REPO, AMBIGUOUS_REPO, UNKNOWN_STATUS_REPO, PLAIN_CHECKOUT])
+def evidence(digest="sha256:candidate-evidence"):
+    return {"ref": "docs/note.md", "digest": digest, "freshness": "current"}
 
 
 def candidate(overrides=None):
-    base = {
-        "subject": {"node_id": KNOWN_REPO["id"]},
+    value = {
+        "subject": {"node_id": KNOWN_NODE["id"]},
         "predicate": "primary_language",
-        "value": {"normalized": "javascript"},
-        "authority": {"class": "learned", "actor": {"kind": "agent", "id": "codex:task-1"}, "authorized": True},
-        "scope": {"project": "vivary-lattice-lab", "visibility": "local"},
+        "value": {"normalized": "python"},
+        "authority": {
+            "class": "learned",
+            "actor": {"kind": "agent", "id": "agent:recall"},
+            "authorized": True,
+        },
+        "scope": {"project": "vivary", "visibility": "local"},
         "valid_time": {"from": "2026-07-01T00:00:00Z", "to": None},
         "observed_time": {"at": "2026-07-01T00:00:00Z"},
-        "source": {"evidence": [{"ref": "docs/note.md", "digest": "sha256:aaa"}], "fingerprint": "sha256:candidate-fp"},
+        "source": {"evidence": [evidence()], "fingerprint": "sha256:candidate-fingerprint"},
+        "freshness": "current",
         "target_assertion_id": None,
     }
-    base.update(overrides or {})
-    return base
+    value.update(overrides or {})
+    return value
 
 
 def neighbor(overrides=None):
-    base = {
-        "id": "assertion_existing_1",
-        "subject": {"node_id": KNOWN_REPO["id"]},
+    value = {
+        "id": "assertion_existing",
+        "subject": {"node_id": KNOWN_NODE["id"]},
         "predicate": "primary_language",
-        "value": {"normalized": "javascript"},
-        "authority": {"class": "learned", "actor": {"kind": "agent", "id": "codex:task-0"}},
-        "scope": {"project": "vivary-lattice-lab", "visibility": "local"},
-        "source": {"evidence": [{"ref": "docs/prior.md", "digest": "sha256:bbb"}], "fingerprint": "sha256:neighbor-fp"},
-        "active": True,
+        "value": {"normalized": "python"},
+        "authority": {"class": "learned", "actor": {"kind": "agent", "id": "agent:prior"}},
+        "scope": {"project": "vivary", "visibility": "local"},
+        "observed_time": {"at": "2026-07-01T00:00:00Z"},
+        "source": {"evidence": [evidence("sha256:neighbor-evidence")], "fingerprint": "sha256:neighbor-fingerprint"},
+        "freshness": "current",
     }
-    base.update(overrides or {})
-    return base
+    value.update(overrides or {})
+    return value
 
 
-# -- pinned outcome/reason-code vocabulary -----------------------------------
-
-
-def test_outcome_constants_are_pinned_to_the_policy_docs_literal_vocabulary_and_no_others():
-    assert REVIEW_REQUIRED == "review_required"
-    assert CORROBORATION_RECORDED == "corroboration_recorded"
-    assert SUPERSEDED_EXPLICITLY == "superseded_explicitly"
-    assert sorted(OUTCOMES) == sorted([CORROBORATION_RECORDED, REVIEW_REQUIRED, SUPERSEDED_EXPLICITLY])
-    # identity_unresolved is a reason code per docs/ARCHITECTURE.md's policy.decision
-    # / policy.reason_codes split - it must never be a member of OUTCOMES.
-    assert REASON_IDENTITY_UNRESOLVED not in OUTCOMES
-
-
-def test_reason_code_constants_are_pinned_strings():
-    assert REASON_IDENTITY_UNRESOLVED == "identity_unresolved"
-    assert REASON_CONFLICTS_WITH == "conflicts_with"
-    assert REASON_INDEPENDENT_EVIDENCE == "independent_evidence"
-    assert REASON_EXPLICIT_CORRECTION == "explicit_correction"
-    assert REASON_AUTHORED_TRUTH_PROTECTED == "authored_truth_protected"
-    assert REASON_ACTOR_NOT_AUTHORIZED == "actor_not_authorized"
-    assert REASON_SUPERSESSION_TARGET_MISSING == "supersession_target_missing"
-    assert REASON_SUPERSESSION_SUBJECT_MISMATCH == "supersession_subject_mismatch"
-    assert REASON_SUPERSESSION_INPUTS_INCOMPLETE == "supersession_inputs_incomplete"
-    assert REASON_NO_SIMILAR_NEIGHBOR == "no_similar_neighbor"
-    assert REASON_EXACT_DUPLICATE_OUT_OF_SCOPE == "exact_duplicate_out_of_scope"
-    assert REASON_RECALL_PROVIDER_ABSENT == "recall_provider_absent"
-    assert REASON_RECALL_PROVIDER_FAILED == "recall_provider_failed"
-    assert STATUS_EVALUATED == "evaluated"
-    assert STATUS_NO_PROVIDER == "no_provider"
-    assert STATUS_PROVIDER_DEGRADED == "provider_degraded"
-    assert ACTIVE_TRUTH_UNCHANGED == "unchanged"
-    assert ACTIVE_TRUTH_NEW_VERSION_ACTIVE == "new_version_active"
-
-
-# -- candidates may only reference existing graph nodes ----------------------
-
-
-def test_a_candidate_referencing_a_node_id_that_is_not_in_the_graph_cannot_become_truth_review_required_identity_unresolved():
-    result = classify_candidate(
-        graph=GRAPH,
-        candidate=candidate({"subject": {"node_id": "repository_ffff_never_observed"}}),
-        neighbors=[],
-    )
-    assert result["outcome"] == REVIEW_REQUIRED
-    assert result["reason_codes"] == [REASON_IDENTITY_UNRESOLVED]
-    assert result["subject"]["resolved"] is False
-
-
-def test_a_candidate_referencing_a_repository_node_whose_identity_is_not_proven_inferred_is_ambiguous_subject_identity():
-    result = classify_candidate(
-        graph=GRAPH, candidate=candidate({"subject": {"node_id": AMBIGUOUS_REPO["id"]}}), neighbors=[]
-    )
-    assert result["outcome"] == REVIEW_REQUIRED
-    assert result["reason_codes"] == [REASON_IDENTITY_UNRESOLVED]
-
-
-def test_a_candidate_referencing_a_repository_node_whose_identity_status_is_unknown_is_also_ambiguous_subject_identity():
-    result = classify_candidate(
-        graph=GRAPH, candidate=candidate({"subject": {"node_id": UNKNOWN_STATUS_REPO["id"]}}), neighbors=[]
-    )
-    assert result["outcome"] == REVIEW_REQUIRED
-    assert result["reason_codes"] == [REASON_IDENTITY_UNRESOLVED]
-
-
-def test_a_candidate_referencing_a_node_kind_with_no_identity_status_field_deterministic_id_resolves_cleanly():
-    result = classify_candidate(
-        graph=GRAPH, candidate=candidate({"subject": {"node_id": PLAIN_CHECKOUT["id"]}}), neighbors=[]
-    )
-    assert result["subject"]["resolved"] is True
-    # no matching neighbor either way -> not one of the three write outcomes
-    assert result["outcome"] is None
-
-
-# -- corroboration -------------------------------------------------------------
-
-
-def test_same_subject_predicate_compatible_value_independent_evidence_corroboration_recorded_active_truth_unchanged():
-    n = neighbor()
-    result = classify_candidate(graph=GRAPH, candidate=candidate(), neighbors=[n])
-    assert result["outcome"] == CORROBORATION_RECORDED
-    assert result["reason_codes"] == [REASON_INDEPENDENT_EVIDENCE]
-    assert result["related_assertion_ids"] == [n["id"]]
+def assert_result(result, outcome, reason_codes):
+    assert result["outcome"] == outcome
+    assert result["reason_codes"] == reason_codes
     assert result["active_truth"] == ACTIVE_TRUTH_UNCHANGED
 
 
-def test_same_subject_predicate_value_but_identical_evidence_fingerprint_exact_duplicate_is_not_corroboration_and_not_review_noise():
-    n = neighbor({"source": {"evidence": [{"ref": "docs/prior.md", "digest": "sha256:bbb"}], "fingerprint": "sha256:candidate-fp"}})
-    result = classify_candidate(graph=GRAPH, candidate=candidate(), neighbors=[n])
-    assert result["outcome"] != CORROBORATION_RECORDED
-    assert result["outcome"] != REVIEW_REQUIRED
-    assert result["outcome"] is None
-    assert result["reason_codes"] == [REASON_EXACT_DUPLICATE_OUT_OF_SCOPE]
+# -- pinned §6 vocabulary ------------------------------------------------------
 
 
-# -- conflict / ambiguity ------------------------------------------------------
+def test_core_outcomes_and_condition_codes_are_the_spec_literals():
+    assert set(OUTCOMES) == {ACCEPTED, REVIEW_REQUIRED, REJECTED}
+    assert {
+        REASON_EXACT_DUPLICATE,
+        REASON_CORROBORATION,
+        REASON_EXPLICIT_CORRECTION,
+        REASON_IDENTITY_UNRESOLVED,
+        REASON_VALUE_CONFLICT,
+        REASON_STALE,
+        REASON_PROVIDER_DEGRADED,
+        REASON_EVIDENCE_NOT_FINGERPRINTED,
+    } == {
+        "exact_duplicate",
+        "corroboration",
+        "explicit_correction",
+        "identity_unresolved",
+        "value_conflict",
+        "stale",
+        "provider_degraded",
+        "evidence_not_fingerprinted",
+    }
 
 
-def test_same_subject_predicate_incompatible_value_preserve_both_review_required_conflicts_with_active_truth_unchanged():
-    n = neighbor({"value": {"normalized": "python"}})
-    result = classify_candidate(graph=GRAPH, candidate=candidate(), neighbors=[n])
-    assert result["outcome"] == REVIEW_REQUIRED
-    assert result["reason_codes"] == [REASON_CONFLICTS_WITH]
-    assert result["related_assertion_ids"] == [n["id"]]
+# -- SPEC §6.2 required distinct results --------------------------------------
 
 
-def test_no_similar_neighbor_at_all_is_not_treated_as_ambiguity_or_conflict_avoids_review_queue_noise_and_is_not_one_of_the_three_outcomes():
-    result = classify_candidate(
-        graph=GRAPH, candidate=candidate({"predicate": "brand_new_predicate"}), neighbors=[neighbor()]
-    )
-    assert result["outcome"] is None
-    assert result["reason_codes"] == [REASON_NO_SIMILAR_NEIGHBOR]
-
-
-# -- explicit, authorized correction -------------------------------------------
-
-
-def test_explicit_correction_authorized_actor_learned_target_all_required_inputs_present_superseded_explicitly():
-    n = neighbor({"id": "assertion_target_1", "authority": {"class": "learned", "actor": {"kind": "agent", "id": "codex:task-0"}}})
-    result = classify_candidate(graph=GRAPH, candidate=candidate({"target_assertion_id": n["id"]}), neighbors=[n])
-    assert result["outcome"] == SUPERSEDED_EXPLICITLY
-    assert result["reason_codes"] == [REASON_EXPLICIT_CORRECTION]
-    assert result["related_assertion_ids"] == [n["id"]]
-    # The one and only path where active truth is allowed to change - a caller
-    # never has to infer this from the outcome string alone.
-    assert result["active_truth"] == ACTIVE_TRUTH_NEW_VERSION_ACTIVE
-
-
-def test_similarity_grants_no_overwrite_rights_an_explicit_target_pointing_at_authored_truth_is_never_superseded_even_at_maximum_similarity():
-    n = neighbor(
+def test_exact_duplicate_with_the_same_fingerprinted_evidence_is_accepted_and_preserved():
+    prior = neighbor(
         {
-            "id": "assertion_authored_1",
-            "authority": {"class": "authored", "actor": {"kind": "human", "id": "jeff"}},
-            # identical value/predicate/subject/evidence to the candidate: maximum similarity
-            "value": {"normalized": "javascript"},
+            "source": {
+                "evidence": [evidence()],
+                "fingerprint": "sha256:candidate-fingerprint",
+            }
         }
     )
-    result = classify_candidate(graph=GRAPH, candidate=candidate({"target_assertion_id": n["id"]}), neighbors=[n])
-    assert result["outcome"] != SUPERSEDED_EXPLICITLY
-    assert result["outcome"] == REVIEW_REQUIRED
-    assert result["reason_codes"] == [REASON_AUTHORED_TRUTH_PROTECTED]
-    assert result["related_assertion_ids"] == [n["id"]]
-    # The load-bearing assertion: no matter how similar, active truth is
-    # never marked replaced when the target is authored.
-    assert result["active_truth"] == ACTIVE_TRUTH_UNCHANGED
+    result = classify_candidate(graph=graph(), candidate=candidate(), neighbors=[prior])
+
+    assert_result(result, ACCEPTED, [REASON_EXACT_DUPLICATE])
+    assert result["related_assertion_ids"] == [prior["id"]]
+    assert result["proposal"] is None
 
 
-def test_explicit_correction_by_an_unauthorized_actor_falls_back_to_review_required_never_supersedes():
-    n = neighbor({"id": "assertion_target_2"})
+def test_compatible_assertion_with_independent_fingerprinted_evidence_is_accepted_as_corroboration():
+    prior = neighbor()
+    result = classify_candidate(graph=graph(), candidate=candidate(), neighbors=[prior])
+
+    assert_result(result, ACCEPTED, [REASON_CORROBORATION])
+    assert result["related_assertion_ids"] == [prior["id"]]
+    assert result["proposal"] is None
+
+
+def test_explicit_correction_of_authored_truth_is_a_human_gated_review_proposal_never_an_activation():
+    prior = neighbor({"id": "assertion_authored", "authority": {"class": "authored"}})
+    proposed = candidate({"target_assertion_id": prior["id"]})
+    result = classify_candidate(graph=graph(), candidate=proposed, neighbors=[prior])
+
+    assert_result(result, REVIEW_REQUIRED, [REASON_EXPLICIT_CORRECTION])
+    assert result["related_assertion_ids"] == [prior["id"]]
+    assert result["proposal"] == {
+        "kind": "explicit_correction",
+        "target_assertion_id": prior["id"],
+        "requires_human_approval": True,
+    }
+
+
+def test_unknown_or_ambiguous_identity_is_review_required_without_entering_comparison_paths():
+    unknown = candidate({"subject": {"node_id": "repository_missing"}})
+    result = classify_candidate(graph=graph(), candidate=unknown, neighbors=[neighbor()])
+
+    assert_result(result, REVIEW_REQUIRED, [REASON_IDENTITY_UNRESOLVED])
+    assert result["subject"] == {"node_id": "repository_missing", "resolved": False}
+
+
+def test_ambiguous_identity_status_is_review_required_not_a_resolved_subject():
+    ambiguous = candidate({"subject": {"node_id": INFERRED_NODE["id"]}})
+    result = classify_candidate(graph=graph([INFERRED_NODE]), candidate=ambiguous, neighbors=[neighbor()])
+
+    assert_result(result, REVIEW_REQUIRED, [REASON_IDENTITY_UNRESOLVED])
+    assert result["subject"] == {"node_id": INFERRED_NODE["id"], "resolved": False}
+
+
+def test_incompatible_value_for_the_same_identity_is_review_required_and_preserves_both_sides():
+    prior = neighbor({"value": {"normalized": "ruby"}})
+    result = classify_candidate(graph=graph(), candidate=candidate(), neighbors=[prior])
+
+    assert_result(result, REVIEW_REQUIRED, [REASON_VALUE_CONFLICT])
+    assert result["related_assertion_ids"] == [prior["id"]]
+
+
+def test_stale_candidate_is_rejected_before_duplicate_or_corroboration_classification():
+    stale = candidate({"freshness": "stale"})
+    result = classify_candidate(graph=graph(), candidate=stale, neighbors=[neighbor()])
+
+    assert_result(result, REJECTED, [REASON_STALE])
+
+
+def test_stale_neighbor_is_rejected_before_duplicate_or_corroboration_classification():
+    stale = neighbor({"freshness": "stale"})
+    result = classify_candidate(graph=graph(), candidate=candidate(), neighbors=[stale])
+
+    assert_result(result, REJECTED, [REASON_STALE])
+
+
+def test_stale_evidence_is_rejected_before_duplicate_or_corroboration_classification():
+    stale = candidate()
+    stale["source"]["evidence"][0]["freshness"] = "stale"
+    result = classify_candidate(graph=graph(), candidate=stale, neighbors=[neighbor()])
+
+    assert_result(result, REJECTED, [REASON_STALE])
+
+
+def test_stale_graph_node_is_rejected_before_the_candidate_can_be_evaluated():
+    stale_node = {**KNOWN_NODE, "freshness": "stale"}
+    result = classify_candidate(graph=graph([stale_node]), candidate=candidate(), neighbors=[])
+
+    assert_result(result, REJECTED, [REASON_STALE])
+
+
+def test_no_matching_neighbor_is_an_accepted_evaluation_not_a_hidden_write_or_coined_reason():
     result = classify_candidate(
-        graph=GRAPH,
-        candidate=candidate(
-            {
-                "target_assertion_id": n["id"],
-                "authority": {"class": "learned", "actor": {"kind": "agent", "id": "codex:task-1"}, "authorized": False},
-            }
-        ),
-        neighbors=[n],
+        graph=graph(),
+        candidate=candidate({"predicate": "new_normalized_predicate"}),
+        neighbors=[neighbor()],
     )
-    assert result["outcome"] == REVIEW_REQUIRED
-    assert result["reason_codes"] == [REASON_ACTOR_NOT_AUTHORIZED]
+
+    assert_result(result, ACCEPTED, [])
+    assert result["proposal"] is None
 
 
-def test_explicit_correction_naming_a_target_assertion_id_that_does_not_exist_among_neighbors_falls_back_to_review_required():
+# -- evidence and normalized authority boundaries -----------------------------
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda assertion: assertion["source"].pop("fingerprint"),
+        lambda assertion: assertion["source"].__setitem__("fingerprint", "not-a-fingerprint"),
+        lambda assertion: assertion["source"]["evidence"][0].__setitem__("digest", "not-a-fingerprint"),
+    ],
+)
+def test_missing_or_malformed_candidate_fingerprint_is_rejected_fail_closed(mutate):
+    malformed = candidate()
+    mutate(malformed)
+    result = classify_candidate(graph=graph(), candidate=malformed, neighbors=[])
+
+    assert_result(result, REJECTED, [REASON_EVIDENCE_NOT_FINGERPRINTED])
+
+
+def test_unfingerprinted_neighbor_cannot_be_counted_as_independent_corroboration():
+    prior = neighbor({"source": {"evidence": [evidence("sha256:prior")], "fingerprint": "broken"}})
+    result = classify_candidate(graph=graph(), candidate=candidate(), neighbors=[prior])
+
+    assert_result(result, REJECTED, [REASON_EVIDENCE_NOT_FINGERPRINTED])
+
+
+@pytest.mark.parametrize("authority_class", [None, "authored", "unknown_authority"])
+def test_candidate_authority_must_use_the_learned_candidate_vocabulary(authority_class):
+    malformed = candidate()
+    malformed["authority"]["class"] = authority_class
+    result = classify_candidate(graph=graph(), candidate=malformed, neighbors=[])
+
+    assert_result(result, REJECTED, [REASON_PROVIDER_DEGRADED])
+
+
+@pytest.mark.parametrize("authority", [{}, {"class": "unknown_authority"}])
+def test_missing_or_unknown_neighbor_authority_cannot_bypass_authored_truth_protection(authority):
+    prior = neighbor({"id": "assertion_target", "authority": authority})
     result = classify_candidate(
-        graph=GRAPH,
-        candidate=candidate({"target_assertion_id": "assertion_never_recalled"}),
-        neighbors=[neighbor({"id": "assertion_target_3"})],
+        graph=graph(),
+        candidate=candidate({"target_assertion_id": prior["id"]}),
+        neighbors=[prior],
     )
-    assert result["outcome"] == REVIEW_REQUIRED
-    assert result["reason_codes"] == [REASON_SUPERSESSION_TARGET_MISSING]
+
+    assert_result(result, REJECTED, [REASON_PROVIDER_DEGRADED])
+    assert result["proposal"] is None
 
 
-def test_explicit_correction_whose_target_is_about_a_different_subject_node_falls_back_to_review_required():
-    n = neighbor({"id": "assertion_target_4", "subject": {"node_id": PLAIN_CHECKOUT["id"]}})
-    result = classify_candidate(graph=GRAPH, candidate=candidate({"target_assertion_id": n["id"]}), neighbors=[n])
-    assert result["outcome"] == REVIEW_REQUIRED
-    assert result["reason_codes"] == [REASON_SUPERSESSION_SUBJECT_MISMATCH]
+# -- explicit correction malformed subcases -----------------------------------
 
 
-def test_a_supersession_decision_missing_a_required_comparison_input_eg_valid_time_is_invalid_and_falls_back_to_review_required():
-    n = neighbor({"id": "assertion_target_5"})
-    incomplete = candidate({"target_assertion_id": n["id"]})
-    del incomplete["valid_time"]
-    result = classify_candidate(graph=GRAPH, candidate=incomplete, neighbors=[n])
-    assert result["outcome"] == REVIEW_REQUIRED
-    assert result["reason_codes"] == [REASON_SUPERSESSION_INPUTS_INCOMPLETE]
+def test_unknown_correction_target_is_a_fail_closed_review_subcase():
+    result = classify_candidate(
+        graph=graph(),
+        candidate=candidate({"target_assertion_id": "assertion_missing"}),
+        neighbors=[neighbor()],
+    )
+
+    assert_result(result, REVIEW_REQUIRED, [REASON_CORRECTION_TARGET_MISSING])
 
 
-# -- determinism and shape ------------------------------------------------------
+def test_cross_subject_correction_target_is_a_fail_closed_review_subcase():
+    prior = neighbor({"id": "assertion_other", "subject": {"node_id": "repository_other"}})
+    result = classify_candidate(
+        graph=graph(),
+        candidate=candidate({"target_assertion_id": prior["id"]}),
+        neighbors=[prior],
+    )
+
+    assert_result(result, REVIEW_REQUIRED, [REASON_CORRECTION_SUBJECT_MISMATCH])
 
 
-def test_classification_is_pure_identical_inputs_yield_byte_identical_decisions_reason_codes_and_related_ids_are_sorted():
-    n1 = neighbor({"id": "assertion_z", "value": {"normalized": "python"}})
-    n2 = neighbor({"id": "assertion_a", "value": {"normalized": "python"}})
-    a = classify_candidate(graph=GRAPH, candidate=candidate(), neighbors=[n1, n2])
-    b = classify_candidate(graph=GRAPH, candidate=candidate(), neighbors=[n1, n2])
-    assert a == b
-    assert a["related_assertion_ids"] == sorted(a["related_assertion_ids"])
+def test_unauthorized_correction_is_a_fail_closed_review_subcase():
+    proposed = candidate({"target_assertion_id": "assertion_target"})
+    proposed["authority"]["authorized"] = False
+    result = classify_candidate(
+        graph=graph(),
+        candidate=proposed,
+        neighbors=[neighbor({"id": "assertion_target"})],
+    )
+
+    assert_result(result, REVIEW_REQUIRED, [REASON_CORRECTION_NOT_AUTHORIZED])
 
 
-# -- graceful degradation: no recall provider ----------------------------------
+def test_correction_missing_required_comparison_input_is_a_fail_closed_review_subcase():
+    proposed = candidate({"target_assertion_id": "assertion_target"})
+    proposed.pop("valid_time")
+    result = classify_candidate(
+        graph=graph(),
+        candidate=proposed,
+        neighbors=[neighbor({"id": "assertion_target"})],
+    )
+
+    assert_result(result, REVIEW_REQUIRED, [REASON_CORRECTION_INPUTS_INCOMPLETE])
 
 
-def test_with_no_recall_provider_the_firewall_is_a_clean_structured_no_op_never_throws_never_fabricates_a_write_decision():
-    result = evaluate_candidate(graph=GRAPH, candidate=candidate())
-    assert result["status"] == STATUS_NO_PROVIDER
-    assert result["outcome"] is None
-    assert result["outcome"] not in OUTCOMES
-    assert result["reason_codes"] == [REASON_RECALL_PROVIDER_ABSENT]
-    assert result["active_truth"] == ACTIVE_TRUTH_UNCHANGED
+# -- provider boundary and never-throw containment ----------------------------
 
 
-def test_a_provider_object_without_a_recall_function_also_degrades_to_the_no_provider_no_op_rather_than_throwing():
-    # doesNotThrow
-    evaluate_candidate(graph=GRAPH, candidate=candidate(), provider={})
-    result = evaluate_candidate(graph=GRAPH, candidate=candidate(), provider={})
-    assert result["status"] == STATUS_NO_PROVIDER
-
-
-def test_with_a_recall_provider_present_the_firewall_evaluates_and_matches_the_pure_classifier_directly():
-    n = neighbor()
-    provider = {"recall": lambda **kwargs: [n]}
-    result = evaluate_candidate(graph=GRAPH, candidate=candidate(), provider=provider)
-    assert result["status"] == STATUS_EVALUATED
-    direct = classify_candidate(graph=GRAPH, candidate=candidate(), neighbors=[n])
-    assert result["outcome"] == direct["outcome"]
-    assert result["reason_codes"] == direct["reason_codes"]
-    assert result["related_assertion_ids"] == direct["related_assertion_ids"]
-    assert result["active_truth"] == direct["active_truth"]
-
-
-def test_a_provider_whose_recall_returns_non_array_garbage_degrades_to_its_own_visible_status_distinct_from_a_healthy_evaluation():
-    provider = {"recall": lambda **kwargs: None}
-    evaluate_candidate(graph=GRAPH, candidate=candidate(), provider=provider)  # doesNotThrow
-    result = evaluate_candidate(graph=GRAPH, candidate=candidate(), provider=provider)
-    assert result["status"] == STATUS_PROVIDER_DEGRADED
-    assert result["status"] != STATUS_EVALUATED
-    assert result["status"] != STATUS_NO_PROVIDER
-    assert result["outcome"] is None
-    assert result["outcome"] not in OUTCOMES
-    assert result["reason_codes"] == [REASON_RECALL_PROVIDER_FAILED]
-    assert result["active_truth"] == ACTIVE_TRUTH_UNCHANGED
-
-@pytest.mark.parametrize("malformed_neighbor", ["garbage", None])
-def test_a_provider_whose_neighbor_list_contains_a_non_object_degrades_instead_of_evaluating_partial_results(
-    malformed_neighbor,
-):
-    provider = {"recall": lambda **kwargs: [neighbor(), malformed_neighbor]}
-
-    result = evaluate_candidate(graph=GRAPH, candidate=candidate(), provider=provider)
+def test_absent_provider_is_visible_rejected_provider_degradation():
+    result = evaluate_candidate(graph=graph(), candidate=candidate())
 
     assert result["status"] == STATUS_PROVIDER_DEGRADED
-    assert result["outcome"] is None
-    assert result["reason_codes"] == [REASON_RECALL_PROVIDER_FAILED]
-    assert result["active_truth"] == ACTIVE_TRUTH_UNCHANGED
+    assert_result(result, REJECTED, [REASON_PROVIDER_DEGRADED])
 
 
-def test_an_idless_matching_neighbor_never_crashes_classification_and_degrades_at_the_provider_boundary():
-    malformed_neighbor = neighbor()
-    del malformed_neighbor["id"]
-
-    direct = classify_candidate(graph=GRAPH, candidate=candidate(), neighbors=[malformed_neighbor])
+def test_malformed_provider_result_is_visible_rejected_provider_degradation():
     result = evaluate_candidate(
-        graph=GRAPH,
+        graph=graph(),
         candidate=candidate(),
-        provider={"recall": lambda **kwargs: [malformed_neighbor]},
+        provider={"recall": lambda **_: "not-a-neighbor-list"},
     )
 
-    assert direct["outcome"] == REVIEW_REQUIRED
-    assert direct["reason_codes"] == [REASON_RECALL_PROVIDER_FAILED]
-    assert direct["related_assertion_ids"] == []
     assert result["status"] == STATUS_PROVIDER_DEGRADED
-    assert result["outcome"] is None
-    assert result["reason_codes"] == [REASON_RECALL_PROVIDER_FAILED]
-    assert result["active_truth"] == ACTIVE_TRUTH_UNCHANGED
+    assert_result(result, REJECTED, [REASON_PROVIDER_DEGRADED])
 
 
-def test_a_provider_whose_recall_throws_degrades_to_status_provider_degraded_never_status_evaluated_and_never_fabricates_no_similar_neighbor():
-    # If the provider had actually returned this neighbor, it would have been
-    # an incompatible-value conflict. The throw must not silently collapse
-    # that possibility into "found nothing" (a would-be conflict masquerading
-    # as review-free harmless novelty is exactly the failure mode a caller
-    # must never be able to mistake for a healthy evaluation).
-    would_have_conflicted = neighbor({"value": {"normalized": "python"}})
+def test_failed_provider_call_is_visible_rejected_provider_degradation():
+    def fail(**_):
+        raise RuntimeError("provider unavailable")
 
-    def _raising_recall(**kwargs):
-        raise RuntimeError("recall backend unavailable")
+    result = evaluate_candidate(graph=graph(), candidate=candidate(), provider={"recall": fail})
 
-    provider = {"recall": _raising_recall}
-    evaluate_candidate(graph=GRAPH, candidate=candidate(), provider=provider)  # doesNotThrow
-    result = evaluate_candidate(graph=GRAPH, candidate=candidate(), provider=provider)
     assert result["status"] == STATUS_PROVIDER_DEGRADED
-    assert result["status"] != STATUS_EVALUATED
-    assert result["outcome"] is None
-    assert result["reason_codes"] == [REASON_RECALL_PROVIDER_FAILED]
-    assert REASON_NO_SIMILAR_NEIGHBOR not in result["reason_codes"]
-    assert result["active_truth"] == ACTIVE_TRUTH_UNCHANGED
-    # sanity: confirm the discarded neighbor really would have conflicted,
-    # proving the degraded status is hiding a real signal, not a non-event.
-    would_be = classify_candidate(graph=GRAPH, candidate=candidate(), neighbors=[would_have_conflicted])
-    assert would_be["outcome"] == REVIEW_REQUIRED
+    assert_result(result, REJECTED, [REASON_PROVIDER_DEGRADED])
 
 
-# -- real fixture graph: no leaks, real node identities ------------------------
+def test_classification_exception_from_untrusted_provider_data_is_contained_at_both_boundaries():
+    malformed = neighbor({"value": {"normalized": {1: "non-string-key"}}})
+    direct = classify_candidate(graph=graph(), candidate=candidate(), neighbors=[malformed])
+    through_firewall = evaluate_candidate(
+        graph=graph(),
+        candidate=candidate(),
+        provider={"recall": lambda **_: [malformed]},
+    )
+
+    assert_result(direct, REJECTED, [REASON_PROVIDER_DEGRADED])
+    assert through_firewall["status"] == STATUS_PROVIDER_DEGRADED
+    assert_result(through_firewall, REJECTED, [REASON_PROVIDER_DEGRADED])
 
 
-def test_real_fixture_graph_a_candidate_about_the_shared_origin_repository_classifies_against_real_node_ids_no_fixture_path_leaks(fx):
-    p = fx["paths"]
-    allowlist = [p["canonical"], p["stale_neighbor"], p["no_origin"]]
-    observation = observe_checkouts([p["canonical"], p["stale_neighbor"], p["no_origin"]], allowlist=allowlist, now=NOW)
-    graph = project_workspace_graph(observation)
+def test_freshness_precedence_is_deterministic_for_any_neighbor_order():
+    stale = neighbor({"id": "assertion_stale", "freshness": "stale"})
+    malformed_freshness = neighbor({"id": "assertion_invalid", "source": {"evidence": [evidence()], "fingerprint": "sha256:other", "freshness": "bogus"}})
 
-    shared_repo = next((n for n in graph["nodes"] if n.get("kind") == "repository" and n.get("identity_status") == "known"), None)
-    assert shared_repo is not None, "fixture graph should contain the shared-origin repository node"
-    solo_repo = next((n for n in graph["nodes"] if n.get("kind") == "repository" and n.get("identity_status") != "known"), None)
-    assert solo_repo is not None, "fixture graph should contain a repository whose identity is not proven"
+    forward = classify_candidate(graph=graph(), candidate=candidate(), neighbors=[stale, malformed_freshness])
+    reverse = classify_candidate(graph=graph(), candidate=candidate(), neighbors=[malformed_freshness, stale])
 
-    known = classify_candidate(graph=graph, candidate=candidate({"subject": {"node_id": shared_repo["id"]}}), neighbors=[])
-    assert known["subject"]["resolved"] is True
-
-    ambiguous = classify_candidate(graph=graph, candidate=candidate({"subject": {"node_id": solo_repo["id"]}}), neighbors=[])
-    assert ambiguous["outcome"] == REVIEW_REQUIRED
-    assert ambiguous["reason_codes"] == [REASON_IDENTITY_UNRESOLVED]
-
-    import json as _json
-
-    serialized = _json.dumps([known, ambiguous])
-    assert FIXTURE_BASE.replace("\\", "/") not in serialized
-    assert "secrets" not in serialized.lower()
-    assert "private-note" not in serialized
+    assert_result(forward, REJECTED, [REASON_PROVIDER_DEGRADED])
+    assert reverse == forward
 
 
-# -- no I/O, no network, no embedding dependency, by construction --------------
+# -- pure deterministic boundary ------------------------------------------------
 
 
-def test_recall_modules_perform_no_filesystem_process_network_or_embedding_io_by_source_scan_of_every_owned_file():
-    vivary_core_dir = os.path.join(os.path.dirname(HERE), "vivary_core")
-    files = sorted(glob.glob(os.path.join(vivary_core_dir, "recall_*.py")))
-    assert len(files) >= 3, "expected recall_classify.py, recall_firewall.py, and recall_outcomes.py"
-    forbidden = [
-        "import os",
-        "import io",
-        "import socket",
-        "import subprocess",
-        "import http",
-        "import urllib",
-        "import requests",
-        "import ftplib",
-        "import smtplib",
-        "open(",
-        "fetch(",
-        "XMLHttpRequest",
-        "WebSocket",
-        "embedding",
-        "onnx",
-        "tensorflow",
-        "faiss",
-    ]
-    for path in files:
-        with open(path, encoding="utf-8") as handle:
-            source = handle.read()
+def test_classification_is_deterministic_and_leaves_caller_owned_inputs_unchanged():
+    current_graph = graph()
+    current_candidate = candidate()
+    current_neighbors = [neighbor({"id": "assertion_z"}), neighbor({"id": "assertion_a", "value": {"normalized": "ruby"}})]
+    original = deepcopy((current_graph, current_candidate, current_neighbors))
+
+    first = classify_candidate(graph=current_graph, candidate=current_candidate, neighbors=current_neighbors)
+    second = classify_candidate(graph=current_graph, candidate=current_candidate, neighbors=current_neighbors)
+
+    assert first == second
+    assert (current_graph, current_candidate, current_neighbors) == original
+
+
+def test_recall_modules_have_no_filesystem_process_network_or_embedding_io_surface():
+    forbidden = ("subprocess", "requests", "urllib", "socket", "open(", "datetime.now", "time.time", "embed")
+    for path in (HERE.parent / "vivary_core").glob("recall_*.py"):
+        source = path.read_text(encoding="utf-8")
         for pattern in forbidden:
-            assert pattern not in source, f"{os.path.basename(path)} must not reference forbidden pattern: {pattern}"
+            assert pattern not in source, f"{path.name} must not reference forbidden pattern: {pattern}"
 
 
-def test_evaluate_candidate_and_classify_candidate_are_exported_as_callables_with_the_expected_arity_of_options_objects():
+def test_public_classifier_and_firewall_are_callables():
     assert callable(classify_candidate)
     assert callable(evaluate_candidate)

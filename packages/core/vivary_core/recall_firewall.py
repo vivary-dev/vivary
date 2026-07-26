@@ -1,29 +1,12 @@
-"""The near-neighbor write firewall's public seam (#12, carries upstream
-vivary#145 intent). Bellamente is optional (docs/ARCHITECTURE.md: "Absence
-means the loop ends at the receipt or produces a plain review inbox; it does
-not break the core system"), so this module's only job beyond classification
-is graceful degradation: with no recall provider, or with a provider that
-fails, return a clean structured status, never throw, never fabricate a write
-decision, and never let a failure masquerade as a healthy "found nothing"
-result.
+"""Optional-provider boundary for the CandidateRecallProvider firewall.
 
-Reference-guided Python port of src/recall/firewall.mjs (graduation slice 6,
-ticket #12, decision 0008). The Node module is the frozen executable oracle.
+The provider is data-only: this module neither constructs one nor performs I/O.
+It turns absent, malformed, failed, or exception-raising provider input into the
+visible §6 ``rejected/provider_degraded`` result.
 
-A recall provider is any object shaped `{ recall({ graph, candidate }) ->
-neighbor[] }`. In this Python port a provider is a dict with a callable
-"recall" key (mirroring the Node object-literal shape most directly), called
-as `recall(graph=graph, candidate=candidate)` - Python keyword arguments
-standing in for the Node reference's single options-object argument, the
-same calling convention every other ported function in this package uses.
-This module never constructs, fetches, or embeds a provider - it only ever
-consumes the neighbor list a provider hands back, and neighbors remain data,
-never truth, all the way through classify_candidate.
-
-ADAPTATION - malformed neighbor sets: an external provider that returns
-non-object or id-less entries has not produced trustworthy recall evidence.
-Report provider degradation before classification rather than evaluating a
-partial set or allowing malformed data to raise.
+ADAPTATION: the frozen Node oracle exposed separate no-provider and provider-
+failed envelope states.  SPEC §6.2 makes both one core rejected degradation
+condition, so this boundary deliberately converges them.
 """
 
 from __future__ import annotations
@@ -33,64 +16,69 @@ from typing import Any, Dict, Optional
 from vivary_core.recall_classify import classify_candidate
 from vivary_core.recall_outcomes import (
     ACTIVE_TRUTH_UNCHANGED,
-    REASON_RECALL_PROVIDER_ABSENT,
-    REASON_RECALL_PROVIDER_FAILED,
+    REASON_PROVIDER_DEGRADED,
+    REJECTED,
     STATUS_EVALUATED,
-    STATUS_NO_PROVIDER,
     STATUS_PROVIDER_DEGRADED,
 )
 
 
-def _degraded_status(status: str, reason_code: str, candidate: Any) -> Dict[str, Any]:
+def _safe_subject(candidate: Any) -> Dict[str, Any]:
     subject = candidate.get("subject") if isinstance(candidate, dict) else None
     node_id = subject.get("node_id") if isinstance(subject, dict) else None
+    return {"node_id": node_id if isinstance(node_id, str) and node_id else None, "resolved": False}
+
+
+def _safe_evidence(candidate: Any) -> Any:
     source = candidate.get("source") if isinstance(candidate, dict) else None
     evidence = source.get("evidence") if isinstance(source, dict) else None
+    return evidence if isinstance(evidence, list) else []
+
+
+def _degraded_result(candidate: Any) -> Dict[str, Any]:
     return {
-        "status": status,
-        "outcome": None,
-        "reason_codes": [reason_code],
+        "status": STATUS_PROVIDER_DEGRADED,
+        "outcome": REJECTED,
+        "reason_codes": [REASON_PROVIDER_DEGRADED],
         "related_assertion_ids": [],
         "active_truth": ACTIVE_TRUTH_UNCHANGED,
-        "subject": {"node_id": node_id if node_id is not None else None, "resolved": None},
-        "evidence": evidence if evidence is not None else [],
+        "subject": _safe_subject(candidate),
+        "evidence": _safe_evidence(candidate),
+        "proposal": None,
     }
+
+
+def _neighbor_envelope_is_valid(neighbors: Any) -> bool:
+    return isinstance(neighbors, list) and all(
+        isinstance(neighbor, dict) and isinstance(neighbor.get("id"), str) and bool(neighbor["id"])
+        for neighbor in neighbors
+    )
 
 
 def evaluate_candidate(
     *, graph: Any = None, candidate: Any = None, provider: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
-    """Evaluate one candidate through the near-neighbor write firewall.
+    """Evaluate one candidate through an optional provider, never raising.
 
-    graph: output of project_workspace_graph
-    candidate: the incoming assertion to evaluate
-    provider: optional recall provider dict, `{"recall": callable}`; absence
-        degrades to a graph-only structured no-op, and a provider whose
-        recall() raises or returns a malformed neighbor list degrades to its
-        own distinct, visible status rather than being silently treated as
-        "found no neighbors."
+    A healthy provider result is still subject to the pure classifier's own
+    normalized-data, evidence, freshness, and authority checks.  Provider data
+    that raises during classification is contained here as degradation rather
+    than escaping the firewall.
     """
     recall_fn = provider.get("recall") if isinstance(provider, dict) else None
     if not callable(recall_fn):
-        return _degraded_status(STATUS_NO_PROVIDER, REASON_RECALL_PROVIDER_ABSENT, candidate)
+        return _degraded_result(candidate)
 
     try:
         neighbors = recall_fn(graph=graph, candidate=candidate)
+        if not _neighbor_envelope_is_valid(neighbors):
+            return _degraded_result(candidate)
+        result = classify_candidate(graph=graph, candidate=candidate, neighbors=neighbors)
+        if not isinstance(result, dict):
+            return _degraded_result(candidate)
     except Exception:
-        return _degraded_status(STATUS_PROVIDER_DEGRADED, REASON_RECALL_PROVIDER_FAILED, candidate)
+        return _degraded_result(candidate)
 
-    neighbors_are_valid = isinstance(neighbors, list) and all(
-        isinstance(neighbor, dict)
-        and isinstance(neighbor.get("id"), str)
-        and bool(neighbor["id"])
-        for neighbor in neighbors
-    )
-    if not neighbors_are_valid:
-        return _degraded_status(
-            STATUS_PROVIDER_DEGRADED,
-            REASON_RECALL_PROVIDER_FAILED,
-            candidate,
-        )
-
-    result = classify_candidate(graph=graph, candidate=candidate, neighbors=neighbors)
+    if result.get("outcome") == REJECTED and REASON_PROVIDER_DEGRADED in result.get("reason_codes", []):
+        return {"status": STATUS_PROVIDER_DEGRADED, **result}
     return {"status": STATUS_EVALUATED, **result}
