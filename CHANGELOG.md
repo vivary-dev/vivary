@@ -36,6 +36,15 @@ Publishing remains a manual human gate.
   contents. Doctor could therefore report a leaking workspace as clean — including the
   `!**/USER.md` case, which stayed green even after the first nested-negation fix
   because that fix inherited the same matcher bug.
+- **A backslash in a `.gitignore` pattern is treated as Git's escape character, not a
+  path separator.** `USER.md\ ` names the file "USER.md " — with the space — so it does
+  not protect `USER.md`, but the parser stripped the trailing space unconditionally and
+  rewrote the backslash to `/`, crediting the rule and reporting the workspace clean.
+- **A bracket expression is no longer credited with protecting a private file.**
+  `[U]SER.md` is honoured only where `core.ignorecase` is off, so on the default
+  Windows and macOS configuration such a rule silently protects nothing. Positive rules
+  that depend on case folding now fail closed; negations spelled that way are still
+  honoured, so an unignore is never missed.
 - **`doctor --repair --yes` converges.** It previously appended a duplicate privacy
   block on every run without ever fixing the workspace, because the planner predicted
   success using a different rule than doctor used to pass. Patterns an append provably
