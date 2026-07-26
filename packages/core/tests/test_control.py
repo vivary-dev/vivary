@@ -560,6 +560,21 @@ def test_derive_execution_edges_fails_closed_on_a_malformed_receipt_shape():
     assert result["edges"] == []
     assert result["reason_codes"] == [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]
 
+def test_derive_execution_edges_fails_closed_when_any_receipt_check_is_malformed():
+    receipt = receipt_like(
+        overrides={
+            "checks": [
+                {"name": "unit-and-contract-tests", "command": "npm test", "outcome": "passed"},
+                {"name": "missing-outcome"},
+            ]
+        }
+    )
+
+    result = derive_execution_edges(receipt=receipt)
+
+    assert result["edges"] == []
+    assert result["reason_codes"] == [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]
+
 
 def test_append_execution_edges_is_append_only_it_returns_a_new_list_and_never_mutates_the_log_passed_in():
     receipt = receipt_like()

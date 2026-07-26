@@ -15,6 +15,11 @@ cannot.
 ADAPTATION - batch idempotency: accepted edge IDs enter the ``seen`` set
 during the same append call. The translated one-shot filter only compared
 against the prior log and admitted duplicate IDs from one incoming batch.
+
+ADAPTATION - receipt-check validation: every check must satisfy the receipt
+contract's ``{name, command, outcome, detail?}`` shape before any edge is
+emitted. The translated comprehension trusted each list item and crashed on
+malformed input.
 """
 
 from __future__ import annotations
@@ -30,12 +35,22 @@ __all__ = [
 ]
 
 
+def _is_check_shape(check):
+    return (
+        isinstance(check, dict)
+        and isinstance(check.get("name"), str)
+        and isinstance(check.get("command"), str)
+        and isinstance(check.get("outcome"), str)
+    )
+
+
 def _is_receipt_shape(receipt):
     return (
         bool(receipt)
         and isinstance(receipt, dict)
         and receipt.get("schema") == RECEIPT_SCHEMA
         and isinstance(receipt.get("checks"), list)
+        and all(_is_check_shape(check) for check in receipt["checks"])
         and bool(receipt.get("capsule"))
         and isinstance((receipt.get("capsule") or {}).get("id"), str)
         and isinstance(receipt.get("fingerprint"), str)
