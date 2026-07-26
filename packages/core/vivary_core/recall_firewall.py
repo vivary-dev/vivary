@@ -19,6 +19,11 @@ same calling convention every other ported function in this package uses.
 This module never constructs, fetches, or embeds a provider - it only ever
 consumes the neighbor list a provider hands back, and neighbors remain data,
 never truth, all the way through classify_candidate.
+
+ADAPTATION - malformed neighbor sets: an external provider that returns
+non-object or id-less entries has not produced trustworthy recall evidence.
+Report provider degradation before classification rather than evaluating a
+partial set or allowing malformed data to raise.
 """
 
 from __future__ import annotations
@@ -61,9 +66,9 @@ def evaluate_candidate(
     candidate: the incoming assertion to evaluate
     provider: optional recall provider dict, `{"recall": callable}`; absence
         degrades to a graph-only structured no-op, and a provider whose
-        recall() raises or returns a non-list degrades to its own distinct,
-        visible status rather than being silently treated as "found no
-        neighbors."
+        recall() raises or returns a malformed neighbor list degrades to its
+        own distinct, visible status rather than being silently treated as
+        "found no neighbors."
     """
     recall_fn = provider.get("recall") if isinstance(provider, dict) else None
     if not callable(recall_fn):
@@ -73,8 +78,19 @@ def evaluate_candidate(
         neighbors = recall_fn(graph=graph, candidate=candidate)
     except Exception:
         return _degraded_status(STATUS_PROVIDER_DEGRADED, REASON_RECALL_PROVIDER_FAILED, candidate)
-    if not isinstance(neighbors, list):
-        return _degraded_status(STATUS_PROVIDER_DEGRADED, REASON_RECALL_PROVIDER_FAILED, candidate)
+
+    neighbors_are_valid = isinstance(neighbors, list) and all(
+        isinstance(neighbor, dict)
+        and isinstance(neighbor.get("id"), str)
+        and bool(neighbor["id"])
+        for neighbor in neighbors
+    )
+    if not neighbors_are_valid:
+        return _degraded_status(
+            STATUS_PROVIDER_DEGRADED,
+            REASON_RECALL_PROVIDER_FAILED,
+            candidate,
+        )
 
     result = classify_candidate(graph=graph, candidate=candidate, neighbors=neighbors)
     return {"status": STATUS_EVALUATED, **result}

@@ -475,6 +475,39 @@ def test_a_provider_whose_recall_returns_non_array_garbage_degrades_to_its_own_v
     assert result["reason_codes"] == [REASON_RECALL_PROVIDER_FAILED]
     assert result["active_truth"] == ACTIVE_TRUTH_UNCHANGED
 
+@pytest.mark.parametrize("malformed_neighbor", ["garbage", None])
+def test_a_provider_whose_neighbor_list_contains_a_non_object_degrades_instead_of_evaluating_partial_results(
+    malformed_neighbor,
+):
+    provider = {"recall": lambda **kwargs: [neighbor(), malformed_neighbor]}
+
+    result = evaluate_candidate(graph=GRAPH, candidate=candidate(), provider=provider)
+
+    assert result["status"] == STATUS_PROVIDER_DEGRADED
+    assert result["outcome"] is None
+    assert result["reason_codes"] == [REASON_RECALL_PROVIDER_FAILED]
+    assert result["active_truth"] == ACTIVE_TRUTH_UNCHANGED
+
+
+def test_an_idless_matching_neighbor_never_crashes_classification_and_degrades_at_the_provider_boundary():
+    malformed_neighbor = neighbor()
+    del malformed_neighbor["id"]
+
+    direct = classify_candidate(graph=GRAPH, candidate=candidate(), neighbors=[malformed_neighbor])
+    result = evaluate_candidate(
+        graph=GRAPH,
+        candidate=candidate(),
+        provider={"recall": lambda **kwargs: [malformed_neighbor]},
+    )
+
+    assert direct["outcome"] == REVIEW_REQUIRED
+    assert direct["reason_codes"] == [REASON_RECALL_PROVIDER_FAILED]
+    assert direct["related_assertion_ids"] == []
+    assert result["status"] == STATUS_PROVIDER_DEGRADED
+    assert result["outcome"] is None
+    assert result["reason_codes"] == [REASON_RECALL_PROVIDER_FAILED]
+    assert result["active_truth"] == ACTIVE_TRUTH_UNCHANGED
+
 
 def test_a_provider_whose_recall_throws_degrades_to_status_provider_degraded_never_status_evaluated_and_never_fabricates_no_similar_neighbor():
     # If the provider had actually returned this neighbor, it would have been

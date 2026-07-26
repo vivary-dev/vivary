@@ -10,6 +10,11 @@ ticket #12, decision 0008). The Node module is the frozen executable oracle:
 every branch, reason code, and ordering rule below is translated function-for-
 function; nothing is redesigned.
 
+ADAPTATION - malformed neighbors: provider-returned entries without a stable
+string ``id`` cannot support an auditable related-assertion decision. Reject
+that set as ``review_required`` instead of raising or silently classifying a
+partial set.
+
 A candidate is the incoming assertion someone (an agent, Bellamente) wants to
 record. A neighbor is a *prior* assertion, already known to the caller
 (returned by an external recall provider - never fetched, embedded, or
@@ -63,6 +68,7 @@ from vivary_core.recall_outcomes import (
     REASON_IDENTITY_UNRESOLVED,
     REASON_INDEPENDENT_EVIDENCE,
     REASON_NO_SIMILAR_NEIGHBOR,
+    REASON_RECALL_PROVIDER_FAILED,
     REASON_SUPERSESSION_INPUTS_INCOMPLETE,
     REASON_SUPERSESSION_SUBJECT_MISMATCH,
     REASON_SUPERSESSION_TARGET_MISSING,
@@ -201,6 +207,18 @@ def classify_candidate(
         return _decision(REVIEW_REQUIRED, [REASON_IDENTITY_UNRESOLVED], subject_info, evidence)
 
     neighbors = neighbors if neighbors is not None else []
+    if not isinstance(neighbors, list) or any(
+        not isinstance(neighbor, dict)
+        or not isinstance(neighbor.get("id"), str)
+        or not neighbor["id"]
+        for neighbor in neighbors
+    ):
+        return _decision(
+            REVIEW_REQUIRED,
+            [REASON_RECALL_PROVIDER_FAILED],
+            subject_info,
+            evidence,
+        )
 
     # Explicit, authorized correction: "explicit correction targeting an
     # assertion, authorized actor -> append new version and supersedes edge".
