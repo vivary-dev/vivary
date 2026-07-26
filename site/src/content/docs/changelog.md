@@ -51,11 +51,11 @@ provider call, memory mutation, MCP, install, or publication action occurs.
 - `python packages/memory-cognee/tests/test_memory_cognee.py` — **49/49** adapter
   tests passed.
 - `cd site && npm run test:site` — **8/8** site tests passed.
-- `cd site && npm run build && npm run test:links` — **23** pages built; **1,636**
-  local references and **1,012** anchors checked with zero failures.
-- `python scripts/check_line_endings.py --verbose` — **226** tracked text files
-  checked; **11** legacy files remain explicitly allowlisted.
-- `git diff --check` — clean.
+- `cd site && npm run build && npm run test:links` — **23** pages built; **1,644**
+  local references and **1,018** anchors checked with zero failures.
+- `python scripts/check_line_endings.py --verbose` — **231** tracked text files
+  checked; **8** legacy files remain explicitly allowlisted.
+- `git diff --check origin/dev...HEAD` — clean.
 - Rendered `/semantic-memory/` browser smoke — all three seams, current/future
   divergence, absolute Bellamente contract link, the `#privacy-boundary` limitation
   and #236 link, updated metadata, and no horizontal overflow verified.
