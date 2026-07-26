@@ -3,10 +3,12 @@
 Use this at the end of every Vivary update that changes behavior, packaging,
 public docs, install commands, release status, or package versions.
 
-**The rule: any update that changes what users install or read must end with
-published PyPI/npm packages and updated website copy.** Merging to `dev` is not
-a release. A change line is finished only when the registries and the site say
-what the repo says.
+**The rule: merging to `dev` is not a release, and development slices do not publish
+early.** For the current comprehensive update, no package publishes until core and role
+integration, trustworthy brownfield setup, MCP, dogfood, the benchmark, the tutorial,
+documentation, package/version truth, and release verification are complete and
+separately approved. At that final gate, core and all dependent packages publish as one
+coordinated train, and the website copy updates with them.
 
 ## 1. Decide the release scope
 
@@ -21,6 +23,7 @@ Work out which packages actually changed, then bump only those:
 | `packages/create-vivary/create_vivary.py` or `create_vivary_assets/` | `create-vivary` (PyPI) **and** `@vivary/create` (npm) — always in lockstep | same |
 | `packages/strato/` templates or skills | `create-vivary` + `@vivary/create` (strato has no version — it rides the create-vivary release train; say so in the changelog entry) | same |
 | `packages/memory-cognee/vivary_cognee.py` | `vivary-memory-cognee` | same |
+| `packages/core/` modules or tests | `vivary-core` — bump the version, but keep it unpublished on `dev`; publish it only in the final coordinated train with every dependent role package | ARCHITECTURE seam section, README surface row |
 | dependency floors in `packages/vivary/pyproject.toml` | `vivary` (meta) — bump its floors and patch version when component minimums move | README table |
 | `docs/`, `site/`, root README only | **no package bump** — site redeploys from `dev` via Vercel automatically | keep docs/site sync (step 3) |
 | repo CI / stats / tests only | no bump, no site work | — |
@@ -31,6 +34,9 @@ Bump rules (semver-ish, pre-1.0):
 - bug fix, hardening, docs-in-package, or template tweak → **patch**;
 - `create-vivary` PyPI and `@vivary/create` npm versions are **always identical**
   (`packages/create-vivary/pyproject.toml` + `packages/create-vivary/npm/package.json`);
+- a role package that first imports `vivary_core` adds its dependency floor in the same
+  commit, as defined by the architecture's dependency direction, and takes a **patch**
+  bump at minimum;
 - never re-release an existing version number; registries are immutable.
 
 ## 2. Set release truth first
@@ -38,8 +44,11 @@ Bump rules (semver-ish, pre-1.0):
 Update every surface that names versions or the command set, in the repo,
 **before** publishing:
 
-- `packages/<pkg>/pyproject.toml` — `version = "..."` **and the module's `__version__` constant** (they must match — a parity test enforces it), plus dependency floors if
-  a package now needs a newer sibling (e.g. ozone requiring `vivary-tropo>=0.4.0`);
+- `packages/<pkg>/pyproject.toml` — update `version = "..."` and any dependency floors.
+  When the package exposes a module `__version__` constant, update that too; its parity
+  test must match the manifest.
+- `vivary-core` has no module `__version__`; `packages/core/pyproject.toml` is its sole
+  in-repo version declaration, and step 6 verifies the installed distribution version.
 - `packages/create-vivary/npm/package.json` — lockstep version;
 - root `README.md` — the release-status blockquote, the surface/version table,
   and the "Current command surface" list;
@@ -163,9 +172,11 @@ the create-vivary release checks, and runs `npm pack --dry-run`. Leave
 `publish=false` for the dry-run gate; rerun with `publish=true` only after the
 npm publish gate is approved.
 
-Order when multiple packages ship: dependencies first (`vivary-tropo` before
-`ozone`/`exo`/`memory-cognee` that pin it), `create-vivary` PyPI before
-`@vivary/create` npm (the launcher installs the PyPI package at run time).
+Order when multiple packages ship: dependencies first. Publish `vivary-core` before
+every role package that depends on it; then publish `vivary-tropo` before
+`ozone`/`exo`/`memory-cognee` packages that pin tropo. Publish the `vivary` meta
+package after all of its component floors are available. Publish `create-vivary` PyPI
+before `@vivary/create` npm (the launcher installs the PyPI package at run time).
 
 ## 6. Verify from the public registries after publish
 
@@ -173,6 +184,12 @@ Check the package pages and run cache-resistant install smokes for every
 changed package:
 
 ```bash
+uv run --isolated --no-project --no-cache --index-url https://pypi.org/simple \
+  --with vivary-core==<ver> python -c \
+  "from importlib.metadata import version; import vivary_core; assert version('vivary-core') == '<ver>'"
+uv run --isolated --no-project --no-cache --index-url https://pypi.org/simple \
+  --with vivary==<vivary-ver> python -c \
+  "from importlib.metadata import version; import vivary_core; assert version('vivary') == '<vivary-ver>'; assert version('vivary-core') == '<core-ver>'"
 uvx --no-cache --index-url https://pypi.org/simple --from vivary-tropo==<ver> tropo --version
 uvx --no-cache --index-url https://pypi.org/simple --from vivary-ozone==<ver> ozone --version
 uvx --no-cache --index-url https://pypi.org/simple --from vivary-exo==<ver> exo --version

@@ -27,6 +27,7 @@ from vivary_core.canonical import (
     _utf16_sort_key,
     is_absolute_root,
     is_within,
+    is_within_allowlist,
     normalize_path,
 )
 from vivary_core.collation import locale_cmp_key
@@ -41,16 +42,66 @@ OBSERVATION_SCHEMA = "vivary.workspace-observation/v0"
 # the one the caller (and the allowlist check) actually asked about.
 AMBIENT_GIT_ENV_KEYS = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"]
 
+# The four keys above are not sufficient. Command-scope configuration
+# (`GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_*` / `GIT_CONFIG_VALUE_*`), alternate
+# object stores, ceiling directories and namespaces can each redirect what Git
+# reports without naming a directory at all — a repository with no remotes can be
+# made to observe as having an attacker-supplied origin, and that forged URL then
+# becomes the repository identity used for grouping, conflicts and fingerprints.
+# So the environment is pinned rather than filtered: every GIT_* variable is
+# dropped, then the few that make the run deterministic are set explicitly.
+_PINNED_GIT_ENV = {
+    # Read only the repository's own config. Global/system config cannot add a
+    # remote, but `url.<base>.insteadOf` can rewrite one, and an observation is
+    # supposed to report the repository's ground truth.
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_SYSTEM": os.devnull,
+    "GIT_CONFIG_NOSYSTEM": "1",
+    # Never block on a credential prompt: observation is read-only and unattended.
+    "GIT_TERMINAL_PROMPT": "0",
+}
+
 _MAX_BUFFER = 4 * 1024 * 1024
 
 RunGit = Callable[[str, List[str]], Dict[str, Any]]
 
 
 def _sanitized_git_env() -> Dict[str, str]:
-    env = dict(os.environ)
-    for key in AMBIENT_GIT_ENV_KEYS:
-        env.pop(key, None)
+    """A narrowly pinned environment for read-only observation.
+
+    Drops every `GIT_*` variable — an allowlist, not a denylist, because the set of
+    Git variables that can change repository, config or object resolution grows with
+    Git itself — then restores only the pins above.
+    """
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    env.update(_PINNED_GIT_ENV)
     return env
+
+
+_CREDENTIAL_URL_RE = re.compile(r"\A([a-zA-Z][a-zA-Z0-9+.-]*://)(?:[^/@]*@)?(.*)\Z", re.DOTALL)
+_SCP_CREDENTIAL_RE = re.compile(r"\A([^/@]*:[^/@]*)@([^/]+:.*)\Z", re.DOTALL)
+
+
+def _redact_remote_url(url: str) -> str:
+    """Strip credential-bearing userinfo from a remote URL.
+
+    `git remote -v` returns `https://user:token@host/repo.git` verbatim, and the
+    result is stored as both a fact and the repository identity, which capsule
+    compilation later repeats in a human-readable claim — so an unredacted value
+    reaches serialized observations, graphs, capsules and fingerprints alike.
+
+    Userinfo is removed entirely rather than masked so that the same repository
+    reached with and without embedded credentials canonicalizes to one identity.
+    An scp-style `git@host:path` keeps its user — that is a well-known account name,
+    not a secret — but `user:password@host:path` loses the whole userinfo.
+    """
+    match = _CREDENTIAL_URL_RE.match(url)
+    if match:
+        return match.group(1) + match.group(2)
+    scp = _SCP_CREDENTIAL_RE.match(url)
+    if scp:
+        return scp.group(2)
+    return url
 
 
 def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
@@ -63,7 +114,8 @@ def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
             env=_sanitized_git_env(),
         )
     except OSError as error:
-        return {"ok": False, "stdout": "", "stderr": str(error)[:400], "command": command}
+        return {"ok": False, "stdout": "", "stderr": str(error)[:400], "command": command,
+                "code": None}
 
     stdout_bytes = proc.stdout or b""
     # Replicate Node's execFile maxBuffer: if the captured stdout exceeds the
@@ -76,15 +128,75 @@ def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
             "stdout": "",
             "stderr": "stdout maxBuffer length exceeded"[:400],
             "command": command,
+            "code": proc.returncode,
         }
 
     if proc.returncode != 0:
         stderr_bytes = proc.stderr or b""
         stderr_text = stderr_bytes.decode("utf-8", errors="replace")
-        return {"ok": False, "stdout": "", "stderr": stderr_text[:400], "command": command}
+        return {"ok": False, "stdout": "", "stderr": stderr_text[:400], "command": command,
+                "code": proc.returncode}
 
     stdout_text = stdout_bytes.decode("utf-8", errors="replace")
     return {"ok": True, "stdout": stdout_text.replace("\r\n", "\n"), "command": command}
+
+
+# Marker files that say something about how a workspace is verified. Presence is
+# stat-only; `package.json` is the one file whose *contents* are read, because
+# presence alone is too weak a signal — a `package.json` for a docs site or a lint
+# hook is common, and telling that workspace to run `npm test` produces a confusing
+# failure rather than a check.
+WORKSPACE_MARKERS = (
+    "tropo.toml",
+    "package.json",
+    "pyproject.toml",
+    "tox.ini",
+    "noxfile.py",
+    "Cargo.toml",
+    "go.mod",
+    "Makefile",
+)
+
+# npm scaffolds this as `scripts.test`. It is a placeholder, not a check.
+_NPM_PLACEHOLDER_TEST = 'echo "Error: no test specified" && exit 1'
+
+
+def _observe_workspace_markers(worktree_root: str) -> List[str]:
+    """Which known marker files exist at the worktree root.
+
+    Stat-only, deterministic, and sorted. Read-only observation in the same sense as
+    the git queries around it — it never executes anything it finds.
+    """
+    found = []
+    for marker in WORKSPACE_MARKERS:
+        try:
+            if os.path.isfile(os.path.join(worktree_root, marker)):
+                found.append(marker)
+        except OSError:
+            continue
+    return sorted(found)
+
+
+def _observe_npm_test_script(worktree_root: str) -> Optional[str]:
+    """`scripts.test` from package.json, or None when there is no real one.
+
+    npm's scaffolded placeholder is treated as absent: it is a known non-check, and
+    deriving a required check from it would hand back a command guaranteed to fail.
+    """
+    try:
+        with open(os.path.join(worktree_root, "package.json"), "r", encoding="utf-8") as handle:
+            manifest = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    scripts = manifest.get("scripts")
+    if not isinstance(scripts, dict):
+        return None
+    script = scripts.get("test")
+    if not isinstance(script, str) or not script.strip():
+        return None
+    return None if script.strip() == _NPM_PLACEHOLDER_TEST else script.strip()
 
 
 def _known(value: Any, command: str) -> Dict[str, Any]:
@@ -122,7 +234,7 @@ def _parse_remotes(stdout: str) -> List[Dict[str, str]]:
             remotes[name] = entry
             order.append(name)
         key = "fetch_url" if match.group(3) == "fetch" else "push_url"
-        entry[key] = normalize_path(match.group(2))
+        entry[key] = _redact_remote_url(normalize_path(match.group(2)))
     values = [remotes[name] for name in order]
     # Node sorts remotes with String.prototype.localeCompare. We use
     # locale_cmp_key (the cmp_to_key-wrapped comparator), NOT
@@ -156,6 +268,28 @@ def _observe_one(raw_path: str, run_git: RunGit) -> Dict[str, Any]:
     if toplevel["ok"]:
         facts["is_git_repository"] = _known(True, toplevel["command"])
         facts["worktree_root"] = _known(normalize_path(toplevel["stdout"].strip()), toplevel["command"])
+        # Every linked worktree of one repository shares a common directory. It is
+        # the only stable local identity available when no remote names the
+        # repository — without it, each worktree of a remote-less repo looks like a
+        # separate repository and their divergence never surfaces.
+        common = run_git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        if common["ok"] and common["stdout"].strip():
+            facts["git_common_dir"] = _known(
+                normalize_path(common["stdout"].strip()), common["command"]
+            )
+        else:
+            facts["git_common_dir"] = _unknown("git_common_dir_unavailable", common["command"])
+
+        worktree_root = facts["worktree_root"]["value"]
+        facts["workspace_markers"] = _known(
+            _observe_workspace_markers(worktree_root), "fs.stat workspace markers"
+        )
+        npm_test = _observe_npm_test_script(worktree_root)
+        facts["npm_test_script"] = (
+            _known(npm_test, "fs.read package.json scripts.test")
+            if npm_test is not None
+            else _unknown("no_npm_test_script", "fs.read package.json scripts.test")
+        )
     else:
         # `--show-toplevel` fails for a bare repository too (it has no working
         # tree) - that is not the same fact as "not a git repository at all".
@@ -203,11 +337,22 @@ def _observe_one(raw_path: str, run_git: RunGit) -> Dict[str, Any]:
     )
 
     branch = run_git(path, ["symbolic-ref", "--short", "-q", "HEAD"])
-    facts["head_ref"] = (
-        _known({"kind": "branch", "name": branch["stdout"].strip()}, branch["command"])
-        if branch["ok"] and branch["stdout"].strip()
-        else _known({"kind": "detached"}, branch["command"])
-    )
+    if branch["ok"] and branch["stdout"].strip():
+        facts["head_ref"] = _known(
+            {"kind": "branch", "name": branch["stdout"].strip()}, branch["command"]
+        )
+    else:
+        # `-q` suppresses the message only for the expected "not a symbolic ref"
+        # case, which exits 1. Anything else — an invalid symbolic HEAD such as
+        # `ref: refs/heads/foo.lock` exits 128 — is corruption, and reporting it as
+        # a known detached HEAD turns a broken repository into a confident fact.
+        # An injected runner that reports no exit code keeps the historical
+        # reading, so custom runners are not silently reclassified.
+        code = branch.get("code")
+        if code is None or code == 1:
+            facts["head_ref"] = _known({"kind": "detached"}, branch["command"])
+        else:
+            facts["head_ref"] = _unknown("head_ref_unresolvable", branch["command"])
 
     status = run_git(path, ["status", "--porcelain"])
     if status["ok"]:
@@ -291,7 +436,7 @@ def observe_checkouts(
     refusals: List[Dict[str, Any]] = []
 
     for raw_path in paths:
-        if not any(is_within(root, raw_path) for root in allowlist):
+        if not any(is_within_allowlist(root, raw_path) for root in allowlist):
             refusals.append(
                 {
                     "raw_path": raw_path,
@@ -331,7 +476,7 @@ def observe_checkouts(
             and worktree_root_fact.get("status") == "known"
         ):
             resolved = worktree_root_fact["value"]
-            if not any(is_within(root, resolved) for root in allowlist):
+            if not any(is_within_allowlist(root, resolved) for root in allowlist):
                 refusals.append(
                     {
                         "raw_path": raw_path,

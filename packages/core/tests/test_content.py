@@ -399,3 +399,46 @@ def test_observation_is_deterministic_under_an_injected_clock(fx, allowlist):
         [fx["paths"]["canonical"], fx["paths"]["dirty"]], allowlist=allowlist, terms=["content"], now=NOW
     )
     assert a == b
+
+
+def test_question_terms_are_searched_as_fixed_strings(fx, allowlist):
+    """`git grep` defaults to basic regular expressions (`-G`).
+
+    A term containing regex syntax therefore matched things it does not name — `.`
+    matches any character, so `foo.bar` matches `fooXbar` — and a term such as `.*`
+    could make nearly every tracked line look relevant to the question. Evidence
+    selection is downstream of this, so a regex term silently widens what a capsule
+    claims is relevant.
+    """
+    repo = fx["paths"]["canonical"]
+    base_dir = os.path.dirname(repo)
+    _commit_file(base_dir, repo, "regex-probe.md", "fooXbar should not match\n", "probe")
+
+    result = observe_content([repo], allowlist=allowlist, terms=["foo.bar"], now=NOW)
+
+    serialized = json.dumps(result)
+    assert "fooXbar" not in serialized, (
+        "the term 'foo.bar' was interpreted as a regex and matched 'fooXbar'"
+    )
+
+
+def test_output_cap_terminates_a_runaway_producer():
+    """The 4 MiB bound must limit memory, not merely report afterwards.
+
+    `capture_output=True` buffers the whole of stdout before any length check runs,
+    so the advertised bound never limited anything: a broad term in a large
+    repository could exhaust the worker before the check was reached. This drives an
+    unbounded producer, which under the old post-hoc pattern would never return.
+    """
+    from vivary_core.workspace_content import _capped_run
+
+    producer = [
+        sys.executable,
+        "-c",
+        "import sys\nwhile True: sys.stdout.write('x' * 4096)",
+    ]
+
+    outcome = _capped_run(producer, dict(os.environ), limit=64 * 1024)
+
+    assert outcome["exceeded"] is True
+    assert len(outcome["stdout"]) <= 64 * 1024 + 4096, "output was buffered past the cap"

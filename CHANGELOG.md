@@ -10,6 +10,237 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: Bellamente predecessor contract and semantic adapter truth] — 2026-07-26
+
+Affects public documentation, its generated website mirror, future implementation
+contracts, and the source checkout's unreleased `vivary-memory-cognee` 0.1.1 privacy
+floor. The published release remains 0.1.0; no provider call, memory mutation, MCP,
+install, version, publication, or deployment action occurs.
+
+### Changed
+
+- Reconciled [#160](https://github.com/vivary-dev/vivary/pull/160) as the normative
+  predecessor to #190: Bellamente remains an independent, workspace-local AgentLTM;
+  Tropo-backed semantic adapters and the provider-neutral `vivary-core` candidate
+  firewall are separate seams; learned memory never silently becomes authored truth.
+- Locked explicit opt-in before any disabled AgentLTM policy is created, the complete
+  fail-closed private set, truthful declarative capability and Doctor behavior, and
+  separate human gates for install, activation, MCP enablement, every mutation, and
+  release dogfood. Ordinary scaffold/adopt runs create no AgentLTM surface; selected
+  output is disabled policy and inert instructions only.
+- Corrected `docs/SEMANTIC-MEMORY.md` to match the shipped asynchronous Cognee adapter:
+  the adapter owns privacy-filtered snapshot construction, indexing refreshes the
+  whole dataset, recall accepts only known-node typed hits, forget removes the whole
+  approved dataset, and Doctor remains module-level and provider-free.
+  Recall documentation now names Cognee's fixed `source = "provider"` label, with the
+  package contract test asserting that value.
+  Current Doctor ordering is now explicit: `unavailable` short-circuits state-path
+  validation, so that status does not attest path safety.
+- Routed the nested Bellamente contract from the documentation index and the generated
+  semantic-memory page without creating an unsupported site route.
+- Made `docs/bellamente-memory/SPEC-bellamente-memory.md` the sole owner of the
+  private-set, Doctor-state, normalized-input, and firewall-result contracts; the ADR
+  and glossary now route instead of restating them. The specification defines the
+  enabled-policy Doctor state, keeps exact-duplicate preserve read-only, and requires
+  explicit opt-in before policy creation.
+- The source checkout's unreleased adapter floor includes `.strato/private/**` and now
+  matches privacy paths case-insensitively on Windows, with snapshot-level regression
+  coverage. Public docs distinguish that behavior from published 0.1.0. The remaining
+  escaped/complex Git-ignore limitation stays explicit and tracked by
+  [#236](https://github.com/vivary-dev/vivary/issues/236).
+
+### Verification
+
+- `python packages/memory-cognee/tests/test_memory_cognee.py` — **50/50** adapter
+  tests passed.
+- `cd site && npm run test:site` — **8/8** site tests passed.
+- `cd site && npm run build && npm run test:links` — **23** pages built; **1,644**
+  local references and **1,018** anchors checked with zero failures.
+- `python scripts/check_line_endings.py --verbose` — **231** tracked text files
+  checked; **8** legacy files remain explicitly allowlisted.
+- `git diff --check origin/dev...HEAD` — clean.
+- Rendered `/semantic-memory/` browser smoke — all three seams, current/future
+  divergence, absolute Bellamente contract link, published-0.1.0 versus unreleased
+  privacy behavior, Windows matching, the #236 link, and no horizontal overflow
+  verified.
+
+## [Unreleased: vivary-core, the governed-context seam] — 2026-07-26
+
+Adds `vivary-core`, an in-repo library under `packages/core/`. **Not published to PyPI
+and not reachable from any shipping CLI**: wiring it outward is
+[#207](https://github.com/vivary-dev/vivary/issues/207). No existing package changes
+version, and nothing about installing or running Vivary changes because it exists.
+Publishing remains a manual human gate. No package publishes before the comprehensive
+coordinated release train is complete and separately approved.
+
+### Added
+
+- `vivary-core` — the shared seam the role packages will speak through, so "what is
+  true, and how do we know" has one implementation rather than four that drift.
+  Canonical JSON, sha256 fingerprints and deterministic IDs; read-only checkout
+  observation over explicit allowlisted roots; projection into a typed evidence graph
+  where divergent checkouts stay unresolved conflicts with both sides preserved;
+  bounded task capsules where every claim carries its evidence and selection reason;
+  and receipts bound to the exact capsule and workspace fingerprint they ran against.
+  Documented in [the architecture page](/architecture/). (Site-absolute route, not a
+  repo-relative path: `CHANGELOG.md` is mirrored to `/changelog/`, where `docs/…`
+  would resolve against that route and 404. Same convention the docs pages use.)
+- `scripts/check_package_docs_parity.py` — a CI guard that derives the published-package
+  list on [the architecture page](/architecture/) from `packages/*/pyproject.toml` plus
+  one explicit `UNPUBLISHED` allowlist, so documented package truth cannot drift behind
+  the manifests again. It caught two published packages missing from that list on the
+  very commit that introduced it. Covered by `scripts/tests/test_package_docs_parity.py`
+  (10 cases), which pins the wrapping behaviour of that prose bullet — reading only its
+  first physical line would report wrapped names as missing and redden CI on a correct
+  doc.
+
+### Changed
+
+- **Recorded the selected dependency direction for `vivary-core`** — the first
+  acceptance criterion of [#207](https://github.com/vivary-dev/vivary/issues/207). Role
+  packages depend on core; the `vivary` meta package receives it transitively and does
+  not declare it, so there is one owner per edge and no version-pinning fight. The edge
+  is added to a role's `pyproject.toml` in the *same commit* that makes that role first
+  import `vivary_core`, never ahead of it. That is why no role manifest depends on
+  `vivary-core` yet: no role imports it, and a dependency nothing uses is a declaration
+  the code does not support. Recorded on [the architecture page](/architecture/) and in
+  the release workflow's bump table.
+- The architecture page's PyPI list named four packages while six are published. It now
+  also names `vivary` and `vivary-memory-cognee`, and says plainly that `vivary-core`
+  remains unpublished during development and publishes only in the final comprehensive
+  coordinated release train. The seam description stopped asserting in the present
+  tense that every role package speaks through core — none does yet.
+- The architecture opening, root agent contract, root README, and create-vivary
+  PyPI/npm package copy now state Vivary's settled standard/scaffolder and
+  governed-context descriptions directly instead of using the retired
+  `create-t3-app` comparison.
+- The release workflow now treats core as the library it is: its manifest is the sole
+  in-repo version declaration, it ships in the same final release train as its
+  dependent roles while uploading first inside that train, the `vivary` meta package
+  uploads after its component floors, and registry smokes prove both direct core and
+  meta-package installs expose `vivary_core` with the expected distribution versions.
+- The edited root README, release workflow, and generated release-workflow mirror are
+  now LF-normalized, and their retired legacy line-ending allowlist entries are gone.
+
+### Fixed
+
+Findings from the `vivary-core` review, all pre-release and none user-reachable:
+
+- **Git environment injection.** Observation dropped four `GIT_*` variables, so
+  command-scope config (`GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_*` / `GIT_CONFIG_VALUE_*`)
+  could make a repository with no remotes observe as having an attacker-supplied
+  origin — which then became the repository identity used for grouping, conflicts and
+  fingerprints. The environment is now pinned rather than filtered.
+- **Credential disclosure.** A remote URL embedding credentials was stored verbatim as
+  both a fact and the repository identity, reaching observations, graphs, capsules and
+  fingerprints. Userinfo is now stripped before storage.
+- **Remote-less repositories are first-class.** Identity fell back to the checkout
+  path, so each linked worktree of a repository without a remote became its own
+  repository node and their divergence never surfaced. Identity now falls back to
+  Git's common directory, which every linked worktree shares.
+- **Capsule scope is enforced, not decorative.** `task.scope` was copied into the
+  output but never applied, so a capsule could declare one scope and carry claims,
+  conflicts and unknowns from outside it.
+- **Content evidence is bound to the snapshot it was observed at**, so an excerpt from
+  an earlier scan can no longer be presented as evidence about a later state.
+- **Failed content searches are visible.** A search that could not run was
+  indistinguishable from a search that found nothing.
+- **Required checks are derived, not hardcoded.** Every workspace was told to run
+  `npm test`, `npx create-vivary doctor` and `entire status`. Checks are now derived
+  from observed markers with their evidence attached, an undeterminable test command
+  is reported as an unknown rather than guessed, and `task.required_checks` overrides.
+- Windows allowlist paths compare case-insensitively; a corrupt symbolic HEAD reports
+  `unknown` instead of "detached"; the git output bound is enforced while the process
+  runs rather than after; search terms are matched as fixed strings, not regexes; and
+  negative claim budgets fail closed instead of silently widening the capsule.
+
+### Verification
+
+- `python -m pytest packages/core/tests/ -q` — **256 passed**.
+- `uv run --isolated --no-project --no-cache --with ./packages/core python -c
+  "from importlib.metadata import version; import vivary_core; assert
+  version('vivary-core') == '0.1.0'"` — local wheel-equivalent import and distribution
+  metadata smoke passed.
+- `python scripts/tests/test_package_docs_parity.py` — **10/10 passed**.
+- `python scripts/check_package_docs_parity.py` — architecture matches **6** published
+  manifests with **1** deliberately unpublished distribution allowlisted.
+- `python scripts/check_line_endings.py --verbose` — **227** tracked text files checked;
+  **8** legacy files remain explicitly allowlisted.
+- `git check-attr whitespace --` with `docs/RELEASE-WORKFLOW.md`,
+  `site/src/content/docs/release-workflow.md`, `README.md`, and
+  `site/src/pages/index.astro` — all four preserve Git's whitespace checks while
+  treating CRLF's `\r` as part of the line ending.
+- `git diff --check origin/dev` — clean across the complete branch plus local remediation.
+- `cd site && npm run test:site && npm run build && npm run test:links` — **8/8** site
+  tests; **23** pages built; **1,626** local references and **1,000** anchors checked with
+  zero failures.
+
+## [Unreleased: guided doctor repair and truthful map counts] — 2026-07-25
+
+Affects `create-vivary` / `@vivary/create` and `vivary-tropo`. Published versions stay
+at **0.3.1** and **0.4.1** in this entry; the bumps are deferred to the unified release
+line tracked in #149, where `create-vivary` / `@vivary/create` take a **minor** and
+`vivary-tropo` a **patch**. `strato` is versionless and rides the create-vivary train.
+Publishing remains a manual human gate.
+
+### Added
+
+- `create-vivary doctor --repair` — a guided, conservative repair plan. Dry-run by
+  default; `--yes` applies only deterministic safe repairs, reruns doctor, and keeps a
+  nonzero exit if the workspace is still invalid. Safe repairs are limited to
+  regenerating missing private/runtime placeholders from the canonical templates,
+  appending missing privacy ignore lines, and removing simple single-line W210
+  redundant derived metadata.
+- `create-vivary doctor --trend` — opt-in drift tracking against a prior recorded run.
+
+### Fixed
+
+- **Privacy probes now match `.gitignore` the way Git does.** The matcher used
+  `fnmatchcase`, so `*` crossed `/`, `**/` and `/**` were not honoured, directory rules
+  like `.strato/*/` never matched, and an excluded directory did not exclude its
+  contents. Doctor could therefore report a leaking workspace as clean — including the
+  `!**/USER.md` case, which stayed green even after the first nested-negation fix
+  because that fix inherited the same matcher bug.
+- **A backslash in a `.gitignore` pattern is treated as Git's escape character, not a
+  path separator.** `USER.md\ ` names the file "USER.md " — with the space — so it does
+  not protect `USER.md`, but the parser stripped the trailing space unconditionally and
+  rewrote the backslash to `/`, crediting the rule and reporting the workspace clean.
+- **A bracket expression is no longer credited with protecting a private file.**
+  `[U]SER.md` is honoured only where `core.ignorecase` is off, so on the default
+  Windows and macOS configuration such a rule silently protects nothing. Positive rules
+  that depend on case folding now fail closed; negations spelled that way are still
+  honoured, so an unignore is never missed.
+- **`doctor --repair --yes` converges.** It previously appended a duplicate privacy
+  block on every run without ever fixing the workspace, because the planner predicted
+  success using a different rule than doctor used to pass. Patterns an append provably
+  cannot fix are now withheld from the safe list and reported as manual instead.
+- **Nested `.gitignore` negations are reported, not papered over.** A lower-level rule
+  that unignores a private path takes precedence in Git, so no root-level line can
+  override it. Both `doctor` and `adopt` now say so and name the exposed paths, rather
+  than recommending a root-level fix that cannot work — or, in adopt's case, answering
+  a negation with another negation.
+- **`doctor --repair` reports the real reason a W210 field was left for a human.**
+  Every failure previously said "complex YAML", so a user whose file was non-UTF-8,
+  hard-linked or unreadable was told to hand-edit YAML that was not the problem.
+- **`doctor --repair` preserves file modes.** Atomic replacement went through
+  `mkstemp`, which creates at `0600`, silently making an existing `0644` file
+  owner-only on POSIX and breaking shared workspaces and service accounts.
+- **Stale-scaffold cleanup no longer crashes.** A raw `OSError` from an unremovable
+  path escaped the `init` error handler, producing a traceback and — under `--json` —
+  no JSON at all. Directory reparse points are now removed with `rmdir`.
+- **Private placeholders no longer crash on an undecodable template.**
+  `UnicodeDecodeError` is a `ValueError`, so it slipped past the `OSError` handler and
+  the repair apply loop alike.
+- **`tropo map` counts hard-linked files.** They were skipped as though they were
+  symlinks, which silently removed ordinary public files from totals, largest-file,
+  index detection and module candidates. Symlinks and reparse points are still omitted;
+  a hard link is an ordinary directory entry, not an alternate route to already-counted
+  content. `map` counts paths and sums per-path sizes — it does not report disk usage.
+- Documented the full privacy ignore set in `docs/COMMANDS.md`. Three enforced lines
+  (`*.vivary-tmp`, `!memory/.gitkeep`, `!heartbeat-reports/.gitkeep`) appeared nowhere
+  in the docs, so a user following them could not make the post-adopt check pass. A
+  test now derives the expectation from the code so the two cannot drift again.
+
 ## [Unreleased: Vivary product identity and proof spine] — 2026-07-18
 
 Affects documentation, site verification, and the website only. No package versions

@@ -12,8 +12,8 @@
 **Typed memory and gates for AI-agent projects.** A standard plus a scaffolder that
 wires up a normalized, agent-native workspace from standalone modules — typed project
 memory, visible state, reusable skills, private boundaries, and verification gates —
-whether the workspace is a second brain, a coding project, knowledge-work bench, or a writing project. Think
-`create-t3-app`, but for an AI agent's workspace instead of a web app.
+whether the workspace is a second brain, a coding project, knowledge-work bench, or a
+writing project.
 
 A *vivary* is an archaic word for a vivarium: a self-contained world where living
 things are kept, in stacked layers. That's the metaphor — your project lives
@@ -37,6 +37,7 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 | `vivary-ozone` | 0.2.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
 | `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
 | `vivary-memory-cognee` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-memory-cognee/) |
+| `vivary-core` (not published) | unreleased | in-repo: `packages/core/` |
 | Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
@@ -170,7 +171,7 @@ Set up Vivary (https://vivary.vercel.app) in this project.
 2. You need Python 3.11+ and uv (or pipx). Tell me if something is missing before installing it.
 3. If this folder already has content, this is an adoption: run `uvx create-vivary adopt .`, show me the dry-run plan, and apply with `--yes` only after I approve. Adopt only adds files — it never touches existing ones.
    If this folder is new or empty, it is a fresh workspace: ask me which preset fits (coding / second brain / knowledge work / writing), then run `uvx create-vivary init . --preset <choice>`.
-4. Verify with `uvx create-vivary doctor .` and `uvx --from vivary-tropo tropo check --root .` — both must pass; show me the results.
+4. After an adoption, handle any `.gitignore` privacy follow-ups first: either add the listed lines yourself, or if your installed `create-vivary` supports guided repair, show me `uvx create-vivary doctor . --repair --json` and ask before applying `--repair --yes` for deterministic safe fixes. Then verify with `uvx create-vivary doctor .` and `uvx --from vivary-tropo tropo check --root .` — both must pass; show me the results.
 5. Read the generated AGENTS.md, then follow it for all future work here.
 ```
 

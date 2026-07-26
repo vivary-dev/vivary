@@ -265,7 +265,9 @@ def test_capsule_fingerprint_is_deterministic_and_sensitive_to_content(graph):
 def test_capsule_binds_the_workspace_fingerprint_it_was_compiled_against(graph):
     capsule = compile_task_capsule(task=TASK, graph=graph)
     assert capsule["workspace"]["fingerprint"] == graph["workspace_fingerprint"]
-    assert len(capsule["required_checks"]) == 3
+    # Checks are derived from what was observed, so a plain git fixture with no
+    # tropo.toml and no package.json yields none rather than three invented ones.
+    assert capsule["required_checks"] == []
 
 
 # -- dirty_entries claims (#44 gap 1) ---------------------------------------
@@ -599,6 +601,9 @@ def test_content_match_candidate_is_bounded_intrinsically_question_matched_and_s
         "checkouts": [
             {
                 "path": "/w/gadget",
+                # Bound to the revision the graph reports for this checkout;
+                # content that cannot be placed in the snapshot is not evidence.
+                "head_revision": "a" * 40,
                 "matches": [
                     {
                         "path": "notes.md",
@@ -665,3 +670,214 @@ def test_absent_content_is_byte_identical_to_explicit_none_and_empty_checkouts()
     assert omitted["fingerprint"] == explicit_none["fingerprint"]
     empty_content = compile_task_capsule(task=TIERED_TASK, graph=graph, content={"checkouts": []})
     assert omitted["fingerprint"] == empty_content["fingerprint"]
+
+
+def test_scope_narrower_than_the_graph_excludes_out_of_scope_checkouts(graph, fx):
+    """A capsule must not carry claims about checkouts its own scope excludes.
+
+    The scope was only copied into the output, never applied to selection, so a
+    capsule could declare scope ['/a'] while including claims from '/b' — and a
+    downstream agent may act on context the capsule itself says is out of scope.
+    """
+    in_scope = fx["paths"]["canonical"]
+
+    capsule = compile_task_capsule(
+        task={**TASK, "scope": [in_scope]}, graph=graph
+    )
+
+    assert capsule["claims"], "scoping must not empty the capsule"
+    out_of_scope = [
+        claim for claim in capsule["claims"]
+        if not claim.get("subject_path", "").lower().startswith(in_scope.replace("\\", "/").lower())
+    ]
+    assert out_of_scope == [], (
+        f"claims outside the declared scope leaked into the capsule: "
+        f"{[c['subject_path'] for c in out_of_scope]}"
+    )
+
+    # The finding names conflicts, unknowns and omissions too, not just claims.
+    # A capsule that declares scope ['/a'] must not narrate /b anywhere.
+    # Exclude ancestors of the in-scope path: the fixture set includes the
+    # shared base directory, whose string is a substring of every path under it,
+    # so a substring probe would flag it whenever an in-scope path is named.
+    others = [
+        p for p in fx["paths"].values()
+        if p != in_scope and not in_scope.startswith(p)
+    ]
+    rest = json.dumps({
+        "conflicts": capsule["conflicts"],
+        "unknowns": capsule["unknowns"],
+        "omissions": capsule["omissions"],
+    }).lower()
+    leaked = [p for p in others if p.replace("\\", "/").lower() in rest]
+    assert leaked == [], (
+        f"out-of-scope paths named in conflicts/unknowns/omissions: {leaked}"
+    )
+
+
+def test_negative_claim_budget_is_rejected_rather_than_inverted(graph):
+    """Negative slicing quietly includes almost everything.
+
+    `max_claims=-1` selected all claims but the last and emitted the contradictory
+    reason 'claim budget -1 reached', so a malformed budget silently *expanded* the
+    context instead of failing closed.
+    """
+    with pytest.raises(ValueError, match="max_claims"):
+        compile_task_capsule(task=TASK, graph=graph, budget={"max_claims": -1})
+
+
+def test_content_search_failure_becomes_a_capsule_unknown(graph, fx):
+    """A failed search must not be indistinguishable from a search with no matches.
+
+    Compilation read only per-checkout `omissions`, so a checkout reporting
+    `grep_unavailable`, or a root refused outright by `observe_content`, vanished
+    from the capsule entirely.
+    """
+    path = fx["paths"]["canonical"]
+    content = {
+        "checkouts": [
+            {"path": path, "status": "unknown", "reason": "grep_unavailable",
+             "matches": [], "omissions": []}
+        ],
+        "refusals": [{"path": fx["paths"]["disallowed"], "reason": "outside_allowlist"}],
+    }
+
+    capsule = compile_task_capsule(task=TASK, graph=graph, content=content)
+
+    recorded = json.dumps(capsule["unknowns"]) + json.dumps(capsule["omissions"])
+    assert "grep_unavailable" in recorded, (
+        "a failed content search left no trace in the capsule"
+    )
+    assert "outside_allowlist" in recorded, (
+        "a refused content root left no trace in the capsule"
+    )
+
+
+def test_content_from_a_different_revision_is_not_used_as_evidence(fx):
+    """Content must be bound to the snapshot the graph describes, not just to a path.
+
+    Matching solely by path accepted a content result from an earlier scan as
+    evidence for the graph's *current* workspace fingerprint. The receipt then
+    claims a unified governed context that never existed: an excerpt from a file as
+    it used to be, presented as evidence about the checkout as it is now.
+
+    Staleness is simulated by rewriting the recorded revision rather than by
+    advancing the fixture repo, because `fx` is module-scoped and other tests
+    assert against its exact commit shas.
+    """
+    p = fx["paths"]
+    allowlist = [p["canonical"], p["staleNeighbor"], p["dirty"], p["noOrigin"]]
+    targets = [p["canonical"], p["staleNeighbor"], p["dirty"], p["noOrigin"]]
+    graph_now = project_workspace_graph(
+        observe_checkouts(targets, allowlist=allowlist, now=NOW)
+    )
+    content = observe_content(targets, allowlist=allowlist, terms=["modified"], now=NOW)
+    task = {"question": "What modified files exist?"}
+
+    # Positive control: bound to the same revision, content is still evidence.
+    fresh = compile_task_capsule(task=task, graph=graph_now, content=content)
+    assert any(c["fact"] == "content_match" for c in fresh["claims"]), (
+        "binding must not discard content that genuinely matches the snapshot"
+    )
+    for checkout in content["checkouts"]:
+        assert checkout.get("head_revision"), (
+            "content must record the revision it searched, or it cannot be bound"
+        )
+
+    # Now the same content, recorded against a revision the graph does not describe.
+    stale = json.loads(json.dumps(content))
+    for checkout in stale["checkouts"]:
+        checkout["head_revision"] = "0" * 40
+
+    capsule = compile_task_capsule(task=task, graph=graph_now, content=stale)
+
+    assert not [c for c in capsule["claims"] if c["fact"] == "content_match"], (
+        "an excerpt observed at a different revision became evidence about this one"
+    )
+    assert any(u.get("kind") == "content_snapshot_stale" for u in capsule["unknowns"]), (
+        "dropping stale content silently is its own dishonesty; it must be reported"
+    )
+
+
+def test_required_checks_are_derived_from_the_observed_workspace(fx):
+    """Checks must fit the workspace, and an undeterminable one must not be invented.
+
+    Hardcoded defaults told every workspace to run `npm test`, `npx create-vivary
+    doctor` and `entire status`, with no override — so a Python-only project got
+    three commands, at least one of which cannot work. Worse than useless: a wrong
+    check that passes trivially would launder a broken workspace into a green
+    receipt.
+    """
+    p = fx["paths"]
+    repo = p["canonical"]
+    base = os.path.dirname(repo)
+    allowlist = [repo]
+
+    def compile_for(task=None):
+        graph = project_workspace_graph(
+            observe_checkouts([repo], allowlist=allowlist, now=NOW)
+        )
+        return compile_task_capsule(task=task or TASK, graph=graph)
+
+    # 1. A governed workspace derives Vivary's own checks, whatever its language.
+    _write(os.path.join(repo, "tropo.toml"), "[base]\nallow_untyped = true\n")
+    try:
+        commands = [c["command"] for c in compile_for()["required_checks"]]
+        assert any("doctor" in c for c in commands), commands
+        assert any("tropo check" in c for c in commands), commands
+        assert not any("npm test" in c for c in commands), (
+            "npm test must not be asserted for a workspace with no npm test script"
+        )
+        assert all(c.get("evidence") for c in compile_for()["required_checks"]), (
+            "every derived check must carry the evidence that justified it"
+        )
+
+        # 2. An ambiguous test system is reported, never guessed.
+        _write(os.path.join(repo, "pyproject.toml"), "[project]\nname = 'x'\n")
+        capsule = compile_for()
+        commands = [c["command"] for c in capsule["required_checks"]]
+        assert not any("pytest" in c or "tox" in c for c in commands), (
+            f"a test command was guessed for an ambiguous ecosystem: {commands}"
+        )
+        undetermined = [
+            u for u in capsule["unknowns"] if u.get("kind") == "required_check_undetermined"
+        ]
+        assert undetermined, "an undeterminable test command must be reported, not dropped"
+        assert "pyproject.toml" in undetermined[0]["observed_markers"]
+
+        # 3. npm's scaffolded placeholder is a known non-check, not a command.
+        _write(
+            os.path.join(repo, "package.json"),
+            '{"scripts": {"test": "echo \\"Error: no test specified\\" && exit 1"}}\n',
+        )
+        commands = [c["command"] for c in compile_for()["required_checks"]]
+        assert "npm test" not in commands, (
+            "npm's placeholder test script must not become a required check"
+        )
+
+        # 4. A real test script is derived.
+        _write(os.path.join(repo, "package.json"), '{"scripts": {"test": "vitest run"}}\n')
+        commands = [c["command"] for c in compile_for()["required_checks"]]
+        assert "npm test" in commands, commands
+
+        # 5. An explicit task list always wins.
+        explicit = compile_for(task={**TASK, "required_checks": [{"name": "mine", "command": "make check"}]})
+        assert explicit["required_checks"] == [{"name": "mine", "command": "make check"}]
+    finally:
+        for name in ("tropo.toml", "pyproject.toml", "package.json"):
+            path = os.path.join(repo, name)
+            if os.path.exists(path):
+                os.remove(path)
+
+
+def test_entire_status_is_not_a_default_check(fx):
+    """`entire status` is not a Vivary command and must not be asserted by default.
+
+    The `entire_checkpoint` provenance in the receipt model is a deliberate,
+    separate integration and stays; only the blanket default goes.
+    """
+    graph = project_workspace_graph(
+        observe_checkouts([fx["paths"]["canonical"]], allowlist=[fx["paths"]["canonical"]], now=NOW)
+    )
+    capsule = compile_task_capsule(task=TASK, graph=graph)
+    assert not any("entire" in c["command"] for c in capsule["required_checks"])
