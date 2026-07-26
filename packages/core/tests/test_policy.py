@@ -768,6 +768,39 @@ def test_next_loop_step_request_gate_after_a_receipt_with_a_failed_required_chec
     assert outcome["decision"] == LOOP_DECISION["REQUEST_GATE"]
     assert outcome["reason_codes"] == [LOOP_REASON["GATE_REQUIRED"]]
 
+def test_next_loop_step_evaluates_a_failed_receipt_at_the_budget_boundary_before_stopping():
+    capsule = build_clean_capsule()
+    checks = [
+        {
+            "name": check["name"],
+            "command": check["command"],
+            "outcome": "failed" if index == 0 else "passed",
+        }
+        for index, check in enumerate(capsule["required_checks"])
+    ]
+    receipt = create_integrity_receipt(
+        capsule=capsule,
+        runtime={"harness": "test", "actor": "test-actor"},
+        checks=checks,
+        now=NOW,
+    )
+
+    outcome = next_loop_step(
+        capsule=capsule,
+        receipt=receipt,
+        state={"turns_used": 5},
+        limits={"max_turns": 5},
+    )
+
+    assert outcome["decision"] == LOOP_DECISION["REQUEST_GATE"]
+    assert outcome["reason_codes"] == [
+        LOOP_REASON["GATE_REQUIRED"],
+        LOOP_REASON["BUDGET_EXHAUSTED"],
+    ]
+    assert outcome["budget"]["decision"] == BUDGET_DECISION["EXHAUSTED"]
+    assert outcome["gate"]["decision"] == GATE_DECISION["GATE_REQUIRED"]
+    assert GATE_REASON["REQUIRED_CHECK_FAILED"] in outcome["gate"]["reason_codes"]
+
 
 def test_next_loop_step_blocked_not_a_silent_pass_on_an_unrecognized_capsule_shape():
     outcome = next_loop_step(capsule={"not": "a capsule"})

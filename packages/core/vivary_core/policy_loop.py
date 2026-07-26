@@ -9,6 +9,11 @@ Strato owns loop state, but only as a value the caller passes in and gets
 back out - this module never stores it between calls and defines no
 persisted format. If a caller wants loop history kept, that goes through
 src/evidence/ (ticket #20), not here.
+
+ADAPTATION - completed-work ordering: when a receipt is present, evaluate
+its gate before returning for budget exhaustion. The decision still carries
+``budget_exhausted`` and never permits another action, but failed evidence
+cannot be hidden behind the boundary stop.
 """
 
 from __future__ import annotations
@@ -62,35 +67,38 @@ def next_loop_step(*, capsule, receipt=_UNSET, verdict=None, state=None, limits=
         }
 
     budget = evaluate_budget(capsule=capsule, state=state, limits=limits)
-    if budget["decision"] == BUDGET_DECISION["EXHAUSTED"]:
-        return {
-            "decision": LOOP_DECISION["STOP"],
-            "reason_codes": [LOOP_REASON["BUDGET_EXHAUSTED"]],
-            "budget": budget,
-            "gate": capsule_gate,
-        }
+    budget_exhausted = budget["decision"] == BUDGET_DECISION["EXHAUSTED"]
+    budget_reason_codes = [LOOP_REASON["BUDGET_EXHAUSTED"]] if budget_exhausted else []
 
     if receipt is not _UNSET:
         receipt_gate = evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict)
         if receipt_gate["decision"] == GATE_DECISION["BLOCKED"]:
             return {
                 "decision": LOOP_DECISION["BLOCKED"],
-                "reason_codes": [LOOP_REASON["BLOCKED_BY_GATE"]],
+                "reason_codes": [LOOP_REASON["BLOCKED_BY_GATE"], *budget_reason_codes],
                 "budget": budget,
                 "gate": receipt_gate,
             }
         if receipt_gate["decision"] == GATE_DECISION["GATE_REQUIRED"]:
             return {
                 "decision": LOOP_DECISION["REQUEST_GATE"],
-                "reason_codes": [LOOP_REASON["GATE_REQUIRED"]],
+                "reason_codes": [LOOP_REASON["GATE_REQUIRED"], *budget_reason_codes],
                 "budget": budget,
                 "gate": receipt_gate,
             }
         return {
             "decision": LOOP_DECISION["STOP"],
-            "reason_codes": [LOOP_REASON["ALL_CHECKS_CLEAR"]],
+            "reason_codes": [LOOP_REASON["ALL_CHECKS_CLEAR"], *budget_reason_codes],
             "budget": budget,
             "gate": receipt_gate,
+        }
+
+    if budget_exhausted:
+        return {
+            "decision": LOOP_DECISION["STOP"],
+            "reason_codes": [LOOP_REASON["BUDGET_EXHAUSTED"]],
+            "budget": budget,
+            "gate": capsule_gate,
         }
 
     if capsule_gate["decision"] == GATE_DECISION["GATE_REQUIRED"]:
