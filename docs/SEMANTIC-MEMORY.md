@@ -518,8 +518,8 @@ Tests for the setup slice and future provider code:
 - Contract tests: recall hits include `node_id`, nullable `type`, `path`, `score`,
   `reason`, provider-reported `source`, `provider`, and edge context.
 - Privacy regression tests: `USER.md`, `MEMORY.md`, `memory/**`,
-  `heartbeat-reports/**`, and configured ignored paths are filtered before indexing
-  and never recalled.
+  `heartbeat-reports/**`, `.strato/private/**`, and configured ignored paths are
+  filtered before indexing and never recalled.
 - Doctor tests for absent config, disabled config, a non-Cognee provider
   (`not-cognee`), missing Cognee dependency, invalid config, stale index, and privacy
   failure.

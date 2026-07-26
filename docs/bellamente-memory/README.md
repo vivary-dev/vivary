@@ -21,9 +21,10 @@ and governs [#190](https://github.com/vivary-dev/vivary/pull/190).
   projection; `AgentLTM` is Bellamente's independent store; and
   `CandidateRecallProvider` normalizes prior assertions for the `vivary-core`
   firewall.
-- **Default none:** scaffold/adopt may write only disabled `[agent-ltm]` policy and
-  inert instructions. It must not install, activate, create a live store, enable MCP,
-  add generated `AGENTS.md` content, or mutate memory.
+- **Default none:** scaffold/adopt may write only disabled `[agent-ltm]` policy,
+  inert instructions, and the `.bellamente/` runtime-data ignore entry. It must not
+  install, activate, create a live store, enable MCP, add generated `AGENTS.md`
+  content, or mutate memory.
 - **Separate stores:** AgentLTM data belongs only at `.bellamente/data/`. It never
   shares a physical store with `tropo`, semantic provider state, or Vivary core.
 - **Fail closed:** `USER.md`, `MEMORY.md`, `memory/**`, `heartbeat-reports/**`, and
@@ -47,10 +48,11 @@ create-vivary doctor <target> --json
 ```
 
 Future capability discovery must declare `requires_external_executable: ["bella"]`
-without probing or executing it; `installed`, if reported, means Vivary-side
-policy/wiring only. Future Doctor behavior is likewise declarative and never calls the
-external executable. Inert documentation may explain a future manual MCP decision,
-but it must not create an active server configuration.
+without probing or executing it and must report `installed: false`; a differently
+named future runtime field may describe separately approved external readiness.
+Future Doctor behavior is likewise declarative, uses namespaced AgentLTM policy
+states, and never calls the executable. Inert documentation may explain a future
+manual MCP decision, but it must not create an active server configuration.
 
 ## Canonical dependencies and decisions
 

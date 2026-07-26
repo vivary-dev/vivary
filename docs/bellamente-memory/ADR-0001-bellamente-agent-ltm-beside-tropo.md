@@ -23,18 +23,22 @@ AgentLTM. If AgentLTM data crosses into Vivary, it crosses through a future
 
 ## Authority, privacy, and storage
 
-- **Default is none.** Scaffold and adopt may create only disabled AgentLTM policy
-  and inert setup documentation. They do not activate Bellamente, install anything,
-  create a live store, configure MCP, or mutate memory.
+- **Default is none.** Scaffold and adopt may create only disabled AgentLTM policy,
+  inert setup documentation, and the `.bellamente/` runtime-data ignore entry. They
+  do not activate Bellamente, install anything, create a live store, configure MCP,
+  or mutate memory.
 - **No provider collision.** AgentLTM policy is separate from the `[memory]`
   semantic-provider slot. Bellamente is never selected as a semantic provider merely
   because its policy exists.
 - **No shared physical store.** `.bellamente/data/` is workspace-local and ignored;
   only normalized IDs and evidence references may cross seams.
-- **Fail closed before data leaves a seam.** The private set is exactly `USER.md`,
-  `MEMORY.md`, `memory/**`, `heartbeat-reports/**`, and `.strato/private/**`.
-  Semantic adapters filter it before indexing or recall; any future AgentLTM bridge
-  must keep it out of writes, ingest, and candidate emission.
+- **Fail closed before data leaves a seam.** The required private set is exactly
+  `USER.md`, `MEMORY.md`, `memory/**`, `heartbeat-reports/**`, and
+  `.strato/private/**`. Today semantic adapters receive that full set from generated
+  policy and `.gitignore`; their built-in floor does not yet include
+  `.strato/private/**`. Future implementation must make the full set an
+  adapter-internal floor and keep it out of indexing, recall, AgentLTM writes, ingest,
+  and candidate emission.
 - **No automatic promotion.** Exact duplicates preserve the prior assertion;
   corroboration records evidence rather than truth; conflict or identity ambiguity
   preserves both sides and returns `review_required`. An explicit correction remains

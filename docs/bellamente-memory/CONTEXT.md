@@ -23,12 +23,14 @@ currently enabled provider, command, MCP server, or store.
 ## Non-negotiable boundaries
 
 - The default is **no AgentLTM**. A scaffold or adopt surface leaves
-  `[agent-ltm].enabled = false` and provides only inert guidance.
+  `[agent-ltm].enabled = false`, writes the `.bellamente/` runtime-data ignore entry,
+  and provides only inert guidance.
 - AgentLTM data is workspace-local at `.bellamente/data/`; no semantic adapter,
   core store, or other workspace shares that physical store.
-- Private data fails closed: `USER.md`, `MEMORY.md`, `memory/**`,
-  `heartbeat-reports/**`, and `.strato/private/**` must never be indexed, ingested,
-  written, or emitted as candidate evidence.
+- The required private set is `USER.md`, `MEMORY.md`, `memory/**`,
+  `heartbeat-reports/**`, and `.strato/private/**`. Current semantic adapters receive
+  the full set from generated policy and `.gitignore`; future implementation must
+  promote the full set to an adapter-internal floor before the contract is met.
 - Semantic adapters own their privacy filtering. The candidate firewall sees only
   normalized, privacy-approved assertions and still refuses unproven evidence.
 - Bellamente data reaches Vivary only through `CandidateRecallProvider` normalization:
@@ -39,15 +41,16 @@ currently enabled provider, command, MCP server, or store.
 
 ## Gate language
 
-**Configured** means disabled policy exists; it does not mean installed, activated,
-reachable, or healthy. **Activated** means a human separately approved changing the
-disabled policy. **Enabled MCP** means a distinct human approval; setup text alone
-never enables it. Every write, correct, forget, ingest, and real live proof requires
-its own human approval.
+**Policy-present** means disabled policy exists; it does not mean installed,
+activated, reachable, or healthy. **Activated** means a human separately approved
+changing the disabled policy. **Enabled MCP** means a distinct human approval; setup
+text alone never enables it. Every write, correct, forget, ingest, and real live proof
+requires its own human approval.
 
 A capability declaration may name `bella` as an external executable requirement, but
 it is declarative only: neither capability discovery nor Doctor may locate or execute
-it. Doctor reports policy state, not external-runtime health.
+it. Capability discovery reports `installed: false`; Doctor reports namespaced
+AgentLTM policy states, not external-runtime health.
 
 ## Verification language
 

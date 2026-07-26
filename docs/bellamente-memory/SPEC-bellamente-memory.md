@@ -34,9 +34,9 @@ bridge may implement that boundary; package placement is deliberately undecided.
 ### 3.1 Disabled by default
 
 The default is **none**. A future scaffold or adopt integration may add only disabled
-policy and inert setup documentation. It must not install software, activate
-AgentLTM, create a live data store, enable MCP, generate an `AGENTS.md` section, or
-write/correct/forget/ingest memory.
+policy, inert setup documentation, and the `.bellamente/` runtime-data ignore entry.
+It must not install software, activate AgentLTM, create a live data store, enable MCP,
+generate an `AGENTS.md` section, or write/correct/forget/ingest memory.
 
 The required future policy shape is separate from semantic-memory configuration. A
 dedicated policy file may use this shape; it is **not** a currently supported config
@@ -96,7 +96,7 @@ No earlier approval authorizes a later action. Each row is a separate human deci
 
 | Action | Required gate | Automatic behavior that is forbidden |
 |---|---|---|
-| Scaffold or adopt | User chose the optional policy surface. | Enabling AgentLTM, external installation, provider invocation, store creation, or memory mutation. |
+| Scaffold or adopt | User chose the optional policy surface. | Write disabled policy, inert guidance, and the `.bellamente/` runtime-data ignore entry; do not enable AgentLTM, install externally, invoke a provider, create the store, or mutate memory. |
 | External installation | Explicit human approval. | Installer-managed installation or executable probing. |
 | Policy activation | Explicit human approval to change `enabled` from `false`. | Activation implied by a preset, capability listing, or data path. |
 | MCP enablement | Explicit human approval distinct from activation. | Writing or enabling an active MCP server configuration. |
@@ -117,14 +117,19 @@ requires_external_executable: ["bella"]
 ```
 
 This is declarative metadata, not an installation requirement. It must not be placed
-in a Python import requirement, trigger PATH lookup, import a module, or execute the
-executable. If the report has an `installed` field, that field describes only
-Vivary-side policy/wiring; it never claims that the external executable is present or
-usable.
+in a Python import requirement, trigger PATH lookup, import a module, or execute
+`bella`.
+
+The capability report always emits `installed`; the Bellamente capability record must
+set it to `false` because capability discovery does not inspect the external
+executable. A separately approved future runtime diagnostic may report external
+readiness under a differently named field. `installed` must never imply that `bella`
+is present or usable.
 
 A future Doctor section is similarly declarative. It may parse AgentLTM policy,
-validate the fail-closed private set, and report `disabled`, `configured`, or
-`misconfigured` policy state. It never locates, probes, imports, or calls `bella`.
+validate the fail-closed private set, and report namespaced states:
+`agent-ltm-disabled`, `agent-ltm-policy-present`, `agent-ltm-privacy-failed`, or
+`agent-ltm-misconfigured`. It never locates, probes, imports, or calls `bella`.
 Absent optional external runtime must not make a normal Vivary workspace broken.
 
 Until that future wiring exists, use only current public commands:
@@ -150,9 +155,9 @@ Bellamente candidate, normalization must supply at least:
 - provider freshness or degradation state.
 
 Failure to resolve the stable node ID is an identity ambiguity, not permission to
-invent a node. Missing fingerprinted evidence is rejected fail-closed (for example,
-`evidence_not_fingerprinted`). Bellamente candidates must map to typed evidence and
-known stable `tropo` node IDs before core evaluation.
+invent a node. Missing fingerprinted evidence is rejected fail-closed with the frozen
+v0 reason code `evidence_not_fingerprinted`. Bellamente candidates must map to typed
+evidence and known stable `tropo` node IDs before core evaluation.
 
 ### 6.2 Required distinct results
 
@@ -169,10 +174,10 @@ observable outcomes required by [#205](https://github.com/vivary-dev/vivary/issu
 | Stale candidate, node, or evidence | `stale`. | Do not promote or mutate until revalidated. |
 | Missing, malformed, or failed optional provider | `provider_degraded`. | Keep degradation visible; do not silently bypass authority checks or mutate. |
 
-A result may additionally use the core decision vocabulary `accepted`,
-`review_required`, or `rejected`, but that decision is not a write. It must make
-create, supersede, preserve, and explicit-correction semantics testable. In every
-case, learned memory cannot automatically replace authored truth.
+Every result must carry a core decision (`accepted`, `review_required`, or `rejected`)
+in addition to its condition label. That decision is not a write. It must make create,
+supersede, preserve, and explicit-correction semantics testable. In every case,
+learned memory cannot automatically replace authored truth.
 
 ## 7. Verification tiers
 
@@ -192,9 +197,14 @@ implementation details may vary only if they preserve every boundary and gate ab
 
 Future implementation work is governed by this specification and by:
 
+- [ADR-0001 — three-seam boundary](ADR-0001-bellamente-agent-ltm-beside-tropo.md)
+- [Bellamente context — canonical vocabulary](CONTEXT.md)
 - [#205 — governed candidate recall](https://github.com/vivary-dev/vivary/issues/205)
 - [#207 — capability and Doctor wiring](https://github.com/vivary-dev/vivary/issues/207)
 - [#217 — spec precedes implementation](https://github.com/vivary-dev/vivary/issues/217)
 - [Vivary architecture / `vivary-core`](../ARCHITECTURE.md)
 - [Optional semantic-memory adapter contract](../SEMANTIC-MEMORY.md)
 - [Public command contract](../COMMANDS.md)
+
+When these documents differ, this specification controls behavior, the ADR fixes the
+architectural boundary, and `CONTEXT.md` fixes vocabulary.
