@@ -20,6 +20,8 @@ Adds `vivary-core`, an in-repo library under `packages/core/`. **Not published t
 and not reachable from any shipping CLI**: wiring it outward is
 [#207](https://github.com/vivary-dev/vivary/issues/207). No existing package changes
 version, and nothing about installing or running Vivary changes because it exists.
+Publishing remains a manual human gate. No package publishes before the comprehensive
+coordinated release train is complete and separately approved.
 
 ### Added
 
@@ -33,6 +35,42 @@ version, and nothing about installing or running Vivary changes because it exist
   Documented in [the architecture page](/architecture/). (Site-absolute route, not a
   repo-relative path: `CHANGELOG.md` is mirrored to `/changelog/`, where `docs/…`
   would resolve against that route and 404. Same convention the docs pages use.)
+- `scripts/check_package_docs_parity.py` — a CI guard that derives the published-package
+  list on [the architecture page](/architecture/) from `packages/*/pyproject.toml` plus
+  one explicit `UNPUBLISHED` allowlist, so documented package truth cannot drift behind
+  the manifests again. It caught two published packages missing from that list on the
+  very commit that introduced it. Covered by `scripts/tests/test_package_docs_parity.py`
+  (10 cases), which pins the wrapping behaviour of that prose bullet — reading only its
+  first physical line would report wrapped names as missing and redden CI on a correct
+  doc.
+
+### Changed
+
+- **Recorded the selected dependency direction for `vivary-core`** — the first
+  acceptance criterion of [#207](https://github.com/vivary-dev/vivary/issues/207). Role
+  packages depend on core; the `vivary` meta package receives it transitively and does
+  not declare it, so there is one owner per edge and no version-pinning fight. The edge
+  is added to a role's `pyproject.toml` in the *same commit* that makes that role first
+  import `vivary_core`, never ahead of it. That is why no role manifest depends on
+  `vivary-core` yet: no role imports it, and a dependency nothing uses is a declaration
+  the code does not support. Recorded on [the architecture page](/architecture/) and in
+  the release workflow's bump table.
+- The architecture page's PyPI list named four packages while six are published. It now
+  also names `vivary` and `vivary-memory-cognee`, and says plainly that `vivary-core`
+  remains unpublished during development and publishes only in the final comprehensive
+  coordinated release train. The seam description stopped asserting in the present
+  tense that every role package speaks through core — none does yet.
+- The architecture opening, root agent contract, root README, and create-vivary
+  PyPI/npm package copy now state Vivary's settled standard/scaffolder and
+  governed-context descriptions directly instead of using the retired
+  `create-t3-app` comparison.
+- The release workflow now treats core as the library it is: its manifest is the sole
+  in-repo version declaration, it ships in the same final release train as its
+  dependent roles while uploading first inside that train, the `vivary` meta package
+  uploads after its component floors, and registry smokes prove both direct core and
+  meta-package installs expose `vivary_core` with the expected distribution versions.
+- The edited root README, release workflow, and generated release-workflow mirror are
+  now LF-normalized, and their retired legacy line-ending allowlist entries are gone.
 
 ### Fixed
 
@@ -65,6 +103,27 @@ Findings from the `vivary-core` review, all pre-release and none user-reachable:
   `unknown` instead of "detached"; the git output bound is enforced while the process
   runs rather than after; search terms are matched as fixed strings, not regexes; and
   negative claim budgets fail closed instead of silently widening the capsule.
+
+### Verification
+
+- `python -m pytest packages/core/tests/ -q` — **256 passed**.
+- `uv run --isolated --no-project --no-cache --with ./packages/core python -c
+  "from importlib.metadata import version; import vivary_core; assert
+  version('vivary-core') == '0.1.0'"` — local wheel-equivalent import and distribution
+  metadata smoke passed.
+- `python scripts/tests/test_package_docs_parity.py` — **10/10 passed**.
+- `python scripts/check_package_docs_parity.py` — architecture matches **6** published
+  manifests with **1** deliberately unpublished distribution allowlisted.
+- `python scripts/check_line_endings.py --verbose` — **227** tracked text files checked;
+  **8** legacy files remain explicitly allowlisted.
+- `git check-attr whitespace --` with `docs/RELEASE-WORKFLOW.md`,
+  `site/src/content/docs/release-workflow.md`, `README.md`, and
+  `site/src/pages/index.astro` — all four preserve Git's whitespace checks while
+  treating CRLF's `\r` as part of the line ending.
+- `git diff --check origin/dev` — clean across the complete branch plus local remediation.
+- `cd site && npm run test:site && npm run build && npm run test:links` — **8/8** site
+  tests; **23** pages built; **1,626** local references and **1,000** anchors checked with
+  zero failures.
 
 ## [Unreleased: guided doctor repair and truthful map counts] — 2026-07-25
 

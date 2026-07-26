@@ -16,6 +16,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -102,12 +104,18 @@ jobs:
         run: node packages/create-vivary/tests/test_npm_launcher.js
       - name: npm trusted publish workflow guard
         run: python scripts/check_npm_trusted_publish_workflow.py
+      - name: package docs parity guard tests
+        run: python scripts/tests/test_package_docs_parity.py
+      - name: package docs parity (documented PyPI list vs manifests)
+        run: python scripts/check_package_docs_parity.py
       - name: tropo check (example vault, strict)
         run: python packages/tropo/tropo.py check --root packages/tropo/examples/vault
       - name: line endings
         run: python scripts/check_line_endings.py
       - name: diff hygiene
-        run: git diff --check
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: git diff --check "$BASE_SHA...HEAD"
 
   review:
     name: graph review gate
