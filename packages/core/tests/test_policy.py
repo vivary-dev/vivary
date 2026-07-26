@@ -802,6 +802,18 @@ def test_next_loop_step_evaluates_a_failed_receipt_at_the_budget_boundary_before
     assert GATE_REASON["REQUIRED_CHECK_FAILED"] in outcome["gate"]["reason_codes"]
 
 
+def test_next_loop_step_blocks_a_capsule_the_budget_refuses_instead_of_acting():
+    capsule = build_clean_capsule()
+    del capsule["capsule_id"]
+
+    outcome = next_loop_step(capsule=capsule)
+
+    assert outcome["decision"] == LOOP_DECISION["BLOCKED"]
+    assert outcome["reason_codes"] == [LOOP_REASON["UNKNOWN_CAPSULE_SHAPE"]]
+    assert outcome["budget"] is None
+    assert outcome["gate"]["decision"] == GATE_DECISION["BLOCKED"]
+
+
 def test_next_loop_step_blocked_not_a_silent_pass_on_an_unrecognized_capsule_shape():
     outcome = next_loop_step(capsule={"not": "a capsule"})
     assert outcome == {

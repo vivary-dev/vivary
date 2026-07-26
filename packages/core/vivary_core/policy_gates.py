@@ -18,6 +18,10 @@ history kept, that goes through src/evidence/ (ticket #20), not here.
 Fail closed: an unrecognized capsule or receipt shape is always a "blocked"
 refusal, never a silent "clear".
 
+ADAPTATION - capsule identity: gate and budget shape checks both require
+``capsule_id`` so the loop cannot accept a capsule that its budget policy
+refuses.
+
 Language mapping (documented, per python/README.md):
 - JS `conflict.id ?? null` / `claim.id ?? null` -> ``dict.get("id")``, which
   already collapses an absent key or an explicit ``None`` to ``None`` -
@@ -44,6 +48,7 @@ def _is_capsule_shape(capsule) -> bool:
     return (
         isinstance(capsule, dict)
         and capsule.get("schema") == CAPSULE_SCHEMA
+        and isinstance(capsule.get("capsule_id"), str)
         and isinstance(capsule.get("claims"), list)
         and isinstance(capsule.get("conflicts"), list)
         and isinstance(capsule.get("unknowns"), list)
