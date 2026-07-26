@@ -1,196 +1,200 @@
-# SPEC: Bellamente memory provider for Vivary
+# SPEC: Bellamente AgentLTM beside tropo
 
-Status: design locked via grill-with-docs session (2026-07-09). Ready for
-implementation planning.
+**Status:** normative predecessor contract for future implementation. It is
+intentionally ahead of [#190](https://github.com/vivary-dev/vivary/pull/190):
+[#217](https://github.com/vivary-dev/vivary/issues/217) makes this specification
+authoritative if implementation and contract differ.
 
-## Summary
+## 1. Scope and decision
 
-Add Bellamente as an optional memory provider for Vivary workspaces.
-Bellamente enters as agent LTM beside tropo — not a tropo-backed recall
-sidecar like Cognee, and not a full product drop-in. Vivary writes config,
-MCP wiring, and agent rules; shells out to `bella` CLI for verification and
-runtime. No Vivary-owned adapter package.
+Bellamente is an optional **AgentLTM**, not a semantic-memory provider and not a
+source of authored graph truth. If a human enables it, it holds durable
+agent-usable assertions with provenance in its own workspace-local store. `tropo`
+remains the typed source of project truth.
 
-## Locked decisions
+This specification does not claim that a Bellamente bridge, policy parser, capability
+record, Doctor section, MCP activation flow, or public command exists today. It fixes
+the requirements for those future surfaces.
 
-| # | Decision | Lock |
+## 2. The three seams
+
+| Seam | Owns | Does not own |
 |---|---|---|
-| Q2 | Integration shape | Scaffold-time wiring. Vivary sets projects up to use Bellamente. |
-| Q3 | Opt-in model | Explicit opt-in. Never default in presets. |
-| Q4 | CLI entrypoints | Both: `--memory bellamente` at init + `memory add bellamente` post-setup. Same provider registry as `none\|local\|cognee`. |
-| Q5 | "Main option" meaning | Recommended first in docs/help, but still opt-in. Bellamente is the first-class maintained adapter; Cognee is supported secondary. |
-| Q6 | Bellamente's job | Agent LTM beside tropo. Tropo = project truth. Bellamente = durable agent facts with provenance. Neither silently rewrites the other. |
-| Q8 | Greenfield only | v1 targets workspaces just started, no real coding done, docs may exist. Not brownfield. |
-| Q9 | Pass bar | Install + doctor green + one live memory round-trip (write fact → recall → trace exists). Uses real `bella` CLI or MCP, not a test seam. |
-| Q10 | Data location | Workspace-local DB at `.bellamente/data/` (gitignored). Dies with project. Global is later/explicit. |
-| Q11 | Dual-store rules | Strict split: Bellamente = agent LTM, tropo/STATE = project truth, private files stay private. Single facts allowed; bulk/import/private-source gated. |
-| Q12 | MCP targets | Claude Code (first-class), Codex (first-class), generic MCP snippet (for Grok/others). Cursor not in v1. |
-| Q13 | Command engine | Same install/verify path behind both entrypoints. Both refuse non-greenfield. |
-| Q14 | Package boundary | Thin create-vivary integration + shell out to `bella`. No `vivary-memory-bellamente` adapter package. |
-| Q15 | Install method | `bella` must be pre-installed by the user. `memory add` verifies via `bella doctor`. No binary download. |
-| Q16 | DB scoping | Separate DB per workspace via `BELLA_DATA_DIR` env var pointing at `.bellamente/data/`. |
-| Q17 | MCP config files | Three: `.mcp.json` (Claude Code, committed), `.codex/config.toml` (Codex, gitignored), `.vivary/mcp-servers.json` (harness-neutral reference). |
-| Q18 | Agent rules location | `.vivary/memory-rules.md` holds full rules. `AGENTS.md` gets a short memory section + link only when a memory provider is installed. |
-| Q19 | Rules content | Dual-store table, write gates, MCP tool list, data location. (See below.) |
+| **SemanticMemoryAdapter** | Privacy-filtered projection and retrieval over typed `tropo` nodes; local/Cognee `RecallHit` results. | Durable independent agent memory or canonical truth. |
+| **AgentLTM** | Bellamente's separately stored, approved agent memory and provenance. | A `tropo` projection, a semantic-provider slot, or automatic truth promotion. |
+| **CandidateRecallProvider** | Optional normalized prior assertions supplied to the `vivary-core` candidate firewall. | `RecallHit` adaptation, privacy filtering for a semantic adapter, or mutation authority. |
 
-## CLI surface
+The existing semantic `RecallHit` adapter protocol does not directly model AgentLTM.
+Any AgentLTM information that crosses into Vivary must first become a normalized
+`CandidateRecallProvider` assertion, then pass through the core firewall. A future
+bridge may implement that boundary; package placement is deliberately undecided.
 
-```
-create-vivary init . --preset coding --memory bellamente --yes
-create-vivary memory add bellamente --yes
-```
+## 3. Default policy, storage, and privacy
 
-Both call the same installer/verifier. Both refuse non-greenfield workspaces.
+### 3.1 Disabled by default
 
-## Install flow (memory add bellamente)
+The default is **none**. A future scaffold or adopt integration may add only disabled
+policy and inert setup documentation. It must not install software, activate
+AgentLTM, create a live data store, enable MCP, generate an `AGENTS.md` section, or
+write/correct/forget/ingest memory.
 
-1. **Greenfield check** — refuse if workspace has real code (heuristic: more
-   than docs/config files present, or an existing memory provider configured).
-2. **Verify bella** — run `bella doctor`. If `bella` not on PATH or doctor
-   fails, stop with a clear "install Bellamente first" pointer.
-3. **Write config** — `.vivary/memory.toml` with `provider = "bellamente"`,
-   privacy settings, and `BELLA_DATA_DIR` pointing at `.bellamente/data/`.
-4. **Write MCP configs** — `.mcp.json` (Claude Code), `.codex/config.toml`
-   (Codex), `.vivary/mcp-servers.json` (generic reference).
-5. **Write agent rules** — `.vivary/memory-rules.md` + short section in
-   `AGENTS.md` with link.
-6. **Update .gitignore** — add `.bellamente/`, `.codex/config.toml`.
-7. **Round-trip proof** — write one test fact via `bella` CLI or MCP, recall
-   it, verify a trace exists. Prefer cleanup/forget after proof.
-8. **Doctor report** — `create-vivary doctor` reports Bellamente configured +
-   healthy.
-
-## Files written by scaffold
-
-| File | Purpose | Committed? |
-|---|---|---|
-| `.vivary/memory.toml` | Memory provider config | yes (no secrets) |
-| `.mcp.json` | Claude Code MCP server entry | yes |
-| `.vivary/mcp-servers.json` | Harness-neutral MCP reference | yes |
-| `.vivary/memory-rules.md` | Agent rules for dual-store | yes |
-| `AGENTS.md` | Short memory section appended | yes |
-| `.codex/config.toml` | Codex MCP server entry | no (gitignored) |
-| `.bellamente/data/` | Bellamente DB (workspace-local) | no (gitignored) |
-
-## .vivary/memory-rules.md content
-
-```md
-# Memory Rules — Bellamente
-
-This workspace uses Bellamente as its agent LTM provider.
-Bellamente holds durable agent-usable facts. Tropo holds project truth.
-Neither silently rewrites the other.
-
-## What goes where
-
-| Store | Holds |
-|---|---|
-| Bellamente DB | durable agent facts, preferences, decisions-with-provenance, cross-session lessons |
-| tropo / STATE / modules | project truth, architecture, typed entities, current work state |
-| USER.md / MEMORY.md / memory/ | private human context — never auto-copied into Bellamente |
-
-## Write gates
-
-- Single durable project-agent facts: allowed once Bellamente is enabled
-- Bulk ingest, private-file import, anything leaving the machine: explicit human gate
-
-## MCP tools
-
-Bellamente MCP exposes: memory_search, memory_write, memory_correct,
-memory_forget, memory_list, memory_history, document_ingest,
-document_list, trace_inspect. Use these for all memory operations.
-
-## Data
-
-Bellamente DB lives at .bellamente/data/ (gitignored).
-Memory dies with this workspace unless explicitly promoted to global.
-```
-
-## AGENTS.md addition (when memory provider installed)
-
-```md
-## Memory
-
-This workspace uses <provider> for agent memory. Read
-[.vivary/memory-rules.md](.vivary/memory-rules.md) before writing or
-recalling memory. Tropo is project truth; <provider> is agent LTM.
-```
-
-## MCP config examples
-
-### .mcp.json (Claude Code)
-
-```json
-{
-  "mcpServers": {
-    "bellamente": {
-      "command": "bella",
-      "args": ["mcp"],
-      "env": { "BELLA_DATA_DIR": "${CLAUDE_PROJECT_DIR}/.bellamente/data" }
-    }
-  }
-}
-```
-
-### .codex/config.toml (Codex)
+The required future policy shape is separate from semantic-memory configuration. A
+dedicated policy file may use this shape; it is **not** a currently supported config
+surface:
 
 ```toml
-[mcp_servers.bellamente]
-command = "bella"
-args = ["mcp"]
-env = { BELLA_DATA_DIR = ".bellamente/data" }
+# .vivary/agent-ltm.toml
+[agent-ltm]
+enabled = false
+implementation = "bellamente"
+data_path = ".bellamente/data/"
+
+[agent-ltm.privacy]
+private_paths = [
+  "USER.md",
+  "MEMORY.md",
+  "memory/**",
+  "heartbeat-reports/**",
+  ".strato/private/**",
+]
+fail_closed = true
 ```
 
-### .vivary/mcp-servers.json (generic reference)
+`[agent-ltm]` is never `[memory]`. In particular, future work must not occupy the
+semantic `[memory].provider` slot with Bellamente. On a clean scaffold the policy is
+created disabled. Adopt may create the absent dedicated policy file, but must leave an
+existing file unchanged and never turn it on.
 
-```json
-{
-  "bellamente": {
-    "transport": "stdio",
-    "command": "bella",
-    "args": ["mcp"],
-    "env": { "BELLA_DATA_DIR": "<workspace-root>/.bellamente/data" }
-  }
-}
+### 3.2 Independent physical store
+
+When enabled after approval, AgentLTM data is workspace-local at
+`.bellamente/data/` and ignored as runtime data. It must not share, alias, or fall
+back to a physical store used by `tropo`, a SemanticMemoryAdapter, or `vivary-core`.
+Only normalized IDs and evidence references may cross a seam. A disabled policy
+reserves the path; it does not create or populate it.
+
+### 3.3 Fail-closed private set
+
+The following paths are private without exception:
+
+- `USER.md`
+- `MEMORY.md`
+- `memory/**`
+- `heartbeat-reports/**`
+- `.strato/private/**`
+
+Privacy is enforced before indexing, embedding, exporting, caching, recall, ingest,
+or AgentLTM writes. SemanticMemoryAdapter implementations own that filtering for
+semantic data. A future AgentLTM bridge must also withhold these sources from writes
+and candidate emission. The core firewall is not a privacy adapter; it receives only
+privacy-approved normalized assertions and rejects inadequate provenance rather than
+trying to recover hidden data.
+
+## 4. Explicit human gates
+
+No earlier approval authorizes a later action. Each row is a separate human decision.
+
+| Action | Required gate | Automatic behavior that is forbidden |
+|---|---|---|
+| Scaffold or adopt | User chose the optional policy surface. | Enabling AgentLTM, external installation, provider invocation, store creation, or memory mutation. |
+| External installation | Explicit human approval. | Installer-managed installation or executable probing. |
+| Policy activation | Explicit human approval to change `enabled` from `false`. | Activation implied by a preset, capability listing, or data path. |
+| MCP enablement | Explicit human approval distinct from activation. | Writing or enabling an active MCP server configuration. |
+| Write, correct, forget, or ingest | Explicit human approval for that operation. | A standing enablement flag authorizing later mutations. |
+| Live proof | Explicit release/dogfood approval. | Installer verification or a unit-test replacement. |
+
+The only MCP-related scaffold output may be inert instructions explaining that a
+manual, separately approved decision is needed. It must not create active runtime
+configuration.
+
+## 5. Capability and Doctor requirements
+
+When a Bellamente capability record is added to the existing capability report, it
+must be optional, default `false`, and require approval. It must declare:
+
+```text
+requires_external_executable: ["bella"]
 ```
 
-## Out of scope (v1)
+This is declarative metadata, not an installation requirement. It must not be placed
+in a Python import requirement, trigger PATH lookup, import a module, or execute the
+executable. If the report has an `installed` field, that field describes only
+Vivary-side policy/wiring; it never claims that the external executable is present or
+usable.
 
-- Brownfield workspace support
-- `memory add` for workspaces that already have a memory provider configured
-- Binary download / platform detection
-- Global Bellamente data dir (workspace-local only)
-- Cursor MCP config
-- Bellamente install automation (user installs `bella` themselves)
-- Runtime recall integration with tropo/strato (Bellamente is used by agents
-  via MCP, not wired into Vivary's retrieval pipeline)
+A future Doctor section is similarly declarative. It may parse AgentLTM policy,
+validate the fail-closed private set, and report `disabled`, `configured`, or
+`misconfigured` policy state. It never locates, probes, imports, or calls `bella`.
+Absent optional external runtime must not make a normal Vivary workspace broken.
 
-## Test plan
+Until that future wiring exists, use only current public commands:
 
-- Greenfield detection: refuse when code files exist; allow docs-only
-- `bella doctor` verification: pass when healthy, fail with pointer when
-  missing
-- Config writing: all files written with correct content + gitignore entries
-- MCP config validity: `.mcp.json` valid JSON, `.codex/config.toml` valid TOML
-- Round-trip proof: write → recall → trace exists, using real `bella` CLI
-- Doctor integration: `create-vivary doctor` reports Bellamente status
-- No-install safety: all core Vivary suites pass without `bella` installed
-- Preset default: no preset silently selects `bellamente`
+```bash
+create-vivary capabilities --json
+create-vivary doctor <target> --json
+```
 
-## Open implementation questions
+## 6. CandidateRecallProvider contract
 
-- Exact greenfield heuristic (file count thresholds, file type detection)
-- Whether `memory add bellamente` writes `.codex/config.toml` with absolute
-  `cwd` at scaffold time or uses a relative path + `codex mcp add` instead
-- How `create-vivary capabilities --json` reports the bellamente provider
-  (adapter_status field, requires_install, etc.)
-- Whether the round-trip proof runs `bella` CLI directly or starts `bella mcp`
-  and calls tools over stdio
+### 6.1 Normalized input boundary
 
-## References
+A `CandidateRecallProvider` is an optional source of **prior assertions** for the
+core firewall, not a direct authority to write. Before the firewall evaluates a
+Bellamente candidate, normalization must supply at least:
 
-- ADR: [ADR-0001-bellamente-agent-ltm-beside-tropo.md](ADR-0001-bellamente-agent-ltm-beside-tropo.md)
-- Domain glossary: [CONTEXT.md](CONTEXT.md)
-- Existing semantic memory architecture: [../SEMANTIC-MEMORY.md](../SEMANTIC-MEMORY.md)
-- Cognee adapter (the pattern we are NOT following): [../../packages/memory-cognee/](../../packages/memory-cognee/)
-- Bellamente MCP implementation: `src/mcp.ts` in the Bellamente repo
+- a known stable `tropo` subject node ID, never only a Bellamente record ID;
+- a normalized assertion identity: subject, predicate, value, project/visibility
+  scope, authority class, and relevant observation time;
+- typed evidence and provenance for every assertion, including a stable fingerprint;
+- any explicit correction target and authorization context; and
+- provider freshness or degradation state.
+
+Failure to resolve the stable node ID is an identity ambiguity, not permission to
+invent a node. Missing fingerprinted evidence is rejected fail-closed (for example,
+`evidence_not_fingerprinted`). Bellamente candidates must map to typed evidence and
+known stable `tropo` node IDs before core evaluation.
+
+### 6.2 Required distinct results
+
+The provider result and firewall decision must preserve these conditions as distinct,
+observable outcomes required by [#205](https://github.com/vivary-dev/vivary/issues/205):
+
+| Condition | Required result | Truth and mutation rule |
+|---|---|---|
+| Exact duplicate with the same evidence | `exact_duplicate` / preserve. | No new assertion or hidden rewrite. |
+| Compatible assertion with independent evidence | `corroboration`. | Evidence may be proposed or linked only after its operation-specific approval; it is not authored-truth promotion. |
+| Explicit correction of a named assertion | `explicit_correction` proposal. | Creation or supersession requires the named target, evidence, authorization, and separate human approval. |
+| Unknown or ambiguous identity | `review_required` with `identity_unresolved`. | Preserve all available sides; create nothing automatically. |
+| Incompatible value for the same identity | `review_required` with `value_conflict`. | Preserve both assertions; never elect a winner from similarity. |
+| Stale candidate, node, or evidence | `stale`. | Do not promote or mutate until revalidated. |
+| Missing, malformed, or failed optional provider | `provider_degraded`. | Keep degradation visible; do not silently bypass authority checks or mutate. |
+
+A result may additionally use the core decision vocabulary `accepted`,
+`review_required`, or `rejected`, but that decision is not a write. It must make
+create, supersede, preserve, and explicit-correction semantics testable. In every
+case, learned memory cannot automatically replace authored truth.
+
+## 7. Verification tiers
+
+| Tier | What it proves | What it must not do |
+|---|---|---|
+| Contract tests | Normalization requires stable node IDs and fingerprinted evidence; duplicate, corroboration, correction, identity/conflict, stale, and degraded paths are distinct. | Use Bellamente, create stores, or mutate a workspace. |
+| Scaffold/capability/Doctor tests | Default-disabled policy, exact private set, separate AgentLTM namespace, inert MCP guidance, and declarative capability/Doctor behavior. | Probe or execute the external executable, install a provider, enable MCP, or perform memory operations. |
+| Release dogfood | A human-approved real write → recall → trace on the intended external runtime. | Run as installer behavior or a unit test. |
+
+## 8. Non-goals and implementation handoff
+
+This contract does not add a default memory capability, a shared store, automatic
+installation, active MCP configuration, generated agent instructions, or a live
+provider call. It does not decide bridge package placement, the UI for per-operation
+approval, the trace format, or the exact execution method for release dogfood. Those
+implementation details may vary only if they preserve every boundary and gate above.
+
+Future implementation work is governed by this specification and by:
+
+- [#205 — governed candidate recall](https://github.com/vivary-dev/vivary/issues/205)
+- [#207 — capability and Doctor wiring](https://github.com/vivary-dev/vivary/issues/207)
+- [#217 — spec precedes implementation](https://github.com/vivary-dev/vivary/issues/217)
+- [Vivary architecture / `vivary-core`](../ARCHITECTURE.md)
+- [Optional semantic-memory adapter contract](../SEMANTIC-MEMORY.md)
+- [Public command contract](../COMMANDS.md)

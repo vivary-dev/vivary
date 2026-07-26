@@ -1,30 +1,77 @@
-# Bellamente is agent LTM beside tropo, integrated via shell-out not adapter
+# ADR-0001: Bellamente Agent LTM beside tropo under governed recall
 
-The existing semantic-memory architecture (../SEMANTIC-MEMORY.md) defines all
-memory providers as tropo-backed recall sidecars that consume typed graph nodes
-and return RecallHit candidates mapped to tropo node ids. The Cognee adapter
-(../../packages/memory-cognee) follows this pattern: a Python package that
-imports Cognee, builds tropo snapshots, and maps recall hits back to tropo
-node ids.
+**Status:** approved predecessor contract. Per [#217](https://github.com/vivary-dev/vivary/issues/217), this contract lands before and governs [#190](https://github.com/vivary-dev/vivary/pull/190); it describes required future behavior, not a shipped Bellamente integration.
 
-We chose a different shape for Bellamente: it enters a Vivary workspace as
-independent agent LTM — durable agent-usable facts with provenance, stored in
-Bellamente's own database, not derived from tropo. Tropo remains project truth;
-Bellamente holds agent memory; neither silently rewrites the other. There is no
-Vivary-owned adapter package. Vivary writes config, MCP wiring, and agent rules,
-then shells out to the bella CLI (bella doctor, bella mcp) for verification and
-runtime. Bellamente owns its store, MCP server, and runtime.
+## Decision
 
-Considered options:
-- A: tropo-backed recall provider (Cognee-shaped Python adapter) — underuses
-  Bellamente's product and forces it into Cognee's job
-- B: independent agent LTM beside tropo — chosen
-- C: full Bellamente product drop-in — too fat for a scaffold option, dual-truth
-  risk with Vivary's own MEMORY/STATE/tropo model
+Bellamente, when a person explicitly enables it, is an **AgentLTM**: a durable,
+workspace-local, independent store for agent-usable assertions and their provenance.
+`tropo` remains typed project truth. Learned memory never silently becomes or replaces
+authored truth.
 
-Consequences: `--memory bellamente` and `--memory cognee` share a flag but use
-different machinery. Cognee means "use this tropo-backed recall provider via a
-Python adapter." Bellamente means "wire this workspace with an agent LTM system
-via config, MCP, and shell-out." The RecallProvider/MemoryProvider protocol from
-../SEMANTIC-MEMORY.md does not apply to Bellamente. Doctor checks for Bellamente
-shell out to `bella doctor`, not to a Python import check.
+This decision creates three distinct seams:
+
+| Seam | Responsibility | Boundary |
+|---|---|---|
+| **SemanticMemoryAdapter** | A local or Cognee projection of privacy-approved typed `tropo` nodes for semantic retrieval. | It owns its privacy filtering and returns typed `RecallHit` candidates. Its state is rebuildable from graph truth. |
+| **AgentLTM** | Bellamente's independent durable store for approved agent memory. | Its data lives only at `.bellamente/data/`; it is not a `tropo` projection and never shares a physical store with semantic memory or Vivary core. |
+| **CandidateRecallProvider** | An optional source of normalized prior assertions for the `vivary-core` candidate-recall firewall. | Before core evaluation, every Bellamente candidate must carry typed evidence/provenance and a known stable `tropo` node ID. The firewall, not similarity, governs whether it can corroborate, challenge, or request review. |
+
+The existing semantic `RecallHit` adapter protocol does **not** directly model
+AgentLTM. If AgentLTM data crosses into Vivary, it crosses through a future
+`CandidateRecallProvider` normalization boundary and the core firewall.
+
+## Authority, privacy, and storage
+
+- **Default is none.** Scaffold and adopt may create only disabled AgentLTM policy
+  and inert setup documentation. They do not activate Bellamente, install anything,
+  create a live store, configure MCP, or mutate memory.
+- **No provider collision.** AgentLTM policy is separate from the `[memory]`
+  semantic-provider slot. Bellamente is never selected as a semantic provider merely
+  because its policy exists.
+- **No shared physical store.** `.bellamente/data/` is workspace-local and ignored;
+  only normalized IDs and evidence references may cross seams.
+- **Fail closed before data leaves a seam.** The private set is exactly `USER.md`,
+  `MEMORY.md`, `memory/**`, `heartbeat-reports/**`, and `.strato/private/**`.
+  Semantic adapters filter it before indexing or recall; any future AgentLTM bridge
+  must keep it out of writes, ingest, and candidate emission.
+- **No automatic promotion.** Exact duplicates preserve the prior assertion;
+  corroboration records evidence rather than truth; conflict or identity ambiguity
+  preserves both sides and returns `review_required`. An explicit correction remains
+  an explicit, approved operation and never automatically overwrites authored truth.
+
+## Gates and observability
+
+External installation, activation, MCP enablement, and each write, correct, forget,
+ingest, and live proof require separate human approval. Generated `AGENTS.md` content
+is out of scope; MCP material is inert setup guidance only, never an active server
+configuration.
+
+A future capability record must declare `requires_external_executable: ["bella"]`
+without importing, locating, or executing it. Its `installed` signal may describe
+Vivary-side policy/wiring only; it must not claim executable availability. A future
+Doctor implementation is declarative: it may parse the disabled policy and report its
+state, but it never probes or calls `bella`.
+
+The real write → recall → trace demonstration is release dogfood after its own human
+gate. It is neither an installer side effect nor a unit-test substitute.
+
+## Consequences
+
+A future integration may add a bridge, policy parser, capability entry, Doctor section,
+or explicit MCP activation flow; this ADR does not preselect package placement or
+claim any of those surfaces exist. Such work must satisfy the normalized outcomes in
+[#205](https://github.com/vivary-dev/vivary/issues/205): duplicate, corroboration,
+explicit correction, unresolved identity, incompatible value, staleness, and provider
+degradation remain distinct and visible.
+
+## References
+
+- [Bellamente predecessor specification](SPEC-bellamente-memory.md)
+- [Bellamente terminology](CONTEXT.md)
+- [Vivary architecture and `vivary-core`](../ARCHITECTURE.md)
+- [Optional semantic-memory adapter contract](../SEMANTIC-MEMORY.md)
+- [Public command contract](../COMMANDS.md)
+- [#205 — governed candidate recall](https://github.com/vivary-dev/vivary/issues/205)
+- [#207 — capability and Doctor wiring](https://github.com/vivary-dev/vivary/issues/207)
+- [#217 — spec precedes implementation](https://github.com/vivary-dev/vivary/issues/217)

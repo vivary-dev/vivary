@@ -10,6 +10,41 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: Bellamente predecessor contract and semantic adapter truth] — 2026-07-26
+
+Affects public documentation, its generated website mirror, and future implementation
+contracts only. No package behavior or version changes, no provider call runs, and no
+memory, MCP, install, or publication action occurs.
+
+### Changed
+
+- Reconciled [#160](https://github.com/vivary-dev/vivary/pull/160) as the normative
+  predecessor to #190: Bellamente remains an independent, workspace-local AgentLTM;
+  Tropo-backed semantic adapters and the provider-neutral `vivary-core` candidate
+  firewall are separate seams; learned memory never silently becomes authored truth.
+- Locked default-disabled policy, the complete fail-closed private set, truthful
+  declarative capability and Doctor behavior, and separate human gates for install,
+  activation, MCP enablement, every mutation, and release dogfood. Scaffold/adopt
+  output is policy and inert instructions only.
+- Corrected `docs/SEMANTIC-MEMORY.md` to match the shipped asynchronous Cognee adapter:
+  the adapter owns privacy-filtered snapshot construction, indexing refreshes the
+  whole dataset, recall accepts only known-node typed hits, forget removes the whole
+  approved dataset, and Doctor remains module-level and provider-free.
+- Routed the nested Bellamente contract from the documentation index and the generated
+  semantic-memory page without creating an unsupported site route.
+
+### Verification
+
+- `cd site && npm run test:site` — **8/8** site tests passed.
+- `cd site && npm run build && npm run test:links` — **23** pages built; **1,633**
+  local references and **1,009** anchors checked with zero failures.
+- `python scripts/check_line_endings.py --verbose` — **226** tracked text files
+  checked; **11** legacy files remain explicitly allowlisted.
+- `git diff --check` — clean.
+- Rendered `/semantic-memory/` browser smoke — all three seams, the current/future
+  divergence, absolute Bellamente contract link, updated metadata, and no horizontal
+  overflow verified.
+
 ## [Unreleased: vivary-core, the governed-context seam] — 2026-07-26
 
 Adds `vivary-core`, an in-repo library under `packages/core/`. **Not published to PyPI
