@@ -27,14 +27,13 @@ currently enabled provider, command, MCP server, or store.
   and provides only inert guidance.
 - AgentLTM data is workspace-local at `.bellamente/data/`; no semantic adapter,
   core store, or other workspace shares that physical store.
-- The required private set is `USER.md`, `MEMORY.md`, `memory/**`,
-  `heartbeat-reports/**`, and `.strato/private/**`. Current semantic adapters receive
-  the full set from generated policy and `.gitignore`; future implementation must
-  promote the full set to an adapter-internal floor before the contract is met.
-- Semantic adapters own their privacy filtering. The candidate firewall sees only
-  normalized, privacy-approved assertions and still refuses unproven evidence.
-- Bellamente data reaches Vivary only through `CandidateRecallProvider` normalization:
-  stable node ID plus typed evidence/provenance are required before evaluation.
+- The normative private-set list and enforcement boundary live only in
+  [SPEC §3.3](SPEC-bellamente-memory.md#33-fail-closed-private-set). Current shipped
+  adapter behavior and known limitations live in
+  [Semantic Memory](../SEMANTIC-MEMORY.md#privacy-boundary); this glossary does not
+  restate either contract.
+- Candidate normalization and unresolved-identity handling live only in
+  [SPEC §6](SPEC-bellamente-memory.md#6-candidaterecallprovider-contract).
 - No learned assertion silently promotes to authored truth. Duplicate preserves;
   corroboration adds evidence; ambiguity or conflict preserves both and requests
   review.

@@ -16,9 +16,9 @@ the `v0.1.0` line.
 
 ## [Unreleased: Bellamente predecessor contract and semantic adapter truth] — 2026-07-26
 
-Affects public documentation, its generated website mirror, and future implementation
-contracts only. No package behavior or version changes, no provider call runs, and no
-memory, MCP, install, or publication action occurs.
+Affects public documentation, its generated website mirror, future implementation
+contracts, and the `vivary-memory-cognee` built-in privacy floor. No version change,
+provider call, memory mutation, MCP, install, or publication action occurs.
 
 ### Changed
 
@@ -40,20 +40,25 @@ memory, MCP, install, or publication action occurs.
   validation, so that status does not attest path safety.
 - Routed the nested Bellamente contract from the documentation index and the generated
   semantic-memory page without creating an unsupported site route.
+- Made `docs/bellamente-memory/SPEC-bellamente-memory.md` the sole owner of the
+  private-set contract, defined the firewall's unresolved-identity input and result
+  emitter, and added `.strato/private/**` to the adapter's built-in floor. The shipped
+  dependency-free Git-ignore matcher's escaped/complex-pattern limitation is now
+  explicit and tracked by [#236](https://github.com/vivary-dev/vivary/issues/236).
 
 ### Verification
 
-- `python packages/memory-cognee/tests/test_memory_cognee.py` — **48/48** adapter
+- `python packages/memory-cognee/tests/test_memory_cognee.py` — **49/49** adapter
   tests passed.
 - `cd site && npm run test:site` — **8/8** site tests passed.
-- `cd site && npm run build && npm run test:links` — **23** pages built; **1,633**
-  local references and **1,009** anchors checked with zero failures.
+- `cd site && npm run build && npm run test:links` — **23** pages built; **1,636**
+  local references and **1,012** anchors checked with zero failures.
 - `python scripts/check_line_endings.py --verbose` — **226** tracked text files
   checked; **11** legacy files remain explicitly allowlisted.
 - `git diff --check` — clean.
-- Rendered `/semantic-memory/` browser smoke — all three seams, the current/future
-  divergence, absolute Bellamente contract link, updated metadata, and no horizontal
-  overflow verified.
+- Rendered `/semantic-memory/` browser smoke — all three seams, current/future
+  divergence, absolute Bellamente contract link, the `#privacy-boundary` limitation
+  and #236 link, updated metadata, and no horizontal overflow verified.
 
 ## [Unreleased: vivary-core, the governed-context seam] — 2026-07-26
 

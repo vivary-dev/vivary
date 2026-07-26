@@ -232,6 +232,18 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
         self.assertIn("source_files", auth.text)
         self.assertTrue(any(edge.source_id == "auth" for edge in snapshot.edges))
 
+    def test_default_private_floor_includes_strato_private(self):
+        patterns = vivary_cognee._privacy_patterns({"privacy": {"private_paths": []}})
+
+        self.assertTrue(
+            vivary_cognee._is_private_path(
+                ".strato/private/agent-secret.md",
+                patterns=patterns,
+                gitignore_rules=[],
+                respect_gitignore=False,
+            )
+        )
+
     def test_build_snapshot_honors_gitignore_directory_pattern(self):
         with temp_workspace() as root:
             write_workspace(root)

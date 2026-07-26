@@ -32,13 +32,10 @@ AgentLTM. If AgentLTM data crosses into Vivary, it crosses through a future
   because its policy exists.
 - **No shared physical store.** `.bellamente/data/` is workspace-local and ignored;
   only normalized IDs and evidence references may cross seams.
-- **Fail closed before data leaves a seam.** The required private set is exactly
-  `USER.md`, `MEMORY.md`, `memory/**`, `heartbeat-reports/**`, and
-  `.strato/private/**`. Today semantic adapters receive that full set from generated
-  policy and `.gitignore`; their built-in floor does not yet include
-  `.strato/private/**`. Future implementation must make the full set an
-  adapter-internal floor and keep it out of indexing, recall, AgentLTM writes, ingest,
-  and candidate emission.
+- **Fail closed before data leaves a seam.** The normative private-set list and
+  enforcement boundary live only in [SPEC §3.3](SPEC-bellamente-memory.md#33-fail-closed-private-set);
+  this ADR does not restate them. Current shipped semantic-adapter behavior and known
+  limitations live in [Semantic Memory](../SEMANTIC-MEMORY.md#privacy-boundary).
 - **No automatic promotion.** Exact duplicates preserve the prior assertion;
   corroboration records evidence rather than truth; conflict or identity ambiguity
   preserves both sides and returns `review_required`. An explicit correction remains

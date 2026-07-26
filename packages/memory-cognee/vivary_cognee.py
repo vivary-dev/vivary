@@ -35,6 +35,7 @@ DEFAULT_PRIVATE_PATTERNS = (
     "MEMORY.md",
     "memory/**",
     "heartbeat-reports/**",
+    ".strato/private/**",
     ".vivary/**",
     ".git/**",
 )

@@ -280,6 +280,18 @@ and type-checked policy fields, but they are not current filtering switches. Bef
 that path filtering, snapshot construction refuses linked, out-of-root, hard-linked,
 or unstatable source files; it raises rather than silently skipping them.
 
+### Privacy boundary
+
+The built-in private floor and literal workspace-relative
+`memory.privacy.private_paths` are filtered before provider calls. The current
+dependency-free `.gitignore` matcher is not fully Git-equivalent: backslash-escaped
+patterns and some complex `**` or anchored patterns can disagree with Git. Until
+[#236](https://github.com/vivary-dev/vivary/issues/236) lands, do not use
+`respect_gitignore` as the sole privacy boundary for such paths. Add each sensitive
+path to `memory.privacy.private_paths` as an unescaped workspace-relative literal or
+simple glob, and do not approve indexing when privacy depends on unsupported Git
+pattern syntax.
+
 Runtime/index state belongs under `.vivary/memory/` and should be ignored. The adapter
 binds Cognee's data, system, cache, and log roots to the configured `state_path`
 before importing Cognee, so provider side effects stay in the workspace cache instead
@@ -479,11 +491,9 @@ Recommended retrieval order:
 
 Current adapter safeguards:
 
-- A recalled item without a stable Vivary node marker, or with a node ID absent from
-  the current privacy-filtered snapshot, is dropped rather than returned.
-- A private or ignored path therefore cannot enter a `RecallHit`; the adapter rebuilds
-  its snapshot before recall and filters it before provider results are mapped back to
-  typed hits.
+- Recall mapping drops a provider item without a stable Vivary node marker or whose
+  node ID is absent from the rebuilt snapshot. A Git-ignored path admitted to the
+  snapshot because of the matcher limitation above is not recovered at this stage.
 - If semantic score and graph edges disagree, prefer graph edges for truth and use the
   semantic hit as a lead to inspect.
 - `tropo query --mode semantic` is the shipped optional-provider bridge. It invokes

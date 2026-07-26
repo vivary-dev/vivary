@@ -144,20 +144,23 @@ create-vivary doctor <target> --json
 ### 6.1 Normalized input boundary
 
 A `CandidateRecallProvider` is an optional source of **prior assertions** for the
-core firewall, not a direct authority to write. Before the firewall evaluates a
-Bellamente candidate, normalization must supply at least:
+core firewall, not a direct authority to write. Before firewall evaluation,
+normalization must supply at least:
 
-- a known stable `tropo` subject node ID, never only a Bellamente record ID;
+- either a known stable `tropo` subject node ID or an explicit unresolved-identity
+  marker that preserves the provider's subject reference and evidence, never only an
+  invented Bellamente-to-Tropo mapping;
 - a normalized assertion identity: subject, predicate, value, project/visibility
   scope, authority class, and relevant observation time;
 - typed evidence and provenance for every assertion, including a stable fingerprint;
 - any explicit correction target and authorization context; and
 - provider freshness or degradation state.
 
-Failure to resolve the stable node ID is an identity ambiguity, not permission to
-invent a node. Missing fingerprinted evidence is rejected fail-closed with the frozen
-v0 reason code `evidence_not_fingerprinted`. Bellamente candidates must map to typed
-evidence and known stable `tropo` node IDs before core evaluation.
+The unresolved-identity marker is a defined firewall input only for emitting
+`review_required` with `identity_unresolved`; it cannot enter duplicate,
+corroboration, conflict, or mutation paths. Missing fingerprinted evidence is rejected
+fail-closed with the frozen v0 reason code `evidence_not_fingerprinted`. Normalization
+must never invent a node ID.
 
 ### 6.2 Required distinct results
 
