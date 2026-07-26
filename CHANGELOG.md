@@ -10,6 +10,34 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: create-vivary npm adopt dispatch] — 2026-07-26
+
+Affects `@vivary/create` argument dispatch, launcher parity tests, and package
+documentation. No package version, Python behavior, publication, or deployment
+changes in this slice.
+
+### Fixed
+
+- Preserved the explicit `adopt` subcommand through the npm launcher instead of
+  rewriting it as `init adopt`.
+- Added a table-driven launcher contract for all five public commands and a
+  cross-runtime guard that compares Python's registered subparsers, its canonical
+  command tuple, and the npm launcher's exported command set.
+
+### Verification
+
+- `node packages/create-vivary/tests/test_npm_launcher.js` — **10/10** argument
+  mapping cases passed; package pinning and shell-free spawn checks passed.
+- `python packages/create-vivary/tests/test_create_vivary.py` — **126** passed,
+  **1** platform-specific test skipped.
+- `python packages/create-vivary/tests/test_assets_parity.py` — **3/3** passed.
+- `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**
+  site tests passed; **23** pages built; **1,653** local references and **1,027**
+  anchors checked with zero failures.
+- `python scripts/check_line_endings.py --verbose` — **231** tracked text files
+  checked; **8** legacy files remain explicitly allowlisted.
+- `git diff --check` — clean.
+
 ## [Unreleased: Bellamente predecessor contract and semantic adapter truth] — 2026-07-26
 
 Affects public documentation, its generated website mirror, future implementation

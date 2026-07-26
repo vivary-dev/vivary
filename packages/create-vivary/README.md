@@ -36,9 +36,9 @@ create-vivary wizard my-workspace --auto --storage embedded --yes --json
 ```
 
 `create-vivary <name>` is shorthand for `create-vivary init <name>`;
-pass `init` / `doctor` / `wizard` / `capabilities` explicitly whenever you prefer. The same UX is available on npm
-via the `@vivary/create` launcher (`npm create @vivary@latest my-workspace`), versioned in
-lockstep.
+pass `init` / `doctor` / `wizard` / `capabilities` / `adopt` explicitly whenever
+you prefer. The same command surface is available on npm via the `@vivary/create`
+launcher (`npm create @vivary@latest my-workspace`), versioned in lockstep.
 
 Presets share the same agent OS shell, then seed a different starter graph. Each
 starter module is generated as `modules/<id>/index.md` so agents route through a small

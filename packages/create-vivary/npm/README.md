@@ -34,6 +34,9 @@ npx @vivary/create@latest wizard my-workspace --auto --storage embedded --yes --
 # Show optional preset capabilities:
 npx @vivary/create@latest capabilities --preset knowledge-work --json
 
+# Preview brownfield adoption without writing:
+npx @vivary/create@latest adopt .
+
 # Append a local debug receipt without polluting JSON stdout:
 npx @vivary/create@latest doctor my-workspace --json --receipt .vivary/receipts.jsonl
 ```
@@ -41,7 +44,8 @@ npx @vivary/create@latest doctor my-workspace --json --receipt .vivary/receipts.
 Presets: `coding` · `second-brain` · `knowledge-work` · `writing`.
 
 A bare `npm create @vivary@latest <name>` maps to the `init` subcommand; you can also
-pass `init` / `doctor` / `wizard` / `capabilities` explicitly (e.g. `npm create @vivary@latest doctor my-workspace`).
+pass `init` / `doctor` / `wizard` / `capabilities` / `adopt` explicitly (e.g.
+`npm create @vivary@latest adopt .`).
 
 For local debugging, pass `--receipt PATH` or set `VIVARY_RECEIPT_LOG=PATH` to append
 a dependency-free JSONL run receipt. Receipts stay local and record only command
