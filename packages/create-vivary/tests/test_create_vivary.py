@@ -1454,6 +1454,136 @@ class CreateVivaryTests(unittest.TestCase):
                     f"{name} must be restored from its canonical template, not a stub",
                 )
 
+    # --- privacy matcher correctness cluster (see drafts/plans/2026-07-25-slice-01-
+    # orchestrated-plan.md Step 2). These six are one indivisible fix: the wildmatch
+    # rewrite and the order-aware unsafe-exception check are bidirectionally
+    # load-bearing, and fixing either alone widens the other.
+
+    def _scaffold_with_gitignore_suffix(self, td, name, suffix):
+        target = Path(td) / name
+        create_vivary.scaffold_workspace(
+            target, preset="coding", force=False, repo_root=ROOT
+        )
+        gitignore = target / ".gitignore"
+        gitignore.write_text(
+            gitignore.read_text(encoding="utf-8") + suffix, encoding="utf-8"
+        )
+        return target
+
+    def test_doctor_rejects_globstar_negation_of_private_file(self):
+        """`!**/USER.md` unignores USER.md in Git; doctor must not report ok.
+
+        The matcher used `fnmatchcase`, whose translation of `**/USER.md` requires a
+        literal `/`, so the rule was invisible and doctor reported a green workspace
+        while `git check-ignore` said USER.md was committable.
+        """
+        with temp_workspace() as td:
+            target = self._scaffold_with_gitignore_suffix(
+                td, "privacy-globstar", "\n!**/USER.md\n"
+            )
+            self.assertIn("USER.md", create_vivary._missing_privacy_ignores(target))
+
+    def test_doctor_rejects_case_variant_negation_of_private_file(self):
+        """`!user.md` unignores USER.md wherever core.ignorecase is on.
+
+        Fails closed on every platform deliberately: the check stays pure (no git
+        config read), which also keeps it usable from `adopt` on a directory that is
+        not a repository yet.
+        """
+        with temp_workspace() as td:
+            target = self._scaffold_with_gitignore_suffix(
+                td, "privacy-case", "\n!user.md\n"
+            )
+            self.assertIn("USER.md", create_vivary._missing_privacy_ignores(target))
+
+    def test_doctor_does_not_treat_wildcard_as_crossing_directories(self):
+        """`*` must not cross `/`. `.strato/*se*` matches nothing Git would match."""
+        with temp_workspace() as td:
+            target = self._scaffold_with_gitignore_suffix(
+                td, "privacy-overmatch", "\n.strato/*se*\n"
+            )
+            gitignore = target / ".gitignore"
+            kept = [
+                line
+                for line in gitignore.read_text(encoding="utf-8").splitlines()
+                if line.strip() != ".strato/private/"
+            ]
+            gitignore.write_text("\n".join(kept) + "\n", encoding="utf-8")
+            self.assertIn(
+                ".strato/private/", create_vivary._missing_privacy_ignores(target)
+            )
+
+    def test_doctor_repair_converges_and_does_not_grow_gitignore(self):
+        """`--repair --yes` must terminate, not append a fresh block on every run.
+
+        The unsafe-exception check was order-insensitive while repair fixes by
+        appending, so a negation Git had already overridden kept the pattern
+        permanently missing and each run appended another identical block.
+        """
+        with temp_workspace() as td:
+            target = self._scaffold_with_gitignore_suffix(
+                td, "privacy-converge", "\n!memory/*.md\nmemory/*\n"
+            )
+            gitignore = target / ".gitignore"
+
+            run_doctor_json(target, "--repair", "--yes")
+            after_first = gitignore.read_text(encoding="utf-8")
+            run_doctor_json(target, "--repair", "--yes")
+            after_second = gitignore.read_text(encoding="utf-8")
+
+            self.assertEqual(
+                after_first,
+                after_second,
+                "repair must converge; a second run may not rewrite .gitignore",
+            )
+
+    def test_doctor_accepts_nested_negation_under_excluded_directory(self):
+        """Git never descends into an excluded directory, so a nested negation there
+        is inert. Reporting it as a manual blocker makes the workspace permanently red
+        and prescribes an edit that changes nothing."""
+        with temp_workspace() as td:
+            target = Path(td) / "privacy-inert-nested"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            gitignore = target / ".gitignore"
+            kept = [
+                line
+                for line in gitignore.read_text(encoding="utf-8").splitlines()
+                if line.strip() not in {"memory/*", "!memory/.gitkeep"}
+            ]
+            gitignore.write_text("\n".join(kept + ["memory/"]) + "\n", encoding="utf-8")
+            (target / "memory" / ".gitignore").write_text(
+                "!private.md\n", encoding="utf-8"
+            )
+
+            self.assertNotIn("memory/*", create_vivary._missing_privacy_ignores(target))
+
+    def test_doctor_repair_offers_an_action_for_nested_only_negation(self):
+        """A nested-only negation must still produce guidance.
+
+        Regression introduced alongside the nested-blocker rewrite: with the negation
+        present only in a nested file, no root append was emitted and the blocker check
+        found every probe ignored, so doctor declared the workspace broken and offered
+        zero actions.
+        """
+        with temp_workspace() as td:
+            target = Path(td) / "privacy-nested-only"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / "memory" / ".gitignore").write_text(
+                "!*.md\n*.md\n", encoding="utf-8"
+            )
+
+            rc, out = run_doctor_json(target, "--repair", "--yes")
+
+            if rc != 0:
+                self.assertTrue(
+                    out["repair"]["actions"],
+                    "doctor reported the workspace broken but offered no action",
+                )
+
     def test_doctor_repair_refuses_hardlinked_gitignore_without_cloning_content(self):
         with temp_workspace() as td:
             target = Path(td) / "repair-hardlink-gitignore"
