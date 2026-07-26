@@ -1,9 +1,9 @@
 # @vivary/create
 
-**The `create-t3-app` for agent-native workspaces.** Scaffold a complete Vivary
-workspace — typed knowledge graph (tropo), agent OS (strato), and starter graph — in
-one command. Generated modules use `modules/<id>/index.md` routers so agents load
-context progressively.
+**A scaffolder for normalized agent-native workspaces.** Create a Vivary workspace
+with a typed knowledge graph (tropo), agent OS (strato), starter graph, visible state,
+and human gates in one command. Generated modules use `modules/<id>/index.md` routers
+so agents load context progressively.
 
 **Current release:** 0.3.1. Use 0.3.1 for new installs; no migration is expected
 from 0.2.1, 0.2.2, 0.2.3, 0.2.5, 0.2.6, 0.2.7, or 0.2.8.

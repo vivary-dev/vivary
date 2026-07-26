@@ -6,10 +6,9 @@ once; don't reload it every turn.
 
 ## Mission
 
-Vivary is a **standard + scaffolder for agent-native workspaces** — the
-`create-t3-app` of agent workspaces. The baseline it encodes: *a self-improving
-loop over a typed knowledge graph, with one visible state surface and human
-gates.* Modules: **tropo** (knowledge), **strato** (agent OS), **ozone**
+Vivary is a **standard + scaffolder for agent-native workspaces**. Its baseline is
+*a self-improving loop over a typed knowledge graph, with one visible state surface
+and human gates.* Modules: **tropo** (knowledge), **strato** (agent OS), **ozone**
 (review), **exo** (orchestration).
 
 ## Design law (non-negotiable)

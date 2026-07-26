@@ -174,7 +174,8 @@ npm publish gate is approved.
 
 Order when multiple packages ship: dependencies first. Publish `vivary-core` before
 every role package that depends on it; then publish `vivary-tropo` before
-`ozone`/`exo`/`memory-cognee` packages that pin tropo. Publish `create-vivary` PyPI
+`ozone`/`exo`/`memory-cognee` packages that pin tropo. Publish the `vivary` meta
+package after all of its component floors are available. Publish `create-vivary` PyPI
 before `@vivary/create` npm (the launcher installs the PyPI package at run time).
 
 ## 6. Verify from the public registries after publish
@@ -186,6 +187,9 @@ changed package:
 uv run --isolated --no-project --no-cache --index-url https://pypi.org/simple \
   --with vivary-core==<ver> python -c \
   "from importlib.metadata import version; import vivary_core; assert version('vivary-core') == '<ver>'"
+uv run --isolated --no-project --no-cache --index-url https://pypi.org/simple \
+  --with vivary==<vivary-ver> python -c \
+  "from importlib.metadata import version; import vivary_core; assert version('vivary') == '<vivary-ver>'; assert version('vivary-core') == '<core-ver>'"
 uvx --no-cache --index-url https://pypi.org/simple --from vivary-tropo==<ver> tropo --version
 uvx --no-cache --index-url https://pypi.org/simple --from vivary-ozone==<ver> ozone --version
 uvx --no-cache --index-url https://pypi.org/simple --from vivary-exo==<ver> exo --version

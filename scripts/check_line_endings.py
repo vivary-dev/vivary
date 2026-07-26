@@ -30,8 +30,6 @@ CRLF_ALLOWED_EXTENSIONS = {
 }
 
 LEGACY_LINE_ENDING_ALLOWLIST = {
-    "README.md",
-    "docs/RELEASE-WORKFLOW.md",
     "packages/create-vivary/create_vivary_assets/__init__.py",
     "packages/tropo/examples/vault/projects/tropo/decisions/0001-folder-as-type.md",
     "site/package-lock.json",
@@ -40,7 +38,6 @@ LEGACY_LINE_ENDING_ALLOWLIST = {
     "site/src/content/blog/memory-that-doesnt-rot.md",
     "site/src/content/blog/the-loop.md",
     "site/src/content/blog/tropo-map-read-the-shape.md",
-    "site/src/content/docs/release-workflow.md",
     "site/src/pages/index.astro",
 }
 

@@ -56,13 +56,17 @@ coordinated release train is complete and separately approved.
   remains unpublished during development and publishes only in the final comprehensive
   coordinated release train. The seam description stopped asserting in the present
   tense that every role package speaks through core — none does yet.
-- The architecture opening now uses Vivary's settled governed-context description
-  instead of the retired `create-t3-app` comparison.
+- The architecture opening, root agent contract, root README, and create-vivary
+  PyPI/npm package copy now state Vivary's settled standard/scaffolder and
+  governed-context descriptions directly instead of using the retired
+  `create-t3-app` comparison.
 - The release workflow now treats core as the library it is: its manifest is the sole
-  in-repo version declaration, it ships in the same final release train as its dependent
-  roles while uploading first inside that train, and its registry smoke imports
-  `vivary_core` and checks distribution metadata instead of assuming a CLI or module
-  `__version__`.
+  in-repo version declaration, it ships in the same final release train as its
+  dependent roles while uploading first inside that train, the `vivary` meta package
+  uploads after its component floors, and registry smokes prove both direct core and
+  meta-package installs expose `vivary_core` with the expected distribution versions.
+- The edited root README, release workflow, and generated release-workflow mirror are
+  now LF-normalized, and their retired legacy line-ending allowlist entries are gone.
 
 ### Fixed
 
@@ -106,8 +110,8 @@ Findings from the `vivary-core` review, all pre-release and none user-reachable:
 - `python scripts/tests/test_package_docs_parity.py` — **10/10 passed**.
 - `python scripts/check_package_docs_parity.py` — architecture matches **6** published
   manifests with **1** deliberately unpublished distribution allowlisted.
-- `python scripts/check_line_endings.py --verbose` — **224** tracked text files checked;
-  **11** legacy files remain explicitly allowlisted.
+- `python scripts/check_line_endings.py --verbose` — **227** tracked text files checked;
+  **8** legacy files remain explicitly allowlisted.
 - `git check-attr whitespace --` with `docs/RELEASE-WORKFLOW.md`,
   `site/src/content/docs/release-workflow.md`, `README.md`, and
   `site/src/pages/index.astro` — all four preserve Git's whitespace checks while
