@@ -55,6 +55,7 @@ CLAIM_REASON = MappingProxyType(
 LEASE_REASON = MappingProxyType(
     {
         "LEASE_EXPIRED": "lease_expired",
+        "UNKNOWN_NOW_SHAPE": "unknown_now_shape",
     }
 )
 

@@ -6,20 +6,21 @@ shape it already carries).
 Reference-guided Python port of src/control/execution.mjs (graduation
 slice 5, decision 0008). Execution edges are evidence, not a success
 declaration, and the log they accumulate into is append-only:
-append_execution_edges only ever unions edges into a new list by edge id: no
-function in this module can remove or overwrite one once appended, which is
+append_execution_edges only ever unions full edge payloads into a new list:
+no function in this module can remove or overwrite one once appended, which is
 what keeps control (control_tasks.py) and execution distinguishable - a
 task's control status can change, but the execution evidence behind it
 cannot.
 
-ADAPTATION - batch idempotency: accepted edge IDs enter the ``seen`` set
-during the same append call. The translated one-shot filter only compared
-against the prior log and admitted duplicate IDs from one incoming batch.
+ADAPTATION - evidence-preserving edges: each check's stable position is part
+of its identity, and collisions append unless the full edge payload matches.
+The frozen Node path keyed evidence only by check name and could erase a
+conflicting failed result.
 
 ADAPTATION - receipt-check validation: every check must satisfy the receipt
-contract's ``{name, command, outcome, detail?}`` shape before any edge is
-emitted. The translated comprehension trusted each list item and crashed on
-malformed input.
+contract's ``{name, command, outcome, detail?}`` shape and use the closed
+``passed``/``failed``/``skipped`` outcome vocabulary before any edge is
+emitted.
 """
 
 from __future__ import annotations
@@ -35,12 +36,16 @@ __all__ = [
 ]
 
 
+_CHECK_OUTCOMES = frozenset({"passed", "failed", "skipped"})
+
+
 def _is_check_shape(check):
     return (
         isinstance(check, dict)
         and isinstance(check.get("name"), str)
         and isinstance(check.get("command"), str)
         and isinstance(check.get("outcome"), str)
+        and check["outcome"] in _CHECK_OUTCOMES
     )
 
 
@@ -70,20 +75,28 @@ def derive_execution_edges(*, receipt):
     if not _is_receipt_shape(receipt):
         return {"edges": [], "reason_codes": [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]}
 
-    edges = [
-        {
-            "edge_id": deterministic_id("exec-edge", {"receipt": receipt["fingerprint"], "check": check["name"]}),
-            "kind": "check",
-            "receipt_id": receipt["receipt_id"],
-            "receipt_fingerprint": receipt["fingerprint"],
-            "capsule_id": receipt["capsule"]["id"],
-            "capsule_fingerprint": receipt["capsule"].get("fingerprint"),
-            "name": check["name"],
-            "outcome": check["outcome"],
-            "detail": check.get("detail"),
-        }
-        for check in receipt["checks"]
-    ]
+    edges = []
+    for position, check in enumerate(receipt["checks"]):
+        edges.append(
+            {
+                "edge_id": deterministic_id(
+                    "exec-edge",
+                    {
+                        "receipt": receipt["fingerprint"],
+                        "check": check["name"],
+                        "position": position,
+                    },
+                ),
+                "kind": "check",
+                "receipt_id": receipt["receipt_id"],
+                "receipt_fingerprint": receipt["fingerprint"],
+                "capsule_id": receipt["capsule"]["id"],
+                "capsule_fingerprint": receipt["capsule"].get("fingerprint"),
+                "name": check["name"],
+                "outcome": check["outcome"],
+                "detail": check.get("detail"),
+            }
+        )
 
     return {"edges": edges, "reason_codes": []}
 
@@ -91,20 +104,22 @@ def derive_execution_edges(*, receipt):
 def append_execution_edges(*, log, edges):
     """Append edges to an execution log. Pure and additive only: the
     returned list is a new list; the `log` passed in is never mutated.
-    Appending the same derived edges more than once is idempotent
-    (deduplicated by `edge_id`) rather than growing the log with repeats,
-    but no existing entry is ever dropped, changed, or reordered.
+    Appending the same full edge payload more than once is idempotent, while
+    a colliding edge ID with different evidence is retained.
 
     @param log
     @param edges
     @returns the new, appended-to log
     """
-    seen = {edge["edge_id"] for edge in log}
+    edges_by_id = {}
+    for existing in log:
+        edges_by_id.setdefault(existing["edge_id"], []).append(existing)
+
     additions = []
     for edge in edges:
-        edge_id = edge["edge_id"]
-        if edge_id in seen:
+        same_id_edges = edges_by_id.setdefault(edge["edge_id"], [])
+        if any(existing == edge for existing in same_id_edges):
             continue
-        seen.add(edge_id)
+        same_id_edges.append(edge)
         additions.append(edge)
     return [*log, *additions]

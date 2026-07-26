@@ -135,6 +135,30 @@ def test_scopes_overlap_is_false_for_disjoint_sibling_paths_in_the_same_project(
     assert scopes_overlap(scope("vivary", ["src/control"]), scope("vivary", ["src/policy"])) is False
 
 
+def test_normalize_scope_lexically_collapses_paths_without_escaping_their_anchors_and_is_idempotent():
+    cases = {
+        "src//control/../policy/.": "src/policy",
+        "\N{ZERO WIDTH NO-BREAK SPACE}src/control": "src/control",
+        "/src//control/../../": "/",
+        r"\\Server\Share\folder\..\..": "//server/share",
+        r"C:\Repo\src\..\Tests": "c:/repo/tests",
+        r"C:Repo\src\..\Tests": "c:repo/tests",
+    }
+
+    for raw_path, expected_path in cases.items():
+        normalized = normalize_scope(scope("vivary", [raw_path]))
+        assert normalized["paths"] == [expected_path]
+        assert normalize_scope(normalized) == normalized
+
+
+def test_scopes_overlap_preserves_posix_and_unc_anchors_as_containing_their_descendants():
+    assert scopes_overlap(scope("vivary", ["/"]), scope("vivary", ["/etc/vivary/config.json"])) is True
+    assert scopes_overlap(
+        scope("vivary", [r"\\Server\Share"]),
+        scope("vivary", [r"\\server\share\src\control.py"]),
+    ) is True
+
+
 # -- control_actors.py -------------------------------------------------------------------
 
 
@@ -211,6 +235,30 @@ def test_request_claim_treats_drive_qualified_windows_path_casing_as_the_same_sc
     assert second["claims"] == first["claims"]
 
 
+
+def test_request_claim_refuses_equivalent_lexical_scope_spellings_for_relative_and_absolute_anchors():
+    path_pairs = [
+        ("src//control/./", "src/control/claims.py"),
+        ("/workspace//src/../control", "/workspace/control/claims.py"),
+        (r"\\Server\Share\Repo\src\..", r"\\server\share\repo\file.py"),
+        (r"C:\Repo\Src\..\Control", r"c:\repo\control\file.py"),
+        (r"C:Repo\Src\..\Control", r"c:repo\control\file.py"),
+    ]
+
+    for claimed_path, requested_path in path_pairs:
+        first = request_claim(
+            active_claims=[],
+            request={"scope": scope("vivary", [claimed_path]), "actor": AGENT},
+        )
+        second = request_claim(
+            active_claims=first["claims"],
+            request={"scope": scope("vivary", [requested_path]), "actor": HUMAN},
+        )
+
+        assert second["decision"] == CLAIM_DECISION["REFUSED"]
+        assert second["reason_codes"] == [CLAIM_REASON["SCOPE_CONFLICT"]]
+        assert second["claims"] == first["claims"]
+
 def test_request_claim_refuses_a_second_overlapping_claim_even_from_the_same_actor_exactly_one_active_claim_per_scope():
     first = request_claim(active_claims=[], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
     second = request_claim(active_claims=first["claims"], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
@@ -280,6 +328,36 @@ def test_release_claim_fails_closed_for_an_actor_that_does_not_hold_the_claim():
     assert len(result["claims"]) == 1
 
 
+def test_release_claim_validates_actor_shape_before_releasing_a_claim():
+    granted = request_claim(active_claims=[], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
+
+    for malformed_actor in (None, {}, {"kind": AGENT["kind"]}, {"id": AGENT["id"]}, {"kind": AGENT["kind"], "id": 1}):
+        result = release_claim(
+            active_claims=granted["claims"],
+            claim_id=granted["claim"]["claim_id"],
+            actor=malformed_actor,
+        )
+
+        assert result["decision"] == CLAIM_DECISION["REFUSED"]
+        assert result["reason_codes"] == [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]]
+        assert result["claims"] == granted["claims"]
+
+
+def test_release_claim_requires_the_holder_kind_and_id_to_match():
+    granted = request_claim(active_claims=[], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
+    same_id_wrong_kind = {"kind": HUMAN["kind"], "id": AGENT["id"]}
+
+    result = release_claim(
+        active_claims=granted["claims"],
+        claim_id=granted["claim"]["claim_id"],
+        actor=same_id_wrong_kind,
+    )
+
+    assert result["decision"] == CLAIM_DECISION["REFUSED"]
+    assert result["reason_codes"] == [CLAIM_REASON["NOT_CLAIM_HOLDER"]]
+    assert result["claims"] == granted["claims"]
+
+
 def test_release_claim_fails_closed_on_an_unknown_claim_id():
     result = release_claim(active_claims=[], claim_id="claim_missing", actor=AGENT)
     assert result["decision"] == CLAIM_DECISION["REFUSED"]
@@ -307,6 +385,24 @@ def test_request_claim_refuses_unparseable_lease_timestamps():
         assert result["decision"] == CLAIM_DECISION["REFUSED"]
         assert result["reason_codes"] == [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]]
         assert result["claims"] == []
+
+
+def test_request_claim_refuses_timezone_naive_lease_timestamps():
+    result = request_claim(
+        active_claims=[],
+        request={
+            "scope": scope("vivary", ["src/control"]),
+            "actor": AGENT,
+            "lease": {
+                "granted_at": "2026-07-20T15:00:00",
+                "expires_at": "2026-07-20T15:10:00",
+            },
+        },
+    )
+
+    assert result["decision"] == CLAIM_DECISION["REFUSED"]
+    assert result["reason_codes"] == [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]]
+    assert result["claims"] == []
 
 
 # -- control_claims.py: leases, time as input only ------------------------------------------
@@ -350,6 +446,27 @@ def test_an_expired_leases_scope_is_claimable_again_once_expire_leases_has_run()
     swept = expire_leases(active_claims=granted["claims"], now="2026-07-20T15:11:00.000Z")
     regranted = request_claim(active_claims=swept["claims"], request={"scope": scope("vivary", ["src/control"]), "actor": HUMAN})
     assert regranted["decision"] == CLAIM_DECISION["GRANTED"]
+
+
+def test_expire_leases_rejects_unparseable_and_timezone_naive_now_without_releasing_claims():
+    granted = request_claim(
+        active_claims=[],
+        request={
+            "scope": scope("vivary", ["src/control"]),
+            "actor": AGENT,
+            "lease": {
+                "granted_at": "2026-07-20T15:00:00.000Z",
+                "expires_at": "2026-07-20T15:10:00.000Z",
+            },
+        },
+    )
+
+    for now in ("not-an-instant", "2026-07-20T15:11:00"):
+        result = expire_leases(active_claims=granted["claims"], now=now)
+
+        assert result["claims"] == granted["claims"]
+        assert result["expired"] == []
+        assert result["reason_codes"] == [LEASE_REASON["UNKNOWN_NOW_SHAPE"]]
 
 
 def test_control_never_reads_the_wall_clock_no_datetime_now_or_time_time_in_any_module():
@@ -646,6 +763,23 @@ def test_derive_execution_edges_produces_one_edge_per_check_carrying_the_receipt
         assert edge["kind"] == "check"
 
 
+
+def test_derive_execution_edges_uses_check_position_for_stable_distinct_duplicate_check_ids():
+    receipt = receipt_like(
+        overrides={
+            "checks": [
+                {"name": "unit-and-contract-tests", "command": "npm test", "outcome": "passed"},
+                {"name": "unit-and-contract-tests", "command": "npm test --retry", "outcome": "failed"},
+            ]
+        }
+    )
+
+    first = derive_execution_edges(receipt=receipt)["edges"]
+    second = derive_execution_edges(receipt=receipt)["edges"]
+
+    assert first[0]["edge_id"] != first[1]["edge_id"]
+    assert [edge["edge_id"] for edge in second] == [edge["edge_id"] for edge in first]
+
 def test_derive_execution_edges_fails_closed_on_a_malformed_receipt_shape():
     result = derive_execution_edges(receipt={"not": "a receipt"})
     assert result["edges"] == []
@@ -667,6 +801,25 @@ def test_derive_execution_edges_fails_closed_when_any_receipt_check_is_malformed
     assert result["reason_codes"] == [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]
 
 
+def test_derive_execution_edges_accepts_only_the_closed_check_outcome_vocabulary():
+    for outcome in ("passed", "failed", "skipped"):
+        result = derive_execution_edges(
+            receipt=receipt_like(
+                overrides={"checks": [{"name": "check", "command": "run check", "outcome": outcome}]}
+            )
+        )
+        assert result["reason_codes"] == []
+        assert result["edges"][0]["outcome"] == outcome
+
+    invalid = derive_execution_edges(
+        receipt=receipt_like(
+            overrides={"checks": [{"name": "check", "command": "run check", "outcome": "pending"}]}
+        )
+    )
+    assert invalid["edges"] == []
+    assert invalid["reason_codes"] == [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]
+
+
 def test_append_execution_edges_is_append_only_it_returns_a_new_list_and_never_mutates_the_log_passed_in():
     receipt = receipt_like()
     edges = derive_execution_edges(receipt=receipt)["edges"]
@@ -676,20 +829,20 @@ def test_append_execution_edges_is_append_only_it_returns_a_new_list_and_never_m
     assert len(result) == 1
 
 
-def test_append_execution_edges_is_idempotent_by_edge_id_appending_the_same_derived_edges_twice_does_not_duplicate_them():
+def test_append_execution_edges_is_idempotent_for_the_same_derived_edges_appending_them_twice_does_not_duplicate_them():
     receipt = receipt_like()
     edges = derive_execution_edges(receipt=receipt)["edges"]
     once = append_execution_edges(log=[], edges=edges)
     twice = append_execution_edges(log=once, edges=edges)
     assert len(twice) == len(once)
 
-def test_append_execution_edges_deduplicates_repeated_ids_within_one_incoming_batch():
+def test_append_execution_edges_skips_only_identical_payloads_and_preserves_conflicting_edge_id_evidence():
     edge = derive_execution_edges(receipt=receipt_like())["edges"][0]
     conflicting_duplicate = {**edge, "outcome": "failed"}
 
-    result = append_execution_edges(log=[], edges=[edge, conflicting_duplicate])
+    result = append_execution_edges(log=[edge], edges=[edge, conflicting_duplicate])
 
-    assert result == [edge]
+    assert result == [edge, conflicting_duplicate]
 
 
 # -- control_tasks.py: adversarial law - done cannot erase or mask a failed verification edge ---

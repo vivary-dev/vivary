@@ -15,10 +15,10 @@ leave a partial write behind. Leases carry a caller-supplied bounded
 validity; this module never reads the wall clock (see expire_leases) -
 `now` is always an input.
 
-ADAPTATION - bounded lease validation: caller-supplied lease timestamps must
-parse before a claim enters the ledger. The frozen Node behavior accepts
-unparseable strings, whose ``NaN`` expiry can otherwise create an immortal
-claim and permanently block overlapping scope.
+ADAPTATION - fail-closed lease validation: caller-supplied lease timestamps
+and `now` must parse as timezone-aware ISO instants. The frozen Node behavior
+accepts unparseable or local timestamps, whose host-dependent values can
+create immortal claims or non-deterministic expiration.
 """
 
 from __future__ import annotations
@@ -157,6 +157,13 @@ def release_claim(*, active_claims, claim_id, actor):
     @param actor  {kind, id}
     @returns {decision, reason_codes, claims}
     """
+    if not _is_valid_actor(actor):
+        return {
+            "decision": CLAIM_DECISION["REFUSED"],
+            "reason_codes": [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]],
+            "claims": list(active_claims),
+        }
+
     found = next((c for c in active_claims if c["claim_id"] == claim_id), None)
     if found is None:
         return {
@@ -164,7 +171,12 @@ def release_claim(*, active_claims, claim_id, actor):
             "reason_codes": [CLAIM_REASON["CLAIM_NOT_FOUND"]],
             "claims": list(active_claims),
         }
-    if found["actor"]["id"] != (actor or {}).get("id"):
+    claim_actor = found.get("actor")
+    if (
+        not _is_valid_actor(claim_actor)
+        or claim_actor["kind"] != actor["kind"]
+        or claim_actor["id"] != actor["id"]
+    ):
         return {
             "decision": CLAIM_DECISION["REFUSED"],
             "reason_codes": [CLAIM_REASON["NOT_CLAIM_HOLDER"]],
@@ -188,6 +200,13 @@ def expire_leases(*, active_claims, now):
     @returns {claims, expired}
     """
     now_ms = _parse_instant_ms(now)
+    if not math.isfinite(now_ms):
+        return {
+            "claims": list(active_claims),
+            "expired": [],
+            "reason_codes": [LEASE_REASON["UNKNOWN_NOW_SHAPE"]],
+        }
+
     claims = []
     expired = []
     for claim in active_claims:
@@ -197,19 +216,18 @@ def expire_leases(*, active_claims, now):
             expired.append({"claim": claim, "reason_codes": [LEASE_REASON["LEASE_EXPIRED"]]})
         else:
             claims.append(claim)
-    return {"claims": claims, "expired": expired}
+    return {"claims": claims, "expired": expired, "reason_codes": []}
 
 
 def _parse_instant_ms(instant):
-    # JS `Date.parse(instant)`: on the pinned ISO-instant fixture surface
-    # (see python/README.md: V8's tolerant non-ISO fallbacks are
-    # deliberately not reproduced) this parses to milliseconds since epoch.
-    # An unparseable string mirrors JS `Date.parse`'s `NaN` result rather
-    # than raising - every comparison against NaN is false in both
-    # languages, so an unparseable instant behaves as "never expired"
-    # exactly as it would in the Node reference.
+    # The frozen Node behavior accepts unparseable strings as `NaN` and
+    # timezone-naive values in the host's local zone. Scope leases must be
+    # deterministic, so both forms fail closed here.
     text = instant[:-1] + "+00:00" if isinstance(instant, str) and instant.endswith("Z") else instant
     try:
-        return datetime.fromisoformat(text).timestamp() * 1000
-    except (TypeError, ValueError):
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            return math.nan
+        return parsed.timestamp() * 1000
+    except (TypeError, ValueError, OverflowError, OSError):
         return math.nan
