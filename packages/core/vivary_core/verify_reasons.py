@@ -37,6 +37,7 @@ REASON_CODES = {
     "MISSING_ID": "missing_id",
     # Integrity failures (fail closed to "insufficient").
     "FINGERPRINT_MISMATCH": "fingerprint_mismatch",
+    "RECEIPT_ID_MISMATCH": "receipt_id_mismatch",
     "CAPSULE_BINDING_MISMATCH": "capsule_binding_mismatch",
     "RECEIPT_INVALID": "receipt_invalid",
     # Evidence-sufficiency failures (fail closed to "insufficient").

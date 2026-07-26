@@ -206,6 +206,14 @@ def test_a_genuine_receipt_verifies_on_its_own_integrity_even_with_no_capsule_su
     verdict = verify_receipt_integrity(receipt=receipt)
     assert verdict["outcome"] == OUTCOMES["VERIFIED"]
 
+def test_a_receipt_with_a_replaced_identifier_is_insufficient(receipt):
+    renamed_receipt = {**receipt, "receipt_id": "receipt_attacker_supplied"}
+
+    verdict = verify_receipt_integrity(receipt=renamed_receipt)
+
+    assert verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
+    assert verdict["reason_codes"] == [REASON_CODES["RECEIPT_ID_MISMATCH"]]
+
 
 def test_a_missing_receipt_is_refused_never_silently_passed():
     assert verify_receipt_integrity()["outcome"] == OUTCOMES["REFUSED"]

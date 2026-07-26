@@ -13,11 +13,16 @@ or process-spawning APIs.
 Reference-guided Python port of src/verify/receipt.mjs (graduation slice 4,
 Ozone; decision 0008). The Node module is the frozen executable oracle:
 every function here must reproduce it exactly.
+
+ADAPTATION - receipt identifier integrity: the Python seam recomputes the
+deterministic receipt ID from its capsule fingerprint, creation time, and
+runtime actor. The frozen Node oracle accepts arbitrary replacement IDs
+because the receipt fingerprint deliberately excludes ``receipt_id``.
 """
 
 from __future__ import annotations
 
-from vivary_core.canonical import fingerprint as compute_fingerprint
+from vivary_core.canonical import deterministic_id, fingerprint as compute_fingerprint
 from vivary_core.receipt import RECEIPT_SCHEMA
 from vivary_core.verify_reasons import OUTCOMES, REASON_CODES
 
@@ -88,6 +93,32 @@ def verify_receipt_integrity(*, receipt=None, capsule=None):
         return _verdict(
             outcome=OUTCOMES["INSUFFICIENT"],
             reason_codes=[REASON_CODES["FINGERPRINT_MISMATCH"]],
+            receipt_id=receipt_id,
+        )
+
+    expected_receipt_id_inputs = (
+        _optional(receipt.get("capsule"), "fingerprint"),
+        receipt.get("created_at"),
+        _optional(receipt.get("runtime"), "actor"),
+    )
+    if not all(isinstance(value, str) and len(value) > 0 for value in expected_receipt_id_inputs):
+        return _verdict(
+            outcome=OUTCOMES["INSUFFICIENT"],
+            reason_codes=[REASON_CODES["RECEIPT_ID_MISMATCH"]],
+            receipt_id=receipt_id,
+        )
+    expected_receipt_id = deterministic_id(
+        "receipt",
+        {
+            "capsule": expected_receipt_id_inputs[0],
+            "created_at": expected_receipt_id_inputs[1],
+            "actor": expected_receipt_id_inputs[2],
+        },
+    )
+    if receipt_id != expected_receipt_id:
+        return _verdict(
+            outcome=OUTCOMES["INSUFFICIENT"],
+            reason_codes=[REASON_CODES["RECEIPT_ID_MISMATCH"]],
             receipt_id=receipt_id,
         )
 
