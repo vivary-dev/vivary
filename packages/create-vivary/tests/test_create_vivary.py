@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import shutil
+import stat
 import subprocess
 import unittest
 import uuid
@@ -948,6 +949,176 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertTrue(outside.exists())
             self.assertTrue((skill_parent / "strato").exists())
 
+    def _block_removal(self, victim: Path):
+        """Make `victim` unremovable, returning a restore callable — or skip.
+
+        Windows refuses to delete a read-only file; POSIX refuses to unlink from a
+        directory without write permission. Neither holds for root, and DrvFs ignores
+        both, so the guard is probed with a throwaway sibling before the test relies
+        on it. The caller MUST call the returned restore in a `finally`, or
+        `temp_workspace`'s bare `rmtree` fails and the error reads as a harness bug.
+        """
+        parent = victim.parent
+        probe = parent / "vivary-removal-probe.tmp"
+        probe.write_text("probe\n", encoding="utf-8")
+        if os.name == "nt":
+            os.chmod(probe, stat.S_IREAD)
+            os.chmod(victim, stat.S_IREAD)
+
+            def restore():
+                for path in (victim, probe):
+                    if path.exists():
+                        os.chmod(path, stat.S_IWRITE)
+                        path.unlink()
+        else:
+            original = stat.S_IMODE(parent.lstat().st_mode)
+            os.chmod(parent, 0o500)
+
+            def restore():
+                os.chmod(parent, original)
+                if probe.exists():
+                    probe.unlink()
+
+        try:
+            probe.unlink()
+        except OSError:
+            return restore
+        restore()
+        self.skipTest("filesystem does not enforce removal permissions here")
+
+    def test_remove_path_raises_scaffold_error_when_file_cannot_be_removed(self):
+        with temp_workspace() as td:
+            target = Path(td) / "unremovable-file"
+            target.mkdir()
+            stale_parent = target / "modules"
+            stale_parent.mkdir()
+            stale = stale_parent / "codebase.md"
+            stale.write_text("legacy\n", encoding="utf-8")
+
+            restore = self._block_removal(stale)
+            try:
+                with self.assertRaises(create_vivary.ScaffoldError):
+                    create_vivary._remove_path(target, stale)
+            finally:
+                restore()
+
+    def test_remove_path_raises_scaffold_error_when_directory_cannot_be_removed(self):
+        with temp_workspace() as td:
+            target = Path(td) / "unremovable-dir"
+            target.mkdir()
+            stale_parent = target / "modules"
+            stale_parent.mkdir()
+            stale = stale_parent / "active-context"
+            stale.mkdir()
+            trapped = stale / "index.md"
+            trapped.write_text("legacy\n", encoding="utf-8")
+
+            restore = self._block_removal(trapped)
+            try:
+                with self.assertRaises(create_vivary.ScaffoldError):
+                    create_vivary._remove_path(target, stale)
+            finally:
+                restore()
+
+    def test_force_cleanup_failure_still_emits_json(self):
+        """The user-visible harm behind this finding: a raw OSError from cleanup
+        escapes `main`, so `--json` prints a traceback and no JSON at all."""
+        with temp_workspace() as td:
+            target = Path(td) / "cleanup-json"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            stale = target / "modules" / "codebase.md"
+            stale.write_text("legacy\n", encoding="utf-8")
+
+            restore = self._block_removal(stale)
+            try:
+                buf = io.StringIO()
+                with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+                    rc = create_vivary.main([
+                        "init",
+                        str(target),
+                        "--preset",
+                        "coding",
+                        "--force",
+                        "--no-wizard",
+                        "--json",
+                        "--repo-root",
+                        str(ROOT),
+                    ])
+            finally:
+                restore()
+
+            self.assertEqual(rc, 1)
+            payload = json.loads(buf.getvalue())
+            self.assertFalse(payload["ok"])
+            self.assertIn("stale scaffold path", payload["error"])
+
+    @unittest.skipIf(os.name != "nt", "junctions are Windows-only")
+    def test_force_cleanup_removes_stale_junction_without_touching_its_target(self):
+        """Regression guard for the reparse-point branch of `_remove_path`.
+
+        Green before and after the rewrite — it pins the behaviour the rewrite must
+        not break, namely that the junction goes and the directory it points at stays.
+        """
+        with temp_workspace() as td:
+            target = Path(td) / "cleanup-junction"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            outside = Path(td) / "outside-active-context"
+            outside.mkdir()
+            (outside / "keep.md").write_text("keep me\n", encoding="utf-8")
+            link = target / "modules" / "active-context"
+            try:
+                result = subprocess.run(
+                    ["cmd", "/c", "mklink", "/J", str(link), str(outside)],
+                    capture_output=True,
+                    timeout=15,
+                )
+            except (OSError, subprocess.SubprocessError):
+                self.skipTest("mklink unavailable")
+            if result.returncode != 0:
+                self.skipTest("junction creation failed")
+
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=True, repo_root=ROOT
+            )
+
+            self.assertFalse(link.exists() or create_vivary._is_symlink_or_junction(link))
+            self.assertEqual((outside / "keep.md").read_text(encoding="utf-8"), "keep me\n")
+
+    @unittest.skipIf(os.name == "nt", "Windows chmod only toggles the read-only bit")
+    def test_doctor_repair_preserves_existing_file_mode(self):
+        """`mkstemp` creates at 0600, so replacing an existing 0644 file through it
+        silently makes the file owner-only. Uses the `gitignore` action deliberately:
+        placeholder repairs create new files and are 0600 either way, so a
+        placeholder-based version of this test would pass before the fix.
+        """
+        with temp_workspace() as td:
+            target = Path(td) / "repair-mode"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            gitignore = target / ".gitignore"
+            gitignore.write_text("node_modules/\n", encoding="utf-8")
+            os.chmod(gitignore, 0o644)
+            if stat.S_IMODE(gitignore.lstat().st_mode) != 0o644:
+                self.skipTest("filesystem does not honour POSIX modes")
+
+            _, out = run_doctor_json(target, "--repair", "--yes")
+
+            applied = [
+                a for a in out["repair"]["actions"]
+                if a["kind"] == "gitignore" and a["applied"]
+            ]
+            self.assertTrue(applied, out)
+            self.assertEqual(
+                stat.S_IMODE(gitignore.lstat().st_mode),
+                0o644,
+                "repair must preserve the existing mode, not drop it to mkstemp's 0600",
+            )
+
     def test_force_dry_run_does_not_cleanup_stale_state(self):
         with temp_workspace() as td:
             target = Path(td) / "agent-workspace"
@@ -1830,6 +2001,103 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertEqual(actions[0]["status"], "manual")
             self.assertFalse(actions[0]["applied"])
             self.assertTrue(module.read_bytes().endswith(b"\xff"))
+            self.assertIn("UTF-8", actions[0]["summary"])
+            self.assertNotIn("complex YAML", actions[0]["summary"])
+
+    def test_doctor_repair_names_hardlink_as_the_w210_manual_cause(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-hardlinked-w210"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            module = target / "modules" / "codebase" / "index.md"
+            module.write_text(
+                module.read_text(encoding="utf-8").replace(
+                    "project: repair-hardlinked-w210\n",
+                    "title: Codebase\nproject: repair-hardlinked-w210\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            twin = Path(td) / "twin.md"
+            try:
+                os.link(module, twin)
+            except (OSError, AttributeError, NotImplementedError):
+                self.skipTest("hard links unavailable")
+
+            rc, out = run_doctor_json(target, "--repair", "--yes")
+
+            self.assertEqual(rc, 1)
+            actions = [a for a in out["repair"]["actions"] if a["kind"] == "tropo-w210"]
+            self.assertEqual(len(actions), 1)
+            self.assertEqual(actions[0]["status"], "manual")
+            self.assertIn("hard link", actions[0]["summary"])
+            self.assertNotIn("complex YAML", actions[0]["summary"])
+            self.assertIn("title: Codebase", module.read_text(encoding="utf-8"))
+
+    def test_w210_manual_summary_names_each_cause(self):
+        summary = create_vivary._w210_manual_summary
+
+        self.assertEqual(
+            summary([{"reason_code": "complex"}]),
+            create_vivary.W210_COMPLEX_SUMMARY,
+            "the all-complex wording is the pre-existing contract and must not drift",
+        )
+
+        stale = summary([{"reason_code": "stale"}])
+        self.assertIn("no longer matches", stale)
+        self.assertNotIn("complex YAML", stale)
+
+        mixed = summary([{"reason_code": "non-utf8"}, {"reason_code": "complex"}])
+        self.assertIn("UTF-8", mixed)
+        self.assertIn("scalar", mixed)
+
+        unknown = summary([{"reason_code": "something-new"}])
+        self.assertIn("manual", unknown.lower())
+
+        self.assertIn("read", summary([{"reason_code": "unreadable"}]))
+
+    def test_read_repair_text_refusals_carry_a_reason_code(self):
+        with temp_workspace() as td:
+            non_utf8 = Path(td) / "non-utf8.md"
+            non_utf8.write_bytes(b"# doc\n\xff")
+            with self.assertRaises(create_vivary.RepairRefusal) as caught:
+                create_vivary._read_repair_text(non_utf8)
+            self.assertEqual(caught.exception.reason_code, "non-utf8")
+            self.assertIn("non-UTF-8", str(caught.exception))
+
+            original = Path(td) / "linked.md"
+            original.write_text("# doc\n", encoding="utf-8")
+            twin = Path(td) / "linked-twin.md"
+            try:
+                os.link(original, twin)
+            except (OSError, AttributeError, NotImplementedError):
+                return
+            with self.assertRaises(create_vivary.RepairRefusal) as caught:
+                create_vivary._read_repair_text(original)
+            self.assertEqual(caught.exception.reason_code, "hardlinked")
+            self.assertIn("multi-linked", str(caught.exception))
+
+    def test_repair_refusal_is_a_scaffold_error(self):
+        """Existing `except ScaffoldError` handlers must keep catching refusals."""
+        self.assertTrue(issubclass(create_vivary.RepairRefusal, create_vivary.ScaffoldError))
+
+    def test_private_placeholder_text_refuses_undecodable_template(self):
+        """`read_text` raises UnicodeDecodeError, which is a ValueError — so it slips
+        past the `except OSError` here and past the apply loop's
+        `except (OSError, ScaffoldError)`, crashing the run instead of refusing.
+        """
+        with temp_workspace() as td:
+            fake_root = Path(td) / "fake-repo"
+            templates = fake_root / "packages" / "strato" / "templates"
+            templates.mkdir(parents=True)
+            (fake_root / "packages" / "strato" / "STRATO.md").write_text(
+                "# Strato\n", encoding="utf-8"
+            )
+            (templates / "USER.template.md").write_bytes(b"# User\n\xff")
+
+            with self.assertRaises(create_vivary.ScaffoldError):
+                create_vivary._private_placeholder_text(fake_root, "USER.md")
 
     @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
     def test_doctor_repair_refuses_symlinked_repair_targets(self):
