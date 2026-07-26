@@ -577,6 +577,14 @@ def test_append_execution_edges_is_idempotent_by_edge_id_appending_the_same_deri
     twice = append_execution_edges(log=once, edges=edges)
     assert len(twice) == len(once)
 
+def test_append_execution_edges_deduplicates_repeated_ids_within_one_incoming_batch():
+    edge = derive_execution_edges(receipt=receipt_like())["edges"][0]
+    conflicting_duplicate = {**edge, "outcome": "failed"}
+
+    result = append_execution_edges(log=[], edges=[edge, conflicting_duplicate])
+
+    assert result == [edge]
+
 
 # -- control_tasks.py: adversarial law - done cannot erase or mask a failed verification edge ---
 

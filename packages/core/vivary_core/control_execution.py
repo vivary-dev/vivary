@@ -11,6 +11,10 @@ function in this module can remove or overwrite one once appended, which is
 what keeps control (control_tasks.py) and execution distinguishable - a
 task's control status can change, but the execution evidence behind it
 cannot.
+
+ADAPTATION - batch idempotency: accepted edge IDs enter the ``seen`` set
+during the same append call. The translated one-shot filter only compared
+against the prior log and admitted duplicate IDs from one incoming batch.
 """
 
 from __future__ import annotations
@@ -80,6 +84,12 @@ def append_execution_edges(*, log, edges):
     @param edges
     @returns the new, appended-to log
     """
-    seen = {e["edge_id"] for e in log}
-    additions = [e for e in edges if e["edge_id"] not in seen]
+    seen = {edge["edge_id"] for edge in log}
+    additions = []
+    for edge in edges:
+        edge_id = edge["edge_id"]
+        if edge_id in seen:
+            continue
+        seen.add(edge_id)
+        additions.append(edge)
     return [*log, *additions]
