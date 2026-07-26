@@ -10,6 +10,60 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: Bellamente predecessor contract and semantic adapter truth] — 2026-07-26
+
+Affects public documentation, its generated website mirror, future implementation
+contracts, and the source checkout's unreleased `vivary-memory-cognee` 0.1.1 privacy
+floor. The published release remains 0.1.0; no provider call, memory mutation, MCP,
+install, version, publication, or deployment action occurs.
+
+### Changed
+
+- Reconciled [#160](https://github.com/vivary-dev/vivary/pull/160) as the normative
+  predecessor to #190: Bellamente remains an independent, workspace-local AgentLTM;
+  Tropo-backed semantic adapters and the provider-neutral `vivary-core` candidate
+  firewall are separate seams; learned memory never silently becomes authored truth.
+- Locked explicit opt-in before any disabled AgentLTM policy is created, the complete
+  fail-closed private set, truthful declarative capability and Doctor behavior, and
+  separate human gates for install, activation, MCP enablement, every mutation, and
+  release dogfood. Ordinary scaffold/adopt runs create no AgentLTM surface; selected
+  output is disabled policy and inert instructions only.
+- Corrected `docs/SEMANTIC-MEMORY.md` to match the shipped asynchronous Cognee adapter:
+  the adapter owns privacy-filtered snapshot construction, indexing refreshes the
+  whole dataset, recall accepts only known-node typed hits, forget removes the whole
+  approved dataset, and Doctor remains module-level and provider-free.
+  Recall documentation now names Cognee's fixed `source = "provider"` label, with the
+  package contract test asserting that value.
+  Current Doctor ordering is now explicit: `unavailable` short-circuits state-path
+  validation, so that status does not attest path safety.
+- Routed the nested Bellamente contract from the documentation index and the generated
+  semantic-memory page without creating an unsupported site route.
+- Made `docs/bellamente-memory/SPEC-bellamente-memory.md` the sole owner of the
+  private-set, Doctor-state, normalized-input, and firewall-result contracts; the ADR
+  and glossary now route instead of restating them. The specification defines the
+  enabled-policy Doctor state, keeps exact-duplicate preserve read-only, and requires
+  explicit opt-in before policy creation.
+- The source checkout's unreleased adapter floor includes `.strato/private/**` and now
+  matches privacy paths case-insensitively on Windows, with snapshot-level regression
+  coverage. Public docs distinguish that behavior from published 0.1.0. The remaining
+  escaped/complex Git-ignore limitation stays explicit and tracked by
+  [#236](https://github.com/vivary-dev/vivary/issues/236).
+
+### Verification
+
+- `python packages/memory-cognee/tests/test_memory_cognee.py` — **50/50** adapter
+  tests passed.
+- `cd site && npm run test:site` — **8/8** site tests passed.
+- `cd site && npm run build && npm run test:links` — **23** pages built; **1,644**
+  local references and **1,018** anchors checked with zero failures.
+- `python scripts/check_line_endings.py --verbose` — **231** tracked text files
+  checked; **8** legacy files remain explicitly allowlisted.
+- `git diff --check origin/dev...HEAD` — clean.
+- Rendered `/semantic-memory/` browser smoke — all three seams, current/future
+  divergence, absolute Bellamente contract link, published-0.1.0 versus unreleased
+  privacy behavior, Windows matching, the #236 link, and no horizontal overflow
+  verified.
+
 ## [Unreleased: vivary-core, the governed-context seam] — 2026-07-26
 
 Adds `vivary-core`, an in-repo library under `packages/core/`. **Not published to PyPI

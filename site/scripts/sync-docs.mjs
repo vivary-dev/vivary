@@ -28,7 +28,7 @@ const pages = [
   ['SKILLS', 'skills', 'Agent skills', 'The strato, tropo, and loops skills that operate a Vivary workspace.'],
   ['ACTIVE-CONTEXT', 'active-context', 'Active context', 'Optional CocoIndex-code sidecar guidance for semantic code retrieval.'],
   ['LLM-ACTIVE-CONTEXT', 'llm-active-context', 'LLM active-context guide', 'Copyable agent instructions for graph-first CocoIndex-code retrieval.'],
-  ['SEMANTIC-MEMORY', 'semantic-memory', 'Optional semantic memory', 'Architecture and adapter plan for optional semantic memory providers such as Cognee.'],
+  ['SEMANTIC-MEMORY', 'semantic-memory', 'Optional semantic memory', 'Implemented contract for Tropo-backed semantic-memory adapters and their boundary from independent agent LTM.'],
   ['WHITE-PAPER', 'white-paper', 'White paper', 'The technical case for a minimal, portable standard for agent-native workspaces.'],
   ['HOWTO', 'howto', 'How-to recipes', 'Task recipes: add a type, see blast radius, review, CI, multi-agent.'],
   ['SIGNALS', 'signals', 'Public signals', 'Public npm, PyPI, and GitHub metrics snapshots.'],
