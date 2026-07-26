@@ -12,6 +12,10 @@ Language mapping: JS `[...new Set(paths.map(normalizePath))].sort()` uses
 JS's default string `.sort()` (UTF-16 code-unit order) - mapped to
 ``canonical._utf16_sort_key`` per the pinned rule (plain string `.sort()`,
 never ``collation.locale_sort_key``).
+
+ADAPTATION - Windows scope identity: drive-qualified paths are folded
+case-insensitively on every host so persisted claim-ledger decisions stay
+deterministic and cannot grant overlapping Windows scopes on Linux CI.
 """
 
 from __future__ import annotations
@@ -19,12 +23,22 @@ from __future__ import annotations
 from vivary_core.canonical import _utf16_sort_key, is_within, normalize_path
 
 
+def _normalize_scope_path(path):
+    normalized = normalize_path(path)
+    is_windows_absolute = (
+        len(normalized) >= 3
+        and normalized[0].isalpha()
+        and normalized[1:3] == ":/"
+    )
+    return normalized.lower() if is_windows_absolute else normalized
+
+
 def normalize_scope(scope):
     """@param scope {project, paths}
     @returns a new scope dict with normalized, sorted, de-duplicated paths
     """
     raw_paths = (scope or {}).get("paths") or []
-    deduped = list(dict.fromkeys(normalize_path(p) for p in raw_paths))
+    deduped = list(dict.fromkeys(_normalize_scope_path(p) for p in raw_paths))
     paths = sorted(deduped, key=_utf16_sort_key)
     project = (scope or {}).get("project")
     return {"project": project if project is not None else "", "paths": paths}

@@ -196,6 +196,20 @@ def test_request_claim_refuses_an_overlapping_scope_claim_from_a_different_actor
     # the ledger is unchanged - no partial write occurred
     assert len(second["claims"]) == 1
 
+def test_request_claim_treats_drive_qualified_windows_path_casing_as_the_same_scope():
+    first = request_claim(
+        active_claims=[],
+        request={"scope": scope("vivary", [r"C:\Repo\src"]), "actor": AGENT},
+    )
+    second = request_claim(
+        active_claims=first["claims"],
+        request={"scope": scope("vivary", [r"c:\repo\src\file.py"]), "actor": HUMAN},
+    )
+
+    assert second["decision"] == CLAIM_DECISION["REFUSED"]
+    assert second["reason_codes"] == [CLAIM_REASON["SCOPE_CONFLICT"]]
+    assert second["claims"] == first["claims"]
+
 
 def test_request_claim_refuses_a_second_overlapping_claim_even_from_the_same_actor_exactly_one_active_claim_per_scope():
     first = request_claim(active_claims=[], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
