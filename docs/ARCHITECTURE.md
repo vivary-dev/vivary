@@ -118,6 +118,17 @@ What it owns:
   selection reason, every omission recorded.
 - **Receipts and evidence** — what actually ran, bound to the exact capsule and
   workspace fingerprint it ran against, in an append-only store.
+- **Role-policy surfaces** — reference implementations of the governed loop inside
+  `vivary-core`, not yet wiring in the shipping role CLIs:
+  - **Strato (`policy_*`)** evaluates budgets, capsule and receipt gates, and the
+    next loop step with fail-closed, pinned reason codes.
+  - **Ozone (`verify_*`)** recomputes receipt fingerprints for tamper detection,
+    evaluates gate sufficiency, and emits bounded repair proposals as gated dry-run
+    data.
+  - **Exo (`control_*`)** governs claims and leases, handoffs, dependencies,
+    execution evidence, and task views over caller-owned state.
+  - **Bellamente (`recall_*`)** applies the near-neighbor write firewall:
+    corroborate or route to review, never silently rewrite authored truth.
 
 The governing rule is the same one the rest of Vivary follows: it never resolves an
 ambiguity it merely observed. Conflicts are handed to review, not to confidence, and
