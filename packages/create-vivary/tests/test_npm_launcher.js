@@ -1,7 +1,7 @@
 // Tests for the npm launcher arg-mapping (packages/create-vivary/npm/index.js).
 // The launcher defaults a bare target to the `init` subcommand so the documented
-// `npm create @vivary@latest my-workspace` UX reaches the Python CLI, which requires an
-// explicit `init`/`doctor`/`wizard`/`capabilities` subcommand.
+// `npm create @vivary@latest my-workspace` UX reaches the Python CLI, which requires
+// an explicit public subcommand.
 "use strict";
 
 const assert = require("node:assert");
@@ -9,6 +9,17 @@ const path = require("node:path");
 
 const { mapArgs, pipxArgs, run, uvxArgs } = require(path.join(__dirname, "..", "npm", "index.js"));
 const { version } = require(path.join(__dirname, "..", "npm", "package.json"));
+
+// Keep this literal list aligned with the public subparsers in create_vivary.py and
+// the documented command reference. Do not source it from the launcher: the table
+// must catch a launcher missing a public command.
+const PUBLIC_SUBCOMMANDS = [
+  ["init", ["workspace"]],
+  ["doctor", ["workspace"]],
+  ["wizard", ["workspace"]],
+  ["capabilities", ["--json"]],
+  ["adopt", ["workspace", "--preset", "coding"]],
+];
 
 const cases = [
   // [input, expected, description]
@@ -18,10 +29,11 @@ const cases = [
     ["init", "Benchmarkies", "--preset", "coding"],
     "bare target keeps trailing flags",
   ],
-  [["init", "ws"], ["init", "ws"], "explicit init unchanged"],
-  [["doctor", "ws"], ["doctor", "ws"], "explicit doctor unchanged"],
-  [["wizard", "ws"], ["wizard", "ws"], "explicit wizard unchanged"],
-  [["capabilities", "--json"], ["capabilities", "--json"], "explicit capabilities unchanged"],
+  ...PUBLIC_SUBCOMMANDS.map(([subcommand, args]) => [
+    [subcommand, ...args],
+    [subcommand, ...args],
+    `explicit ${subcommand} unchanged`,
+  ]),
   [["-h"], ["-h"], "leading short help flag unchanged"],
   [["--help"], ["--help"], "leading long help flag unchanged"],
   [[], [], "no args unchanged"],

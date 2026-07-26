@@ -9,9 +9,9 @@ const { version } = require("./package.json");
 
 // The documented UX permits the bare-target form
 // `npm create @vivary@latest my-workspace`, but the Python CLI expects an explicit
-// `init`/`doctor` subcommand. Default a bare target to `init`; an explicit subcommand
-// or leading flag (e.g. `-h`/`--help`) passes through unchanged.
-const SUBCOMMANDS = new Set(["init", "doctor", "wizard", "capabilities"]);
+// subcommand. Default a bare target to `init`; an explicit subcommand or leading
+// flag (e.g. `-h`/`--help`) passes through unchanged.
+const SUBCOMMANDS = new Set(["init", "doctor", "wizard", "capabilities", "adopt"]);
 
 function mapArgs(args) {
   const first = args[0];
