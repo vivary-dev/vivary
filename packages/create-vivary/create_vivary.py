@@ -17,7 +17,6 @@ import sys
 import tempfile
 import time
 from datetime import date, datetime, timezone
-from fnmatch import fnmatchcase
 from pathlib import Path
 
 
@@ -756,7 +755,12 @@ def _privacy_gitignore_repair_actions(target: Path) -> list[dict]:
         if not gitignore.exists()
         else _missing_privacy_ignores(target, include_nested=False)
     )
-    nested_only = _nested_privacy_blockers(target, missing_with_nested)
+    nested_only = _unfixable_privacy_blockers(target, missing_with_nested)
+    # An append that provably will not fix the pattern must not be offered as `safe`,
+    # or repair rewrites `.gitignore` on every run without ever converging.
+    missing_root_only = [
+        pattern for pattern in missing_root_only if pattern not in set(nested_only)
+    ]
     actions: list[dict] = []
     if missing_root_only:
         actions.append(
@@ -1311,82 +1315,82 @@ def _missing_privacy_ignores(target: Path, *, include_nested: bool = True) -> li
     broad negations and nested memory/.gitignore files, since Git gives lower-level
     ignore files precedence over parent rules.
     """
-    missing = [
+    return [
         required
         for required, paths in PRIVACY_IGNORE_PROBES.items()
         if not all(
-            _ignored_by_rules(
-                _privacy_rules_for_probe(target, path, include_nested=include_nested),
-                path,
-            )
+            _probe_is_ignored(target, path, include_nested=include_nested)
             for path in paths
         )
     ]
-    memory_rules = _privacy_rules_for_probe(
-        target, "memory/secret.md", include_nested=include_nested
-    )
-    if "memory/*" not in missing and _has_unsafe_memory_exception(memory_rules):
-        missing.append("memory/*")
-    return missing
 
 
-def _nested_privacy_blockers(target: Path, patterns: list[str]) -> list[str]:
-    """Patterns a root `.gitignore` append cannot fix, because a lower-level ignore file
-    unignores them.
+def _unfixable_privacy_blockers(target: Path, patterns: list[str]) -> list[str]:
+    """Patterns a root `.gitignore` append provably cannot fix.
 
-    Decided by simulating the repair: apply the lines the append would add on top of the
-    existing root rules, then the nested rules (Git gives deeper ignore files
-    precedence), and check every probe. Anything still unignored is reported `manual`.
+    Decided by simulating the append and re-asking `_probe_is_ignored` — the same
+    predicate doctor passes on — so the planner can never report success for a change
+    the follow-up check will reject.
 
-    This is deliberately independent of whether the root rule was missing as well. The
-    previous subtraction of `missing_root_only` from `missing_with_nested` silently
-    dropped exactly that case, so repair appended the root rule, reported success, and
-    left the private path exposed.
+    Anything listed here is reported `manual` *and* withheld from the `safe` append
+    list. Withholding is what makes repair converge: previously an unfixable pattern
+    stayed missing forever, so every run appended another identical block.
     """
-    root_rules = _privacy_rules_at_base(target, "")
     blocked: list[str] = []
     for pattern in patterns:
-        repaired_root = list(root_rules)
-        for raw_line in PRIVACY_IGNORE_REPAIR_LINES[pattern].splitlines():
-            line = raw_line.rstrip(" ")
-            if not line or line.startswith("#"):
-                continue
-            negated = line.startswith("!")
-            body = line[1:] if negated else line
-            if body:
-                repaired_root.append(("", negated, body.replace("\\", "/")))
-        for probe in PRIVACY_IGNORE_PROBES[pattern]:
-            nested = _nested_privacy_rules_for_probe(target, probe)
-            if not nested:
-                continue
-            if not _ignored_by_rules(repaired_root + nested, probe):
-                blocked.append(pattern)
-                break
+        extra = tuple(_repair_line_rules(pattern))
+        if any(
+            not _probe_is_ignored(target, probe, extra_root_rules=extra)
+            for probe in PRIVACY_IGNORE_PROBES[pattern]
+        ):
+            blocked.append(pattern)
     return blocked
 
 
-def _nested_privacy_rules_for_probe(
-    target: Path, rel_path: str
-) -> list[tuple[str, bool, str]]:
-    """Rules contributed only by `.gitignore` files below the workspace root."""
-    rules: list[tuple[str, bool, str]] = []
-    parts = rel_path.replace("\\", "/").split("/")
-    for depth in range(1, len(parts)):
-        rules.extend(_privacy_rules_at_base(target, "/".join(parts[:depth])))
-    return rules
+def _probe_is_ignored(
+    target: Path,
+    rel_path: str,
+    *,
+    include_nested: bool = True,
+    extra_root_rules: tuple[tuple[str, bool, str], ...] = (),
+) -> bool:
+    """Whether Git would ignore `rel_path` in this workspace.
 
+    One predicate, shared by doctor's pass criterion, the repair planner's prediction
+    of success, and adopt's follow-ups — so the planner can never claim a fix the
+    check it is trying to satisfy will reject.
 
-def _privacy_rules_for_probe(
-    target: Path, rel_path: str, *, include_nested: bool
-) -> list[tuple[str, bool, str]]:
-    rules = _privacy_rules_at_base(target, "")
+    Walks the root file first, then downward. Git never descends into an excluded
+    directory, so once a directory component is excluded the answer is settled and a
+    deeper negation cannot re-include the file.
+
+    `extra_root_rules` simulates lines a repair would append to the root file.
+    """
+    rel_path = rel_path.replace("\\", "/")
+    rules = _privacy_rules_at_base(target, "") + list(extra_root_rules)
     if not include_nested:
-        return rules
+        return _ignored_by_rules(rules, rel_path)
 
-    parts = rel_path.replace("\\", "/").split("/")
+    parts = rel_path.split("/")
     for depth in range(1, len(parts)):
         base = "/".join(parts[:depth])
+        if _ignored_by_rules(rules, base):
+            return True
         rules.extend(_privacy_rules_at_base(target, base))
+    return _ignored_by_rules(rules, rel_path)
+
+
+def _repair_line_rules(pattern: str) -> list[tuple[str, bool, str]]:
+    """The root-level rules a `gitignore` repair would append for `pattern`."""
+    rules: list[tuple[str, bool, str]] = []
+    for raw_line in PRIVACY_IGNORE_REPAIR_LINES[pattern].splitlines():
+        line = raw_line.rstrip(" ")
+        if not line or line.startswith("#"):
+            continue
+        negated = line.startswith("!")
+        body = line[1:] if negated else line
+        if body:
+            rules.append(("", negated, body.replace("\\", "/")))
     return rules
 
 
@@ -1414,12 +1418,19 @@ def _privacy_ignore_rules(gitignore: Path, *, base: str) -> list[tuple[str, bool
 def _ignored_by_rules(rules: list[tuple[str, bool, str]], rel_path: str) -> bool:
     ignored = False
     for base, negated, pattern in rules:
-        if _ignore_rule_matches(base, pattern, rel_path):
+        # Negations match case-insensitively so a `!user.md` style re-include is never
+        # missed on a case-insensitive checkout; positive rules stay case-sensitive so
+        # a differently-cased rule is never credited with protecting anything. Both
+        # directions fail closed, and the check stays pure — no `git config` read — so
+        # `adopt` can use it on a directory that is not a repository yet.
+        if _ignore_rule_matches(base, pattern, rel_path, fold_case=negated):
             ignored = not negated
     return ignored
 
 
-def _ignore_rule_matches(base: str, pattern: str, rel_path: str) -> bool:
+def _ignore_rule_matches(
+    base: str, pattern: str, rel_path: str, *, fold_case: bool = False
+) -> bool:
     rel_path = rel_path.replace("\\", "/")
     if base:
         prefix = f"{base}/"
@@ -1429,29 +1440,63 @@ def _ignore_rule_matches(base: str, pattern: str, rel_path: str) -> bool:
     else:
         scoped = rel_path
 
-    directory_rule = pattern.endswith("/")
-    pattern = pattern.rstrip("/")
-    if pattern.startswith("/"):
-        pattern = pattern[1:]
+    body = pattern.rstrip("/")
+    if body.startswith("/"):
+        body = body[1:]
+    if not body:
+        return False
 
-    if directory_rule:
-        return scoped == pattern or scoped.startswith(pattern + "/")
-    if "/" not in pattern:
-        return fnmatchcase(Path(scoped).name, pattern)
-    return fnmatchcase(scoped, pattern)
+    regex = _wildmatch_regex(body)
+    if "/" not in body:
+        # A pattern with no separator matches by basename at any depth.
+        regex = r"(?:.*/)?" + regex
+    # A match also covers everything beneath it: `foo/` and bare `foo` name a
+    # directory, and Git excludes a directory's whole subtree.
+    flags = re.IGNORECASE if fold_case else 0
+    return re.match(rf"(?:{regex})(?:/.*)?\Z", scoped, flags) is not None
 
 
-def _has_unsafe_memory_exception(rules: list[tuple[str, bool, str]]) -> bool:
-    for base, negated, pattern in rules:
-        if not negated:
-            continue
-        if any(
-            _ignore_rule_matches(base, pattern, probe)
-            for probe in PRIVACY_IGNORE_PROBES["memory/*"]
-        ):
-            return True
+def _wildmatch_regex(pattern: str) -> str:
+    """Translate a gitignore pattern into a regex with Git's wildmatch semantics.
 
-    return False
+    `*` and `?` never cross `/`; `**/` matches zero or more leading segments; `**`
+    elsewhere matches anything. `fnmatch` gets all of that wrong — its `*` crosses
+    separators, and it compiles `**/USER.md` into a pattern requiring a literal slash,
+    so `!**/USER.md` was invisible here while Git honoured it and left the file
+    committable.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(pattern):
+        char = pattern[i]
+        if char == "*":
+            if pattern[i : i + 3] == "**/":
+                out.append("(?:[^/]+/)*")
+                i += 3
+            elif pattern[i : i + 2] == "**":
+                out.append(".*")
+                i += 2
+            else:
+                out.append("[^/]*")
+                i += 1
+        elif char == "?":
+            out.append("[^/]")
+            i += 1
+        elif char == "[":
+            close = pattern.find("]", i + 2)
+            if close == -1:
+                out.append(re.escape(char))
+                i += 1
+            else:
+                body = pattern[i + 1 : close]
+                if body[:1] in ("!", "^"):
+                    body = "^" + body[1:]
+                out.append(f"[{body}]")
+                i = close + 1
+        else:
+            out.append(re.escape(char))
+            i += 1
+    return "".join(out)
 
 
 def _obsidian_writes(target: Path) -> list[tuple[Path, str]]:

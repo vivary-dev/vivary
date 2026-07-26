@@ -1162,7 +1162,24 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertFalse(report["ok"])
             self.assertIn("privacy ignore missing: memory/*", report["errors"])
 
-    def test_doctor_rejects_nested_strato_private_gitignore_negation(self):
+    def test_doctor_accepts_inert_nested_strato_private_negation(self):
+        """A negation inside an already-excluded directory is inert, so doctor passes.
+
+        This test previously asserted the opposite. That assertion encoded the
+        order-insensitive matcher's behaviour as if it were intent; Git disagrees.
+        Verified directly:
+
+            $ printf '.strato/private/\\n' > .gitignore
+            $ printf '!private/secret.md\\n' > .strato/.gitignore
+            $ git check-ignore -v .strato/private/secret.md
+            .gitignore:1:.strato/private/    .strato/private/secret.md
+
+        `git status --untracked-files=all` does not list the file either. Git never
+        descends into an excluded directory and documents that a file cannot be
+        re-included if a parent directory is excluded, so the nested rule can never
+        fire. Reporting it made the workspace permanently red and prescribed a manual
+        edit that would change nothing.
+        """
         with temp_workspace() as td:
             target = Path(td) / "agent-workspace"
             create_vivary.scaffold_workspace(
@@ -1175,8 +1192,9 @@ class CreateVivaryTests(unittest.TestCase):
 
             report = create_vivary.doctor_workspace(target, repo_root=ROOT)
 
-            self.assertFalse(report["ok"])
-            self.assertIn("privacy ignore missing: .strato/private/", report["errors"])
+            self.assertNotIn(
+                "privacy ignore missing: .strato/private/", report["errors"]
+            )
 
     def test_doctor_ignores_unrelated_gitignore_negation(self):
         with temp_workspace() as td:
