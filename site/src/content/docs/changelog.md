@@ -20,6 +20,8 @@ Adds `vivary-core`, an in-repo library under `packages/core/`. **Not published t
 and not reachable from any shipping CLI**: wiring it outward is
 [#207](https://github.com/vivary-dev/vivary/issues/207). No existing package changes
 version, and nothing about installing or running Vivary changes because it exists.
+Publishing remains a manual human gate. No package publishes before the comprehensive
+coordinated release train is complete and separately approved.
 
 ### Added
 
@@ -44,20 +46,22 @@ version, and nothing about installing or running Vivary changes because it exist
 
 ### Changed
 
-- **Ratified the dependency direction for `vivary-core`** — the first acceptance
-  criterion of [#207](https://github.com/vivary-dev/vivary/issues/207). Role packages
-  depend on core; the `vivary` meta package receives it transitively and does not declare
-  it, so there is one owner per edge and no version-pinning fight. The edge is added to a
-  role's `pyproject.toml` in the *same commit* that makes that role first import
-  `vivary_core`, never ahead of it. That is why no manifest declares `vivary-core` yet:
-  nothing imports it yet, and a dependency nothing uses is a declaration the code does
-  not support. Recorded on [the architecture page](/architecture/) and in the release
-  workflow's bump table.
+- **Recorded the selected dependency direction for `vivary-core`** — the first
+  acceptance criterion of [#207](https://github.com/vivary-dev/vivary/issues/207). Role
+  packages depend on core; the `vivary` meta package receives it transitively and does
+  not declare it, so there is one owner per edge and no version-pinning fight. The edge
+  is added to a role's `pyproject.toml` in the *same commit* that makes that role first
+  import `vivary_core`, never ahead of it. That is why no role manifest depends on
+  `vivary-core` yet: no role imports it, and a dependency nothing uses is a declaration
+  the code does not support. Recorded on [the architecture page](/architecture/) and in
+  the release workflow's bump table.
 - The architecture page's PyPI list named four packages while six are published. It now
-  also names `vivary` and `vivary-memory-cognee`, and says plainly that `vivary-core` is
-  declared in-repo but deliberately unpublished. The seam description stopped asserting
-  in the present tense that every role package speaks through core — none does yet, which
-  its own status note already said thirty lines further down.
+  also names `vivary` and `vivary-memory-cognee`, and says plainly that `vivary-core`
+  remains unpublished during development and publishes only in the final comprehensive
+  coordinated release train. The seam description stopped asserting in the present
+  tense that every role package speaks through core — none does yet.
+- The architecture opening now uses Vivary's settled governed-context description
+  instead of the retired `create-t3-app` comparison.
 
 ### Fixed
 
@@ -90,6 +94,23 @@ Findings from the `vivary-core` review, all pre-release and none user-reachable:
   `unknown` instead of "detached"; the git output bound is enforced while the process
   runs rather than after; search terms are matched as fixed strings, not regexes; and
   negative claim budgets fail closed instead of silently widening the capsule.
+
+### Verification
+
+- `python -m pytest packages/core/tests/ -q` — **256 passed**.
+- `python scripts/tests/test_package_docs_parity.py` — **10/10 passed**.
+- `python scripts/check_package_docs_parity.py` — architecture matches **6** published
+  manifests with **1** deliberately unpublished distribution allowlisted.
+- `python scripts/check_line_endings.py --verbose` — **224** tracked text files checked;
+  **11** legacy files remain explicitly allowlisted.
+- `git check-attr whitespace --` with `docs/RELEASE-WORKFLOW.md`,
+  `site/src/content/docs/release-workflow.md`, `README.md`, and
+  `site/src/pages/index.astro` — all four preserve Git's whitespace checks while
+  treating CRLF's `\r` as part of the line ending.
+- `git diff --check origin/dev` — clean across the complete branch plus local remediation.
+- `cd site && npm run test:site && npm run build && npm run test:links` — **8/8** site
+  tests; **23** pages built; **1,626** local references and **1,000** anchors checked with
+  zero failures.
 
 ## [Unreleased: guided doctor repair and truthful map counts] — 2026-07-25
 

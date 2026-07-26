@@ -3,7 +3,7 @@
 That guard is a required CI check, so it needs its own coverage. Its bullet parser is
 the fragile part: the PyPI line is prose that wraps, so reading only the first physical
 line would silently report documented packages as missing and redden CI on a correct
-doc. These tests pin the wrapping behaviour and every failure branch.
+doc. These tests pin the wrapping behaviour and every documented-list failure branch.
 
 The expected package set is derived from the manifests here too, so adding a package
 does not require editing this file.
@@ -151,9 +151,9 @@ def test_stale_unpublished_allowlist_fails():
 
 
 def test_core_is_allowlisted_as_unpublished():
-    # Pins the #221 decision: vivary-core ships with the roles, never ahead of them.
-    # Publishing it means removing it here deliberately, which then requires the docs
-    # to name it.
+    # Pins the #221 decision: vivary-core stays unpublished during development and ships
+    # only in the final comprehensive coordinated release train. Publishing it means
+    # removing it here deliberately, which then requires the architecture doc to name it.
     module = _load()
     assert "vivary-core" in module.UNPUBLISHED
 

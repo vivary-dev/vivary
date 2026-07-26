@@ -1,14 +1,14 @@
 """Check that documented PyPI package truth matches the packaging manifests.
 
-`docs/ARCHITECTURE.md` claims to state "current package truth", but that list drifted
-two published packages behind `packages/*/pyproject.toml` before this guard existed.
-So it is derived rather than maintained by hand: the manifests are the single
-declaration, and `UNPUBLISHED` is the one explicit exception recording a distribution
-that exists in-repo without a PyPI release.
+`docs/ARCHITECTURE.md` claims to state "current package truth", but its PyPI list
+drifted two published packages behind `packages/*/pyproject.toml` before this guard
+existed. The manifests are the single declaration, and `UNPUBLISHED` is the one
+explicit exception recording a distribution that exists in-repo without a PyPI
+release.
 
 Publishing a distribution means removing its name from `UNPUBLISHED`, which then
-requires it in the documented list. Adding a package requires documenting it. Neither
-can drift silently.
+requires it in that PyPI list. Adding a package requires documenting it there. Other
+release surfaces remain the release workflow's explicit completeness checks.
 """
 
 from __future__ import annotations
@@ -22,9 +22,9 @@ PACKAGES = Path("packages")
 ARCHITECTURE = Path("docs/ARCHITECTURE.md")
 PYPI_BULLET = "- PyPI:"
 
-# Distributions that deliberately have no PyPI release yet. `vivary-core` is unpublished
-# on purpose: it ships with the next major alongside the role packages, never ahead of
-# them.
+# Distributions that deliberately have no PyPI release yet. `vivary-core` stays
+# unpublished during development and ships only in the final comprehensive coordinated
+# release train, together with every dependent role package.
 UNPUBLISHED = {"vivary-core"}
 
 
