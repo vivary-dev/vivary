@@ -190,11 +190,33 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     # scope ['/a'] while including claims from '/b', so a downstream agent could act
     # on context the capsule itself says is out of scope.
     declared_scope = task.get("scope")
+    def _in_scope(path) -> bool:
+        if not declared_scope:
+            return True
+        if not path:
+            # A scoped capsule may still narrate something with no path of its own;
+            # only entries that positively name an out-of-scope path are dropped.
+            return True
+        return any(is_within_allowlist(root, path) for root in declared_scope)
+
+    def _entry_in_scope(entry) -> bool:
+        """Scope applies to everything a capsule narrates, not only its claims.
+
+        A conflict, unknown or refusal naming an out-of-scope checkout is still
+        context about a place the capsule says it is not looking.
+        """
+        if not declared_scope or not isinstance(entry, dict):
+            return True
+        for key in ("path", "subject_path"):
+            if entry.get(key) and not _in_scope(entry[key]):
+                return False
+        for side in entry.get("sides") or []:
+            if isinstance(side, dict) and side.get("path") and not _in_scope(side["path"]):
+                return False
+        return True
+
     if declared_scope:
-        checkouts = [
-            n for n in checkouts
-            if any(is_within_allowlist(root, n.get("path") or "") for root in declared_scope)
-        ]
+        checkouts = [n for n in checkouts if _in_scope(n.get("path"))]
     checkouts_by_path = {n.get("path"): n for n in checkouts}
 
     truncation_omissions: list[dict] = []
@@ -259,6 +281,8 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
             }
         )
     for refusal in graph.get("refusals") or []:
+        if not _in_scope(refusal.get("path")):
+            continue
         omissions.append({"kind": "refused_root", "reason": refusal.get("reason"), "path": refusal.get("path")})
     content_unknowns: list[dict] = []
     for checkout_content in (content.get("checkouts") if content else None) or []:
@@ -296,6 +320,8 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     # never resolve them. Every conflict is handed to review, not to confidence.
     conflicts = []
     for conflict in graph["conflicts"]:
+        if not _entry_in_scope(conflict):
+            continue
         entry = dict(conflict)
         entry["decision"] = "review_required"
         conflicts.append(entry)
@@ -315,7 +341,10 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         },
         "claims": included,
         "conflicts": conflicts,
-        "unknowns": [*graph["unknowns"], *content_unknowns],
+        "unknowns": [
+            *[u for u in graph["unknowns"] if _entry_in_scope(u)],
+            *[u for u in content_unknowns if _entry_in_scope(u)],
+        ],
         "omissions": omissions,
         "required_checks": DEFAULT_REQUIRED_CHECKS,
         "budget": {"max_claims": max_claims},

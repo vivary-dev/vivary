@@ -690,6 +690,19 @@ def test_scope_narrower_than_the_graph_excludes_out_of_scope_checkouts(graph, fx
         f"{[c['subject_path'] for c in out_of_scope]}"
     )
 
+    # The finding names conflicts, unknowns and omissions too, not just claims.
+    # A capsule that declares scope ['/a'] must not narrate /b anywhere.
+    others = [p for p in fx["paths"].values() if p != in_scope]
+    rest = json.dumps({
+        "conflicts": capsule["conflicts"],
+        "unknowns": capsule["unknowns"],
+        "omissions": capsule["omissions"],
+    }).lower()
+    leaked = [p for p in others if p.replace("\\", "/").lower() in rest]
+    assert leaked == [], (
+        f"out-of-scope paths named in conflicts/unknowns/omissions: {leaked}"
+    )
+
 
 def test_negative_claim_budget_is_rejected_rather_than_inverted(graph):
     """Negative slicing quietly includes almost everything.
