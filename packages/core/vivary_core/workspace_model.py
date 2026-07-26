@@ -97,6 +97,19 @@ def _repository_identity(checkout: Dict[str, Any]) -> Dict[str, Any]:
                 "identity_status": "known",
                 "evidence": remotes.get("evidence"),
             }
+    # No remote names this repository, so fall back to a *repository*-level local
+    # identity rather than a worktree-level one. Git's common directory is shared by
+    # every linked worktree, so two branches of one remote-less repo group into a
+    # single repository node and their divergence surfaces exactly as it does for a
+    # repo with a remote. Keyed on the checkout path only when even that is
+    # unavailable, which is the genuinely unidentifiable case.
+    common_dir = checkout["facts"].get("git_common_dir")
+    if common_dir is not None and common_dir.get("status") == "known" and common_dir.get("value"):
+        return {
+            "identity": f"local:{common_dir['value']}",
+            "identity_status": "inferred",
+            "evidence": common_dir.get("evidence"),
+        }
     return {
         "identity": f"local:{checkout['path']}",
         "identity_status": "inferred" if (remotes is not None and remotes.get("status") == "known") else "unknown",

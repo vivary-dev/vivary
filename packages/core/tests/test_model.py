@@ -277,3 +277,46 @@ def test_refusals_pass_through_and_ignored_private_paths_never_appear_in_the_gra
     assert len(graph["refusals"]) == 1
     assert graph["refusals"][0]["reason"] == "outside_allowlist"
     assert "private-note" not in json.dumps(project_workspace_graph(observation))
+
+
+def test_linked_worktrees_of_a_no_remote_repo_share_one_repository_and_conflict(fx):
+    """A repository without a remote must surface divergence exactly like one with.
+
+    Identity fell back to `local:<path>`, so each linked worktree of the same
+    repository became its own repository node — and the divergent-checkout conflict,
+    the precise ambiguity this graph exists to surface, never fired. A local-only
+    repo is not a second-class repo; it just has no remote to name it.
+    """
+    from vivary_core.workspace_observe import observe_checkouts
+
+    base = tempfile.mkdtemp(prefix="vivary-worktree-")
+    try:
+        main_wt = os.path.join(base, "main-wt")
+        os.makedirs(main_wt)
+        _git(base, main_wt, ["init", "-q", "-b", "main", "."])
+        _write(os.path.join(main_wt, "a.txt"), "one\n")
+        _git(base, main_wt, ["add", "a.txt"])
+        _git(base, main_wt, ["commit", "-q", "-m", "one"])
+
+        linked = os.path.join(base, "linked-wt")
+        _git(base, main_wt, ["worktree", "add", "-q", "-b", "side", linked])
+        _write(os.path.join(linked, "b.txt"), "two\n")
+        _git(base, linked, ["add", "b.txt"])
+        _git(base, linked, ["commit", "-q", "-m", "two"])
+
+        observation = observe_checkouts([main_wt, linked], allowlist=[base], now=NOW)
+        graph = project_workspace_graph(observation)
+
+        repositories = [n for n in graph["nodes"] if n["kind"] == "repository"]
+        assert len(repositories) == 1, (
+            "linked worktrees of one repository must resolve to a single repository "
+            f"node, got {[r['identity'] for r in repositories]}"
+        )
+
+        divergent = [c for c in graph["conflicts"] if c["kind"] == "divergent_checkouts"]
+        assert len(divergent) == 1, (
+            "two worktrees at different revisions must surface as a divergence"
+        )
+        assert len(divergent[0]["sides"]) == 2
+    finally:
+        _rmtree_force(base)

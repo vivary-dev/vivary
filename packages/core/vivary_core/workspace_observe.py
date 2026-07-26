@@ -210,6 +210,17 @@ def _observe_one(raw_path: str, run_git: RunGit) -> Dict[str, Any]:
     if toplevel["ok"]:
         facts["is_git_repository"] = _known(True, toplevel["command"])
         facts["worktree_root"] = _known(normalize_path(toplevel["stdout"].strip()), toplevel["command"])
+        # Every linked worktree of one repository shares a common directory. It is
+        # the only stable local identity available when no remote names the
+        # repository — without it, each worktree of a remote-less repo looks like a
+        # separate repository and their divergence never surfaces.
+        common = run_git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        if common["ok"] and common["stdout"].strip():
+            facts["git_common_dir"] = _known(
+                normalize_path(common["stdout"].strip()), common["command"]
+            )
+        else:
+            facts["git_common_dir"] = _unknown("git_common_dir_unavailable", common["command"])
     else:
         # `--show-toplevel` fails for a bare repository too (it has no working
         # tree) - that is not the same fact as "not a git repository at all".
