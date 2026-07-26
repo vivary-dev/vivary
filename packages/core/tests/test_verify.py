@@ -32,7 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PY_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, PY_ROOT)
 
-from vivary_core.canonical import deterministic_id  # noqa: E402
+from vivary_core.canonical import deterministic_id, fingerprint  # noqa: E402
 from vivary_core.capsule_compile import compile_task_capsule  # noqa: E402
 from vivary_core.receipt import RECEIPT_SCHEMA, create_integrity_receipt  # noqa: E402
 from vivary_core.verify_reasons import OUTCOMES, REASON_CODES  # noqa: E402
@@ -265,6 +265,29 @@ def test_a_gate_whose_required_checks_all_passed_and_whose_claims_are_all_verifi
     assert verdict["reason_codes"] == []
     assert verdict["claims_verified"] == len(capsule["claims"])
     assert verdict["claims_total"] == len(capsule["claims"])
+
+def test_a_receipt_with_unrelated_verified_claim_ids_is_insufficient(capsule, receipt):
+    capsule_claim_ids = [claim["id"] for claim in capsule["claims"]]
+    unrelated_receipt = {
+        **receipt,
+        "claims_verified": ["claim:unrelated"] * len(capsule_claim_ids),
+        "claims_unverified": capsule_claim_ids,
+    }
+    receipt_body = {
+        key: value
+        for key, value in unrelated_receipt.items()
+        if key not in ("receipt_id", "fingerprint")
+    }
+    unrelated_receipt["fingerprint"] = fingerprint(receipt_body)
+
+    verdict = evaluate_gate_sufficiency(
+        gate=passing_gate(),
+        capsule=capsule,
+        receipt=unrelated_receipt,
+    )
+
+    assert verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
+    assert REASON_CODES["CLAIMS_NOT_FULLY_VERIFIED"] in verdict["reason_codes"]
 
 
 def test_a_missing_required_check_is_insufficient_with_a_named_failing_check(capsule, receipt):

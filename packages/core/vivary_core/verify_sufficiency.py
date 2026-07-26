@@ -30,6 +30,11 @@ about the capsule it claims to cover.
 Reference-guided Python port of src/verify/sufficiency.mjs (graduation
 slice 4, Ozone; decision 0008). The Node module is the frozen executable
 oracle: every function here must reproduce it exactly.
+
+ADAPTATION - verified claim coverage: the Python seam fails closed unless
+``receipt.claims_verified`` names every capsule claim. The frozen Node oracle
+only compares list lengths, which lets duplicate or unrelated IDs satisfy a
+gate; preserving that behavior would violate Ozone's evidence contract.
 """
 
 from __future__ import annotations
@@ -145,7 +150,14 @@ def evaluate_gate_sufficiency(*, gate=None, capsule=None, receipt=_NO_RECEIPT_PA
             add_reason(REASON_CODES["RECEIPT_MISSING_FOR_CLAIMS_VERIFICATION"])
         else:
             claims_verified = effective_receipt.get("claims_verified")
-            claims_verified_count = len(claims_verified) if claims_verified is not None else 0
+            if not isinstance(claims_verified, list):
+                claims_verified = []
+            claims_verified_count = sum(
+                isinstance(claim, dict)
+                and isinstance(claim.get("id"), str)
+                and claim["id"] in claims_verified
+                for claim in capsule["claims"]
+            )
             if claims_verified_count < len(capsule["claims"]):
                 add_reason(REASON_CODES["CLAIMS_NOT_FULLY_VERIFIED"])
 
