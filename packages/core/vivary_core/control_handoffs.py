@@ -12,6 +12,11 @@ capsule/revision the handoff claims to describe, and on any attempt to hand
 ownership-class authority to a worker or agent actor (the "workers never
 become product owners" law also applies at handoff time, not only at claim
 time).
+
+ADAPTATION - holder-bound initiation: a handoff is refused unless
+``from_actor`` matches both the kind and ID recorded on the claim. The
+translated path validated only the recipient and let any actor transfer
+another actor's claim.
 """
 
 from __future__ import annotations
@@ -91,6 +96,20 @@ def create_handoff(
         return {"decision": HANDOFF_DECISION["REFUSED"], "reason_codes": [HANDOFF_REASON["UNKNOWN_RECEIPT_SHAPE"]], "handoff": None}
     if not _is_claim_shape(claim):
         return {"decision": HANDOFF_DECISION["REFUSED"], "reason_codes": [HANDOFF_REASON["UNKNOWN_CLAIM_SHAPE"]], "handoff": None}
+
+    claim_actor = claim.get("actor")
+    holder_matches = (
+        isinstance(claim_actor, dict)
+        and isinstance(from_actor, dict)
+        and claim_actor.get("kind") == from_actor.get("kind")
+        and claim_actor.get("id") == from_actor.get("id")
+    )
+    if not holder_matches:
+        return {
+            "decision": HANDOFF_DECISION["REFUSED"],
+            "reason_codes": [HANDOFF_REASON["NOT_CLAIM_HOLDER"]],
+            "handoff": None,
+        }
 
     if receipt["capsule"]["fingerprint"] != capsule["fingerprint"]:
         return {"decision": HANDOFF_DECISION["REFUSED"], "reason_codes": [HANDOFF_REASON["RECEIPT_CAPSULE_MISMATCH"]], "handoff": None}

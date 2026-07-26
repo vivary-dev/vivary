@@ -87,6 +87,7 @@ HANDOFF_REASON = MappingProxyType(
         "UNKNOWN_CLAIM_SHAPE": "unknown_claim_shape",
         "RECEIPT_CAPSULE_MISMATCH": "receipt_capsule_mismatch",
         "WORKSPACE_REVISION_MISMATCH": "workspace_revision_mismatch",
+        "NOT_CLAIM_HOLDER": CLAIM_REASON["NOT_CLAIM_HOLDER"],
         "WORKERS_CANNOT_OWN": AUTHORITY_REASON["WORKERS_CANNOT_OWN"],
         "UNKNOWN_AUTHORITY_CLASS": AUTHORITY_REASON["UNKNOWN_AUTHORITY_CLASS"],
     }

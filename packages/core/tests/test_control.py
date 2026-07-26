@@ -446,6 +446,35 @@ def test_create_handoff_binds_a_claim_and_receipt_to_the_capsule_fingerprint_and
     assert result["handoff"]["receipt"]["fingerprint"] == receipt["fingerprint"]
     assert result["handoff"]["workspace_revision"] == capsule["workspace"]["fingerprint"]
 
+def test_create_handoff_refuses_when_the_initiator_is_not_the_claim_holder():
+    capsule = capsule_like()
+    receipt = receipt_like()
+    claim = {
+        "claim_id": "claim_1",
+        "actor": AGENT,
+        "scope": scope("vivary", ["src/control"]),
+        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
+    }
+    impostors = (
+        HUMAN,
+        {"kind": ACTOR_KIND["AGENT"], "id": "agent:other"},
+    )
+
+    for impostor in impostors:
+        result = create_handoff(
+            claim=claim,
+            receipt=receipt,
+            capsule=capsule,
+            from_actor=impostor,
+            to_actor=HUMAN,
+            workspace_revision=capsule["workspace"]["fingerprint"],
+            created_at="2026-07-20T15:06:00.000Z",
+        )
+
+        assert result["decision"] == HANDOFF_DECISION["REFUSED"]
+        assert result["reason_codes"] == [HANDOFF_REASON["NOT_CLAIM_HOLDER"]]
+        assert result["handoff"] is None
+
 
 def test_create_handoff_fails_closed_when_the_receipt_was_not_run_against_the_given_capsule():
     capsule = capsule_like()
