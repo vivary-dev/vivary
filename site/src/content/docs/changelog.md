@@ -164,10 +164,13 @@ Findings from the `vivary-core` review, all pre-release and none user-reachable:
   `unknown` instead of "detached"; the git output bound is enforced while the process
   runs rather than after; search terms are matched as fixed strings, not regexes; and
   negative claim budgets fail closed instead of silently widening the capsule.
+- **Capsule gate and budget validation now agree on identity shape.** A capsule without
+  a string `capsule_id` can no longer pass the gate, receive a budget refusal, and
+  still reach the loop's `act` decision.
 
 ### Verification
 
-- `python -m pytest packages/core/tests/ -q` — **411 passed**.
+- `python -m pytest packages/core/tests/ -q` — **412 passed**.
 - `uv run --isolated --no-project --no-cache --with ./packages/core python -c
   "from importlib.metadata import version; import vivary_core; assert
   version('vivary-core') == '0.1.0'"` — local wheel-equivalent import and distribution

@@ -79,7 +79,7 @@ pip install pytest
 python -m pytest packages/core/tests/ -q
 ```
 
-The 411-test suite translates the reference contracts across observation,
+The 412-test suite translates the reference contracts across observation,
 capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces,
 corruption handling, real-git evidence-store round trips, and byte-exact
 cross-runtime fixtures.
