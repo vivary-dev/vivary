@@ -67,9 +67,11 @@ personal vault.
 
 ## Provider model
 
-Semantic memory is a `strato` retrieval sidecar over a `tropo` graph snapshot. It
-consumes typed nodes and edges, then returns typed Vivary node candidates. It never
-owns canonical content.
+Semantic memory is a `strato` retrieval sidecar over a `tropo` graph snapshot. A
+**SemanticMemoryAdapter** is a Tropo-backed projection: it resolves a workspace and
+builds the privacy-filtered typed snapshot that it indexes or uses to validate recall.
+The category can cover local and Cognee-backed projections; the observed concrete
+implementation is `CogneeMemoryAdapter`. It never owns canonical content.
 
 ```text
 files + frontmatter
@@ -77,35 +79,57 @@ files + frontmatter
         v
 tropo typed graph  -->  tropo query / graph / blast / check
         |
-        | privacy-filtered typed nodes + edges
         v
-MemoryProvider / RecallProvider
+CogneeMemoryAdapter(root)
+  resolves workspace + builds privacy-filtered snapshot per operation
         |
         v
-typed RecallHit candidates  -->  strato retrieve step  -->  agent reads source files
+rebuildable provider dataset  -->  typed, known-node RecallHit candidates
+        |
+        v
+strato retrieve step  -->  agent reads source files
 ```
 
-The provider may keep an index, embeddings, graph projections, or provider-specific
-state, but that state is rebuildable from the typed graph plus approved source files.
-If provider state and source files disagree, source files plus `tropo` win.
+The adapter, not its caller, owns snapshot construction and privacy filtering.
+`index` and `recall` each build a current snapshot from the resolved workspace; callers
+do not supply nodes or edges. Provider state is rebuildable from the typed graph plus
+approved source files. If provider state and source files disagree, source files plus
+`tropo` win.
+
+### Adjacent memory terms
+
+- **SemanticMemoryAdapter** — a Tropo-backed projection for semantic recall. Its
+  candidates remain typed graph leads, not canonical content.
+- **AgentLTM** — an independent agent long-term-memory store, not a Tropo projection
+  or semantic-adapter dataset. Bellamente is discussed only in the separate
+  [AgentLTM documentation](https://github.com/vivary-dev/vivary/tree/dev/docs/bellamente-memory).
+- **CandidateRecallProvider** — the provider-neutral, optional source of normalized
+  prior assertions proposed for the `vivary-core` candidate-recall firewall in
+  [#205](https://github.com/vivary-dev/vivary/issues/205). It is not a shipped
+  protocol or a synonym for SemanticMemoryAdapter. Before `vivary-core` evaluates a
+  Bellamente candidate, normalization must supply typed evidence and either a known
+  stable Tropo node ID or the explicit unresolved-identity marker defined by the
+  Bellamente contract. Learned memory never silently promotes to authored truth.
 
 ## Minimal interface
 
-The first implementation should keep indexing and recall separate enough that a
-workspace can disable writes while still reporting health.
+The current seam keeps provider writes separate from health reporting. The
+`SemanticMemoryAdapter` name below documents the shape implemented by
+`CogneeMemoryAdapter`; it is not a published shared provider base class.
 
 ```python
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from pathlib import Path
+from typing import Any, Protocol
 
 @dataclass(frozen=True)
 class MemoryNode:
     id: str
-    type: str
+    type: str | None
     path: str
     title: str
     text: str
-    fields: dict
+    fields: dict[str, Any]
 
 @dataclass(frozen=True)
 class MemoryEdge:
@@ -116,80 +140,79 @@ class MemoryEdge:
 @dataclass(frozen=True)
 class RecallHit:
     node_id: str
-    type: str
+    type: str | None
     path: str
     score: float
     reason: str
-    source: Literal["tropo", "semantic", "provider"]
+    source: str  # fixed "provider" label from the Cognee adapter
     edge_context: list[MemoryEdge]
     provider: str
 
-class RecallProvider(Protocol):
-    name: str
+@dataclass(frozen=True)
+class MemorySnapshot:
+    root: str
+    dataset: str
+    fingerprint: str
+    nodes: list[MemoryNode]
+    edges: list[MemoryEdge]
+    private_patterns: list[str]
 
-    def doctor(self) -> dict: ...
-    def recall(
-        self,
-        query: str,
-        *,
-        k: int = 10,
-        filters: dict | None = None,
-    ) -> list[RecallHit]: ...
+class SemanticMemoryAdapter(Protocol):
+    async def index(
+        self, *, dry_run: bool = False, approved: bool = False
+    ) -> dict[str, Any]: ...
 
-class MemoryProvider(RecallProvider, Protocol):
-    def index(
-        self,
-        *,
-        nodes: list[MemoryNode],
-        edges: list[MemoryEdge],
-        dry_run: bool = False,
-    ) -> dict: ...
+    async def recall(self, query: str, *, k: int = 10) -> list[RecallHit]: ...
 
-    def forget(self, node_ids: list[str]) -> dict: ...
+    async def forget(self, *, approved: bool = False) -> dict[str, Any]: ...
+
+def doctor(root: str | Path) -> dict[str, Any]: ...
 ```
 
-Minimum contract:
+Minimum current contract:
 
-- `index` receives only privacy-approved typed nodes and typed edges.
-- `recall` returns node ids, types, paths, scores, reason text, and edge context, not
-  opaque chunks.
-- `forget` removes provider state for deleted or newly private nodes.
-- `doctor` reports disabled, unavailable, healthy, stale, or misconfigured without
-  breaking a core Vivary workspace.
-- Providers must be optional imports. Missing extras produce helpful status, not an
-  import-time failure.
+- `CogneeMemoryAdapter(root)` resolves the workspace. `index` and `recall` each build
+  their own current, privacy-filtered snapshot; they do not accept caller-supplied
+  nodes, edges, or recall filters.
+- `index(dry_run=True)` reports node/edge counts and the fingerprint for the whole
+  snapshot without returning its contents or performing provider writes.
+  A non-dry-run index is an async whole-dataset refresh: after the configured approval
+  gate, it removes the prior dataset and remembers every current snapshot node.
+- `recall` is async and returns only typed hits whose stable node IDs occur in the
+  current snapshot. Its `k` is normalized by the adapter; `tropo query` applies
+  type, path, and edge filters after recall.
+- `forget(approved=True)` is async whole-dataset removal, not targeted node deletion;
+  it also removes the adapter manifest.
+- `doctor(root)` is a separate, module-level, read-only declarative report. It builds
+  a snapshot and inspects config, package availability, and manifest state without
+  constructing the adapter, importing Cognee, or calling the provider.
+- The optional Cognee runtime is imported only for live adapter operations. Missing
+  extras produce status or a helpful adapter error, not an import-time core failure.
 
 ## Cognee provider
 
-Cognee plugs in as an adapter behind the provider interface through a separate
-optional package:
-
-- `vivary-memory-cognee`
-
-Future packaging options may still include:
-
-- `vivary-strato[cognee]` if `strato` later becomes packaged code
-- `create-vivary[cognee]` only if the scaffolder owns provider setup, not core runtime
+Cognee plugs in through the separate optional `vivary-memory-cognee` adapter package.
+Future packaging options may still include `vivary-strato[cognee]` if `strato` becomes
+packaged code, or `create-vivary[cognee]` if the scaffolder owns provider setup rather
+than core runtime.
 
 The adapter maps:
 
 | Vivary | Cognee adapter responsibility |
 |---|---|
-| typed node | approved memory item with stable Vivary node id |
-| typed edge | relationship/context metadata preserved during recall |
-| privacy ignore result | hard pre-index filter |
-| `tropo graph` snapshot | rebuildable provider input |
-| `RecallHit` | typed Vivary node candidate for `strato` to inspect |
+| workspace root | resolve the workspace before every operation |
+| `tropo graph` snapshot | build a rebuildable, privacy-filtered provider input |
+| typed node and edge | encode the current snapshot with stable Vivary node IDs and recall context |
+| privacy policy | filter before packets reach the provider |
+| `RecallHit` | return a typed Vivary node candidate for `strato` to inspect |
 | provider state | cache/index only, safe to delete and rebuild |
 
 Cognee-specific details stay behind the adapter: package imports, initialization,
 LLM/embedding model settings, data directories, optional server/UI usage, and any
 remote/API key configuration. The default Vivary install should not import Cognee or
-run a Cognee doctor.
-
-Including a Cognee layer "in Vivary" means the monorepo owns an optional adapter,
-tests, docs, and install flow. It does not mean Cognee becomes a dependency of the
-core packages or the default preset output.
+run a Cognee doctor. Including a Cognee layer "in Vivary" means the monorepo owns an
+optional adapter, tests, docs, and install flow; it does not make Cognee a dependency
+of core packages or the default preset output.
 
 Current commands:
 
@@ -210,12 +233,12 @@ is retrieval policy for `strato` plus optional provider state. Keeping it separa
 prevents users from treating a semantic index as graph truth and lets storage and
 memory be installed independently.
 
-Cognee-policy example:
+Approved activated Cognee-policy example:
 
 ```toml
 # .vivary/memory.toml
-# Optional semantic memory. Default scaffold may omit this file or write disabled
-# policy only. Provider state is rebuildable cache, not source truth.
+# Activated optional semantic memory. Provider state is rebuildable cache, not source
+# truth.
 
 [memory]
 enabled = true
@@ -225,7 +248,7 @@ provider = "cognee"   # vivary-local | cognee
 [memory.privacy]
 respect_gitignore = true
 respect_vivary_private = true
-private_paths = ["USER.md", "MEMORY.md", "memory/**", "heartbeat-reports/**"]
+private_paths = ["USER.md", "MEMORY.md", "memory/**", "heartbeat-reports/**", ".strato/private/**"]
 fail_closed = true
 
 [memory.cognee]
@@ -236,6 +259,41 @@ api_key_env = ""
 allow_without_api_key = false
 allow_telemetry = false
 ```
+
+Approved scaffold contract: selecting a memory capability writes only disabled
+policy/config and inert documentation. It must not install, enable, index, call a
+provider, or mutate memory. Human activation is a separate gate; install and live
+proof remain separate explicit gates after activation.
+
+Current scaffold output diverges: it writes `enabled = true` with runtime gates closed
+(`allow_network = false` and `require_explicit_index = true`). It installs nothing,
+indexes nothing, and makes no provider call, but does not yet meet the approved
+disabled-policy contract.
+
+In the source checkout's unreleased `vivary-memory-cognee` 0.1.1 adapter, privacy
+filtering is owned by `build_snapshot`: built-in private patterns always apply, and
+Git ignore rules apply when `respect_gitignore` (default `true`) is enabled.
+`respect_vivary_private` and `fail_closed` are accepted and type-checked policy fields,
+but they are not current filtering switches. Before path filtering, snapshot
+construction refuses linked, out-of-root, hard-linked, or unstatable source files; it
+raises rather than silently skipping them.
+
+### Privacy boundary
+
+The source checkout and next `vivary-memory-cognee` release include
+`.strato/private/**` in the built-in floor and compare privacy patterns
+case-insensitively on Windows. The currently published 0.1.0 package lacks that
+built-in `.strato/private/**` entry; its generated Vivary configuration lists the path
+in `memory.privacy.private_paths`, but hand-written or older configurations must add
+it explicitly before indexing.
+
+The dependency-free `.gitignore` matcher is not fully Git-equivalent:
+backslash-escaped patterns and some complex `**` or anchored patterns can disagree
+with Git. Until [#236](https://github.com/vivary-dev/vivary/issues/236) lands, do not
+use `respect_gitignore` as the sole privacy boundary for such paths. Add each sensitive
+path to `memory.privacy.private_paths` as an unescaped workspace-relative literal or
+simple glob, and do not approve indexing when privacy depends on unsupported Git
+pattern syntax.
 
 Runtime/index state belongs under `.vivary/memory/` and should be ignored. The adapter
 binds Cognee's data, system, cache, and log roots to the configured `state_path`
@@ -363,42 +421,60 @@ remote services merely because a capability exists.
 
 ## Doctor behavior
 
-`create-vivary doctor` includes a semantic memory section without requiring any
-provider dependency.
+`vivary_cognee.doctor(root)` is the current module-level, read-only semantic-memory
+report. It is separate from `CogneeMemoryAdapter`: it resolves the workspace, parses
+the memory config, builds the privacy-filtered Tropo snapshot, checks Cognee
+availability without importing it, and, when Cognee is available, resolves and
+compares the manifest. It does not construct an adapter or make provider, embedding,
+or LLM calls.
 
-Recommended states:
+Package unavailability short-circuits manifest and `state_path` resolution. An
+`unavailable` report therefore confirms only that Cognee is configured and absent; it
+does **not** attest that the configured state path is safe. Live adapter operations
+always validate the path before use, and Doctor reports an unsafe path as
+`misconfigured` once Cognee is available.
+
+Its current states are:
 
 | State | Meaning |
 |---|---|
-| `disabled` | no `.vivary/memory.toml`, or `[memory].enabled = false` |
-| `enabled` | provider configured and policy says semantic recall can run |
-| `healthy` | optional provider package is installed and the current graph fingerprint matches the manifest |
-| `unavailable` | optional provider dependency is not installed |
-| `misconfigured` | invalid provider, missing required fields, secret literal in config, or forbidden network mode |
-| `stale` | provider index exists but graph fingerprint or indexed node count is outdated |
+| `disabled` | semantic memory is disabled or its provider is `none` |
+| `not-cognee` | another enabled provider is configured; this adapter does not handle it |
+| `unavailable` | Cognee is configured but its package is not installed; manifest and state-path validation have not run |
+| `misconfigured` | root, config, or snapshot validation failed, or state-path validation failed while Cognee was available |
+| `stale` | Cognee is available but the manifest is absent, unreadable, or does not match the current snapshot |
+| `healthy` | Cognee is available and the manifest matches the current snapshot |
 
-Doctor checks:
+The report is declarative: it describes config, snapshot, package, and manifest state;
+it never activates or talks to the provider.
 
-- Parse `.vivary/memory.toml` if present.
-- Report disabled cleanly when absent or disabled.
-- Type-check the committed semantic-memory config shape and report invalid TOML as
-  `misconfigured`.
-- Build a privacy-filtered Tropo graph snapshot without provider calls, refusing
-  out-of-root, linked, or hard-linked Markdown files before they can become provider
-  packets.
-- Confirm optional Cognee package presence only when Cognee is configured; this check
-  does not import Cognee runtime or make embedding/LLM calls.
-- Compare the local manifest fingerprint to the current Tropo graph snapshot and
-  report `stale` or `healthy`.
-- Return JSON that agents can gate on, for example:
+### Workspace doctor (`create-vivary doctor`)
+
+The workspace doctor separately returns a `memory` report without requiring a provider
+runtime or invoking live provider operations. Its status vocabulary is intentionally
+different from the adapter-package doctor:
+
+| State | Meaning |
+|---|---|
+| `disabled` | no memory config, `enabled = false`, or provider `none` |
+| `privacy-failed` | private workspace paths are not actively ignored |
+| `healthy` | the `vivary-local` policy is configured |
+| `configured` | Cognee policy and its adapter are available; indexing still requires approval |
+| `unavailable` | Cognee policy is configured but the adapter is unavailable |
+| `misconfigured` | config is invalid or the provider is unknown |
+
+For example, the no-config case is agent-gateable JSON:
 
 ```json
 {
   "memory": {
     "enabled": false,
     "provider": "none",
+    "mode": "none",
     "status": "disabled",
-    "privacy": "not-indexed"
+    "config": null,
+    "privacy": "not-indexed",
+    "detail": ""
   }
 }
 ```
@@ -416,18 +492,17 @@ Recommended retrieval order:
 5. Read the returned source files directly before acting.
 6. Verify with the same workspace checks and human gates.
 
-Conflict rules:
+Current adapter safeguards:
 
-- If semantic recall returns a node id that `tropo graph` does not know, mark it stale
-  and ignore it.
-- If semantic recall suggests content from a private/ignored path, treat it as a
-  privacy failure and stop.
+- Recall mapping drops a provider item without a stable Vivary node marker or whose
+  node ID is absent from the rebuilt snapshot. A Git-ignored path admitted to the
+  snapshot because of the matcher limitation above is not recovered at this stage.
 - If semantic score and graph edges disagree, prefer graph edges for truth and use the
   semantic hit as a lead to inspect.
-- `tropo query --mode semantic` shares this provider contract. It calls the configured
-  optional semantic-memory provider and returns typed Vivary node ids, not opaque
-  chunks. It must stay unavailable until the user has explicitly configured, installed,
-  and indexed a supported provider.
+- `tropo query --mode semantic` is the shipped optional-provider bridge. It invokes
+  the adapter's async recall boundary, then applies type, path, and edge filters to
+  typed results before returning them. It stays unavailable until the user explicitly
+  configures, installs, and indexes a supported provider.
 
 ## Implementation files
 
@@ -462,15 +537,18 @@ Files touched by the setup slice and likely files for the Cognee adapter PR:
 
 Tests for the setup slice and future provider code:
 
-- Fake provider unit tests: `index`, `recall`, `forget`, and `doctor` behavior with
-  typed nodes and edges.
-- Contract tests: recall hits must include `node_id`, `type`, `path`, `score`,
-  `reason`, `provider`, and edge context.
+- Adapter tests: `CogneeMemoryAdapter` resolves the workspace and builds its own
+  privacy-filtered snapshot for `index` and `recall`; `forget` is approved
+  whole-dataset removal and `doctor` remains module-level and provider-free.
+- Contract tests: recall hits include `node_id`, nullable `type`, `path`, `score`,
+  `reason`, the Cognee adapter's fixed `source = "provider"` label, `provider`, and
+  edge context.
 - Privacy regression tests: `USER.md`, `MEMORY.md`, `memory/**`,
-  `heartbeat-reports/**`, and configured ignored paths are filtered before indexing
-  and never recalled.
-- Doctor tests for absent config, disabled config, enabled local provider, missing
-  Cognee dependency, invalid config, stale index, and privacy failure.
+  `heartbeat-reports/**`, `.strato/private/**`, and configured ignored paths are
+  filtered before indexing and never recalled.
+- Doctor tests for absent config, disabled config, a non-Cognee provider
+  (`not-cognee`), missing Cognee dependency, invalid config, stale index, and privacy
+  failure.
 - Scaffold tests: default `second-brain` creates no semantic memory dependency and
   no enabled provider.
 - Wizard/agent-mode tests: `--auto` never selects Cognee; explicit Cognee choice writes
@@ -499,8 +577,9 @@ When this becomes implementation work, treat it as a behavior and public-copy ch
 
 1. Cut a feature branch from `dev`.
 2. Write the tests above before provider code.
-3. Implement the provider abstraction with a fake provider first. Done for the first
-   Cognee adapter slice in `packages/memory-cognee/`.
+3. Implement or maintain semantic adapters around the workspace-root and
+   adapter-built-snapshot seam. The first Cognee adapter slice is in
+   `packages/memory-cognee/`.
 4. Add capability discovery so human and agent flows can see optional database,
    local-memory, and Cognee choices before installing anything.
 5. Add optional Cognee adapter only behind an explicit extra/package.
@@ -522,10 +601,9 @@ When this becomes implementation work, treat it as a behavior and public-copy ch
 
 - Whether a future `strato` package should wrap `vivary-memory-cognee` or keep the
   adapter package separate.
-- Whether local Vivary semantic recall should be implemented before Cognee so the
-  provider interface is proven without a third-party dependency.
-- Whether #20's eventual `tropo query --mode semantic` should call this provider layer
-  directly or stay a separate typed-node embedding path with the same result contract.
-- Exact graph fingerprint/staleness algorithm for provider indexes.
-- Whether `.vivary/memory.toml` is written by default as disabled policy or only
-  written when the user opts into memory configuration.
+- Whether local Vivary semantic recall should be implemented before Cognee using this
+  adapter seam, without a third-party dependency.
+- Whether adapters beyond Cognee must use the current fingerprint and manifest
+  algorithm.
+- When the scaffold will be brought into conformance with the approved
+  disabled-policy contract.

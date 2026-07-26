@@ -232,6 +232,32 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
         self.assertIn("source_files", auth.text)
         self.assertTrue(any(edge.source_id == "auth" for edge in snapshot.edges))
 
+    def test_build_snapshot_filters_strato_private_floor(self):
+        with temp_workspace() as root:
+            write_workspace(root)
+            strato_dir = ".STRATO" if os.name == "nt" else ".strato"
+            private_dir = root / strato_dir / "private"
+            private_dir.mkdir(parents=True)
+            (private_dir / "agent-secret.md").write_text(
+                "---\nproject: demo\nstatus: active\nmodule_area: private\n---\n"
+                "# Private\n\nstrato private sentinel\n",
+                encoding="utf-8",
+            )
+
+            snapshot = vivary_cognee.build_snapshot(root)
+
+        sent_text = "\n".join(node.text for node in snapshot.nodes)
+        self.assertNotIn("strato private sentinel", sent_text)
+
+    def test_private_patterns_are_case_insensitive_on_windows(self):
+        with mock.patch.object(vivary_cognee.os, "name", "nt"):
+            self.assertTrue(
+                vivary_cognee._pattern_matches(
+                    ".strato/private/**",
+                    ".STRATO/PRIVATE/agent-secret.md",
+                )
+            )
+
     def test_build_snapshot_honors_gitignore_directory_pattern(self):
         with temp_workspace() as root:
             write_workspace(root)
@@ -461,6 +487,7 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
         self.assertEqual([hit.node_id for hit in hits], ["auth"])
         self.assertEqual(hits[0].type, "module")
         self.assertEqual(hits[0].path, "modules/auth/index.md")
+        self.assertEqual(hits[0].source, "provider")
         self.assertEqual(hits[0].provider, "cognee")
         self.assertEqual(fake.recall_calls[0]["top_k"], 3)
 

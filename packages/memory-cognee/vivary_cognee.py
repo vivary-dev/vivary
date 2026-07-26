@@ -35,6 +35,7 @@ DEFAULT_PRIVATE_PATTERNS = (
     "MEMORY.md",
     "memory/**",
     "heartbeat-reports/**",
+    ".strato/private/**",
     ".vivary/**",
     ".git/**",
 )
@@ -100,6 +101,10 @@ def _pattern_matches(pattern: str, rel_path: str, base: str = "") -> bool:
     pattern = _norm(raw_pattern)
     rel_path = _norm(rel_path)
     base = _norm(base)
+    if os.name == "nt":
+        pattern = pattern.casefold()
+        rel_path = rel_path.casefold()
+        base = base.casefold()
     if base:
         if rel_path != base and not rel_path.startswith(base + "/"):
             return False
@@ -115,7 +120,7 @@ def _pattern_matches(pattern: str, rel_path: str, base: str = "") -> bool:
         return rel_path == pattern or rel_path.startswith(pattern + "/")
     if "/" not in pattern:
         parts = rel_path.split("/")
-        return fnmatchcase(Path(rel_path).name, pattern) or any(
+        return fnmatchcase(parts[-1], pattern) or any(
             fnmatchcase(part, pattern) for part in parts[:-1]
         )
     return fnmatchcase(rel_path, pattern) or rel_path.startswith(pattern + "/")

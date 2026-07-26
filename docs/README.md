@@ -11,7 +11,7 @@ Start here.
 | [SKILLS.md](SKILLS.md) | The agent skills: strato (bootstrap/heartbeat/self-improve), tropo, loops. |
 | [ACTIVE-CONTEXT.md](ACTIVE-CONTEXT.md) | Optional CocoIndex-code sidecar for active semantic code context. |
 | [LLM-ACTIVE-CONTEXT.md](LLM-ACTIVE-CONTEXT.md) | Copyable LLM instructions for graph-first CocoIndex-code retrieval. |
-| [SEMANTIC-MEMORY.md](SEMANTIC-MEMORY.md) | Architecture and optional adapter plan for semantic memory providers such as Cognee. |
+| [SEMANTIC-MEMORY.md](SEMANTIC-MEMORY.md) | Architecture and implemented adapter contract for Tropo-backed semantic memory. |
 | [WHITE-PAPER.md](WHITE-PAPER.md) | Technical argument, minimal architecture, human-gate model, and proof standard. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The layer model (tropo → strato → ozone → exo) and the why. |
 | [OBSIDIAN.md](OBSIDIAN.md) | Optional Obsidian setup for fans (never required). |
@@ -25,6 +25,7 @@ Starlight guides.
 
 | Document | What it covers |
 |---|---|
+| [bellamente-memory/](bellamente-memory/) | Reconciled contract for optional Bellamente agent LTM and its typed Vivary boundary. |
 | [PRODUCT-ROADMAP.md](PRODUCT-ROADMAP.md) | Canonical outcome map behind the public [roadmap page](https://vivary.vercel.app/roadmap/). |
 | [CONTENT-ROADMAP.md](CONTENT-ROADMAP.md) | Internal proof-led content and publishing plan. |
 
