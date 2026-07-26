@@ -11,6 +11,7 @@ same pattern python/tests/test_evidence.py uses for its own fixtures.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import stat
@@ -342,3 +343,90 @@ def test_observation_is_deterministic_under_an_injected_clock(fx, allowlist):
 
 def test_observation_schema_constant():
     assert OBSERVATION_SCHEMA == "vivary.workspace-observation/v0"
+
+
+def test_ambient_git_config_env_cannot_forge_a_remote(fx, allowlist, monkeypatch):
+    """`GIT_CONFIG_*` must not be able to invent an origin for a remote-less repo.
+
+    The denylist covered four keys, so command-scope config injection still passed
+    through. Setting these before `observe_checkouts` makes a repository with no
+    remotes observe as having an attacker-supplied origin — and that false URL then
+    becomes the repository identity used for graph grouping, conflicts and
+    fingerprints, so a forged value propagates into every downstream claim.
+    """
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "remote.origin.url")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "https://evil.example/attacker.git")
+
+    result = observe_checkouts([fx["paths"]["no_origin"]], allowlist=allowlist, now=NOW)
+
+    facts = result["checkouts"][0]["facts"]
+    assert facts["remotes"]["status"] == "known"
+    assert facts["remotes"]["value"] == [], (
+        "ambient GIT_CONFIG_* injected a remote into a repository that has none"
+    )
+    assert "attacker" not in json.dumps(result)
+
+
+def test_ambient_git_object_env_is_scrubbed():
+    """Every Git variable that can redirect repository, config or object resolution
+    is removed, not just the four originally named."""
+    from vivary_core.workspace_observe import _sanitized_git_env
+
+    hostile = {
+        "GIT_DIR": "/tmp/evil.git",
+        "GIT_WORK_TREE": "/tmp/evil",
+        "GIT_INDEX_FILE": "/tmp/evil-index",
+        "GIT_COMMON_DIR": "/tmp/evil-common",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "remote.origin.url",
+        "GIT_CONFIG_VALUE_0": "https://evil.example/x.git",
+        "GIT_CONFIG_GLOBAL": "/tmp/evil-config",
+        "GIT_CONFIG_SYSTEM": "/tmp/evil-system",
+        "GIT_OBJECT_DIRECTORY": "/tmp/evil-objects",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES": "/tmp/evil-alt",
+        "GIT_CEILING_DIRECTORIES": "/tmp",
+        "GIT_NAMESPACE": "evil",
+    }
+    saved = {k: os.environ.get(k) for k in hostile}
+    os.environ.update(hostile)
+    try:
+        env = _sanitized_git_env()
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    # No attacker-supplied value may survive. Two keys remain *present* on purpose:
+    # the sanitizer pins config discovery to os.devnull rather than deleting it, so
+    # the run reads the repository's own config and nothing ambient.
+    leaked = sorted(key for key, value in hostile.items() if env.get(key) == value)
+    assert leaked == [], f"these Git overrides survived sanitization: {leaked}"
+    assert env["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert env["GIT_CONFIG_SYSTEM"] == os.devnull
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert "GIT_CONFIG_COUNT" not in env and "GIT_DIR" not in env
+
+
+def test_remote_url_credentials_are_redacted(fx, allowlist):
+    """A configured HTTPS remote embedding credentials must not be stored verbatim.
+
+    `git remote -v` returns userinfo as written, and the parser stored the complete
+    URL as both a fact and the repository identity, which capsule compilation later
+    repeats in a human-readable claim — so serialized observations, graphs, capsules
+    and fingerprints could all disclose a long-lived token.
+    """
+    repo = fx["paths"]["no_origin"]
+    secret = "secret-token-do-not-leak"
+    _git(FIXTURE_BASE, repo, ["remote", "add", "leaky",
+                              f"https://user:{secret}@example.com/repo.git"])
+    try:
+        result = observe_checkouts([repo], allowlist=allowlist, now=NOW)
+    finally:
+        _git(FIXTURE_BASE, repo, ["remote", "remove", "leaky"])
+
+    serialized = json.dumps(result)
+    assert secret not in serialized, "remote credentials leaked into the observation"
+    assert "example.com/repo.git" in serialized, "the canonical remote identity was lost"

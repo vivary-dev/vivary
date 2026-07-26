@@ -41,16 +41,66 @@ OBSERVATION_SCHEMA = "vivary.workspace-observation/v0"
 # the one the caller (and the allowlist check) actually asked about.
 AMBIENT_GIT_ENV_KEYS = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"]
 
+# The four keys above are not sufficient. Command-scope configuration
+# (`GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_*` / `GIT_CONFIG_VALUE_*`), alternate
+# object stores, ceiling directories and namespaces can each redirect what Git
+# reports without naming a directory at all — a repository with no remotes can be
+# made to observe as having an attacker-supplied origin, and that forged URL then
+# becomes the repository identity used for grouping, conflicts and fingerprints.
+# So the environment is pinned rather than filtered: every GIT_* variable is
+# dropped, then the few that make the run deterministic are set explicitly.
+_PINNED_GIT_ENV = {
+    # Read only the repository's own config. Global/system config cannot add a
+    # remote, but `url.<base>.insteadOf` can rewrite one, and an observation is
+    # supposed to report the repository's ground truth.
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_SYSTEM": os.devnull,
+    "GIT_CONFIG_NOSYSTEM": "1",
+    # Never block on a credential prompt: observation is read-only and unattended.
+    "GIT_TERMINAL_PROMPT": "0",
+}
+
 _MAX_BUFFER = 4 * 1024 * 1024
 
 RunGit = Callable[[str, List[str]], Dict[str, Any]]
 
 
 def _sanitized_git_env() -> Dict[str, str]:
-    env = dict(os.environ)
-    for key in AMBIENT_GIT_ENV_KEYS:
-        env.pop(key, None)
+    """A narrowly pinned environment for read-only observation.
+
+    Drops every `GIT_*` variable — an allowlist, not a denylist, because the set of
+    Git variables that can change repository, config or object resolution grows with
+    Git itself — then restores only the pins above.
+    """
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    env.update(_PINNED_GIT_ENV)
     return env
+
+
+_CREDENTIAL_URL_RE = re.compile(r"\A([a-zA-Z][a-zA-Z0-9+.-]*://)(?:[^/@]*@)?(.*)\Z", re.DOTALL)
+_SCP_CREDENTIAL_RE = re.compile(r"\A([^/@]*:[^/@]*)@([^/]+:.*)\Z", re.DOTALL)
+
+
+def _redact_remote_url(url: str) -> str:
+    """Strip credential-bearing userinfo from a remote URL.
+
+    `git remote -v` returns `https://user:token@host/repo.git` verbatim, and the
+    result is stored as both a fact and the repository identity, which capsule
+    compilation later repeats in a human-readable claim — so an unredacted value
+    reaches serialized observations, graphs, capsules and fingerprints alike.
+
+    Userinfo is removed entirely rather than masked so that the same repository
+    reached with and without embedded credentials canonicalizes to one identity.
+    An scp-style `git@host:path` keeps its user — that is a well-known account name,
+    not a secret — but `user:password@host:path` loses the whole userinfo.
+    """
+    match = _CREDENTIAL_URL_RE.match(url)
+    if match:
+        return match.group(1) + match.group(2)
+    scp = _SCP_CREDENTIAL_RE.match(url)
+    if scp:
+        return scp.group(2)
+    return url
 
 
 def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
@@ -122,7 +172,7 @@ def _parse_remotes(stdout: str) -> List[Dict[str, str]]:
             remotes[name] = entry
             order.append(name)
         key = "fetch_url" if match.group(3) == "fetch" else "push_url"
-        entry[key] = normalize_path(match.group(2))
+        entry[key] = _redact_remote_url(normalize_path(match.group(2)))
     values = [remotes[name] for name in order]
     # Node sorts remotes with String.prototype.localeCompare. We use
     # locale_cmp_key (the cmp_to_key-wrapped comparator), NOT
