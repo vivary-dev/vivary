@@ -3670,6 +3670,33 @@ def _print_adopt_report(result: dict, *, mode: str) -> None:
             print(f"  warning: {warning}")
 
 
+# Import name per capability, for the ones backed by an installable package. A
+# capability with no entry here needs nothing installed and is always present.
+CAPABILITY_IMPORTS = {
+    "storage:embedded": "lancedb",
+    "memory:local": "vivary_memory_cognee",
+    "active-context:cocoindex-code": "cocoindex_code",
+    "governed-context:core": "vivary_core",
+}
+
+
+def _capability_installed(capability_id: str) -> bool:
+    """Whether the package behind a capability can actually be imported.
+
+    Declared intent is not install truth: the report is only actionable if it says
+    what is present *here*. Absence is never an error — these are optional by
+    construction, and calling an optional package's absence "broken" is precisely
+    what the report exists to avoid.
+    """
+    module = CAPABILITY_IMPORTS.get(capability_id)
+    if module is None:
+        return True
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError, AttributeError):
+        return False
+
+
 def capability_report(preset: str = "coding") -> dict:
     if preset not in PRESETS:
         raise ScaffoldError(f"unknown preset {preset!r}; expected one of {', '.join(PRESETS)}")
@@ -3732,6 +3759,23 @@ def capability_report(preset: str = "coding") -> dict:
                 "network": "provider-dependent, default local guidance",
             }
         )
+
+    # The governed-context seam. Local-only and approval-free: it reads a workspace
+    # and never writes, fetches, or reaches a provider. Not a default — it is not
+    # published yet, and nothing in the baseline install requires it (#207).
+    capabilities.append(
+        {
+            "id": "governed-context:core",
+            "label": "Governed context seam (vivary-core)",
+            "default": False,
+            "requires_install": ["vivary-core"],
+            "requires_approval": False,
+            "network": False,
+        }
+    )
+
+    for capability in capabilities:
+        capability["installed"] = _capability_installed(capability["id"])
 
     return {
         "ok": True,
