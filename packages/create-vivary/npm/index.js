@@ -62,7 +62,7 @@ function main() {
   process.exit(result.status == null ? 1 : result.status);
 }
 
-module.exports = { mapArgs, pipxArgs, run, uvxArgs };
+module.exports = { SUBCOMMANDS, mapArgs, pipxArgs, run, uvxArgs };
 
 if (require.main === module) {
   main();

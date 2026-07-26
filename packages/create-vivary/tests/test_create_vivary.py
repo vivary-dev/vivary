@@ -1,5 +1,6 @@
 """Tests for the create-vivary workspace scaffold."""
 
+import argparse
 import io
 import importlib
 import json
@@ -1164,6 +1165,28 @@ class CreateVivaryTests(unittest.TestCase):
         self.assertEqual(create_vivary.with_default_command(["doctor", "ws"]), ["doctor", "ws"])
         self.assertEqual(create_vivary.with_default_command(["-h"]), ["-h"])
         self.assertEqual(create_vivary.with_default_command([]), [])
+
+    def test_public_subcommands_match_parser_and_npm_launcher(self):
+        parser = create_vivary.build_parser()
+        subparsers = next(
+            action
+            for action in parser._actions
+            if isinstance(action, argparse._SubParsersAction)
+        )
+        self.assertEqual(set(subparsers.choices), set(create_vivary.SUBCOMMANDS))
+
+        npm_launcher = subprocess.run(
+            [
+                "node",
+                "-e",
+                "process.stdout.write(JSON.stringify([...require(process.argv[1]).SUBCOMMANDS]))",
+                str(PKG / "npm" / "index.js"),
+            ],
+            capture_output=True,
+            check=True,
+            text=True,
+        )
+        self.assertEqual(set(json.loads(npm_launcher.stdout)), set(create_vivary.SUBCOMMANDS))
 
     def test_cli_bare_target_defaults_to_init(self):
         with temp_workspace() as td:
