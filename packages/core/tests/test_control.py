@@ -492,6 +492,68 @@ def test_create_handoff_fails_closed_when_the_receipt_was_not_run_against_the_gi
     assert result["decision"] == HANDOFF_DECISION["REFUSED"]
     assert result["reason_codes"] == [HANDOFF_REASON["RECEIPT_CAPSULE_MISMATCH"]]
 
+def test_create_handoff_fails_closed_when_receipt_capsule_id_does_not_match():
+    capsule = capsule_like()
+    receipt = receipt_like(
+        overrides={
+            "capsule": {
+                "id": "capsule_other",
+                "fingerprint": capsule["fingerprint"],
+            }
+        }
+    )
+    claim = {
+        "claim_id": "claim_1",
+        "actor": AGENT,
+        "scope": scope("vivary", ["src/control"]),
+        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
+    }
+
+    result = create_handoff(
+        claim=claim,
+        receipt=receipt,
+        capsule=capsule,
+        from_actor=AGENT,
+        to_actor=HUMAN,
+        workspace_revision=capsule["workspace"]["fingerprint"],
+        created_at="2026-07-20T15:06:00.000Z",
+    )
+
+    assert result["decision"] == HANDOFF_DECISION["REFUSED"]
+    assert result["reason_codes"] == [HANDOFF_REASON["RECEIPT_CAPSULE_MISMATCH"]]
+
+
+def test_create_handoff_fails_closed_when_receipt_and_requested_revision_disagree_with_capsule_workspace():
+    capsule = capsule_like()
+    different_workspace = "sha256:different-workspace"
+    receipt = receipt_like(
+        overrides={
+            "workspace": {
+                "fingerprint": different_workspace,
+                "observed_at": "2026-07-20T15:00:00.000Z",
+            }
+        }
+    )
+    claim = {
+        "claim_id": "claim_1",
+        "actor": AGENT,
+        "scope": scope("vivary", ["src/control"]),
+        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
+    }
+
+    result = create_handoff(
+        claim=claim,
+        receipt=receipt,
+        capsule=capsule,
+        from_actor=AGENT,
+        to_actor=HUMAN,
+        workspace_revision=different_workspace,
+        created_at="2026-07-20T15:06:00.000Z",
+    )
+
+    assert result["decision"] == HANDOFF_DECISION["REFUSED"]
+    assert result["reason_codes"] == [HANDOFF_REASON["WORKSPACE_REVISION_MISMATCH"]]
+
 
 def test_create_handoff_fails_closed_when_the_workspace_revision_does_not_match_the_receipts():
     capsule = capsule_like()

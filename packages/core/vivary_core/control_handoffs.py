@@ -17,6 +17,11 @@ ADAPTATION - holder-bound initiation: a handoff is refused unless
 ``from_actor`` matches both the kind and ID recorded on the claim. The
 translated path validated only the recipient and let any actor transfer
 another actor's claim.
+
+ADAPTATION - complete receipt binding: handoffs compare both capsule ID and
+fingerprint, and require receipt, capsule, and requested workspace revisions
+to agree. The translated path checked only capsule fingerprint and the
+receipt-to-requested workspace pair.
 """
 
 from __future__ import annotations
@@ -111,9 +116,18 @@ def create_handoff(
             "handoff": None,
         }
 
-    if receipt["capsule"]["fingerprint"] != capsule["fingerprint"]:
+    receipt_capsule = receipt["capsule"]
+    if (
+        receipt_capsule.get("id") != capsule["capsule_id"]
+        or receipt_capsule["fingerprint"] != capsule["fingerprint"]
+    ):
         return {"decision": HANDOFF_DECISION["REFUSED"], "reason_codes": [HANDOFF_REASON["RECEIPT_CAPSULE_MISMATCH"]], "handoff": None}
-    if receipt["workspace"]["fingerprint"] != workspace_revision:
+    receipt_workspace_revision = receipt["workspace"]["fingerprint"]
+    capsule_workspace_revision = capsule["workspace"]["fingerprint"]
+    if (
+        receipt_workspace_revision != workspace_revision
+        or receipt_workspace_revision != capsule_workspace_revision
+    ):
         return {"decision": HANDOFF_DECISION["REFUSED"], "reason_codes": [HANDOFF_REASON["WORKSPACE_REVISION_MISMATCH"]], "handoff": None}
 
     authority_class = to_authority_class
