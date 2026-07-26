@@ -208,6 +208,19 @@ class ScaffoldError(RuntimeError):
     """Raised when a workspace cannot be scaffolded safely."""
 
 
+class RepairRefusal(ScaffoldError):
+    """Raised when a repair is refused for a reason worth reporting by name.
+
+    Subclasses `ScaffoldError` so every existing `except ScaffoldError` handler keeps
+    working unchanged; `reason_code` is what lets a caller say *why* it refused rather
+    than guessing at a single catch-all cause.
+    """
+
+    def __init__(self, message: str, *, reason_code: str) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+
+
 def default_repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
@@ -235,6 +248,23 @@ def _is_symlink_or_junction(path: Path) -> bool:
         return False
 
 
+def _reparse_point_is_dir(path: Path) -> bool:
+    """Whether `path` is a reparse point that the OS treats as a directory.
+
+    Windows junctions and directory symlinks must be removed with `rmdir`, not
+    `unlink`. Returns `False` on POSIX — `st_file_attributes` does not exist there, and
+    routing a symlink-to-directory to `os.rmdir` would raise ENOTDIR.
+    """
+    try:
+        st = os.stat(path, follow_symlinks=False)
+        attrs = st.st_file_attributes
+    except (AttributeError, OSError):
+        return False
+    reparse = attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    directory = attrs & getattr(stat, "FILE_ATTRIBUTE_DIRECTORY", 0x10)
+    return bool(reparse and directory)
+
+
 def _has_multiple_hardlinks(path: Path) -> bool:
     try:
         return path.exists() and path.is_file() and os.stat(path).st_nlink > 1
@@ -244,11 +274,15 @@ def _has_multiple_hardlinks(path: Path) -> bool:
 
 def _read_repair_text(path: Path) -> str:
     if _has_multiple_hardlinks(path):
-        raise ScaffoldError(f"refusing to rewrite multi-linked file: {path}")
+        raise RepairRefusal(
+            f"refusing to rewrite multi-linked file: {path}", reason_code="hardlinked"
+        )
     try:
         return path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
-        raise ScaffoldError(f"refusing to rewrite non-UTF-8 file: {path}") from exc
+        raise RepairRefusal(
+            f"refusing to rewrite non-UTF-8 file: {path}", reason_code="non-utf8"
+        ) from exc
 
 
 def _resolve_scaffold_target(target: str | Path) -> Path:
@@ -658,7 +692,11 @@ def _private_placeholder_text(root: Path, rel: str) -> str:
     source = _source_paths(root)["strato_templates"] / template
     try:
         return source.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
+        # `UnicodeDecodeError` is a `ValueError`, so it escaped the old `OSError`-only
+        # handler here *and* the apply loop's `except (OSError, ScaffoldError)`. Not
+        # `_read_repair_text`: that adds a multi-hardlink refusal, which is meaningful
+        # for a workspace file being rewritten and wrong for a read-only template.
         raise ScaffoldError(f"could not read canonical template {source}: {exc}")
 
 
@@ -816,7 +854,7 @@ def _tropo_repair_actions(docs) -> list[dict]:
                     "tropo-w210",
                     "manual",
                     rel,
-                    "W210 derived metadata uses complex YAML; remove it manually.",
+                    _w210_manual_summary(manual),
                     details={"manual": manual},
                 )
             )
@@ -850,12 +888,64 @@ def _tropo_repair_actions(docs) -> list[dict]:
     return actions
 
 
+# A W210 field can only be removed automatically when its line is a simple top-level
+# scalar. These indicators open a block scalar, whose value continues onto following
+# lines, so deleting the one line would silently orphan the rest. Shared by the planner
+# and `_apply_w210_fix`: if the two definitions drifted, the planner would call a field
+# safe and the apply step would then refuse it.
+W210_BLOCK_SCALAR_INDICATORS = {"|", ">", "|-", ">-", "|+", ">+"}
+
+W210_COMPLEX_SUMMARY = "W210 derived metadata uses complex YAML; remove it manually."
+W210_MANUAL_REASON_TEXT = {
+    "complex": "the field is not a simple top-level scalar",
+    "stale": "the reported line no longer matches the field",
+    "hardlinked": "the file has multiple hard links",
+    "non-utf8": "the file is not UTF-8",
+    "unreadable": "the file could not be read",
+}
+W210_MANUAL_REASON_ORDER = ("complex", "stale", "hardlinked", "non-utf8", "unreadable")
+W210_MANUAL_UNKNOWN_TEXT = "it could not be repaired automatically"
+
+
+def _w210_manual_summary(manual: list[dict]) -> str:
+    """Name the actual reason a W210 field was left for a human.
+
+    Every failure used to report "complex YAML", so a user whose file was non-UTF-8,
+    hard-linked or unreadable was told to hand-edit YAML that was not the problem.
+    Human mode omits `details`, so this sentence is all they get.
+    """
+    codes = {entry.get("reason_code") for entry in manual}
+    if codes == {"complex"}:
+        return W210_COMPLEX_SUMMARY
+    reasons = [
+        W210_MANUAL_REASON_TEXT[code] for code in W210_MANUAL_REASON_ORDER if code in codes
+    ]
+    if codes - set(W210_MANUAL_REASON_ORDER):
+        reasons.append(W210_MANUAL_UNKNOWN_TEXT)
+    if not reasons:
+        reasons = [W210_MANUAL_UNKNOWN_TEXT]
+    if len(reasons) == 1:
+        joined = reasons[0]
+    else:
+        joined = ", ".join(reasons[:-1]) + f" and {reasons[-1]}"
+    return (
+        "Cannot remove W210 derived metadata automatically because "
+        f"{joined}; remove it manually."
+    )
+
+
 def _w210_removal_plan(doc, findings: list) -> tuple[list[dict], list[dict]]:
     try:
         lines = _read_repair_text(Path(doc.full)).splitlines()
     except (OSError, ScaffoldError) as exc:
+        reason_code = getattr(exc, "reason_code", "unreadable")
         return [], [
-            {"key": _parse_w210_key(f.message), "line": f.line, "reason": str(exc)}
+            {
+                "key": _parse_w210_key(f.message),
+                "line": f.line,
+                "reason": str(exc),
+                "reason_code": reason_code,
+            }
             for f in findings
         ]
 
@@ -865,15 +955,22 @@ def _w210_removal_plan(doc, findings: list) -> tuple[list[dict], list[dict]]:
         key = _parse_w210_key(finding.message)
         index = finding.line - 1
         line = lines[index] if 0 <= index < len(lines) else ""
+        holds_key = re.match(rf"^{re.escape(key)}\s*:", line)
         match = re.match(rf"^{re.escape(key)}\s*:\s*(.+?)\s*$", line)
-        if match and match.group(1).strip() not in {"|", ">", "|-", ">-", "|+", ">+"}:
+        if match and match.group(1).strip() not in W210_BLOCK_SCALAR_INDICATORS:
             safe.append({"key": key, "line": finding.line})
         else:
+            # The line still holds the reported field but is not a plain scalar
+            # (block scalar, or a nested mapping whose value starts below) — that is
+            # "complex". A line that does not hold the field at all means the report
+            # no longer describes the file, which is a different problem to explain.
+            reason_code = "complex" if holds_key else "stale"
             manual.append(
                 {
                     "key": key,
                     "line": finding.line,
-                    "reason": "not a simple top-level scalar line",
+                    "reason": W210_MANUAL_REASON_TEXT[reason_code],
+                    "reason_code": reason_code,
                 }
             )
     return safe, manual
@@ -1061,7 +1158,7 @@ def _apply_w210_fix(
             if matched_key is None:
                 raise ScaffoldError(f"refusing stale W210 repair for {rel}:{doc_line}")
             value = re.match(rf"^{re.escape(matched_key)}\s*:\s*(.+?)\s*$", line)
-            if value is None or value.group(1).strip() in {"|", ">", "|-", ">-", "|+", ">+"}:
+            if value is None or value.group(1).strip() in W210_BLOCK_SCALAR_INDICATORS:
                 raise ScaffoldError(f"refusing complex W210 repair for {rel}:{doc_line}")
             continue
         kept.append(line)
@@ -1698,9 +1795,27 @@ def _existing_components(target: Path, path: Path) -> list[Path]:
     return components
 
 
+def _existing_regular_file_mode(path: Path) -> int | None:
+    """The permission bits of an existing regular file, or `None`.
+
+    `& 0o777` deliberately drops setuid/setgid/sticky rather than restoring them onto
+    a file this tool just rewrote.
+    """
+    try:
+        st = path.lstat()
+    except OSError:
+        return None
+    if not stat.S_ISREG(st.st_mode):
+        return None
+    return stat.S_IMODE(st.st_mode) & 0o777
+
+
 def _write_text_no_follow(target: Path, dst: Path, text: str) -> None:
     _ensure_safe_destinations(target, [dst], force=True)
     dst.parent.mkdir(parents=True, exist_ok=True)
+    # Read the mode before `mkstemp`, which always creates at 0600. Without this, an
+    # atomic replace of an existing 0644 file silently makes it owner-only on POSIX.
+    mode = _existing_regular_file_mode(dst)
     fd, tmp_name = tempfile.mkstemp(
         prefix=f".{dst.name}.", suffix=".vivary-tmp", dir=dst.parent
     )
@@ -1708,6 +1823,12 @@ def _write_text_no_follow(target: Path, dst: Path, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(text)
+            if mode is not None and hasattr(os, "fchmod"):
+                try:
+                    os.fchmod(fh.fileno(), mode)
+                except OSError:
+                    # A mode we cannot restore must not abort an otherwise good repair.
+                    pass
         os.replace(tmp, dst)
     finally:
         if tmp.exists() or tmp.is_symlink():
@@ -1803,10 +1924,21 @@ def _ensure_safe_cleanup_targets(root: Path, paths: list[Path]) -> None:
 def _remove_path(root: Path, path: Path) -> None:
     if not _is_safe_cleanup_target(root, path):
         raise ScaffoldError(f"refusing to clean unsafe scaffold path: {path}")
-    if path.is_dir() and not _is_symlink_or_junction(path):
-        shutil.rmtree(path)
-    elif path.exists() or _is_symlink_or_junction(path):
-        path.unlink()
+    link = _is_symlink_or_junction(path)
+    try:
+        if path.is_dir() and not link:
+            shutil.rmtree(path)
+        elif link and _reparse_point_is_dir(path):
+            # A junction or directory symlink: `rmdir` removes the link itself and
+            # leaves whatever it points at alone. `unlink` is for the file case.
+            os.rmdir(path)
+        elif path.exists() or link:
+            path.unlink()
+    except OSError as exc:
+        # Never let a raw OSError escape: `scaffold_workspace` is reached from `init`,
+        # whose only error handler catches `ScaffoldError`. Uncaught, `--json` prints a
+        # traceback and no JSON at all.
+        raise ScaffoldError(f"failed to clean stale scaffold path: {path}: {exc}") from exc
 
 
 def _is_safe_cleanup_target(root: Path, path: Path) -> bool:
