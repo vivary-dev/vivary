@@ -2953,5 +2953,53 @@ class VersionParityTests(unittest.TestCase):
         self.assertEqual(npm["version"], declared, "npm package.json must stay in lockstep")
 
 
+class GovernedContextCapabilityTests(unittest.TestCase):
+    """#207 slice: the install must be able to report the governed-context seam.
+
+    `vivary-core` is merged but nothing outside `packages/core/` references it, so a
+    user has no way to find out whether the seam is present. A capability nobody can
+    observe is indistinguishable from one that does not exist.
+    """
+
+    def test_core_is_reported_as_a_capability(self):
+        report = create_vivary.capability_report("coding")
+        core = next(
+            (c for c in report["available_capabilities"] if c["id"] == "governed-context:core"),
+            None,
+        )
+        self.assertIsNotNone(core, "governed-context:core must appear in the capability report")
+        self.assertEqual(core["requires_install"], ["vivary-core"])
+        self.assertFalse(core["requires_approval"], "reading local context needs no approval")
+        self.assertFalse(core["network"], "the seam is local-only and must say so")
+        self.assertFalse(core["default"], "core is not yet part of the default install")
+
+    def test_every_capability_reports_whether_it_is_installed(self):
+        """Install truth, not just declared intent — that is what makes the report
+        actionable rather than a restatement of the docs."""
+        report = create_vivary.capability_report("coding")
+        for capability in report["available_capabilities"]:
+            self.assertIn(
+                "installed", capability, f"{capability['id']} does not report install state"
+            )
+            self.assertIsInstance(capability["installed"], bool)
+
+        base = next(c for c in report["available_capabilities"] if c["id"] == "storage:file")
+        self.assertTrue(base["installed"], "a zero-dependency capability is always present")
+
+    def test_absent_optional_capability_is_not_an_error(self):
+        """Doctor must never call an *optional* absent package broken."""
+        with temp_workspace() as td:
+            target = Path(td) / "capability-probe"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertTrue(report["ok"], report)
+            joined = json.dumps(report["errors"])
+            self.assertNotIn("vivary-core", joined)
+            self.assertNotIn("vivary_core", joined)
+
+
 if __name__ == "__main__":
     unittest.main()
