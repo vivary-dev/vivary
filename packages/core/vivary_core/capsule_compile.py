@@ -35,11 +35,72 @@ from vivary_core.collation import locale_sort_key
 
 CAPSULE_SCHEMA = "vivary.task-capsule/v0"
 
-DEFAULT_REQUIRED_CHECKS = [
-    {"name": "unit-and-contract-tests", "command": "npm test"},
-    {"name": "vivary-graph-doctor", "command": "npx create-vivary doctor . --json"},
-    {"name": "entire-status", "command": "entire status --json"},
-]
+# Checks were hardcoded for every workspace, so a Python-only project was told to
+# run `npm test` and had no way to say otherwise. They are now derived from what was
+# actually observed, and a check nobody can evidence is reported as an unknown rather
+# than invented — a wrong check that passes *trivially* (a test runner collecting
+# nothing and exiting 0) would launder a broken workspace into a green receipt, which
+# is worse than having no check at all.
+#
+# `entire status --json` was also a default here. It is not a Vivary command; the
+# `entire_checkpoint` provenance the receipt model carries is a deliberate, separate
+# integration and is untouched. A check for it must be derived from evidence that the
+# workspace actually uses Entire, never assumed.
+
+# Markers that indicate a test system exists but do not identify the command to run.
+# Python alone spans pytest, tox, nox and make; picking one would be a guess.
+_AMBIGUOUS_TEST_MARKERS = ("pyproject.toml", "tox.ini", "noxfile.py", "Cargo.toml", "go.mod", "Makefile")
+
+
+def _fact_value(node, name):
+    fact = (node.get("facts") or {}).get(name)
+    if fact is None or fact.get("status") != "known":
+        return None
+    return fact.get("value")
+
+
+def _derive_required_checks(checkouts):
+    """The checks this workspace can actually be verified with, plus what is unknown.
+
+    Returns `(checks, unknowns)`. Every derived check carries the evidence that
+    justified it, so a consumer can see *why* it was asked to run something.
+    """
+    checks = []
+    unknowns = []
+    seen = set()
+
+    def add(name, command, evidence):
+        if command in seen:
+            return
+        seen.add(command)
+        checks.append({"name": name, "command": command, "evidence": evidence})
+
+    for node in checkouts:
+        markers = _fact_value(node, "workspace_markers") or []
+        marker_evidence = ((node.get("facts") or {}).get("workspace_markers") or {}).get("evidence")
+
+        # Vivary's own checks are provable: a tropo.toml means a governed workspace,
+        # and these apply whatever the project is written in.
+        if "tropo.toml" in markers:
+            add("vivary-graph-doctor", "create-vivary doctor . --json", marker_evidence)
+            add("vivary-graph-check", "tropo check --root . --json", marker_evidence)
+
+        npm_test = _fact_value(node, "npm_test_script")
+        if npm_test:
+            add("project-tests", "npm test", marker_evidence)
+        elif any(marker in markers for marker in _AMBIGUOUS_TEST_MARKERS):
+            unknowns.append(
+                {
+                    "kind": "required_check_undetermined",
+                    "subject": node.get("id"),
+                    "subject_path": node.get("path"),
+                    "reason": "a test system is present but the command it is run with cannot be determined from observation",
+                    "observed_markers": [m for m in markers if m in _AMBIGUOUS_TEST_MARKERS],
+                    "resolution": "pass task.required_checks to state the command explicitly",
+                    "evidence": [marker_evidence] if marker_evidence else [],
+                }
+            )
+    return checks, unknowns
 
 # How many dirty paths a dirty_entries claim may list by name; the exact
 # total count is always reported in the claim text regardless of the cap, so
@@ -308,6 +369,15 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         if not _in_scope(refusal.get("path")):
             continue
         omissions.append({"kind": "refused_root", "reason": refusal.get("reason"), "path": refusal.get("path")})
+    # An explicit task-level list always wins: derivation is a convenience, not a
+    # ceiling, and a caller who knows the command should never be argued with.
+    declared_checks = task.get("required_checks")
+    if declared_checks is not None:
+        required_checks = list(declared_checks)
+        check_unknowns: list[dict] = []
+    else:
+        required_checks, check_unknowns = _derive_required_checks(checkouts)
+
     content_unknowns: list[dict] = []
     for checkout_content in (content.get("checkouts") if content else None) or []:
         node = checkouts_by_path.get(checkout_content.get("path"))
@@ -387,9 +457,10 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         "unknowns": [
             *[u for u in graph["unknowns"] if _entry_in_scope(u)],
             *[u for u in content_unknowns if _entry_in_scope(u)],
+            *[u for u in check_unknowns if _entry_in_scope(u)],
         ],
         "omissions": omissions,
-        "required_checks": DEFAULT_REQUIRED_CHECKS,
+        "required_checks": required_checks,
         "budget": {"max_claims": max_claims},
     }
 

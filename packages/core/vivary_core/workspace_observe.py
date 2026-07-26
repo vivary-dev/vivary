@@ -141,6 +141,64 @@ def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
     return {"ok": True, "stdout": stdout_text.replace("\r\n", "\n"), "command": command}
 
 
+# Marker files that say something about how a workspace is verified. Presence is
+# stat-only; `package.json` is the one file whose *contents* are read, because
+# presence alone is too weak a signal — a `package.json` for a docs site or a lint
+# hook is common, and telling that workspace to run `npm test` produces a confusing
+# failure rather than a check.
+WORKSPACE_MARKERS = (
+    "tropo.toml",
+    "package.json",
+    "pyproject.toml",
+    "tox.ini",
+    "noxfile.py",
+    "Cargo.toml",
+    "go.mod",
+    "Makefile",
+)
+
+# npm scaffolds this as `scripts.test`. It is a placeholder, not a check.
+_NPM_PLACEHOLDER_TEST = 'echo "Error: no test specified" && exit 1'
+
+
+def _observe_workspace_markers(worktree_root: str) -> List[str]:
+    """Which known marker files exist at the worktree root.
+
+    Stat-only, deterministic, and sorted. Read-only observation in the same sense as
+    the git queries around it — it never executes anything it finds.
+    """
+    found = []
+    for marker in WORKSPACE_MARKERS:
+        try:
+            if os.path.isfile(os.path.join(worktree_root, marker)):
+                found.append(marker)
+        except OSError:
+            continue
+    return sorted(found)
+
+
+def _observe_npm_test_script(worktree_root: str) -> Optional[str]:
+    """`scripts.test` from package.json, or None when there is no real one.
+
+    npm's scaffolded placeholder is treated as absent: it is a known non-check, and
+    deriving a required check from it would hand back a command guaranteed to fail.
+    """
+    try:
+        with open(os.path.join(worktree_root, "package.json"), "r", encoding="utf-8") as handle:
+            manifest = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    scripts = manifest.get("scripts")
+    if not isinstance(scripts, dict):
+        return None
+    script = scripts.get("test")
+    if not isinstance(script, str) or not script.strip():
+        return None
+    return None if script.strip() == _NPM_PLACEHOLDER_TEST else script.strip()
+
+
 def _known(value: Any, command: str) -> Dict[str, Any]:
     return {"status": "known", "value": value, "evidence": {"command": command}}
 
@@ -221,6 +279,17 @@ def _observe_one(raw_path: str, run_git: RunGit) -> Dict[str, Any]:
             )
         else:
             facts["git_common_dir"] = _unknown("git_common_dir_unavailable", common["command"])
+
+        worktree_root = facts["worktree_root"]["value"]
+        facts["workspace_markers"] = _known(
+            _observe_workspace_markers(worktree_root), "fs.stat workspace markers"
+        )
+        npm_test = _observe_npm_test_script(worktree_root)
+        facts["npm_test_script"] = (
+            _known(npm_test, "fs.read package.json scripts.test")
+            if npm_test is not None
+            else _unknown("no_npm_test_script", "fs.read package.json scripts.test")
+        )
     else:
         # `--show-toplevel` fails for a bare repository too (it has no working
         # tree) - that is not the same fact as "not a git repository at all".
