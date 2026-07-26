@@ -15,7 +15,7 @@ This decision creates three distinct seams:
 |---|---|---|
 | **SemanticMemoryAdapter** | A local or Cognee projection of privacy-approved typed `tropo` nodes for semantic retrieval. | It owns its privacy filtering and returns typed `RecallHit` candidates. Its state is rebuildable from graph truth. |
 | **AgentLTM** | Bellamente's independent durable store for approved agent memory. | Its data lives only at `.bellamente/data/`; it is not a `tropo` projection and never shares a physical store with semantic memory or Vivary core. |
-| **CandidateRecallProvider** | An optional source of normalized prior assertions for the `vivary-core` candidate-recall firewall. | Before core evaluation, every Bellamente candidate must carry typed evidence/provenance and a known stable `tropo` node ID. The firewall, not similarity, governs whether it can corroborate, challenge, or request review. |
+| **CandidateRecallProvider** | An optional source of normalized prior assertions for the `vivary-core` candidate-recall firewall. | Before core evaluation, normalization follows [SPEC §6.1](SPEC-bellamente-memory.md#61-normalized-input-boundary), including its defined known-ID-or-unresolved-marker boundary. The firewall, not similarity, governs whether a candidate can corroborate, challenge, or request review. |
 
 The existing semantic `RecallHit` adapter protocol does **not** directly model
 AgentLTM. If AgentLTM data crosses into Vivary, it crosses through a future
@@ -51,9 +51,10 @@ configuration.
 Future capability discovery remains declarative: it advertises disabled AgentLTM
 policy without probing or executing Bellamente and must report `installed: false`.
 A separately approved runtime diagnostic may report external readiness under a
-differently named field. Future Doctor behavior is likewise declarative and uses
-namespaced states (`agent-ltm-disabled`, `agent-ltm-policy-present`,
-`agent-ltm-misconfigured`) rather than probing or calling the external runtime.
+differently named field. Future Doctor behavior is likewise declarative; its
+namespaced state vocabulary is owned only by
+[SPEC §5](SPEC-bellamente-memory.md#5-capability-and-doctor-requirements). Doctor never
+probes or calls the external runtime.
 
 The real write → recall → trace demonstration is release dogfood after its own human
 gate. It is neither an installer side effect nor a unit-test substitute.

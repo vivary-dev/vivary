@@ -61,9 +61,10 @@ fail_closed = true
 ```
 
 `[agent-ltm]` is never `[memory]`. In particular, future work must not occupy the
-semantic `[memory].provider` slot with Bellamente. On a clean scaffold the policy is
-created disabled. Adopt may create the absent dedicated policy file, but must leave an
-existing file unchanged and never turn it on.
+semantic `[memory].provider` slot with Bellamente. An ordinary scaffold or adopt run
+creates no AgentLTM policy. Only after the user chooses the optional policy surface
+may a clean scaffold create the policy disabled, or adopt create it when absent; adopt
+must leave an existing file unchanged and never turn it on.
 
 ### 3.2 Independent physical store
 
@@ -179,16 +180,17 @@ observable outcomes required by [#205](https://github.com/vivary-dev/vivary/issu
 
 Every result carries the pinned core decision and distinct condition label shown
 above. `accepted` means the normalized candidate was evaluated successfully; it is
-not permission to write. Every create, supersede, preserve, or explicit-correction
-operation remains separately testable and gated. Learned memory cannot automatically
-replace authored truth.
+not permission to write. Operations that create or supersede state, including an
+explicit correction, remain separately testable and gated. Exact-duplicate preserve is
+a read-only evaluation result, not a gated mutation. Learned memory cannot
+automatically replace authored truth.
 
 ## 7. Verification tiers
 
 | Tier | What it proves | What it must not do |
 |---|---|---|
-| Contract tests | Normalization requires stable node IDs and fingerprinted evidence; duplicate, corroboration, correction, identity/conflict, stale, and degraded paths are distinct. | Use Bellamente, create stores, or mutate a workspace. |
-| Scaffold/capability/Doctor tests | Default-disabled policy, exact private set, separate AgentLTM namespace, inert MCP guidance, and declarative capability/Doctor behavior. | Probe or execute the external executable, install a provider, enable MCP, or perform memory operations. |
+| Contract tests | Normalization requires a stable node ID or the defined unresolved-identity marker plus fingerprinted evidence; duplicate, corroboration, correction, identity/conflict, stale, and degraded paths are distinct. | Use Bellamente, create stores, or mutate a workspace. |
+| Scaffold/capability/Doctor tests | No policy without opt-in; selected policy remains disabled; exact private set, separate AgentLTM namespace, inert MCP guidance, and declarative capability/Doctor behavior. | Probe or execute the external executable, install a provider, enable MCP, or perform memory operations. |
 | Release dogfood | A human-approved real write → recall → trace on the intended external runtime. | Run as installer behavior or a unit test. |
 
 ## 8. Non-goals and implementation handoff

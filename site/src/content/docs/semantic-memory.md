@@ -111,8 +111,9 @@ approved source files. If provider state and source files disagree, source files
   prior assertions proposed for the `vivary-core` candidate-recall firewall in
   [#205](https://github.com/vivary-dev/vivary/issues/205). It is not a shipped
   protocol or a synonym for SemanticMemoryAdapter. Before `vivary-core` evaluates a
-  Bellamente candidate, it must map to typed evidence and a known stable Tropo node
-  ID. Learned memory never silently promotes to authored truth.
+  Bellamente candidate, normalization must supply typed evidence and either a known
+  stable Tropo node ID or the explicit unresolved-identity marker defined by the
+  Bellamente contract. Learned memory never silently promotes to authored truth.
 
 ## Minimal interface
 

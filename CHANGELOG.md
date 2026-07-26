@@ -22,10 +22,11 @@ provider call, memory mutation, MCP, install, or publication action occurs.
   predecessor to #190: Bellamente remains an independent, workspace-local AgentLTM;
   Tropo-backed semantic adapters and the provider-neutral `vivary-core` candidate
   firewall are separate seams; learned memory never silently becomes authored truth.
-- Locked default-disabled policy, the complete fail-closed private set, truthful
-  declarative capability and Doctor behavior, and separate human gates for install,
-  activation, MCP enablement, every mutation, and release dogfood. Scaffold/adopt
-  output is policy and inert instructions only.
+- Locked explicit opt-in before any disabled AgentLTM policy is created, the complete
+  fail-closed private set, truthful declarative capability and Doctor behavior, and
+  separate human gates for install, activation, MCP enablement, every mutation, and
+  release dogfood. Ordinary scaffold/adopt runs create no AgentLTM surface; selected
+  output is disabled policy and inert instructions only.
 - Corrected `docs/SEMANTIC-MEMORY.md` to match the shipped asynchronous Cognee adapter:
   the adapter owns privacy-filtered snapshot construction, indexing refreshes the
   whole dataset, recall accepts only known-node typed hits, forget removes the whole
@@ -37,10 +38,12 @@ provider call, memory mutation, MCP, install, or publication action occurs.
 - Routed the nested Bellamente contract from the documentation index and the generated
   semantic-memory page without creating an unsupported site route.
 - Made `docs/bellamente-memory/SPEC-bellamente-memory.md` the sole owner of the
-  private-set contract, defined the firewall's unresolved-identity input and result
-  emitter, and added `.strato/private/**` to the adapter's built-in floor. The shipped
-  dependency-free Git-ignore matcher's escaped/complex-pattern limitation is now
-  explicit and tracked by [#236](https://github.com/vivary-dev/vivary/issues/236).
+  private-set and Doctor-state contracts, aligned summaries to its
+  known-ID-or-unresolved-marker boundary, and kept exact-duplicate preserve as a
+  read-only result rather than a mutation gate. The adapter's built-in floor now
+  includes `.strato/private/**`; the shipped Git-ignore matcher's escaped/complex
+  pattern limitation is explicit and tracked by
+  [#236](https://github.com/vivary-dev/vivary/issues/236).
 
 ### Verification
 
