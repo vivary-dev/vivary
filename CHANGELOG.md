@@ -10,6 +10,72 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: guided doctor repair and truthful map counts] — 2026-07-25
+
+Affects `create-vivary` / `@vivary/create` and `vivary-tropo`. Published versions stay
+at **0.3.1** and **0.4.1** in this entry; the bumps are deferred to the unified release
+line tracked in #149, where `create-vivary` / `@vivary/create` take a **minor** and
+`vivary-tropo` a **patch**. `strato` is versionless and rides the create-vivary train.
+Publishing remains a manual human gate.
+
+### Added
+
+- `create-vivary doctor --repair` — a guided, conservative repair plan. Dry-run by
+  default; `--yes` applies only deterministic safe repairs, reruns doctor, and keeps a
+  nonzero exit if the workspace is still invalid. Safe repairs are limited to
+  regenerating missing private/runtime placeholders from the canonical templates,
+  appending missing privacy ignore lines, and removing simple single-line W210
+  redundant derived metadata.
+- `create-vivary doctor --trend` — opt-in drift tracking against a prior recorded run.
+
+### Fixed
+
+- **Privacy probes now match `.gitignore` the way Git does.** The matcher used
+  `fnmatchcase`, so `*` crossed `/`, `**/` and `/**` were not honoured, directory rules
+  like `.strato/*/` never matched, and an excluded directory did not exclude its
+  contents. Doctor could therefore report a leaking workspace as clean — including the
+  `!**/USER.md` case, which stayed green even after the first nested-negation fix
+  because that fix inherited the same matcher bug.
+- **A backslash in a `.gitignore` pattern is treated as Git's escape character, not a
+  path separator.** `USER.md\ ` names the file "USER.md " — with the space — so it does
+  not protect `USER.md`, but the parser stripped the trailing space unconditionally and
+  rewrote the backslash to `/`, crediting the rule and reporting the workspace clean.
+- **A bracket expression is no longer credited with protecting a private file.**
+  `[U]SER.md` is honoured only where `core.ignorecase` is off, so on the default
+  Windows and macOS configuration such a rule silently protects nothing. Positive rules
+  that depend on case folding now fail closed; negations spelled that way are still
+  honoured, so an unignore is never missed.
+- **`doctor --repair --yes` converges.** It previously appended a duplicate privacy
+  block on every run without ever fixing the workspace, because the planner predicted
+  success using a different rule than doctor used to pass. Patterns an append provably
+  cannot fix are now withheld from the safe list and reported as manual instead.
+- **Nested `.gitignore` negations are reported, not papered over.** A lower-level rule
+  that unignores a private path takes precedence in Git, so no root-level line can
+  override it. Both `doctor` and `adopt` now say so and name the exposed paths, rather
+  than recommending a root-level fix that cannot work — or, in adopt's case, answering
+  a negation with another negation.
+- **`doctor --repair` reports the real reason a W210 field was left for a human.**
+  Every failure previously said "complex YAML", so a user whose file was non-UTF-8,
+  hard-linked or unreadable was told to hand-edit YAML that was not the problem.
+- **`doctor --repair` preserves file modes.** Atomic replacement went through
+  `mkstemp`, which creates at `0600`, silently making an existing `0644` file
+  owner-only on POSIX and breaking shared workspaces and service accounts.
+- **Stale-scaffold cleanup no longer crashes.** A raw `OSError` from an unremovable
+  path escaped the `init` error handler, producing a traceback and — under `--json` —
+  no JSON at all. Directory reparse points are now removed with `rmdir`.
+- **Private placeholders no longer crash on an undecodable template.**
+  `UnicodeDecodeError` is a `ValueError`, so it slipped past the `OSError` handler and
+  the repair apply loop alike.
+- **`tropo map` counts hard-linked files.** They were skipped as though they were
+  symlinks, which silently removed ordinary public files from totals, largest-file,
+  index detection and module candidates. Symlinks and reparse points are still omitted;
+  a hard link is an ordinary directory entry, not an alternate route to already-counted
+  content. `map` counts paths and sums per-path sizes — it does not report disk usage.
+- Documented the full privacy ignore set in `docs/COMMANDS.md`. Three enforced lines
+  (`*.vivary-tmp`, `!memory/.gitkeep`, `!heartbeat-reports/.gitkeep`) appeared nowhere
+  in the docs, so a user following them could not make the post-adopt check pass. A
+  test now derives the expectation from the code so the two cannot drift again.
+
 ## [Unreleased: Vivary product identity and proof spine] — 2026-07-18
 
 Affects documentation, site verification, and the website only. No package versions
