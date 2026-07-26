@@ -18,18 +18,14 @@ ADAPTATION - the Ozone gate-verdict seam (#13): several Node tests build a
 real verdict via `evaluateGateSufficiency` (src/verify/sufficiency.mjs).
 That module is not part of this slice (not in the owned-files list, and not
 one of the already-ported "capsule_compile, receipt, workspace_*" modules
-this task's rules call out as importable). `evaluate_receipt_gate` only ever
-reads `verdict["failing_checks"]` (see policy_gates.py), so rather than port
-the whole Ozone sufficiency module speculatively, `_ozone_verdict_stub`
-below computes exactly that one field, matching sufficiency.mjs's
-required-checks loop (src/verify/sufficiency.mjs lines 93-108) verbatim: for
-each required check name, missing -> {"actual": "missing"}, present but not
-"passed" -> {"actual": <outcome>}. The "without a verdict, behavior is
-unchanged" test (mirroring the Node test of the same name) is the
-self-check on this stub: it asserts the verdict-driven path and the
-no-verdict re-derivation fallback inside evaluate_receipt_gate produce an
-identical result, which only holds if the stub's failing_checks matches
-what a real Ozone verdict would have contained.
+this task's rules call out as importable). Rather than port the whole Ozone
+sufficiency module speculatively, `_ozone_verdict_stub` emits the verdict
+fields Strato consumes: `outcome`, `reason_codes`, and `failing_checks`.
+It matches sufficiency.mjs's required-check loop: missing ->
+{"actual": "missing"}, present but not "passed" -> {"actual": <outcome>},
+with `insufficient` whenever either occurs. The "without a verdict,
+behavior is unchanged" test is the self-check that the stub's specific
+check failures match the no-verdict re-derivation fallback.
 """
 
 from __future__ import annotations
@@ -297,12 +293,19 @@ def base_receipt_like(capsule, overrides=None):
 def _ozone_verdict_stub(*, capsule, receipt, required_checks):
     outcome_by_name = {c["name"]: c.get("outcome") for c in receipt.get("checks", [])}
     failing_checks = []
+    reason_codes = []
     for name in required_checks:
         if name not in outcome_by_name:
             failing_checks.append({"name": name, "expected": "passed", "actual": "missing"})
+            reason_codes.append("required_check_missing")
         elif outcome_by_name[name] != "passed":
             failing_checks.append({"name": name, "expected": "passed", "actual": outcome_by_name[name]})
-    return {"failing_checks": failing_checks}
+            reason_codes.append("required_check_failed")
+    return {
+        "outcome": "insufficient" if failing_checks else "sufficient",
+        "reason_codes": list(dict.fromkeys(reason_codes)),
+        "failing_checks": failing_checks,
+    }
 
 
 # -- reason-code vocabulary is pinned -------------------------------------------------
@@ -337,6 +340,7 @@ def test_gate_reason_code_vocabulary_is_pinned():
         "RECEIPT_CAPSULE_MISMATCH": "receipt_capsule_mismatch",
         "UNKNOWN_CAPSULE_SHAPE": "unknown_capsule_shape",
         "UNKNOWN_RECEIPT_SHAPE": "unknown_receipt_shape",
+        "VERDICT_INSUFFICIENT": "verdict_insufficient",
     }
     with pytest.raises(TypeError):
         GATE_DECISION["CLEAR"] = "nope"
@@ -580,6 +584,35 @@ def test_evaluate_receipt_gate_a_sufficient_ozone_verdict_clears_the_required_ch
 
     outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict)
     assert outcome == {"decision": GATE_DECISION["CLEAR"], "reason_codes": [], "gate_requests": []}
+
+def test_evaluate_receipt_gate_honors_an_insufficient_verdict_with_no_failing_checks():
+    capsule = build_clean_capsule()
+    receipt = create_integrity_receipt(
+        capsule=capsule,
+        runtime={"harness": "test", "actor": "test-actor"},
+        checks=[
+            {"name": check["name"], "command": check["command"], "outcome": "passed"}
+            for check in capsule["required_checks"]
+        ],
+        now=NOW,
+    )
+    verdict = {
+        "outcome": "insufficient",
+        "reason_codes": ["claims_not_fully_verified"],
+        "failing_checks": [],
+    }
+
+    outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict)
+
+    assert outcome["decision"] == GATE_DECISION["GATE_REQUIRED"]
+    assert outcome["reason_codes"] == [GATE_REASON["VERDICT_INSUFFICIENT"]]
+    assert outcome["gate_requests"] == [
+        {
+            "reason_code": GATE_REASON["VERDICT_INSUFFICIENT"],
+            "verdict_outcome": "insufficient",
+            "verdict_reason_codes": ["claims_not_fully_verified"],
+        }
+    ]
 
 
 def test_evaluate_receipt_gate_a_supplied_verdict_is_actually_consumed_not_ignored_it_can_disagree_with_what_re_deriving_from_the_receipt_would_say():

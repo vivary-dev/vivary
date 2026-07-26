@@ -124,22 +124,21 @@ def evaluate_receipt_gate(*, capsule, receipt, verdict=None):
     checks and unresolved state well enough to proceed without a human gate.
 
     Gate-seam harmonization (#13): Ozone's evaluateGateSufficiency
-    (src/verify/sufficiency.mjs) already owns the judgment of which required
-    checks are missing or failed, behind its GATE_SPEC seam. When a caller
-    passes that verdict in, this function consumes its `failing_checks`
-    instead of re-deriving the same comparison from
-    capsule["required_checks"] vs receipt["checks"] - Strato decides policy
-    FROM verdicts; only Ozone evaluates sufficiency and recomputes
-    fingerprints; neither runs checks. `verdict` is optional and duck-typed
-    (only `failing_checks` is read) so this module stays decoupled from
-    src/verify/'s schema constant; omitting it keeps the original
-    self-contained re-derivation, unchanged, for backward compatibility.
+    (src/verify/sufficiency.mjs) already owns evidence sufficiency behind its
+    GATE_SPEC seam. When a caller passes that verdict in, this function
+    consumes its outcome, reason codes, and failing checks instead of
+    treating an empty ``failing_checks`` list as proof of sufficiency.
+    Strato decides policy FROM verdicts; only Ozone evaluates sufficiency and
+    recomputes fingerprints; neither runs checks. ``verdict`` remains
+    optional and duck-typed, so this module stays decoupled from src/verify/'s
+    schema and reason constants; omitting it keeps the original self-contained
+    re-derivation unchanged for backward compatibility.
 
     capsule  the Task Capsule the receipt claims to run against
     receipt  the Execution Receipt to evaluate
-    verdict  {"failing_checks": [{"name": str, "expected": str, "actual": str}]}
-             (optional) - an Ozone gate-verdict (evaluateGateSufficiency's
-             return value) covering the same capsule/receipt pair.
+    verdict  {"outcome": str, "reason_codes": [str],
+              "failing_checks": [{"name": str, "expected": str, "actual": str}]}
+             (optional) - an Ozone gate-verdict covering the same pair.
 
     Returns {"decision": str, "reason_codes": [str], "gate_requests": [dict]}.
     """
@@ -164,8 +163,12 @@ def evaluate_receipt_gate(*, capsule, receipt, verdict=None):
         gate_requests.append({"reason_code": GATE_REASON["RECEIPT_CAPSULE_MISMATCH"]})
 
     failing_checks = verdict.get("failing_checks") if isinstance(verdict, dict) else None
+    has_specific_failure = False
     if isinstance(failing_checks, list):
         for failing in failing_checks:
+            if not isinstance(failing, dict):
+                continue
+            has_specific_failure = True
             if failing.get("actual") == "missing":
                 reason_codes.append(GATE_REASON["REQUIRED_CHECK_MISSING"])
                 gate_requests.append({"reason_code": GATE_REASON["REQUIRED_CHECK_MISSING"], "check": failing.get("name")})
@@ -194,6 +197,23 @@ def evaluate_receipt_gate(*, capsule, receipt, verdict=None):
                         "outcome": found.get("outcome"),
                     }
                 )
+
+    if (
+        isinstance(verdict, dict)
+        and verdict.get("outcome") != "sufficient"
+        and not has_specific_failure
+    ):
+        verdict_reason_codes = verdict.get("reason_codes")
+        if not isinstance(verdict_reason_codes, list):
+            verdict_reason_codes = []
+        reason_codes.append(GATE_REASON["VERDICT_INSUFFICIENT"])
+        gate_requests.append(
+            {
+                "reason_code": GATE_REASON["VERDICT_INSUFFICIENT"],
+                "verdict_outcome": verdict.get("outcome"),
+                "verdict_reason_codes": verdict_reason_codes,
+            }
+        )
 
     if len(receipt["unresolved_conflicts"]) > 0:
         reason_codes.append(GATE_REASON["UNRESOLVED_CONFLICT"])
