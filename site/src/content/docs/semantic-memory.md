@@ -147,7 +147,7 @@ class RecallHit:
     path: str
     score: float
     reason: str
-    source: str  # provider-reported source label
+    source: str  # fixed "provider" label from the Cognee adapter
     edge_context: list[MemoryEdge]
     provider: str
 
@@ -520,7 +520,8 @@ Tests for the setup slice and future provider code:
   privacy-filtered snapshot for `index` and `recall`; `forget` is approved
   whole-dataset removal and `doctor` remains module-level and provider-free.
 - Contract tests: recall hits include `node_id`, nullable `type`, `path`, `score`,
-  `reason`, provider-reported `source`, `provider`, and edge context.
+  `reason`, the Cognee adapter's fixed `source = "provider"` label, `provider`, and
+  edge context.
 - Privacy regression tests: `USER.md`, `MEMORY.md`, `memory/**`,
   `heartbeat-reports/**`, `.strato/private/**`, and configured ignored paths are
   filtered before indexing and never recalled.

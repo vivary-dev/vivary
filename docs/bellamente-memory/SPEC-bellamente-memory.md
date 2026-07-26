@@ -94,14 +94,14 @@ trying to recover hidden data.
 
 No earlier approval authorizes a later action. Each row is a separate human decision.
 
-| Action | Required gate | Automatic behavior that is forbidden |
-|---|---|---|
-| Scaffold or adopt | User chose the optional policy surface. | Write disabled policy, inert guidance, and the `.bellamente/` runtime-data ignore entry; do not enable AgentLTM, install externally, invoke a provider, create the store, or mutate memory. |
-| External installation | Explicit human approval. | Installer-managed installation or executable probing. |
-| Policy activation | Explicit human approval to change `enabled` from `false`. | Activation implied by a preset, capability listing, or data path. |
-| MCP enablement | Explicit human approval distinct from activation. | Writing or enabling an active MCP server configuration. |
-| Write, correct, forget, or ingest | Explicit human approval for that operation. | A standing enablement flag authorizing later mutations. |
-| Live proof | Explicit release/dogfood approval. | Installer verification or a unit-test replacement. |
+| Action | Required gate | Permitted automatic output | Automatic behavior that is forbidden |
+|---|---|---|---|
+| Scaffold or adopt | User chose the optional policy surface. | Write disabled policy, inert guidance, and the `.bellamente/` runtime-data ignore entry. | Enable AgentLTM, install externally, invoke a provider, create the store, or mutate memory. |
+| External installation | Explicit human approval. | None. | Installer-managed installation or executable probing. |
+| Policy activation | Explicit human approval to change `enabled` from `false`. | None. | Activation implied by a preset, capability listing, or data path. |
+| MCP enablement | Explicit human approval distinct from activation. | None. | Writing or enabling an active MCP server configuration. |
+| Write, correct, forget, or ingest | Explicit human approval for that operation. | None. | A standing enablement flag authorizing later mutations. |
+| Live proof | Explicit release/dogfood approval. | None. | Installer verification or a unit-test replacement. |
 
 The only MCP-related scaffold output may be inert instructions explaining that a
 manual, separately approved decision is needed. It must not create active runtime
@@ -164,20 +164,21 @@ evidence and known stable `tropo` node IDs before core evaluation.
 The provider result and firewall decision must preserve these conditions as distinct,
 observable outcomes required by [#205](https://github.com/vivary-dev/vivary/issues/205):
 
-| Condition | Required result | Truth and mutation rule |
+| Condition | Required core decision and result | Truth and mutation rule |
 |---|---|---|
-| Exact duplicate with the same evidence | `exact_duplicate` / preserve. | No new assertion or hidden rewrite. |
-| Compatible assertion with independent evidence | `corroboration`. | Evidence may be proposed or linked only after its operation-specific approval; it is not authored-truth promotion. |
-| Explicit correction of a named assertion | `explicit_correction` proposal. | Creation or supersession requires the named target, evidence, authorization, and separate human approval. |
+| Exact duplicate with the same evidence | `accepted` with `exact_duplicate` / preserve. | No new assertion or hidden rewrite. |
+| Compatible assertion with independent evidence | `accepted` with `corroboration`. | Evidence may be proposed or linked only after its operation-specific approval; it is not authored-truth promotion. |
+| Explicit correction of a named assertion | `review_required` with an `explicit_correction` proposal. | Creation or supersession requires the named target, evidence, authorization, and separate human approval. |
 | Unknown or ambiguous identity | `review_required` with `identity_unresolved`. | Preserve all available sides; create nothing automatically. |
 | Incompatible value for the same identity | `review_required` with `value_conflict`. | Preserve both assertions; never elect a winner from similarity. |
-| Stale candidate, node, or evidence | `stale`. | Do not promote or mutate until revalidated. |
-| Missing, malformed, or failed optional provider | `provider_degraded`. | Keep degradation visible; do not silently bypass authority checks or mutate. |
+| Stale candidate, node, or evidence | `rejected` with `stale`. | Do not promote or mutate until revalidated. |
+| Missing, malformed, or failed optional provider | `rejected` with `provider_degraded`. | Keep degradation visible; do not silently bypass authority checks or mutate. |
 
-Every result must carry a core decision (`accepted`, `review_required`, or `rejected`)
-in addition to its condition label. That decision is not a write. It must make create,
-supersede, preserve, and explicit-correction semantics testable. In every case,
-learned memory cannot automatically replace authored truth.
+Every result carries the pinned core decision and distinct condition label shown
+above. `accepted` means the normalized candidate was evaluated successfully; it is
+not permission to write. Every create, supersede, preserve, or explicit-correction
+operation remains separately testable and gated. Learned memory cannot automatically
+replace authored truth.
 
 ## 7. Verification tiers
 

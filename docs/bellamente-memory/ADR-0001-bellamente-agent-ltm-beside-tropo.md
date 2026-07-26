@@ -51,11 +51,12 @@ ingest, and live proof require separate human approval. Generated `AGENTS.md` co
 is out of scope; MCP material is inert setup guidance only, never an active server
 configuration.
 
-A future capability record must declare `requires_external_executable: ["bella"]`
-without importing, locating, or executing it. Its `installed` signal may describe
-Vivary-side policy/wiring only; it must not claim executable availability. A future
-Doctor implementation is declarative: it may parse the disabled policy and report its
-state, but it never probes or calls `bella`.
+Future capability discovery remains declarative: it advertises disabled AgentLTM
+policy without probing or executing Bellamente and must report `installed: false`.
+A separately approved runtime diagnostic may report external readiness under a
+differently named field. Future Doctor behavior is likewise declarative and uses
+namespaced states (`agent-ltm-disabled`, `agent-ltm-policy-present`,
+`agent-ltm-misconfigured`) rather than probing or calling the external runtime.
 
 The real write → recall → trace demonstration is release dogfood after its own human
 gate. It is neither an installer side effect nor a unit-test substitute.

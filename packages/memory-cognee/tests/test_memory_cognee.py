@@ -461,6 +461,7 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
         self.assertEqual([hit.node_id for hit in hits], ["auth"])
         self.assertEqual(hits[0].type, "module")
         self.assertEqual(hits[0].path, "modules/auth/index.md")
+        self.assertEqual(hits[0].source, "provider")
         self.assertEqual(hits[0].provider, "cognee")
         self.assertEqual(fake.recall_calls[0]["top_k"], 3)
 

@@ -34,11 +34,15 @@ memory, MCP, install, or publication action occurs.
   the adapter owns privacy-filtered snapshot construction, indexing refreshes the
   whole dataset, recall accepts only known-node typed hits, forget removes the whole
   approved dataset, and Doctor remains module-level and provider-free.
+  Recall documentation now names Cognee's fixed `source = "provider"` label, with the
+  package contract test asserting that value.
 - Routed the nested Bellamente contract from the documentation index and the generated
   semantic-memory page without creating an unsupported site route.
 
 ### Verification
 
+- `python packages/memory-cognee/tests/test_memory_cognee.py` — **48/48** adapter
+  tests passed.
 - `cd site && npm run test:site` — **8/8** site tests passed.
 - `cd site && npm run build && npm run test:links` — **23** pages built; **1,633**
   local references and **1,009** anchors checked with zero failures.
