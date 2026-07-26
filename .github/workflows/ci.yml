@@ -33,6 +33,8 @@ jobs:
         run: python packages/create-vivary/tests/test_create_vivary.py
       - name: create-vivary adopt
         run: python packages/create-vivary/tests/test_adopt.py
+      - name: create-vivary privacy (differential vs real git check-ignore)
+        run: python packages/create-vivary/tests/test_privacy_differential.py
       - name: strato integrity (scaffold smokes, link/parity checks)
         run: python packages/create-vivary/tests/test_strato_integrity.py
       - name: memory-cognee
