@@ -57,6 +57,14 @@ writes Cognee policy and verification docs without installing Cognee or indexing
 content. Runtime Cognee recall lives in the optional `vivary-memory-cognee` Python
 package and still requires explicit install and index approval.
 
+In source builds and the next package release, `doctor --repair --json` previews a
+guided repair plan without writing. After approval, `doctor --repair --yes`
+regenerates missing ignored private placeholders, appends missing privacy ignore
+lines, removes simple W210 redundant metadata, and reruns doctor. Non-workspace,
+symlinked, junctioned, hardlinked, non-file, or non-UTF-8 repair targets are refused
+or kept manual. Complex YAML W210 cases, broken refs, and exo conflicts stay manual
+guidance.
+
 ## How it works
 
 This package is a thin launcher: it runs the Python `create-vivary` scaffolder via
