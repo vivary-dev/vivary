@@ -14,6 +14,58 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: vivary-core, the governed-context seam] — 2026-07-26
+
+Adds `vivary-core`, an in-repo library under `packages/core/`. **Not published to PyPI
+and not reachable from any shipping CLI**: wiring it outward is
+[#207](https://github.com/vivary-dev/vivary/issues/207). No existing package changes
+version, and nothing about installing or running Vivary changes because it exists.
+
+### Added
+
+- `vivary-core` — the shared seam the role packages will speak through, so "what is
+  true, and how do we know" has one implementation rather than four that drift.
+  Canonical JSON, sha256 fingerprints and deterministic IDs; read-only checkout
+  observation over explicit allowlisted roots; projection into a typed evidence graph
+  where divergent checkouts stay unresolved conflicts with both sides preserved;
+  bounded task capsules where every claim carries its evidence and selection reason;
+  and receipts bound to the exact capsule and workspace fingerprint they ran against.
+  Documented in `docs/ARCHITECTURE.md`. (Plain text, not a link: `CHANGELOG.md` is
+  mirrored to the site's `/changelog/` route, where a repo-relative path resolves
+  against that route and breaks the built-link check.)
+
+### Fixed
+
+Findings from the `vivary-core` review, all pre-release and none user-reachable:
+
+- **Git environment injection.** Observation dropped four `GIT_*` variables, so
+  command-scope config (`GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_*` / `GIT_CONFIG_VALUE_*`)
+  could make a repository with no remotes observe as having an attacker-supplied
+  origin — which then became the repository identity used for grouping, conflicts and
+  fingerprints. The environment is now pinned rather than filtered.
+- **Credential disclosure.** A remote URL embedding credentials was stored verbatim as
+  both a fact and the repository identity, reaching observations, graphs, capsules and
+  fingerprints. Userinfo is now stripped before storage.
+- **Remote-less repositories are first-class.** Identity fell back to the checkout
+  path, so each linked worktree of a repository without a remote became its own
+  repository node and their divergence never surfaced. Identity now falls back to
+  Git's common directory, which every linked worktree shares.
+- **Capsule scope is enforced, not decorative.** `task.scope` was copied into the
+  output but never applied, so a capsule could declare one scope and carry claims,
+  conflicts and unknowns from outside it.
+- **Content evidence is bound to the snapshot it was observed at**, so an excerpt from
+  an earlier scan can no longer be presented as evidence about a later state.
+- **Failed content searches are visible.** A search that could not run was
+  indistinguishable from a search that found nothing.
+- **Required checks are derived, not hardcoded.** Every workspace was told to run
+  `npm test`, `npx create-vivary doctor` and `entire status`. Checks are now derived
+  from observed markers with their evidence attached, an undeterminable test command
+  is reported as an unknown rather than guessed, and `task.required_checks` overrides.
+- Windows allowlist paths compare case-insensitively; a corrupt symbolic HEAD reports
+  `unknown` instead of "detached"; the git output bound is enforced while the process
+  runs rather than after; search terms are matched as fixed strings, not regexes; and
+  negative claim budgets fail closed instead of silently widening the capsule.
+
 ## [Unreleased: guided doctor repair and truthful map counts] — 2026-07-25
 
 Affects `create-vivary` / `@vivary/create` and `vivary-tropo`. Published versions stay

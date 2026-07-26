@@ -23,6 +23,23 @@ The governed-context shared seam every Vivary role package will speak through:
 - **`capsule_digest`** — a pure, fingerprint-bound serializer producing a
   compact digest of a Task Capsule with nothing dropped: conflicts and
   unknowns byte-verbatim, every omission recorded.
+- **`workspace_observe`** — read-only checkout observation: explicit
+  allowlisted roots only, ambient-git-env sanitized, bare repositories
+  positively confirmed, symlink/junction escapes re-checked post-resolution
+  and refused. Never fetches, never writes, never crawls.
+- **`workspace_model`** — pure projection of observations into a typed
+  evidence graph; divergent checkouts become explicit unresolved conflicts
+  with both sides and their evidence preserved — never auto-resolved.
+- **`workspace_content`** — bounded, read-only `git grep` content search
+  over tracked files only, every truncation recorded.
+- **`capsule_compile` / `capsule_select`** — the bounded Task Capsule:
+  relevance-ranked, explainable claim selection with fail-closed structured
+  filters; every budget cut is a recorded omission.
+- **`collation`** — JS `localeCompare` ordering (claim/node/edge ranking is
+  part of the frozen contract), pinned as an empirical weight table
+  extracted from the reference runtime and verified on ~2.1M probe pairs;
+  characters outside the pinned domain fail loud rather than silently
+  diverging.
 
 Zero runtime dependencies. Python 3.11+.
 
