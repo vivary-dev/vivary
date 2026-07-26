@@ -2871,14 +2871,24 @@ def test_map_prunes_junction_to_outside_root(tmp_path):
         shutil.rmtree(outside, ignore_errors=True)
 
 
-def test_map_skips_hardlinked_private_file(tmp_path):
+def test_map_counts_hardlinked_files(tmp_path):
+    """Hard-linked files are counted like any other file.
+
+    This deliberately replaces `test_map_skips_hardlinked_private_file`, which
+    encoded the opposite intent. A hard link is an ordinary directory entry — unlike
+    a symlink or reparse point, it is not an alternate route that risks cycles or
+    double-walking. Skipping them silently undercut totals, largest-file and module
+    detection for ordinary public files, and it was never a privacy control: that is
+    what `exclude` and `MAP_SKIP_DIRS` are for. `map` counts paths and sums per-path
+    sizes; it does not claim to report disk usage.
+    """
     (tmp_path / "src").mkdir()
-    (tmp_path / ".strato" / "private").mkdir(parents=True)
-    secret = tmp_path / ".strato" / "private" / "secret.md"
-    secret.write_text("# Secret\n" * 500, encoding="utf-8")
-    public_link = tmp_path / "src" / "private-view.md"
+    (tmp_path / "docs").mkdir()
+    original = tmp_path / "docs" / "guide.md"
+    original.write_text("# Guide\n" * 500, encoding="utf-8")
+    linked = tmp_path / "src" / "guide-copy.md"
     try:
-        os.link(secret, public_link)
+        os.link(original, linked)
     except (AttributeError, OSError):
         return
     (tmp_path / "src" / "open.md").write_text("# Open\n", encoding="utf-8")
@@ -2886,9 +2896,30 @@ def test_map_skips_hardlinked_private_file(tmp_path):
     rc, out = _capture_rc(tropo.cmd_map, _map_args(str(tmp_path)))
 
     assert rc == 0
+    assert out["summary"]["total_files"] == 3, out["summary"]["total_files"]
+    largest = [f["path"] for f in out["summary"]["largest_files"]]
+    assert any("guide-copy" in path for path in largest), largest
+    assert any("guide.md" in path for path in largest), largest
+
+
+def test_map_skips_symlinked_file(tmp_path):
+    """Symlinks and reparse points stay omitted, and for a reason that does not
+    apply to hard links: they are an alternate route to a file the walk may already
+    have counted, and following them can cycle."""
+    (tmp_path / "src").mkdir()
+    real = tmp_path / "src" / "real.md"
+    real.write_text("# Real\n" * 200, encoding="utf-8")
+    link = tmp_path / "src" / "linked.md"
+    try:
+        link.symlink_to(real)
+    except (AttributeError, OSError, NotImplementedError):
+        return
+
+    rc, out = _capture_rc(tropo.cmd_map, _map_args(str(tmp_path)))
+
+    assert rc == 0
     assert out["summary"]["total_files"] == 1
-    assert not any("private-view" in f["path"] for f in out["summary"]["largest_files"])
-    assert not any("secret" in f["path"] for f in out["summary"]["largest_files"])
+    assert not any("linked" in f["path"] for f in out["summary"]["largest_files"])
 
 
 def test_map_markdown_escapes_table_cells():

@@ -2893,16 +2893,6 @@ def _is_link_or_reparse(path):
     return bool(attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
 
 
-def _has_multiple_hardlinks(path):
-    try:
-        return os.path.isfile(path) and os.stat(path, follow_symlinks=False).st_nlink > 1
-    except (AttributeError, OSError):
-        try:
-            return os.path.isfile(path) and os.stat(path).st_nlink > 1
-        except OSError:
-            return False
-
-
 def _map_walk(root, skip_patterns):
     """Walk the full tree from `root` (no depth limit — aggregate counts need
     the whole tree). Reuses `is_excluded` so skip semantics match `check`/`graph`
@@ -2912,9 +2902,14 @@ def _map_walk(root, skip_patterns):
     never loop, double-count, or leak outside-root content into the inventory
     (os.walk's followlinks=False alone does not stop junctions — Windows does
     not classify them as symlinks). Files that are themselves links/reparse
-    points, multi-hardlinked, or whose real path resolves outside `root` are
-    skipped for the same reason. Yields (dirpath, reldir, dirnames, filenames)
-    with dirnames/filenames pruned in place."""
+    points, or whose real path resolves outside `root`, are skipped for that same
+    reason: each is an alternate route to content the walk may already have counted.
+    Hard-linked files are *not* skipped — a hard link is an ordinary directory entry,
+    not an alternate route the walk can arrive at twice, so omitting them only
+    undercounted the tree. Consequently `map` counts paths and sums per-path sizes;
+    it does not report disk usage, and two hard links to one inode count twice.
+    Yields (dirpath, reldir, dirnames, filenames) with dirnames/filenames pruned in
+    place."""
     root_abs = os.path.abspath(root)
     root_real = os.path.normcase(os.path.realpath(root_abs))
     seen = set()
@@ -2947,7 +2942,7 @@ def _map_walk(root, skip_patterns):
             if is_excluded(rel_file, skip_patterns):
                 continue
             full_file = os.path.join(dirpath, f)
-            if _is_link_or_reparse(full_file) or _has_multiple_hardlinks(full_file):
+            if _is_link_or_reparse(full_file):
                 continue
             if not _realpath_within(root_real, full_file):
                 continue
