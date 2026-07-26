@@ -300,14 +300,31 @@ def _bound_matches(by_file: Dict[str, List[Dict[str, Any]]], evidence: Dict[str,
     return {"matches": matches, "omissions": omissions}
 
 
+def _observed_revision(path: str, run_git: RunGit) -> Any:
+    """The revision this search actually ran against.
+
+    Content is evidence about a checkout *at a moment*. Without recording which
+    moment, a result from an earlier scan can be matched to a later graph by path
+    alone and presented as evidence for a snapshot it never described. `None` when
+    the revision cannot be read — unbindable content is then treated as stale rather
+    than quietly trusted.
+    """
+    head = run_git(path, ["rev-parse", "HEAD"])
+    return head["stdout"].strip() if head.get("ok") and head["stdout"].strip() else None
+
+
 def _observe_one_content(raw_path: str, terms: List[str], run_git: RunGit) -> Dict[str, Any]:
     path = normalize_path(raw_path)
 
     if len(terms) == 0:
+        # `head_revision` is deliberately None here rather than looked up: with no
+        # terms there is no search and no match to bind, and this branch's contract
+        # is that it runs *no* git command at all.
         return {
             "raw_path": raw_path,
             "path": path,
             "status": "observed",
+            "head_revision": None,
             "matches": [],
             "omissions": [],
             "reason": "no_question_terms",
@@ -340,6 +357,7 @@ def _observe_one_content(raw_path: str, terms: List[str], run_git: RunGit) -> Di
         "raw_path": raw_path,
         "path": path,
         "status": "observed",
+        "head_revision": _observed_revision(path, run_git),
         "matches": bounded["matches"],
         "omissions": bounded["omissions"],
     }

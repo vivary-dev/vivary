@@ -599,6 +599,9 @@ def test_content_match_candidate_is_bounded_intrinsically_question_matched_and_s
         "checkouts": [
             {
                 "path": "/w/gadget",
+                # Bound to the revision the graph reports for this checkout;
+                # content that cannot be placed in the snapshot is not evidence.
+                "head_revision": "a" * 40,
                 "matches": [
                     {
                         "path": "notes.md",
@@ -739,4 +742,50 @@ def test_content_search_failure_becomes_a_capsule_unknown(graph, fx):
     )
     assert "outside_allowlist" in recorded, (
         "a refused content root left no trace in the capsule"
+    )
+
+
+def test_content_from_a_different_revision_is_not_used_as_evidence(fx):
+    """Content must be bound to the snapshot the graph describes, not just to a path.
+
+    Matching solely by path accepted a content result from an earlier scan as
+    evidence for the graph's *current* workspace fingerprint. The receipt then
+    claims a unified governed context that never existed: an excerpt from a file as
+    it used to be, presented as evidence about the checkout as it is now.
+
+    Staleness is simulated by rewriting the recorded revision rather than by
+    advancing the fixture repo, because `fx` is module-scoped and other tests
+    assert against its exact commit shas.
+    """
+    p = fx["paths"]
+    allowlist = [p["canonical"], p["staleNeighbor"], p["dirty"], p["noOrigin"]]
+    targets = [p["canonical"], p["staleNeighbor"], p["dirty"], p["noOrigin"]]
+    graph_now = project_workspace_graph(
+        observe_checkouts(targets, allowlist=allowlist, now=NOW)
+    )
+    content = observe_content(targets, allowlist=allowlist, terms=["modified"], now=NOW)
+    task = {"question": "What modified files exist?"}
+
+    # Positive control: bound to the same revision, content is still evidence.
+    fresh = compile_task_capsule(task=task, graph=graph_now, content=content)
+    assert any(c["fact"] == "content_match" for c in fresh["claims"]), (
+        "binding must not discard content that genuinely matches the snapshot"
+    )
+    for checkout in content["checkouts"]:
+        assert checkout.get("head_revision"), (
+            "content must record the revision it searched, or it cannot be bound"
+        )
+
+    # Now the same content, recorded against a revision the graph does not describe.
+    stale = json.loads(json.dumps(content))
+    for checkout in stale["checkouts"]:
+        checkout["head_revision"] = "0" * 40
+
+    capsule = compile_task_capsule(task=task, graph=graph_now, content=stale)
+
+    assert not [c for c in capsule["claims"] if c["fact"] == "content_match"], (
+        "an excerpt observed at a different revision became evidence about this one"
+    )
+    assert any(u.get("kind") == "content_snapshot_stale" for u in capsule["unknowns"]), (
+        "dropping stale content silently is its own dishonesty; it must be reported"
     )

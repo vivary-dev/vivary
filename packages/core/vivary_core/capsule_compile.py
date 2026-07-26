@@ -132,6 +132,28 @@ def _dirty_entries_claim(node, truncation_omissions):
 # `content_term_match` signal: a content match is on-topic by construction
 # (the term was found in the checkout's own tracked-file content), even when
 # nothing about the checkout's label/branch/repository identity matches.
+def _observed_head(node):
+    fact = (node.get("facts") or {}).get("head_revision")
+    if fact is None or fact.get("status") != "known":
+        return None
+    return fact.get("value")
+
+
+def _content_is_bound_to(node, checkout_content):
+    """Whether this content was observed at the revision the graph describes.
+
+    Matching by path alone accepted a result from an earlier scan as evidence for a
+    later snapshot, so a capsule could present an excerpt of a file as it used to be
+    as evidence about the checkout as it is now — a unified governed context that
+    never existed at any single moment. Unbindable content (either side missing a
+    revision) is treated as stale rather than quietly trusted: this is an integrity
+    check, and the whole point is not to accept evidence that cannot be placed.
+    """
+    observed = _observed_head(node)
+    searched = checkout_content.get("head_revision")
+    return bool(observed) and bool(searched) and observed == searched
+
+
 def _content_match_candidates(content, checkouts_by_path):
     if not content or not isinstance(content.get("checkouts"), list):
         return []
@@ -139,6 +161,8 @@ def _content_match_candidates(content, checkouts_by_path):
     for checkout_content in content["checkouts"]:
         node = checkouts_by_path.get(checkout_content.get("path"))
         if node is None:
+            continue
+        if not _content_is_bound_to(node, checkout_content):
             continue
         for match in checkout_content.get("matches") or []:
             evidence = match.get("evidence")
@@ -296,6 +320,25 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         # only `omissions` made `grep_unavailable` — and a root `observe_content`
         # refused outright — vanish from the capsule, so a failed search was
         # indistinguishable from a clean miss.
+        # Content that could not be bound to this snapshot is dropped from evidence
+        # above; saying so is the other half of the fix. A silent drop would leave a
+        # capsule that looks like a clean search with no matches.
+        if (
+            node is not None
+            and checkout_content.get("matches")
+            and not _content_is_bound_to(node, checkout_content)
+        ):
+            content_unknowns.append(
+                {
+                    "kind": "content_snapshot_stale",
+                    "subject": node.get("id"),
+                    "subject_path": checkout_content.get("path"),
+                    "reason": "content was observed at a different revision than the graph describes",
+                    "observed_revision": _observed_head(node),
+                    "searched_revision": checkout_content.get("head_revision"),
+                    "evidence": [],
+                }
+            )
         if checkout_content.get("status") not in (None, "observed"):
             content_unknowns.append(
                 {
