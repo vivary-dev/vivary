@@ -279,6 +279,22 @@ def test_once_a_claim_releases_the_freed_scope_can_be_claimed_again():
     assert regranted["decision"] == CLAIM_DECISION["GRANTED"]
 
 
+def test_request_claim_refuses_unparseable_lease_timestamps():
+    valid = "2026-07-20T15:00:00.000Z"
+    for lease in (
+        {"granted_at": "bad", "expires_at": valid},
+        {"granted_at": valid, "expires_at": "bad"},
+    ):
+        result = request_claim(
+            active_claims=[],
+            request={"scope": scope("vivary", ["src/control"]), "actor": AGENT, "lease": lease},
+        )
+
+        assert result["decision"] == CLAIM_DECISION["REFUSED"]
+        assert result["reason_codes"] == [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]]
+        assert result["claims"] == []
+
+
 # -- control_claims.py: leases, time as input only ------------------------------------------
 
 

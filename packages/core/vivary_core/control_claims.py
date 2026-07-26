@@ -14,6 +14,11 @@ ledger is left unchanged on refusal, so a rejected request can never
 leave a partial write behind. Leases carry a caller-supplied bounded
 validity; this module never reads the wall clock (see expire_leases) -
 `now` is always an input.
+
+ADAPTATION - bounded lease validation: caller-supplied lease timestamps must
+parse before a claim enters the ledger. The frozen Node behavior accepts
+unparseable strings, whose ``NaN`` expiry can otherwise create an immortal
+claim and permanently block overlapping scope.
 """
 
 from __future__ import annotations
@@ -57,10 +62,15 @@ def _is_valid_actor(actor):
 def _is_valid_lease(lease):
     if lease is None:
         return True
+    if not isinstance(lease, dict):
+        return False
+    granted_at = lease.get("granted_at")
+    expires_at = lease.get("expires_at")
     return (
-        isinstance(lease, dict)
-        and isinstance(lease.get("granted_at"), str)
-        and isinstance(lease.get("expires_at"), str)
+        isinstance(granted_at, str)
+        and isinstance(expires_at, str)
+        and math.isfinite(_parse_instant_ms(granted_at))
+        and math.isfinite(_parse_instant_ms(expires_at))
     )
 
 
