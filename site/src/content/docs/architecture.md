@@ -131,8 +131,11 @@ What it owns:
     data.
   - **Exo (`control_*`)** governs claims and leases, handoffs, dependencies,
     execution evidence, and task views over caller-owned state.
-  - **Bellamente (`recall_*`)** applies the near-neighbor write firewall:
-    corroborate or route to review, never silently rewrite authored truth.
+  - **Bellamente (`recall_*`)** applies the SPEC-owned candidate-recall
+    firewall: exact duplicate and independent-evidence results are accepted
+    evaluations, while an explicit correction is a separately human-gated
+    `review_required` proposal. Stale, degraded, or unfingerprinted input is
+    rejected; learned memory never silently rewrites authored truth.
 
 The governing rule is the same one the rest of Vivary follows: it never resolves an
 ambiguity it merely observed. Conflicts are handed to review, not to confidence, and

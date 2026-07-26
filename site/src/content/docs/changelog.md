@@ -43,10 +43,11 @@ install, version, publication, or deployment action occurs.
 - Routed the nested Bellamente contract from the documentation index and the generated
   semantic-memory page without creating an unsupported site route.
 - Made `docs/bellamente-memory/SPEC-bellamente-memory.md` the sole owner of the
-  private-set, Doctor-state, normalized-input, and firewall-result contracts; the ADR
-  and glossary now route instead of restating them. The specification defines the
-  enabled-policy Doctor state, keeps exact-duplicate preserve read-only, and requires
-  explicit opt-in before policy creation.
+  private-set, Doctor-state, normalized-input, and firewall-result contracts;
+  the ADR and glossary now route instead of restating them. It pins accepted
+  exact-duplicate preserve and independent-evidence corroboration evaluations,
+  a `review_required` explicit-correction proposal that never activates truth,
+  and rejected stale, provider-degraded, or unfingerprinted inputs.
 - The source checkout's unreleased adapter floor includes `.strato/private/**` and now
   matches privacy paths case-insensitively on Windows, with snapshot-level regression
   coverage. Public docs distinguish that behavior from published 0.1.0. The remaining
@@ -101,8 +102,9 @@ coordinated release train is complete and separately approved.
   them into shipping CLIs: Strato owns fail-closed budgets, capsule/receipt gates, and
   loop transitions; Ozone owns receipt-integrity verdicts, gate sufficiency, and
   bounded gated repair proposals; Exo owns claims, leases, handoffs, dependencies,
-  execution evidence, and task views; Bellamente owns the near-neighbor recall
-  firewall that preserves authored truth. The canonical architecture page and its
+  execution evidence, and task views; Bellamente owns the SPEC-owned
+  candidate-recall firewall: accepted evaluations and gated review-only
+  corrections preserve authored truth. The canonical architecture page and its
   generated site mirror now describe these surfaces explicitly.
 
 ### Changed
@@ -170,7 +172,7 @@ Findings from the `vivary-core` review, all pre-release and none user-reachable:
 
 ### Verification
 
-- `python -m pytest packages/core/tests/ -q` — **412 passed**.
+- `python -m pytest packages/core/tests/ -q` — **450 passed**.
 - `uv run --isolated --no-project --no-cache --with ./packages/core python -c
   "from importlib.metadata import version; import vivary_core; assert
   version('vivary-core') == '0.1.0'"` — local wheel-equivalent import and distribution

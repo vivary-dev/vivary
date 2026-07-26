@@ -168,7 +168,7 @@ Findings from the `vivary-core` review, all pre-release and none user-reachable:
 
 ### Verification
 
-- `python -m pytest packages/core/tests/ -q` — **412 passed**.
+- `python -m pytest packages/core/tests/ -q` — **450 passed**.
 - `uv run --isolated --no-project --no-cache --with ./packages/core python -c
   "from importlib.metadata import version; import vivary_core; assert
   version('vivary-core') == '0.1.0'"` — local wheel-equivalent import and distribution
