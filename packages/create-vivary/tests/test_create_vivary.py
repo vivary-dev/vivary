@@ -2986,6 +2986,41 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         base = next(c for c in report["available_capabilities"] if c["id"] == "storage:file")
         self.assertTrue(base["installed"], "a zero-dependency capability is always present")
 
+    def test_install_truth_is_derived_from_each_capability_s_requirements(self):
+        """`installed` must follow `requires_install`, not a second hand-kept list.
+
+        The first version of this kept a parallel capability-id -> module map, and it
+        disagreed with the declarations it was meant to describe: `memory:cognee`
+        needs `vivary-memory-cognee` and was reported installed, while `memory:local`
+        needs nothing and was reported absent. Exactly backwards, and exactly the
+        class of "reports something it cannot evidence" this report exists to remove.
+        """
+        report = create_vivary.capability_report("coding")
+        by_id = {c["id"]: c for c in report["available_capabilities"]}
+
+        # Anything requiring nothing is present by definition.
+        for capability in report["available_capabilities"]:
+            if not capability["requires_install"]:
+                self.assertTrue(
+                    capability["installed"],
+                    f"{capability['id']} requires nothing and must report installed",
+                )
+
+        # A capability naming a package that is genuinely absent must say so.
+        self.assertFalse(by_id["memory:cognee"]["installed"])
+        self.assertFalse(by_id["governed-context:core"]["installed"])
+
+        # And the probe must agree with a direct import check, requirement by
+        # requirement — no capability may claim more than its packages support.
+        for capability in report["available_capabilities"]:
+            expected = all(
+                create_vivary._requirement_importable(r)
+                for r in capability["requires_install"]
+            )
+            self.assertEqual(
+                capability["installed"], expected, f"{capability['id']} misreports"
+            )
+
     def test_absent_optional_capability_is_not_an_error(self):
         """Doctor must never call an *optional* absent package broken."""
         with temp_workspace() as td:

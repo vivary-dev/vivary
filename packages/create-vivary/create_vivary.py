@@ -3670,31 +3670,48 @@ def _print_adopt_report(result: dict, *, mode: str) -> None:
             print(f"  warning: {warning}")
 
 
-# Import name per capability, for the ones backed by an installable package. A
-# capability with no entry here needs nothing installed and is always present.
-CAPABILITY_IMPORTS = {
-    "storage:embedded": "lancedb",
-    "memory:local": "vivary_memory_cognee",
-    "active-context:cocoindex-code": "cocoindex_code",
-    "governed-context:core": "vivary_core",
+# Import name for each installable requirement, keyed by the exact string used in a
+# capability's `requires_install`. An extra maps to what the extra actually provides
+# (`vivary-tropo[embedded]` is only useful once lancedb is importable), and a
+# distribution whose import name differs from its package name is spelled out. A
+# requirement absent from this map falls back to the usual `-` → `_` normalization.
+REQUIREMENT_IMPORTS = {
+    "vivary-tropo[embedded]": "lancedb",
+    "vivary-tropo": "tropo",
+    "vivary-memory-cognee": "vivary_cognee",
+    "cocoindex-code[full]": "cocoindex_code",
+    "vivary-core": "vivary_core",
 }
 
 
-def _capability_installed(capability_id: str) -> bool:
-    """Whether the package behind a capability can actually be imported.
-
-    Declared intent is not install truth: the report is only actionable if it says
-    what is present *here*. Absence is never an error — these are optional by
-    construction, and calling an optional package's absence "broken" is precisely
-    what the report exists to avoid.
-    """
-    module = CAPABILITY_IMPORTS.get(capability_id)
+def _requirement_importable(requirement: str) -> bool:
+    module = REQUIREMENT_IMPORTS.get(requirement)
     if module is None:
-        return True
+        module = requirement.split("[", 1)[0].replace("-", "_")
     try:
         return importlib.util.find_spec(module) is not None
     except (ImportError, ValueError, AttributeError):
         return False
+
+
+def _capability_installed(capability: dict) -> bool:
+    """Whether everything a capability declares it needs is actually importable.
+
+    Derived from the capability's own `requires_install` rather than a parallel map,
+    which is what keeps the answer honest: a second hand-maintained list can disagree
+    with the declaration it is supposed to describe, and the first version of this did
+    exactly that — reporting a capability needing `vivary-memory-cognee` as installed
+    while reporting one needing nothing as absent.
+
+    A capability requiring nothing is always present. Declared intent is not install
+    truth: the report is only actionable if it says what is present *here*. Absence is
+    never an error — these are optional by construction, and calling an optional
+    package's absence "broken" is precisely what this report exists to avoid.
+    """
+    return all(
+        _requirement_importable(requirement)
+        for requirement in capability.get("requires_install") or []
+    )
 
 
 def capability_report(preset: str = "coding") -> dict:
@@ -3775,7 +3792,7 @@ def capability_report(preset: str = "coding") -> dict:
     )
 
     for capability in capabilities:
-        capability["installed"] = _capability_installed(capability["id"])
+        capability["installed"] = _capability_installed(capability)
 
     return {
         "ok": True,
