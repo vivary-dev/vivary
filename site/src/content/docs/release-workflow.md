@@ -25,6 +25,7 @@ Work out which packages actually changed, then bump only those:
 | `packages/create-vivary/create_vivary.py` or `create_vivary_assets/` | `create-vivary` (PyPI) **and** `@vivary/create` (npm) — always in lockstep | same |
 | `packages/strato/` templates or skills | `create-vivary` + `@vivary/create` (strato has no version — it rides the create-vivary release train; say so in the changelog entry) | same |
 | `packages/memory-cognee/vivary_cognee.py` | `vivary-memory-cognee` | same |
+| `packages/core/` modules or tests | `vivary-core` — bump the version, but **do not publish**: core is unpublished by design and never ships ahead of the roles | ARCHITECTURE seam section, README surface row |
 | dependency floors in `packages/vivary/pyproject.toml` | `vivary` (meta) — bump its floors and patch version when component minimums move | README table |
 | `docs/`, `site/`, root README only | **no package bump** — site redeploys from `dev` via Vercel automatically | keep docs/site sync (step 3) |
 | repo CI / stats / tests only | no bump, no site work | — |
@@ -35,6 +36,9 @@ Bump rules (semver-ish, pre-1.0):
 - bug fix, hardening, docs-in-package, or template tweak → **patch**;
 - `create-vivary` PyPI and `@vivary/create` npm versions are **always identical**
   (`packages/create-vivary/pyproject.toml` + `packages/create-vivary/npm/package.json`);
+- a role package that gains or raises a `vivary-core` floor → **patch** at minimum,
+  and that floor lands in the same commit as the import that needs it, never ahead
+  of it;
 - never re-release an existing version number; registries are immutable.
 
 ## 2. Set release truth first

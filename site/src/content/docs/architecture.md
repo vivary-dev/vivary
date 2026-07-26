@@ -95,9 +95,10 @@ Baseline = **tropo + strato** (knowledge + the self-improving loop over it).
 ### The shared seam: `vivary-core`
 
 The four layers above are the *vertical* column. `vivary-core` is the horizontal
-seam beneath them — the governed-context primitives every role package speaks
-through, so that "what is true, and how do we know" has exactly one implementation
-rather than four that drift.
+seam beneath them — the governed-context primitives every role package is *meant* to
+speak through, so that "what is true, and how do we know" ends up with exactly one
+implementation rather than four that drift. No role speaks through it yet; see
+**Status** below for where that stands.
 
 It is a library, not a layer and not a CLI. Nothing about the baseline changes
 because it exists: you still install and run `tropo`, `strato`, `ozone`, `exo`.
@@ -126,6 +127,14 @@ The governing rule is the same one the rest of Vivary follows: it never resolves
 ambiguity it merely observed. Conflicts are handed to review, not to confidence, and
 anything unproven is reported `unknown` rather than guessed.
 
+**Dependency direction:** role packages depend on `vivary-core`; the `vivary` meta
+package receives it transitively and does not declare it. One owner per edge, so there
+is no version-pinning fight between the meta package and the roles. The edge is added to
+a role's `pyproject.toml` in the *same commit* that makes that role first import
+`vivary_core` — never ahead of it. That is why no manifest declares `vivary-core` today:
+nothing imports it yet, and a dependency nothing uses is a declaration the code does not
+support.
+
 **Status:** merged into `dev` and not yet reachable from any shipping CLI — wiring it
 outward is tracked in [#207](https://github.com/vivary-dev/vivary/issues/207). Until
 that lands, treat this section as describing the seam's contract, not a user-facing
@@ -148,7 +157,11 @@ Vivary's differentiators:
 The brand owns the namespace; current package truth is:
 
 - npm: `@vivary/create` — the launcher for the scaffolder.
-- PyPI: `vivary-tropo`, `vivary-ozone`, `vivary-exo`, and `create-vivary`.
+- PyPI: `vivary` (the meta package that installs the suite), `vivary-tropo`,
+  `vivary-ozone`, `vivary-exo`, `create-vivary`, and the optional
+  `vivary-memory-cognee`.
+- `vivary-core` is declared in-repo but deliberately unpublished; it ships with the next
+  major alongside the role packages, never ahead of them.
 - `strato` is bundled source/templates, not a published npm or PyPI package.
 - GitHub: `vivary-dev/vivary` holds the public repo.
 

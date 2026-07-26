@@ -102,6 +102,8 @@ jobs:
         run: node packages/create-vivary/tests/test_npm_launcher.js
       - name: npm trusted publish workflow guard
         run: python scripts/check_npm_trusted_publish_workflow.py
+      - name: package docs parity (documented PyPI list vs manifests)
+        run: python scripts/check_package_docs_parity.py
       - name: tropo check (example vault, strict)
         run: python packages/tropo/tropo.py check --root packages/tropo/examples/vault
       - name: line endings

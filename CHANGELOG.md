@@ -29,6 +29,28 @@ version, and nothing about installing or running Vivary changes because it exist
   Documented in [the architecture page](/architecture/). (Site-absolute route, not a
   repo-relative path: `CHANGELOG.md` is mirrored to `/changelog/`, where `docs/…`
   would resolve against that route and 404. Same convention the docs pages use.)
+- `scripts/check_package_docs_parity.py` — a CI guard that derives the published-package
+  list on [the architecture page](/architecture/) from `packages/*/pyproject.toml` plus
+  one explicit `UNPUBLISHED` allowlist, so documented package truth cannot drift behind
+  the manifests again. It caught two published packages missing from that list on the
+  very commit that introduced it.
+
+### Changed
+
+- **Ratified the dependency direction for `vivary-core`** — the first acceptance
+  criterion of [#207](https://github.com/vivary-dev/vivary/issues/207). Role packages
+  depend on core; the `vivary` meta package receives it transitively and does not declare
+  it, so there is one owner per edge and no version-pinning fight. The edge is added to a
+  role's `pyproject.toml` in the *same commit* that makes that role first import
+  `vivary_core`, never ahead of it. That is why no manifest declares `vivary-core` yet:
+  nothing imports it yet, and a dependency nothing uses is a declaration the code does
+  not support. Recorded on [the architecture page](/architecture/) and in the release
+  workflow's bump table.
+- The architecture page's PyPI list named four packages while six are published. It now
+  also names `vivary` and `vivary-memory-cognee`, and says plainly that `vivary-core` is
+  declared in-repo but deliberately unpublished. The seam description stopped asserting
+  in the present tense that every role package speaks through core — none does yet, which
+  its own status note already said thirty lines further down.
 
 ### Fixed
 
