@@ -1,6 +1,7 @@
 """Tests for the create-vivary workspace scaffold."""
 
 import io
+import hashlib
 import importlib
 import json
 import os
@@ -47,6 +48,23 @@ def run_doctor_json(target: Path, *args: str) -> tuple[int, dict]:
             str(ROOT),
         ])
     return rc, json.loads(buf.getvalue())
+
+
+def snapshot_workspace(root: Path) -> dict[str, tuple]:
+    """Capture every file's bytes and every entry's modification time."""
+    snapshot = {}
+    for path in sorted(root.rglob("*")):
+        rel = path.relative_to(root).as_posix()
+        stat_result = path.stat()
+        if path.is_dir():
+            snapshot[rel] = ("dir", stat_result.st_mtime_ns)
+        elif path.is_file():
+            snapshot[rel] = (
+                "file",
+                stat_result.st_mtime_ns,
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+            )
+    return snapshot
 
 
 class CreateVivaryTests(unittest.TestCase):
@@ -1205,12 +1223,122 @@ class CreateVivaryTests(unittest.TestCase):
                 target, preset="writing", force=False, repo_root=ROOT
             )
 
+            before = snapshot_workspace(target)
             report = create_vivary.doctor_workspace(target, repo_root=ROOT)
 
             self.assertTrue(report["ok"], report)
             self.assertEqual(report["errors"], [])
             self.assertEqual(report["graph"]["broken"], 0)
             self.assertGreaterEqual(report["graph"]["nodes"], 9)
+            self.assertEqual(
+                report["compatibility"],
+                {
+                    "baseline_missing": [],
+                    "declared_capability_problems": [],
+                    "recommended_missing": [],
+                    "recommended_upgrade": None,
+                },
+            )
+            self.assertEqual(snapshot_workspace(target), before)
+
+    def test_doctor_warns_for_legacy_recommended_surface_without_writing(self):
+        with temp_workspace() as td:
+            target = Path(td) / "legacy-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="writing", force=False, repo_root=ROOT
+            )
+            legacy_rel = ".agents/skills/loops/SKILL.md"
+            (target / legacy_rel).unlink()
+            before = snapshot_workspace(target)
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            warning = f"recommended workspace file missing: {legacy_rel}"
+            self.assertTrue(report["ok"], report)
+            self.assertEqual(report["errors"], [])
+            self.assertEqual(report["compatibility"]["baseline_missing"], [])
+            self.assertEqual(report["compatibility"]["declared_capability_problems"], [])
+            self.assertEqual(report["compatibility"]["recommended_missing"], [legacy_rel])
+            self.assertIn(warning, report["warnings"])
+            self.assertIn(report["compatibility"]["recommended_upgrade"], report["warnings"])
+
+            json_rc, json_report = run_doctor_json(target)
+            self.assertEqual(json_rc, 0)
+            self.assertEqual(json_report["ok"], report["ok"])
+            self.assertEqual(json_report["errors"], report["errors"])
+            self.assertEqual(json_report["warnings"], report["warnings"])
+
+            human = io.StringIO()
+            with redirect_stdout(human):
+                human_rc = create_vivary.main(
+                    ["doctor", str(target), "--repo-root", str(ROOT)]
+                )
+            self.assertEqual(human_rc, json_rc)
+            self.assertIn(f"warning: {warning}", human.getvalue())
+            self.assertEqual(snapshot_workspace(target), before)
+
+    def test_doctor_accepts_adopted_brownfield_workspace_without_writing(self):
+        with temp_workspace() as td:
+            target = Path(td) / "brownfield-workspace"
+            target.mkdir()
+            (target / "README.md").write_text("# Existing project\n", encoding="utf-8")
+            (target / "CLAUDE.md").write_text("# Existing guidance\n", encoding="utf-8")
+            for index in range(6):
+                docs_path = target / "docs" / f"topic-{index}.md"
+                docs_path.parent.mkdir(exist_ok=True)
+                docs_path.write_text(f"# Topic {index}\n", encoding="utf-8")
+            (target / "src").mkdir()
+            (target / "src" / "main.py").write_text("print('hello')\n", encoding="utf-8")
+            (target / "src" / "util.py").write_text(
+                "def helper():\n    return 1\n", encoding="utf-8"
+            )
+            adopted = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
+            self.assertTrue(adopted["doctor"]["ok"], adopted["doctor"])
+            before = snapshot_workspace(target)
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertTrue(report["ok"], report)
+            self.assertEqual(report["compatibility"]["baseline_missing"], [])
+            self.assertEqual(report["compatibility"]["declared_capability_problems"], [])
+            self.assertEqual(report["compatibility"]["recommended_missing"], [])
+            self.assertEqual(snapshot_workspace(target), before)
+
+    def test_doctor_rejects_corrupt_baseline_and_declared_storage(self):
+        with temp_workspace() as td:
+            target = Path(td) / "corrupt-workspace"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="writing",
+                force=False,
+                storage="embedded",
+                provider="lancedb",
+                repo_root=ROOT,
+            )
+            (target / "AGENTS.md").unlink()
+            (target / ".vivary" / "storage.toml").write_text(
+                "[storage]\nbackend = \"embedded\"\n", encoding="utf-8"
+            )
+            before = snapshot_workspace(target)
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            problem = (
+                "declared capability storage:embedded missing required "
+                "[storage.embedded] configuration"
+            )
+            self.assertFalse(report["ok"])
+            self.assertIn("AGENTS.md", report["compatibility"]["baseline_missing"])
+            self.assertIn(problem, report["compatibility"]["declared_capability_problems"])
+            self.assertIn("missing required file: AGENTS.md", report["errors"])
+            self.assertIn(problem, report["errors"])
+
+            json_rc, json_report = run_doctor_json(target)
+            self.assertEqual(json_rc, 1)
+            self.assertEqual(json_report["ok"], report["ok"])
+            self.assertEqual(json_report["errors"], report["errors"])
+            self.assertEqual(json_report["warnings"], report["warnings"])
+            self.assertEqual(snapshot_workspace(target), before)
 
     def test_doctor_rejects_commented_or_negated_privacy_ignores(self):
         with temp_workspace() as td:
@@ -1418,18 +1546,18 @@ class CreateVivaryTests(unittest.TestCase):
                 report["errors"],
             )
 
-    def test_doctor_reports_missing_contract_file(self):
+    def test_doctor_reports_missing_baseline_contract_file(self):
         with temp_workspace() as td:
             target = Path(td) / "agent-workspace"
             create_vivary.scaffold_workspace(
                 target, preset="coding", force=False, repo_root=ROOT
             )
-            (target / "STATE.md").unlink()
+            (target / "STRATO.md").unlink()
 
             report = create_vivary.doctor_workspace(target, repo_root=ROOT)
 
             self.assertFalse(report["ok"])
-            self.assertIn("missing required file: STATE.md", report["errors"])
+            self.assertIn("missing required file: STRATO.md", report["errors"])
 
     def test_cli_doctor_exit_codes(self):
         with temp_workspace() as td:

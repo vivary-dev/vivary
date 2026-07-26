@@ -140,6 +140,18 @@ REPAIR_WORKSPACE_MARKERS = (
     "modules/index.md",
 )
 
+# The repair markers identify the smallest usable Vivary workspace. Privacy
+# protection and the routed workspace module are likewise irreducible: without
+# them private placeholders become committable or the typed graph is broken.
+BASELINE_WORKSPACE_FILES = (
+    *REPAIR_WORKSPACE_MARKERS,
+    ".gitignore",
+    "modules/agent-workspace/index.md",
+)
+RECOMMENDED_WORKSPACE_FILES = tuple(
+    rel for rel in REQUIRED_WORKSPACE_FILES if rel not in BASELINE_WORKSPACE_FILES
+)
+
 PRESET_STARTERS = {
     "coding": {
         "module_id": "codebase",
@@ -473,6 +485,138 @@ def scaffold_workspace(
     return created
 
 
+def _empty_workspace_compatibility() -> dict:
+    return {
+        "baseline_missing": [],
+        "declared_capability_problems": [],
+        "recommended_missing": [],
+        "recommended_upgrade": None,
+    }
+
+
+def _declared_storage_capability_problems(target: Path) -> tuple[str, list[str]]:
+    """Return the declared storage backend and any missing declared configuration."""
+    cfg_path = target / _STORAGE_DIR / _STORAGE_CONFIG_NAME
+    if not cfg_path.exists():
+        # File storage predates the optional config and remains the legacy default.
+        return "file", []
+
+    try:
+        import tomllib as _toml
+
+        data = _toml.loads(cfg_path.read_text(encoding="utf-8-sig"))
+    except Exception as exc:
+        return "unknown", [
+            f"declared capability storage configuration unreadable: "
+            f"{_STORAGE_DIR}/{_STORAGE_CONFIG_NAME} ({exc})"
+        ]
+
+    storage = data.get("storage") if isinstance(data, dict) else None
+    if not isinstance(storage, dict):
+        return "unknown", ["declared capability storage missing required [storage] configuration"]
+
+    backend = storage.get("backend")
+    if not isinstance(backend, str) or not backend:
+        return "unknown", ["declared capability storage missing required storage.backend"]
+    if backend == "file":
+        return backend, []
+
+    if backend == "embedded":
+        section = storage.get("embedded")
+        required = ("path", "provider")
+    elif backend == "cloud":
+        section = storage.get("cloud")
+        required = ("provider",)
+    else:
+        return "unknown", [f"declared capability storage has unknown backend: {backend!r}"]
+
+    if not isinstance(section, dict):
+        return backend, [
+            f"declared capability storage:{backend} missing required "
+            f"[storage.{backend}] configuration"
+        ]
+
+    problems = [
+        f"declared capability storage:{backend} missing required "
+        f"storage.{backend}.{key}"
+        for key in required
+        if not isinstance(section.get(key), str) or not section[key]
+    ]
+    return backend, problems
+
+
+def _declared_memory_capability_problems(target: Path, memory_report: dict) -> list[str]:
+    """Validate the configuration a semantic-memory declaration actually owns."""
+    if not memory_report["enabled"] or memory_report["status"] == "misconfigured":
+        return []
+
+    try:
+        import tomllib as _toml
+
+        data = _toml.loads(
+            (target / _STORAGE_DIR / _MEMORY_CONFIG_NAME).read_text(encoding="utf-8-sig")
+        )
+    except Exception:
+        # `_memory_report` reports a malformed declaration as an error.
+        return []
+
+    memory = data.get("memory")
+    if not isinstance(memory, dict):
+        return []
+
+    provider = memory_report["provider"]
+    if provider == "vivary-local":
+        capability = "memory:local"
+        section_name = "local"
+    elif provider == "cognee":
+        capability = "memory:cognee"
+        section_name = "cognee"
+    else:
+        # `_memory_report` owns the missing- or unknown-provider error.
+        return []
+
+    section = memory.get(section_name)
+    if not isinstance(section, dict):
+        return [
+            f"declared capability {capability} missing required "
+            f"[memory.{section_name}] configuration"
+        ]
+
+    required = {
+        "state_path": str,
+        "allow_network": bool,
+        "require_explicit_index": bool,
+    }
+    return [
+        f"declared capability {capability} missing required memory.{section_name}.{key}"
+        for key, expected_type in required.items()
+        if not isinstance(section.get(key), expected_type)
+    ]
+
+
+def _workspace_compatibility(target: Path, memory_report: dict) -> tuple[dict, str]:
+    """Classify only scaffold ownership; integrity and privacy stay strict elsewhere."""
+    compatibility = _empty_workspace_compatibility()
+    compatibility["baseline_missing"] = [
+        rel for rel in BASELINE_WORKSPACE_FILES if not (target / rel).exists()
+    ]
+    compatibility["recommended_missing"] = [
+        rel for rel in RECOMMENDED_WORKSPACE_FILES if not (target / rel).exists()
+    ]
+    if compatibility["recommended_missing"]:
+        compatibility["recommended_upgrade"] = (
+            "run create-vivary adopt <workspace> (without --yes) to review the "
+            "newer recommended scaffold surface"
+        )
+
+    backend, storage_problems = _declared_storage_capability_problems(target)
+    compatibility["declared_capability_problems"] = [
+        *storage_problems,
+        *_declared_memory_capability_problems(target, memory_report),
+    ]
+    return compatibility, backend
+
+
 def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None) -> dict:
     """Validate that a directory looks like a usable Vivary agent workspace."""
     root = Path(repo_root) if repo_root is not None else default_repo_root()
@@ -480,6 +624,9 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
     target = Path(target).resolve()
     errors: list[str] = []
     warnings: list[str] = []
+    memory_report = _memory_report(target)
+    compatibility = _empty_workspace_compatibility()
+    backend_name = "file"
 
     if not target.exists():
         errors.append(f"workspace does not exist: {target}")
@@ -487,17 +634,33 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         errors.append(f"workspace is not a directory: {target}")
 
     if not errors:
-        for rel in REQUIRED_WORKSPACE_FILES:
-            if not (target / rel).exists():
-                errors.append(f"missing required file: {rel}")
+        compatibility, backend_name = _workspace_compatibility(target, memory_report)
+        errors.extend(
+            f"missing required file: {rel}"
+            for rel in compatibility["baseline_missing"]
+        )
+        errors.extend(compatibility["declared_capability_problems"])
+        upgrade = compatibility["recommended_upgrade"]
+        warnings.extend(
+            f"recommended workspace file missing: {rel}"
+            for rel in compatibility["recommended_missing"]
+        )
+        if compatibility["recommended_missing"]:
+            warnings.append(upgrade)
 
         if (target / ".gitignore").exists():
             missing = _missing_privacy_ignores(target)
             errors.extend(f"privacy ignore missing: {pattern}" for pattern in missing)
         errors.extend(_module_index_errors(target))
 
+        if memory_report["status"] == "misconfigured":
+            errors.append(f"semantic memory misconfigured: {memory_report['detail']}")
+        elif memory_report["status"] == "privacy-failed":
+            errors.append("semantic memory privacy check failed")
+        elif memory_report["status"] == "unavailable":
+            warnings.append(f"semantic memory provider unavailable: {memory_report['provider']}")
+
     graph = {"nodes": 0, "edges": 0, "broken": 0}
-    findings: list[str] = []
     if not errors:
         try:
             _tropo, _resolver, docs, nodes, edges = _doctor_graph_context(target, root)
@@ -516,26 +679,6 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         except Exception as exc:  # keep doctor a report, not a traceback
             errors.append(f"tropo validation failed: {exc}")
 
-    # Check storage backend
-    storage_cfg_path = target / _STORAGE_DIR / _STORAGE_CONFIG_NAME
-    backend_name = "file"
-    if storage_cfg_path.exists():
-        try:
-            import tomllib as _toml
-            with open(storage_cfg_path, "rb") as _fh:
-                _data = _toml.load(_fh)
-            backend_name = _data.get("storage", {}).get("backend", "file")
-        except Exception:
-            backend_name = "unknown"
-
-    memory_report = _memory_report(target)
-    if memory_report["status"] == "misconfigured":
-        errors.append(f"semantic memory misconfigured: {memory_report['detail']}")
-    elif memory_report["status"] == "privacy-failed":
-        errors.append("semantic memory privacy check failed")
-    elif memory_report["status"] == "unavailable":
-        warnings.append(f"semantic memory provider unavailable: {memory_report['provider']}")
-
     return {
         "ok": not errors,
         "root": str(target),
@@ -544,6 +687,7 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         "graph": graph,
         "backend": backend_name,
         "memory": memory_report,
+        "compatibility": compatibility,
     }
 
 
@@ -607,6 +751,7 @@ def _doctor_repair_error_report(target: str | Path, *, yes: bool, error: Excepti
             "privacy": "not-indexed",
             "detail": "doctor repair refused to inspect target",
         },
+        "compatibility": _empty_workspace_compatibility(),
         "repair": {
             "mode": "applied" if yes else "dry-run",
             "actions": [],
@@ -1372,9 +1517,12 @@ def _memory_report(target: Path) -> dict:
             "detail": "memory.provider and memory.mode must be strings",
         }
 
-    if not enabled or provider == "none":
+    if not enabled:
         status = "disabled"
         detail = ""
+    elif provider == "none":
+        status = "misconfigured"
+        detail = "memory.provider is required when memory.enabled is true"
     elif _missing_privacy_ignores(target):
         status = "privacy-failed"
         detail = "private workspace paths are not actively ignored"
