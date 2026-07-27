@@ -16,6 +16,7 @@ import pytest
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
+from vivary_core.canonical import fingerprint  # noqa: E402
 from vivary_core.recall_classify import classify_candidate  # noqa: E402
 from vivary_core.recall_firewall import evaluate_candidate  # noqa: E402
 from vivary_core.recall_outcomes import (  # noqa: E402
@@ -25,6 +26,7 @@ from vivary_core.recall_outcomes import (  # noqa: E402
     REASON_CORRECTION_INPUTS_INCOMPLETE,
     REASON_CORRECTION_NOT_AUTHORIZED,
     REASON_CORRECTION_SUBJECT_MISMATCH,
+    REASON_CORRECTION_TARGET_MISMATCH,
     REASON_CORRECTION_TARGET_MISSING,
     REASON_CORROBORATION,
     REASON_EVIDENCE_NOT_FINGERPRINTED,
@@ -67,7 +69,17 @@ def graph(nodes=None):
 
 
 def evidence(digest="sha256:candidate-evidence"):
-    return {"ref": "docs/note.md", "digest": digest, "freshness": "current"}
+    body = {
+        "kind": "file",
+        "ref": "docs/note.md",
+        "digest": digest,
+        "freshness": "current",
+    }
+    return {**body, "fingerprint": fingerprint(body)}
+
+
+def refingerprint_evidence(item):
+    item["fingerprint"] = fingerprint({key: value for key, value in item.items() if key != "fingerprint"})
 
 
 def candidate(overrides=None):
@@ -158,6 +170,133 @@ def test_exact_duplicate_with_the_same_fingerprinted_evidence_is_accepted_and_pr
     assert result["proposal"] is None
 
 
+def test_duplicate_classification_compares_actual_evidence_not_only_source_fingerprint():
+    same_evidence = neighbor(
+        {
+            "source": {
+                "evidence": [evidence()],
+                "fingerprint": "sha256:different-source",
+            }
+        }
+    )
+    independent_evidence = neighbor(
+        {
+            "id": "assertion_independent",
+            "source": {
+                "evidence": [evidence("sha256:independent-evidence")],
+                "fingerprint": "sha256:candidate-fingerprint",
+            },
+        }
+    )
+
+    duplicate = classify_candidate(graph=graph(), candidate=candidate(), neighbors=[same_evidence])
+    corroboration = classify_candidate(graph=graph(), candidate=candidate(), neighbors=[independent_evidence])
+
+    assert_result(duplicate, ACCEPTED, [REASON_EXACT_DUPLICATE])
+    assert_result(corroboration, ACCEPTED, [REASON_CORROBORATION])
+
+
+@pytest.mark.parametrize(
+    ("candidate_evidence", "neighbor_evidence", "reason_code"),
+    [
+        pytest.param(
+            [evidence("sha256:replayed-a")],
+            [evidence("sha256:replayed-a"), evidence("sha256:replayed-b")],
+            REASON_EXACT_DUPLICATE,
+            id="replayed",
+        ),
+        pytest.param(
+            [evidence("sha256:reordered-a"), evidence("sha256:reordered-b")],
+            [evidence("sha256:reordered-b"), evidence("sha256:reordered-a")],
+            REASON_EXACT_DUPLICATE,
+            id="reordered",
+        ),
+        pytest.param(
+            [evidence("sha256:duplicated")],
+            [evidence("sha256:duplicated"), evidence("sha256:duplicated")],
+            REASON_EXACT_DUPLICATE,
+            id="duplicated",
+        ),
+        pytest.param(
+            [evidence("sha256:independent-a"), evidence("sha256:independent-b")],
+            [evidence("sha256:independent-c")],
+            REASON_CORROBORATION,
+            id="independent",
+        ),
+        pytest.param(
+            [evidence("sha256:shared"), evidence("sha256:new")],
+            [evidence("sha256:shared")],
+            REASON_CORROBORATION,
+            id="shared-plus-new",
+        ),
+    ],
+)
+def test_compatible_evidence_requires_material_independent_of_the_recalled_record(
+    candidate_evidence, neighbor_evidence, reason_code
+):
+    prior = neighbor(
+        {
+            "source": {
+                "evidence": neighbor_evidence,
+                "fingerprint": "sha256:recalled-source",
+            }
+        }
+    )
+    result = classify_candidate(
+        graph=graph(),
+        candidate=candidate(
+            {
+                "source": {
+                    "evidence": candidate_evidence,
+                    "fingerprint": "sha256:candidate-source",
+                }
+            }
+        ),
+        neighbors=[prior],
+    )
+
+    assert_result(result, ACCEPTED, [reason_code])
+    assert set(result["related_assertion_ids"]) == {prior["id"]}
+    assert result["proposal"] is None
+
+
+def test_corroboration_excludes_replayed_evidence_from_its_related_assertions():
+    replayed = neighbor(
+        {
+            "id": "assertion_replayed",
+            "source": {
+                "evidence": [evidence("sha256:shared"), evidence("sha256:shared")],
+                "fingerprint": "sha256:replayed-source",
+            },
+        }
+    )
+    independent = neighbor(
+        {
+            "id": "assertion_independent",
+            "source": {
+                "evidence": [evidence("sha256:independent")],
+                "fingerprint": "sha256:independent-source",
+            },
+        }
+    )
+    result = classify_candidate(
+        graph=graph(),
+        candidate=candidate(
+            {
+                "source": {
+                    "evidence": [evidence("sha256:shared")],
+                    "fingerprint": "sha256:candidate-source",
+                }
+            }
+        ),
+        neighbors=[replayed, independent],
+    )
+
+    assert_result(result, ACCEPTED, [REASON_CORROBORATION])
+    assert set(result["related_assertion_ids"]) == {independent["id"]}
+    assert result["proposal"] is None
+
+
 def test_compatible_assertion_with_independent_fingerprinted_evidence_is_accepted_as_corroboration():
     prior = neighbor()
     result = classify_candidate(graph=graph(), candidate=candidate(), neighbors=[prior])
@@ -187,6 +326,117 @@ def test_unknown_or_ambiguous_identity_is_review_required_without_entering_compa
 
     assert_result(result, REVIEW_REQUIRED, [REASON_IDENTITY_UNRESOLVED])
     assert result["subject"] == {"node_id": "repository_missing", "resolved": False}
+
+
+@pytest.mark.parametrize(
+    "subject",
+    [
+        {},
+        {"unresolved_identity": "not a marker mapping"},
+        {"unresolved_identity": {}},
+        {
+            "node_id": KNOWN_NODE["id"],
+            "unresolved_identity": {"provider_ref": "bellamente:assertion-42"},
+        },
+    ],
+    ids=["missing", "non-dict-marker", "missing-provider-ref", "node-and-marker"],
+)
+def test_missing_or_invalid_subject_identity_is_rejected(subject):
+    result = classify_candidate(
+        graph=graph(),
+        candidate=candidate({"subject": subject}),
+        neighbors=[],
+    )
+
+    assert_result(result, REJECTED, [REASON_PROVIDER_DEGRADED])
+
+
+
+@pytest.mark.parametrize(
+    ("node_id", "projected_node_id", "resolved"),
+    [
+        (KNOWN_NODE["id"], KNOWN_NODE["id"], True),
+        (None, None, False),
+        ("", None, False),
+        (123, None, False),
+    ],
+    ids=["valid", "null", "empty", "non-string"],
+)
+def test_unresolved_identity_marker_rejects_any_node_id_key_and_preserves_provider_reference(
+    node_id, projected_node_id, resolved
+):
+    marker = {"provider_ref": "bellamente:assertion-42"}
+    result = classify_candidate(
+        graph=graph(),
+        candidate=candidate({"subject": {"node_id": node_id, "unresolved_identity": marker}}),
+        neighbors=[],
+    )
+
+    assert_result(result, REJECTED, [REASON_PROVIDER_DEGRADED])
+    assert result["subject"] == {
+        "node_id": projected_node_id,
+        "unresolved_identity": marker,
+        "resolved": resolved,
+    }
+
+def test_explicit_unresolved_identity_marker_is_review_required_and_preserves_the_provider_reference():
+    marker = {"provider_ref": "bellamente:assertion-42"}
+    result = classify_candidate(
+        graph=graph(),
+        candidate=candidate({"subject": {"unresolved_identity": marker}}),
+        neighbors=[],
+    )
+
+    assert_result(result, REVIEW_REQUIRED, [REASON_IDENTITY_UNRESOLVED])
+    assert result["subject"] == {
+        "node_id": None,
+        "unresolved_identity": marker,
+        "resolved": False,
+    }
+
+
+def test_unresolved_identity_marker_never_enters_duplicate_or_corroboration_paths():
+    marker = {"provider_ref": "bellamente:assertion-42"}
+
+    result = classify_candidate(
+        graph=graph(),
+        candidate=candidate({"subject": {"unresolved_identity": marker}}),
+        neighbors=[neighbor()],
+    )
+
+    assert_result(result, REVIEW_REQUIRED, [REASON_IDENTITY_UNRESOLVED])
+    assert result["related_assertion_ids"] == []
+
+
+def test_unresolved_identity_marker_does_not_bypass_fingerprinted_evidence_requirement():
+    unresolved = candidate(
+        {
+            "subject": {"unresolved_identity": {"provider_ref": "bellamente:assertion-42"}},
+            "source": {
+                "evidence": [evidence(digest="not-a-fingerprint")],
+                "fingerprint": "sha256:candidate-fingerprint",
+            },
+        }
+    )
+
+    result = classify_candidate(graph=graph(), candidate=unresolved, neighbors=[])
+
+    assert_result(result, REJECTED, [REASON_EVIDENCE_NOT_FINGERPRINTED])
+
+
+def test_recalled_neighbors_cannot_carry_unresolved_identity_markers():
+    malformed_neighbor = neighbor(
+        {
+            "subject": {
+                "node_id": KNOWN_NODE["id"],
+                "unresolved_identity": {"provider_ref": "bellamente:assertion-42"},
+            }
+        }
+    )
+
+    result = classify_candidate(graph=graph(), candidate=candidate(), neighbors=[malformed_neighbor])
+
+    assert_result(result, REJECTED, [REASON_PROVIDER_DEGRADED])
 
 
 def test_ambiguous_identity_status_is_review_required_not_a_resolved_subject():
@@ -221,7 +471,9 @@ def test_stale_neighbor_is_rejected_before_duplicate_or_corroboration_classifica
 
 def test_stale_evidence_is_rejected_before_duplicate_or_corroboration_classification():
     stale = candidate()
-    stale["source"]["evidence"][0]["freshness"] = "stale"
+    item = stale["source"]["evidence"][0]
+    item["freshness"] = "stale"
+    item["fingerprint"] = fingerprint({key: value for key, value in item.items() if key != "fingerprint"})
     result = classify_candidate(graph=graph(), candidate=stale, neighbors=[neighbor()])
 
     assert_result(result, REJECTED, [REASON_STALE])
@@ -253,12 +505,35 @@ def test_no_matching_neighbor_is_an_accepted_evaluation_not_a_hidden_write_or_co
     [
         lambda assertion: assertion["source"].pop("fingerprint"),
         lambda assertion: assertion["source"].__setitem__("fingerprint", "not-a-fingerprint"),
-        lambda assertion: assertion["source"]["evidence"][0].__setitem__("digest", "not-a-fingerprint"),
+        lambda assertion: (
+            assertion["source"]["evidence"][0].__setitem__("digest", "not-a-fingerprint"),
+            refingerprint_evidence(assertion["source"]["evidence"][0]),
+        ),
     ],
 )
 def test_missing_or_malformed_candidate_fingerprint_is_rejected_fail_closed(mutate):
     malformed = candidate()
     mutate(malformed)
+    result = classify_candidate(graph=graph(), candidate=malformed, neighbors=[])
+
+    assert_result(result, REJECTED, [REASON_EVIDENCE_NOT_FINGERPRINTED])
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda item: (item.pop("kind"), refingerprint_evidence(item)),
+        lambda item: (item.__setitem__("kind", ""), refingerprint_evidence(item)),
+        lambda item: item.pop("fingerprint"),
+        lambda item: item.__setitem__("fingerprint", "sha256:not-the-evidence"),
+        lambda item: (item.pop("ref"), refingerprint_evidence(item)),
+        lambda item: (item.__setitem__("ref", ""), refingerprint_evidence(item)),
+    ],
+)
+def test_evidence_must_be_typed_and_bound_to_its_claimed_fingerprint(mutate):
+    malformed = candidate()
+    mutate(malformed["source"]["evidence"][0])
+
     result = classify_candidate(graph=graph(), candidate=malformed, neighbors=[])
 
     assert_result(result, REJECTED, [REASON_EVIDENCE_NOT_FINGERPRINTED])
@@ -315,6 +590,24 @@ def test_cross_subject_correction_target_is_a_fail_closed_review_subcase():
     )
 
     assert_result(result, REVIEW_REQUIRED, [REASON_CORRECTION_SUBJECT_MISMATCH])
+
+
+@pytest.mark.parametrize(
+    "target_overrides",
+    [
+        {"predicate": "different_predicate"},
+        {"scope": {"project": "other-project", "visibility": "local"}},
+        {"scope": {"project": "vivary", "visibility": "public"}},
+    ],
+)
+def test_correction_target_must_match_the_candidate_predicate_and_scope(target_overrides):
+    prior = neighbor({"id": "assertion_target", **target_overrides})
+    proposed = candidate({"target_assertion_id": prior["id"]})
+
+    result = classify_candidate(graph=graph(), candidate=proposed, neighbors=[prior])
+
+    assert_result(result, REVIEW_REQUIRED, [REASON_CORRECTION_TARGET_MISMATCH])
+    assert result["proposal"] is None
 
 
 def test_unauthorized_correction_is_a_fail_closed_review_subcase():

@@ -54,7 +54,12 @@ def _is_capsule_shape(capsule) -> bool:
         isinstance(capsule, dict)
         and capsule.get("schema") == CAPSULE_SCHEMA
         and isinstance(capsule.get("capsule_id"), str)
+        and len(capsule["capsule_id"]) > 0
         and isinstance(capsule.get("fingerprint"), str)
+        and len(capsule["fingerprint"]) > 0
+        and isinstance(capsule.get("workspace"), dict)
+        and isinstance(capsule["workspace"].get("fingerprint"), str)
+        and len(capsule["workspace"]["fingerprint"]) > 0
     )
 
 

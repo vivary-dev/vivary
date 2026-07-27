@@ -10,7 +10,8 @@ The governed-context shared seam every Vivary role package will speak through:
   private-to-public writes, and a rebuildable projection with a pinned
   fingerprint.
 - **`receipt`** — integrity receipts: what actually ran, bound to the exact
-  capsule and workspace fingerprint it ran against. A receipt never declares
+  capsule and workspace fingerprint it ran against. Construction refuses
+  incomplete bindings or an invalid runtime actor. A receipt never declares
   success beyond its checks; provenance references are labeled provenance
   only, never proof of correctness.
 - **`evidence_store`** — an append-only JSONL evidence store under
@@ -34,7 +35,8 @@ The governed-context shared seam every Vivary role package will speak through:
   over tracked files only, every truncation recorded.
 - **`capsule_compile` / `capsule_select`** — the bounded Task Capsule:
   relevance-ranked, explainable claim selection with fail-closed structured
-  filters; every budget cut is a recorded omission.
+  filters; every budget cut is a recorded omission, and malformed graph nodes
+  or facts are rejected rather than partially compiled.
 - **`collation`** — JS `localeCompare` ordering (claim/node/edge ranking is
   part of the frozen contract), pinned as an empirical weight table
   extracted from the reference runtime and verified on ~2.1M probe pairs;
@@ -43,23 +45,31 @@ The governed-context shared seam every Vivary role package will speak through:
 - **`policy_*`** (Strato) — budgets, capsule/receipt gates, and the loop
   step, all fail-closed with pinned reason codes; malformed configured budget
   scalars exhaust the affected dimension, while omission alone means unbounded.
-  An optional Ozone verdict is consumed without importing the verify layer.
-- **`verify_*`** (Ozone) — receipt-integrity verdicts (fingerprint
-  recomputation for tamper detection), gate sufficiency, and bounded
-  context-repair proposals as pure dry-run JSON: every proposed write
-  named, `requires_gate` on each. Duplicate check names preserve their worst
+  Receipt integrity is independently rechecked before a gate can clear. Bound,
+  fingerprinted Ozone verdicts add evidence but never waive receipt evidence.
+- **`verify_*`** (Ozone) — receipt-integrity verdicts (fingerprint and
+  deterministic-identifier recomputation for tamper detection), gate
+  sufficiency, and bounded context-repair proposals as pure dry-run JSON.
+  Capsule identity and workspace bindings are mandatory, and optional null
+  gate constraints remain absent constraints. Every proposed write is named
+  and carries `requires_gate`. Duplicate check names preserve their worst
   recorded outcome.
 - **`control_*`** (Exo) — claims, leases, handoffs, dependency cycles,
-  execution evidence, and task views over caller-owned state; one active
-  claim per scope, including equivalent Win32 device-path spellings;
-  completing a task is architecturally unable to erase a failed verification
-  edge.
-- **`recall_*`** (Bellamente) — the SPEC-owned candidate-recall firewall:
-  exact duplicates and independent evidence are accepted evaluations; explicit
-  corrections are review-only, human-gated proposals; stale, degraded, or
-  unfingerprinted input rejects and never rewrites authored truth.
+  execution evidence, and task views over caller-owned state; one active claim
+  per scope, including equivalent Win32 device-path spellings. Malformed leases
+  cannot hold a scope forever, receipt integrity is rechecked before handoffs
+  or execution edges are created, and completing a task cannot erase a failed
+  verification edge.
+- **`recall_*`** (Bellamente) — an evaluation-only candidate-recall firewall.
+  [SPEC §6.2](https://github.com/vivary-dev/vivary/blob/dev/docs/bellamente-memory/SPEC-bellamente-memory.md#62-required-distinct-results)
+  owns its decisions, conditions, and truth/mutation rules; it never rewrites
+  authored truth.
 
 Zero runtime dependencies. Python 3.11+.
+
+This package remains unpublished until the coordinated release train. See the
+[release workflow](https://github.com/vivary-dev/vivary/blob/dev/docs/RELEASE-WORKFLOW.md#2-set-release-truth-first) for
+version ownership.
 
 ## Provenance and proof
 
@@ -88,7 +98,7 @@ pip install pytest
 python -m pytest packages/core/tests/ -q
 ```
 
-The 457-test suite translates the reference contracts across observation,
+The 589-test suite translates the reference contracts across observation,
 capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces,
 corruption handling, real-git evidence-store round trips, and byte-exact
 cross-runtime fixtures.

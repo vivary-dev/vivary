@@ -55,6 +55,7 @@ GATE_REASON = MappingProxyType(
         "UNKNOWN_RECEIPT_SHAPE": "unknown_receipt_shape",
         "VERDICT_INSUFFICIENT": "verdict_insufficient",
         "VERDICT_BINDING_MISMATCH": "verdict_binding_mismatch",
+        "VERDICT_INTEGRITY_MISMATCH": "verdict_integrity_mismatch",
     }
 )
 

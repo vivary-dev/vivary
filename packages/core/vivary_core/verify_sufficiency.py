@@ -37,9 +37,14 @@ only compares list lengths, which lets duplicate or unrelated IDs satisfy a
 gate; preserving that behavior would violate Ozone's evidence contract.
 
 ADAPTATION - malformed gate constraints: the Python seam refuses a present
-constraint unless it has the declared type and finite numeric range. The
-frozen Node oracle silently ignores malformed constraints, which can make
-insufficient evidence appear sufficient.
+constraint unless it has the declared type and finite numeric range. This
+includes the Boolean claim-verification switch. The frozen Node oracle
+silently ignores malformed constraints, which can make insufficient evidence
+appear sufficient.
+
+ADAPTATION - capsule binding shape: sufficiency requires a capsule ID,
+fingerprint, and workspace fingerprint. A partial capsule cannot receive a
+``sufficient`` verdict.
 
 ADAPTATION - duplicate receipt checks: when several receipt entries carry a
 required check's name, the Python seam preserves the worst outcome rather
@@ -93,8 +98,16 @@ def _receipt_id_binding(receipt):
 
 
 def _is_valid_capsule(capsule):
+    workspace = capsule.get("workspace") if _is_plain_object(capsule) else None
     return (
         _is_plain_object(capsule)
+        and isinstance(capsule.get("capsule_id"), str)
+        and len(capsule["capsule_id"]) > 0
+        and isinstance(capsule.get("fingerprint"), str)
+        and len(capsule["fingerprint"]) > 0
+        and _is_plain_object(workspace)
+        and isinstance(workspace.get("fingerprint"), str)
+        and len(workspace["fingerprint"]) > 0
         and isinstance(capsule.get("claims"), list)
         and isinstance(capsule.get("conflicts"), list)
         and isinstance(capsule.get("unknowns"), list)
@@ -110,6 +123,8 @@ def _is_finite_number(value):
 
 
 def _has_malformed_constraints(gate):
+    if gate.get("require_claims_verified") is not None and not isinstance(gate["require_claims_verified"], bool):
+        return True
     required_checks = gate.get("required_checks")
     if required_checks is not None and (
         not isinstance(required_checks, list) or not all(isinstance(name, str) for name in required_checks)

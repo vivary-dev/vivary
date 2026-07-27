@@ -27,6 +27,8 @@ import inspect
 import os
 import sys
 
+import pytest
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 PY_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, PY_ROOT)
@@ -57,6 +59,7 @@ from vivary_core.control_dependencies import detect_dependency_cycle, evaluate_d
 from vivary_core.control_handoffs import create_handoff  # noqa: E402
 from vivary_core.control_execution import append_execution_edges, derive_execution_edges  # noqa: E402
 from vivary_core.control_tasks import mark_task_done, task_integrity_view, with_gate_reference  # noqa: E402
+from vivary_core.canonical import deterministic_id, fingerprint  # noqa: E402
 from vivary_core.receipt import RECEIPT_SCHEMA  # noqa: E402
 from vivary_core.capsule_compile import CAPSULE_SCHEMA  # noqa: E402
 
@@ -95,10 +98,9 @@ def capsule_like(overrides=None):
 
 
 def receipt_like(overrides=None):
-    base = {
+    overrides = overrides or {}
+    body = {
         "schema": RECEIPT_SCHEMA,
-        "receipt_id": "receipt_abc",
-        "fingerprint": "sha256:receipt-fp",
         "capsule": {"id": "capsule_abc", "fingerprint": "sha256:capsule-fp"},
         "workspace": {"fingerprint": "sha256:workspace-fp", "observed_at": "2026-07-20T15:00:00.000Z"},
         "runtime": {"harness": "claude-code", "actor": "codex:task-1"},
@@ -110,8 +112,23 @@ def receipt_like(overrides=None):
         "unresolved_unknowns": [],
         "provenance": [],
         "created_at": "2026-07-20T15:05:00.000Z",
+        **{key: value for key, value in overrides.items() if key not in ("receipt_id", "fingerprint")},
     }
-    return {**base, **(overrides or {})}
+    receipt = {
+        "receipt_id": deterministic_id(
+            "receipt",
+            {
+                "capsule": body["capsule"].get("fingerprint", "sha256:capsule-fp")
+                if isinstance(body["capsule"], dict)
+                else "sha256:capsule-fp",
+                "created_at": body["created_at"],
+                "actor": body["runtime"]["actor"],
+            },
+        ),
+        **body,
+        "fingerprint": fingerprint(body),
+    }
+    return {**receipt, **{key: overrides[key] for key in ("receipt_id", "fingerprint") if key in overrides}}
 
 
 # -- control_scope.py -------------------------------------------------------------------
@@ -121,6 +138,10 @@ def test_normalize_scope_sorts_and_de_duplicates_paths_and_leaves_project_untouc
     normalized = normalize_scope(scope("vivary", ["b/two", "a/one", "a/one", "b\\two"]))
     assert normalized["project"] == "vivary"
     assert normalized["paths"] == ["a/one", "b/two"]
+
+
+def test_normalize_scope_returns_an_empty_typed_scope_for_a_truthy_non_dict_input():
+    assert normalize_scope("not a scope mapping") == {"project": "", "paths": []}
 
 
 def test_scopes_overlap_is_false_across_different_projects_even_with_identical_paths():
@@ -299,6 +320,66 @@ def test_request_claim_fails_closed_on_a_malformed_request_shape():
     assert result["reason_codes"] == [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]]
 
 
+def test_request_claim_fails_closed_on_a_truthy_non_dict_request():
+    assert request_claim(active_claims=[], request="not a claim request") == {
+        "decision": CLAIM_DECISION["REFUSED"],
+        "reason_codes": [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]],
+        "claim": None,
+        "claims": [],
+        "conflicts": [],
+    }
+
+
+def test_claim_ledger_entry_points_fail_closed_on_a_non_list_ledger():
+    request_result = request_claim(
+        active_claims=None,
+        request={"scope": scope("vivary", ["src/control"]), "actor": AGENT},
+    )
+    release_result = release_claim(active_claims=None, claim_id="claim_missing", actor=AGENT)
+    expire_result = expire_leases(active_claims=None, now="2026-07-20T15:10:00.000Z")
+
+    assert request_result["reason_codes"] == [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]]
+    assert release_result["reason_codes"] == [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]]
+    assert expire_result["reason_codes"] == [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]]
+
+
+def test_request_claim_fails_closed_when_caller_owned_claim_state_has_a_malformed_scope():
+    malformed_claim = {"claim_id": "claim_bad_scope", "scope": "not a scope mapping"}
+
+    assert request_claim(
+        active_claims=[malformed_claim],
+        request={"scope": scope("vivary", ["src/control"]), "actor": AGENT},
+    ) == {
+        "decision": CLAIM_DECISION["REFUSED"],
+        "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]],
+        "claim": None,
+        "claims": [malformed_claim],
+        "conflicts": [],
+    }
+
+
+def test_request_claim_fails_closed_when_a_persisted_claim_has_an_impossible_actor_authority_pair():
+    impossible_claim = {
+        "claim_id": "claim_agent_owner",
+        "scope": scope("vivary", ["src/control"]),
+        "actor": AGENT,
+        "authority_class": AUTHORITY_CLASS["OWNER"],
+        "lease": None,
+        "status": "active",
+    }
+
+    assert request_claim(
+        active_claims=[impossible_claim],
+        request={"scope": scope("vivary", ["src/control"]), "actor": HUMAN},
+    ) == {
+        "decision": CLAIM_DECISION["REFUSED"],
+        "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]],
+        "claim": None,
+        "claims": [impossible_claim],
+        "conflicts": [],
+    }
+
+
 # -- control_claims.py: workers never become owners ---------------------------------------
 
 
@@ -363,6 +444,16 @@ def test_release_claim_validates_actor_shape_before_releasing_a_claim():
         assert result["claims"] == granted["claims"]
 
 
+def test_release_claim_fails_closed_when_caller_owned_claim_state_is_malformed():
+    malformed_claim = "not a claim mapping"
+
+    assert release_claim(active_claims=[malformed_claim], claim_id="claim_missing", actor=AGENT) == {
+        "decision": CLAIM_DECISION["REFUSED"],
+        "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]],
+        "claims": [malformed_claim],
+    }
+
+
 def test_release_claim_requires_the_holder_kind_and_id_to_match():
     granted = request_claim(active_claims=[], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
     same_id_wrong_kind = {"kind": HUMAN["kind"], "id": AGENT["id"]}
@@ -425,6 +516,24 @@ def test_request_claim_refuses_timezone_naive_lease_timestamps():
     assert result["claims"] == []
 
 
+def test_request_claim_refuses_a_lease_that_expires_before_it_is_granted():
+    result = request_claim(
+        active_claims=[],
+        request={
+            "scope": scope("vivary", ["src/control"]),
+            "actor": AGENT,
+            "lease": {
+                "granted_at": "2026-07-20T15:00:00.000Z",
+                "expires_at": "2026-07-20T14:59:59.999Z",
+            },
+        },
+    )
+
+    assert result["decision"] == CLAIM_DECISION["REFUSED"]
+    assert result["reason_codes"] == [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]]
+    assert result["claims"] == []
+
+
 # -- control_claims.py: leases, time as input only ------------------------------------------
 
 
@@ -468,6 +577,49 @@ def test_an_expired_leases_scope_is_claimable_again_once_expire_leases_has_run()
     assert regranted["decision"] == CLAIM_DECISION["GRANTED"]
 
 
+def test_expire_leases_quarantines_an_impossible_persisted_authority_pair_and_frees_its_scope_for_a_follow_on_request():
+    impossible_claim = {
+        "claim_id": "claim_agent_owner",
+        "scope": scope("vivary", ["src/control"]),
+        "actor": AGENT,
+        "authority_class": AUTHORITY_CLASS["OWNER"],
+        "lease": {"granted_at": "2026-07-20T15:00:00.000Z", "expires_at": "2026-07-20T15:10:00.000Z"},
+        "status": "active",
+    }
+
+    swept = expire_leases(active_claims=[impossible_claim], now="2026-07-20T15:05:00.000Z")
+    follow_on = request_claim(
+        active_claims=swept["claims"],
+        request={"scope": scope("vivary", ["src/control"]), "actor": HUMAN},
+    )
+
+    assert swept == {
+        "claims": [],
+        "expired": [{"claim": impossible_claim, "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]]}],
+        "reason_codes": [],
+    }
+    assert follow_on["decision"] == CLAIM_DECISION["GRANTED"]
+    assert follow_on["reason_codes"] == []
+    assert follow_on["conflicts"] == []
+
+
+def test_expire_leases_retains_a_persisted_claim_with_a_valid_human_owner_authority_pair():
+    valid_claim = {
+        "claim_id": "claim_human_owner",
+        "scope": scope("vivary", ["src/control"]),
+        "actor": HUMAN,
+        "authority_class": AUTHORITY_CLASS["OWNER"],
+        "lease": {"granted_at": "2026-07-20T15:00:00.000Z", "expires_at": "2026-07-20T15:10:00.000Z"},
+        "status": "active",
+    }
+
+    assert expire_leases(active_claims=[valid_claim], now="2026-07-20T15:05:00.000Z") == {
+        "claims": [valid_claim],
+        "expired": [],
+        "reason_codes": [],
+    }
+
+
 def test_expire_leases_rejects_unparseable_and_timezone_naive_now_without_releasing_claims():
     granted = request_claim(
         active_claims=[],
@@ -487,6 +639,72 @@ def test_expire_leases_rejects_unparseable_and_timezone_naive_now_without_releas
         assert result["claims"] == granted["claims"]
         assert result["expired"] == []
         assert result["reason_codes"] == [LEASE_REASON["UNKNOWN_NOW_SHAPE"]]
+
+
+def test_expire_leases_quarantines_a_claim_with_a_missing_expiry_in_caller_owned_state():
+    malformed_claim = {
+        "claim_id": "claim_missing_expiry",
+        "scope": scope("vivary", ["src/control"]),
+        "actor": AGENT,
+        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
+        "lease": {"granted_at": "2026-07-20T15:00:00.000Z"},
+        "status": "active",
+    }
+
+    result = expire_leases(active_claims=[malformed_claim], now="2026-07-20T15:10:00.000Z")
+
+    assert result["claims"] == []
+    assert result["expired"] == [{"claim": malformed_claim, "reason_codes": [LEASE_REASON["UNKNOWN_LEASE_SHAPE"]]}]
+    assert result["reason_codes"] == []
+
+
+def test_expire_leases_quarantines_a_claim_with_an_unparseable_expiry_in_caller_owned_state():
+    malformed_claim = {
+        "claim_id": "claim_unparseable_expiry",
+        "scope": scope("vivary", ["src/control"]),
+        "actor": AGENT,
+        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
+        "lease": {
+            "granted_at": "2026-07-20T15:00:00.000Z",
+            "expires_at": "not an instant",
+        },
+        "status": "active",
+    }
+
+    result = expire_leases(active_claims=[malformed_claim], now="2026-07-20T15:10:00.000Z")
+
+    assert result["claims"] == []
+    assert result["expired"] == [{"claim": malformed_claim, "reason_codes": [LEASE_REASON["UNKNOWN_LEASE_SHAPE"]]}]
+    assert result["reason_codes"] == []
+
+
+def test_expire_leases_quarantines_a_malformed_claim_entry_in_caller_owned_state():
+    malformed_claim = "not a claim mapping"
+
+    assert expire_leases(active_claims=[malformed_claim], now="2026-07-20T15:10:00.000Z") == {
+        "claims": [],
+        "expired": [{"claim": malformed_claim, "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]]}],
+        "reason_codes": [],
+    }
+
+
+def test_expire_leases_expires_a_zero_duration_lease_at_the_caller_supplied_grant_time():
+    instant = "2026-07-20T15:00:00.000Z"
+    granted = request_claim(
+        active_claims=[],
+        request={
+            "scope": scope("vivary", ["src/control"]),
+            "actor": AGENT,
+            "lease": {"granted_at": instant, "expires_at": instant},
+        },
+    )
+
+    result = expire_leases(active_claims=granted["claims"], now=instant)
+
+    assert granted["decision"] == CLAIM_DECISION["GRANTED"]
+    assert result["claims"] == []
+    assert result["expired"] == [{"claim": granted["claim"], "reason_codes": [LEASE_REASON["LEASE_EXPIRED"]]}]
+    assert result["reason_codes"] == []
 
 
 def test_control_never_reads_the_wall_clock_no_datetime_now_or_time_time_in_any_module():
@@ -537,6 +755,53 @@ def test_evaluate_dependencies_fails_closed_when_the_task_itself_is_unknown():
     result = evaluate_dependencies(tasks=[], task_id="ghost")
     assert result["decision"] == DEPENDENCY_DECISION["BLOCKED"]
     assert result["reason_codes"] == [DEPENDENCY_REASON["UNKNOWN_TASK"]]
+
+
+MALFORMED_DEPENDENCY_GRAPHS = [
+    ["not a task mapping"],
+    [{"id": "t1", "depends_on": "t0"}],
+    [{"id": "t1", "depends_on": [""]}],
+    [{"id": "t1", "depends_on": [1]}],
+    [{"id": "", "depends_on": []}],
+]
+
+
+@pytest.mark.parametrize("tasks", MALFORMED_DEPENDENCY_GRAPHS)
+def test_evaluate_dependencies_fails_closed_on_a_malformed_task_graph(tasks):
+    assert evaluate_dependencies(tasks=tasks, task_id="t1") == {
+        "decision": DEPENDENCY_DECISION["BLOCKED"],
+        "reason_codes": [DEPENDENCY_REASON["UNKNOWN_TASK"]],
+        "unmet": [],
+    }
+
+
+def test_evaluate_dependencies_rejects_duplicate_task_ids_as_an_invalid_graph_shape():
+    tasks = [
+        {"id": "duplicate", "status": "done", "depends_on": []},
+        {"id": "duplicate", "status": "open", "depends_on": []},
+    ]
+
+    assert evaluate_dependencies(tasks=tasks, task_id="duplicate") == {
+        "decision": DEPENDENCY_DECISION["BLOCKED"],
+        "reason_codes": [DEPENDENCY_REASON["UNKNOWN_TASK"]],
+        "unmet": [],
+    }
+
+
+def test_detect_dependency_cycle_rejects_duplicate_task_ids_as_an_invalid_graph_shape():
+    tasks = [
+        {"id": "duplicate", "depends_on": []},
+        {"id": "duplicate", "depends_on": []},
+    ]
+
+    with pytest.raises(ValueError):
+        detect_dependency_cycle(tasks=tasks)
+
+
+@pytest.mark.parametrize("tasks", MALFORMED_DEPENDENCY_GRAPHS)
+def test_detect_dependency_cycle_rejects_a_malformed_task_graph(tasks):
+    with pytest.raises(ValueError):
+        detect_dependency_cycle(tasks=tasks)
 
 
 def test_detect_dependency_cycle_finds_a_direct_cycle_and_fails_closed():
@@ -724,6 +989,116 @@ def test_create_handoff_fails_closed_on_a_malformed_capsule_or_receipt_shape():
     assert result["reason_codes"] == [HANDOFF_REASON["UNKNOWN_RECEIPT_SHAPE"]]
 
 
+def test_create_handoff_fails_closed_when_a_capsule_workspace_is_a_truthy_non_dict():
+    claim = {
+        "claim_id": "claim_1",
+        "actor": AGENT,
+        "scope": scope("vivary", ["src/control"]),
+        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
+    }
+    result = create_handoff(
+        claim=claim,
+        receipt=receipt_like(),
+        capsule=capsule_like(overrides={"workspace": "not a workspace mapping"}),
+        from_actor=AGENT,
+        to_actor=HUMAN,
+        workspace_revision="sha256:workspace-fp",
+        created_at="2026-07-20T15:06:00.000Z",
+    )
+
+    assert result["decision"] == HANDOFF_DECISION["REFUSED"]
+    assert result["reason_codes"] == [HANDOFF_REASON["UNKNOWN_CAPSULE_SHAPE"]]
+    assert result["handoff"] is None
+
+
+@pytest.mark.parametrize("nested_field", ["capsule", "workspace"])
+def test_create_handoff_fails_closed_when_a_receipt_binding_is_a_truthy_non_dict(nested_field):
+    claim = {
+        "claim_id": "claim_1",
+        "actor": AGENT,
+        "scope": scope("vivary", ["src/control"]),
+        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
+    }
+    result = create_handoff(
+        claim=claim,
+        receipt=receipt_like(overrides={nested_field: "not a receipt binding mapping"}),
+        capsule=capsule_like(),
+        from_actor=AGENT,
+        to_actor=HUMAN,
+        workspace_revision="sha256:workspace-fp",
+        created_at="2026-07-20T15:06:00.000Z",
+    )
+
+    assert result["decision"] == HANDOFF_DECISION["REFUSED"]
+    assert result["reason_codes"] == [HANDOFF_REASON["UNKNOWN_RECEIPT_SHAPE"]]
+    assert result["handoff"] is None
+
+
+@pytest.mark.parametrize("empty_binding", ["capsule_id", "capsule_fingerprint", "workspace_fingerprint"])
+def test_create_handoff_rejects_empty_capsule_or_workspace_bindings(empty_binding):
+    capsule = capsule_like()
+    receipt_overrides = {}
+    workspace_revision = capsule["workspace"]["fingerprint"]
+    if empty_binding == "capsule_id":
+        capsule["capsule_id"] = ""
+        receipt_overrides["capsule"] = {"id": "", "fingerprint": capsule["fingerprint"]}
+    elif empty_binding == "capsule_fingerprint":
+        capsule["fingerprint"] = ""
+        receipt_overrides["capsule"] = {"id": capsule["capsule_id"], "fingerprint": ""}
+    else:
+        capsule["workspace"] = {**capsule["workspace"], "fingerprint": ""}
+        receipt_overrides["workspace"] = {**capsule["workspace"]}
+        workspace_revision = ""
+    receipt = receipt_like(overrides=receipt_overrides)
+    claim = {
+        "claim_id": "claim_1",
+        "actor": AGENT,
+        "scope": scope("vivary", ["src/control"]),
+        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
+    }
+
+    result = create_handoff(
+        claim=claim,
+        receipt=receipt,
+        capsule=capsule,
+        from_actor=AGENT,
+        to_actor=HUMAN,
+        workspace_revision=workspace_revision,
+        created_at="2026-07-20T15:06:00.000Z",
+    )
+
+    assert result["decision"] == HANDOFF_DECISION["REFUSED"]
+    assert result["reason_codes"] == [HANDOFF_REASON["UNKNOWN_CAPSULE_SHAPE"]]
+    assert result["handoff"] is None
+
+
+def test_create_handoff_rejects_a_receipt_tampered_after_fingerprinting():
+    capsule = capsule_like()
+    receipt = receipt_like(
+        overrides={"checks": [{"name": "unit-and-contract-tests", "command": "npm test", "outcome": "failed"}]}
+    )
+    tampered = {**receipt, "checks": [{**receipt["checks"][0], "outcome": "passed"}]}
+    claim = {
+        "claim_id": "claim_1",
+        "actor": AGENT,
+        "scope": scope("vivary", ["src/control"]),
+        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
+    }
+
+    result = create_handoff(
+        claim=claim,
+        receipt=tampered,
+        capsule=capsule,
+        from_actor=AGENT,
+        to_actor=HUMAN,
+        workspace_revision=capsule["workspace"]["fingerprint"],
+        created_at="2026-07-20T15:06:00.000Z",
+    )
+
+    assert result["decision"] == HANDOFF_DECISION["REFUSED"]
+    assert result["reason_codes"] == [HANDOFF_REASON["UNKNOWN_RECEIPT_SHAPE"]]
+
+
 def test_create_handoff_refuses_to_hand_ownership_authority_to_a_worker_or_agent_actor_workers_never_become_product_owners():
     capsule = capsule_like()
     receipt = receipt_like()
@@ -805,6 +1180,14 @@ def test_derive_execution_edges_fails_closed_on_a_malformed_receipt_shape():
     assert result["edges"] == []
     assert result["reason_codes"] == [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]
 
+
+def test_derive_execution_edges_fails_closed_when_receipt_capsule_is_a_truthy_non_dict():
+    result = derive_execution_edges(receipt=receipt_like(overrides={"capsule": "not a capsule mapping"}))
+
+    assert result["edges"] == []
+    assert result["reason_codes"] == [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]
+
+
 def test_derive_execution_edges_fails_closed_when_any_receipt_check_is_malformed():
     receipt = receipt_like(
         overrides={
@@ -813,6 +1196,29 @@ def test_derive_execution_edges_fails_closed_when_any_receipt_check_is_malformed
                 {"name": "missing-outcome"},
             ]
         }
+    )
+
+    result = derive_execution_edges(receipt=receipt)
+
+    assert result["edges"] == []
+    assert result["reason_codes"] == [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]
+
+
+def test_derive_execution_edges_rejects_a_receipt_tampered_after_fingerprinting():
+    receipt = receipt_like(
+        overrides={"checks": [{"name": "unit-and-contract-tests", "command": "npm test", "outcome": "failed"}]}
+    )
+    tampered = {**receipt, "checks": [{**receipt["checks"][0], "outcome": "passed"}]}
+
+    result = derive_execution_edges(receipt=tampered)
+
+    assert result["edges"] == []
+    assert result["reason_codes"] == [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]
+
+
+def test_derive_execution_edges_rejects_an_empty_capsule_identity():
+    receipt = receipt_like(
+        overrides={"capsule": {"id": "", "fingerprint": "sha256:capsule-fp"}}
     )
 
     result = derive_execution_edges(receipt=receipt)

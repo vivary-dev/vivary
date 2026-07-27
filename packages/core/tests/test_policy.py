@@ -46,6 +46,7 @@ from vivary_core.capsule_compile import (  # noqa: E402
     CAPSULE_SCHEMA,
     compile_task_capsule,
 )
+from vivary_core.canonical import fingerprint  # noqa: E402
 from vivary_core.receipt import RECEIPT_SCHEMA, create_integrity_receipt  # noqa: E402
 from vivary_core.workspace_model import project_workspace_graph  # noqa: E402
 from vivary_core.workspace_observe import observe_checkouts  # noqa: E402
@@ -58,6 +59,9 @@ from vivary_core.policy_gates import (  # noqa: E402
     evaluate_receipt_gate,
 )
 from vivary_core.policy_loop import LOOP_DECISION, LOOP_REASON, next_loop_step  # noqa: E402
+from vivary_core.verify_reasons import OUTCOMES, REASON_CODES  # noqa: E402
+from vivary_core.verify_receipt import verify_receipt_integrity  # noqa: E402
+from vivary_core.verify_sufficiency import evaluate_gate_sufficiency  # noqa: E402
 
 FIXED_DATE = "2026-07-01T12:00:00Z"
 FETCH_STAMP_EPOCH = 1782000000.0  # 2026-07-02T00:00:00Z
@@ -265,23 +269,20 @@ def base_capsule_like(overrides=None):
 
 
 def base_receipt_like(capsule, overrides=None):
-    receipt = {
-        "schema": RECEIPT_SCHEMA,
-        "receipt_id": "receipt_test0000",
-        "fingerprint": "sha256:test-receipt",
-        "capsule": {"id": capsule["capsule_id"], "fingerprint": capsule["fingerprint"]},
-        "workspace": capsule["workspace"],
-        "runtime": {"harness": "test", "actor": "test-actor"},
-        "checks": [{"name": c["name"], "command": c["command"], "outcome": "passed"} for c in capsule["required_checks"]],
-        "claims_in_scope": [],
-        "claims_verified": [],
-        "claims_unverified": [],
-        "unresolved_conflicts": [],
-        "unresolved_unknowns": [],
-        "provenance": [],
-        "created_at": NOW(),
-    }
-    receipt.update(overrides or {})
+    receipt = create_integrity_receipt(
+        capsule=capsule,
+        runtime={"harness": "test", "actor": "test-actor"},
+        checks=[
+            {"name": check["name"], "command": check["command"], "outcome": "passed"}
+            for check in capsule["required_checks"]
+        ],
+        now=NOW,
+    )
+    overrides = overrides or {}
+    receipt.update(overrides)
+    if "fingerprint" not in overrides:
+        body = {key: value for key, value in receipt.items() if key not in ("receipt_id", "fingerprint")}
+        receipt["fingerprint"] = fingerprint(body)
     return receipt
 
 
@@ -289,11 +290,27 @@ def base_receipt_like(capsule, overrides=None):
 
 
 def _bound_verdict(*, capsule, receipt, **fields):
-    return {
+    body = {
+        "schema": "vivary.gate-verdict/v0",
+        "gate": "ci",
+        "outcome": "sufficient",
+        "reason_codes": [],
+        "failing_checks": [],
+        "unresolved_conflicts": 0,
+        "unresolved_unknowns": 0,
+        "claims_total": len(capsule["claims"]),
+        "claims_verified": None,
+        "receipt_outcome": "verified",
         **fields,
         "capsule": {"id": capsule["capsule_id"], "fingerprint": capsule["fingerprint"]},
         "receipt_id": receipt["receipt_id"],
     }
+    return {**body, "fingerprint": fingerprint(body)}
+
+
+def _refingerprint_verdict(verdict):
+    body = {key: value for key, value in verdict.items() if key != "fingerprint"}
+    return {**body, "fingerprint": fingerprint(body)}
 
 
 def _ozone_verdict_stub(*, capsule, receipt, required_checks):
@@ -350,6 +367,7 @@ def test_gate_reason_code_vocabulary_is_pinned():
         "UNKNOWN_RECEIPT_SHAPE": "unknown_receipt_shape",
         "VERDICT_INSUFFICIENT": "verdict_insufficient",
         "VERDICT_BINDING_MISMATCH": "verdict_binding_mismatch",
+        "VERDICT_INTEGRITY_MISMATCH": "verdict_integrity_mismatch",
     }
     with pytest.raises(TypeError):
         GATE_DECISION["CLEAR"] = "nope"
@@ -468,6 +486,42 @@ def test_evaluate_budget_fails_closed_on_an_unrecognized_capsule_shape():
         }
 
 
+@pytest.mark.parametrize(
+    "missing_binding",
+    ["capsule_id", "fingerprint", "workspace", "workspace_fingerprint"],
+)
+def test_evaluate_budget_refuses_capsules_missing_required_bindings(missing_binding):
+    capsule = base_capsule_like()
+    if missing_binding == "workspace_fingerprint":
+        capsule["workspace"].pop("fingerprint")
+    else:
+        capsule.pop(missing_binding)
+
+    assert evaluate_budget(capsule=capsule) == {
+        "decision": BUDGET_DECISION["REFUSED"],
+        "reason_codes": [BUDGET_REASON["UNKNOWN_CAPSULE_SHAPE"]],
+        "details": {},
+    }
+
+
+@pytest.mark.parametrize(
+    "empty_binding",
+    ["capsule_id", "fingerprint", "workspace_fingerprint"],
+)
+def test_evaluate_budget_refuses_capsules_with_empty_required_bindings(empty_binding):
+    capsule = base_capsule_like()
+    if empty_binding == "workspace_fingerprint":
+        capsule["workspace"]["fingerprint"] = ""
+    else:
+        capsule[empty_binding] = ""
+
+    assert evaluate_budget(capsule=capsule) == {
+        "decision": BUDGET_DECISION["REFUSED"],
+        "reason_codes": [BUDGET_REASON["UNKNOWN_CAPSULE_SHAPE"]],
+        "details": {},
+    }
+
+
 # -- policy_gates.py: evaluate_capsule_gate -----------------------------------------------
 
 def test_evaluate_capsule_gate_clear_on_a_fully_known_conflict_free_capsule():
@@ -517,6 +571,26 @@ def test_evaluate_capsule_gate_fails_closed_on_an_unrecognized_capsule_shape():
         }
 
 
+@pytest.mark.parametrize(
+    "workspace",
+    [None, {}, {"fingerprint": ""}, {"fingerprint": None}],
+)
+def test_strato_rejects_capsules_without_a_complete_workspace_binding(workspace):
+    capsule = base_capsule_like({"workspace": workspace})
+
+    gate = evaluate_capsule_gate(capsule=capsule)
+    loop = next_loop_step(capsule=capsule)
+
+    assert gate == {
+        "decision": GATE_DECISION["BLOCKED"],
+        "reason_codes": [GATE_REASON["UNKNOWN_CAPSULE_SHAPE"]],
+        "gate_requests": [],
+    }
+    assert loop["decision"] == LOOP_DECISION["BLOCKED"]
+    assert loop["reason_codes"] == [LOOP_REASON["UNKNOWN_CAPSULE_SHAPE"]]
+    assert loop["budget"] is None
+
+
 def test_evaluate_capsule_gate_never_echoes_a_checkout_path_only_ids_and_counts(real_graph):
     import json
 
@@ -529,6 +603,71 @@ def test_evaluate_capsule_gate_never_echoes_a_checkout_path_only_ids_and_counts(
 
 
 # -- policy_gates.py: evaluate_receipt_gate ------------------------------------------------
+
+@pytest.mark.parametrize("verdict_kind", ["early", "receiptless"])
+def test_strato_accepts_genuine_ozone_early_or_receiptless_verdict_contracts(verdict_kind):
+    capsule = build_clean_capsule()
+    receipt = create_integrity_receipt(
+        capsule=capsule,
+        runtime={"harness": "test", "actor": "test-actor"},
+        checks=[{"name": check["name"], "command": check["command"], "outcome": "passed"} for check in capsule["required_checks"]],
+        now=NOW,
+    )
+
+    if verdict_kind == "early":
+        verdict = evaluate_gate_sufficiency(
+            gate={"name": "ci", "require_claims_verified": "not-a-boolean"},
+            capsule=capsule,
+            receipt=receipt,
+        )
+        assert verdict["receipt_id"] == receipt["receipt_id"]
+        assert verdict["reason_codes"] == [REASON_CODES["MALFORMED_GATE"]]
+        expected = {
+            "decision": GATE_DECISION["GATE_REQUIRED"],
+            "reason_codes": [GATE_REASON["VERDICT_INSUFFICIENT"]],
+            "gate_requests": [
+                {
+                    "reason_code": GATE_REASON["VERDICT_INSUFFICIENT"],
+                    "verdict_outcome": OUTCOMES["INSUFFICIENT"],
+                    "verdict_reason_codes": [REASON_CODES["MALFORMED_GATE"]],
+                }
+            ],
+        }
+    else:
+        verdict = evaluate_gate_sufficiency(
+            gate={"name": "ci", "required_checks": ["ozone-only-evidence"]},
+            capsule=capsule,
+        )
+        assert verdict["receipt_id"] is None
+        assert verdict["receipt_outcome"] is None
+        expected = {
+            "decision": GATE_DECISION["GATE_REQUIRED"],
+            "reason_codes": [GATE_REASON["VERDICT_BINDING_MISMATCH"]],
+            "gate_requests": [{"reason_code": GATE_REASON["VERDICT_BINDING_MISMATCH"]}],
+        }
+
+    assert verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
+    assert verdict["fingerprint"] == fingerprint({key: value for key, value in verdict.items() if key != "fingerprint"})
+    assert evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict) == expected
+
+
+def test_evaluate_receipt_gate_does_not_clear_a_receipt_ozone_marks_as_forged():
+    capsule = build_clean_capsule()
+    receipt = create_integrity_receipt(
+        capsule=capsule,
+        runtime={"harness": "test", "actor": "test-actor"},
+        checks=[{"name": check["name"], "command": check["command"], "outcome": "passed"} for check in capsule["required_checks"]],
+        now=NOW,
+    )
+    forged = {**receipt, "claims_verified": []}
+
+    integrity = verify_receipt_integrity(receipt=forged, capsule=capsule)
+    assert integrity["outcome"] == OUTCOMES["INSUFFICIENT"]
+    assert integrity["reason_codes"] == [REASON_CODES["FINGERPRINT_MISMATCH"]]
+
+    outcome = evaluate_receipt_gate(capsule=capsule, receipt=forged)
+    assert outcome["decision"] != GATE_DECISION["CLEAR"]
+    assert outcome["reason_codes"]
 
 def test_evaluate_receipt_gate_clear_when_all_required_checks_passed_and_nothing_is_unresolved():
     capsule = build_clean_capsule()
@@ -665,6 +804,63 @@ def test_evaluate_receipt_gate_a_sufficient_ozone_verdict_clears_the_required_ch
     outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict)
     assert outcome == {"decision": GATE_DECISION["CLEAR"], "reason_codes": [], "gate_requests": []}
 
+
+@pytest.mark.parametrize(
+    "projection",
+    [
+        pytest.param({}, id="zero-of-one"),
+        pytest.param({"claims_total": 0, "claims_verified": 0}, id="false-zero-of-zero"),
+    ],
+)
+def test_evaluate_receipt_gate_rejects_recomputed_sufficient_claim_projections(projection):
+    capsule = base_capsule_like({"claims": [{"id": "claim-one"}]})
+    receipt = base_receipt_like(
+        capsule,
+        {"claims_verified": [], "claims_unverified": ["claim-one"]},
+    )
+    insufficient = evaluate_gate_sufficiency(
+        gate={"name": "ci", "require_claims_verified": True},
+        capsule=capsule,
+        receipt=receipt,
+    )
+    assert insufficient["outcome"] == OUTCOMES["INSUFFICIENT"]
+    assert insufficient["claims_total"] == 1
+    assert insufficient["claims_verified"] == 0
+
+    forged = _refingerprint_verdict(
+        {
+            **insufficient,
+            "outcome": OUTCOMES["SUFFICIENT"],
+            "reason_codes": [],
+            **projection,
+        }
+    )
+
+    assert evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=forged) == {
+        "decision": GATE_DECISION["GATE_REQUIRED"],
+        "reason_codes": [GATE_REASON["VERDICT_INTEGRITY_MISMATCH"]],
+        "gate_requests": [{"reason_code": GATE_REASON["VERDICT_INTEGRITY_MISMATCH"]}],
+    }
+
+
+def test_evaluate_receipt_gate_clears_a_legitimate_sufficient_claim_projection():
+    capsule = base_capsule_like({"claims": [{"id": "claim-one"}]})
+    receipt = base_receipt_like(capsule)
+    verdict = evaluate_gate_sufficiency(
+        gate={"name": "ci", "require_claims_verified": True},
+        capsule=capsule,
+        receipt=receipt,
+    )
+
+    assert verdict["outcome"] == OUTCOMES["SUFFICIENT"]
+    assert verdict["claims_total"] == 1
+    assert verdict["claims_verified"] == 1
+    assert evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict) == {
+        "decision": GATE_DECISION["CLEAR"],
+        "reason_codes": [],
+        "gate_requests": [],
+    }
+
 def test_evaluate_receipt_gate_honors_an_insufficient_verdict_with_no_failing_checks():
     capsule = build_clean_capsule()
     receipt = create_integrity_receipt(
@@ -697,6 +893,129 @@ def test_evaluate_receipt_gate_honors_an_insufficient_verdict_with_no_failing_ch
     ]
 
 
+@pytest.mark.parametrize("mutation", ["missing", "mismatched"])
+def test_evaluate_receipt_gate_validates_ozone_verdict_integrity_before_clearing(mutation):
+    capsule = build_clean_capsule()
+    receipt = create_integrity_receipt(
+        capsule=capsule,
+        runtime={"harness": "test", "actor": "test-actor"},
+        checks=[
+            {"name": check["name"], "command": check["command"], "outcome": "passed"}
+            for check in capsule["required_checks"]
+        ],
+        now=NOW,
+    )
+    verdict = _bound_verdict(
+        capsule=capsule,
+        receipt=receipt,
+        outcome="sufficient",
+        reason_codes=[],
+        failing_checks=[],
+    )
+    if mutation == "missing":
+        verdict.pop("fingerprint")
+    else:
+        verdict["fingerprint"] = "sha256:not-this-verdict"
+
+    outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict)
+
+    assert outcome == {
+        "decision": GATE_DECISION["GATE_REQUIRED"],
+        "reason_codes": [GATE_REASON["VERDICT_INTEGRITY_MISMATCH"]],
+        "gate_requests": [{"reason_code": GATE_REASON["VERDICT_INTEGRITY_MISMATCH"]}],
+    }
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"failing_checks": "none"},
+        {"reason_codes": ["required_check_failed"]},
+        {
+            "outcome": "sufficient",
+            "failing_checks": [{"name": "ci", "expected": "passed", "actual": "failed"}],
+        },
+        {"gate": None},
+        {"unresolved_conflicts": "0"},
+        {"unresolved_unknowns": None},
+        {"claims_total": True},
+        {"claims_verified": "all"},
+        {"receipt_outcome": 1},
+        {"outcome": "sufficient", "receipt_outcome": "insufficient"},
+        {"outcome": "sufficient", "receipt_outcome": "refused"},
+        {
+            "outcome": "insufficient",
+            "reason_codes": ["required_check_failed"],
+            "failing_checks": [{"name": "ci", "expected": "passed"}],
+        },
+        {"claims_total": 0, "claims_verified": 1},
+        {"outcome": "cleared"},
+        {
+            "outcome": "insufficient",
+            "reason_codes": ["required_check_failed", "required_check_failed"],
+        },
+        {"outcome": "insufficient"},
+        {
+            "outcome": "insufficient",
+            "reason_codes": ["required_check_failed"],
+            "failing_checks": [{"name": "", "expected": "passed", "actual": "failed"}],
+        },
+        {
+            "outcome": "insufficient",
+            "reason_codes": ["required_check_failed"],
+            "failing_checks": [{"name": "ci", "expected": "skipped", "actual": "failed"}],
+        },
+    ],
+)
+def test_evaluate_receipt_gate_rejects_correctly_fingerprinted_malformed_or_contradictory_verdicts(
+    mutation,
+):
+    capsule = build_clean_capsule()
+    receipt = create_integrity_receipt(
+        capsule=capsule,
+        runtime={"harness": "test", "actor": "test-actor"},
+        checks=[
+            {"name": check["name"], "command": check["command"], "outcome": "passed"}
+            for check in capsule["required_checks"]
+        ],
+        now=NOW,
+    )
+    verdict = _refingerprint_verdict(
+        {
+            **_bound_verdict(capsule=capsule, receipt=receipt),
+            **mutation,
+        }
+    )
+
+    outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict)
+
+    assert outcome == {
+        "decision": GATE_DECISION["GATE_REQUIRED"],
+        "reason_codes": [GATE_REASON["VERDICT_INTEGRITY_MISMATCH"]],
+        "gate_requests": [{"reason_code": GATE_REASON["VERDICT_INTEGRITY_MISMATCH"]}],
+    }
+
+
+def test_evaluate_receipt_gate_requires_sufficient_verdicts_to_carry_the_failing_checks_field():
+    capsule = build_clean_capsule()
+    receipt = create_integrity_receipt(
+        capsule=capsule,
+        runtime={"harness": "test", "actor": "test-actor"},
+        checks=[
+            {"name": check["name"], "command": check["command"], "outcome": "passed"}
+            for check in capsule["required_checks"]
+        ],
+        now=NOW,
+    )
+    verdict = _bound_verdict(capsule=capsule, receipt=receipt)
+    verdict.pop("failing_checks")
+    verdict = _refingerprint_verdict(verdict)
+
+    outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict)
+
+    assert outcome["reason_codes"] == [GATE_REASON["VERDICT_INTEGRITY_MISMATCH"]]
+
+
 def test_evaluate_receipt_gate_rejects_an_unbound_verdict_without_trusting_its_failing_checks():
     capsule = build_clean_capsule()
     receipt = create_integrity_receipt(
@@ -705,11 +1024,22 @@ def test_evaluate_receipt_gate_rejects_an_unbound_verdict_without_trusting_its_f
         checks=[{"name": c["name"], "command": c["command"], "outcome": "passed"} for c in capsule["required_checks"]],
         now=NOW,
     )
-    verdict = {
-        "outcome": "insufficient",
-        "reason_codes": ["claims_not_fully_verified"],
-        "failing_checks": [{"name": capsule["required_checks"][0]["name"], "expected": "passed", "actual": "missing"}],
-    }
+    bound = _bound_verdict(
+        capsule=capsule,
+        receipt=receipt,
+        outcome="insufficient",
+        reason_codes=["claims_not_fully_verified"],
+        failing_checks=[
+            {
+                "name": capsule["required_checks"][0]["name"],
+                "expected": "passed",
+                "actual": "missing",
+            }
+        ],
+    )
+    verdict = _refingerprint_verdict(
+        {key: value for key, value in bound.items() if key not in ("capsule", "receipt_id", "fingerprint")}
+    )
 
     outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict)
 
@@ -825,13 +1155,19 @@ def test_evaluate_receipt_gate_rejects_missing_or_mismatched_verdict_bindings():
         now=NOW,
     )
     valid = _bound_verdict(capsule=capsule, receipt=receipt, outcome="sufficient", reason_codes=[], failing_checks=[])
-    missing_receipt_id = {key: value for key, value in valid.items() if key != "receipt_id"}
+    missing_receipt_id = {
+        key: value for key, value in valid.items() if key not in ("receipt_id", "fingerprint")
+    }
     invalid_verdicts = [
-        {**valid, "capsule": {"fingerprint": capsule["fingerprint"]}},
-        {**valid, "capsule": {"id": "capsule_other", "fingerprint": capsule["fingerprint"]}},
-        {**valid, "capsule": {"id": capsule["capsule_id"], "fingerprint": "sha256:other"}},
-        missing_receipt_id,
-        {**valid, "receipt_id": "receipt_other"},
+        _refingerprint_verdict({**valid, "capsule": {"fingerprint": capsule["fingerprint"]}}),
+        _refingerprint_verdict(
+            {**valid, "capsule": {"id": "capsule_other", "fingerprint": capsule["fingerprint"]}}
+        ),
+        _refingerprint_verdict(
+            {**valid, "capsule": {"id": capsule["capsule_id"], "fingerprint": "sha256:other"}}
+        ),
+        _refingerprint_verdict(missing_receipt_id),
+        _refingerprint_verdict({**valid, "receipt_id": "receipt_other"}),
     ]
 
     for verdict in invalid_verdicts:
@@ -890,10 +1226,24 @@ def test_evaluate_receipt_gate_requires_a_matching_check_command():
     )
 def test_evaluate_receipt_gate_gate_required_when_the_receipt_binds_to_a_different_capsule_fingerprint():
     capsule = build_clean_capsule()
-    receipt = base_receipt_like(
-        capsule, {"capsule": {"id": capsule["capsule_id"], "fingerprint": "sha256:not-this-capsule"}}
+    other_capsule = base_capsule_like(
+        {"capsule_id": "capsule_other0000", "fingerprint": "sha256:other-capsule"}
     )
+    receipt = base_receipt_like(other_capsule)
     outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt)
+    assert GATE_REASON["RECEIPT_CAPSULE_MISMATCH"] in outcome["reason_codes"]
+
+
+def test_evaluate_receipt_gate_requires_the_receipt_workspace_to_match_the_capsule():
+    capsule = build_clean_capsule()
+    other_capsule = {
+        **capsule,
+        "workspace": {**capsule["workspace"], "fingerprint": "sha256:other-workspace"},
+    }
+    receipt = base_receipt_like(other_capsule)
+
+    outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt)
+
     assert GATE_REASON["RECEIPT_CAPSULE_MISMATCH"] in outcome["reason_codes"]
 
 

@@ -14,7 +14,7 @@ This decision creates three distinct seams:
 | Seam | Responsibility | Boundary |
 |---|---|---|
 | **SemanticMemoryAdapter** | A local or Cognee projection of privacy-approved typed `tropo` nodes for semantic retrieval. | It owns its privacy filtering and returns typed `RecallHit` candidates. Its state is rebuildable from graph truth. |
-| **AgentLTM** | Bellamente's independent durable store for approved agent memory. | Its data lives only at `.bellamente/data/`; it is not a `tropo` projection and never shares a physical store with semantic memory or Vivary core. |
+| **AgentLTM** | Bellamente's independent durable store for approved agent memory. | Store location and persisted-payload rules are owned by [SPEC §3.2](SPEC-bellamente-memory.md#32-independent-physical-store). |
 | **CandidateRecallProvider** | An optional source of normalized prior assertions for the `vivary-core` candidate-recall firewall. | Before core evaluation, normalization follows [SPEC §6.1](SPEC-bellamente-memory.md#61-normalized-input-boundary), including its defined known-ID-or-unresolved-marker boundary. The firewall, not similarity, governs whether a candidate can corroborate, challenge, or request review. |
 
 The existing semantic `RecallHit` adapter protocol does **not** directly model
@@ -29,8 +29,10 @@ AgentLTM. If AgentLTM data crosses into Vivary, it crosses through a future
 - **No provider collision.** AgentLTM policy is separate from the `[memory]`
   semantic-provider slot. Bellamente is never selected as a semantic provider merely
   because its policy exists.
-- **No shared physical store.** `.bellamente/data/` is workspace-local and ignored;
-  only normalized IDs and evidence references may cross seams.
+- **No shared physical store.** `.bellamente/data/` is workspace-local and ignored.
+  Its store and persisted-payload boundary are owned only by
+  [SPEC §3.2](SPEC-bellamente-memory.md#32-independent-physical-store); this ADR
+  does not restate them.
 - **Fail closed before data leaves a seam.** The normative private-set list and
   enforcement boundary live only in [SPEC §3.3](SPEC-bellamente-memory.md#33-fail-closed-private-set);
   this ADR does not restate them. Current shipped semantic-adapter behavior and known

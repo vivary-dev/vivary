@@ -265,11 +265,28 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         raise ValueError(
             f"budget.max_claims must be a non-negative integer (got {max_claims!r})"
         )
-    checkouts = [
-        n
-        for n in graph.get("nodes", [])
-        if n.get("kind") == "checkout" and ((n.get("facts") or {}).get("is_git_repository") or {}).get("value") is True
-    ]
+    nodes = graph.get("nodes") if isinstance(graph, dict) else None
+    if not isinstance(nodes, list):
+        raise ValueError("workspace graph must contain a node list")
+
+    checkouts = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            raise ValueError("workspace graph contains an invalid node")
+        facts = node.get("facts")
+        if facts is None:
+            facts = {}
+        if not isinstance(facts, dict) or any(
+            fact is not None and not isinstance(fact, dict) for fact in facts.values()
+        ):
+            raise ValueError("workspace graph contains an invalid fact")
+        repository_fact = facts.get("is_git_repository")
+        if (
+            node.get("kind") == "checkout"
+            and isinstance(repository_fact, dict)
+            and repository_fact.get("value") is True
+        ):
+            checkouts.append(node)
     # A declared scope narrower than the graph's allowlist must actually bound what
     # the capsule carries. Copying it into the output alone let a capsule declare
     # scope ['/a'] while including claims from '/b', so a downstream agent could act

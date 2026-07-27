@@ -106,14 +106,24 @@ def _path_contains(root, child):
     )
 
 
+def _is_valid_scope(scope):
+    return (
+        bool(scope)
+        and isinstance(scope, dict)
+        and isinstance(scope.get("project"), str)
+        and isinstance(scope.get("paths"), list)
+    )
+
+
 def normalize_scope(scope):
     """@param scope {project, paths}
     @returns a new scope dict with normalized, sorted, de-duplicated paths
     """
-    raw_paths = (scope or {}).get("paths") or []
+    scope = scope if isinstance(scope, dict) else {}
+    raw_paths = scope.get("paths") or []
     deduped = list(dict.fromkeys(_normalize_scope_path(p) for p in raw_paths))
     paths = sorted(deduped, key=_utf16_sort_key)
-    project = (scope or {}).get("project")
+    project = scope.get("project")
     return {"project": project if project is not None else "", "paths": paths}
 
 

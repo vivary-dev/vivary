@@ -26,7 +26,10 @@ PY_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, PY_ROOT)
 
 from vivary_core.canonical import canonicalize  # noqa: E402
+from vivary_core.policy_gates import GATE_DECISION, evaluate_receipt_gate  # noqa: E402
 from vivary_core.receipt import create_integrity_receipt  # noqa: E402
+from vivary_core.verify_reasons import OUTCOMES, REASON_CODES  # noqa: E402
+from vivary_core.verify_receipt import verify_receipt_integrity  # noqa: E402
 
 FIXTURES_DIR = os.path.join(HERE, "fixtures", "parity")
 
@@ -62,6 +65,41 @@ def test_receipt_binds_the_exact_capsule_and_workspace_fingerprints(capsule_name
     assert receipt["workspace"]["fingerprint"] == capsule["workspace"]["fingerprint"]
 
 
+@pytest.mark.parametrize("empty_binding", ["capsule_id", "capsule_fingerprint", "workspace_fingerprint"])
+def test_receipt_construction_rejects_empty_capsule_or_workspace_bindings(empty_binding):
+    capsule = {**CAPSULES["capsule-basic"]}
+    if empty_binding == "capsule_id":
+        capsule["capsule_id"] = ""
+    elif empty_binding == "capsule_fingerprint":
+        capsule["fingerprint"] = ""
+    else:
+        capsule["workspace"] = {**capsule["workspace"], "fingerprint": ""}
+
+    with pytest.raises(ValueError, match="non-empty capsule and workspace bindings"):
+        create_integrity_receipt(capsule=capsule, runtime=RUNTIME, checks=PASSING_CHECKS, now=NOW)
+
+
+@pytest.mark.parametrize(
+    "runtime",
+    [
+        {**RUNTIME, "actor": None},
+        {**RUNTIME, "actor": ""},
+        None,
+        "not a runtime mapping",
+        [],
+    ],
+    ids=["null-actor", "empty-actor", "null-runtime", "string-runtime", "list-runtime"],
+)
+def test_receipt_construction_rejects_an_invalid_runtime_actor(runtime):
+    with pytest.raises(ValueError, match="non-empty runtime actor"):
+        create_integrity_receipt(
+            capsule=CAPSULES["capsule-basic"],
+            runtime=runtime,
+            checks=PASSING_CHECKS,
+            now=NOW,
+        )
+
+
 @pytest.mark.parametrize("capsule_name", CAPSULE_NAMES)
 def test_all_checks_passing_marks_claims_verified_any_failure_leaves_all_unverified(capsule_name):
     capsule = CAPSULES[capsule_name]
@@ -78,6 +116,26 @@ def test_all_checks_passing_marks_claims_verified_any_failure_leaves_all_unverif
     assert failed["claims_verified"] == []
     assert len(failed["claims_unverified"]) == len(capsule["claims"])
 
+
+def test_receipt_id_substitution_cannot_clear_the_policy_gate():
+    capsule = CAPSULES["capsule-basic"]
+    receipt = create_integrity_receipt(capsule=capsule, runtime=RUNTIME, checks=PASSING_CHECKS, now=NOW)
+    other_receipt = create_integrity_receipt(
+        capsule=capsule,
+        runtime={**RUNTIME, "actor": "other-vivary-lattice-session"},
+        checks=PASSING_CHECKS,
+        now=NOW,
+    )
+    substituted = {**receipt, "receipt_id": other_receipt["receipt_id"]}
+
+    assert substituted["receipt_id"] != receipt["receipt_id"]
+    integrity = verify_receipt_integrity(receipt=substituted, capsule=capsule)
+    assert integrity["outcome"] == OUTCOMES["INSUFFICIENT"]
+    assert integrity["reason_codes"] == [REASON_CODES["RECEIPT_ID_MISMATCH"]]
+
+    outcome = evaluate_receipt_gate(capsule=capsule, receipt=substituted)
+    assert outcome["decision"] != GATE_DECISION["CLEAR"]
+    assert outcome["reason_codes"]
 
 @pytest.mark.parametrize("capsule_name", CAPSULE_NAMES)
 def test_no_checks_means_nothing_is_verified(capsule_name):

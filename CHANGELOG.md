@@ -100,11 +100,13 @@ install, version, publication, or deployment action occurs.
 - Routed the nested Bellamente contract from the documentation index and the generated
   semantic-memory page without creating an unsupported site route.
 - Made `docs/bellamente-memory/SPEC-bellamente-memory.md` the sole owner of the
-  private-set, Doctor-state, normalized-input, and firewall-result contracts;
-  the ADR and glossary now route instead of restating them. It pins accepted
-  exact-duplicate preserve and independent-evidence corroboration evaluations,
-  a `review_required` explicit-correction proposal that never activates truth,
-  and rejected stale, provider-degraded, or unfingerprinted inputs.
+  physical-store/persisted-payload, private-set, Doctor-state, normalized-input, and
+  firewall-result contracts; the ADR, glossary, and core package README now route
+  instead of restating them. It pins accepted
+  exact-duplicate preserve and independent-evidence corroboration evaluations, plus
+  accepted no-match evaluation with empty `reason_codes`; `review_required` outcomes
+  for explicit correction, unresolved identity, and value conflict; and rejected
+  stale, provider-degraded, or unfingerprinted inputs.
 - The source checkout's unreleased adapter floor includes `.strato/private/**` and now
   matches privacy paths case-insensitively on Windows, with snapshot-level regression
   coverage. Public docs distinguish that behavior from published 0.1.0. The remaining
@@ -147,8 +149,8 @@ install, version, publication, or deployment action occurs.
 
 Adds `vivary-core`, an in-repo library under `packages/core/`. **Not published to PyPI
 and not reachable from any shipping CLI**: wiring it outward is
-[#207](https://github.com/vivary-dev/vivary/issues/207). No existing package changes
-version, and nothing about installing or running Vivary changes because it exists.
+[#207](https://github.com/vivary-dev/vivary/issues/207). No existing package changes its published version. The in-repo `vivary-core` version
+is **0.2.0**. Nothing about installing or running Vivary changes because it exists.
 Publishing remains a manual human gate. No package publishes before the comprehensive
 coordinated release train is complete and separately approved.
 
@@ -208,6 +210,8 @@ coordinated release train is complete and separately approved.
   meta-package installs expose `vivary_core` with the expected distribution versions.
 - The edited root README, release workflow, and generated release-workflow mirror are
   now LF-normalized, and their retired legacy line-ending allowlist entries are gone.
+- The lean root verification block now includes the core suite and current observed
+  counts for the four fast local package suites; exhaustive jobs remain CI-owned.
 
 ### Fixed
 
@@ -249,16 +253,46 @@ Findings from the `vivary-core` review, all pre-release and none user-reachable:
 - **Malformed configured loop budgets fail closed.** Non-numeric, boolean,
   `NaN`, and infinite limits or counters exhaust the affected dimension with
   deterministic typed details; omission remains the only unbounded form.
-- **Capsule gate and budget validation now agree on identity shape.** A capsule without
-  a string `capsule_id` can no longer pass the gate, receive a budget refusal, and
-  still reach the loop's `act` decision.
+- **Capsule compilation, gate validation, and budget validation agree on shape.**
+  Capsule IDs, capsule fingerprints, and workspace fingerprints are mandatory;
+  non-dict graph nodes or facts are rejected instead of being partially compiled.
+- **Ozone keeps optional constraints and binding failures distinct.** An explicit
+  null claim-verification constraint remains absent, while a partial capsule cannot
+  produce a `sufficient` verdict. A receipt whose own capsule/workspace bindings are
+  incomplete reports the new pinned `missing_binding` reason instead of masquerading
+  as a mismatch with a supplied capsule.
+- **Strato verifies receipts and bound Ozone verdicts before clearing a gate.**
+  Receipt fingerprints and deterministic IDs are recomputed. Verdict fingerprints,
+  bindings, typed projections, and outcome consistency are checked. Genuine
+  non-sufficient early verdicts bound to the same receipt keep their actual Ozone
+  reasons; a receiptless non-sufficient verdict supplied later with a receipt yields
+  `verdict_binding_mismatch`. A `sufficient` verdict also requires a verified receipt
+  outcome and projections matching the bound capsule and receipt. Forged verdicts use
+  the pinned `verdict_integrity_mismatch` reason.
+- **The Bellamente recall firewall rejects replay and mismatched corrections.**
+  Typed evidence requires stable references and self-recomputable fingerprints;
+  reordered or duplicated evidence cannot claim independent corroboration. Explicit
+  unresolved-identity markers preserve opaque provider references and stop at
+  `identity_unresolved`; they never reach comparison or mutation paths. Explicit
+  corrections whose predicate or scope differs from the named target use the pinned
+  `correction_target_mismatch` review reason.
+- **Receipt construction refuses unusable evidence at the source.** Incomplete
+  capsule/workspace bindings and missing, empty, or non-string runtime actors raise
+  `ValueError` instead of producing a receipt that can never verify.
+- **Exo fails closed on malformed caller-owned control state.** Handoffs and
+  execution edges recheck receipt integrity; inverted leases are refused, malformed
+  persisted leases are quarantined with `unknown_lease_shape`, and malformed claim
+  ledgers are refused or quarantined with `unknown_claim_shape`. Duplicate task IDs
+  invalidate a dependency graph instead of being resolved last-write-wins. Truthy
+  non-dict scope, request, dependency, capsule, or receipt inputs produce typed
+  refusals (or `ValueError` for invalid dependency graphs) instead of uncaught errors.
 
 ### Verification
 
-- `python -m pytest packages/core/tests/ -q` — **457 passed**.
+- `python -m pytest packages/core/tests/ -q` — **589 passed**.
 - `uv run --isolated --no-project --no-cache --with ./packages/core python -c
   "from importlib.metadata import version; import vivary_core; assert
-  version('vivary-core') == '0.1.0'"` — local wheel-equivalent import and distribution
+  version('vivary-core') == '0.2.0'"` — local wheel-equivalent import and distribution
   metadata smoke passed.
 - `python scripts/tests/test_package_docs_parity.py` — **10/10 passed**.
 - `python scripts/check_package_docs_parity.py` — architecture matches **6** published

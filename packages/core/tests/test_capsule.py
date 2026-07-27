@@ -726,6 +726,60 @@ def test_negative_claim_budget_is_rejected_rather_than_inverted(graph):
         compile_task_capsule(task=TASK, graph=graph, budget={"max_claims": -1})
 
 
+@pytest.mark.parametrize(
+    ("nodes", "message"),
+    [
+        ("not a node list", "node list"),
+        (["not a node mapping"], "invalid node"),
+    ],
+    ids=["nodes-container", "node-entry"],
+)
+def test_compile_task_capsule_rejects_malformed_graph_node_shapes(nodes, message):
+    graph = {
+        "nodes": nodes,
+        "workspace_fingerprint": "sha256:workspace-fp",
+        "observed_at": "2026-07-20T15:00:00.000Z",
+        "allowlist": ["/workspace"],
+        "conflicts": [],
+        "unknowns": [],
+        "refusals": [],
+    }
+
+    with pytest.raises(ValueError, match=message):
+        compile_task_capsule(task={"question": "What facts were observed?"}, graph=graph)
+
+
+@pytest.mark.parametrize(
+    "facts",
+    [
+        "not a facts mapping",
+        {"is_git_repository": "not a fact mapping"},
+    ],
+    ids=["facts-container", "nested-fact"],
+)
+def test_compile_task_capsule_rejects_truthy_non_dict_facts_as_invalid_graph_shape(facts):
+    """Malformed observed facts must become a typed input error, never AttributeError."""
+    graph = {
+        "nodes": [
+            {
+                "id": "checkout_bad_facts",
+                "kind": "checkout",
+                "path": "/workspace",
+                "facts": facts,
+            }
+        ],
+        "workspace_fingerprint": "sha256:workspace-fp",
+        "observed_at": "2026-07-20T15:00:00.000Z",
+        "allowlist": ["/workspace"],
+        "conflicts": [],
+        "unknowns": [],
+        "refusals": [],
+    }
+
+    with pytest.raises(ValueError, match="invalid fact"):
+        compile_task_capsule(task={"question": "What facts were observed?"}, graph=graph)
+
+
 def test_content_search_failure_becomes_a_capsule_unknown(graph, fx):
     """A failed search must not be indistinguishable from a search with no matches.
 

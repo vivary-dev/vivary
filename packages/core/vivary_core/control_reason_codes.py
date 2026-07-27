@@ -47,6 +47,7 @@ CLAIM_REASON = MappingProxyType(
         "UNKNOWN_ACTOR_KIND": AUTHORITY_REASON["UNKNOWN_ACTOR_KIND"],
         "UNKNOWN_AUTHORITY_CLASS": AUTHORITY_REASON["UNKNOWN_AUTHORITY_CLASS"],
         "UNKNOWN_REQUEST_SHAPE": "unknown_request_shape",
+        "UNKNOWN_CLAIM_SHAPE": "unknown_claim_shape",
         "CLAIM_NOT_FOUND": "claim_not_found",
         "NOT_CLAIM_HOLDER": "not_claim_holder",
     }
@@ -56,6 +57,7 @@ LEASE_REASON = MappingProxyType(
     {
         "LEASE_EXPIRED": "lease_expired",
         "UNKNOWN_NOW_SHAPE": "unknown_now_shape",
+        "UNKNOWN_LEASE_SHAPE": "unknown_lease_shape",
     }
 )
 

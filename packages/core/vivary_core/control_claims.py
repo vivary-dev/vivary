@@ -16,9 +16,16 @@ validity; this module never reads the wall clock (see expire_leases) -
 `now` is always an input.
 
 ADAPTATION - fail-closed lease validation: caller-supplied lease timestamps
-and `now` must parse as timezone-aware ISO instants. The frozen Node behavior
-accepts unparseable or local timestamps, whose host-dependent values can
-create immortal claims or non-deterministic expiration.
+and `now` must parse as timezone-aware ISO instants. A lease cannot expire
+before it is granted. The frozen Node behavior accepts unparseable, local, or
+inverted timestamps, whose values can create invalid or non-deterministic
+claims.
+
+ADAPTATION - fail-closed persisted authority: every active claim's
+actor/authority_class pair is rechecked with `can_hold_authority`, so
+impossible pairs (such as agent+owner) quarantine as `unknown_claim_shape`
+rather than surviving `expire_leases` or blocking a valid follow-on request
+with `scope_conflict`.
 """
 
 from __future__ import annotations
@@ -29,7 +36,7 @@ from datetime import datetime
 from vivary_core.canonical import deterministic_id
 from vivary_core.control_actors import AUTHORITY_CLASS, can_hold_authority
 from vivary_core.control_reason_codes import CLAIM_DECISION, CLAIM_REASON, LEASE_REASON
-from vivary_core.control_scope import normalize_scope, scopes_overlap
+from vivary_core.control_scope import _is_valid_scope, normalize_scope, scopes_overlap
 
 __all__ = [
     "CLAIM_DECISION",
@@ -41,13 +48,6 @@ __all__ = [
 ]
 
 
-def _is_valid_scope(scope):
-    return (
-        bool(scope)
-        and isinstance(scope, dict)
-        and isinstance(scope.get("project"), str)
-        and isinstance(scope.get("paths"), list)
-    )
 
 
 def _is_valid_actor(actor):
@@ -66,11 +66,26 @@ def _is_valid_lease(lease):
         return False
     granted_at = lease.get("granted_at")
     expires_at = lease.get("expires_at")
+    granted_at_ms = _parse_instant_ms(granted_at)
+    expires_at_ms = _parse_instant_ms(expires_at)
     return (
         isinstance(granted_at, str)
         and isinstance(expires_at, str)
-        and math.isfinite(_parse_instant_ms(granted_at))
-        and math.isfinite(_parse_instant_ms(expires_at))
+        and math.isfinite(granted_at_ms)
+        and math.isfinite(expires_at_ms)
+        and expires_at_ms >= granted_at_ms
+    )
+
+
+def _is_valid_active_claim(claim):
+    return (
+        isinstance(claim, dict)
+        and isinstance(claim.get("claim_id"), str)
+        and len(claim["claim_id"]) > 0
+        and _is_valid_scope(claim.get("scope"))
+        and _is_valid_actor(claim.get("actor"))
+        and can_hold_authority(claim.get("actor"), claim.get("authority_class"))["allowed"]
+        and claim.get("status") == "active"
     )
 
 
@@ -87,12 +102,22 @@ def request_claim(*, active_claims, request):
     @param request  {scope, actor, authority_class?, lease?}
     @returns {decision, reason_codes, claim, claims, conflicts}
     """
-    scope = (request or {}).get("scope")
-    actor = (request or {}).get("actor")
-    authority_class = (request or {}).get("authority_class")
+    request = request if isinstance(request, dict) else {}
+    if not isinstance(active_claims, list):
+        return {
+            "decision": CLAIM_DECISION["REFUSED"],
+            "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]],
+            "claim": None,
+            "claims": [],
+            "conflicts": [],
+        }
+
+    scope = request.get("scope")
+    actor = request.get("actor")
+    authority_class = request.get("authority_class")
     if authority_class is None:
         authority_class = AUTHORITY_CLASS["CONTRIBUTOR"]
-    lease = (request or {}).get("lease")
+    lease = request.get("lease")
 
     if not _is_valid_scope(scope) or not _is_valid_actor(actor) or not _is_valid_lease(lease):
         return {
@@ -100,6 +125,17 @@ def request_claim(*, active_claims, request):
             "reason_codes": [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]],
             "claim": None,
             "claims": list(active_claims),
+            "conflicts": [],
+        }
+
+    if not isinstance(active_claims, list) or not all(
+        _is_valid_active_claim(claim) and _is_valid_lease(claim.get("lease")) for claim in active_claims
+    ):
+        return {
+            "decision": CLAIM_DECISION["REFUSED"],
+            "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]],
+            "claim": None,
+            "claims": list(active_claims) if isinstance(active_claims, list) else [],
             "conflicts": [],
         }
 
@@ -157,11 +193,27 @@ def release_claim(*, active_claims, claim_id, actor):
     @param actor  {kind, id}
     @returns {decision, reason_codes, claims}
     """
+    if not isinstance(active_claims, list):
+        return {
+            "decision": CLAIM_DECISION["REFUSED"],
+            "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]],
+            "claims": [],
+        }
+
     if not _is_valid_actor(actor):
         return {
             "decision": CLAIM_DECISION["REFUSED"],
             "reason_codes": [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]],
             "claims": list(active_claims),
+        }
+
+    if not isinstance(active_claims, list) or not all(
+        _is_valid_active_claim(claim) and _is_valid_lease(claim.get("lease")) for claim in active_claims
+    ):
+        return {
+            "decision": CLAIM_DECISION["REFUSED"],
+            "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]],
+            "claims": list(active_claims) if isinstance(active_claims, list) else [],
         }
 
     found = next((c for c in active_claims if c["claim_id"] == claim_id), None)
@@ -199,6 +251,13 @@ def expire_leases(*, active_claims, now):
     @param now  ISO instant supplied by the caller
     @returns {claims, expired}
     """
+    if not isinstance(active_claims, list):
+        return {
+            "claims": [],
+            "expired": [],
+            "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]],
+        }
+
     now_ms = _parse_instant_ms(now)
     if not math.isfinite(now_ms):
         return {
@@ -210,7 +269,13 @@ def expire_leases(*, active_claims, now):
     claims = []
     expired = []
     for claim in active_claims:
+        if not _is_valid_active_claim(claim):
+            expired.append({"claim": claim, "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]]})
+            continue
         lease = claim.get("lease")
+        if lease is not None and not _is_valid_lease(lease):
+            expired.append({"claim": claim, "reason_codes": [LEASE_REASON["UNKNOWN_LEASE_SHAPE"]]})
+            continue
         is_expired = lease is not None and _parse_instant_ms(lease["expires_at"]) <= now_ms
         if is_expired:
             expired.append({"claim": claim, "reason_codes": [LEASE_REASON["LEASE_EXPIRED"]]})
