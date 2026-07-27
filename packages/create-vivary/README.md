@@ -33,6 +33,9 @@ create-vivary init . --preset coding --auto --size large --yes --json
 
 # Reconfigure storage on an existing workspace:
 create-vivary wizard my-workspace --auto --storage embedded --yes --json
+
+# Preview brownfield adoption without writing:
+create-vivary adopt .
 ```
 
 `create-vivary <name>` is shorthand for `create-vivary init <name>`; pass `init` /
