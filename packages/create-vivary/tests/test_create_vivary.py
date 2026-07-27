@@ -1765,8 +1765,9 @@ class CreateVivaryTests(unittest.TestCase):
         self.assertEqual(create_vivary.BASELINE_WORKSPACE_FILES, expected)
         self.assertEqual(create_vivary.REQUIRED_WORKSPACE_FILES, expected)
         self.assertEqual(len(create_vivary.BASELINE_WORKSPACE_FILES), 15)
-        self.assertIn(
-            "modules/index.md", create_vivary.REPAIR_MODULE_CONTRACT_MARKERS
+        self.assertTrue(
+            set(create_vivary.INDEXED_WORKSPACE_FILES)
+            <= set(create_vivary.REPAIR_MODULE_CONTRACT_MARKERS)
         )
         self.assertNotIn("modules/index.md", create_vivary.BASELINE_WORKSPACE_FILES)
 
@@ -2369,6 +2370,32 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertFalse((target / ".gitignore").exists())
             self.assertFalse((target / "USER.md").exists())
             self.assertFalse((target / ".vivary" / "doctor-state.json").exists())
+
+    def test_doctor_repair_recognizes_surviving_nested_module_index(self):
+        with temp_workspace() as td:
+            target = Path(td) / "repair-partial-index"
+            create_vivary.scaffold_workspace(
+                target, preset="coding", force=False, repo_root=ROOT
+            )
+            (target / "modules" / "index.md").unlink()
+            (target / "USER.md").unlink()
+
+            rc, out = run_doctor_json(target, "--repair")
+
+            self.assertEqual(rc, 1)
+            self.assertEqual(out["repair"]["mode"], "dry-run")
+            actions = out["repair"]["actions"]
+            self.assertFalse(any(action["kind"] == "workspace" for action in actions))
+            self.assertTrue(
+                any(
+                    action["kind"] == "placeholder"
+                    and action["path"] == "USER.md"
+                    and action["status"] == "safe"
+                    for action in actions
+                )
+            )
+            self.assertFalse((target / "USER.md").exists())
+            self.assertFalse((target / "modules" / "index.md").exists())
 
     def test_doctor_repair_reports_nested_gitignore_negation_as_manual(self):
         with temp_workspace() as td:

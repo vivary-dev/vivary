@@ -88,6 +88,9 @@ install, version, publication, or deployment action occurs.
   providers, privacy downgrades below the published floor, and enabled
   `memory.provider = "none"`, while preserving graph/trend metrics when a declared
   optional-memory config is malformed.
+- **Indexed repair recognition (#237 follow-up)** — `doctor --repair` now recognizes
+  either surviving indexed module-contract marker, so losing `modules/index.md` alone
+  does not block unrelated conservative repairs.
 
 ### Verification
 
