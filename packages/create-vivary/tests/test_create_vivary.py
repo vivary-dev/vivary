@@ -1166,7 +1166,7 @@ class CreateVivaryTests(unittest.TestCase):
         self.assertEqual(create_vivary.with_default_command(["-h"]), ["-h"])
         self.assertEqual(create_vivary.with_default_command([]), [])
 
-    def test_public_subcommands_match_parser_and_npm_launcher(self):
+    def test_public_subcommands_match_parser(self):
         parser = create_vivary.build_parser()
         subparsers = next(
             action
@@ -1175,6 +1175,8 @@ class CreateVivaryTests(unittest.TestCase):
         )
         self.assertEqual(set(subparsers.choices), set(create_vivary.SUBCOMMANDS))
 
+    @unittest.skipIf(shutil.which("node") is None, "node unavailable")
+    def test_npm_launcher_subcommands_match_python(self):
         npm_launcher = subprocess.run(
             [
                 "node",
