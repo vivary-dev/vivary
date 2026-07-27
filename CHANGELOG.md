@@ -10,6 +10,31 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: create-vivary npm adopt dispatch] — 2026-07-26
+
+Affects `@vivary/create` argv transport, launcher coverage, and package documentation.
+No package version, Python command behavior, publication, or deployment changes occur
+in this slice.
+
+### Fixed
+
+- Made the npm launcher a shell-free transport that forwards argv unchanged to the
+  canonical Python CLI, which solely owns command recognition and bare-name-to-`init`
+  normalization.
+- Added launcher coverage for raw passthrough of all five documented public command
+  names, runner fallback and status propagation, both-runner error reporting, package
+  pins, and shell-free stdio inheritance.
+- Kept Python-only coverage for bare-name normalization and every canonical public
+  subcommand, without requiring Node.
+
+### Verification
+
+- Node launcher coverage exercises raw explicit, bare, and leading-flag passthrough;
+  uvx/pipx success and nonzero propagation; both-runner stderr; pinned package args;
+  and shell-free stdio-inherited spawning.
+- Python launcher coverage exercises bare-target-to-`init` normalization and explicit
+  handling for every canonical public subcommand without invoking Node.
+
 ## [Unreleased: Bellamente predecessor contract and semantic adapter truth] — 2026-07-26
 
 Affects public documentation, its generated website mirror, future implementation
