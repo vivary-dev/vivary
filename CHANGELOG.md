@@ -10,6 +10,31 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: create-vivary npm adopt dispatch] — 2026-07-26
+
+Affects `@vivary/create` argv transport, launcher coverage, and package documentation.
+No package version, Python command behavior, publication, or deployment changes occur
+in this slice.
+
+### Fixed
+
+- Made the npm launcher a shell-free transport that forwards argv unchanged to the
+  canonical Python CLI, which solely owns command recognition and bare-name-to-`init`
+  normalization.
+- Added launcher coverage for raw passthrough of all five documented public command
+  names, runner fallback and status propagation, both-runner error reporting, package
+  pins, and shell-free stdio inheritance.
+- Kept Python-only coverage for bare-name normalization and every canonical public
+  subcommand, without requiring Node.
+
+### Verification
+
+- Node launcher coverage exercises raw explicit, bare, and leading-flag passthrough;
+  uvx/pipx success and nonzero propagation; both-runner stderr; pinned package args;
+  and shell-free stdio-inherited spawning.
+- Python launcher coverage exercises bare-target-to-`init` normalization and explicit
+  handling for every canonical public subcommand without invoking Node.
+
 ## [Unreleased: Bellamente predecessor contract and semantic adapter truth] — 2026-07-26
 
 Affects public documentation, its generated website mirror, future implementation
@@ -39,10 +64,11 @@ install, version, publication, or deployment action occurs.
 - Routed the nested Bellamente contract from the documentation index and the generated
   semantic-memory page without creating an unsupported site route.
 - Made `docs/bellamente-memory/SPEC-bellamente-memory.md` the sole owner of the
-  private-set, Doctor-state, normalized-input, and firewall-result contracts; the ADR
-  and glossary now route instead of restating them. The specification defines the
-  enabled-policy Doctor state, keeps exact-duplicate preserve read-only, and requires
-  explicit opt-in before policy creation.
+  private-set, Doctor-state, normalized-input, and firewall-result contracts;
+  the ADR and glossary now route instead of restating them. It pins accepted
+  exact-duplicate preserve and independent-evidence corroboration evaluations,
+  a `review_required` explicit-correction proposal that never activates truth,
+  and rejected stale, provider-degraded, or unfingerprinted inputs.
 - The source checkout's unreleased adapter floor includes `.strato/private/**` and now
   matches privacy paths case-insensitively on Windows, with snapshot-level regression
   coverage. Public docs distinguish that behavior from published 0.1.0. The remaining
@@ -107,6 +133,14 @@ coordinated release train is complete and separately approved.
   (10 cases), which pins the wrapping behaviour of that prose bullet — reading only its
   first physical line would report wrapped names as missing and redden CI on a correct
   doc.
+- Completed the in-core reference surfaces for the four role layers without wiring
+  them into shipping CLIs: Strato owns fail-closed budgets, capsule/receipt gates, and
+  loop transitions; Ozone owns receipt-integrity verdicts, gate sufficiency, and
+  bounded gated repair proposals; Exo owns claims, leases, handoffs, dependencies,
+  execution evidence, and task views; Bellamente owns the SPEC-owned
+  candidate-recall firewall: accepted evaluations and gated review-only
+  corrections preserve authored truth. The canonical architecture page and its
+  generated site mirror now describe these surfaces explicitly.
 
 ### Changed
 
@@ -167,10 +201,22 @@ Findings from the `vivary-core` review, all pre-release and none user-reachable:
   `unknown` instead of "detached"; the git output bound is enforced while the process
   runs rather than after; search terms are matched as fixed strings, not regexes; and
   negative claim budgets fail closed instead of silently widening the capsule.
+- **Equivalent Win32 device paths share one claim scope.** Extended-length drive
+  and UNC spellings can no longer acquire a second claim over a tree already
+  covered by its ordinary drive or UNC path.
+- **Duplicate Ozone check names preserve the worst evidence.** A later passing
+  entry can no longer erase an earlier failed or skipped result for the same
+  required check.
+- **Malformed configured loop budgets fail closed.** Non-numeric, boolean,
+  `NaN`, and infinite limits or counters exhaust the affected dimension with
+  deterministic typed details; omission remains the only unbounded form.
+- **Capsule gate and budget validation now agree on identity shape.** A capsule without
+  a string `capsule_id` can no longer pass the gate, receive a budget refusal, and
+  still reach the loop's `act` decision.
 
 ### Verification
 
-- `python -m pytest packages/core/tests/ -q` — **256 passed**.
+- `python -m pytest packages/core/tests/ -q` — **457 passed**.
 - `uv run --isolated --no-project --no-cache --with ./packages/core python -c
   "from importlib.metadata import version; import vivary_core; assert
   version('vivary-core') == '0.1.0'"` — local wheel-equivalent import and distribution
@@ -178,7 +224,7 @@ Findings from the `vivary-core` review, all pre-release and none user-reachable:
 - `python scripts/tests/test_package_docs_parity.py` — **10/10 passed**.
 - `python scripts/check_package_docs_parity.py` — architecture matches **6** published
   manifests with **1** deliberately unpublished distribution allowlisted.
-- `python scripts/check_line_endings.py --verbose` — **227** tracked text files checked;
+- `python scripts/check_line_endings.py --verbose` — **256** tracked text files checked;
   **8** legacy files remain explicitly allowlisted.
 - `git check-attr whitespace --` with `docs/RELEASE-WORKFLOW.md`,
   `site/src/content/docs/release-workflow.md`, `README.md`, and
@@ -186,8 +232,8 @@ Findings from the `vivary-core` review, all pre-release and none user-reachable:
   treating CRLF's `\r` as part of the line ending.
 - `git diff --check origin/dev` — clean across the complete branch plus local remediation.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8** site
-  tests; **23** pages built; **1,626** local references and **1,000** anchors checked with
-  zero failures.
+  tests; **23** pages built; **1,644** local references and **1,018** anchors checked
+  with zero failures.
 
 ## [Unreleased: guided doctor repair and truthful map counts] — 2026-07-25
 

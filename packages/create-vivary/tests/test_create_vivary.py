@@ -1669,15 +1669,17 @@ class CreateVivaryTests(unittest.TestCase):
         self.assertEqual(stdout.getvalue().strip(), f"create-vivary {create_vivary.__version__}")
 
     def test_with_default_command_injects_init(self):
-        # Bare target -> init (parity with the npm launcher's mapArgs).
         self.assertEqual(create_vivary.with_default_command(["ws"]), ["init", "ws"])
         self.assertEqual(
             create_vivary.with_default_command(["ws", "--preset", "coding"]),
             ["init", "ws", "--preset", "coding"],
         )
-        # Explicit subcommands and leading flags pass through unchanged.
-        self.assertEqual(create_vivary.with_default_command(["init", "ws"]), ["init", "ws"])
-        self.assertEqual(create_vivary.with_default_command(["doctor", "ws"]), ["doctor", "ws"])
+        for command in create_vivary.SUBCOMMANDS:
+            with self.subTest(command=command):
+                self.assertEqual(
+                    create_vivary.with_default_command([command, "ws"]),
+                    [command, "ws"],
+                )
         self.assertEqual(create_vivary.with_default_command(["-h"]), ["-h"])
         self.assertEqual(create_vivary.with_default_command([]), [])
 

@@ -4408,9 +4408,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def with_default_command(argv: list[str]) -> list[str]:
     """Default a bare target to the ``init`` subcommand so ``create-vivary <name>``
-    behaves like ``create-vivary init <name>``. This mirrors the npm launcher
-    (`@vivary/create`) so both entry points share one UX. An explicit subcommand or
-    a leading flag (e.g. ``-h``/``--help``) passes through unchanged."""
+    behaves like ``create-vivary init <name>``. The npm launcher forwards raw argv
+    here, so Python is the sole owner of command recognition and normalization."""
     index = 0
     while index < len(argv):
         token = argv[index]
