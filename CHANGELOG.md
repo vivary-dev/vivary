@@ -12,31 +12,28 @@ the `v0.1.0` line.
 
 ## [Unreleased: create-vivary npm adopt dispatch] — 2026-07-26
 
-Affects `@vivary/create` argument dispatch, launcher parity tests, and package
-documentation. No package version, Python behavior, publication, or deployment
-changes in this slice.
+Affects `@vivary/create` argv transport, launcher coverage, and package documentation.
+No package version, Python command behavior, publication, or deployment changes occur
+in this slice.
 
 ### Fixed
 
-- Preserved the explicit `adopt` subcommand through the npm launcher instead of
-  rewriting it as `init adopt`.
-- Added a table-driven launcher contract for all five public commands and a
-  cross-runtime guard that compares Python's registered subparsers, its canonical
-  command tuple, and the npm launcher's exported command set.
+- Made the npm launcher a shell-free transport that forwards argv unchanged to the
+  canonical Python CLI, which solely owns command recognition and bare-name-to-`init`
+  normalization.
+- Added launcher coverage for raw passthrough of all five documented public command
+  names, runner fallback and status propagation, both-runner error reporting, package
+  pins, and shell-free stdio inheritance.
+- Kept Python-only coverage for bare-name normalization and every canonical public
+  subcommand, without requiring Node.
 
 ### Verification
 
-- `node packages/create-vivary/tests/test_npm_launcher.js` — **10/10** argument
-  mapping cases passed; package pinning and shell-free spawn checks passed.
-- `python packages/create-vivary/tests/test_create_vivary.py` — **126** passed,
-  **1** platform-specific test skipped.
-- `python packages/create-vivary/tests/test_assets_parity.py` — **3/3** passed.
-- `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**
-  site tests passed; **23** pages built; **1,653** local references and **1,027**
-  anchors checked with zero failures.
-- `python scripts/check_line_endings.py --verbose` — **231** tracked text files
-  checked; **8** legacy files remain explicitly allowlisted.
-- `git diff --check` — clean.
+- Node launcher coverage exercises raw explicit, bare, and leading-flag passthrough;
+  uvx/pipx success and nonzero propagation; both-runner stderr; pinned package args;
+  and shell-free stdio-inherited spawning.
+- Python launcher coverage exercises bare-target-to-`init` normalization and explicit
+  handling for every canonical public subcommand without invoking Node.
 
 ## [Unreleased: Bellamente predecessor contract and semantic adapter truth] — 2026-07-26
 

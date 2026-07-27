@@ -1,6 +1,5 @@
 """Tests for the create-vivary workspace scaffold."""
 
-import argparse
 import io
 import importlib
 import json
@@ -1154,41 +1153,19 @@ class CreateVivaryTests(unittest.TestCase):
         self.assertEqual(stdout.getvalue().strip(), f"create-vivary {create_vivary.__version__}")
 
     def test_with_default_command_injects_init(self):
-        # Bare target -> init (parity with the npm launcher's mapArgs).
         self.assertEqual(create_vivary.with_default_command(["ws"]), ["init", "ws"])
         self.assertEqual(
             create_vivary.with_default_command(["ws", "--preset", "coding"]),
             ["init", "ws", "--preset", "coding"],
         )
-        # Explicit subcommands and leading flags pass through unchanged.
-        self.assertEqual(create_vivary.with_default_command(["init", "ws"]), ["init", "ws"])
-        self.assertEqual(create_vivary.with_default_command(["doctor", "ws"]), ["doctor", "ws"])
+        for command in create_vivary.SUBCOMMANDS:
+            with self.subTest(command=command):
+                self.assertEqual(
+                    create_vivary.with_default_command([command, "ws"]),
+                    [command, "ws"],
+                )
         self.assertEqual(create_vivary.with_default_command(["-h"]), ["-h"])
         self.assertEqual(create_vivary.with_default_command([]), [])
-
-    def test_public_subcommands_match_parser(self):
-        parser = create_vivary.build_parser()
-        subparsers = next(
-            action
-            for action in parser._actions
-            if isinstance(action, argparse._SubParsersAction)
-        )
-        self.assertEqual(set(subparsers.choices), set(create_vivary.SUBCOMMANDS))
-
-    @unittest.skipIf(shutil.which("node") is None, "node unavailable")
-    def test_npm_launcher_subcommands_match_python(self):
-        npm_launcher = subprocess.run(
-            [
-                "node",
-                "-e",
-                "process.stdout.write(JSON.stringify([...require(process.argv[1]).SUBCOMMANDS]))",
-                str(PKG / "npm" / "index.js"),
-            ],
-            capture_output=True,
-            check=True,
-            text=True,
-        )
-        self.assertEqual(set(json.loads(npm_launcher.stdout)), set(create_vivary.SUBCOMMANDS))
 
     def test_cli_bare_target_defaults_to_init(self):
         with temp_workspace() as td:

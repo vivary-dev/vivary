@@ -86,8 +86,8 @@ by itself.
 ## Quickstart
 
 Scaffold a workspace in one npm command. No Python package install first; the launcher
-needs Python 3.11+ and `uv` or `pipx` available:
-
+forwards argv unchanged to the canonical Python CLI, which normalizes a bare workspace
+name to `init`; Python 3.11+ and `uv` or `pipx` must be available:
 ```bash
 npm create @vivary@latest my-workspace        # pick: second brain · coding · knowledge work · writing
 ```

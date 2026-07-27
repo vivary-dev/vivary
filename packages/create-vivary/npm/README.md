@@ -43,8 +43,9 @@ npx @vivary/create@latest doctor my-workspace --json --receipt .vivary/receipts.
 
 Presets: `coding` · `second-brain` · `knowledge-work` · `writing`.
 
-A bare `npm create @vivary@latest <name>` maps to the `init` subcommand; you can also
-pass `init` / `doctor` / `wizard` / `capabilities` / `adopt` explicitly (e.g.
+The npm launcher forwards argv unchanged to the Python CLI. Python is the sole owner
+of command recognition and the bare `<name>` → `init <name>` normalization; you can
+also pass `init` / `doctor` / `wizard` / `capabilities` / `adopt` explicitly (e.g.
 `npm create @vivary@latest adopt .`).
 
 For local debugging, pass `--receipt PATH` or set `VIVARY_RECEIPT_LOG=PATH` to append
@@ -71,10 +72,10 @@ guidance.
 
 ## How it works
 
-This package is a thin launcher: it runs the Python `create-vivary` scaffolder via
-[uv](https://docs.astral.sh/uv/) (`uvx`) or [pipx](https://pipx.pypa.io/), so the
-scaffolder stays one source of truth in Python while you get a Node-native entry
-point. **Python 3.11+ and uv (or pipx) must already be installed.**
+This package is a thin, shell-free transport: it forwards argv unchanged to the Python
+`create-vivary` scaffolder via [uv](https://docs.astral.sh/uv/) (`uvx`) or
+[pipx](https://pipx.pypa.io/), so the scaffolder stays one source of truth while you
+get a Node-native entry point. **Python 3.11+ and uv (or pipx) must already be installed.**
 
 Prefer Python directly? `uvx create-vivary@0.3.1 my-workspace --preset coding` — a bare
 target defaults to `init` there too (the PyPI `create-vivary` is versioned in lockstep

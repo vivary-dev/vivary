@@ -35,10 +35,10 @@ create-vivary init . --preset coding --auto --size large --yes --json
 create-vivary wizard my-workspace --auto --storage embedded --yes --json
 ```
 
-`create-vivary <name>` is shorthand for `create-vivary init <name>`;
-pass `init` / `doctor` / `wizard` / `capabilities` / `adopt` explicitly whenever
-you prefer. The same command surface is available on npm via the `@vivary/create`
-launcher (`npm create @vivary@latest my-workspace`), versioned in lockstep.
+`create-vivary <name>` is shorthand for `create-vivary init <name>`; pass `init` /
+`doctor` / `wizard` / `capabilities` / `adopt` explicitly whenever you prefer. The
+`@vivary/create` npm launcher forwards argv unchanged to this Python CLI, which owns
+that command recognition and normalization; both packages are versioned in lockstep.
 
 Presets share the same agent OS shell, then seed a different starter graph. Each
 starter module is generated as `modules/<id>/index.md` so agents route through a small
