@@ -14,6 +14,42 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: cross-platform orientation proof] — 2026-07-26
+
+Affects repository proof automation and CI only. No package version, public command,
+publication, deployment, or generated workspace behavior changes in this slice.
+
+### Added
+
+- Added one disposable orientation runner, implemented without third-party Python
+  imports and using Node, uvx, and Git for the real transport and checkout proof, for
+  `tropo map → create-vivary adopt → create-vivary doctor → tropo find` loop across
+  current, legacy flat-layout, brownfield, already-adopted, divergent-checkout, and
+  corrupt fixtures.
+- Exercised the Python and npm entry points together, with strict normalized-JSON
+  parity, dry-run-before-apply enforcement, exact mutation allowlists, post-apply
+  adopt idempotence, Git branch/HEAD/ref preservation, bounded read-only map/find checks,
+  and honest Doctor compatibility results.
+- Added a sanitized aggregate JSON receipt with command, version, fixture fingerprint,
+  expected/actual mutation, parity, Doctor, retrieval, and Git-preservation evidence.
+  CI runs the proof independently on `ubuntu-latest` and `windows-latest` and uploads
+  each receipt even when a fixture fails.
+
+### Verification
+
+- `python packages/create-vivary/tests/test_orientation_proof.py` — **7/7** focused
+  runner and receipt regressions passed.
+- `python packages/create-vivary/tests/orientation_proof.py --receipt
+  orientation-proof.json` — all **6/6**
+  fixtures passed on Windows with real Python and npm transports.
+- `cd site && npm run sync-docs && npm run build` — **23** documentation pages built
+  after regenerating the source-doc and changelog mirrors.
+- `python scripts/check_line_endings.py --verbose` — tracked text files checked; **8**
+  legacy files remain explicitly allowlisted.
+- `python scripts/check_package_docs_parity.py` — package documentation matches all
+  **6** published manifests and the one explicit unpublished allowlist.
+- `git diff --check origin/dev` — clean.
+
 ## [Unreleased: create-vivary npm adopt dispatch] — 2026-07-26
 
 Affects `@vivary/create` argv transport, launcher coverage, and package documentation.
