@@ -87,8 +87,9 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
   `tropo` needs Python 3.11+ (stdlib `tomllib`).
 - **CI runs free** on the public `vivary-dev/vivary` repo (Actions is free for public
   repos): `.github/workflows/ci.yml` runs all four suites + parity + `tropo check` +
-  the `ozone review --strict` review gate + a site build on every PR/push. Verify
-  locally too; the local suite is fast.
+  the `ozone review --strict` review gate + a cross-platform (Ubuntu/Windows)
+  orientation proof + a site build on every PR/push. Verify locally too; the local
+  suite is fast.
 - **Docs stay in sync.** Update the affected docs in the *same* change as any
   behavior / command / flag / structure change — never leave them stale (stale docs
   are a bug). Source of truth is `docs/`; the website under `site/` is generated from

@@ -22,6 +22,9 @@ node_modules/
 sandboxes/*
 !sandboxes/README.md
 
+# Local proof receipts
+/orientation-proof.json
+
 # Canonical Strato skills are source files even if a global ignore hides .claude/
 !packages/strato/.claude/
 !packages/strato/.claude/skills/

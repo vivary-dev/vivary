@@ -33,12 +33,15 @@ create-vivary init . --preset coding --auto --size large --yes --json
 
 # Reconfigure storage on an existing workspace:
 create-vivary wizard my-workspace --auto --storage embedded --yes --json
+
+# Preview brownfield adoption without writing:
+create-vivary adopt .
 ```
 
-`create-vivary <name>` is shorthand for `create-vivary init <name>`;
-pass `init` / `doctor` / `wizard` / `capabilities` explicitly whenever you prefer. The same UX is available on npm
-via the `@vivary/create` launcher (`npm create @vivary@latest my-workspace`), versioned in
-lockstep.
+`create-vivary <name>` is shorthand for `create-vivary init <name>`; pass `init` /
+`doctor` / `wizard` / `capabilities` / `adopt` explicitly whenever you prefer. The
+`@vivary/create` npm launcher forwards argv unchanged to this Python CLI, which owns
+that command recognition and normalization; both packages are versioned in lockstep.
 
 Presets share the same agent OS shell, then seed a different starter graph. Each
 starter module is generated as `modules/<id>/index.md` so agents route through a small
@@ -96,6 +99,27 @@ lines, removes simple W210 redundant metadata, and reruns doctor. Non-workspace,
 symlinked, junctioned, hardlinked, non-file, or non-UTF-8 repair targets are refused
 or kept manual. Complex YAML W210 cases, broken refs, and exo conflicts stay manual
 guidance.
+
+Doctor recognizes both published workspace contracts without performing a migration.
+The 15 common v0.1 root/template/runtime-skill paths remain strict for every workspace.
+A flat `modules/agent-workspace.md` workspace is reported as
+`compatibility.workspace_contract = "legacy-v0.1"` and receives only recommendations
+for the two newer module indexes; Doctor includes the declared `Preset:` in an `adopt`
+dry-run suggestion when it can read one. If either modern index is present, the
+workspace is `indexed-v0.2+` and both `modules/index.md` and
+`modules/agent-workspace/index.md` are required. Published releases through v0.3.1 can
+lack newer `heartbeat-reports/*` or `*.vivary-tmp` ignore rules. Doctor reports those
+as actionable warnings when they predate the declared profile. Current semantic-memory
+profiles keep every current privacy rule strict, including `*.vivary-tmp`.
+
+`compatibility.schema_version` is `1`; its stable fields distinguish common
+`baseline_missing`, inferred `contract_missing`, declared capability problems, and
+non-failing recommendations. Plain `doctor`, including `--json`, never writes and exits
+`0` only when there are no errors (`1` otherwise); `--trend` and `--repair --yes` are
+the explicit write modes. Declared storage and memory configs are checked against both
+the published v0.3.1 and current profiles: unknown cloud providers and
+`memory.enabled = true` with `memory.provider = "none"` are errors, while a malformed
+optional-memory declaration does not discard Doctor's graph metrics.
 
 ## Developing from source
 
