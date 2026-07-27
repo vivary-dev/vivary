@@ -121,12 +121,15 @@ What it owns:
 - **Role-policy surfaces** — reference implementations of the governed loop inside
   `vivary-core`, not yet wiring in the shipping role CLIs:
   - **Strato (`policy_*`)** evaluates budgets, capsule and receipt gates, and the
-    next loop step with fail-closed, pinned reason codes.
+    next loop step with fail-closed, pinned reason codes. A configured budget
+    accepts only finite numeric limits and counters; omit a limit to leave that
+    dimension unbounded.
   - **Ozone (`verify_*`)** recomputes receipt fingerprints for tamper detection,
-    evaluates gate sufficiency, and emits bounded repair proposals as gated dry-run
-    data.
+    evaluates gate sufficiency without allowing duplicate check names to erase
+    worse evidence, and emits bounded repair proposals as gated dry-run data.
   - **Exo (`control_*`)** governs claims and leases, handoffs, dependencies,
-    execution evidence, and task views over caller-owned state.
+    execution evidence, and task views over caller-owned state. Equivalent
+    Win32 drive, UNC, and device-namespace spellings share one scope identity.
   - **Bellamente (`recall_*`)** applies the SPEC-owned candidate-recall
     firewall: exact duplicate and independent-evidence results are accepted
     evaluations, while an explicit correction is a separately human-gated

@@ -411,6 +411,53 @@ def test_evaluate_budget_both_turn_and_action_budgets_can_be_exceeded_together()
     assert outcome["reason_codes"] == [BUDGET_REASON["TURN_BUDGET_EXCEEDED"], BUDGET_REASON["ACTION_BUDGET_EXCEEDED"]]
 
 
+@pytest.mark.parametrize(
+    ("state", "limits", "reason", "details"),
+    [
+        (
+            {"turns_used": 999},
+            {"max_turns": float("nan")},
+            BUDGET_REASON["TURN_BUDGET_EXCEEDED"],
+            {"turns": {"used": 999, "max": None}},
+        ),
+        (
+            {"turns_used": "3"},
+            {"max_turns": 5},
+            BUDGET_REASON["TURN_BUDGET_EXCEEDED"],
+            {"turns": {"used": None, "max": 5}},
+        ),
+        (
+            {"turns_used": 3},
+            {"max_turns": "5"},
+            BUDGET_REASON["TURN_BUDGET_EXCEEDED"],
+            {"turns": {"used": 3, "max": None}},
+        ),
+        (
+            {"actions_used": 3},
+            {"max_actions": float("inf")},
+            BUDGET_REASON["ACTION_BUDGET_EXCEEDED"],
+            {"actions": {"used": 3, "max": None}},
+        ),
+        (
+            {"actions_used": True},
+            {"max_actions": 5},
+            BUDGET_REASON["ACTION_BUDGET_EXCEEDED"],
+            {"actions": {"used": None, "max": 5}},
+        ),
+    ],
+)
+def test_evaluate_budget_fails_closed_on_present_malformed_limits_or_counters(state, limits, reason, details):
+    capsule = build_clean_capsule()
+    outcome = evaluate_budget(capsule=capsule, state=state, limits=limits)
+
+    assert outcome["decision"] == BUDGET_DECISION["EXHAUSTED"]
+    assert outcome["reason_codes"] == [reason]
+    assert outcome["details"] == details
+    assert evaluate_budget(capsule=capsule, state=state, limits=limits) == outcome
+    loop_outcome = next_loop_step(capsule=capsule, state=state, limits=limits)
+    assert loop_outcome["decision"] == LOOP_DECISION["STOP"]
+    assert loop_outcome["budget"] == outcome
+
 def test_evaluate_budget_fails_closed_on_an_unrecognized_capsule_shape():
     for bad in [None, {}, {"schema": "not-a-capsule"}, {"capsule_id": "x"}]:
         outcome = evaluate_budget(capsule=bad)

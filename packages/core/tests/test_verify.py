@@ -428,6 +428,36 @@ def test_a_failed_required_check_is_insufficient_with_its_actual_outcome_named(c
     # any failure marks the whole receipt's claims unverified (receipt.py contract)
     assert REASON_CODES["CLAIMS_NOT_FULLY_VERIFIED"] in verdict["reason_codes"]
 
+def test_duplicate_required_check_names_preserve_the_worst_recorded_outcome(capsule):
+    for outcomes, expected in [
+        (("failed", "passed"), "failed"),
+        (("passed", "failed"), "failed"),
+        (("skipped", "passed"), "skipped"),
+        (("passed", "skipped"), "skipped"),
+    ]:
+        duplicate_receipt = create_integrity_receipt(
+            capsule=capsule,
+            runtime=RUNTIME,
+            checks=[
+                {"name": "unit-and-contract-tests", "command": "pytest", "outcome": outcome}
+                for outcome in outcomes
+            ],
+            now=NOW,
+        )
+
+        assert verify_receipt_integrity(receipt=duplicate_receipt, capsule=capsule)["outcome"] == OUTCOMES["VERIFIED"]
+        verdict = evaluate_gate_sufficiency(
+            gate={"name": "ci", "required_checks": ["unit-and-contract-tests"]},
+            capsule=capsule,
+            receipt=duplicate_receipt,
+        )
+
+        assert verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
+        assert verdict["failing_checks"] == [
+            {"name": "unit-and-contract-tests", "expected": "passed", "actual": expected}
+        ]
+        assert verdict["reason_codes"] == [REASON_CODES["REQUIRED_CHECK_FAILED"]]
+
 
 def test_unresolved_conflicts_beyond_the_gates_limit_are_insufficient(capsule):
     gate = {"name": "no-conflicts", "max_unresolved_conflicts": 0}

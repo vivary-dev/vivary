@@ -40,6 +40,10 @@ ADAPTATION - malformed gate constraints: the Python seam refuses a present
 constraint unless it has the declared type and finite numeric range. The
 frozen Node oracle silently ignores malformed constraints, which can make
 insufficient evidence appear sufficient.
+
+ADAPTATION - duplicate receipt checks: when several receipt entries carry a
+required check's name, the Python seam preserves the worst outcome rather
+than allowing a later passing entry to erase failed or skipped evidence.
 """
 
 from __future__ import annotations
@@ -59,6 +63,7 @@ GATE_VERDICT_SCHEMA = "vivary.gate-verdict/v0"
 # treats the latter as "a receipt argument was given" (and lets it fail
 # verify_receipt_integrity's own shape check).
 _NO_RECEIPT_PASSED = object()
+_CHECK_OUTCOME_RANK = {"passed": 0, "skipped": 1, "failed": 2}
 
 
 def _verdict(**fields):
@@ -199,9 +204,15 @@ def evaluate_gate_sufficiency(*, gate=None, capsule=None, receipt=_NO_RECEIPT_PA
             for check in checks if isinstance(checks, list) else []:
                 if isinstance(check, dict) and isinstance(check.get("name"), str):
                     check_outcome = check.get("outcome")
-                    outcome_by_name[check["name"]] = (
+                    resolved_outcome = (
                         check_outcome if check_outcome in ("passed", "failed", "skipped") else "failed"
                     )
+                    previous_outcome = outcome_by_name.get(check["name"])
+                    if (
+                        previous_outcome is None
+                        or _CHECK_OUTCOME_RANK[resolved_outcome] > _CHECK_OUTCOME_RANK[previous_outcome]
+                    ):
+                        outcome_by_name[check["name"]] = resolved_outcome
             for name in required_checks:
                 if name not in outcome_by_name:
                     failing_checks.append({"name": name, "expected": "passed", "actual": "missing"})

@@ -159,6 +159,20 @@ def test_scopes_overlap_preserves_posix_and_unc_anchors_as_containing_their_desc
     ) is True
 
 
+def test_scopes_overlap_folds_win32_device_namespace_paths_to_their_drive_or_unc_anchor():
+    assert scopes_overlap(
+        scope("vivary", [r"C:\Repo"]),
+        scope("vivary", [r"\\?\C:\Repo\src\control.py"]),
+    ) is True
+    assert scopes_overlap(
+        scope("vivary", [r"C:\Repo"]),
+        scope("vivary", [r"\\.\C:\Repo\src\control.py"]),
+    ) is True
+    assert scopes_overlap(
+        scope("vivary", [r"\\Server\Share"]),
+        scope("vivary", [r"\\?\UNC\server\share\src\control.py"]),
+    ) is True
+
 # -- control_actors.py -------------------------------------------------------------------
 
 

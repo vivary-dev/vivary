@@ -20,6 +20,11 @@ collisions that the frozen Node normalizer leaves distinct.
 ADAPTATION - Windows scope identity: drive-qualified and UNC paths are folded
 case-insensitively on every host so persisted claim-ledger decisions stay
 deterministic and cannot grant overlapping Windows scopes on Linux CI.
+
+ADAPTATION - Win32 device namespaces: extended-length drive paths collapse
+to their drive anchor, and extended-length UNC paths collapse to their UNC
+anchor. Long-path-aware tools therefore cannot claim the same tree under a
+second lexical identity.
 """
 
 from __future__ import annotations
@@ -57,6 +62,12 @@ def _normalize_scope_path(path):
 
     if raw_path.startswith("//"):
         unc_parts = [segment for segment in raw_path.split("/") if segment]
+        if len(unc_parts) >= 2 and unc_parts[0] in ("?", "."):
+            device_parts = unc_parts[1:]
+            if _DRIVE_PREFIX.match(device_parts[0]):
+                return _normalize_scope_path("/".join(device_parts))
+            if device_parts[0].casefold() == "unc" and len(device_parts) >= 3:
+                return _normalize_scope_path("//" + "/".join(device_parts[1:]))
         if len(unc_parts) >= 2:
             anchor = [unc_parts[0].casefold(), unc_parts[1].casefold()]
             segments = [segment.casefold() for segment in _collapse_segments(unc_parts[2:])]

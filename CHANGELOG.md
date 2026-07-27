@@ -162,13 +162,22 @@ Findings from the `vivary-core` review, all pre-release and none user-reachable:
   `unknown` instead of "detached"; the git output bound is enforced while the process
   runs rather than after; search terms are matched as fixed strings, not regexes; and
   negative claim budgets fail closed instead of silently widening the capsule.
+- **Equivalent Win32 device paths share one claim scope.** Extended-length drive
+  and UNC spellings can no longer acquire a second claim over a tree already
+  covered by its ordinary drive or UNC path.
+- **Duplicate Ozone check names preserve the worst evidence.** A later passing
+  entry can no longer erase an earlier failed or skipped result for the same
+  required check.
+- **Malformed configured loop budgets fail closed.** Non-numeric, boolean,
+  `NaN`, and infinite limits or counters exhaust the affected dimension with
+  deterministic typed details; omission remains the only unbounded form.
 - **Capsule gate and budget validation now agree on identity shape.** A capsule without
   a string `capsule_id` can no longer pass the gate, receive a budget refusal, and
   still reach the loop's `act` decision.
 
 ### Verification
 
-- `python -m pytest packages/core/tests/ -q` — **450 passed**.
+- `python -m pytest packages/core/tests/ -q` — **457 passed**.
 - `uv run --isolated --no-project --no-cache --with ./packages/core python -c
   "from importlib.metadata import version; import vivary_core; assert
   version('vivary-core') == '0.1.0'"` — local wheel-equivalent import and distribution

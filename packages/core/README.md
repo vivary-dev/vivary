@@ -41,16 +41,19 @@ The governed-context shared seam every Vivary role package will speak through:
   characters outside the pinned domain fail loud rather than silently
   diverging.
 - **`policy_*`** (Strato) — budgets, capsule/receipt gates, and the loop
-  step, all fail-closed with pinned reason codes; consumes an optional
-  Ozone verdict without ever importing the verify layer.
+  step, all fail-closed with pinned reason codes; malformed configured budget
+  scalars exhaust the affected dimension, while omission alone means unbounded.
+  An optional Ozone verdict is consumed without importing the verify layer.
 - **`verify_*`** (Ozone) — receipt-integrity verdicts (fingerprint
   recomputation for tamper detection), gate sufficiency, and bounded
   context-repair proposals as pure dry-run JSON: every proposed write
-  named, `requires_gate` on each.
+  named, `requires_gate` on each. Duplicate check names preserve their worst
+  recorded outcome.
 - **`control_*`** (Exo) — claims, leases, handoffs, dependency cycles,
   execution evidence, and task views over caller-owned state; one active
-  claim per scope; completing a task is architecturally unable to erase a
-  failed verification edge.
+  claim per scope, including equivalent Win32 device-path spellings;
+  completing a task is architecturally unable to erase a failed verification
+  edge.
 - **`recall_*`** (Bellamente) — the SPEC-owned candidate-recall firewall:
   exact duplicates and independent evidence are accepted evaluations; explicit
   corrections are review-only, human-gated proposals; stale, degraded, or
@@ -85,7 +88,7 @@ pip install pytest
 python -m pytest packages/core/tests/ -q
 ```
 
-The 450-test suite translates the reference contracts across observation,
+The 457-test suite translates the reference contracts across observation,
 capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces,
 corruption handling, real-git evidence-store round trips, and byte-exact
 cross-runtime fixtures.
