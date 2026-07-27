@@ -48,6 +48,20 @@ install, version, publication, or deployment action occurs.
   coverage. Public docs distinguish that behavior from published 0.1.0. The remaining
   escaped/complex Git-ignore limitation stays explicit and tracked by
   [#236](https://github.com/vivary-dev/vivary/issues/236).
+- **create-vivary Doctor compatibility (#199)** — Doctor now distinguishes the strict
+  15-path v0.1 common contract from legacy flat and v0.2+ indexed module layouts.
+  Valid published workspaces receive preset-preserving, read-only upgrade
+  recommendations, including actionable warnings for newer privacy-ignore lines they
+  predate. Partial modern indexes, common root/runtime-skill gaps, and privacy gaps
+  owned by each declared semantic-memory profile remain errors. The versioned
+  `compatibility` report is schema version 1.
+- **Declared configuration integrity (#199)** — Doctor validates recognized published
+  and current embedded/cloud storage and local/Cognee memory profiles, including every
+  field in the generated current profile without rejecting the narrower published
+  v0.3.1 memory profile. It rejects empty declared storage strings, unknown cloud
+  providers, privacy downgrades below the published floor, and enabled
+  `memory.provider = "none"`, while preserving graph/trend metrics when a declared
+  optional-memory config is malformed.
 
 ### Verification
 
