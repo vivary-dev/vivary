@@ -40,6 +40,24 @@ The governed-context shared seam every Vivary role package will speak through:
   extracted from the reference runtime and verified on ~2.1M probe pairs;
   characters outside the pinned domain fail loud rather than silently
   diverging.
+- **`policy_*`** (Strato) — budgets, capsule/receipt gates, and the loop
+  step, all fail-closed with pinned reason codes; malformed configured budget
+  scalars exhaust the affected dimension, while omission alone means unbounded.
+  An optional Ozone verdict is consumed without importing the verify layer.
+- **`verify_*`** (Ozone) — receipt-integrity verdicts (fingerprint
+  recomputation for tamper detection), gate sufficiency, and bounded
+  context-repair proposals as pure dry-run JSON: every proposed write
+  named, `requires_gate` on each. Duplicate check names preserve their worst
+  recorded outcome.
+- **`control_*`** (Exo) — claims, leases, handoffs, dependency cycles,
+  execution evidence, and task views over caller-owned state; one active
+  claim per scope, including equivalent Win32 device-path spellings;
+  completing a task is architecturally unable to erase a failed verification
+  edge.
+- **`recall_*`** (Bellamente) — the SPEC-owned candidate-recall firewall:
+  exact duplicates and independent evidence are accepted evaluations; explicit
+  corrections are review-only, human-gated proposals; stale, degraded, or
+  unfingerprinted input rejects and never rewrites authored truth.
 
 Zero runtime dependencies. Python 3.11+.
 
@@ -48,15 +66,20 @@ Zero runtime dependencies. Python 3.11+.
 This package is a **reference-guided port** of a proven Node.js
 implementation developed and hardened in The Little AI Company's
 governed-context research program (589 tests, adversarially reviewed,
-benchmarked on real workspaces). The port did not reinterpret a spec — the
-Node modules and their tests are the executable oracle, and the port is
-proven **byte-identical** on every JSON contract: the frozen
-ContextIntegrityEvent v0 conformance and replay fixtures (including the
-pinned projection fingerprint), evidence-store JSONL bytes and git object
-SHAs, and capsule digest and receipt bytes over captured real-pipeline
-capsules. The cross-language parity harness lives with the reference
-implementation; the frozen fixtures travel here (`tests/fixtures/`) so this
-package's own test suite re-verifies the contract bytes on every run.
+benchmarked on real workspaces). Frozen JSON contracts remain byte-identical
+where their owning authority is unchanged: the ContextIntegrityEvent v0
+conformance and replay fixtures (including the pinned projection fingerprint),
+evidence-store JSONL bytes and git object SHAs, and capsule digest and receipt
+bytes over captured real-pipeline capsules.
+
+**ADAPTATION — CandidateRecallProvider:** [the Bellamente memory SPEC](../../docs/bellamente-memory/SPEC-bellamente-memory.md#62-required-distinct-results)
+owns firewall-result truth and intentionally supersedes the frozen Node
+vocabulary here. `accepted` is evaluation rather than write permission;
+explicit corrections remain review-required, human-gated proposals; and stale,
+degraded, or unfingerprinted inputs reject fail-closed. The cross-language
+parity harness lives with the reference implementation; its frozen fixtures
+travel here (`tests/fixtures/`) so this package's own test suite re-verifies
+the remaining contract bytes on every run.
 
 ## Tests
 
@@ -65,7 +88,7 @@ pip install pytest
 python -m pytest packages/core/tests/ -q
 ```
 
-The suite is the Node reference suite translated 1:1 (135 tests): contract
-conformance, replay determinism, fail-closed scope rules, evidence-store
-round-trips against real git remotes, and byte-exact digest/receipt output
-against the frozen fixtures.
+The 457-test suite translates the reference contracts across observation,
+capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces,
+corruption handling, real-git evidence-store round trips, and byte-exact
+cross-runtime fixtures.
