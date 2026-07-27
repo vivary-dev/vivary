@@ -172,6 +172,12 @@ def test_scopes_overlap_folds_win32_device_namespace_paths_to_their_drive_or_unc
         scope("vivary", [r"\\Server\Share"]),
         scope("vivary", [r"\\?\UNC\server\share\src\control.py"]),
     ) is True
+    for device_root in ["\\\\?\\C:\\", r"\\?\C:", "\\\\.\\C:\\"]:
+        normalized = normalize_scope(scope("vivary", [device_root]))
+        assert normalized["paths"] == ["c:/"]
+        assert normalize_scope(normalized) == normalized
+        assert scopes_overlap(scope("vivary", [device_root]), scope("vivary", [r"C:\Repo"])) is True
+        assert scopes_overlap(scope("vivary", [device_root]), scope("vivary", [r"C:Repo"])) is False
 
 # -- control_actors.py -------------------------------------------------------------------
 

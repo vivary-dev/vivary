@@ -433,6 +433,8 @@ def test_duplicate_required_check_names_preserve_the_worst_recorded_outcome(caps
         (("failed", "passed"), "failed"),
         (("passed", "failed"), "failed"),
         (("skipped", "passed"), "skipped"),
+        (("failed", "skipped"), "failed"),
+        (("skipped", "failed"), "failed"),
         (("passed", "skipped"), "skipped"),
     ]:
         duplicate_receipt = create_integrity_receipt(

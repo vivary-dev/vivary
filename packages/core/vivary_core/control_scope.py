@@ -65,7 +65,8 @@ def _normalize_scope_path(path):
         if len(unc_parts) >= 2 and unc_parts[0] in ("?", "."):
             device_parts = unc_parts[1:]
             if _DRIVE_PREFIX.match(device_parts[0]):
-                return _normalize_scope_path("/".join(device_parts))
+                device_path = "/".join(device_parts)
+                return _normalize_scope_path(device_path + "/" if len(device_path) == 2 else device_path)
             if device_parts[0].casefold() == "unc" and len(device_parts) >= 3:
                 return _normalize_scope_path("//" + "/".join(device_parts[1:]))
         if len(unc_parts) >= 2:
