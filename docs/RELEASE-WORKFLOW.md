@@ -124,6 +124,16 @@ tests or docs before pushing:
 - **Path and link abuse:** test symlinks, junctions, hard links, absolute paths,
   nested roots, malformed config, stale manifests, repeated runs, and out-of-root
   targets. Fail closed with a Vivary error, not a raw Python traceback.
+- **Cross-platform orientation loop:** for scaffold, adopt, Doctor, map, or retrieval
+  changes, run `python packages/create-vivary/tests/orientation_proof.py --receipt
+  orientation-proof.json`. The disposable runner uses both Python and npm entry points,
+  proves dry-run before bounded apply, re-runs adopt after apply to prove idempotence,
+  preserves divergent Git state, and emits a sanitized aggregate receipt. CI runs the
+  same proof on Ubuntu and Windows and retains each receipt whenever the process writes
+  one, including fixture and preflight failures. A timed-out or cancelled process is
+  killed before that write, so it has no receipt to upload. The real transport proof
+  requires `node`, `uv` (for `uvx`), and `git` on `PATH`; a missing prerequisite fails
+  closed and writes a preflight receipt.
 - **Security scan shape:** scan diffs for shell execution, encoded payloads, inline
   PowerShell blobs, download-and-execute patterns, secret literals, and broad
   filesystem deletion. Keep long prompts/instructions in reviewed files and pass
