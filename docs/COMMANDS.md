@@ -433,7 +433,7 @@ create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writin
 | `init <target>` | Lay down a complete workspace: the agent contract, the strato shell (SOUL/USER/STATE/MEMORY), runtime skills, a `tropo.toml`, a starter typed graph, and optional storage or semantic-memory config based on flags/wizard answers. |
 | `wizard <target>` | Re-run the setup wizard on an existing workspace to reconfigure storage and optional semantic-memory policy. |
 | `capabilities` | List optional capabilities for a preset: storage, semantic memory, and preset-specific sidecars. |
-| `doctor <target>` | Validate a workspace: required files, active privacy ignore rules, module directory indexes, tropo graph health, backend reachability, and semantic-memory status. |
+| `doctor <target>` | Validate the strict common workspace shell, the inferred published module contract, active privacy ignore rules, module directory indexes, tropo graph health, declared capability config, backend reachability, and semantic-memory status. |
 | `adopt <target>` | Bring Vivary to an existing repo or vault. Only adds files that don't already exist; never moves, renames, edits, or overwrites anything. Dry-run by default. |
 
 | Flag | Effect |
@@ -454,14 +454,74 @@ create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writin
 | `--repair` | Doctor-only. Include a conservative guided repair plan. Dry-run by default; writes nothing without `--yes`. |
 | `--yes` | With `doctor --repair`, apply deterministic safe repairs, rerun doctor, and keep a nonzero exit if the workspace is still invalid. |
 
-`doctor` checks that `USER.md`, `MEMORY.md`, `memory/*`, `heartbeat-reports/*`,
-`.strato/private/`, and `*.vivary-tmp` are actively ignored. Comments, negations, and
-unrelated patterns that merely contain those names do not count. If `.vivary/memory.toml` exists,
-`doctor` reports semantic memory as `disabled`, `healthy`, `configured`,
-`unavailable`, `misconfigured`, or `privacy-failed` without requiring optional Cognee
-support to be installed.
+`doctor` always requires active ignore rules for `USER.md`, `MEMORY.md`, `memory/*`,
+and `.strato/private/`. Published workspaces can predate `heartbeat-reports/*` or
+`*.vivary-tmp`; without declared semantic memory, Doctor reports those missing newer
+rules as warnings and names the line to add. A published semantic-memory profile makes
+`heartbeat-reports/*` strict while leaving its newer `*.vivary-tmp` gap as an upgrade
+warning. A current semantic-memory profile makes all six rules strict. Comments,
+negations, and unrelated patterns that merely contain those names do not count.
 
-`doctor --repair` is guided and conservative. Plain `doctor` stays read-only.
+If `.vivary/memory.toml` exists, `doctor` reports semantic memory as `disabled`,
+`healthy`, `configured`, `unavailable`, `misconfigured`, or `privacy-failed` without
+requiring optional Cognee support to be installed.
+
+### Doctor compatibility and declared configuration
+
+Doctor separates a **strict common baseline** from an **inferred workspace-contract
+shape**. The baseline is the exact 15 files shared by the published v0.1 workspace:
+`README.md`, `AGENTS.md`, `SOUL.md`, `STRATO.md`, `STATE.md`, `USER.md`, `MEMORY.md`,
+`bug-risk-playbook.md`, `tropo.toml`, `.gitignore`, `templates/AGENTS.md`, and the four
+runtime skill files under `.claude/skills/{strato,loops}/SKILL.md` and
+`.agents/skills/{strato,loops}/SKILL.md`. Missing any of these is an error for every
+supported workspace, including a legacy one.
+
+`compatibility.workspace_contract` identifies `legacy-v0.1` when the workspace has the
+flat `modules/agent-workspace.md` layout and no modern index, or `indexed-v0.2+` when
+either modern index exists. An indexed workspace must have both `modules/index.md` and
+`modules/agent-workspace/index.md`; a partial indexed layout is an error. A legacy
+workspace is healthy without those two files: they appear only as recommendations,
+with the non-writing adopt preview `create-vivary adopt <workspace> --preset <preset>`
+(`adopt` is dry-run unless `--yes` is supplied). If `README.md` declares a supported
+`Preset:`, Doctor puts that preset in its recommendation; otherwise it uses the explicit
+`<preset>` placeholder. A workspace carrying neither published module signature is not
+silently upgraded into an error solely for that absence.
+It is only a preview: `adopt` never moves, converts, or removes a flat module, so any
+legacy-to-indexed conversion remains a separate human decision.
+
+The `compatibility` object is versioned with `"schema_version": 1`. It contains
+`workspace_contract`, `baseline_missing`, `contract_missing`,
+`declared_capability_problems`, `recommended_missing`, and `recommended_upgrade`.
+`baseline_missing` is always the common v0.1 contract; `contract_missing` applies only
+after Doctor has inferred the indexed contract; recommendations never make `ok` false.
+
+When a storage or semantic-memory config is declared, Doctor validates its recognized
+published or current profile. Embedded storage needs nonempty `path` and `provider`;
+Qdrant cloud storage needs nonempty `provider`, `url`, `api_key`, and `collection`;
+Astra needs nonempty `provider`, `endpoint`, `api_key`, and `collection`. Unknown cloud
+providers are errors.
+
+Local memory needs `state_path`, `allow_network`, and `require_explicit_index`. The
+published Cognee profile adds `api_key_env`; its empty value remains a valid explicit
+opt-out. The current Cognee profile also emits `allow_without_api_key` and
+`allow_telemetry`; if either current-profile field is present, both are required and
+type-checked. Both profiles require `enabled`, `provider`,
+`mode = "semantic-provider"`, and every `[memory.privacy]` field. The three privacy
+booleans must stay fail-closed. `private_paths` must retain the four-path published
+floor (`USER.md`, `MEMORY.md`, `memory/**`, and `heartbeat-reports/**`); the current
+template adds `.strato/private/**`, but Doctor accepts the published v0.3.1 profile
+without it. A published profile missing the newer `*.vivary-tmp` ignore receives an
+upgrade warning; the same gap remains an error for a current memory profile.
+`memory.enabled = true` with `memory.provider = "none"` is a misconfiguration, not an
+enabled no-op.
+
+Plain `doctor` (including `--json`) is read-only, including legacy recommendations and
+failing reports. It exits `0` exactly when `errors` is empty and `1` otherwise;
+warnings do not change the exit code. `doctor --trend` is the explicit state-write
+exception, and `doctor --repair --yes` is the explicit repair-write exception.
+
+`doctor --repair` is guided and conservative for both published module contracts.
+Plain `doctor` stays read-only.
 `doctor --repair --json` reports `repair.actions` without writing. Each action has
 `kind`, `status`, `path`, `summary`, and `applied`, with extra details when useful.
 `doctor --repair --yes --json` applies only deterministic safe repairs, then reruns

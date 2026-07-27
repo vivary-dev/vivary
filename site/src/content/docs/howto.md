@@ -18,6 +18,39 @@ create-vivary init my-workspace --preset writing      # coding | second-brain | 
 create-vivary doctor my-workspace                      # validate it
 ```
 
+## Check a legacy or current workspace without changing it
+
+```bash
+create-vivary doctor my-workspace --json
+```
+
+Doctor is read-only in both human and JSON modes: it exits `0` when the report has no
+errors and `1` when it has any; warnings do not alter that result. In particular, a
+published v0.1 workspace with flat `modules/agent-workspace.md` is healthy without
+`modules/index.md` or `modules/agent-workspace/index.md`. Its JSON
+`compatibility.schema_version` is `1`, `workspace_contract` is `legacy-v0.1`, and the
+two modern paths are recommendations rather than errors. Published releases through
+v0.3.1 can also lack newer `heartbeat-reports/*` or `*.vivary-tmp` ignore rules.
+Without declared semantic memory, Doctor reports those gaps as warnings and names each
+line to add. A published semantic-memory profile keeps `heartbeat-reports/*` strict and
+leaves its newer `*.vivary-tmp` gap as an upgrade warning; a current semantic-memory
+profile keeps every privacy rule strict.
+
+Use the recommendation's preset-preserving command only to preview the newer indexed surface:
+
+```bash
+create-vivary adopt my-workspace --preset writing
+```
+
+`adopt` is already a dry run unless you add `--yes`; Doctor recommendations never
+write. It only adds files and does not migrate flat modules: a human must separately
+decide whether and how to remove or convert `modules/<id>.md` files before an indexed
+contract can pass. Current v0.2+ workspaces identify as `indexed-v0.2+`; if either
+modern index exists, both must exist. The shared v0.1 root contract and runtime skills
+remain strict for both shapes. If `.vivary/memory.toml` says `enabled = true`, it must
+name a real provider: `provider = "none"` is misconfigured. Use `--trend` only when
+you intend to write `.vivary/doctor-state.json`.
+
 ## Bring an existing repo's docs under tropo
 
 ```bash

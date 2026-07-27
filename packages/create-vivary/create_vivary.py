@@ -66,7 +66,11 @@ RECEIPT_RESERVED_WINDOWS_NAMES = {
     *(f"LPT{i}" for i in range(1, 10)),
 }
 
-REQUIRED_WORKSPACE_FILES = (
+# The exact 15 files published in v0.1 are the strict common contract for every
+# supported workspace. This literal must not be derived from repair markers or
+# current scaffold output: neither may weaken a historical root or runtime-skill
+# requirement.
+BASELINE_WORKSPACE_FILES = (
     "README.md",
     "AGENTS.md",
     "SOUL.md",
@@ -77,13 +81,23 @@ REQUIRED_WORKSPACE_FILES = (
     "bug-risk-playbook.md",
     "tropo.toml",
     ".gitignore",
-    "modules/index.md",
-    "modules/agent-workspace/index.md",
     "templates/AGENTS.md",
     ".claude/skills/strato/SKILL.md",
     ".claude/skills/loops/SKILL.md",
     ".agents/skills/strato/SKILL.md",
     ".agents/skills/loops/SKILL.md",
+)
+
+# Kept for callers that name the published v0.1 requirement set. The baseline
+# tuple above is the only owner so current scaffold additions cannot silently
+# change legacy Doctor severity.
+REQUIRED_WORKSPACE_FILES = BASELINE_WORKSPACE_FILES
+
+# v0.2 introduced routed module indexes without changing the common v0.1
+# workspace shell. Doctor recognizes both published contracts.
+INDEXED_WORKSPACE_FILES = (
+    "modules/index.md",
+    "modules/agent-workspace/index.md",
 )
 
 # Private placeholders repair can regenerate, in report order. `USER.md` and `MEMORY.md`
@@ -133,12 +147,37 @@ PRIVACY_IGNORE_REPAIR_LINES = {
     "*.vivary-tmp": "*.vivary-tmp",
 }
 
+PUBLISHED_BASELINE_PRIVACY_IGNORES = (
+    "USER.md",
+    "MEMORY.md",
+    "memory/*",
+    ".strato/private/",
+)
+PUBLISHED_MEMORY_PRIVACY_IGNORES = (
+    "USER.md",
+    "MEMORY.md",
+    "memory/*",
+    "heartbeat-reports/*",
+    ".strato/private/",
+)
+
 REPAIR_WORKSPACE_MARKERS = (
     "tropo.toml",
     "AGENTS.md",
     "STRATO.md",
-    "modules/index.md",
 )
+REPAIR_MODULE_CONTRACT_MARKERS = (
+    "modules/index.md",
+    "modules/agent-workspace.md",
+)
+
+# Repair markers only identify targets that `doctor --repair` may safely plan
+# against. They deliberately do not set Doctor's compatibility severity.
+#
+WORKSPACE_COMPATIBILITY_SCHEMA_VERSION = 1
+LEGACY_WORKSPACE_CONTRACT = "legacy-v0.1"
+INDEXED_WORKSPACE_CONTRACT = "indexed-v0.2+"
+LEGACY_RECOMMENDED_WORKSPACE_FILES = INDEXED_WORKSPACE_FILES
 
 PRESET_STARTERS = {
     "coding": {
@@ -473,6 +512,272 @@ def scaffold_workspace(
     return created
 
 
+def _empty_workspace_compatibility() -> dict:
+    return {
+        "schema_version": WORKSPACE_COMPATIBILITY_SCHEMA_VERSION,
+        "workspace_contract": None,
+        "baseline_missing": [],
+        "contract_missing": [],
+        "declared_capability_problems": [],
+        "recommended_missing": [],
+        "recommended_upgrade": None,
+    }
+
+def _workspace_declared_preset(target: Path) -> str:
+    """Return a supported `Preset:` declaration or an explicit safe placeholder."""
+    try:
+        readme = (target / "README.md").read_text(encoding="utf-8-sig")
+    except Exception:
+        return "<preset>"
+
+    match = re.search(r"(?mi)^Preset:\s*([^\r\n]+?)\s*$", readme)
+    preset = match.group(1).strip() if match else ""
+    return preset if preset in PRESETS else "<preset>"
+
+
+def _workspace_contract(target: Path) -> tuple[str | None, list[str]]:
+    """Classify a published module layout without inferring a new requirement."""
+    indexed_present = any((target / rel).exists() for rel in INDEXED_WORKSPACE_FILES)
+    if indexed_present:
+        return (
+            INDEXED_WORKSPACE_CONTRACT,
+            [rel for rel in INDEXED_WORKSPACE_FILES if not (target / rel).exists()],
+        )
+    if (target / "modules" / "agent-workspace.md").is_file():
+        return LEGACY_WORKSPACE_CONTRACT, []
+    # A shell that carries neither published module signature is not silently
+    # upgraded into a hard error. Its common baseline remains fully strict.
+    return None, []
+
+
+def _missing_declared_config_fields(
+    section: object,
+    fields: dict[str, type],
+    *,
+    require_nonempty_strings: bool = False,
+) -> list[str]:
+    """Return fields that do not satisfy the selected config schema."""
+    if not isinstance(section, dict):
+        return list(fields)
+    return [
+        key
+        for key, expected_type in fields.items()
+        if not isinstance(section.get(key), expected_type)
+        or (
+            require_nonempty_strings
+            and expected_type is str
+            and not section[key]
+        )
+    ]
+
+
+def _declared_storage_capability_problems(target: Path) -> tuple[str, list[str]]:
+    """Return the declared storage backend and any missing declared configuration."""
+    cfg_path = target / _STORAGE_DIR / _STORAGE_CONFIG_NAME
+    if not cfg_path.exists():
+        # File storage predates the optional config and remains the legacy default.
+        return "file", []
+
+    try:
+        import tomllib as _toml
+
+        data = _toml.loads(cfg_path.read_text(encoding="utf-8-sig"))
+    except Exception as exc:
+        return "unknown", [
+            f"declared capability storage configuration unreadable: "
+            f"{_STORAGE_DIR}/{_STORAGE_CONFIG_NAME} ({exc})"
+        ]
+
+    storage = data.get("storage") if isinstance(data, dict) else None
+    if not isinstance(storage, dict):
+        return "unknown", ["declared capability storage missing required [storage] configuration"]
+
+    backend = storage.get("backend")
+    if not isinstance(backend, str) or not backend:
+        return "unknown", ["declared capability storage missing required storage.backend"]
+    if backend == "file":
+        return backend, []
+
+    storage_schemas = _DECLARED_CONFIG_SCHEMAS["storage"]
+    if backend == "embedded":
+        section = storage.get("embedded")
+        fields = storage_schemas["embedded"]
+    elif backend == "cloud":
+        section = storage.get("cloud")
+        if not isinstance(section, dict):
+            return backend, [
+                "declared capability storage:cloud missing required "
+                "[storage.cloud] configuration"
+            ]
+        provider = section.get("provider")
+        cloud_schemas = storage_schemas["cloud"]
+        if not isinstance(provider, str):
+            return backend, [
+                "declared capability storage:cloud missing required "
+                "storage.cloud.provider"
+            ]
+        if provider not in cloud_schemas:
+            return backend, [
+                f"declared capability storage:cloud has unknown provider: {provider!r}"
+            ]
+        fields = cloud_schemas[provider]
+    else:
+        return "unknown", [f"declared capability storage has unknown backend: {backend!r}"]
+
+    if not isinstance(section, dict):
+        return backend, [
+            f"declared capability storage:{backend} missing required "
+            f"[storage.{backend}] configuration"
+        ]
+
+    return backend, [
+        f"declared capability storage:{backend} missing required "
+        f"storage.{backend}.{key}"
+        for key in _missing_declared_config_fields(
+            section,
+            fields,
+            require_nonempty_strings=True,
+        )
+    ]
+
+
+def _normalize_memory_private_path(path: str) -> str:
+    normalized = path.replace("\\", "/").strip("/")
+    if normalized.endswith("/**"):
+        return normalized[:-3]
+    return normalized
+
+
+def _declared_memory_capability_problems(target: Path, memory_report: dict) -> list[str]:
+    """Validate every field owned by the selected semantic-memory template."""
+    if not memory_report["enabled"] or memory_report["status"] == "misconfigured":
+        return []
+
+    try:
+        import tomllib as _toml
+
+        data = _toml.loads(
+            (target / _STORAGE_DIR / _MEMORY_CONFIG_NAME).read_text(encoding="utf-8-sig")
+        )
+    except Exception:
+        # `_memory_report` reports a malformed declaration as an error.
+        return []
+
+    memory = data.get("memory")
+    if not isinstance(memory, dict):
+        return []
+
+    schemas = _DECLARED_CONFIG_SCHEMAS["memory"]
+    problems = [
+        f"declared capability memory missing required memory.{key}"
+        for key in _missing_declared_config_fields(memory, schemas["root"])
+    ]
+    if memory.get("mode") != "semantic-provider":
+        problems.append(
+            f"declared capability memory has unsupported memory.mode: {memory.get('mode')!r}"
+        )
+
+    privacy = memory.get("privacy")
+    if not isinstance(privacy, dict):
+        problems.append(
+            "declared capability memory missing required [memory.privacy] configuration"
+        )
+    else:
+        problems.extend(
+            f"declared capability memory missing required memory.privacy.{key}"
+            for key in _missing_declared_config_fields(privacy, schemas["privacy"])
+        )
+        for key in ("respect_gitignore", "respect_vivary_private", "fail_closed"):
+            if isinstance(privacy.get(key), bool) and not privacy[key]:
+                problems.append(
+                    f"declared capability memory requires memory.privacy.{key} = true"
+                )
+        private_paths = privacy.get("private_paths")
+        if isinstance(private_paths, list) and not all(
+            isinstance(path, str) for path in private_paths
+        ):
+            problems.append(
+                "declared capability memory requires memory.privacy.private_paths "
+                "to contain only strings"
+            )
+        if isinstance(private_paths, list) and all(
+            isinstance(path, str) for path in private_paths
+        ):
+            normalized_private_paths = {
+                _normalize_memory_private_path(path) for path in private_paths
+            }
+            missing_private_paths = [
+                path
+                for path in _MEMORY_PUBLISHED_PRIVATE_PATHS
+                if _normalize_memory_private_path(path)
+                not in normalized_private_paths
+            ]
+            if missing_private_paths:
+                problems.append(
+                    "declared capability memory requires "
+                    "memory.privacy.private_paths to include: "
+                    + ", ".join(missing_private_paths)
+                )
+
+    provider = memory_report["provider"]
+    schema = schemas["providers"].get(provider)
+    if schema is None:
+        # `_memory_report` owns the missing- or unknown-provider error.
+        return problems
+    section_name, fields, optional_fields = schema
+    capability = "memory:local" if provider == "vivary-local" else "memory:cognee"
+
+    section = memory.get(section_name)
+    if not isinstance(section, dict):
+        problems.append(
+            f"declared capability {capability} missing required "
+            f"[memory.{section_name}] configuration"
+        )
+        return problems
+    problems.extend(
+        f"declared capability {capability} missing required memory.{section_name}.{key}"
+        for key in _missing_declared_config_fields(section, fields)
+    )
+    if any(key in section for key in optional_fields):
+        problems.extend(
+            f"declared capability {capability} missing required "
+            f"memory.{section_name}.{key}"
+            for key in _missing_declared_config_fields(section, optional_fields)
+        )
+    return problems
+
+
+def _workspace_compatibility(target: Path, memory_report: dict) -> tuple[dict, str]:
+    """Classify published workspace ownership; integrity and privacy stay strict."""
+    compatibility = _empty_workspace_compatibility()
+    compatibility["baseline_missing"] = [
+        rel for rel in BASELINE_WORKSPACE_FILES if not (target / rel).exists()
+    ]
+
+    contract, contract_missing = _workspace_contract(target)
+    compatibility["workspace_contract"] = contract
+    compatibility["contract_missing"] = contract_missing
+    if contract == LEGACY_WORKSPACE_CONTRACT:
+        compatibility["recommended_missing"] = [
+            rel
+            for rel in LEGACY_RECOMMENDED_WORKSPACE_FILES
+            if not (target / rel).exists()
+        ]
+        preset = _workspace_declared_preset(target)
+        compatibility["recommended_upgrade"] = (
+            "run create-vivary adopt <workspace> "
+            f"--preset {preset} (dry-run: omit --yes) to review the indexed v0.2+ "
+            "module contract"
+        )
+
+    backend, storage_problems = _declared_storage_capability_problems(target)
+    compatibility["declared_capability_problems"] = [
+        *storage_problems,
+        *_declared_memory_capability_problems(target, memory_report),
+    ]
+    return compatibility, backend
+
+
 def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None) -> dict:
     """Validate that a directory looks like a usable Vivary agent workspace."""
     root = Path(repo_root) if repo_root is not None else default_repo_root()
@@ -480,6 +785,9 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
     target = Path(target).resolve()
     errors: list[str] = []
     warnings: list[str] = []
+    memory_report, memory_privacy_requirements = _memory_report(target)
+    compatibility = _empty_workspace_compatibility()
+    backend_name = "file"
 
     if not target.exists():
         errors.append(f"workspace does not exist: {target}")
@@ -487,17 +795,52 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         errors.append(f"workspace is not a directory: {target}")
 
     if not errors:
-        for rel in REQUIRED_WORKSPACE_FILES:
-            if not (target / rel).exists():
-                errors.append(f"missing required file: {rel}")
+        compatibility, backend_name = _workspace_compatibility(target, memory_report)
+        errors.extend(
+            f"missing required file: {rel}"
+            for rel in compatibility["baseline_missing"]
+        )
+        errors.extend(
+            f"missing required indexed contract file: {rel}"
+            for rel in compatibility["contract_missing"]
+        )
+        warnings.extend(
+            f"recommended workspace file missing: {rel}"
+            for rel in compatibility["recommended_missing"]
+        )
+        if compatibility["recommended_upgrade"] is not None:
+            warnings.append(compatibility["recommended_upgrade"])
 
         if (target / ".gitignore").exists():
             missing = _missing_privacy_ignores(target)
-            errors.extend(f"privacy ignore missing: {pattern}" for pattern in missing)
+            if memory_report["enabled"]:
+                required_missing = [
+                    pattern
+                    for pattern in missing
+                    if pattern in memory_privacy_requirements
+                ]
+                warnings.extend(
+                    f"recommended privacy ignore missing: {pattern}; add it to .gitignore"
+                    for pattern in missing
+                    if pattern not in memory_privacy_requirements
+                )
+            else:
+                required_missing = [
+                    pattern
+                    for pattern in missing
+                    if pattern in PUBLISHED_BASELINE_PRIVACY_IGNORES
+                ]
+                warnings.extend(
+                    f"recommended privacy ignore missing: {pattern}; add it to .gitignore"
+                    for pattern in missing
+                    if pattern not in PUBLISHED_BASELINE_PRIVACY_IGNORES
+                )
+            errors.extend(
+                f"privacy ignore missing: {pattern}" for pattern in required_missing
+            )
         errors.extend(_module_index_errors(target))
 
     graph = {"nodes": 0, "edges": 0, "broken": 0}
-    findings: list[str] = []
     if not errors:
         try:
             _tropo, _resolver, docs, nodes, edges = _doctor_graph_context(target, root)
@@ -516,25 +859,16 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         except Exception as exc:  # keep doctor a report, not a traceback
             errors.append(f"tropo validation failed: {exc}")
 
-    # Check storage backend
-    storage_cfg_path = target / _STORAGE_DIR / _STORAGE_CONFIG_NAME
-    backend_name = "file"
-    if storage_cfg_path.exists():
-        try:
-            import tomllib as _toml
-            with open(storage_cfg_path, "rb") as _fh:
-                _data = _toml.load(_fh)
-            backend_name = _data.get("storage", {}).get("backend", "file")
-        except Exception:
-            backend_name = "unknown"
-
-    memory_report = _memory_report(target)
-    if memory_report["status"] == "misconfigured":
-        errors.append(f"semantic memory misconfigured: {memory_report['detail']}")
-    elif memory_report["status"] == "privacy-failed":
-        errors.append("semantic memory privacy check failed")
-    elif memory_report["status"] == "unavailable":
-        warnings.append(f"semantic memory provider unavailable: {memory_report['provider']}")
+    if target.is_dir():
+        # Declaration failures must not suppress graph/trend metrics. The graph is a
+        # read-only observation of the workspace, independent of optional providers.
+        errors.extend(compatibility["declared_capability_problems"])
+        if memory_report["status"] == "misconfigured":
+            errors.append(f"semantic memory misconfigured: {memory_report['detail']}")
+        elif memory_report["status"] == "privacy-failed":
+            errors.append("semantic memory privacy check failed")
+        elif memory_report["status"] == "unavailable":
+            warnings.append(f"semantic memory provider unavailable: {memory_report['provider']}")
 
     return {
         "ok": not errors,
@@ -544,6 +878,7 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         "graph": graph,
         "backend": backend_name,
         "memory": memory_report,
+        "compatibility": compatibility,
     }
 
 
@@ -607,6 +942,7 @@ def _doctor_repair_error_report(target: str | Path, *, yes: bool, error: Excepti
             "privacy": "not-indexed",
             "detail": "doctor repair refused to inspect target",
         },
+        "compatibility": _empty_workspace_compatibility(),
         "repair": {
             "mode": "applied" if yes else "dry-run",
             "actions": [],
@@ -657,7 +993,10 @@ def _doctor_repair_actions(target: Path, root: Path) -> list[dict]:
                     "`create-vivary init` for a new workspace or "
                     "`create-vivary adopt` for an existing project."
                 ),
-                details={"required_markers": list(REPAIR_WORKSPACE_MARKERS)},
+                details={
+                    "required_markers": list(REPAIR_WORKSPACE_MARKERS),
+                    "module_contract_any_of": list(REPAIR_MODULE_CONTRACT_MARKERS),
+                },
             )
         ]
 
@@ -675,7 +1014,12 @@ def _doctor_repair_actions(target: Path, root: Path) -> list[dict]:
 
 
 def _looks_like_vivary_workspace(target: Path) -> bool:
-    return all((target / marker).exists() for marker in REPAIR_WORKSPACE_MARKERS)
+    has_module_contract = any(
+        (target / rel).is_file() for rel in REPAIR_MODULE_CONTRACT_MARKERS
+    )
+    return has_module_contract and all(
+        (target / marker).exists() for marker in REPAIR_WORKSPACE_MARKERS
+    )
 
 
 def _private_placeholder_text(root: Path, rel: str) -> str:
@@ -1310,72 +1654,124 @@ def _format_doctor_trend(trend: dict, state_warning: str | None) -> list[str]:
     return lines
 
 
-def _memory_report(target: Path) -> dict:
+def _memory_required_privacy_ignores(memory: dict) -> tuple[str, ...]:
+    """Select the published or current privacy floor for a valid memory profile."""
+    privacy = memory.get("privacy")
+    if not isinstance(privacy, dict):
+        return tuple(PRIVACY_IGNORE_PROBES)
+    private_paths = privacy.get("private_paths")
+    if not isinstance(private_paths, list) or not all(
+        isinstance(path, str) for path in private_paths
+    ):
+        return tuple(PRIVACY_IGNORE_PROBES)
+    cognee = memory.get("cognee")
+    current_private_paths = {
+        _normalize_memory_private_path(path)
+        for path in set(_MEMORY_CURRENT_PRIVATE_PATHS)
+        - set(_MEMORY_PUBLISHED_PRIVATE_PATHS)
+    }
+    has_current_cognee_fields = isinstance(cognee, dict) and any(
+        key in cognee for key in ("allow_without_api_key", "allow_telemetry")
+    )
+    has_current_private_path = any(
+        _normalize_memory_private_path(path) in current_private_paths
+        for path in private_paths
+    )
+    if has_current_private_path or has_current_cognee_fields:
+        return tuple(PRIVACY_IGNORE_PROBES)
+    return PUBLISHED_MEMORY_PRIVACY_IGNORES
+
+
+def _memory_report(target: Path) -> tuple[dict, tuple[str, ...]]:
     cfg_path = target / _STORAGE_DIR / _MEMORY_CONFIG_NAME
+    current_privacy_ignores = tuple(PRIVACY_IGNORE_PROBES)
     if not cfg_path.exists():
-        return {
-            "enabled": False,
-            "provider": "none",
-            "mode": "none",
-            "status": "disabled",
-            "config": None,
-            "privacy": "not-indexed",
-            "detail": "",
-        }
+        return (
+            {
+                "enabled": False,
+                "provider": "none",
+                "mode": "none",
+                "status": "disabled",
+                "config": None,
+                "privacy": "not-indexed",
+                "detail": "",
+            },
+            current_privacy_ignores,
+        )
 
     try:
         import tomllib as _toml
+
         data = _toml.loads(cfg_path.read_text(encoding="utf-8-sig"))
     except Exception as exc:
-        return {
-            "enabled": False,
-            "provider": "unknown",
-            "mode": "unknown",
-            "status": "misconfigured",
-            "config": str(cfg_path),
-            "privacy": "unknown",
-            "detail": str(exc),
-        }
+        return (
+            {
+                "enabled": False,
+                "provider": "unknown",
+                "mode": "unknown",
+                "status": "misconfigured",
+                "config": str(cfg_path),
+                "privacy": "unknown",
+                "detail": str(exc),
+            },
+            current_privacy_ignores,
+        )
 
     memory = data.get("memory", {})
     if not isinstance(memory, dict):
-        return {
-            "enabled": False,
-            "provider": "unknown",
-            "mode": "unknown",
-            "status": "misconfigured",
-            "config": str(cfg_path),
-            "privacy": "unknown",
-            "detail": "memory must be a TOML table",
-        }
+        return (
+            {
+                "enabled": False,
+                "provider": "unknown",
+                "mode": "unknown",
+                "status": "misconfigured",
+                "config": str(cfg_path),
+                "privacy": "unknown",
+                "detail": "memory must be a TOML table",
+            },
+            current_privacy_ignores,
+        )
     enabled = memory.get("enabled", False)
     provider = memory.get("provider", "none")
     mode = memory.get("mode", "none")
     if not isinstance(enabled, bool):
-        return {
-            "enabled": False,
-            "provider": "unknown",
-            "mode": "unknown",
-            "status": "misconfigured",
-            "config": str(cfg_path),
-            "privacy": "unknown",
-            "detail": "memory.enabled must be true or false",
-        }
+        return (
+            {
+                "enabled": False,
+                "provider": "unknown",
+                "mode": "unknown",
+                "status": "misconfigured",
+                "config": str(cfg_path),
+                "privacy": "unknown",
+                "detail": "memory.enabled must be true or false",
+            },
+            current_privacy_ignores,
+        )
     if not isinstance(provider, str) or not isinstance(mode, str):
-        return {
-            "enabled": False,
-            "provider": "unknown",
-            "mode": "unknown",
-            "status": "misconfigured",
-            "config": str(cfg_path),
-            "privacy": "unknown",
-            "detail": "memory.provider and memory.mode must be strings",
-        }
+        return (
+            {
+                "enabled": False,
+                "provider": "unknown",
+                "mode": "unknown",
+                "status": "misconfigured",
+                "config": str(cfg_path),
+                "privacy": "unknown",
+                "detail": "memory.provider and memory.mode must be strings",
+            },
+            current_privacy_ignores,
+        )
 
-    if not enabled or provider == "none":
+    required_privacy_ignores = _memory_required_privacy_ignores(memory)
+    if not enabled:
         status = "disabled"
         detail = ""
-    elif _missing_privacy_ignores(target):
+    elif provider == "none":
+        status = "misconfigured"
+        detail = "memory.provider is required when memory.enabled is true"
+    elif any(
+        pattern in required_privacy_ignores
+        for pattern in _missing_privacy_ignores(target)
+    ):
         status = "privacy-failed"
         detail = "private workspace paths are not actively ignored"
     elif provider == "vivary-local":
@@ -1392,15 +1788,20 @@ def _memory_report(target: Path) -> dict:
         status = "misconfigured"
         detail = f"unknown provider {provider!r}"
 
-    return {
-        "enabled": enabled,
-        "provider": provider,
-        "mode": mode,
-        "status": status,
-        "config": str(cfg_path),
-        "privacy": "private-paths-filtered" if status != "privacy-failed" else "failed",
-        "detail": detail,
-    }
+    return (
+        {
+            "enabled": enabled,
+            "provider": provider,
+            "mode": mode,
+            "status": status,
+            "config": str(cfg_path),
+            "privacy": (
+                "private-paths-filtered" if status != "privacy-failed" else "failed"
+            ),
+            "detail": detail,
+        },
+        required_privacy_ignores,
+    )
 
 
 
@@ -2783,8 +3184,21 @@ collection = "my-workspace"
 """,
 }
 
+_MEMORY_PUBLISHED_PRIVATE_PATHS = (
+    "USER.md",
+    "MEMORY.md",
+    "memory/**",
+    "heartbeat-reports/**",
+)
+_MEMORY_CURRENT_PRIVATE_PATHS = (
+    *_MEMORY_PUBLISHED_PRIVATE_PATHS,
+    ".strato/private/**",
+)
+_MEMORY_CURRENT_PRIVATE_PATHS_TOML = json.dumps(_MEMORY_CURRENT_PRIVATE_PATHS)
+
+
 _MEMORY_TOML_TEMPLATES = {
-    "local": """\
+    "local": f"""\
 [memory]
 enabled = true
 mode = "semantic-provider"
@@ -2793,7 +3207,7 @@ provider = "vivary-local"
 [memory.privacy]
 respect_gitignore = true
 respect_vivary_private = true
-private_paths = ["USER.md", "MEMORY.md", "memory/**", "heartbeat-reports/**", ".strato/private/**"]
+private_paths = {_MEMORY_CURRENT_PRIVATE_PATHS_TOML}
 fail_closed = true
 
 [memory.local]
@@ -2801,7 +3215,7 @@ state_path = ".vivary/memory/local"
 allow_network = false
 require_explicit_index = true
 """,
-    "cognee": """\
+    "cognee": f"""\
 [memory]
 enabled = true
 mode = "semantic-provider"
@@ -2810,7 +3224,7 @@ provider = "cognee"
 [memory.privacy]
 respect_gitignore = true
 respect_vivary_private = true
-private_paths = ["USER.md", "MEMORY.md", "memory/**", "heartbeat-reports/**", ".strato/private/**"]
+private_paths = {_MEMORY_CURRENT_PRIVATE_PATHS_TOML}
 fail_closed = true
 
 [memory.cognee]
@@ -2821,6 +3235,69 @@ api_key_env = ""
 allow_without_api_key = false
 allow_telemetry = false
 """,
+}
+
+# The single owner of selected-template fields. Doctor validates presence and
+# types, then fail-closes the privacy fields; generated Cognee
+# `api_key_env = ""` and cloud placeholders remain valid declarations.
+_DECLARED_CONFIG_SCHEMAS = {
+    "storage": {
+        "embedded": {
+            "path": str,
+            "provider": str,
+        },
+        "cloud": {
+            "qdrant": {
+                "provider": str,
+                "url": str,
+                "api_key": str,
+                "collection": str,
+            },
+            "astra": {
+                "provider": str,
+                "endpoint": str,
+                "api_key": str,
+                "collection": str,
+            },
+        },
+    },
+    "memory": {
+        "root": {
+            "enabled": bool,
+            "provider": str,
+            "mode": str,
+        },
+        "privacy": {
+            "respect_gitignore": bool,
+            "respect_vivary_private": bool,
+            "private_paths": list,
+            "fail_closed": bool,
+        },
+        "providers": {
+            "vivary-local": (
+                "local",
+                {
+                    "state_path": str,
+                    "allow_network": bool,
+                    "require_explicit_index": bool,
+                },
+                {},
+            ),
+            "cognee": (
+                "cognee",
+                {
+                    "state_path": str,
+                    "allow_network": bool,
+                    "require_explicit_index": bool,
+                    "api_key_env": str,
+                },
+                {
+                    "allow_without_api_key": bool,
+                    "allow_telemetry": bool,
+                },
+            ),
+        },
+    },
 }
 
 

@@ -1,10 +1,12 @@
 """Tests for the create-vivary workspace scaffold."""
 
 import io
+import hashlib
 import importlib
 import json
 import os
 import sys
+import re
 import shutil
 import stat
 import subprocess
@@ -47,6 +49,122 @@ def run_doctor_json(target: Path, *args: str) -> tuple[int, dict]:
             str(ROOT),
         ])
     return rc, json.loads(buf.getvalue())
+
+
+def snapshot_workspace(root: Path) -> dict[str, tuple]:
+    """Capture every file's bytes and every entry's modification time."""
+    snapshot = {}
+    for path in sorted(root.rglob("*")):
+        rel = path.relative_to(root).as_posix()
+        stat_result = path.stat()
+        if path.is_dir():
+            snapshot[rel] = ("dir", stat_result.st_mtime_ns)
+        elif path.is_file():
+            snapshot[rel] = (
+                "file",
+                stat_result.st_mtime_ns,
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+            )
+    return snapshot
+
+def flatten_v01_modules(target: Path) -> None:
+    """Turn current generated module routers into the flat published v0.1 layout."""
+    modules = target / "modules"
+    for module_dir in sorted(path for path in modules.iterdir() if path.is_dir()):
+        (modules / f"{module_dir.name}.md").write_bytes(
+            (module_dir / "index.md").read_bytes()
+        )
+        shutil.rmtree(module_dir)
+    (modules / "index.md").unlink()
+
+
+PUBLISHED_PRIVACY_IGNORE_RULES = {
+    "v0.1.0": (
+        "USER.md",
+        "MEMORY.md",
+        "memory/*",
+        "!memory/.gitkeep",
+        ".strato/private/",
+    ),
+    "v0.2.0": (
+        "USER.md",
+        "MEMORY.md",
+        "memory/*",
+        "!memory/.gitkeep",
+        ".strato/private/",
+    ),
+    "v0.2.8": (
+        "USER.md",
+        "MEMORY.md",
+        "memory/*",
+        "!memory/.gitkeep",
+        "heartbeat-reports/*",
+        "!heartbeat-reports/.gitkeep",
+        ".strato/private/",
+    ),
+    "v0.3.1": (
+        "USER.md",
+        "MEMORY.md",
+        "memory/*",
+        "!memory/.gitkeep",
+        "heartbeat-reports/*",
+        "!heartbeat-reports/.gitkeep",
+        ".strato/private/",
+    ),
+}
+
+PUBLISHED_V031_MEMORY_TEMPLATES = {
+    "local": """\
+[memory]
+enabled = true
+mode = "semantic-provider"
+provider = "vivary-local"
+
+[memory.privacy]
+respect_gitignore = true
+respect_vivary_private = true
+private_paths = ["USER.md", "MEMORY.md", "memory/**", "heartbeat-reports/**"]
+fail_closed = true
+
+[memory.local]
+state_path = ".vivary/memory/local"
+allow_network = false
+require_explicit_index = true
+""",
+    "cognee": """\
+[memory]
+enabled = true
+mode = "semantic-provider"
+provider = "cognee"
+
+[memory.privacy]
+respect_gitignore = true
+respect_vivary_private = true
+private_paths = ["USER.md", "MEMORY.md", "memory/**", "heartbeat-reports/**"]
+fail_closed = true
+
+[memory.cognee]
+state_path = ".vivary/memory/cognee"
+allow_network = false
+require_explicit_index = true
+api_key_env = ""
+""",
+}
+
+
+def apply_published_workspace_fixture(target: Path, version: str) -> None:
+    """Apply the module and privacy profile emitted by a published release."""
+    rules = PUBLISHED_PRIVACY_IGNORE_RULES[version]
+    (target / ".gitignore").write_text("\n".join((*rules, "")), encoding="utf-8")
+    if version != "v0.1.0":
+        return
+
+    modules = target / "modules"
+    for module_dir in sorted(path for path in modules.iterdir() if path.is_dir()):
+        legacy_module = modules / f"{module_dir.name}.md"
+        legacy_module.write_bytes((module_dir / "index.md").read_bytes())
+        shutil.rmtree(module_dir)
+    (modules / "index.md").unlink()
 
 
 class CreateVivaryTests(unittest.TestCase):
@@ -650,6 +768,404 @@ class CreateVivaryTests(unittest.TestCase):
         self.assertEqual(report["memory"]["status"], "misconfigured")
         self.assertIn("memory.enabled", report["memory"]["detail"])
 
+    def test_declared_config_schema_matches_selected_generated_template_fields(self):
+        import tomllib
+
+        storage_cases = (
+            ("embedded", "embedded", None),
+            ("cloud-qdrant", "cloud", "qdrant"),
+            ("cloud-astra", "cloud", "astra"),
+        )
+        for template_name, backend, provider in storage_cases:
+            with self.subTest(storage_template=template_name):
+                storage = tomllib.loads(
+                    create_vivary._STORAGE_TOML_TEMPLATES[template_name]
+                )["storage"]
+                section = storage[backend]
+                schema = create_vivary._DECLARED_CONFIG_SCHEMAS["storage"][backend]
+                if provider is not None:
+                    schema = schema[provider]
+                self.assertEqual(set(section), set(schema))
+                self.assertEqual(
+                    {key for key, value in storage.items() if isinstance(value, dict)},
+                    {backend},
+                )
+
+        for template_name, provider in (("local", "vivary-local"), ("cognee", "cognee")):
+            with self.subTest(memory_template=template_name):
+                memory = tomllib.loads(
+                    create_vivary._MEMORY_TOML_TEMPLATES[template_name]
+                )["memory"]
+                schemas = create_vivary._DECLARED_CONFIG_SCHEMAS["memory"]
+                section_name, provider_schema, optional_schema = schemas["providers"][
+                    provider
+                ]
+                self.assertEqual(
+                    {key for key, value in memory.items() if not isinstance(value, dict)},
+                    set(schemas["root"]),
+                )
+                self.assertEqual(
+                    {key for key, value in memory.items() if isinstance(value, dict)},
+                    {"privacy", section_name},
+                )
+                self.assertEqual(set(memory["privacy"]), set(schemas["privacy"]))
+                self.assertEqual(
+                    set(memory[section_name]),
+                    set(provider_schema) | set(optional_schema),
+                )
+
+    def test_doctor_accepts_published_v031_memory_profiles_without_writing(self):
+        for memory_mode, published_config in PUBLISHED_V031_MEMORY_TEMPLATES.items():
+            with self.subTest(memory=memory_mode):
+                with temp_workspace() as td:
+                    target = Path(td) / f"published-v031-{memory_mode}"
+                    create_vivary.scaffold_workspace(
+                        target,
+                        preset="writing",
+                        memory=memory_mode,
+                        force=False,
+                        repo_root=ROOT,
+                    )
+                    apply_published_workspace_fixture(target, "v0.3.1")
+                    (target / ".vivary" / "memory.toml").write_text(
+                        published_config, encoding="utf-8"
+                    )
+                    before = snapshot_workspace(target)
+
+                    report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+                    self.assertTrue(report["ok"], report)
+                    self.assertNotEqual(
+                        report["memory"]["status"], "privacy-failed"
+                    )
+                    self.assertIn(
+                        "recommended privacy ignore missing: *.vivary-tmp; "
+                        "add it to .gitignore",
+                        report["warnings"],
+                    )
+                    self.assertNotIn(
+                        "privacy ignore missing: *.vivary-tmp", report["errors"]
+                    )
+                    self.assertEqual(
+                        report["compatibility"]["declared_capability_problems"], []
+                    )
+                    self.assertEqual(snapshot_workspace(target), before)
+
+    def test_doctor_rejects_missing_or_weakened_memory_privacy_fields(self):
+        privacy_fields = create_vivary._DECLARED_CONFIG_SCHEMAS["memory"]["privacy"]
+        for memory_mode in ("local", "cognee"):
+            with temp_workspace() as td:
+                target = Path(td) / f"{memory_mode}-privacy"
+                create_vivary.scaffold_workspace(
+                    target,
+                    preset="writing",
+                    memory=memory_mode,
+                    force=False,
+                    repo_root=ROOT,
+                )
+                config = target / ".vivary" / "memory.toml"
+                original = config.read_text(encoding="utf-8")
+
+                with self.subTest(memory=memory_mode, case="missing-fields"):
+                    stripped = original
+                    for field in privacy_fields:
+                        stripped = re.sub(
+                            rf"(?m)^{re.escape(field)} = .*\n", "", stripped
+                        )
+                    config.write_text(stripped, encoding="utf-8")
+                    report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+                    self.assertFalse(report["ok"], report)
+                    for field in privacy_fields:
+                        self.assertIn(
+                            "declared capability memory missing required "
+                            f"memory.privacy.{field}",
+                            report["compatibility"]["declared_capability_problems"],
+                        )
+
+                with self.subTest(memory=memory_mode, case="respect_gitignore=false"):
+                    config.write_text(
+                        original.replace(
+                            "respect_gitignore = true", "respect_gitignore = false"
+                        ),
+                        encoding="utf-8",
+                    )
+                    report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+                    expected = (
+                        "declared capability memory requires "
+                        "memory.privacy.respect_gitignore = true"
+                    )
+                    self.assertFalse(report["ok"], report)
+                    self.assertIn(
+                        expected,
+                        report["compatibility"]["declared_capability_problems"],
+                    )
+
+                with self.subTest(memory=memory_mode, case="private_paths=[]"):
+                    config.write_text(
+                        re.sub(
+                            r"(?m)^private_paths = .*$",
+                            "private_paths = []",
+                            original,
+                        ),
+                        encoding="utf-8",
+                    )
+                    report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+                    expected = (
+                        "declared capability memory requires "
+                        "memory.privacy.private_paths to include: "
+                        + ", ".join(create_vivary._MEMORY_PUBLISHED_PRIVATE_PATHS)
+                    )
+                    self.assertFalse(report["ok"], report)
+                    self.assertIn(
+                        expected,
+                        report["compatibility"]["declared_capability_problems"],
+                    )
+
+                with self.subTest(memory=memory_mode, case="private_paths=non-strings"):
+                    config.write_text(
+                        re.sub(
+                            r"(?m)^private_paths = .*$",
+                            'private_paths = [["USER.md"]]',
+                            original,
+                        ),
+                        encoding="utf-8",
+                    )
+                    gitignore = target / ".gitignore"
+                    gitignore.write_text(
+                        gitignore.read_text(encoding="utf-8").replace(
+                            "*.vivary-tmp\n", ""
+                        ),
+                        encoding="utf-8",
+                    )
+                    report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+                    self.assertFalse(report["ok"], report)
+                    self.assertIn(
+                        "declared capability memory requires "
+                        "memory.privacy.private_paths to contain only strings",
+                        report["compatibility"]["declared_capability_problems"],
+                    )
+                    self.assertIn(
+                        "privacy ignore missing: *.vivary-tmp", report["errors"]
+                    )
+
+    def test_declared_memory_keeps_all_gitignore_privacy_rules_strict(self):
+        with temp_workspace() as td:
+            target = Path(td) / "memory-privacy-rules"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="writing",
+                memory="local",
+                force=False,
+                repo_root=ROOT,
+            )
+            memory_config = target / ".vivary" / "memory.toml"
+            memory_config.write_text(
+                memory_config.read_text(encoding="utf-8").replace(
+                    '".strato/private/**"', r"'.strato\private\**'"
+                ),
+                encoding="utf-8",
+            )
+            gitignore = target / ".gitignore"
+            gitignore.write_text(
+                gitignore.read_text(encoding="utf-8")
+                .replace("heartbeat-reports/*\n", "")
+                .replace("*.vivary-tmp\n", ""),
+                encoding="utf-8",
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertFalse(report["ok"], report)
+            self.assertEqual(report["memory"]["status"], "privacy-failed")
+            self.assertIn(
+                "privacy ignore missing: heartbeat-reports/*", report["errors"]
+            )
+            self.assertIn("privacy ignore missing: *.vivary-tmp", report["errors"])
+
+    def test_doctor_reports_every_missing_selected_template_field(self):
+        cases = (
+            ("storage", "embedded", "lancedb", "path"),
+            ("storage", "embedded", "lancedb", "provider"),
+            ("storage", "cloud", "qdrant", "provider"),
+            ("storage", "cloud", "qdrant", "url"),
+            ("storage", "cloud", "qdrant", "api_key"),
+            ("storage", "cloud", "qdrant", "collection"),
+            ("storage", "cloud", "astra", "provider"),
+            ("storage", "cloud", "astra", "endpoint"),
+            ("storage", "cloud", "astra", "api_key"),
+            ("storage", "cloud", "astra", "collection"),
+            ("memory", "local", None, "state_path"),
+            ("memory", "local", None, "allow_network"),
+            ("memory", "local", None, "require_explicit_index"),
+            ("memory", "cognee", None, "state_path"),
+            ("memory", "cognee", None, "allow_network"),
+            ("memory", "cognee", None, "require_explicit_index"),
+            ("memory", "cognee", None, "api_key_env"),
+            ("memory", "cognee", None, "allow_without_api_key"),
+            ("memory", "cognee", None, "allow_telemetry"),
+        )
+        for capability, mode, provider, field in cases:
+            with self.subTest(capability=capability, mode=mode, provider=provider, field=field):
+                with temp_workspace() as td:
+                    target = Path(td) / f"{capability}-{mode}-{provider or 'default'}-{field}"
+                    if capability == "storage":
+                        create_vivary.scaffold_workspace(
+                            target,
+                            preset="writing",
+                            storage=mode,
+                            provider=provider or "lancedb",
+                            force=False,
+                            repo_root=ROOT,
+                        )
+                        config = target / ".vivary" / "storage.toml"
+                        expected = (
+                            f"declared capability storage:{mode} missing required "
+                            f"storage.{mode}.{field}"
+                        )
+                    else:
+                        create_vivary.scaffold_workspace(
+                            target,
+                            preset="writing",
+                            memory=mode,
+                            force=False,
+                            repo_root=ROOT,
+                        )
+                        config = target / ".vivary" / "memory.toml"
+                        memory_capability = "local" if mode == "local" else "cognee"
+                        expected = (
+                            f"declared capability memory:{memory_capability} missing required "
+                            f"memory.{mode}.{field}"
+                        )
+
+                    healthy = create_vivary.doctor_workspace(target, repo_root=ROOT)
+                    self.assertEqual(
+                        healthy["compatibility"]["declared_capability_problems"], []
+                    )
+                    text = config.read_text(encoding="utf-8")
+                    stripped = re.sub(
+                        rf"(?m)^{re.escape(field)} = .*\n", "", text
+                    )
+                    self.assertNotEqual(stripped, text)
+                    config.write_text(stripped, encoding="utf-8")
+
+                    report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+                    self.assertFalse(report["ok"], report)
+                    self.assertIn(expected, report["compatibility"]["declared_capability_problems"])
+                    self.assertIn(expected, report["errors"])
+
+    def test_doctor_rejects_empty_declared_embedded_fields(self):
+        for field in ("path", "provider"):
+            with self.subTest(field=field):
+                with temp_workspace() as td:
+                    target = Path(td) / f"empty-embedded-{field}"
+                    create_vivary.scaffold_workspace(
+                        target,
+                        preset="writing",
+                        storage="embedded",
+                        provider="lancedb",
+                        force=False,
+                        repo_root=ROOT,
+                    )
+                    config = target / ".vivary" / "storage.toml"
+                    text = config.read_text(encoding="utf-8")
+                    text = re.sub(
+                        rf'(?m)^{re.escape(field)} = ".*"$',
+                        f'{field} = ""',
+                        text,
+                    )
+                    config.write_text(text, encoding="utf-8")
+
+                    report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+                    problem = (
+                        "declared capability storage:embedded missing required "
+                        f"storage.embedded.{field}"
+                    )
+                    self.assertFalse(report["ok"], report)
+                    self.assertIn(
+                        problem,
+                        report["compatibility"]["declared_capability_problems"],
+                    )
+                    self.assertIn(problem, report["errors"])
+
+    def test_doctor_rejects_unknown_declared_cloud_provider(self):
+        with temp_workspace() as td:
+            target = Path(td) / "unknown-cloud-provider"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="writing",
+                storage="cloud",
+                provider="qdrant",
+                force=False,
+                repo_root=ROOT,
+            )
+            config = target / ".vivary" / "storage.toml"
+            config.write_text(
+                config.read_text(encoding="utf-8").replace(
+                    'provider = "qdrant"', 'provider = "unknown"', 1
+                ),
+                encoding="utf-8",
+            )
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            problem = "declared capability storage:cloud has unknown provider: 'unknown'"
+            self.assertFalse(report["ok"], report)
+            self.assertIn(problem, report["compatibility"]["declared_capability_problems"])
+            self.assertIn(problem, report["errors"])
+
+    def test_doctor_reports_enabled_none_memory_after_graph_observation(self):
+        with temp_workspace() as td:
+            target = Path(td) / "none-memory"
+            create_vivary.scaffold_workspace(
+                target, preset="writing", force=False, repo_root=ROOT
+            )
+            vivary_dir = target / ".vivary"
+            vivary_dir.mkdir(exist_ok=True)
+            (vivary_dir / "memory.toml").write_text(
+                "[memory]\n"
+                "enabled = true\n"
+                'mode = "semantic-provider"\n'
+                'provider = "none"\n',
+                encoding="utf-8",
+            )
+            before = snapshot_workspace(target)
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertFalse(report["ok"], report)
+            self.assertEqual(report["memory"]["status"], "misconfigured")
+            self.assertIn(
+                "semantic memory misconfigured: memory.provider is required when "
+                "memory.enabled is true",
+                report["errors"],
+            )
+            self.assertGreater(report["graph"]["nodes"], 0)
+            self.assertGreater(report["graph"]["edges"], 0)
+            self.assertEqual(snapshot_workspace(target), before)
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                rc = create_vivary.main(
+                    [
+                        "doctor",
+                        str(target),
+                        "--trend",
+                        "--json",
+                        "--repo-root",
+                        str(ROOT),
+                    ]
+                )
+            trend_report = json.loads(output.getvalue())
+            state = json.loads(
+                (target / ".vivary" / "doctor-state.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(rc, 1)
+            self.assertGreater(trend_report["graph"]["nodes"], 0)
+            self.assertEqual(
+                state["metrics"]["graph_nodes"], trend_report["graph"]["nodes"]
+            )
+
     def test_doctor_accepts_bom_prefixed_memory_config(self):
         with temp_workspace() as td:
             target = Path(td) / "bom-memory"
@@ -1207,12 +1723,304 @@ class CreateVivaryTests(unittest.TestCase):
                 target, preset="writing", force=False, repo_root=ROOT
             )
 
+            before = snapshot_workspace(target)
             report = create_vivary.doctor_workspace(target, repo_root=ROOT)
 
             self.assertTrue(report["ok"], report)
             self.assertEqual(report["errors"], [])
             self.assertEqual(report["graph"]["broken"], 0)
             self.assertGreaterEqual(report["graph"]["nodes"], 9)
+            self.assertEqual(
+                report["compatibility"],
+                {
+                    "schema_version": 1,
+                    "workspace_contract": "indexed-v0.2+",
+                    "baseline_missing": [],
+                    "contract_missing": [],
+                    "declared_capability_problems": [],
+                    "recommended_missing": [],
+                    "recommended_upgrade": None,
+                },
+            )
+            self.assertEqual(snapshot_workspace(target), before)
+
+    def test_doctor_baseline_is_the_literal_v01_common_contract(self):
+        expected = (
+            "README.md",
+            "AGENTS.md",
+            "SOUL.md",
+            "STRATO.md",
+            "STATE.md",
+            "USER.md",
+            "MEMORY.md",
+            "bug-risk-playbook.md",
+            "tropo.toml",
+            ".gitignore",
+            "templates/AGENTS.md",
+            ".claude/skills/strato/SKILL.md",
+            ".claude/skills/loops/SKILL.md",
+            ".agents/skills/strato/SKILL.md",
+            ".agents/skills/loops/SKILL.md",
+        )
+        self.assertEqual(create_vivary.BASELINE_WORKSPACE_FILES, expected)
+        self.assertEqual(create_vivary.REQUIRED_WORKSPACE_FILES, expected)
+        self.assertEqual(len(create_vivary.BASELINE_WORKSPACE_FILES), 15)
+        self.assertIn(
+            "modules/index.md", create_vivary.REPAIR_MODULE_CONTRACT_MARKERS
+        )
+        self.assertNotIn("modules/index.md", create_vivary.BASELINE_WORKSPACE_FILES)
+
+    def test_doctor_keeps_every_v01_common_path_strict(self):
+        with temp_workspace() as td:
+            target = Path(td) / "common-contract"
+            create_vivary.scaffold_workspace(
+                target, preset="writing", force=False, repo_root=ROOT
+            )
+            for rel in create_vivary.BASELINE_WORKSPACE_FILES:
+                with self.subTest(path=rel):
+                    path = target / rel
+                    original = path.read_bytes()
+                    path.unlink()
+                    report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+                    self.assertFalse(report["ok"], report)
+                    self.assertIn(rel, report["compatibility"]["baseline_missing"])
+                    self.assertIn(f"missing required file: {rel}", report["errors"])
+                    path.write_bytes(original)
+
+    def test_doctor_accepts_published_v01_workspace_without_writing(self):
+        with temp_workspace() as td:
+            target = Path(td) / "legacy-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="writing", force=False, repo_root=ROOT
+            )
+            apply_published_workspace_fixture(target, "v0.1.0")
+            before = snapshot_workspace(target)
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            recommendations = [
+                "modules/index.md",
+                "modules/agent-workspace/index.md",
+            ]
+            guidance = (
+                "run create-vivary adopt <workspace> --preset writing "
+                "(dry-run: omit --yes) to review the indexed v0.2+ module contract"
+            )
+            self.assertTrue(report["ok"], report)
+            self.assertEqual(report["errors"], [])
+            self.assertEqual(report["compatibility"]["schema_version"], 1)
+            self.assertEqual(report["compatibility"]["workspace_contract"], "legacy-v0.1")
+            self.assertEqual(report["compatibility"]["baseline_missing"], [])
+            self.assertEqual(report["compatibility"]["contract_missing"], [])
+            self.assertEqual(report["compatibility"]["declared_capability_problems"], [])
+            self.assertEqual(report["compatibility"]["recommended_missing"], recommendations)
+            self.assertEqual(report["compatibility"]["recommended_upgrade"], guidance)
+            self.assertGreater(report["graph"]["nodes"], 0)
+            self.assertGreater(report["graph"]["edges"], 0)
+            self.assertEqual(report["graph"]["broken"], 0)
+            for rel in recommendations:
+                self.assertIn(f"recommended workspace file missing: {rel}", report["warnings"])
+            self.assertIn(guidance, report["warnings"])
+            for pattern in ("heartbeat-reports/*", "*.vivary-tmp"):
+                self.assertIn(
+                    f"recommended privacy ignore missing: {pattern}; "
+                    "add it to .gitignore",
+                    report["warnings"],
+                )
+
+            json_rc, json_report = run_doctor_json(target)
+            self.assertEqual(json_rc, 0)
+            self.assertEqual(json_report["ok"], report["ok"])
+            self.assertEqual(json_report["errors"], report["errors"])
+            self.assertEqual(json_report["warnings"], report["warnings"])
+            self.assertEqual(json_report["compatibility"], report["compatibility"])
+
+            human = io.StringIO()
+            with redirect_stdout(human):
+                human_rc = create_vivary.main(
+                    ["doctor", str(target), "--repo-root", str(ROOT)]
+                )
+            self.assertEqual(human_rc, json_rc)
+            self.assertIn("warning: recommended workspace file missing: modules/index.md", human.getvalue())
+            self.assertIn(f"warning: {guidance}", human.getvalue())
+            self.assertEqual(snapshot_workspace(target), before)
+
+    def test_doctor_accepts_other_published_privacy_profiles_without_writing(self):
+        cases = (
+            ("v0.2.0", ("heartbeat-reports/*", "*.vivary-tmp")),
+            ("v0.2.8", ("*.vivary-tmp",)),
+            ("v0.3.1", ("*.vivary-tmp",)),
+        )
+        for version, privacy_recommendations in cases:
+            with self.subTest(version=version):
+                with temp_workspace() as td:
+                    target = Path(td) / f"published-{version}"
+                    create_vivary.scaffold_workspace(
+                        target, preset="writing", force=False, repo_root=ROOT
+                    )
+                    apply_published_workspace_fixture(target, version)
+                    before = snapshot_workspace(target)
+
+                    report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+                    self.assertTrue(report["ok"], report)
+                    self.assertEqual(report["errors"], [])
+                    self.assertEqual(
+                        report["compatibility"]["workspace_contract"],
+                        "indexed-v0.2+",
+                    )
+                    for pattern in privacy_recommendations:
+                        self.assertIn(
+                            f"recommended privacy ignore missing: {pattern}; "
+                            "add it to .gitignore",
+                            report["warnings"],
+                        )
+
+                    json_rc, json_report = run_doctor_json(target)
+                    self.assertEqual(json_rc, 0)
+                    self.assertEqual(json_report["ok"], report["ok"])
+                    self.assertEqual(json_report["errors"], report["errors"])
+                    self.assertEqual(json_report["warnings"], report["warnings"])
+
+                    human = io.StringIO()
+                    with redirect_stdout(human):
+                        human_rc = create_vivary.main(
+                            ["doctor", str(target), "--repo-root", str(ROOT)]
+                        )
+                    self.assertEqual(human_rc, json_rc)
+                    for pattern in privacy_recommendations:
+                        self.assertIn(
+                            f"warning: recommended privacy ignore missing: {pattern}; "
+                            "add it to .gitignore",
+                            human.getvalue(),
+                        )
+                    self.assertEqual(snapshot_workspace(target), before)
+
+    def test_doctor_repair_recognizes_legacy_v01_module_contract(self):
+        with temp_workspace() as td:
+            target = Path(td) / "legacy-repair"
+            create_vivary.scaffold_workspace(
+                target, preset="writing", force=False, repo_root=ROOT
+            )
+            apply_published_workspace_fixture(target, "v0.1.0")
+            gitignore = target / ".gitignore"
+            gitignore.write_text(
+                gitignore.read_text(encoding="utf-8").replace("USER.md\n", ""),
+                encoding="utf-8",
+            )
+
+            report = create_vivary.doctor_repair_workspace(
+                target, repo_root=ROOT, yes=False
+            )
+
+            actions = report["repair"]["actions"]
+            self.assertFalse(any(action["kind"] == "workspace" for action in actions))
+            self.assertTrue(
+                any(
+                    action["kind"] == "gitignore"
+                    and action["status"] == "safe"
+                    and action["path"] == ".gitignore"
+                    for action in actions
+                ),
+                actions,
+            )
+
+    def test_doctor_rejects_partial_indexed_workspace_contract(self):
+        with temp_workspace() as td:
+            target = Path(td) / "partial-indexed-workspace"
+            create_vivary.scaffold_workspace(
+                target, preset="writing", force=False, repo_root=ROOT
+            )
+            (target / "modules" / "index.md").unlink()
+            before = snapshot_workspace(target)
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertFalse(report["ok"], report)
+            self.assertEqual(report["compatibility"]["workspace_contract"], "indexed-v0.2+")
+            self.assertEqual(
+                report["compatibility"]["contract_missing"], ["modules/index.md"]
+            )
+            self.assertIn(
+                "missing required indexed contract file: modules/index.md",
+                report["errors"],
+            )
+            self.assertEqual(snapshot_workspace(target), before)
+
+    def test_doctor_accepts_adopted_brownfield_workspace_without_writing(self):
+        with temp_workspace() as td:
+            target = Path(td) / "brownfield-workspace"
+            target.mkdir()
+            (target / "README.md").write_text("# Existing project\n", encoding="utf-8")
+            (target / "CLAUDE.md").write_text("# Existing guidance\n", encoding="utf-8")
+            for index in range(6):
+                docs_path = target / "docs" / f"topic-{index}.md"
+                docs_path.parent.mkdir(exist_ok=True)
+                docs_path.write_text(f"# Topic {index}\n", encoding="utf-8")
+            (target / "src").mkdir()
+            (target / "src" / "main.py").write_text("print('hello')\n", encoding="utf-8")
+            (target / "src" / "util.py").write_text(
+                "def helper():\n    return 1\n", encoding="utf-8"
+            )
+            adopted = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
+            self.assertTrue(adopted["doctor"]["ok"], adopted["doctor"])
+            before = snapshot_workspace(target)
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            self.assertTrue(report["ok"], report)
+            self.assertEqual(report["compatibility"]["schema_version"], 1)
+            self.assertEqual(report["compatibility"]["workspace_contract"], "indexed-v0.2+")
+            self.assertEqual(report["compatibility"]["baseline_missing"], [])
+            self.assertEqual(report["compatibility"]["contract_missing"], [])
+            self.assertEqual(report["compatibility"]["declared_capability_problems"], [])
+            self.assertEqual(report["compatibility"]["recommended_missing"], [])
+            self.assertEqual(snapshot_workspace(target), before)
+
+    def test_doctor_rejects_corrupt_baseline_and_declared_storage(self):
+        with temp_workspace() as td:
+            target = Path(td) / "corrupt-workspace"
+            create_vivary.scaffold_workspace(
+                target,
+                preset="writing",
+                force=False,
+                storage="embedded",
+                provider="lancedb",
+                repo_root=ROOT,
+            )
+            (target / "AGENTS.md").unlink()
+            (target / ".vivary" / "storage.toml").write_text(
+                "[storage]\nbackend = \"embedded\"\n", encoding="utf-8"
+            )
+            before = snapshot_workspace(target)
+
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+
+            problem = (
+                "declared capability storage:embedded missing required "
+                "[storage.embedded] configuration"
+            )
+            self.assertFalse(report["ok"])
+            self.assertIn("AGENTS.md", report["compatibility"]["baseline_missing"])
+            self.assertIn(problem, report["compatibility"]["declared_capability_problems"])
+            self.assertIn("missing required file: AGENTS.md", report["errors"])
+            self.assertIn(problem, report["errors"])
+
+            json_rc, json_report = run_doctor_json(target)
+            self.assertEqual(json_rc, 1)
+            self.assertEqual(json_report["ok"], report["ok"])
+            self.assertEqual(json_report["errors"], report["errors"])
+            self.assertEqual(json_report["warnings"], report["warnings"])
+
+            human = io.StringIO()
+            with redirect_stdout(human):
+                human_rc = create_vivary.main(
+                    ["doctor", str(target), "--repo-root", str(ROOT)]
+                )
+            self.assertEqual(human_rc, json_rc)
+            for error in report["errors"]:
+                self.assertIn(f"error: {error}", human.getvalue())
+            self.assertEqual(snapshot_workspace(target), before)
 
     def test_doctor_rejects_commented_or_negated_privacy_ignores(self):
         with temp_workspace() as td:
@@ -1236,7 +2044,7 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertIn("privacy ignore missing: USER.md", report["errors"])
             self.assertIn("privacy ignore missing: MEMORY.md", report["errors"])
             self.assertIn("privacy ignore missing: memory/*", report["errors"])
-            self.assertIn("privacy ignore missing: heartbeat-reports/*", report["errors"])
+            self.assertIn("recommended privacy ignore missing: heartbeat-reports/*; add it to .gitignore", report["warnings"])
             self.assertIn("privacy ignore missing: .strato/private/", report["errors"])
 
     def test_doctor_accepts_root_privacy_ignores_with_gitkeep_exception(self):
@@ -1287,7 +2095,7 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertIn("privacy ignore missing: USER.md", report["errors"])
             self.assertIn("privacy ignore missing: MEMORY.md", report["errors"])
             self.assertIn("privacy ignore missing: memory/*", report["errors"])
-            self.assertIn("privacy ignore missing: heartbeat-reports/*", report["errors"])
+            self.assertIn("recommended privacy ignore missing: heartbeat-reports/*; add it to .gitignore", report["warnings"])
 
     def test_doctor_rejects_indented_privacy_ignores(self):
         with temp_workspace() as td:
@@ -1310,7 +2118,7 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertIn("privacy ignore missing: USER.md", report["errors"])
             self.assertIn("privacy ignore missing: MEMORY.md", report["errors"])
             self.assertIn("privacy ignore missing: memory/*", report["errors"])
-            self.assertIn("privacy ignore missing: heartbeat-reports/*", report["errors"])
+            self.assertIn("recommended privacy ignore missing: heartbeat-reports/*; add it to .gitignore", report["warnings"])
 
     def test_doctor_rejects_nested_memory_gitignore_negation(self):
         with temp_workspace() as td:
@@ -1420,18 +2228,18 @@ class CreateVivaryTests(unittest.TestCase):
                 report["errors"],
             )
 
-    def test_doctor_reports_missing_contract_file(self):
+    def test_doctor_reports_missing_baseline_contract_file(self):
         with temp_workspace() as td:
             target = Path(td) / "agent-workspace"
             create_vivary.scaffold_workspace(
                 target, preset="coding", force=False, repo_root=ROOT
             )
-            (target / "STATE.md").unlink()
+            (target / "STRATO.md").unlink()
 
             report = create_vivary.doctor_workspace(target, repo_root=ROOT)
 
             self.assertFalse(report["ok"])
-            self.assertIn("missing required file: STATE.md", report["errors"])
+            self.assertIn("missing required file: STRATO.md", report["errors"])
 
     def test_cli_doctor_exit_codes(self):
         with temp_workspace() as td:
@@ -1549,6 +2357,14 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertEqual(len(actions), 1)
             self.assertEqual(actions[0]["kind"], "workspace")
             self.assertEqual(actions[0]["status"], "manual")
+            self.assertEqual(
+                actions[0]["details"]["required_markers"],
+                list(create_vivary.REPAIR_WORKSPACE_MARKERS),
+            )
+            self.assertEqual(
+                actions[0]["details"]["module_contract_any_of"],
+                list(create_vivary.REPAIR_MODULE_CONTRACT_MARKERS),
+            )
             self.assertIsNone(out["trend"])
             self.assertFalse((target / ".gitignore").exists())
             self.assertFalse((target / "USER.md").exists())
