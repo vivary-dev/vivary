@@ -18,10 +18,10 @@ ADAPTATION - holder-bound initiation: a handoff is refused unless
 translated path validated only the recipient and let any actor transfer
 another actor's claim.
 
-ADAPTATION - complete receipt binding: handoffs compare both capsule ID and
-fingerprint, and require receipt, capsule, and requested workspace revisions
-to agree. The translated path checked only capsule fingerprint and the
-receipt-to-requested workspace pair.
+ADAPTATION - complete receipt binding: a receipt must pass its fingerprint,
+identifier integrity, and non-empty capsule/workspace binding checks. Handoffs compare both capsule ID and fingerprint, and require the receipt,
+capsule, and requested workspace revisions to agree. The translated path checked
+only capsule fingerprint and the receipt-to-requested workspace pair.
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ from vivary_core.capsule_compile import CAPSULE_SCHEMA
 from vivary_core.control_actors import AUTHORITY_CLASS, can_hold_authority
 from vivary_core.control_reason_codes import HANDOFF_DECISION, HANDOFF_REASON
 from vivary_core.receipt import RECEIPT_SCHEMA
+from vivary_core.verify_receipt import verify_receipt_integrity
 
 __all__ = [
     "HANDOFF_DECISION",
@@ -45,9 +46,12 @@ def _is_capsule_shape(capsule):
         and isinstance(capsule, dict)
         and capsule.get("schema") == CAPSULE_SCHEMA
         and isinstance(capsule.get("capsule_id"), str)
+        and len(capsule["capsule_id"]) > 0
         and isinstance(capsule.get("fingerprint"), str)
-        and bool(capsule.get("workspace"))
-        and isinstance((capsule.get("workspace") or {}).get("fingerprint"), str)
+        and len(capsule["fingerprint"]) > 0
+        and isinstance(capsule.get("workspace"), dict)
+        and isinstance(capsule["workspace"].get("fingerprint"), str)
+        and len(capsule["workspace"]["fingerprint"]) > 0
     )
 
 
@@ -58,10 +62,11 @@ def _is_receipt_shape(receipt):
         and receipt.get("schema") == RECEIPT_SCHEMA
         and isinstance(receipt.get("receipt_id"), str)
         and isinstance(receipt.get("fingerprint"), str)
-        and bool(receipt.get("capsule"))
-        and isinstance((receipt.get("capsule") or {}).get("fingerprint"), str)
-        and bool(receipt.get("workspace"))
-        and isinstance((receipt.get("workspace") or {}).get("fingerprint"), str)
+        and isinstance(receipt.get("capsule"), dict)
+        and isinstance(receipt["capsule"].get("fingerprint"), str)
+        and isinstance(receipt.get("workspace"), dict)
+        and isinstance(receipt["workspace"].get("fingerprint"), str)
+        and verify_receipt_integrity(receipt=receipt)["outcome"] == "verified"
     )
 
 

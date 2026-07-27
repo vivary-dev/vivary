@@ -275,25 +275,32 @@ def test_a_malformed_capsule_binding_is_insufficient_without_raising(receipt, ma
     assert verdict["reason_codes"] == [REASON_CODES["CAPSULE_BINDING_MISMATCH"]]
 
 
-@pytest.mark.parametrize("workspace_fingerprint", [None, ""])
-def test_missing_or_empty_workspace_fingerprints_never_bind_a_receipt_to_a_capsule(
-    capsule, receipt, workspace_fingerprint
-):
-    if workspace_fingerprint is None:
-        unbound_receipt = {key: value for key, value in receipt.items() if key != "workspace"}
-        unbound_capsule = {key: value for key, value in capsule.items() if key != "workspace"}
+@pytest.mark.parametrize(
+    ("container", "field", "value"),
+    [
+        ("receipt", "capsule", None),
+        ("receipt", "workspace", None),
+        ("capsule", "id", ""),
+        ("capsule", "fingerprint", ""),
+        ("workspace", "fingerprint", ""),
+    ],
+)
+def test_missing_or_empty_receipt_bindings_use_the_missing_binding_reason(receipt, container, field, value):
+    if container == "receipt":
+        unbound_receipt = {key: item for key, item in receipt.items() if key != field}
     else:
-        unbound_receipt = {**receipt, "workspace": {"fingerprint": workspace_fingerprint}}
-        unbound_capsule = {**capsule, "workspace": {"fingerprint": workspace_fingerprint}}
+        unbound_receipt = {**receipt, container: {**receipt[container], field: value}}
     receipt_body = {
         key: value for key, value in unbound_receipt.items() if key not in ("receipt_id", "fingerprint")
     }
     unbound_receipt["fingerprint"] = fingerprint(receipt_body)
 
-    verdict = verify_receipt_integrity(receipt=unbound_receipt, capsule=unbound_capsule)
+    verdict = verify_receipt_integrity(receipt=unbound_receipt)
 
     assert verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
-    assert verdict["reason_codes"] == [REASON_CODES["CAPSULE_BINDING_MISMATCH"]]
+    assert verdict["reason_codes"] == ["missing_binding"]
+    assert REASON_CODES["MISSING_BINDING"] == verdict["reason_codes"][0]
+
 
 
 def test_receipt_verification_is_deterministic(capsule, receipt):
@@ -490,6 +497,88 @@ def test_present_malformed_gate_constraints_are_insufficient_not_sufficient(caps
     assert verdict["gate"] == "ci"
     assert verdict["capsule"] == {"id": capsule["capsule_id"], "fingerprint": capsule["fingerprint"]}
     assert verdict["receipt_id"] == receipt["receipt_id"]
+
+
+@pytest.mark.parametrize(
+    "claim_requirement",
+    [{}, {"require_claims_verified": None}],
+)
+def test_null_claim_verification_requirement_is_equivalent_to_its_absence(capsule, claim_requirement):
+    verdict = evaluate_gate_sufficiency(gate={"name": "ci", **claim_requirement}, capsule=capsule)
+
+    assert verdict["outcome"] == OUTCOMES["SUFFICIENT"]
+    assert verdict["reason_codes"] == []
+    assert verdict["claims_verified"] is None
+    assert verdict["receipt_outcome"] is None
+
+@pytest.mark.parametrize("require_claims_verified", [0, 1, "false", [], {}])
+def test_claim_verification_constraint_requires_a_boolean(require_claims_verified):
+    capsule = {
+        "schema": "vivary.task-capsule/v0",
+        "capsule_id": "capsule_test",
+        "fingerprint": "sha256:capsule",
+        "workspace": {"fingerprint": "sha256:workspace"},
+        "claims": [],
+        "conflicts": [],
+        "unknowns": [],
+    }
+    verdict = evaluate_gate_sufficiency(
+        gate={"name": "ci", "require_claims_verified": require_claims_verified},
+        capsule=capsule,
+    )
+
+    assert verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
+    assert verdict["reason_codes"] == [REASON_CODES["MALFORMED_GATE"]]
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    ["capsule_id", "fingerprint", "workspace", "workspace_fingerprint"],
+)
+def test_capsule_identity_and_workspace_binding_are_required(missing_field):
+    capsule = {
+        "schema": "vivary.task-capsule/v0",
+        "capsule_id": "capsule_test",
+        "fingerprint": "sha256:capsule",
+        "workspace": {"fingerprint": "sha256:workspace"},
+        "claims": [],
+        "conflicts": [],
+        "unknowns": [],
+    }
+    if missing_field == "workspace_fingerprint":
+        capsule["workspace"] = {}
+    else:
+        capsule.pop(missing_field)
+
+    verdict = evaluate_gate_sufficiency(gate={"name": "ci"}, capsule=capsule)
+
+    assert verdict["outcome"] == OUTCOMES["REFUSED"]
+    assert verdict["reason_codes"] == [REASON_CODES["MISSING_CAPSULE"]]
+
+
+@pytest.mark.parametrize(
+    "empty_field",
+    ["capsule_id", "fingerprint", "workspace_fingerprint"],
+)
+def test_capsule_identity_and_workspace_binding_must_be_nonempty(empty_field):
+    capsule = {
+        "schema": "vivary.task-capsule/v0",
+        "capsule_id": "capsule_test",
+        "fingerprint": "sha256:capsule",
+        "workspace": {"fingerprint": "sha256:workspace"},
+        "claims": [],
+        "conflicts": [],
+        "unknowns": [],
+    }
+    if empty_field == "workspace_fingerprint":
+        capsule["workspace"]["fingerprint"] = ""
+    else:
+        capsule[empty_field] = ""
+
+    verdict = evaluate_gate_sufficiency(gate={"name": "ci"}, capsule=capsule)
+
+    assert verdict["outcome"] == OUTCOMES["REFUSED"]
+    assert verdict["reason_codes"] == [REASON_CODES["MISSING_CAPSULE"]]
 
 
 def test_a_gate_needing_checks_or_claim_verification_with_no_receipt_at_all_is_insufficient_never_sufficient(capsule):

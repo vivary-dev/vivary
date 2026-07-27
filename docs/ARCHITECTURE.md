@@ -130,11 +130,10 @@ What it owns:
   - **Exo (`control_*`)** governs claims and leases, handoffs, dependencies,
     execution evidence, and task views over caller-owned state. Equivalent
     Win32 drive, UNC, and device-namespace spellings share one scope identity.
-  - **Bellamente (`recall_*`)** applies the SPEC-owned candidate-recall
-    firewall: exact duplicate and independent-evidence results are accepted
-    evaluations, while an explicit correction is a separately human-gated
-    `review_required` proposal. Stale, degraded, or unfingerprinted input is
-    rejected; learned memory never silently rewrites authored truth.
+  - **Bellamente (`recall_*`)** applies the
+    [SPEC-owned candidate-recall firewall](https://github.com/vivary-dev/vivary/blob/dev/docs/bellamente-memory/SPEC-bellamente-memory.md#6-candidaterecallprovider-contract).
+    SPEC §6 owns its normalized inputs, decisions, reason codes, and truth/mutation
+    rules; the package evaluates candidates but never mutates authored truth.
 
 The governing rule is the same one the rest of Vivary follows: it never resolves an
 ambiguity it merely observed. Conflicts are handed to review, not to confidence, and

@@ -71,8 +71,11 @@ must leave an existing file unchanged and never turn it on.
 When enabled after approval, AgentLTM data is workspace-local at
 `.bellamente/data/` and ignored as runtime data. It must not share, alias, or fall
 back to a physical store used by `tropo`, a SemanticMemoryAdapter, or `vivary-core`.
-Only normalized IDs and evidence references may cross a seam. A disabled policy
-reserves the path; it does not create or populate it.
+Raw or unverified provider payloads must not be persisted in this future
+Bellamente-side store. It may persist only normalized candidate payloads that have
+passed the firewall validation in [§6](#6-candidaterecallprovider-contract). A
+disabled policy reserves the path; it does not create or populate it.
+Only normalized IDs and evidence references may cross a seam.
 
 ### 3.3 Fail-closed private set
 
@@ -165,6 +168,11 @@ normalization must supply at least:
 - any explicit correction target and authorization context; and
 - provider freshness or degradation state.
 
+The v0 unresolved-identity marker is the candidate subject
+`{"unresolved_identity": {"provider_ref": "<non-empty opaque provider reference>"}}`.
+`node_id` must be absent; normalization must not attach both forms. Recalled neighbors
+must carry stable `tropo` node IDs and cannot use the marker.
+
 The unresolved-identity marker is a defined firewall input only for emitting
 `review_required` with `identity_unresolved`; it cannot enter duplicate,
 corroboration, conflict, or mutation paths. Missing fingerprinted evidence is rejected
@@ -178,26 +186,39 @@ observable outcomes required by [#205](https://github.com/vivary-dev/vivary/issu
 
 | Condition | Required core decision and result | Truth and mutation rule |
 |---|---|---|
+| Candidate or recalled neighbor without stable fingerprinted evidence | `rejected` with `evidence_not_fingerprinted`. | Do not compare, promote, or mutate. |
 | Exact duplicate with the same evidence | `accepted` with `exact_duplicate` / preserve. | No new assertion or hidden rewrite. |
 | Compatible assertion with independent evidence | `accepted` with `corroboration`. | Evidence may be proposed or linked only after its operation-specific approval; it is not authored-truth promotion. |
+| Novel normalized candidate with no recalled match | `accepted` with an empty `reason_codes` list. | It is an evaluation only; create or mutate no assertion automatically. |
 | Explicit correction of a named assertion | `review_required` with an `explicit_correction` proposal. | Creation or supersession requires the named target, evidence, authorization, and separate human approval. |
 | Unknown or ambiguous identity | `review_required` with `identity_unresolved`. | Preserve all available sides; create nothing automatically. |
 | Incompatible value for the same identity | `review_required` with `value_conflict`. | Preserve both assertions; never elect a winner from similarity. |
 | Stale candidate, node, or evidence | `rejected` with `stale`. | Do not promote or mutate until revalidated. |
 | Missing, malformed, or failed optional provider | `rejected` with `provider_degraded`. | Keep degradation visible; do not silently bypass authority checks or mutate. |
 
-Every result carries the pinned core decision and distinct condition label shown
-above. `accepted` means the normalized candidate was evaluated successfully; it is
-not permission to write. Operations that create or supersede state, including an
-explicit correction, remain separately testable and gated. Exact-duplicate preserve is
-a read-only evaluation result, not a gated mutation. Learned memory cannot
+Malformed explicit-correction proposals remain `review_required` and use only these
+pinned v0 reason codes:
+
+- `correction_target_missing` when the named target does not exist;
+- `correction_subject_mismatch` when the target has another subject;
+- `correction_target_mismatch` when the target's predicate or scope differs;
+- `correction_not_authorized` when correction authority is absent; and
+- `correction_inputs_incomplete` when the target ID or required validity inputs are
+  missing or malformed.
+
+Every result carries the pinned core decision shown above. Except for the accepted
+no-match result, whose `reason_codes` list is deliberately empty, every result carries
+its distinct condition label. `accepted` means the normalized candidate was evaluated
+successfully; it is not permission to write. Operations that create or supersede state,
+including an explicit correction, remain separately testable and gated. Exact-duplicate
+preserve is a read-only evaluation result, not a gated mutation. Learned memory cannot
 automatically replace authored truth.
 
 ## 7. Verification tiers
 
 | Tier | What it proves | What it must not do |
 |---|---|---|
-| Contract tests | Normalization requires a stable node ID or the defined unresolved-identity marker plus fingerprinted evidence; duplicate, corroboration, correction, identity/conflict, stale, and degraded paths are distinct. | Use Bellamente, create stores, or mutate a workspace. |
+| Contract tests | Normalization requires a stable node ID or the defined unresolved-identity marker plus fingerprinted evidence; evidence rejection, duplicate, corroboration, novel no-match, correction, identity/conflict, stale, and degraded paths are distinct. | Use Bellamente, create stores, or mutate a workspace. |
 | Scaffold/capability/Doctor tests | No policy without opt-in; selected policy remains disabled; exact private set, separate AgentLTM namespace, inert MCP guidance, and declarative capability/Doctor behavior. | Probe or execute the external executable, install a provider, enable MCP, or perform memory operations. |
 | Release dogfood | A human-approved real write → recall → trace on the intended external runtime. | Run as installer behavior or a unit test. |
 

@@ -22,6 +22,10 @@ because the receipt fingerprint deliberately excludes ``receipt_id``.
 ADAPTATION - malformed receipt bodies: the Python seam reports a typed
 fingerprint mismatch when a body cannot be canonicalized, rather than
 letting a host-language serialization error escape the verifier.
+
+ADAPTATION - complete receipt binding: a receipt cannot verify on its own when
+its capsule ID, capsule fingerprint, or workspace fingerprint is empty. A
+correct body fingerprint cannot make an empty binding usable evidence.
 """
 
 from __future__ import annotations
@@ -109,6 +113,19 @@ def verify_receipt_integrity(*, receipt=None, capsule=None):
     receipt_id = _valid_receipt_id(receipt.get("receipt_id"))
     if receipt_id is None:
         shape_reasons.append(REASON_CODES["MISSING_ID"])
+    receipt_capsule = receipt.get("capsule")
+    receipt_workspace = receipt.get("workspace")
+    if not (
+        isinstance(receipt_capsule, dict)
+        and isinstance(receipt_capsule.get("id"), str)
+        and len(receipt_capsule["id"]) > 0
+        and isinstance(receipt_capsule.get("fingerprint"), str)
+        and len(receipt_capsule["fingerprint"]) > 0
+        and isinstance(receipt_workspace, dict)
+        and isinstance(receipt_workspace.get("fingerprint"), str)
+        and len(receipt_workspace["fingerprint"]) > 0
+    ):
+        shape_reasons.append(REASON_CODES["MISSING_BINDING"])
     if shape_reasons:
         # `receipt.receipt_id ?? null`: dict.get already collapses an absent
         # key and an explicit None the same way JS `??` collapses undefined

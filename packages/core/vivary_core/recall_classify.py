@@ -14,13 +14,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from vivary_core.canonical import _utf16_sort_key, canonicalize
+from vivary_core.canonical import _utf16_sort_key, canonicalize, fingerprint
 from vivary_core.recall_outcomes import (
     ACCEPTED,
     ACTIVE_TRUTH_UNCHANGED,
     REASON_CORRECTION_INPUTS_INCOMPLETE,
     REASON_CORRECTION_NOT_AUTHORIZED,
     REASON_CORRECTION_SUBJECT_MISMATCH,
+    REASON_CORRECTION_TARGET_MISMATCH,
     REASON_CORRECTION_TARGET_MISSING,
     REASON_CORROBORATION,
     REASON_EVIDENCE_NOT_FINGERPRINTED,
@@ -67,22 +68,29 @@ def _safe_evidence(candidate: Any) -> Any:
 
 
 def _has_fingerprinted_evidence(assertion: Any) -> bool:
-    """Require stable provenance before any comparison or correction path."""
+    """Require typed, self-bound provenance before any comparison."""
     source = _get_path(assertion, "source")
     if not isinstance(source, dict) or not _stable_fingerprint(source.get("fingerprint")):
         return False
     evidence = source.get("evidence")
     if not isinstance(evidence, list) or not evidence:
         return False
-    return all(
-        isinstance(item, dict)
-        and _stable_fingerprint(item.get("digest"))
-        and (
-            "fingerprint" not in item
-            or _stable_fingerprint(item.get("fingerprint"))
-        )
-        for item in evidence
-    )
+    for item in evidence:
+        if not (
+            isinstance(item, dict)
+            and _nonempty_string(item.get("kind"))
+            and _nonempty_string(item.get("ref"))
+            and _stable_fingerprint(item.get("digest"))
+            and _stable_fingerprint(item.get("fingerprint"))
+        ):
+            return False
+        body = {key: value for key, value in item.items() if key != "fingerprint"}
+        try:
+            if fingerprint(body) != item["fingerprint"]:
+                return False
+        except Exception:
+            return False
+    return True
 
 
 def _freshness_state(value: Any, *, required: bool) -> str:
@@ -139,11 +147,15 @@ def _is_normalized_assertion(assertion: Any, *, candidate: bool) -> bool:
     if not isinstance(subject, dict):
         return False
     node_id = subject.get("node_id")
+    marker = subject.get("unresolved_identity")
+    marker_is_valid = isinstance(marker, dict) and _nonempty_string(marker.get("provider_ref"))
     if candidate:
-        # An absent node id remains the fail-closed unresolved-identity path.
-        if node_id is not None and not _nonempty_string(node_id):
+        if "unresolved_identity" in subject:
+            if not marker_is_valid or _nonempty_string(node_id):
+                return False
+        elif not _nonempty_string(node_id):
             return False
-    elif not _nonempty_string(node_id):
+    elif "unresolved_identity" in subject or not _nonempty_string(node_id):
         return False
 
     if not _nonempty_string(assertion.get("predicate")) or not _canonical_value_is_valid(assertion):
@@ -191,7 +203,12 @@ def _subject_info(graph: Any, candidate: Any) -> Tuple[Dict[str, Any], Optional[
     try:
         node, resolved = _resolve_subject(graph, candidate)
         node_id = _get_path(candidate, "subject", "node_id")
-        return {"node_id": node_id if _nonempty_string(node_id) else None, "resolved": resolved}, node, resolved
+        marker = _get_path(candidate, "subject", "unresolved_identity")
+        subject = {"node_id": node_id if _nonempty_string(node_id) else None}
+        if isinstance(marker, dict) and _nonempty_string(marker.get("provider_ref")):
+            subject["unresolved_identity"] = marker
+        subject["resolved"] = resolved
+        return subject, node, resolved
     except Exception:
         return {"node_id": None, "resolved": False}, None, False
 
@@ -314,6 +331,17 @@ def _classify_candidate(graph: Any, candidate: Any, neighbors: Optional[List[Dic
                 evidence,
                 related_assertion_ids=[target["id"]],
             )
+        if (
+            target.get("predicate") != candidate.get("predicate")
+            or canonicalize(target.get("scope")) != canonicalize(candidate.get("scope"))
+        ):
+            return _decision(
+                REVIEW_REQUIRED,
+                [REASON_CORRECTION_TARGET_MISMATCH],
+                subject,
+                evidence,
+                related_assertion_ids=[target["id"]],
+            )
         if not _correction_authorized(candidate):
             return _decision(
                 REVIEW_REQUIRED,
@@ -357,9 +385,11 @@ def _classify_candidate(graph: Any, candidate: Any, neighbors: Optional[List[Dic
     ]
     compatible = [neighbor for neighbor in matches if _values_compatible(neighbor, candidate)]
     if compatible:
-        candidate_fingerprint = candidate["source"]["fingerprint"]
+        candidate_evidence = {item["digest"] for item in candidate["source"]["evidence"]}
         independent = [
-            neighbor for neighbor in compatible if neighbor["source"]["fingerprint"] != candidate_fingerprint
+            neighbor
+            for neighbor in compatible
+            if candidate_evidence - {item["digest"] for item in neighbor["source"]["evidence"]}
         ]
         if independent:
             return _decision(
@@ -396,9 +426,11 @@ def classify_candidate(
 ) -> Dict[str, Any]:
     """Return one deterministic §6 result without mutating caller-owned data.
 
-    Direct callers receive a fail-closed ``rejected/provider_degraded`` result
-    for malformed provider-shaped data rather than an exception.  The firewall
-    repeats that containment around its provider callback boundary.
+    A normalized candidate with no recalled match returns ``accepted`` with an empty
+    ``reason_codes`` list; it remains evaluation-only rather than an automatic write.
+    Direct callers receive a fail-closed ``rejected/provider_degraded`` result for
+    malformed provider-shaped data rather than an exception. The firewall repeats
+    that containment around its provider callback boundary.
     """
     try:
         return _classify_candidate(graph, candidate, neighbors)

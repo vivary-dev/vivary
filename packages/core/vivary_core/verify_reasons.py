@@ -33,9 +33,10 @@ REASON_CODES = {
     "MISSING_CAPSULE": "missing_capsule",
     "MISSING_GATE": "missing_gate",
     "UNSUPPORTED_SCHEMA": "unsupported_schema",
+    # Integrity failures (fail closed to "insufficient").
     "MISSING_FINGERPRINT": "missing_fingerprint",
     "MISSING_ID": "missing_id",
-    # Integrity failures (fail closed to "insufficient").
+    "MISSING_BINDING": "missing_binding",
     "FINGERPRINT_MISMATCH": "fingerprint_mismatch",
     "RECEIPT_ID_MISMATCH": "receipt_id_mismatch",
     "CAPSULE_BINDING_MISMATCH": "capsule_binding_mismatch",

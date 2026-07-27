@@ -20,11 +20,37 @@ __all__ = [
 ]
 
 
+def _has_valid_task_entries(tasks):
+    return (
+        isinstance(tasks, list)
+        and all(
+            isinstance(task, dict)
+            and isinstance(task.get("id"), str)
+            and len(task["id"]) > 0
+            and (
+                task.get("depends_on") is None
+                or (
+                    isinstance(task["depends_on"], list)
+                    and all(isinstance(dep_id, str) and len(dep_id) > 0 for dep_id in task["depends_on"])
+                )
+            )
+            for task in tasks
+        )
+        and len({task["id"] for task in tasks}) == len(tasks)
+    )
+
+
 def evaluate_dependencies(*, tasks, task_id):
     """@param tasks  [{id, status, depends_on?}]
     @param task_id
     @returns {decision, reason_codes, unmet}
     """
+    if not _has_valid_task_entries(tasks):
+        return {
+            "decision": DEPENDENCY_DECISION["BLOCKED"],
+            "reason_codes": [DEPENDENCY_REASON["UNKNOWN_TASK"]],
+            "unmet": [],
+        }
     by_id = {t["id"]: t for t in tasks}
     task = by_id.get(task_id)
     if task is None:
@@ -67,6 +93,8 @@ def detect_dependency_cycle(*, tasks):
     @param tasks  [{id, depends_on?}]
     @returns {has_cycle, cycle}
     """
+    if not _has_valid_task_entries(tasks):
+        raise ValueError("task dependency graph contains an invalid task entry")
     by_id = {t["id"]: t for t in tasks}
     white, gray, black = 0, 1, 2
     color = {t["id"]: white for t in tasks}

@@ -17,10 +17,11 @@ of its identity, and collisions append unless the full edge payload matches.
 The frozen Node path keyed evidence only by check name and could erase a
 conflicting failed result.
 
-ADAPTATION - receipt-check validation: every check must satisfy the receipt
-contract's ``{name, command, outcome, detail?}`` shape and use the closed
-``passed``/``failed``/``skipped`` outcome vocabulary before any edge is
-emitted.
+ADAPTATION - receipt-check validation: every receipt must pass its fingerprint,
+identifier integrity, and non-empty capsule/workspace binding checks before any
+edge is emitted. Every check must also satisfy the contract's
+``{name, command, outcome, detail?}`` shape and use the closed
+``passed``/``failed``/``skipped`` outcome vocabulary.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from __future__ import annotations
 from vivary_core.canonical import deterministic_id
 from vivary_core.control_reason_codes import EXECUTION_REASON
 from vivary_core.receipt import RECEIPT_SCHEMA
+from vivary_core.verify_receipt import verify_receipt_integrity
 
 __all__ = [
     "EXECUTION_REASON",
@@ -56,10 +58,11 @@ def _is_receipt_shape(receipt):
         and receipt.get("schema") == RECEIPT_SCHEMA
         and isinstance(receipt.get("checks"), list)
         and all(_is_check_shape(check) for check in receipt["checks"])
-        and bool(receipt.get("capsule"))
-        and isinstance((receipt.get("capsule") or {}).get("id"), str)
+        and isinstance(receipt.get("capsule"), dict)
+        and isinstance(receipt["capsule"].get("id"), str)
         and isinstance(receipt.get("fingerprint"), str)
         and isinstance(receipt.get("receipt_id"), str)
+        and verify_receipt_integrity(receipt=receipt)["outcome"] == "verified"
     )
 
 
