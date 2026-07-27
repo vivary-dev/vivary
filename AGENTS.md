@@ -106,10 +106,11 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
 ## Verify
 
 ```bash
-python packages/tropo/tests/test_tropo.py                  # 83/83
-python packages/ozone/tests/test_ozone.py                  # 16/16
-python packages/exo/tests/test_exo.py                      # 14/14
-python packages/create-vivary/tests/test_create_vivary.py  # 62/62  (+ test_assets_parity 3/3)
+python packages/tropo/tests/test_tropo.py                  # 150/150
+python packages/ozone/tests/test_ozone.py                  # 21/21
+python packages/exo/tests/test_exo.py                      # 17/17
+python packages/create-vivary/tests/test_create_vivary.py  # 143 run, 1 skipped
+python -m pytest packages/core/tests/ -q                   # 579 passed
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # clean
 ```
 

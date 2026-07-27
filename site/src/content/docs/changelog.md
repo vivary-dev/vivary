@@ -214,6 +214,8 @@ coordinated release train is complete and separately approved.
   meta-package installs expose `vivary_core` with the expected distribution versions.
 - The edited root README, release workflow, and generated release-workflow mirror are
   now LF-normalized, and their retired legacy line-ending allowlist entries are gone.
+- The lean root verification block now includes the core suite and current observed
+  counts for the four fast local package suites; exhaustive jobs remain CI-owned.
 
 ### Fixed
 
