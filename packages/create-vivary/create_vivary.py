@@ -168,6 +168,7 @@ REPAIR_WORKSPACE_MARKERS = (
 )
 REPAIR_MODULE_CONTRACT_MARKERS = (
     "modules/index.md",
+    "modules/agent-workspace/index.md",
     "modules/agent-workspace.md",
 )
 
