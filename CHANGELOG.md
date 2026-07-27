@@ -263,9 +263,11 @@ Findings from the `vivary-core` review, all pre-release and none user-reachable:
   as a mismatch with a supplied capsule.
 - **Strato verifies receipts and bound Ozone verdicts before clearing a gate.**
   Receipt fingerprints and deterministic IDs are recomputed. Verdict fingerprints,
-  bindings, typed projections, and outcome consistency are checked; genuine
-  non-sufficient early/receiptless verdicts keep their actual Ozone reasons, while a
-  `sufficient` verdict still requires a verified receipt outcome. Forged verdicts use
+  bindings, typed projections, and outcome consistency are checked. Genuine
+  non-sufficient early verdicts bound to the same receipt keep their actual Ozone
+  reasons; a receiptless non-sufficient verdict supplied later with a receipt yields
+  `verdict_binding_mismatch`. A `sufficient` verdict also requires a verified receipt
+  outcome and projections matching the bound capsule and receipt. Forged verdicts use
   the pinned `verdict_integrity_mismatch` reason.
 - **The Bellamente recall firewall rejects replay and mismatched corrections.**
   Typed evidence requires stable references and self-recomputable fingerprints;
@@ -287,7 +289,7 @@ Findings from the `vivary-core` review, all pre-release and none user-reachable:
 
 ### Verification
 
-- `python -m pytest packages/core/tests/ -q` — **579 passed**.
+- `python -m pytest packages/core/tests/ -q` — **589 passed**.
 - `uv run --isolated --no-project --no-cache --with ./packages/core python -c
   "from importlib.metadata import version; import vivary_core; assert
   version('vivary-core') == '0.2.0'"` — local wheel-equivalent import and distribution

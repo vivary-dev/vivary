@@ -98,7 +98,7 @@ pip install pytest
 python -m pytest packages/core/tests/ -q
 ```
 
-The 579-test suite translates the reference contracts across observation,
+The 589-test suite translates the reference contracts across observation,
 capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces,
 corruption handling, real-git evidence-store round trips, and byte-exact
 cross-runtime fixtures.

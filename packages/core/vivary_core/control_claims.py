@@ -20,6 +20,12 @@ and `now` must parse as timezone-aware ISO instants. A lease cannot expire
 before it is granted. The frozen Node behavior accepts unparseable, local, or
 inverted timestamps, whose values can create invalid or non-deterministic
 claims.
+
+ADAPTATION - fail-closed persisted authority: every active claim's
+actor/authority_class pair is rechecked with `can_hold_authority`, so
+impossible pairs (such as agent+owner) quarantine as `unknown_claim_shape`
+rather than surviving `expire_leases` or blocking a valid follow-on request
+with `scope_conflict`.
 """
 
 from __future__ import annotations
@@ -78,7 +84,7 @@ def _is_valid_active_claim(claim):
         and len(claim["claim_id"]) > 0
         and _is_valid_scope(claim.get("scope"))
         and _is_valid_actor(claim.get("actor"))
-        and isinstance(claim.get("authority_class"), str)
+        and can_hold_authority(claim.get("actor"), claim.get("authority_class"))["allowed"]
         and claim.get("status") == "active"
     )
 

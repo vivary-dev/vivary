@@ -214,6 +214,33 @@ def _has_valid_verdict_contract(verdict) -> bool:
         )
     return len(reason_codes) > 0
 
+def _has_matching_sufficient_verdict_projection(*, verdict, capsule, receipt) -> bool:
+    # A caller can recompute the public verdict fingerprint, so a sufficient
+    # projection must agree with the independently bound capsule and receipt.
+    if verdict.get("outcome") != "sufficient":
+        return True
+
+    if verdict.get("claims_total") != len(capsule["claims"]):
+        return False
+
+    claims_verified = verdict.get("claims_verified")
+    if claims_verified is None:
+        # Ozone only projects coverage when the gate requested it.
+        return True
+
+    verified_claim_ids = receipt.get("claims_verified")
+    if not isinstance(verified_claim_ids, list):
+        verified_claim_ids = []
+    receipt_claims_verified = sum(
+        isinstance(claim, dict)
+        and isinstance(claim.get("id"), str)
+        and claim["id"] in verified_claim_ids
+        for claim in capsule["claims"]
+    )
+    return claims_verified == len(capsule["claims"]) and claims_verified == receipt_claims_verified
+
+
+
 
 def _has_matching_verdict_bindings(*, verdict, capsule, receipt) -> bool:
     return (
@@ -355,6 +382,11 @@ def evaluate_receipt_gate(*, capsule, receipt, verdict=None):
         elif not _has_matching_verdict_bindings(verdict=verdict, capsule=capsule, receipt=receipt):
             reason_codes.append(GATE_REASON["VERDICT_BINDING_MISMATCH"])
             gate_requests.append({"reason_code": GATE_REASON["VERDICT_BINDING_MISMATCH"]})
+        elif not _has_matching_sufficient_verdict_projection(
+            verdict=verdict, capsule=capsule, receipt=receipt
+        ):
+            reason_codes.append(GATE_REASON["VERDICT_INTEGRITY_MISMATCH"])
+            gate_requests.append({"reason_code": GATE_REASON["VERDICT_INTEGRITY_MISMATCH"]})
         else:
             failing_checks = verdict.get("failing_checks")
             if isinstance(failing_checks, list):

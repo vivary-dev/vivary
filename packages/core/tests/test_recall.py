@@ -351,6 +351,34 @@ def test_missing_or_invalid_subject_identity_is_rejected(subject):
     assert_result(result, REJECTED, [REASON_PROVIDER_DEGRADED])
 
 
+
+@pytest.mark.parametrize(
+    ("node_id", "projected_node_id", "resolved"),
+    [
+        (KNOWN_NODE["id"], KNOWN_NODE["id"], True),
+        (None, None, False),
+        ("", None, False),
+        (123, None, False),
+    ],
+    ids=["valid", "null", "empty", "non-string"],
+)
+def test_unresolved_identity_marker_rejects_any_node_id_key_and_preserves_provider_reference(
+    node_id, projected_node_id, resolved
+):
+    marker = {"provider_ref": "bellamente:assertion-42"}
+    result = classify_candidate(
+        graph=graph(),
+        candidate=candidate({"subject": {"node_id": node_id, "unresolved_identity": marker}}),
+        neighbors=[],
+    )
+
+    assert_result(result, REJECTED, [REASON_PROVIDER_DEGRADED])
+    assert result["subject"] == {
+        "node_id": projected_node_id,
+        "unresolved_identity": marker,
+        "resolved": resolved,
+    }
+
 def test_explicit_unresolved_identity_marker_is_review_required_and_preserves_the_provider_reference():
     marker = {"provider_ref": "bellamente:assertion-42"}
     result = classify_candidate(

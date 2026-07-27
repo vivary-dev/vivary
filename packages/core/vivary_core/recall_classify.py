@@ -151,7 +151,7 @@ def _is_normalized_assertion(assertion: Any, *, candidate: bool) -> bool:
     marker_is_valid = isinstance(marker, dict) and _nonempty_string(marker.get("provider_ref"))
     if candidate:
         if "unresolved_identity" in subject:
-            if not marker_is_valid or _nonempty_string(node_id):
+            if not marker_is_valid or "node_id" in subject:
                 return False
         elif not _nonempty_string(node_id):
             return False

@@ -358,6 +358,28 @@ def test_request_claim_fails_closed_when_caller_owned_claim_state_has_a_malforme
     }
 
 
+def test_request_claim_fails_closed_when_a_persisted_claim_has_an_impossible_actor_authority_pair():
+    impossible_claim = {
+        "claim_id": "claim_agent_owner",
+        "scope": scope("vivary", ["src/control"]),
+        "actor": AGENT,
+        "authority_class": AUTHORITY_CLASS["OWNER"],
+        "lease": None,
+        "status": "active",
+    }
+
+    assert request_claim(
+        active_claims=[impossible_claim],
+        request={"scope": scope("vivary", ["src/control"]), "actor": HUMAN},
+    ) == {
+        "decision": CLAIM_DECISION["REFUSED"],
+        "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]],
+        "claim": None,
+        "claims": [impossible_claim],
+        "conflicts": [],
+    }
+
+
 # -- control_claims.py: workers never become owners ---------------------------------------
 
 
@@ -553,6 +575,49 @@ def test_an_expired_leases_scope_is_claimable_again_once_expire_leases_has_run()
     swept = expire_leases(active_claims=granted["claims"], now="2026-07-20T15:11:00.000Z")
     regranted = request_claim(active_claims=swept["claims"], request={"scope": scope("vivary", ["src/control"]), "actor": HUMAN})
     assert regranted["decision"] == CLAIM_DECISION["GRANTED"]
+
+
+def test_expire_leases_quarantines_an_impossible_persisted_authority_pair_and_frees_its_scope_for_a_follow_on_request():
+    impossible_claim = {
+        "claim_id": "claim_agent_owner",
+        "scope": scope("vivary", ["src/control"]),
+        "actor": AGENT,
+        "authority_class": AUTHORITY_CLASS["OWNER"],
+        "lease": {"granted_at": "2026-07-20T15:00:00.000Z", "expires_at": "2026-07-20T15:10:00.000Z"},
+        "status": "active",
+    }
+
+    swept = expire_leases(active_claims=[impossible_claim], now="2026-07-20T15:05:00.000Z")
+    follow_on = request_claim(
+        active_claims=swept["claims"],
+        request={"scope": scope("vivary", ["src/control"]), "actor": HUMAN},
+    )
+
+    assert swept == {
+        "claims": [],
+        "expired": [{"claim": impossible_claim, "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]]}],
+        "reason_codes": [],
+    }
+    assert follow_on["decision"] == CLAIM_DECISION["GRANTED"]
+    assert follow_on["reason_codes"] == []
+    assert follow_on["conflicts"] == []
+
+
+def test_expire_leases_retains_a_persisted_claim_with_a_valid_human_owner_authority_pair():
+    valid_claim = {
+        "claim_id": "claim_human_owner",
+        "scope": scope("vivary", ["src/control"]),
+        "actor": HUMAN,
+        "authority_class": AUTHORITY_CLASS["OWNER"],
+        "lease": {"granted_at": "2026-07-20T15:00:00.000Z", "expires_at": "2026-07-20T15:10:00.000Z"},
+        "status": "active",
+    }
+
+    assert expire_leases(active_claims=[valid_claim], now="2026-07-20T15:05:00.000Z") == {
+        "claims": [valid_claim],
+        "expired": [],
+        "reason_codes": [],
+    }
 
 
 def test_expire_leases_rejects_unparseable_and_timezone_naive_now_without_releasing_claims():

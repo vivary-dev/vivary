@@ -804,6 +804,63 @@ def test_evaluate_receipt_gate_a_sufficient_ozone_verdict_clears_the_required_ch
     outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict)
     assert outcome == {"decision": GATE_DECISION["CLEAR"], "reason_codes": [], "gate_requests": []}
 
+
+@pytest.mark.parametrize(
+    "projection",
+    [
+        pytest.param({}, id="zero-of-one"),
+        pytest.param({"claims_total": 0, "claims_verified": 0}, id="false-zero-of-zero"),
+    ],
+)
+def test_evaluate_receipt_gate_rejects_recomputed_sufficient_claim_projections(projection):
+    capsule = base_capsule_like({"claims": [{"id": "claim-one"}]})
+    receipt = base_receipt_like(
+        capsule,
+        {"claims_verified": [], "claims_unverified": ["claim-one"]},
+    )
+    insufficient = evaluate_gate_sufficiency(
+        gate={"name": "ci", "require_claims_verified": True},
+        capsule=capsule,
+        receipt=receipt,
+    )
+    assert insufficient["outcome"] == OUTCOMES["INSUFFICIENT"]
+    assert insufficient["claims_total"] == 1
+    assert insufficient["claims_verified"] == 0
+
+    forged = _refingerprint_verdict(
+        {
+            **insufficient,
+            "outcome": OUTCOMES["SUFFICIENT"],
+            "reason_codes": [],
+            **projection,
+        }
+    )
+
+    assert evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=forged) == {
+        "decision": GATE_DECISION["GATE_REQUIRED"],
+        "reason_codes": [GATE_REASON["VERDICT_INTEGRITY_MISMATCH"]],
+        "gate_requests": [{"reason_code": GATE_REASON["VERDICT_INTEGRITY_MISMATCH"]}],
+    }
+
+
+def test_evaluate_receipt_gate_clears_a_legitimate_sufficient_claim_projection():
+    capsule = base_capsule_like({"claims": [{"id": "claim-one"}]})
+    receipt = base_receipt_like(capsule)
+    verdict = evaluate_gate_sufficiency(
+        gate={"name": "ci", "require_claims_verified": True},
+        capsule=capsule,
+        receipt=receipt,
+    )
+
+    assert verdict["outcome"] == OUTCOMES["SUFFICIENT"]
+    assert verdict["claims_total"] == 1
+    assert verdict["claims_verified"] == 1
+    assert evaluate_receipt_gate(capsule=capsule, receipt=receipt, verdict=verdict) == {
+        "decision": GATE_DECISION["CLEAR"],
+        "reason_codes": [],
+        "gate_requests": [],
+    }
+
 def test_evaluate_receipt_gate_honors_an_insufficient_verdict_with_no_failing_checks():
     capsule = build_clean_capsule()
     receipt = create_integrity_receipt(
