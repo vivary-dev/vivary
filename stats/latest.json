@@ -1,75 +1,75 @@
 {
-  "date": "2026-07-06",
-  "generated_at": "2026-07-06T14:04:08Z",
+  "date": "2026-07-27",
+  "generated_at": "2026-07-27T12:35:58Z",
   "github": {
     "forks": 1,
-    "open_issues": 17,
-    "pushed_at": "2026-07-06T12:58:36Z",
+    "open_issues": 44,
+    "pushed_at": "2026-07-27T04:58:18Z",
     "stale": false,
-    "stars": 3,
+    "stars": 5,
     "watchers": 0
   },
   "github_forks": 1,
-  "github_stars": 3,
+  "github_stars": 5,
   "npm": {
     "packages": {
       "@vivary/create": {
-        "end": "2026-07-05",
-        "last_week": 319,
+        "end": "2026-07-24",
+        "last_week": 149,
         "stale": false,
-        "start": "2026-06-29",
+        "start": "2026-07-18",
         "versions_last_week": {
           "0.1.0": 4,
-          "0.1.1": 5,
+          "0.1.1": 3,
           "0.2.0": 4,
           "0.2.2": 4,
-          "0.2.3": 3,
-          "0.2.5": 14,
-          "0.2.6": 21,
-          "0.2.7": 22,
-          "0.2.8": 52,
-          "0.3.1": 190
+          "0.2.3": 5,
+          "0.2.5": 4,
+          "0.2.6": 3,
+          "0.2.7": 3,
+          "0.2.8": 4,
+          "0.3.1": 124
         }
       }
     },
-    "weekly_total": 319
+    "weekly_total": 149
   },
-  "npm_weekly": 319,
+  "npm_weekly": 149,
   "pypi": {
     "packages": {
       "create-vivary": {
-        "last_day": 47,
-        "last_month": 1867,
-        "last_week": 512,
+        "last_day": 84,
+        "last_month": 1550,
+        "last_week": 331,
         "stale": false
       },
       "vivary-exo": {
-        "last_day": 40,
-        "last_month": 675,
-        "last_week": 180,
+        "last_day": 84,
+        "last_month": 740,
+        "last_week": 234,
         "stale": false
       },
       "vivary-ozone": {
-        "last_day": 40,
-        "last_month": 441,
-        "last_week": 170,
+        "last_day": 84,
+        "last_month": 782,
+        "last_week": 218,
         "stale": false
       },
       "vivary-tropo": {
-        "last_day": 84,
-        "last_month": 2859,
-        "last_week": 770,
+        "last_day": 158,
+        "last_month": 2031,
+        "last_week": 444,
         "stale": false
       }
     },
-    "weekly_total": 1632
+    "weekly_total": 1227
   },
-  "pypi_weekly": 1632,
+  "pypi_weekly": 1227,
   "status": "ok",
   "totals": {
-    "npm_weekly": 319,
-    "package_weekly": 1951,
-    "pypi_weekly": 1632
+    "npm_weekly": 149,
+    "package_weekly": 1376,
+    "pypi_weekly": 1227
   },
   "warnings": []
 }
