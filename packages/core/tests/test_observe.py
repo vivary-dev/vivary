@@ -609,6 +609,189 @@ def test_ambient_git_config_env_cannot_forge_a_remote(fx, allowlist, monkeypatch
     assert "attacker" not in json.dumps(result)
 
 
+def test_worktree_semantics_allowlist_reads_normal_config_without_git_env_injection(
+    fx,
+    monkeypatch,
+    tmp_path,
+):
+    from vivary_core.workspace_observe import (
+        _sanitized_git_env,
+        _default_run_git,
+        _worktree_semantic_config,
+    )
+
+    git_home = tmp_path / "git-home"
+    git_home.mkdir()
+    (git_home / ".gitconfig").write_text(
+        "[core]\n"
+        "autocrlf = on\n"
+        "eol = crlf\n"
+        '[url "https://evil.example/"]\n'
+        "insteadOf = https://good.example/\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(git_home))
+    monkeypatch.setenv("USERPROFILE", str(git_home))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "false")
+
+    config = _worktree_semantic_config(fx["paths"]["no_origin"])
+    env = _sanitized_git_env(config)
+
+    assert config == {
+        "core.autocrlf": "true",
+        "core.eol": "crlf",
+    }
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert env["GIT_CONFIG_KEY_0"] == "core.autocrlf"
+    assert env["GIT_CONFIG_VALUE_0"] == "true"
+    assert env["GIT_CONFIG_KEY_1"] == "core.eol"
+    assert env["GIT_CONFIG_VALUE_1"] == "crlf"
+    assert "evil" not in json.dumps(config)
+    _git(
+        fx["paths"]["base"],
+        fx["paths"]["no_origin"],
+        ["remote", "add", "origin", "https://good.example/repo.git"],
+    )
+    try:
+        result = _default_run_git(
+            fx["paths"]["no_origin"],
+            ["remote", "get-url", "origin"],
+            worktree_config=config,
+        )
+    finally:
+        _git(
+            fx["paths"]["base"],
+            fx["paths"]["no_origin"],
+            ["remote", "remove", "origin"],
+        )
+    assert result["ok"]
+    assert result["stdout"] == "https://good.example/repo.git\n"
+    assert "evil.example" not in result["stdout"]
+    assert "autocrlf" not in result["command"]
+    assert "core.eol" not in result["command"]
+
+
+@pytest.mark.parametrize(
+    ("setting", "expected"),
+    [
+        ("autocrlf\n", "true"),
+        ("autocrlf =\n", "false"),
+    ],
+    ids=["valueless-true", "explicitly-empty-false"],
+)
+def test_autocrlf_uses_git_boolean_semantics(
+    fx,
+    monkeypatch,
+    tmp_path,
+    setting,
+    expected,
+):
+    from vivary_core.workspace_observe import _worktree_semantic_config
+
+    git_home = tmp_path / "git-home"
+    git_home.mkdir()
+    (git_home / ".gitconfig").write_text(
+        "[core]\n" + setting,
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(git_home))
+    monkeypatch.setenv("USERPROFILE", str(git_home))
+
+    config = _worktree_semantic_config(fx["paths"]["no_origin"])
+
+    assert config["core.autocrlf"] == expected
+
+
+def test_global_excludes_file_remains_private_across_sanitized_git_boundary(
+    fx,
+    monkeypatch,
+    tmp_path,
+):
+    git_home = tmp_path / "git-home"
+    git_home.mkdir()
+    excludes_file = git_home / "global-ignore"
+    excludes_file.write_text(".envrc\n", encoding="utf-8")
+    (git_home / ".gitconfig").write_text(
+        "[core]\n"
+        f"excludesFile = {excludes_file.as_posix()}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(git_home))
+    monkeypatch.setenv("USERPROFILE", str(git_home))
+    secret = os.path.join(fx["paths"]["no_origin"], ".envrc")
+    with open(secret, "w", encoding="utf-8") as handle:
+        handle.write("PRIVATE_GLOBAL_IGNORE_MARKER\n")
+
+    try:
+        result = observe_checkouts(
+            [fx["paths"]["no_origin"]],
+            allowlist=[fx["paths"]["base"]],
+            now=NOW,
+        )
+    finally:
+        os.remove(secret)
+
+    dirty = result["checkouts"][0]["facts"]["is_dirty"]
+    assert dirty["status"] == "known"
+    assert dirty["value"] is False
+    assert ".envrc" not in json.dumps(result)
+    assert "PRIVATE_GLOBAL_IGNORE_MARKER" not in json.dumps(result)
+
+
+def test_repo_scoped_excludes_file_is_not_overridden_by_global_policy(
+    fx,
+    monkeypatch,
+    tmp_path,
+):
+    from vivary_core.workspace_observe import _worktree_semantic_config
+
+    git_home = tmp_path / "git-home"
+    git_home.mkdir()
+    global_excludes = git_home / "global-ignore"
+    global_excludes.write_text(".envrc\n", encoding="utf-8")
+    (git_home / ".gitconfig").write_text(
+        "[core]\n"
+        f"excludesFile = {global_excludes.as_posix()}\n",
+        encoding="utf-8",
+    )
+    local_excludes = tmp_path / "repo-ignore"
+    local_excludes.write_text(".local-only\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(git_home))
+    monkeypatch.setenv("USERPROFILE", str(git_home))
+    repo = fx["paths"]["no_origin"]
+    secret = os.path.join(repo, ".envrc")
+    with open(secret, "w", encoding="utf-8") as handle:
+        handle.write("REPO_POLICY_PRECEDENCE_MARKER\n")
+    _git(
+        fx["paths"]["base"],
+        repo,
+        ["config", "core.excludesFile", local_excludes.as_posix()],
+    )
+
+    try:
+        config = _worktree_semantic_config(repo)
+        result = observe_checkouts(
+            [repo],
+            allowlist=[fx["paths"]["base"]],
+            now=NOW,
+        )
+    finally:
+        _git(
+            fx["paths"]["base"],
+            repo,
+            ["config", "--unset", "core.excludesFile"],
+        )
+        os.remove(secret)
+
+    assert "core.excludesFile" not in config
+    dirty = result["checkouts"][0]["facts"]["is_dirty"]
+    assert dirty["status"] == "known"
+    assert dirty["value"] is True
+    assert ".envrc" in json.dumps(result)
+
+
 def test_ambient_git_object_env_is_scrubbed():
     """Every Git variable that can redirect repository, config or object resolution
     is removed, not just the four originally named."""

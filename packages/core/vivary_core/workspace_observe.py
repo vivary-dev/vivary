@@ -73,15 +73,34 @@ _SUBPROCESS_CLEANUP_TIMEOUT = 2.0
 RunGit = Callable[[str, List[str]], Dict[str, Any]]
 
 
-def _sanitized_git_env() -> Dict[str, str]:
+def _sanitized_git_env(
+    worktree_config: Optional[Dict[str, str]] = None,
+) -> Dict[str, str]:
     """A narrowly pinned environment for read-only observation.
 
-    Drops every `GIT_*` variable — an allowlist, not a denylist, because the set of
-    Git variables that can change repository, config or object resolution grows with
-    Git itself — then restores only the pins above.
+    Drops every ambient `GIT_*` variable, restores only the fixed safety pins,
+    then optionally injects validated worktree-filter values. The latter are
+    carried in the environment so evidence command strings remain canonical
+    across machines.
     """
-    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.upper().startswith("GIT_")
+    }
     env.update(_PINNED_GIT_ENV)
+    if worktree_config:
+        env["GIT_CONFIG_COUNT"] = str(len(worktree_config))
+        for index, (key, value) in enumerate(worktree_config.items()):
+            env[f"GIT_CONFIG_KEY_{index}"] = key
+            env[f"GIT_CONFIG_VALUE_{index}"] = value
+    return env
+
+
+def _config_discovery_git_env() -> Dict[str, str]:
+    """Read the user's normal Git config without honoring `GIT_*` injection."""
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    env["GIT_TERMINAL_PROMPT"] = "0"
     return env
 
 
@@ -195,6 +214,127 @@ def _capped_run(argv: List[str], env: Dict[str, str], limit: int) -> Dict[str, A
     }
 
 
+_WORKTREE_SEMANTIC_CONFIG = (
+    ("core.autocrlf", {"true", "false", "input"}),
+    ("core.eol", {"lf", "crlf", "native"}),
+)
+
+
+def _worktree_semantic_config(checkout_path: str) -> Dict[str, str]:
+    """Preserve validated host worktree/ignore policy across the hardened Git boundary.
+
+    The enum filters affect checkout bytes; ``core.excludesFile`` affects privacy.
+    Restoring either means observations and fingerprints can legitimately vary with
+    host Git policy, just as ordinary Git status does.
+    """
+    config: Dict[str, str] = {}
+    env = _config_discovery_git_env()
+    for key, allowed_values in _WORKTREE_SEMANTIC_CONFIG:
+        outcome = _capped_run(
+            ["git", "--no-optional-locks", "-C", checkout_path, "config", "--get", key],
+            env,
+            1024,
+        )
+        if (
+            outcome["error"] is not None
+            or outcome["exceeded"]
+            or outcome["code"] != 0
+        ):
+            continue
+        try:
+            value = outcome["stdout"].decode("utf-8", "strict").strip().lower()
+        except UnicodeDecodeError:
+            continue
+        if key == "core.autocrlf" and value != "input":
+            parsed = _capped_run(
+                [
+                    "git",
+                    "--no-optional-locks",
+                    "-C",
+                    checkout_path,
+                    "config",
+                    "--type=bool",
+                    "--get",
+                    key,
+                ],
+                env,
+                1024,
+            )
+            if (
+                parsed["error"] is not None
+                or parsed["exceeded"]
+                or parsed["code"] != 0
+            ):
+                continue
+            try:
+                value = parsed["stdout"].decode("utf-8", "strict").strip().lower()
+            except UnicodeDecodeError:
+                continue
+        if value in allowed_values:
+            config[key] = value
+
+    # First ask the hardened process whether repository/worktree-scoped config
+    # already supplies this key (including config.worktree and local includes).
+    # Command-scope injection must never override a value that process can see.
+    repo_excludes = _capped_run(
+        [
+            "git",
+            "--no-optional-locks",
+            "-C",
+            checkout_path,
+            "config",
+            "--path",
+            "--get",
+            "core.excludesFile",
+        ],
+        _sanitized_git_env(),
+        1024,
+    )
+    if (
+        repo_excludes["error"] is not None
+        or repo_excludes["exceeded"]
+        or repo_excludes["code"] not in (0, 1)
+    ):
+        return config
+    if repo_excludes["code"] == 0:
+        return config
+
+    # Query broader scopes explicitly: an observed repository must not choose
+    # the path injected at command scope. `--path` gives Git ownership of `~`
+    # expansion. A present but unusable higher-precedence value suppresses the
+    # lower scope, matching Git's effective-config semantics.
+    for scope in ("--global", "--system"):
+        excludes = _capped_run(
+            [
+                "git",
+                "--no-optional-locks",
+                "config",
+                scope,
+                "--path",
+                "--get",
+                "core.excludesFile",
+            ],
+            env,
+            1024,
+        )
+        if (
+            excludes["error"] is not None
+            or excludes["exceeded"]
+            or excludes["code"] not in (0, 1)
+        ):
+            return config
+        if excludes["code"] == 1:
+            continue
+        try:
+            value = excludes["stdout"].decode("utf-8", "strict").rstrip("\r\n")
+        except UnicodeDecodeError:
+            return config
+        if os.path.isfile(value) and os.access(value, os.R_OK):
+            config["core.excludesFile"] = os.path.abspath(value)
+        return config
+    return config
+
+
 _CREDENTIAL_URL_RE = re.compile(r"\A([a-zA-Z][a-zA-Z0-9+.-]*://)(?:[^/@]*@)?(.*)\Z", re.DOTALL)
 _SCP_CREDENTIAL_RE = re.compile(r"\A([^/@]*:[^/@]*)@([^/]+:.*)\Z", re.DOTALL)
 
@@ -221,13 +361,25 @@ def _redact_remote_url(url: str) -> str:
     return url
 
 
-def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
+def _default_run_git(
+    checkout_path: str,
+    args: List[str],
+    *,
+    worktree_config: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     # `core.fsmonitor` is repository configuration and can name an executable.
     # Override it on every Git invocation rather than trusting an observed
-    # worktree's hook while performing a governed, read-only observation. Keep
-    # the override here, at the concrete runner boundary: injected runners retain
-    # their documented subcommand-only `args` contract and supply their own
-    # evidence.
+    # worktree's hook while performing a governed, read-only observation.
+    #
+    # Global/system config remains blocked from the governed command. The narrow
+    # worktree-semantics allowlist is discovered separately, validated, and
+    # re-applied through the pinned environment so Git-for-Windows autocrlf
+    # worktrees are not falsely reported as dirty.
+    semantic_config = (
+        _worktree_semantic_config(checkout_path)
+        if worktree_config is None
+        else worktree_config
+    )
     full_args = [
         "--no-optional-locks",
         "-c",
@@ -237,7 +389,11 @@ def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
         *args,
     ]
     command = f"git {' '.join(full_args)}"
-    outcome = _capped_run(["git", *full_args], _sanitized_git_env(), _MAX_BUFFER)
+    outcome = _capped_run(
+        ["git", *full_args],
+        _sanitized_git_env(semantic_config),
+        _MAX_BUFFER,
+    )
     if outcome["error"] is not None:
         return {
             "ok": False,
@@ -758,7 +914,19 @@ def observe_checkouts(
                `code`, because privacy checks fail closed when it is absent.
     """
     if run_git is None:
-        run_git = _default_run_git
+        worktree_config: Dict[str, Dict[str, str]] = {}
+
+        def run_default(path: str, args: List[str]) -> Dict[str, Any]:
+            key = normalize_path(path)
+            if key not in worktree_config:
+                worktree_config[key] = _worktree_semantic_config(path)
+            return _default_run_git(
+                path,
+                args,
+                worktree_config=worktree_config[key],
+            )
+
+        run_git = run_default
 
     if not isinstance(allowlist, list) or len(allowlist) == 0:
         raise ValueError(

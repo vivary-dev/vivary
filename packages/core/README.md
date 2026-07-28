@@ -25,8 +25,9 @@ The governed-context shared seam every Vivary role package will speak through:
   compact digest of a Task Capsule with nothing dropped: conflicts and
   unknowns byte-verbatim, every omission recorded.
 - **`workspace_observe`** — read-only checkout observation: explicit
-  allowlisted roots only, ambient-git-env sanitized, bare repositories
-  positively confirmed, symlink/junction escapes re-checked post-resolution
+  allowlisted roots only; ambient Git injection sanitized without discarding
+  Git-parsed worktree EOL or explicit host ignore policy; bare repositories
+  positively confirmed; symlink/junction escapes re-checked post-resolution
   and refused. Never fetches, never writes, never crawls.
 - **`workspace_model`** — pure projection of observations into a typed
   evidence graph; divergent checkouts become explicit unresolved conflicts
@@ -99,7 +100,7 @@ pip install pytest
 python -m pytest packages/core/tests/ -q
 ```
 
-The current platform-specific proof is **610 tests on Windows**; on Linux, it is
-**608 passed plus 2 skips**. It translates the reference contracts across observation,
+The current platform-specific proof is **615 tests on Windows**; on Linux, it is
+**613 passed plus 2 skips**. It translates the reference contracts across observation,
 capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces, corruption
 handling, real-git evidence-store round trips, and byte-exact cross-runtime fixtures.

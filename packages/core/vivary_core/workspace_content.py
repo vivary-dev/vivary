@@ -70,12 +70,23 @@ from vivary_core.workspace_observe import (  # noqa: E402
     _capped_run,
     _ignored_paths,
     _sanitized_git_env,
+    _worktree_semantic_config,
 )
 
 
 
 
-def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
+def _default_run_git(
+    checkout_path: str,
+    args: List[str],
+    *,
+    worktree_config: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    semantic_config = (
+        _worktree_semantic_config(checkout_path)
+        if worktree_config is None
+        else worktree_config
+    )
     full_args = [
         "--no-optional-locks",
         "-c",
@@ -87,7 +98,7 @@ def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
     command = "git " + " ".join(full_args)
     outcome = _capped_run(
         ["git", *full_args],
-        _sanitized_git_env(),
+        _sanitized_git_env(semantic_config),
         _MAX_GIT_OUTPUT_BYTES,
     )
     if outcome["error"] is not None:
@@ -433,7 +444,19 @@ def observe_content(
         numeric `code`, because privacy checks fail closed when it is absent.
     """
     if run_git is None:
-        run_git = _default_run_git
+        worktree_config: Dict[str, Dict[str, str]] = {}
+
+        def run_default(path: str, args: List[str]) -> Dict[str, Any]:
+            key = normalize_path(path)
+            if key not in worktree_config:
+                worktree_config[key] = _worktree_semantic_config(path)
+            return _default_run_git(
+                path,
+                args,
+                worktree_config=worktree_config[key],
+            )
+
+        run_git = run_default
     if not isinstance(allowlist, (list, tuple)) or len(allowlist) == 0:
         raise ValueError("observeContent requires an explicit non-empty allowlist of repository roots")
     # #71: reject a bad allowlist ENTRY (empty, whitespace-only, or not an

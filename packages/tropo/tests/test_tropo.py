@@ -21,6 +21,7 @@ sys.path.insert(0, PACKAGE_ROOT)
 import tropo  # noqa: E402
 import vivary_core  # noqa: E402
 from vivary_core import normalize_path  # noqa: E402
+from vivary_core.workspace_observe import _config_discovery_git_env  # noqa: E402
 
 ROOT = PACKAGE_ROOT
 VAULT = os.path.join(ROOT, "examples", "vault")
@@ -55,6 +56,27 @@ def temp_workspace():
         yield path
     finally:
         remove_workspace(path)
+
+
+@contextmanager
+def _isolated_user_git_config():
+    """Keep host user Git policy out of governed-observation fixtures."""
+    with tempfile.TemporaryDirectory(prefix="tropo-git-home-") as raw_home:
+        git_home = Path(raw_home)
+        xdg_home = git_home / "xdg"
+        xdg_home.mkdir()
+        (git_home / ".gitconfig").write_text("", encoding="utf-8")
+        with mock.patch.dict(
+            os.environ,
+            {
+                "HOME": str(git_home),
+                "USERPROFILE": str(git_home),
+                "XDG_CONFIG_HOME": str(xdg_home),
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_ASKPASS": "echo",
+            },
+        ):
+            yield
 
 
 import argparse  # noqa: E402
@@ -885,11 +907,19 @@ def _search_vault(tmp_path):
 
 def _init_git_repo(path):
     def git(*args):
+        command = [
+            "git",
+            "-c",
+            "core.fsmonitor=false",
+        ]
+        if args and args[0] == "init":
+            command.extend(["-c", "init.templateDir="])
         subprocess.run(
-            ["git", "-C", str(path), *args],
+            [*command, "-C", str(path), *args],
             check=True,
             capture_output=True,
             text=True,
+            env=_config_discovery_git_env(),
         )
 
     git("init", "-q")
@@ -1913,13 +1943,21 @@ def test_governed_find_keeps_content_when_checkout_state_is_stable(tmp_path):
         "STABLE_GOVERNED_CONTENT_MARKER\n",
         encoding="utf-8",
     )
-    _init_git_repo(tmp_path)
-
-    capsule = tropo.governed_find(
-        str(tmp_path),
-        "STABLE_GOVERNED_CONTENT_MARKER",
-        max_claims=24,
-    )
+    with tempfile.TemporaryDirectory(prefix="tropo-git-home-") as git_home:
+        Path(git_home, ".gitconfig").write_text(
+            "[core]\nautocrlf = true\n",
+            encoding="utf-8",
+        )
+        with mock.patch.dict(
+            os.environ,
+            {"HOME": git_home, "USERPROFILE": git_home},
+        ):
+            _init_git_repo(tmp_path)
+            capsule = tropo.governed_find(
+                str(tmp_path),
+                "STABLE_GOVERNED_CONTENT_MARKER",
+                max_claims=24,
+            )
 
     assert any(
         claim["fact"] == "content_match"
@@ -3742,22 +3780,23 @@ def test_version_constant_matches_pyproject(tmp_path):
 
 
 if __name__ == "__main__":
-    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    passed = 0
-    for fn in fns:
-        import inspect
-        kw = {}
-        if "tmp_path" in inspect.signature(fn).parameters:
-            kw["tmp_path"] = make_tmp_path()
-        try:
-            fn(**kw)
-            print(f"  ok  {fn.__name__}")
-            passed += 1
-        except Exception as e:
-            print(f"FAIL  {fn.__name__}: {e}")
-        finally:
-            tmp_path = kw.get("tmp_path")
-            if tmp_path is not None and tmp_path.exists():
-                remove_workspace(tmp_path)
-    print(f"\n{passed}/{len(fns)} passed")
-    sys.exit(0 if passed == len(fns) else 1)
+    with _isolated_user_git_config():
+        fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+        passed = 0
+        for fn in fns:
+            import inspect
+            kw = {}
+            if "tmp_path" in inspect.signature(fn).parameters:
+                kw["tmp_path"] = make_tmp_path()
+            try:
+                fn(**kw)
+                print(f"  ok  {fn.__name__}")
+                passed += 1
+            except Exception as e:
+                print(f"FAIL  {fn.__name__}: {e}")
+            finally:
+                tmp_path = kw.get("tmp_path")
+                if tmp_path is not None and tmp_path.exists():
+                    remove_workspace(tmp_path)
+        print(f"\n{passed}/{len(fns)} passed")
+        sys.exit(0 if passed == len(fns) else 1)

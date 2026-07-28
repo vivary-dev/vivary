@@ -130,8 +130,9 @@ where the command must run and the exact observation that justified it. A standa
 observed root also carries the scaffold identity markers `AGENTS.md` and `STRATO.md`.
 Governed search drops one-letter ASCII contraction fragments, uses NUL-framed Git
 output, treats every path passed to `git check-ignore` as literal, excludes tracked
-paths covered by repository ignore policy, and refuses a Tropo root nested inside a
-larger Git worktree rather than leaking sibling checkout facts.
+paths covered by repository ignore policy or an explicit readable global/system
+`core.excludesFile`, and refuses a Tropo root nested inside a larger Git worktree
+rather than leaking sibling checkout facts.
 Every default Git command used by checkout observation or content retrieval disables
 repository-configured filesystem monitors. Workspace markers and package scripts pass
 through the same fail-closed ignore-policy filter as content and dirty paths.

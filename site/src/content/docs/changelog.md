@@ -45,6 +45,11 @@ separate human gate.
   declared dependency metadata, and exercises the installed governed command.
 - The cross-platform orientation matrix now runs the full Tropo suite on
   `windows-latest`, including the governed root-casing contract.
+- Session-scoped test harnesses isolate the core and Tropo suites from host user Git
+  policy by pinning `HOME`, `USERPROFILE`, and `XDG_CONFIG_HOME` to throwaway Git
+  homes. Tropo's direct `__main__` runner uses the same boundary, keeping observation
+  fixtures, dirty facts, and fingerprints reproducible under both supported test
+  entry points.
 
 ### Changed
 
@@ -93,6 +98,11 @@ separate human gate.
   read through a bounded descriptor whose file identity is verified before and after
   opening. An ignored or externally linked manifest cannot leak facts or derive an
   executable check.
+  The hardened boundary preserves Git-parsed `core.autocrlf`/`core.eol` and an
+  explicit readable global or system `core.excludesFile` without honoring ambient
+  `GIT_*` injection or overriding repository-scoped ignore policy. Host ignore
+  policy can therefore legitimately change dirty facts, workspace fingerprints, and
+  capsule IDs between machines, matching the host's own `git status`.
 - Derived checks execute from the observed Git worktree root even when the requested
   checkout path is nested. Excessively nested `package.json` input now degrades to no
   npm check instead of escaping the structured observation contract.
@@ -117,9 +127,9 @@ separate human gate.
 - `python packages/tropo/tests/test_tropo.py` — **169/169** passed on Windows.
 - `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **169/169**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **610 passed** on Windows;
+- `python -m pytest packages/core/tests/ -q` — **615 passed** on Windows;
   `UV_CACHE_DIR=$HOME/.cache/uv TMPDIR=/tmp uv run --with pytest python3 -m pytest
-  packages/core/tests/ -q -p no:cacheprovider` — **608 passed, 2 platform-specific
+  packages/core/tests/ -q -p no:cacheprovider` — **613 passed, 2 platform-specific
   skips** on WSL Linux.
 - `python -m pytest packages/tropo/tests/test_tropo.py -q -k "governed or
   cmd_find_returns_context_packet"` — **17 passed**.
@@ -140,7 +150,7 @@ separate human gate.
 - `python scripts/tests/test_package_docs_parity.py` — **10/10 passed**;
   `python scripts/check_package_docs_parity.py` — **6** published manifests and
   **1** unpublished allowlist entry matched the architecture page.
-- `python scripts/check_line_endings.py --verbose` — **259** tracked text files
+- `python scripts/check_line_endings.py --verbose` — **261** tracked text files
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
