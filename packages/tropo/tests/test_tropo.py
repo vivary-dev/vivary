@@ -1697,6 +1697,7 @@ def test_cmd_find_governed_returns_bounded_core_capsule(tmp_path):
     assert tropo._governed_query_terms("what's authentication") == [
         "authentication"
     ]
+    assert tropo._governed_query_terms("what's this") == []
 
     _search_vault(tmp_path)
     (tmp_path / "package.json").write_text(
@@ -1731,7 +1732,6 @@ def test_cmd_find_governed_returns_bounded_core_capsule(tmp_path):
         (check["name"].split("@", 1)[0], check["command"])
         for check in out["required_checks"]
     ] == [
-        ("vivary-graph-doctor", "create-vivary doctor . --json"),
         ("vivary-graph-check", "tropo check --root . --json"),
         ("project-tests", "npm test"),
     ]
@@ -1739,9 +1739,6 @@ def test_cmd_find_governed_returns_bounded_core_capsule(tmp_path):
     assert {
         check["command"]: check["evidence"] for check in out["required_checks"]
     } == {
-        "create-vivary doctor . --json": {
-            "command": "fs.stat workspace markers"
-        },
         "tropo check --root . --json": {
             "command": "fs.stat workspace markers"
         },

@@ -58,6 +58,12 @@ jobs:
           cat > "$smoke/ws/tropo.toml" <<'EOF'
           packs = ["repo-graph"]
           EOF
+          cat > "$smoke/ws/AGENTS.md" <<'EOF'
+          # Runtime
+          EOF
+          cat > "$smoke/ws/STRATO.md" <<'EOF'
+          # Agent OS
+          EOF
           cat > "$smoke/ws/.gitignore" <<'EOF'
           .vivary/memory/
           USER.md
@@ -127,6 +133,12 @@ jobs:
           assert governed["schema"] == "vivary.task-capsule/v0"
           assert governed["budget"] == {"max_claims": 2}
           assert governed["claims"]
+          assert {
+              check["command"] for check in governed["required_checks"]
+          } == {
+              "create-vivary doctor . --json",
+              "tropo check --root . --json",
+          }
           PY
       - name: assets parity
         run: python packages/create-vivary/tests/test_assets_parity.py

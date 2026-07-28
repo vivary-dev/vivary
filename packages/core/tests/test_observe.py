@@ -25,7 +25,11 @@ import pytest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
-from vivary_core.workspace_observe import OBSERVATION_SCHEMA, observe_checkouts  # noqa: E402
+from vivary_core.workspace_observe import (  # noqa: E402
+    OBSERVATION_SCHEMA,
+    _parse_remotes,
+    observe_checkouts,
+)
 
 FIXTURE_BASE = os.path.join(HERE, ".fixtures", "observe")
 
@@ -228,6 +232,19 @@ def test_clean_canonical_checkout_every_core_fact_is_known(fx, allowlist):
     assert f["remotes"]["value"][0]["name"] == "origin"
     assert f["last_fetch"]["status"] == "known"
     assert f["last_fetch"]["value"] == "2026-07-02T00:00:00.000Z"
+
+
+def test_remote_parser_sorts_non_latin_names_deterministically():
+    stdout = (
+        "身份\thttps://example.com/unicode.git (fetch)\n"
+        "身份\thttps://example.com/unicode.git (push)\n"
+        "origin\thttps://example.com/origin.git (fetch)\n"
+        "origin\thttps://example.com/origin.git (push)\n"
+    )
+
+    remotes = _parse_remotes(stdout)
+
+    assert [remote["name"] for remote in remotes] == ["origin", "身份"]
 
 
 def test_stale_neighbor_older_head_freshness_is_explicit_unknown(fx, allowlist):

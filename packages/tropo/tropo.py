@@ -1867,7 +1867,7 @@ def _governed_query_terms(text):
         and (len(term) > 1 or not term.isascii())
     ]
     bounded = []
-    for term in terms or raw:
+    for term in terms:
         if term not in bounded:
             bounded.append(term)
             if len(bounded) == _MAX_GOVERNED_QUERY_TERMS:

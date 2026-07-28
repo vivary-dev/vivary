@@ -55,6 +55,11 @@ CAPSULE_SCHEMA = "vivary.task-capsule/v0"
 # Markers that indicate a test system exists but do not identify the command to run.
 # Python alone spans pytest, tox, nox and make; picking one would be a guess.
 _AMBIGUOUS_TEST_MARKERS = ("pyproject.toml", "tox.ini", "noxfile.py", "Cargo.toml", "go.mod", "Makefile")
+# Keep aligned with create-vivary's REPAIR_WORKSPACE_MARKERS. Core cannot import
+# the scaffolder package, so this boundary contract is intentionally repeated here.
+_CREATE_VIVARY_WORKSPACE_MARKERS = frozenset(
+    ("tropo.toml", "AGENTS.md", "STRATO.md")
+)
 
 
 def _fact_value(node, name):
@@ -90,15 +95,16 @@ def _derive_required_checks(checkouts):
         cwd = node.get("path")
         suffix = f"@{node.get('id')}"
 
-        # Vivary's own checks are provable: a tropo.toml means a governed workspace,
-        # and these apply whatever the project is written in.
-        if "tropo.toml" in markers:
+        # A standalone Tropo graph can run its graph check. Doctor validates the
+        # broader create-vivary scaffold, so require that scaffold's identity markers.
+        if _CREATE_VIVARY_WORKSPACE_MARKERS.issubset(markers):
             add(
                 f"vivary-graph-doctor{suffix}",
                 "create-vivary doctor . --json",
                 marker_evidence,
                 cwd,
             )
+        if "tropo.toml" in markers:
             add(
                 f"vivary-graph-check{suffix}",
                 "tropo check --root . --json",

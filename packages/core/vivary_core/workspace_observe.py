@@ -31,7 +31,7 @@ from vivary_core.canonical import (
     is_within_allowlist,
     normalize_path,
 )
-from vivary_core.collation import locale_cmp_key
+from vivary_core.collation import CollationDomainError, locale_sort_key
 from vivary_core.event_contract import _default_clock
 
 OBSERVATION_SCHEMA = "vivary.workspace-observation/v0"
@@ -261,6 +261,8 @@ WORKSPACE_MARKERS = (
     "tropo.toml",
     "package.json",
     "pyproject.toml",
+    "AGENTS.md",
+    "STRATO.md",
     "tox.ini",
     "noxfile.py",
     "Cargo.toml",
@@ -431,18 +433,15 @@ def _parse_remotes(stdout: str) -> List[Dict[str, str]]:
         key = "fetch_url" if match.group(3) == "fetch" else "push_url"
         entry[key] = _redact_remote_url(normalize_path(match.group(2)))
     values = [remotes[name] for name in order]
-    # Node sorts remotes with String.prototype.localeCompare. We use
-    # locale_cmp_key (the cmp_to_key-wrapped comparator), NOT
-    # collation.locale_sort_key: locale_sort_key eagerly computes collation
-    # weights for every element even in a single-element list, so it raises
-    # CollationDomainError on a remote name containing a character outside
-    # the pinned collation domain (e.g. CJK) even though no comparison is
-    # ever performed against it - a spurious failure Node's lazy
-    # Array.prototype.sort comparator never exhibits (localeCompare is only
-    # invoked when two elements are actually compared). locale_cmp_key's key
-    # step only wraps each element; the comparator itself is deferred to
-    # actual pairwise comparisons, matching Node's laziness exactly.
-    return sorted(values, key=lambda r: locale_cmp_key(r["name"]))
+
+    def sort_key(remote):
+        name = remote["name"]
+        try:
+            return (0, locale_sort_key(name))
+        except CollationDomainError:
+            return (1, _utf16_sort_key(name))
+
+    return sorted(values, key=sort_key)
 
 
 def _to_iso_string(mtime_ns: int) -> str:

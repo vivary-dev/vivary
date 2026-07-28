@@ -233,7 +233,10 @@ def build_clean_capsule():
             ),
             "upstream": _known("origin/main", "git rev-parse --abbrev-ref --symbolic-full-name @{upstream}"),
             "last_fetch": _known("2026-07-01T00:00:00.000Z", "fs.stat FETCH_HEAD"),
-            "workspace_markers": _known(["tropo.toml"], "fs.stat workspace markers"),
+            "workspace_markers": _known(
+                ["tropo.toml", "AGENTS.md", "STRATO.md"],
+                "fs.stat workspace markers",
+            ),
         },
     }
     observation = {

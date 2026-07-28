@@ -873,9 +873,14 @@ def test_required_checks_are_derived_from_the_observed_workspace(fx):
         )
         return compile_task_capsule(task=task or TASK, graph=graph)
 
-    # 1. A governed workspace derives Vivary's own checks, whatever its language.
+    # 1. A standalone Tropo graph derives only the check it can satisfy.
     _write(os.path.join(repo, "tropo.toml"), "[base]\nallow_untyped = true\n")
     try:
+        commands = [c["command"] for c in compile_for()["required_checks"]]
+        assert not any("doctor" in c for c in commands), commands
+        assert any("tropo check" in c for c in commands), commands
+        _write(os.path.join(repo, "AGENTS.md"), "# Runtime\n")
+        _write(os.path.join(repo, "STRATO.md"), "# Agent OS\n")
         commands = [c["command"] for c in compile_for()["required_checks"]]
         assert any("doctor" in c for c in commands), commands
         assert any("tropo check" in c for c in commands), commands
@@ -936,7 +941,7 @@ def test_required_checks_are_derived_from_the_observed_workspace(fx):
             {"name": "mine", "command": "make check"}
         ]
     finally:
-        for name in ("tropo.toml", "pyproject.toml", "package.json"):
+        for name in ("tropo.toml", "AGENTS.md", "STRATO.md", "pyproject.toml", "package.json"):
             path = os.path.join(repo, name)
             if os.path.exists(path):
                 os.remove(path)
@@ -947,6 +952,8 @@ def test_required_checks_disambiguate_multiple_checkout_execution_roots(fx):
     roots = [fx["paths"]["canonical"], fx["paths"]["staleNeighbor"]]
     for root in roots:
         _write(os.path.join(root, "tropo.toml"), "[base]\nallow_untyped = true\n")
+        _write(os.path.join(root, "AGENTS.md"), "# Runtime\n")
+        _write(os.path.join(root, "STRATO.md"), "# Agent OS\n")
 
     try:
         graph = project_workspace_graph(
@@ -963,9 +970,10 @@ def test_required_checks_disambiguate_multiple_checkout_execution_roots(fx):
         assert all("@" in check["name"] for check in checks)
     finally:
         for root in roots:
-            marker = os.path.join(root, "tropo.toml")
-            if os.path.exists(marker):
-                os.remove(marker)
+            for name in ("tropo.toml", "AGENTS.md", "STRATO.md"):
+                marker = os.path.join(root, name)
+                if os.path.exists(marker):
+                    os.remove(marker)
 
 
 

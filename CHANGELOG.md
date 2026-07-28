@@ -68,6 +68,11 @@ and requires a separate human gate.
   become explicit omissions instead of aborting Unicode queries.
 - Governed mode refuses a Tropo root nested inside a larger Git worktree rather than
   labeling repository-wide checkout facts as scoped to the nested directory.
+- Standalone Tropo graphs now derive only `tropo check`; `create-vivary doctor` requires
+  the observed `tropo.toml` + `AGENTS.md` + `STRATO.md` scaffold identity. Governed
+  query fallback no longer restores filtered stopwords or one-letter ASCII fragments,
+  and checkout observation sorts non-Latin remote names with the deterministic Unicode
+  fallback instead of aborting.
 - Command, package, architecture, root overview, and generated-site truth now describe
   the opt-in boundary, dependency direction, and no-fetch/no-write/no-provider
   constraints.
@@ -77,18 +82,19 @@ and requires a separate human gate.
 - `python packages/tropo/tests/test_tropo.py` — **160/160** passed on Windows.
 - `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **160/160**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **601 passed** on Windows;
-  `uv run --with pytest python3 -m pytest packages/core/tests/ -q` — **599 passed,
+- `python -m pytest packages/core/tests/ -q` — **602 passed** on Windows;
+  `uv run --with pytest python3 -m pytest packages/core/tests/ -q` — **600 passed,
   2 platform-specific skips** on WSL Linux.
 - `python -m pytest packages/tropo/tests/test_tropo.py -q -k "governed or
   cmd_find_returns_context_packet"` — **11 passed**.
 - Isolated `uv run --with ./packages/core --with ./packages/tropo` distribution
   smoke — installed metadata reported core **0.2.1** and Tropo **0.4.2**; governed
-  find returned a bounded two-claim Task Capsule with checkout-scoped checks.
+  find returned a bounded two-claim Task Capsule with the full scaffold's doctor and
+  graph checks.
 - `python scripts/tests/test_package_docs_parity.py` — **10/10 passed**;
   `python scripts/check_package_docs_parity.py` — **6** published manifests and
   **1** unpublished allowlist entry matched the architecture page.
-- `python scripts/check_line_endings.py --verbose` — **258** tracked text files
+- `python scripts/check_line_endings.py --verbose` — **259** tracked text files
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
