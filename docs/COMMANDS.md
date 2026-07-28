@@ -4,12 +4,13 @@ This is the full, technical list of every command. If you're just starting, you 
 need a handful (`create-vivary init`, `doctor`, `tropo check`); the [getting started
 guide](/getting-started/) walks through those. Come back here for the details.
 
-Every CLI across the four layers. All engines are zero-dependency Python (3.11+);
-the CLI command names are `tropo` / `ozone` / `exo` / `create-vivary` regardless of
-how you install them.
+Every CLI across the four layers uses Python 3.11+ and no third-party runtime
+dependency; Tropo's optional governed path composes the first-party `vivary-core`
+contract seam. Command names remain `tropo` / `ozone` / `exo` / `create-vivary`
+regardless of installation method.
 
 - **Install (PyPI):** `pip install vivary`
-- **Run without installing (uv):** `uvx vivary-tropo check`, `uvx vivary-ozone review`, …
+- **Run without installing (uv):** `uvx --from vivary-tropo tropo check`, `uvx --from vivary-ozone ozone review`, …
 - **Scaffold (npm):** `npm create @vivary@latest my-workspace` / `npx @vivary/create@latest my-workspace`
 - **From a repo checkout:** `python packages/tropo/tropo.py check`, etc.
 
@@ -102,12 +103,46 @@ says. `tropo.toml` declares the types.
 | `plan <change.toml>` | Simulate a change (remove/retype/break/add) and show the graph delta. |
 | `fix [--dry-run]` | Strip redundant frontmatter (`W210` — a field equal to its derived value). The only mechanical edit tropo makes. |
 | `init [DIR] [--packs a,b]` | Scaffold a `tropo.toml` (optionally composing reusable type packs). |
-| `find <text> [--budget N] [--k N] [--json]` | Human-friendly context packet: the smallest typed nodes/files worth opening first, with reasons and snippets trimmed to an approximate token budget. |
+| `find <text> [--budget N] [--k N] [--json]` or `find <text> --governed [--max-claims N] [--json]` | Human-friendly retrieval. Plain mode returns typed nodes/files with reasons and snippets under an approximate token budget. Experimental governed mode runs Tropo's read-only workspace scan through `vivary-core` and returns a bounded, fingerprinted Task Capsule with evidence, conflicts, unknowns, omissions, and required checks. |
 | `query <text> [--k N] [--mode text\|vector\|semantic] [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]] [--snippet N] [--explain] [--json]` | Filtered graph search over typed nodes. Default `text` searches id/title, frontmatter, path, body, and outbound edge context. `vector` uses dependency-free local typed vectors when `.vivary/storage.toml` enables them, prefers stored embedded vectors when current rows exist, and otherwise falls back to text search. `semantic` calls an explicitly configured optional semantic-memory provider and returns typed node ids. |
 | `migrate --from file --to embedded [--dry-run] [--json]` | Move file-backed graph data into the configured embedded backend. When local vector policy is explicitly enabled, migrated rows also include typed-node vectors and provenance metadata. Cloud migration, non-file sources, backend installation, and `migrated_at` tracking are future 0.3.x work. |
 | `map [--root PATH] [--depth N] [--max-entries N] [--json]` | Read-only filesystem inventory of a repo/vault/docs tree — no `tropo.toml` required. See [Filesystem map](#filesystem-map-tropo-map) below. |
 
 `tropo find` is the default "what should I read first?" command for humans and agents.
+
+`tropo find --governed` is the first opt-in `vivary-core` adapter. It scans only the
+resolved Tropo root, passes that same normalized path as the explicit allowlist and
+capsule scope, performs no fetch, write, index mutation, provider call, or memory
+operation, and reports anything unproved as an unknown or omission. `--max-claims`
+sets the capsule's non-negative claim bound (default `24`). Governed mode rejects every
+plain/query retrieval modifier it does not consume: `--budget`, `--k`, `--mode`,
+`--type`, `--path`, `--edge`, `--snippet`, and `--explain`. Conversely,
+`--max-claims` requires `--governed`, and both governed flags are valid only with
+`find`; invalid combinations exit `2` rather than being ignored. Plain `tropo find`
+remains unchanged when the flag is absent.
+Derived required checks use checkout-scoped names and carry both the normalized `cwd`
+where the command must run and the exact observation that justified it. A standalone
+`tropo.toml` derives `tropo check`; `create-vivary doctor` is derived only when the
+observed root also carries the scaffold identity markers `AGENTS.md` and `STRATO.md`.
+Governed search drops one-letter ASCII contraction fragments, uses NUL-framed Git
+output, treats every path passed to `git check-ignore` as literal, excludes tracked
+paths covered by repository ignore policy or an explicit readable global/system
+`core.excludesFile`, and refuses a Tropo root nested inside a larger Git worktree
+rather than leaking sibling checkout facts.
+Every default Git command used by checkout observation or content retrieval disables
+repository-configured filesystem monitors. Workspace markers and package scripts pass
+through the same fail-closed ignore-policy filter as content and dirty paths.
+Reparse-point and multiply linked markers are rejected; a bounded package manifest is
+read only through a descriptor whose identity is verified around the open. Ignored or
+externally linked manifests cannot leak facts or derive commands. Core brackets content
+with checkout observations; dirty or privacy-filtered checkouts also require two
+identical content scans inside a stable bracket. A changed bracket retries once.
+Persistent mutation reports content unavailable, while an unobservable dirty state
+reports `dirty_state_unknown`; neither case compiles mixed-state facts and content.
+Unicode terms and content remain supported; unrankable non-content facts become
+explicit omissions instead of aborting the capsule. Question extraction preserves
+order, deduplicates terms, and searches at most the first `16`; core then caps matched
+bytes, lines per file, claims, and omission detail.
 `tropo query` is the lower-level filtered search primitive. By default both are
 graph/text retrieval, not the CocoIndex active-context sidecar. On the unreleased
 `dev` branch, `tropo query --mode vector` is a dependency-free typed-vector mode:
@@ -171,12 +206,15 @@ Useful retrieval flags:
 | `--explain` | Include stable match reasons such as title/id, frontmatter, path, body, or edge context. |
 | `--mode text\|vector\|semantic` | `query` only: use dependency-free graph/text search, dependency-free local typed-vector search, or call the configured optional semantic-memory provider. |
 | `--budget N` | `find` only: approximate token budget for the returned context packet. |
+| `--governed` | `find` only, unreleased source: opt into the experimental Tropo scan → `vivary-core` evidence graph → bounded Task Capsule path. |
+| `--max-claims N` | `find --governed` only, unreleased source: maximum capsule claims; must be a non-negative integer (default `24`). |
 
 ```bash
 tropo find "where is release truth owned" --root . --budget 800 --json
 tropo query "release truth" --type decision --path "decisions/*" --explain --json
 tropo query "agent workspace" --edge affects:agent-workspace
 # Unreleased dev branch until the next package publish:
+tropo find "where is release truth owned" --root . --governed --max-claims 12 --json
 tropo query "release truth" --mode vector --json
 tropo query "release truth" --mode semantic --json
 ```

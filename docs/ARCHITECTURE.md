@@ -42,10 +42,11 @@ through `modules/index.md`, open that module's `index.md`, and follow deeper lin
 when the task proves they are relevant.
 
 **No lock-in (corollary):** a workspace is plain Markdown + YAML plus a few
-zero-dependency CLIs. It works in any editor or none and on any agent runtime
-(Claude Code via `.claude/`, Codex via `AGENTS.md` + `.agents/`). tropo even ignores
-`.obsidian/`, `.vscode/`, etc. — no editor, plugin, or single-vendor agent is ever
-required.
+lightweight Python CLIs. Governed Tropo composes the first-party `vivary-core` seam,
+but no CLI requires an editor, plugin, provider, network service, or single-vendor
+agent runtime. Workspaces operate in any editor or none, with Claude Code via
+`.claude/` or Codex via `AGENTS.md` + `.agents/`; tropo ignores `.obsidian/`,
+`.vscode/`, and similar tool state.
 
 **Active context is a sidecar.** For codebases, a workspace may opt into
 CocoIndex-code guidance (`--active-context cocoindex-code`) so agents can ask before
@@ -139,18 +140,19 @@ The governing rule is the same one the rest of Vivary follows: it never resolves
 ambiguity it merely observed. Conflicts are handed to review, not to confidence, and
 anything unproven is reported `unknown` rather than guessed.
 
-**Selected dependency direction:** role packages depend on `vivary-core`; the `vivary`
-meta package receives it transitively and does not declare it. One owner per edge, so
-there is no version-pinning fight between the meta package and the roles. The edge is
-added to a role's `pyproject.toml` in the *same commit* that makes that role first import
-`vivary_core` — never ahead of it. That is why no role manifest depends on
-`vivary-core` today: no role imports it yet, and a dependency nothing uses is a
-declaration the code does not support.
+**Selected dependency direction:** a shipping package that imports `vivary-core`
+declares its own floor in the same commit; the `vivary` meta package receives core
+transitively and does not declare it. One owner per edge avoids version-pinning fights.
+`vivary-tropo` is the first importer: its experimental `find --governed` adapter depends
+on `vivary-core>=0.2.1`, the first source version that exposes the adapter's required
+API. No other role manifest depends on core yet; the remaining role packages add their
+own floors only when their first real imports land — never ahead of the code that needs them.
 
-**Status:** merged into `dev` and not yet reachable from any shipping CLI — wiring it
-outward is tracked in [#207](https://github.com/vivary-dev/vivary/issues/207). Until
-that lands, treat this section as describing the seam's contract, not a user-facing
-feature.
+**Status:** merged into `dev`, unpublished during development, and reachable only
+through the explicit experimental `tropo find --governed` flag. Plain Tropo retrieval
+and every role CLI remain unchanged. The remaining package/role integration is tracked
+in [#207](https://github.com/vivary-dev/vivary/issues/207); publication waits for the
+final comprehensive release train and its separate human gate.
 
 ## 4. The moat
 

@@ -16,11 +16,11 @@ Usage:
   tropo view [graph | blast <id>] [--out FILE]
   tropo plan <change-spec.toml> [--json]
   tropo query <text> [--mode text|vector|semantic] [--type TYPE] [--path GLOB] [--edge FIELD[:TARGET]]
-  tropo find <text> [--budget N] [--json]
+  tropo find <text> [--budget N | --governed [--max-claims N]] [--json]
   tropo map [PATH | --root PATH] [--depth N] [--max-entries N] [--json]
 
 Config is TOML (tropo.toml, resolved by walking up). Content frontmatter is YAML.
-Zero dependencies. Requires Python 3.11+ (for tomllib).
+Requires Python 3.11+ (for tomllib). Governed find uses vivary-core.
 Exit codes: 0 = clean, 1 = errors found, 2 = config/usage problem.
 """
 
@@ -46,7 +46,7 @@ import tomllib
 from collections import Counter, deque
 from fnmatch import fnmatchcase
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
 RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
 RECEIPT_SCHEMA = "vivary.run_receipt.v1"
 COMMANDS = (
@@ -54,13 +54,13 @@ COMMANDS = (
     "fix", "init", "migrate", "query", "find", "map",
 )
 RECEIPT_VALUE_FLAGS = {
-    "--receipt", "--depth", "--max-entries", "--out", "--packs", "--root",
-    "--config", "--from", "--to", "--k", "--type", "--path", "--edge",
+    "--receipt", "--depth", "--max-entries", "--max-claims", "--out", "--packs",
+    "--root", "--config", "--from", "--to", "--k", "--type", "--path", "--edge",
     "--snippet", "--budget",
 }
 RECEIPT_KNOWN_FLAGS = RECEIPT_VALUE_FLAGS | {
-    "--budget", "--dry-run", "--explain", "--help", "--json", "--lenient",
-    "--quiet", "--strict", "--version", "--yes", "-h",
+    "--budget", "--dry-run", "--explain", "--governed", "--help", "--json",
+    "--lenient", "--quiet", "--strict", "--version", "--yes", "-h",
 }
 RECEIPT_RESERVED_WINDOWS_NAMES = {
     "CON",
@@ -1216,6 +1216,7 @@ MEMORY_CONFIG_NAME = "memory.toml"
 _CONTENT_PREVIEW_CHARS = 1000
 _DEFAULT_SNIPPET_CHARS = 160
 _DEFAULT_FIND_BUDGET = 1200
+_MAX_GOVERNED_QUERY_TERMS = 16
 _DEFAULT_VECTOR_DIMENSIONS = 128
 _MIN_VECTOR_DIMENSIONS = 16
 _MAX_VECTOR_DIMENSIONS = 4096
@@ -1414,12 +1415,22 @@ def _load_memory_query_config(root):
             "detail": f"{STORAGE_DIR}/{MEMORY_CONFIG_NAME} does not enable semantic memory",
         }
     try:
-        with open(path, encoding="utf-8-sig") as fh:
-            data = tomllib.loads(fh.read())
-    except (OSError, tomllib.TOMLDecodeError) as e:
+        with open(path, "r", encoding="utf-8-sig") as handle:
+            data = tomllib.loads(handle.read())
+    except OSError as e:
         return {
             "enabled": False,
-            "provider": "unknown",
+            "provider": "none",
+            "status": "misconfigured",
+            "detail": (
+                f"cannot read {STORAGE_DIR}/{MEMORY_CONFIG_NAME}: "
+                f"{e.strerror or e.__class__.__name__}"
+            ),
+        }
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
+        return {
+            "enabled": False,
+            "provider": "none",
             "status": "misconfigured",
             "detail": f"invalid {STORAGE_DIR}/{MEMORY_CONFIG_NAME}: {e}",
         }
@@ -1454,11 +1465,18 @@ def _load_memory_query_config(root):
             "status": "disabled",
             "detail": f"{STORAGE_DIR}/{MEMORY_CONFIG_NAME} does not enable semantic memory",
         }
+    cognee = memory.get("cognee", {})
+    allow_network = (
+        cognee.get("allow_network", False) if isinstance(cognee, dict) else None
+    )
+    if not isinstance(allow_network, bool):
+        allow_network = None
     return {
         "enabled": True,
         "provider": provider,
         "status": "configured",
         "detail": "",
+        "_allow_network": allow_network,
     }
 
 
@@ -1855,6 +1873,23 @@ def _query_terms(text):
     raw = re.findall(r"[a-z0-9]+", text.lower())
     terms = [t for t in raw if t not in _QUERY_STOPWORDS]
     return terms or raw
+
+
+def _governed_query_terms(text):
+    raw = re.findall(r"[^\W_]+", text.lower(), flags=re.UNICODE)
+    terms = [
+        term
+        for term in raw
+        if term not in _QUERY_STOPWORDS
+        and (len(term) > 1 or not term.isascii())
+    ]
+    bounded = []
+    for term in terms:
+        if term not in bounded:
+            bounded.append(term)
+            if len(bounded) == _MAX_GOVERNED_QUERY_TERMS:
+                break
+    return bounded
 
 
 def _normalize_glob(pattern):
@@ -2797,12 +2832,21 @@ def semantic_query(resolver, text, *, k=10, type_filters=None, path_filters=None
         hits = asyncio.run(
             vivary_cognee.CogneeMemoryAdapter(resolver.root).recall(text, k=provider_k)
         )
-    except getattr(vivary_cognee, "AdapterError", RuntimeError) as e:
+    except Exception as e:
+        policy_detail = ""
+        if config.get("_allow_network") is False:
+            policy_detail = (
+                "; workspace policy: memory.cognee.allow_network is false "
+                "(default deny)"
+            )
         return 1, [], {
             "enabled": True,
             "provider": "cognee",
             "status": "unavailable",
-            "detail": str(e),
+            "detail": (
+                "semantic-memory provider query failed "
+                f"({e.__class__.__name__}){policy_detail}"
+            ),
         }
     results = []
     for hit in hits:
@@ -3722,7 +3766,8 @@ def cmd_query(args, resolver):
     raw_k = getattr(args, "k", 10)
     k = 10 if raw_k is None else raw_k
     mode = getattr(args, "mode", "text") or "text"
-    snippet = getattr(args, "snippet", _DEFAULT_SNIPPET_CHARS)
+    raw_snippet = getattr(args, "snippet", None)
+    snippet = _DEFAULT_SNIPPET_CHARS if raw_snippet is None else raw_snippet
     explain = getattr(args, "explain", False)
     type_filters = getattr(args, "type", None) or []
     path_filters = getattr(args, "path", None) or []
@@ -3839,17 +3884,282 @@ def cmd_query(args, resolver):
     return 0
 
 
+def _same_filesystem_path(left, right):
+    if os.name == "nt":
+        return left.casefold() == right.casefold()
+    return left == right
+
+
+def _governed_checkout(observation, root):
+    return next(
+        (
+            entry
+            for entry in observation.get("checkouts", [])
+            if entry.get("path") == root
+        ),
+        None,
+    )
+
+
+def _refuse_nested_governed_root(observation, root, normalize):
+    """Keep governed scope equal to the resolved worktree root."""
+    checkout = _governed_checkout(observation, root)
+    worktree_root = (
+        ((checkout or {}).get("facts") or {}).get("worktree_root") or {}
+    )
+    if (
+        worktree_root.get("status") == "known"
+        and not _same_filesystem_path(
+            normalize(worktree_root.get("value")),
+            root,
+        )
+    ):
+        raise ValueError(
+            "the governed Tropo root must be the Git worktree root; "
+            "nested roots are refused to prevent sibling checkout facts from leaking"
+        )
+
+
+def _governed_observation_state(observation):
+    """The observed checkout state that can enter a governed capsule.
+
+    Timestamps are deliberately excluded: they describe the scan, not the
+    worktree. Every checkout fact and refusal remains in the comparison because
+    either can alter a graph, derived check, claim, unknown, omission, evidence,
+    or fingerprint.
+    """
+    return (
+        observation.get("checkouts", []),
+        observation.get("refusals", []),
+    )
+
+
+def _governed_content_unavailability_reason(observation):
+    """Explain why a stable fact bracket still cannot attest read content."""
+    checkouts = observation.get("checkouts", [])
+    if len(checkouts) != 1:
+        return "dirty_state_unknown"
+    for checkout in checkouts:
+        facts = checkout.get("facts") or {}
+        repository = facts.get("is_git_repository") or {}
+        if repository.get("status") != "known" or repository.get("value") is not True:
+            return "dirty_state_unknown"
+        for name in ("is_dirty", "dirty_entries"):
+            fact = facts.get(name) or {}
+            if (
+                fact.get("status") != "known"
+                and fact.get("reason") != "ignored_dirty_entries_excluded"
+            ):
+                return "dirty_state_unknown"
+    return None
+
+
+def _governed_content_state(content):
+    """Content identity without the observation timestamp."""
+    return (
+        content.get("schema"),
+        content.get("terms", []),
+        content.get("allowlist", []),
+        content.get("checkouts", []),
+        content.get("refusals", []),
+    )
+
+
+def _governed_content_unavailable(
+    content,
+    root,
+    reason="worktree_state_changed_during_content_observation",
+):
+    """Discard content that cannot be bound without changing content schemas."""
+    return {
+        "schema": content.get("schema", "vivary.workspace-content/v0"),
+        "observed_at": content.get("observed_at"),
+        "terms": content.get("terms", []),
+        "allowlist": content.get("allowlist", [root]),
+        "checkouts": [
+            {
+                "raw_path": root,
+                "path": root,
+                "status": "unknown",
+                "reason": reason,
+                "matches": [],
+                "omissions": [],
+            }
+        ],
+        "refusals": [],
+    }
+
+
+def governed_find(root, question, *, max_claims=24):
+    """Compile a bounded governed-context capsule for one Tropo workspace.
+
+    Facts and content must describe one worktree state. A content scan is
+    bracketed by two full checkout observations; a changed bracket retries once,
+    then discards the unstable content rather than quietly pairing it with
+    stale facts.
+    """
+    from vivary_core import (
+        compile_task_capsule,
+        observe_checkouts,
+        observe_content,
+        normalize_path,
+        project_workspace_graph,
+    )
+
+    root = normalize_path(os.path.realpath(os.path.abspath(root)))
+    paths = [root]
+    terms = _governed_query_terms(question)
+
+    for _attempt in range(2):
+        before = observe_checkouts(paths, allowlist=paths)
+        _refuse_nested_governed_root(before, root, normalize_path)
+        scanned_content = observe_content(
+            paths,
+            allowlist=paths,
+            terms=terms,
+        )
+        after = observe_checkouts(paths, allowlist=paths)
+        _refuse_nested_governed_root(after, root, normalize_path)
+        if _governed_observation_state(before) != _governed_observation_state(after):
+            continue
+
+        observation = after
+        unavailable_reason = _governed_content_unavailability_reason(after)
+        if unavailable_reason is not None:
+            content = _governed_content_unavailable(
+                scanned_content,
+                root,
+                reason=unavailable_reason,
+            )
+            break
+
+        checkout = _governed_checkout(after, root) or {}
+        dirty_fact = (checkout.get("facts") or {}).get("is_dirty") or {}
+        requires_rescan = (
+            dirty_fact.get("status") != "known" or dirty_fact.get("value") is True
+        )
+        if requires_rescan:
+            rescanned_content = observe_content(
+                paths,
+                allowlist=paths,
+                terms=terms,
+            )
+            final = observe_checkouts(paths, allowlist=paths)
+            _refuse_nested_governed_root(final, root, normalize_path)
+            if (
+                _governed_observation_state(after)
+                != _governed_observation_state(final)
+                or _governed_content_state(scanned_content)
+                != _governed_content_state(rescanned_content)
+            ):
+                continue
+            observation = final
+            content = rescanned_content
+        else:
+            content = scanned_content
+        break
+    else:
+        # Both bounded attempts saw a changing checkout. `after` is still one
+        # coherent fact snapshot, but none of the read content can be bound to
+        # it, so expose that incompleteness instead of mixing observations.
+        observation = after
+        content = _governed_content_unavailable(scanned_content, root)
+
+    graph = project_workspace_graph(observation)
+    return compile_task_capsule(
+        task={"question": question, "scope": paths},
+        graph=graph,
+        content=content,
+        budget={"max_claims": max_claims},
+    )
+
+
+def _print_governed_find(capsule):
+    claims = capsule["claims"]
+    print(
+        f"tropo find: governed capsule {capsule['capsule_id']} "
+        f"({len(claims)} claim(s), {len(capsule['conflicts'])} conflict(s), "
+        f"{len(capsule['unknowns'])} unknown(s))"
+    )
+    for index, claim in enumerate(claims, 1):
+        print(f"{index:2}. {claim['claim']}")
+        print(f"    why: {claim['selection_reason']}")
+
+
 def cmd_find(args, resolver):
-    """Return a small typed context packet for a task or question."""
+    """Return a small typed context packet or an experimental governed capsule."""
     if not args.paths:
         sys.exit("tropo find: provide a task or question — e.g. tropo find \"auth module\"")
     text = " ".join(args.paths)
+
+    if getattr(args, "governed", False):
+        unsupported = []
+        for flag, value in (
+            ("--budget", getattr(args, "budget", None)),
+            ("--k", getattr(args, "k", None)),
+            ("--mode", getattr(args, "mode", None)),
+            ("--snippet", getattr(args, "snippet", None)),
+        ):
+            if value is not None:
+                unsupported.append(flag)
+        unsupported.extend(
+            flag
+            for flag, value in (
+                ("--type", getattr(args, "type", None)),
+                ("--path", getattr(args, "path", None)),
+                ("--edge", getattr(args, "edge", None)),
+                ("--explain", getattr(args, "explain", False)),
+            )
+            if value
+        )
+        if unsupported:
+            print(
+                "tropo find --governed: unsupported option(s): "
+                + ", ".join(unsupported),
+                file=sys.stderr,
+            )
+            return 2
+
+        max_claims = getattr(args, "max_claims", None)
+        if max_claims is None:
+            max_claims = 24
+        try:
+            capsule = governed_find(
+                resolver.root,
+                text,
+                max_claims=max_claims,
+            )
+        except ImportError:
+            print(
+                "tropo find --governed: vivary-core>=0.2.1 is required; "
+                "install Tropo with its declared dependencies",
+                file=sys.stderr,
+            )
+            return 2
+        except ValueError as error:
+            print(f"tropo find --governed: {error}", file=sys.stderr)
+            return 2
+
+        if args.json:
+            print(json.dumps(capsule, indent=2))
+        else:
+            _print_governed_find(capsule)
+        return 0
+
+    if getattr(args, "max_claims", None) is not None:
+        print(
+            "tropo find: --max-claims requires --governed",
+            file=sys.stderr,
+        )
+        return 2
+
     k = getattr(args, "k", 5) or 5
     budget = getattr(args, "budget", _DEFAULT_FIND_BUDGET) or _DEFAULT_FIND_BUDGET
     type_filters = getattr(args, "type", None) or []
     path_filters = getattr(args, "path", None) or []
     edge_filters = getattr(args, "edge", None) or []
-    snippet = getattr(args, "snippet", _DEFAULT_SNIPPET_CHARS)
+    raw_snippet = getattr(args, "snippet", None)
+    snippet = _DEFAULT_SNIPPET_CHARS if raw_snippet is None else raw_snippet
 
     query_results = search_graph(
         resolver,
@@ -3861,7 +4171,10 @@ def cmd_find(args, resolver):
         snippet_chars=snippet,
         explain=True,
     )
-    context, estimated_tokens = _trim_context_to_budget(_context_results(query_results), budget)
+    context, estimated_tokens = _trim_context_to_budget(
+        _context_results(query_results),
+        budget,
+    )
 
     if args.json:
         print(json.dumps({
@@ -4087,7 +4400,7 @@ def _main(argv=None):
     p.add_argument("--yes", action="store_true", help="auto-confirm prompts (agent/CI use)")
     p.add_argument("--k", type=int, default=None,
                    help="query/find: number of results (query default: 10, find default: 5)")
-    p.add_argument("--mode", choices=["text", "vector", "semantic"], default="text",
+    p.add_argument("--mode", choices=["text", "vector", "semantic"], default=None,
                    help="query: text graph search (default), local typed vector search, or optional semantic-memory provider search")
     p.add_argument("--type", action="append", default=[],
                    help="query/find: restrict results to a document type; repeatable")
@@ -4095,13 +4408,22 @@ def _main(argv=None):
                    help="query/find: restrict results to a path glob; repeatable")
     p.add_argument("--edge", action="append", default=[],
                    help="query/find: require outbound edge FIELD or FIELD:TARGET; repeatable")
-    p.add_argument("--snippet", type=int, default=_DEFAULT_SNIPPET_CHARS,
-                   help="query/find: snippet characters per result (0 disables snippets)")
+    p.add_argument("--snippet", type=int, default=None,
+                   help=f"query/find: snippet characters per result (default: {_DEFAULT_SNIPPET_CHARS}; 0 disables)")
     p.add_argument("--explain", action="store_true",
                    help="query: include stable match reasons")
-    p.add_argument("--budget", type=int, default=_DEFAULT_FIND_BUDGET,
-                   help="find: approximate token budget for the context packet")
+    p.add_argument("--budget", type=int, default=None,
+                   help=f"find: approximate token budget (default: {_DEFAULT_FIND_BUDGET})")
+    p.add_argument("--governed", action="store_true",
+                   help="find: experimental read-only scan → graph → capsule pipeline")
+    p.add_argument("--max-claims", type=int, default=None,
+                   help="find --governed: maximum capsule claims (default: 24)")
     args = p.parse_args(argv)
+
+    if args.command != "find" and (
+        args.governed or args.max_claims is not None
+    ):
+        p.error("--governed and --max-claims are only valid with find")
 
     if args.command == "init":
         return cmd_init(args)

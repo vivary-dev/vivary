@@ -1,7 +1,8 @@
 """Read-only checkout observation. This is the only impure module in the
 slice: it may run read-only git queries and stat files, and nothing else. It
-never fetches, never writes the index (--no-optional-locks), and never
-crawls - it observes exactly the explicit allowlisted roots it is handed.
+never fetches, never writes the index (--no-optional-locks), never honors
+repository fsmonitor hooks, and never crawls - it observes exactly the explicit
+allowlisted roots it is handed.
 
 Reference-guided Python port of src/workspace/observe.mjs (slice 2, ticket
 #84/#88, decision 0008). The Node module is the frozen executable oracle:
@@ -19,7 +20,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import subprocess
+import threading
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
@@ -30,7 +33,7 @@ from vivary_core.canonical import (
     is_within_allowlist,
     normalize_path,
 )
-from vivary_core.collation import locale_cmp_key
+from vivary_core.collation import CollationDomainError, locale_sort_key
 from vivary_core.event_contract import _default_clock
 
 OBSERVATION_SCHEMA = "vivary.workspace-observation/v0"
@@ -62,20 +65,274 @@ _PINNED_GIT_ENV = {
 }
 
 _MAX_BUFFER = 4 * 1024 * 1024
+_READ_CHUNK = 64 * 1024
+_MAX_STDERR_BYTES = 8 * 1024
+_MAX_MANIFEST_BYTES = 1024 * 1024
+_SUBPROCESS_CLEANUP_TIMEOUT = 2.0
 
 RunGit = Callable[[str, List[str]], Dict[str, Any]]
 
 
-def _sanitized_git_env() -> Dict[str, str]:
+def _sanitized_git_env(
+    worktree_config: Optional[Dict[str, str]] = None,
+) -> Dict[str, str]:
     """A narrowly pinned environment for read-only observation.
 
-    Drops every `GIT_*` variable — an allowlist, not a denylist, because the set of
-    Git variables that can change repository, config or object resolution grows with
-    Git itself — then restores only the pins above.
+    Drops every ambient `GIT_*` variable, restores only the fixed safety pins,
+    then optionally injects validated worktree-filter values. The latter are
+    carried in the environment so evidence command strings remain canonical
+    across machines.
     """
-    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.upper().startswith("GIT_")
+    }
     env.update(_PINNED_GIT_ENV)
+    if worktree_config:
+        env["GIT_CONFIG_COUNT"] = str(len(worktree_config))
+        for index, (key, value) in enumerate(worktree_config.items()):
+            env[f"GIT_CONFIG_KEY_{index}"] = key
+            env[f"GIT_CONFIG_VALUE_{index}"] = value
     return env
+
+
+def _config_discovery_git_env() -> Dict[str, str]:
+    """Read the user's normal Git config without honoring `GIT_*` injection."""
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
+def _capped_run(argv: List[str], env: Dict[str, str], limit: int) -> Dict[str, Any]:
+    """Run ``argv`` with bounded stdout while draining stderr concurrently."""
+    try:
+        proc = subprocess.Popen(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+    except OSError as error:
+        return {
+            "error": str(error),
+            "stdout": b"",
+            "stderr": b"",
+            "code": None,
+            "exceeded": False,
+        }
+
+    stderr_chunks: List[bytes] = []
+    stderr_errors: List[Exception] = []
+
+    def drain_stderr() -> None:
+        captured = 0
+        try:
+            assert proc.stderr is not None
+            while True:
+                chunk = proc.stderr.read(_READ_CHUNK)
+                if not chunk:
+                    break
+                room = _MAX_STDERR_BYTES - captured
+                if room > 0:
+                    kept = chunk[:room]
+                    stderr_chunks.append(kept)
+                    captured += len(kept)
+        except (OSError, ValueError) as error:
+            stderr_errors.append(error)
+
+    stderr_reader = threading.Thread(target=drain_stderr, daemon=True)
+    stderr_reader.start()
+
+    stdout_chunks: List[bytes] = []
+    total = 0
+    exceeded = False
+    stdout_error: Optional[Exception] = None
+    try:
+        assert proc.stdout is not None
+        while True:
+            chunk = proc.stdout.read(_READ_CHUNK)
+            if not chunk:
+                break
+            room = limit - total
+            if room > 0:
+                kept = chunk[:room]
+                stdout_chunks.append(kept)
+                total += len(kept)
+            if len(chunk) > room:
+                exceeded = True
+                proc.kill()
+                break
+    except (OSError, ValueError) as error:
+        stdout_error = error
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    finally:
+        try:
+            code = proc.wait(timeout=_SUBPROCESS_CLEANUP_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            try:
+                code = proc.wait(timeout=_SUBPROCESS_CLEANUP_TIMEOUT)
+            except (OSError, subprocess.TimeoutExpired) as error:
+                code = proc.returncode
+                if stdout_error is None:
+                    stdout_error = error
+        except OSError as error:
+            code = proc.returncode
+            if stdout_error is None:
+                stdout_error = error
+
+        stderr_reader.join(_SUBPROCESS_CLEANUP_TIMEOUT)
+        stderr_drain_timed_out = stderr_reader.is_alive()
+        if stderr_drain_timed_out:
+            # Closing BufferedReader here can block on the same lock held by its
+            # read. The daemon already caps captured bytes, so report the timeout
+            # and return rather than turning cleanup itself into an unbounded wait.
+            stderr_errors.append(RuntimeError("stderr drain timed out"))
+
+        for pipe in (proc.stdout, proc.stderr):
+            if pipe is None or (pipe is proc.stderr and stderr_drain_timed_out):
+                continue
+            try:
+                pipe.close()
+            except (OSError, ValueError):
+                pass
+
+    run_error = stdout_error or (stderr_errors[0] if stderr_errors else None)
+    return {
+        "error": str(run_error) if run_error is not None else None,
+        "stdout": b"".join(stdout_chunks),
+        "stderr": b"".join(stderr_chunks),
+        "code": code,
+        "exceeded": exceeded,
+    }
+
+
+_WORKTREE_SEMANTIC_CONFIG = (
+    ("core.autocrlf", {"true", "false", "input"}),
+    ("core.eol", {"lf", "crlf", "native"}),
+)
+
+
+def _worktree_semantic_config(checkout_path: str) -> Dict[str, str]:
+    """Preserve validated host worktree/ignore policy across the hardened Git boundary.
+
+    The enum filters affect checkout bytes; ``core.excludesFile`` affects privacy.
+    Restoring either means observations and fingerprints can legitimately vary with
+    host Git policy, just as ordinary Git status does.
+    """
+    config: Dict[str, str] = {}
+    env = _config_discovery_git_env()
+    for key, allowed_values in _WORKTREE_SEMANTIC_CONFIG:
+        outcome = _capped_run(
+            ["git", "--no-optional-locks", "-C", checkout_path, "config", "--get", key],
+            env,
+            1024,
+        )
+        if (
+            outcome["error"] is not None
+            or outcome["exceeded"]
+            or outcome["code"] != 0
+        ):
+            continue
+        try:
+            value = outcome["stdout"].decode("utf-8", "strict").strip().lower()
+        except UnicodeDecodeError:
+            continue
+        if key == "core.autocrlf" and value != "input":
+            parsed = _capped_run(
+                [
+                    "git",
+                    "--no-optional-locks",
+                    "-C",
+                    checkout_path,
+                    "config",
+                    "--type=bool",
+                    "--get",
+                    key,
+                ],
+                env,
+                1024,
+            )
+            if (
+                parsed["error"] is not None
+                or parsed["exceeded"]
+                or parsed["code"] != 0
+            ):
+                continue
+            try:
+                value = parsed["stdout"].decode("utf-8", "strict").strip().lower()
+            except UnicodeDecodeError:
+                continue
+        if value in allowed_values:
+            config[key] = value
+
+    # First ask the hardened process whether repository/worktree-scoped config
+    # already supplies this key (including config.worktree and local includes).
+    # Command-scope injection must never override a value that process can see.
+    repo_excludes = _capped_run(
+        [
+            "git",
+            "--no-optional-locks",
+            "-C",
+            checkout_path,
+            "config",
+            "--path",
+            "--get",
+            "core.excludesFile",
+        ],
+        _sanitized_git_env(),
+        1024,
+    )
+    if (
+        repo_excludes["error"] is not None
+        or repo_excludes["exceeded"]
+        or repo_excludes["code"] not in (0, 1)
+    ):
+        return config
+    if repo_excludes["code"] == 0:
+        return config
+
+    # Query broader scopes explicitly: an observed repository must not choose
+    # the path injected at command scope. `--path` gives Git ownership of `~`
+    # expansion. A present but unusable higher-precedence value suppresses the
+    # lower scope, matching Git's effective-config semantics.
+    for scope in ("--global", "--system"):
+        excludes = _capped_run(
+            [
+                "git",
+                "--no-optional-locks",
+                "config",
+                scope,
+                "--path",
+                "--get",
+                "core.excludesFile",
+            ],
+            env,
+            1024,
+        )
+        if (
+            excludes["error"] is not None
+            or excludes["exceeded"]
+            or excludes["code"] not in (0, 1)
+        ):
+            return config
+        if excludes["code"] == 1:
+            continue
+        try:
+            value = excludes["stdout"].decode("utf-8", "strict").rstrip("\r\n")
+        except UnicodeDecodeError:
+            return config
+        if os.path.isfile(value) and os.access(value, os.R_OK):
+            config["core.excludesFile"] = os.path.abspath(value)
+        return config
+    return config
 
 
 _CREDENTIAL_URL_RE = re.compile(r"\A([a-zA-Z][a-zA-Z0-9+.-]*://)(?:[^/@]*@)?(.*)\Z", re.DOTALL)
@@ -104,52 +361,81 @@ def _redact_remote_url(url: str) -> str:
     return url
 
 
-def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
-    full_args = ["--no-optional-locks", "-C", checkout_path, *args]
+def _default_run_git(
+    checkout_path: str,
+    args: List[str],
+    *,
+    worktree_config: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    # `core.fsmonitor` is repository configuration and can name an executable.
+    # Override it on every Git invocation rather than trusting an observed
+    # worktree's hook while performing a governed, read-only observation.
+    #
+    # Global/system config remains blocked from the governed command. The narrow
+    # worktree-semantics allowlist is discovered separately, validated, and
+    # re-applied through the pinned environment so Git-for-Windows autocrlf
+    # worktrees are not falsely reported as dirty.
+    semantic_config = (
+        _worktree_semantic_config(checkout_path)
+        if worktree_config is None
+        else worktree_config
+    )
+    full_args = [
+        "--no-optional-locks",
+        "-c",
+        "core.fsmonitor=false",
+        "-C",
+        checkout_path,
+        *args,
+    ]
     command = f"git {' '.join(full_args)}"
-    try:
-        proc = subprocess.run(
-            ["git", *full_args],
-            capture_output=True,
-            env=_sanitized_git_env(),
-        )
-    except OSError as error:
-        return {"ok": False, "stdout": "", "stderr": str(error)[:400], "command": command,
-                "code": None}
-
-    stdout_bytes = proc.stdout or b""
-    # Replicate Node's execFile maxBuffer: if the captured stdout exceeds the
-    # buffer limit, execFile treats the whole invocation as failed (it never
-    # silently returns truncated output) - mirrored here as a post-hoc length
-    # check since Python's subprocess has no equivalent capture ceiling.
-    if len(stdout_bytes) > _MAX_BUFFER:
+    outcome = _capped_run(
+        ["git", *full_args],
+        _sanitized_git_env(semantic_config),
+        _MAX_BUFFER,
+    )
+    if outcome["error"] is not None:
         return {
             "ok": False,
             "stdout": "",
-            "stderr": "stdout maxBuffer length exceeded"[:400],
+            "stderr": outcome["error"][:400],
             "command": command,
-            "code": proc.returncode,
+            "code": outcome["code"],
+        }
+    if outcome["exceeded"]:
+        return {
+            "ok": False,
+            "stdout": "",
+            "stderr": "stdout maxBuffer length exceeded",
+            "command": command,
+            "code": outcome["code"],
+        }
+    if outcome["code"] != 0:
+        stderr_text = outcome["stderr"].decode("utf-8", errors="replace")
+        return {
+            "ok": False,
+            "stdout": "",
+            "stderr": stderr_text[:400],
+            "command": command,
+            "code": outcome["code"],
         }
 
-    if proc.returncode != 0:
-        stderr_bytes = proc.stderr or b""
-        stderr_text = stderr_bytes.decode("utf-8", errors="replace")
-        return {"ok": False, "stdout": "", "stderr": stderr_text[:400], "command": command,
-                "code": proc.returncode}
-
-    stdout_text = stdout_bytes.decode("utf-8", errors="replace")
+    stdout_text = outcome["stdout"].decode("utf-8", errors="replace")
     return {"ok": True, "stdout": stdout_text.replace("\r\n", "\n"), "command": command}
 
 
-# Marker files that say something about how a workspace is verified. Presence is
-# stat-only; `package.json` is the one file whose *contents* are read, because
-# presence alone is too weak a signal — a `package.json` for a docs site or a lint
-# hook is common, and telling that workspace to run `npm test` produces a confusing
+# Marker files that say something about how a workspace is verified. They are
+# stat-only after the repository's ignore policy has admitted their names;
+# `package.json` is the one file whose *contents* are read, because presence
+# alone is too weak a signal — a `package.json` for a docs site or a lint hook
+# is common, and telling that workspace to run `npm test` produces a confusing
 # failure rather than a check.
 WORKSPACE_MARKERS = (
     "tropo.toml",
     "package.json",
     "pyproject.toml",
+    "AGENTS.md",
+    "STRATO.md",
     "tox.ini",
     "noxfile.py",
     "Cargo.toml",
@@ -161,33 +447,101 @@ WORKSPACE_MARKERS = (
 _NPM_PLACEHOLDER_TEST = 'echo "Error: no test specified" && exit 1'
 
 
-def _observe_workspace_markers(worktree_root: str) -> List[str]:
-    """Which known marker files exist at the worktree root.
+def _is_safe_workspace_file(path: str) -> bool:
+    """Reject reparse points and multiply linked files before marker admission."""
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    return (
+        stat.S_ISREG(info.st_mode)
+        and info.st_nlink == 1
+        and not getattr(info, "st_reparse_tag", 0)
+    )
 
-    Stat-only, deterministic, and sorted. Read-only observation in the same sense as
-    the git queries around it — it never executes anything it finds.
+
+def _observe_workspace_markers(
+    worktree_root: str,
+    run_git: RunGit,
+) -> tuple[Optional[List[str]], set[str], str]:
+    """Known root markers admitted by repository ignore policy.
+
+    A marker can derive a required command, so it is governed data just like a
+    dirty path or content match. Check every allowlisted name with
+    `check-ignore --no-index` before statting or reading it: this applies the
+    policy to tracked names too and leaves real tracked and untracked,
+    non-ignored markers observable. An unavailable or malformed policy fails
+    closed for the whole marker set.
     """
+    ignored, ignore_command = _ignored_paths(
+        worktree_root,
+        list(WORKSPACE_MARKERS),
+        run_git,
+    )
+    if ignored is None:
+        return None, set(), ignore_command
+
     found = []
     for marker in WORKSPACE_MARKERS:
-        try:
-            if os.path.isfile(os.path.join(worktree_root, marker)):
-                found.append(marker)
-        except OSError:
+        if marker in ignored:
             continue
-    return sorted(found)
+        path = os.path.join(worktree_root, marker)
+        if _is_safe_workspace_file(path):
+            found.append(marker)
+            continue
+    return sorted(found), ignored, ignore_command
 
 
 def _observe_npm_test_script(worktree_root: str) -> Optional[str]:
-    """`scripts.test` from package.json, or None when there is no real one.
+    """`scripts.test` from one bounded, in-root regular file, or None.
 
-    npm's scaffolded placeholder is treated as absent: it is a known non-check, and
-    deriving a required check from it would hand back a command guaranteed to fail.
+    Open the descriptor without following POSIX symlinks, then bind it to the
+    lstat identity observed before and after the open. The identity checks cover
+    Windows reparse-point swaps where `O_NOFOLLOW` is unavailable. Single-link
+    files only: an in-root hardlink can otherwise disclose a manifest owned
+    outside the governed workspace.
     """
+    path = os.path.join(worktree_root, "package.json")
     try:
-        with open(os.path.join(worktree_root, "package.json"), "r", encoding="utf-8") as handle:
-            manifest = json.load(handle)
-    except (OSError, ValueError):
+        before = os.lstat(path)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or getattr(before, "st_reparse_tag", 0)
+        ):
+            return None
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+    except OSError:
         return None
+
+    try:
+        opened = os.fstat(descriptor)
+        after = os.lstat(path)
+        identities = {
+            (before.st_dev, before.st_ino),
+            (opened.st_dev, opened.st_ino),
+            (after.st_dev, after.st_ino),
+        }
+        if (
+            len(identities) != 1
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or opened.st_size > _MAX_MANIFEST_BYTES
+            or not stat.S_ISREG(after.st_mode)
+            or after.st_nlink != 1
+            or getattr(after, "st_reparse_tag", 0)
+        ):
+            return None
+        with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+            descriptor = -1
+            manifest = json.load(handle)
+    except (OSError, ValueError, RecursionError):
+        return None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
     if not isinstance(manifest, dict):
         return None
     scripts = manifest.get("scripts")
@@ -207,14 +561,100 @@ def _unknown(reason: str, command: str) -> Dict[str, Any]:
     return {"status": "unknown", "reason": reason, "evidence": {"command": command}}
 
 
-def _parse_porcelain(stdout: str) -> List[Dict[str, str]]:
-    entries = []
-    for line in stdout.split("\n"):
-        if len(line) == 0:
-            continue
-        state = line[:2].strip() or "??"
-        entries.append({"state": state, "path": line[3:]})
+def _parse_porcelain(stdout: str) -> Optional[List[Dict[str, str]]]:
+    """Parse `git status --porcelain=v1 -z` without filename ambiguity."""
+    if stdout == "":
+        return []
+    fields = stdout.split("\0")
+    if fields[-1] != "":
+        return None
+
+    entries: List[Dict[str, str]] = []
+    index = 0
+    while index < len(fields) - 1:
+        record = fields[index]
+        if len(record) < 3 or record[2] != " ":
+            return None
+        state = record[:2].strip() or "??"
+        path = record[3:]
+        index += 1
+        if "R" in state or "C" in state:
+            # With `-z`, Git emits the destination in `record` and the source as
+            # the following field. The source is consumed but never disclosed.
+            if index >= len(fields) - 1:
+                return None
+            index += 1
+        entries.append({"state": state, "path": path})
     return entries
+
+def _ignored_paths(
+    checkout_path: str,
+    paths: List[str],
+    run_git: RunGit,
+) -> tuple[Optional[set[str]], str]:
+    """Return tracked or untracked paths excluded by repository ignore policy.
+
+    `--no-index` is the security-critical part: Git normally stops considering an
+    ignored path once it is tracked, but governed observation must not disclose a
+    path merely because it was committed before the privacy rule was added.
+    Bounded argv chunks avoid one process per dirty path. Paths whose line-oriented
+    `check-ignore` output would be ambiguous, and output real Git cannot produce,
+    fail closed.
+    """
+    unique_paths = list(dict.fromkeys(path for path in paths if path))
+    evidence_command = (
+        f"git -c core.quotePath=false check-ignore --no-index -- "
+        f"<{len(unique_paths)} paths>"
+    )
+    if any(
+        any(ord(char) < 32 for char in path)
+        or (path.startswith('"') and path.endswith('"'))
+        for path in unique_paths
+    ):
+        return None, evidence_command
+
+    chunks: List[List[str]] = []
+    chunk: List[str] = []
+    chunk_chars = 0
+    for path in unique_paths:
+        path_chars = len(path) + 3
+        if path_chars > 6500:
+            return None, evidence_command
+        if chunk and (len(chunk) >= 128 or chunk_chars + path_chars > 6500):
+            chunks.append(chunk)
+            chunk = []
+            chunk_chars = 0
+        chunk.append(f"./{path}" if not path.startswith("./") else path)
+        chunk_chars += path_chars
+    if chunk:
+        chunks.append(chunk)
+
+    normalized_inputs = {normalize_path(path) for path in unique_paths}
+    ignored: set[str] = set()
+    for paths_chunk in chunks:
+        result = run_git(
+            checkout_path,
+            [
+                "-c",
+                "core.quotePath=false",
+                "check-ignore",
+                "--no-index",
+                "--",
+                *paths_chunk,
+            ],
+        )
+        if result.get("ok"):
+            for ignored_path in result.get("stdout", "").splitlines():
+                normalized_ignored_path = normalize_path(ignored_path)
+                if normalized_ignored_path.startswith("./"):
+                    normalized_ignored_path = normalized_ignored_path[2:]
+                if normalized_ignored_path not in normalized_inputs:
+                    return None, evidence_command
+                ignored.add(normalized_ignored_path)
+            continue
+        if result.get("code") != 1:
+            return None, evidence_command
+    return ignored, evidence_command
 
 
 _REMOTE_RE = re.compile(r"^(\S+)\t(.+) \((fetch|push)\)$")
@@ -236,18 +676,15 @@ def _parse_remotes(stdout: str) -> List[Dict[str, str]]:
         key = "fetch_url" if match.group(3) == "fetch" else "push_url"
         entry[key] = _redact_remote_url(normalize_path(match.group(2)))
     values = [remotes[name] for name in order]
-    # Node sorts remotes with String.prototype.localeCompare. We use
-    # locale_cmp_key (the cmp_to_key-wrapped comparator), NOT
-    # collation.locale_sort_key: locale_sort_key eagerly computes collation
-    # weights for every element even in a single-element list, so it raises
-    # CollationDomainError on a remote name containing a character outside
-    # the pinned collation domain (e.g. CJK) even though no comparison is
-    # ever performed against it - a spurious failure Node's lazy
-    # Array.prototype.sort comparator never exhibits (localeCompare is only
-    # invoked when two elements are actually compared). locale_cmp_key's key
-    # step only wraps each element; the comparator itself is deferred to
-    # actual pairwise comparisons, matching Node's laziness exactly.
-    return sorted(values, key=lambda r: locale_cmp_key(r["name"]))
+
+    def sort_key(remote):
+        name = remote["name"]
+        try:
+            return (0, locale_sort_key(name))
+        except CollationDomainError:
+            return (1, _utf16_sort_key(name))
+
+    return sorted(values, key=sort_key)
 
 
 def _to_iso_string(mtime_ns: int) -> str:
@@ -263,6 +700,7 @@ def _to_iso_string(mtime_ns: int) -> str:
 def _observe_one(raw_path: str, run_git: RunGit) -> Dict[str, Any]:
     path = normalize_path(raw_path)
     facts: Dict[str, Any] = {}
+    worktree_root = path
 
     toplevel = run_git(path, ["rev-parse", "--show-toplevel"])
     if toplevel["ok"]:
@@ -279,17 +717,38 @@ def _observe_one(raw_path: str, run_git: RunGit) -> Dict[str, Any]:
             )
         else:
             facts["git_common_dir"] = _unknown("git_common_dir_unavailable", common["command"])
-
         worktree_root = facts["worktree_root"]["value"]
-        facts["workspace_markers"] = _known(
-            _observe_workspace_markers(worktree_root), "fs.stat workspace markers"
+
+        markers, ignored_markers, ignore_command = _observe_workspace_markers(
+            worktree_root,
+            run_git,
         )
-        npm_test = _observe_npm_test_script(worktree_root)
-        facts["npm_test_script"] = (
-            _known(npm_test, "fs.read package.json scripts.test")
-            if npm_test is not None
-            else _unknown("no_npm_test_script", "fs.read package.json scripts.test")
-        )
+        if markers is None:
+            facts["workspace_markers"] = _unknown(
+                "ignore_policy_unavailable",
+                ignore_command,
+            )
+            facts["npm_test_script"] = _unknown(
+                "ignore_policy_unavailable",
+                ignore_command,
+            )
+        else:
+            facts["workspace_markers"] = _known(markers, "fs.stat workspace markers")
+            if "package.json" in ignored_markers:
+                # Do not turn a private manifest's existence or scripts into a
+                # fact. It is indistinguishable from a manifest with no usable
+                # test script and cannot derive `npm test`.
+                facts["npm_test_script"] = _unknown(
+                    "no_npm_test_script",
+                    ignore_command,
+                )
+            else:
+                npm_test = _observe_npm_test_script(worktree_root)
+                facts["npm_test_script"] = (
+                    _known(npm_test, "fs.read package.json scripts.test")
+                    if npm_test is not None
+                    else _unknown("no_npm_test_script", "fs.read package.json scripts.test")
+                )
     else:
         # `--show-toplevel` fails for a bare repository too (it has no working
         # tree) - that is not the same fact as "not a git repository at all".
@@ -354,14 +813,60 @@ def _observe_one(raw_path: str, run_git: RunGit) -> Dict[str, Any]:
         else:
             facts["head_ref"] = _unknown("head_ref_unresolvable", branch["command"])
 
-    status = run_git(path, ["status", "--porcelain"])
-    if status["ok"]:
-        entries = _parse_porcelain(status["stdout"])
-        facts["dirty_entries"] = _known(entries, status["command"])
-        facts["is_dirty"] = _known(len(entries) > 0, status["command"])
-    else:
+    status = run_git(path, ["status", "--porcelain=v1", "-z"])
+    if not status["ok"]:
         facts["dirty_entries"] = _unknown("status_unavailable", status["command"])
         facts["is_dirty"] = _unknown("status_unavailable", status["command"])
+    else:
+        entries = _parse_porcelain(status["stdout"])
+        if entries is None:
+            facts["dirty_entries"] = _unknown("status_malformed", status["command"])
+            facts["is_dirty"] = _unknown("status_malformed", status["command"])
+        else:
+            ignored, ignore_command = _ignored_paths(
+                worktree_root,
+                [entry.get("path", "") for entry in entries],
+                run_git,
+            )
+            if ignored is None:
+                facts["dirty_entries"] = _unknown(
+                    "ignore_policy_unavailable", ignore_command
+                )
+                facts["is_dirty"] = _unknown(
+                    "ignore_policy_unavailable", ignore_command
+                )
+            else:
+                visible_entries = [
+                    entry
+                    for entry in entries
+                    if normalize_path(entry.get("path", "")) not in ignored
+                ]
+                evidence = {
+                    "command": status["command"],
+                    "privacy_command": ignore_command,
+                }
+                if len(visible_entries) != len(entries):
+                    facts["dirty_entries"] = {
+                        "status": "unknown",
+                        "reason": "ignored_dirty_entries_excluded",
+                        "evidence": evidence,
+                    }
+                    facts["is_dirty"] = {
+                        "status": "unknown",
+                        "reason": "ignored_dirty_entries_excluded",
+                        "evidence": evidence,
+                    }
+                else:
+                    facts["dirty_entries"] = {
+                        "status": "known",
+                        "value": visible_entries,
+                        "evidence": evidence,
+                    }
+                    facts["is_dirty"] = {
+                        "status": "known",
+                        "value": len(entries) > 0,
+                        "evidence": evidence,
+                    }
 
     remote = run_git(path, ["remote", "-v"])
     facts["remotes"] = (
@@ -405,10 +910,23 @@ def observe_checkouts(
     allowlist  explicit allowed roots; a path outside every allowlist entry
                is refused without running git.
     now        injectable clock for determinism.
-    run_git    injectable git runner for tests.
+    run_git    injectable git runner; failed results must include the numeric
+               `code`, because privacy checks fail closed when it is absent.
     """
     if run_git is None:
-        run_git = _default_run_git
+        worktree_config: Dict[str, Dict[str, str]] = {}
+
+        def run_default(path: str, args: List[str]) -> Dict[str, Any]:
+            key = normalize_path(path)
+            if key not in worktree_config:
+                worktree_config[key] = _worktree_semantic_config(path)
+            return _default_run_git(
+                path,
+                args,
+                worktree_config=worktree_config[key],
+            )
+
+        run_git = run_default
 
     if not isinstance(allowlist, list) or len(allowlist) == 0:
         raise ValueError(

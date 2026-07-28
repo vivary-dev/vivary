@@ -39,7 +39,7 @@ You need **Python 3.11 or newer**. Pick whichever line fits how you like to work
 pip install vivary
 
 # B) run on demand with uv, nothing installed permanently
-uvx vivary-tropo --version
+uvx --from vivary-tropo tropo --version
 
 # C) scaffold with one npm command, pinned to the latest npm tag
 #    Requires Python 3.11+ and uv or pipx; no Python package install first.

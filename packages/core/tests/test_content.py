@@ -37,6 +37,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 from datetime import datetime, timezone
 
 import pytest
@@ -44,11 +45,14 @@ import pytest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
+from test_support import content_git_runner  # noqa: E402
+
 from vivary_core.workspace_content import (  # noqa: E402
     CONTENT_SCHEMA,
     MAX_EXCERPT_LENGTH,
     MAX_FILES_PER_CHECKOUT,
     MAX_MATCHES_PER_FILE,
+    _parse_grep_lines,
     observe_content,
 )
 
@@ -241,6 +245,25 @@ def test_real_fixture_tracked_content_match_reports_file_line_excerpt_term_and_e
     assert re.search(r"commit b content", match["excerpt"], re.IGNORECASE)
     assert re.match(r"^git .*grep .*-e content", match["evidence"]["command"])
 
+def test_nul_framing_preserves_colon_number_filename_segments():
+    parsed = _parse_grep_lines(
+        "foo:12:bar.md\0" "7\0" "needle:still-content\n",
+        ["needle"],
+    )
+
+    assert parsed == {
+        "foo:12:bar.md": [
+            {
+                "path": "foo:12:bar.md",
+                "line": 7,
+                "rawContent": "needle:still-content",
+                "term": "needle",
+            }
+        ]
+    }
+
+
+
 
 def test_tracked_files_only_git_ignored_and_untracked_content_never_appears_in_a_match(fx, allowlist):
     result = observe_content(
@@ -251,6 +274,195 @@ def test_tracked_files_only_git_ignored_and_untracked_content_never_appears_in_a
     serialized = json.dumps(result)
     assert "private-note" not in serialized
     assert "private_fixture_marker" not in serialized.lower()
+
+def test_tracked_path_added_to_ignore_policy_never_enters_content(fx, allowlist):
+    repo = fx["paths"]["dirty"]
+    gitignore = os.path.join(repo, ".gitignore")
+    original = open(gitignore, encoding="utf-8").read()
+    _write(gitignore, original + "tracked.md\n")
+    try:
+        result = observe_content(
+            [repo],
+            allowlist=allowlist,
+            terms=["modified"],
+            now=NOW,
+        )
+    finally:
+        _write(gitignore, original)
+
+    assert result["checkouts"][0]["matches"] == []
+    serialized = json.dumps(result)
+    assert "tracked.md" not in serialized
+    assert any(
+        omission.get("kind") == "privacy_matches_excluded"
+        for omission in result["checkouts"][0]["omissions"]
+    )
+
+
+
+
+def test_ignore_filter_literalizes_git_pathspec_magic():
+    magic_path = ":(top)secret.md"
+
+    def run_git(_path, args):
+        command = "git " + " ".join(args)
+        if "rev-parse" in args:
+            return {
+                "ok": True,
+                "stdout": "a" * 40 + "\n",
+                "code": 0,
+                "command": command,
+            }
+        if "check-ignore" in args:
+            assert args[-1] == f"./{magic_path}"
+            return {
+                "ok": True,
+                "stdout": f"./{magic_path}\n",
+                "code": 0,
+                "command": command,
+            }
+        return {
+            "ok": True,
+            "stdout": f"{magic_path}\0" + "1\0" + "private marker\n",
+            "code": 0,
+            "command": command,
+        }
+
+    result = observe_content(
+        ["C:/fake"],
+        allowlist=["C:/fake"],
+        terms=["private"],
+        run_git=run_git,
+        now=NOW,
+    )
+
+    checkout = result["checkouts"][0]
+    assert checkout["matches"] == []
+    assert any(
+        omission.get("kind") == "privacy_matches_excluded"
+        for omission in checkout["omissions"]
+    )
+
+
+def test_real_git_ignored_pathspec_magic_never_enters_content(tmp_path):
+    if os.name == "nt":
+        return
+
+    base = str(tmp_path)
+    repo = str(tmp_path / "repo")
+    magic_path = ":(top)secret.md"
+    os.makedirs(repo)
+    _write(os.path.join(base, "empty-gitconfig"), "")
+    _git(base, repo, ["init", "-q", "-b", "main"])
+    _write(os.path.join(repo, magic_path), "private marker\n")
+    _git(base, repo, ["add", "--", f"./{magic_path}"])
+    _git(base, repo, ["commit", "-q", "-m", "track private fixture"])
+    _write(os.path.join(repo, ".gitignore"), f"{magic_path}\n")
+
+    result = observe_content(
+        [repo],
+        allowlist=[repo],
+        terms=["private"],
+        now=NOW,
+    )
+
+    checkout = result["checkouts"][0]
+    assert checkout["matches"] == []
+    assert magic_path not in json.dumps(result)
+    assert any(
+        omission.get("kind") == "privacy_matches_excluded"
+        for omission in checkout["omissions"]
+    )
+
+
+@pytest.mark.parametrize(
+    "ignore_result",
+    [
+        {"ok": True, "stdout": "outside.md\n", "code": 0},
+        {"ok": False, "stdout": "", "stderr": "unavailable"},
+    ],
+)
+def test_ignore_filter_fails_closed_on_untrusted_output_or_missing_exit_code(
+    ignore_result,
+):
+    def run_git(_path, args):
+        command = "git " + " ".join(args)
+        if "check-ignore" in args:
+            return {**ignore_result, "command": command}
+        if "rev-parse" in args:
+            return {
+                "ok": True,
+                "stdout": "a" * 40 + "\n",
+                "code": 0,
+                "command": command,
+            }
+        return {
+            "ok": True,
+            "stdout": "tracked.md\0" + "1\0" + "needle\n",
+            "code": 0,
+            "command": command,
+        }
+
+    result = observe_content(
+        ["C:/fake"],
+        allowlist=["C:/fake"],
+        terms=["needle"],
+        run_git=run_git,
+        now=NOW,
+    )
+
+    checkout = result["checkouts"][0]
+    assert checkout["status"] == "unknown"
+    assert checkout["reason"] == "ignore_policy_unavailable"
+    assert checkout["matches"] == []
+
+
+def test_capped_runner_returns_when_inherited_stderr_handle_stays_open(
+    monkeypatch,
+):
+    from vivary_core import workspace_observe
+
+    class EofPipe:
+        def __init__(self):
+            self.closed = False
+
+        def read(self, _size):
+            return b""
+
+        def close(self):
+            self.closed = True
+
+    class HeldPipe(EofPipe):
+        def __init__(self):
+            super().__init__()
+            self.release = threading.Event()
+
+        def read(self, _size):
+            self.release.wait()
+            return b""
+
+    class InheritedHandlePopen:
+        def __init__(self, *_args, **_kwargs):
+            self.stdout = EofPipe()
+            self.stderr = HeldPipe()
+            self.returncode = 0
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+    child = InheritedHandlePopen()
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: child)
+    monkeypatch.setattr(workspace_observe, "_SUBPROCESS_CLEANUP_TIMEOUT", 0.05)
+
+    outcome = workspace_observe._capped_run(["fake-producer"], {}, limit=64)
+
+    assert outcome["error"] == "stderr drain timed out"
+    assert child.stdout.closed is True
+    assert child.stderr.closed is False
+    child.stderr.release.set()
 
 
 def test_tracked_uncommitted_working_tree_edit_is_still_searched(fx, allowlist):
@@ -338,15 +550,16 @@ def test_bounded_matched_files_per_checkout_matched_lines_per_file_and_excerpt_l
     file_count = MAX_FILES_PER_CHECKOUT + 3
     lines_per_file = MAX_MATCHES_PER_FILE + 2
     long_line = "x" * (MAX_EXCERPT_LENGTH + 50) + " needle"
-    lines = []
+    records = []
     for f in range(file_count):
         name = f"file-{f:02d}.md"
-        for l in range(lines_per_file):
-            lines.append(f"{name}:{l + 1}:{long_line}")
-    big_stdout = "\n".join(lines) + "\n"
+        for line_number in range(1, lines_per_file + 1):
+            records.append(
+                f"{name}\0{line_number}\0{long_line}\n"
+            )
+    big_stdout = "".join(records)
 
-    def big_run_git(path, args):
-        return {"ok": True, "stdout": big_stdout, "command": "git " + " ".join(args)}
+    big_run_git = content_git_runner(big_stdout)
 
     result = observe_content(
         [fx["paths"]["canonical"]], allowlist=allowlist, terms=["needle"], now=NOW, run_git=big_run_git
@@ -442,3 +655,94 @@ def test_output_cap_terminates_a_runaway_producer():
 
     assert outcome["exceeded"] is True
     assert len(outcome["stdout"]) <= 64 * 1024 + 4096, "output was buffered past the cap"
+
+
+def test_capped_runner_survives_a_stderr_flood_from_a_real_child(monkeypatch):
+    from vivary_core.workspace_content import _capped_run
+
+    real_popen = subprocess.Popen
+    children = []
+
+    def tracking_popen(*args, **kwargs):
+        child = real_popen(*args, **kwargs)
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(subprocess, "Popen", tracking_popen)
+    producer = [
+        sys.executable,
+        "-c",
+        "import sys; sys.stderr.write('e' * (4 << 20)); sys.stderr.flush(); "
+        "sys.stdout.write('done'); sys.stdout.flush()",
+    ]
+    box = {}
+    runner = threading.Thread(
+        target=lambda: box.update(
+            result=_capped_run(producer, dict(os.environ), limit=1 << 20)
+        ),
+        daemon=True,
+    )
+
+    runner.start()
+    runner.join(5)
+    deadlocked = runner.is_alive()
+    if deadlocked:
+        children[0].kill()
+        runner.join(5)
+
+    assert not deadlocked, "_capped_run deadlocked on a full stderr pipe"
+    assert box["result"]["stdout"] == b"done"
+    assert children
+    assert all(child.stdout.closed and child.stderr.closed for child in children)
+
+
+def test_capped_runner_drains_stdout_and_stderr_concurrently(monkeypatch):
+    """A child that fills stderr before stdout must not deadlock the runner."""
+    from vivary_core.workspace_content import _capped_run
+
+    class CoordinatedPipe:
+        def __init__(self, payload):
+            self.payload = payload
+            self.started = threading.Event()
+            self.peer = None
+            self.sent = False
+
+        def read(self, _size):
+            self.started.set()
+            assert self.peer.started.wait(0.5), "the peer pipe was not drained concurrently"
+            if self.sent:
+                return b""
+            self.sent = True
+            return self.payload
+
+        def close(self):
+            self.closed = True
+
+    class FullDuplexPopen:
+        def __init__(self, *_args, **_kwargs):
+            self.stdout = CoordinatedPipe(b"stdout")
+            self.stderr = CoordinatedPipe(b"stderr")
+            self.stdout.peer = self.stderr
+            self.stderr.peer = self.stdout
+            self.returncode = 0
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def communicate(self):
+            return b"", b""
+
+    monkeypatch.setattr(subprocess, "Popen", FullDuplexPopen)
+
+    outcome = _capped_run(["fake-producer"], {}, limit=64)
+
+    assert outcome == {
+        "error": None,
+        "stdout": b"stdout",
+        "stderr": b"stderr",
+        "code": 0,
+        "exceeded": False,
+    }

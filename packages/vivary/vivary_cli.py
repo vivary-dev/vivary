@@ -18,7 +18,7 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 DEFAULT_RECEIPT_LOG = ".vivary/receipts.jsonl"
 RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
 SAFE_FIELDS = (

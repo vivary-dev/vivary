@@ -41,6 +41,8 @@ import pytest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
+from test_support import content_git_runner  # noqa: E402
+
 from vivary_core.canonical import normalize_path  # noqa: E402
 from vivary_core.workspace_content import MAX_EXCERPT_LENGTH, observe_content  # noqa: E402
 from vivary_core.workspace_model import project_workspace_graph  # noqa: E402
@@ -840,10 +842,15 @@ def _assert_well_formed_excerpt(excerpt):
 
 
 def _excerpt_for(raw_line):
-    def run_git(path, args):
-        return {"ok": True, "stdout": f"file.md:1:{raw_line}\n", "command": "git " + " ".join(args)}
-
-    result = observe_content(["C:/fake"], allowlist=["C:/fake"], terms=["needle"], run_git=run_git, now=NOW)
+    result = observe_content(
+        ["C:/fake"],
+        allowlist=["C:/fake"],
+        terms=["needle"],
+        run_git=content_git_runner(
+            f"file.md\0" + "1\0" + raw_line + "\n"
+        ),
+        now=NOW,
+    )
     return result["checkouts"][0]["matches"][0]["excerpt"]
 
 
@@ -874,37 +881,40 @@ def test_content_mjs_max_excerpt_length_valid_surrogate_pair_well_before_boundar
     _assert_well_formed_excerpt(excerpt)
 
 
-def test_content_mjs_grep_line_guard_colon_delimited_content_attributes_correctly(fx):
-    def run_git(path, args):
-        return {"ok": True, "stdout": "log.md:5:at 10:30:00 done\n", "command": "git " + " ".join(args)}
+def test_content_mjs_nul_framing_preserves_colons_in_content(fx):
+    run_git = content_git_runner(
+        "log.md\0" + "5\0" + "at 10:30:00 done\n"
+    )
 
-    result = observe_content(["C:/fake"], allowlist=["C:/fake"], terms=["done"], run_git=run_git, now=NOW)
+    result = observe_content(
+        ["C:/fake"],
+        allowlist=["C:/fake"],
+        terms=["done"],
+        run_git=run_git,
+        now=NOW,
+    )
     match = result["checkouts"][0]["matches"][0]
     assert match["path"] == "log.md"
     assert match["line"] == 5
     assert match["excerpt"] == "at 10:30:00 done"
 
 
-def test_content_mjs_characterized_not_fixed_colon_in_filename_ambiguity(fx):
-    # A real file literally named "notes:1:draft.md", line 5, containing
-    # "some content" - this is what `git grep -n` would emit for it. NTFS
-    # cannot hold a literal colon in a filename at all, so this fixture is
-    # simulated via a crafted run_git result rather than a real
-    # Windows-buildable file - the parsing behavior under test depends only
-    # on the stdout text format, which is identical on every platform.
-    def run_git(path, args):
-        return {"ok": True, "stdout": "notes:1:draft.md:5:some content\n", "command": "git " + " ".join(args)}
+def test_content_mjs_nul_framing_preserves_colons_in_filename(fx):
+    run_git = content_git_runner(
+        "notes:1:draft.md\0" + "5\0" + "some content\n"
+    )
 
-    result = observe_content(["C:/fake"], allowlist=["C:/fake"], terms=["content"], run_git=run_git, now=NOW)
+    result = observe_content(
+        ["C:/fake"],
+        allowlist=["C:/fake"],
+        terms=["content"],
+        run_git=run_git,
+        now=NOW,
+    )
     match = result["checkouts"][0]["matches"][0]
-    # This IS a misattribution: the real file is "notes:1:draft.md" at line
-    # 5, but the non-greedy regex splits on the first ":<digits>:" it finds.
-    # Pinning the current (imperfect but directionally safer) behavior - see
-    # content.mjs's identical comment on why the greedy alternative is
-    # rejected.
-    assert match["path"] == "notes"
-    assert match["line"] == 1
-    assert match["excerpt"] == "draft.md:5:some content"
+    assert match["path"] == "notes:1:draft.md"
+    assert match["line"] == 5
+    assert match["excerpt"] == "some content"
 
 
 def test_content_mjs_match_on_genuine_crlf_terminated_line(fx):

@@ -29,9 +29,14 @@ Language mapping notes (decision 0008 / documented rules for this slice):
 
 from __future__ import annotations
 
-from vivary_core.canonical import deterministic_id, fingerprint, is_within_allowlist
+from vivary_core.canonical import (
+    _utf16_sort_key,
+    deterministic_id,
+    fingerprint,
+    is_within_allowlist,
+)
 from vivary_core.capsule_select import select_claims
-from vivary_core.collation import locale_sort_key
+from vivary_core.collation import CollationDomainError, locale_sort_key
 
 CAPSULE_SCHEMA = "vivary.task-capsule/v0"
 
@@ -50,6 +55,11 @@ CAPSULE_SCHEMA = "vivary.task-capsule/v0"
 # Markers that indicate a test system exists but do not identify the command to run.
 # Python alone spans pytest, tox, nox and make; picking one would be a guess.
 _AMBIGUOUS_TEST_MARKERS = ("pyproject.toml", "tox.ini", "noxfile.py", "Cargo.toml", "go.mod", "Makefile")
+# Keep aligned with create-vivary's REPAIR_WORKSPACE_MARKERS. Core cannot import
+# the scaffolder package, so this boundary contract is intentionally repeated here.
+_CREATE_VIVARY_WORKSPACE_MARKERS = frozenset(
+    ("tropo.toml", "AGENTS.md", "STRATO.md")
+)
 
 
 def _fact_value(node, name):
@@ -69,26 +79,53 @@ def _derive_required_checks(checkouts):
     unknowns = []
     seen = set()
 
-    def add(name, command, evidence):
-        if command in seen:
+    def add(name, command, evidence, cwd):
+        key = (cwd, command)
+        if key in seen:
             return
-        seen.add(command)
-        checks.append({"name": name, "command": command, "evidence": evidence})
+        seen.add(key)
+        checks.append(
+            {"name": name, "command": command, "cwd": cwd, "evidence": evidence}
+        )
 
     for node in checkouts:
+        facts = node.get("facts") or {}
         markers = _fact_value(node, "workspace_markers") or []
-        marker_evidence = ((node.get("facts") or {}).get("workspace_markers") or {}).get("evidence")
+        marker_evidence = (facts.get("workspace_markers") or {}).get("evidence")
+        cwd = _fact_value(node, "worktree_root") or node.get("path")
+        suffix = f"@{node.get('id')}"
 
-        # Vivary's own checks are provable: a tropo.toml means a governed workspace,
-        # and these apply whatever the project is written in.
+        # A standalone Tropo graph can run its graph check. Doctor validates the
+        # broader create-vivary scaffold, so require that scaffold's identity markers.
+        if _CREATE_VIVARY_WORKSPACE_MARKERS.issubset(markers):
+            add(
+                f"vivary-graph-doctor{suffix}",
+                "create-vivary doctor . --json",
+                marker_evidence,
+                cwd,
+            )
         if "tropo.toml" in markers:
-            add("vivary-graph-doctor", "create-vivary doctor . --json", marker_evidence)
-            add("vivary-graph-check", "tropo check --root . --json", marker_evidence)
+            add(
+                f"vivary-graph-check{suffix}",
+                "tropo check --root . --json",
+                marker_evidence,
+                cwd,
+            )
 
-        npm_test = _fact_value(node, "npm_test_script")
+        npm_test_fact = facts.get("npm_test_script") or {}
+        npm_test = (
+            npm_test_fact.get("value")
+            if npm_test_fact.get("status") == "known"
+            else None
+        )
         if npm_test:
-            add("project-tests", "npm test", marker_evidence)
-        elif any(marker in markers for marker in _AMBIGUOUS_TEST_MARKERS):
+            add(
+                f"project-tests{suffix}",
+                "npm test",
+                npm_test_fact.get("evidence"),
+                cwd,
+            )
+        if any(marker in markers for marker in _AMBIGUOUS_TEST_MARKERS):
             unknowns.append(
                 {
                     "kind": "required_check_undetermined",
@@ -134,9 +171,9 @@ def _describe_ref(ref):
 # (clean checkouts get no such claim). Lists up to DIRTY_PATHS_CAP paths with
 # their porcelain state; the exact total is always in the claim text, and any
 # truncation is recorded as an omission via `truncation_omissions`.
-# git-ignored paths never appear here: `git status --porcelain` (the source
-# of dirty_entries) never lists an ignored path, so there is no leak risk to
-# guard against - see test_capsule.py.
+# Observation removes paths covered by repository ignore policy before graph
+# projection. If that privacy check cannot be proved, dirty entries stay unknown
+# and this compiler emits no path claim.
 def _dirty_entries_claim(node, truncation_omissions):
     facts = node.get("facts") or {}
     is_dirty = facts.get("is_dirty")
@@ -243,6 +280,48 @@ def _content_match_candidates(content, checkouts_by_path):
     return candidates
 
 
+
+def _candidate_sort_key(candidate):
+    """Preserve frozen locale ordering without feeding it unpinned raw content.
+
+    Graph-derived candidates remain byte-identical to the reference port. Content
+    candidates are a later adaptation; when a raw path or excerpt falls outside the
+    pinned locale domain, place it in a separate deterministic UTF-16 bucket rather
+    than guessing an ICU weight or crashing the governed adapter.
+    """
+    value = (
+        f"{candidate.get('subject')}:{candidate.get('fact')}:"
+        f"{candidate.get('claim')}"
+    )
+    try:
+        return (0, locale_sort_key(value))
+    except CollationDomainError:
+        if candidate.get("fact") != "content_match":
+            raise
+        return (1, _utf16_sort_key(value))
+
+
+def _sort_candidates(candidates):
+    keyed = []
+    omissions = []
+    for candidate in candidates:
+        try:
+            sort_key = _candidate_sort_key(candidate)
+        except CollationDomainError as error:
+            omissions.append(
+                {
+                    "kind": "collation_domain_excluded",
+                    "subject": candidate.get("subject"),
+                    "fact": candidate.get("fact"),
+                    "reason": str(error),
+                }
+            )
+        else:
+            keyed.append((sort_key, candidate))
+    keyed.sort(key=lambda entry: entry[0])
+    return [candidate for _, candidate in keyed], omissions
+
+
 def compile_task_capsule(*, task, graph, budget=None, content=None):
     """Compile a bounded Task Capsule.
 
@@ -346,7 +425,8 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         ]
         candidates.extend(c for c in claims if c is not None)
     candidates.extend(_content_match_candidates(content, checkouts_by_path))
-    candidates.sort(key=lambda c: locale_sort_key(f"{c.get('subject')}:{c.get('fact')}:{c.get('claim')}"))
+    candidates, collation_omissions = _sort_candidates(candidates)
+    truncation_omissions.extend(collation_omissions)
 
     # Filters restrict, ranking orders, the budget cuts - each step explained.
     selection = select_claims(task=task, graph=graph, candidates=candidates, max_claims=max_claims)

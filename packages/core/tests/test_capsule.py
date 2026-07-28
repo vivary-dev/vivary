@@ -47,6 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PY_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, PY_ROOT)
 
+from vivary_core.canonical import normalize_path  # noqa: E402
 from vivary_core.capsule_compile import compile_task_capsule  # noqa: E402
 from vivary_core.workspace_content import observe_content  # noqa: E402
 from vivary_core.workspace_model import project_workspace_graph  # noqa: E402
@@ -271,12 +272,11 @@ def test_capsule_binds_the_workspace_fingerprint_it_was_compiled_against(graph):
 
 
 # -- dirty_entries claims (#44 gap 1) ---------------------------------------
-# observe.mjs already carries the individual dirty paths as `dirty_entries`
-# (an array of {state, path}); until now compile.mjs only ever emitted the
-# `is_dirty` boolean, never the paths, even though the fixture's dirty
-# checkout has no git-ignored entries in that array at all - git status
-# --porcelain never lists an ignored path, so surfacing dirty_entries as a
-# claim carries no leak risk by construction, not merely by omission.
+# Observation carries individual dirty paths as `dirty_entries` (an array of
+# {state, path}); compilation previously emitted only the `is_dirty` boolean.
+# The observation boundary now removes paths covered by repository ignore policy
+# and makes the fact unknown when that policy cannot be proved, so compilation may
+# safely project only known dirty entries.
 
 
 def test_a_dirty_checkout_gets_a_bounded_dirty_entries_claim_naming_its_paths_and_exact_count(graph):
@@ -873,9 +873,14 @@ def test_required_checks_are_derived_from_the_observed_workspace(fx):
         )
         return compile_task_capsule(task=task or TASK, graph=graph)
 
-    # 1. A governed workspace derives Vivary's own checks, whatever its language.
+    # 1. A standalone Tropo graph derives only the check it can satisfy.
     _write(os.path.join(repo, "tropo.toml"), "[base]\nallow_untyped = true\n")
     try:
+        commands = [c["command"] for c in compile_for()["required_checks"]]
+        assert not any("doctor" in c for c in commands), commands
+        assert any("tropo check" in c for c in commands), commands
+        _write(os.path.join(repo, "AGENTS.md"), "# Runtime\n")
+        _write(os.path.join(repo, "STRATO.md"), "# Agent OS\n")
         commands = [c["command"] for c in compile_for()["required_checks"]]
         assert any("doctor" in c for c in commands), commands
         assert any("tropo check" in c for c in commands), commands
@@ -885,6 +890,9 @@ def test_required_checks_are_derived_from_the_observed_workspace(fx):
         assert all(c.get("evidence") for c in compile_for()["required_checks"]), (
             "every derived check must carry the evidence that justified it"
         )
+        assert all(
+            c.get("cwd") == normalize_path(repo) for c in compile_for()["required_checks"]
+        ), "every derived check must bind the workspace where it must run"
 
         # 2. An ambiguous test system is reported, never guessed.
         _write(os.path.join(repo, "pyproject.toml"), "[project]\nname = 'x'\n")
@@ -911,17 +919,89 @@ def test_required_checks_are_derived_from_the_observed_workspace(fx):
 
         # 4. A real test script is derived.
         _write(os.path.join(repo, "package.json"), '{"scripts": {"test": "vitest run"}}\n')
-        commands = [c["command"] for c in compile_for()["required_checks"]]
-        assert "npm test" in commands, commands
+        checks = compile_for()["required_checks"]
+        project_test = next(c for c in checks if c["command"] == "npm test")
+        assert project_test["evidence"] == {
+            "command": "fs.read package.json scripts.test"
+        }
+        assert any(
+            u.get("kind") == "required_check_undetermined"
+            and "pyproject.toml" in u.get("observed_markers", [])
+            for u in compile_for()["unknowns"]
+        ), "an npm test command must not hide an undetermined Python check"
 
         # 5. An explicit task list always wins.
-        explicit = compile_for(task={**TASK, "required_checks": [{"name": "mine", "command": "make check"}]})
-        assert explicit["required_checks"] == [{"name": "mine", "command": "make check"}]
+        explicit = compile_for(
+            task={
+                **TASK,
+                "required_checks": [{"name": "mine", "command": "make check"}],
+            }
+        )
+        assert explicit["required_checks"] == [
+            {"name": "mine", "command": "make check"}
+        ]
     finally:
-        for name in ("tropo.toml", "pyproject.toml", "package.json"):
+        for name in ("tropo.toml", "AGENTS.md", "STRATO.md", "pyproject.toml", "package.json"):
             path = os.path.join(repo, name)
             if os.path.exists(path):
                 os.remove(path)
+
+
+
+def test_required_checks_run_at_the_observed_worktree_root(fx):
+    repo = fx["paths"]["canonical"]
+    nested = os.path.join(repo, "nested")
+    os.makedirs(nested, exist_ok=True)
+    for name in ("tropo.toml", "AGENTS.md", "STRATO.md"):
+        _write(os.path.join(repo, name), f"# {name}\n")
+
+    try:
+        graph = project_workspace_graph(
+            observe_checkouts([nested], allowlist=[repo], now=NOW)
+        )
+        capsule = compile_task_capsule(task=TASK, graph=graph)
+
+        assert capsule["required_checks"]
+        assert all(
+            check["cwd"] == normalize_path(repo)
+            for check in capsule["required_checks"]
+        )
+    finally:
+        for name in ("tropo.toml", "AGENTS.md", "STRATO.md"):
+            marker = os.path.join(repo, name)
+            if os.path.exists(marker):
+                os.remove(marker)
+        os.rmdir(nested)
+
+
+def test_required_checks_disambiguate_multiple_checkout_execution_roots(fx):
+    roots = [fx["paths"]["canonical"], fx["paths"]["staleNeighbor"]]
+    for root in roots:
+        _write(os.path.join(root, "tropo.toml"), "[base]\nallow_untyped = true\n")
+        _write(os.path.join(root, "AGENTS.md"), "# Runtime\n")
+        _write(os.path.join(root, "STRATO.md"), "# Agent OS\n")
+
+    try:
+        graph = project_workspace_graph(
+            observe_checkouts(roots, allowlist=roots, now=NOW)
+        )
+        capsule = compile_task_capsule(task=TASK, graph=graph)
+        checks = capsule["required_checks"]
+
+        assert len(checks) == 4
+        assert len({check["name"] for check in checks}) == len(checks)
+        assert {check["cwd"] for check in checks} == {
+            normalize_path(root) for root in roots
+        }
+        assert all("@" in check["name"] for check in checks)
+    finally:
+        for root in roots:
+            for name in ("tropo.toml", "AGENTS.md", "STRATO.md"):
+                marker = os.path.join(root, name)
+                if os.path.exists(marker):
+                    os.remove(marker)
+
+
 
 
 def test_entire_status_is_not_a_default_check(fx):

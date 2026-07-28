@@ -25,8 +25,9 @@ The governed-context shared seam every Vivary role package will speak through:
   compact digest of a Task Capsule with nothing dropped: conflicts and
   unknowns byte-verbatim, every omission recorded.
 - **`workspace_observe`** — read-only checkout observation: explicit
-  allowlisted roots only, ambient-git-env sanitized, bare repositories
-  positively confirmed, symlink/junction escapes re-checked post-resolution
+  allowlisted roots only; ambient Git injection sanitized without discarding
+  Git-parsed worktree EOL or explicit host ignore policy; bare repositories
+  positively confirmed; symlink/junction escapes re-checked post-resolution
   and refused. Never fetches, never writes, never crawls.
 - **`workspace_model`** — pure projection of observations into a typed
   evidence graph; divergent checkouts become explicit unresolved conflicts
@@ -35,8 +36,9 @@ The governed-context shared seam every Vivary role package will speak through:
   over tracked files only, every truncation recorded.
 - **`capsule_compile` / `capsule_select`** — the bounded Task Capsule:
   relevance-ranked, explainable claim selection with fail-closed structured
-  filters; every budget cut is a recorded omission, and malformed graph nodes
-  or facts are rejected rather than partially compiled.
+  filters; derived checks bind checkout-scoped identities, execution workspaces, and
+  exact observation evidence; every budget cut is a recorded omission, and malformed
+  graph nodes or facts are rejected rather than partially compiled.
 - **`collation`** — JS `localeCompare` ordering (claim/node/edge ranking is
   part of the frozen contract), pinned as an empirical weight table
   extracted from the reference runtime and verified on ~2.1M probe pairs;
@@ -75,8 +77,8 @@ version ownership.
 
 This package is a **reference-guided port** of a proven Node.js
 implementation developed and hardened in The Little AI Company's
-governed-context research program (589 tests, adversarially reviewed,
-benchmarked on real workspaces). Frozen JSON contracts remain byte-identical
+governed-context research program (adversarially reviewed, benchmarked on real
+workspaces). Frozen JSON contracts remain byte-identical
 where their owning authority is unchanged: the ContextIntegrityEvent v0
 conformance and replay fixtures (including the pinned projection fingerprint),
 evidence-store JSONL bytes and git object SHAs, and capsule digest and receipt
@@ -98,7 +100,7 @@ pip install pytest
 python -m pytest packages/core/tests/ -q
 ```
 
-The 589-test suite translates the reference contracts across observation,
-capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces,
-corruption handling, real-git evidence-store round trips, and byte-exact
-cross-runtime fixtures.
+The current platform-specific proof is **615 tests on Windows**; on Linux, it is
+**613 passed plus 2 skips**. It translates the reference contracts across observation,
+capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces, corruption
+handling, real-git evidence-store round trips, and byte-exact cross-runtime fixtures.

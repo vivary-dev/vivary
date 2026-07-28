@@ -18,6 +18,7 @@ The asymmetry is deliberate and load-bearing:
     `adopt` on a directory that is not a repository yet.
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -95,9 +96,36 @@ class PrivacyDifferentialTests(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.sandbox, ignore_errors=True)
 
+    def _git_env(self) -> dict[str, str]:
+        env = dict(os.environ)
+        env.update(
+            {
+                "GIT_CONFIG_GLOBAL": str(self.sandbox / "no-such-gitconfig"),
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "HOME": str(self.sandbox),
+                "USERPROFILE": str(self.sandbox),
+                "GIT_OPTIONAL_LOCKS": "0",
+            }
+        )
+        return env
+
+
     def _git(self, target: Path, *args: str) -> subprocess.CompletedProcess:
+        config = [
+            "-c",
+            "core.excludesFile=",
+            "-c",
+            "core.fsmonitor=false",
+        ]
+        if args and args[0] == "init":
+            config.extend(["-c", "init.templateDir="])
         return subprocess.run(
-            ["git", *args], cwd=str(target), capture_output=True, text=True, timeout=30
+            ["git", *config, *args],
+            cwd=str(target),
+            env=self._git_env(),
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
 
     def _git_ignores(self, target: Path, rel: str) -> bool:

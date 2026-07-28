@@ -10,7 +10,7 @@ The precise, typed knowledge graph — the real edges, coloured by type — rend
 single self-contained HTML file, no editor or plugin needed:
 
 ```bash
-tropo view --root . --out graph.html   # or: uvx vivary-tropo view ...
+tropo view --root . --out graph.html   # or: uvx --from vivary-tropo tropo view ...
 # open graph.html in any browser
 ```
 
@@ -38,6 +38,7 @@ Open the workspace folder as a vault. Two things worth knowing:
 ## The principle
 
 Recommend Obsidian to fans, never require it. The same workspace must work for
-someone on plain `vim` + a terminal, in Claude Code, or in Codex — so the graph,
-review, and loop all run from zero-dependency CLIs over plain files, and the visual
-graph (`tropo view`) needs nothing but a browser.
+someone on plain `vim` + a terminal, in Claude Code, or in Codex: the lightweight
+CLIs operate over plain files without a provider or network service, and governed
+Tropo composes only the first-party `vivary-core` seam. The visual graph (`tropo
+view`) needs nothing but a browser.

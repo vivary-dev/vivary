@@ -41,5 +41,5 @@ learn → gate* (`strato`) — retrieving from the graph, verifying with `tropo 
 `ozone review`, naming blast radius before risky changes, and stopping at human gates.
 `AGENTS.md` and module `index.md` files route progressively so durable detail lives
 once instead of being copied everywhere. When one agent becomes many, `exo` coordinates
-them. Everything is plain Markdown + zero-dependency CLIs — no editor, no vendor, no
-lock-in.
+them. Everything is plain Markdown plus lightweight, provider-free CLIs — no editor,
+network service, vendor, or lock-in.

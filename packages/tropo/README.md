@@ -10,7 +10,7 @@ model made every file pay a ceremony tax — `type:`, `created:`, `updated:`,
 write down only the irreducible signal. A clean note can have **zero
 frontmatter** and still be fully typed and valid.
 
-> Status: **working engine (v0.4).** `tropo.py` implements spec v1 end-to-end —
+> Status: **working engine (v0.5.0).** `tropo.py` implements spec v1 end-to-end —
 > folder-as-type resolution, derivation, validation, packs, **overlays**, the
 > `signal` report, **`fix`** (de-noise), **`init`**, the graph layer
 > (`graph`/`blast`/`view`/`plan`), typed retrieval (`find`/`query`), read-only
@@ -23,26 +23,30 @@ frontmatter** and still be fully typed and valid.
 
 ```bash
 python tropo.py init my-vault                   # scaffold a tropo.toml (--packs dev-project)
-python tropo.py types  --root examples/vault    # the resolved type registry
-python tropo.py check  --root examples/vault    # validate — opinionated: warnings fail too (--lenient to relax)
-python tropo.py signal --root examples/vault    # print ONLY the irreducible metadata
-python tropo.py graph  --root examples/vault    # emit typed nodes + edges
-python tropo.py view   --root examples/vault --out examples/vault/graph.html
-python tropo.py fix    --dry-run                 # preview redundant-frontmatter removal
-python tropo.py find "folder as type decision" --root examples/vault --json  # read-this-first packet
-python tropo.py query "meeting notes" --root examples/vault --type meeting --explain
-python tropo.py query "meeting notes" --root examples/vault --mode vector --json
-python tropo.py query "meeting notes" --root examples/vault --mode semantic --json
-python tropo.py map    --root examples/vault    # read-only filesystem inventory, no tropo.toml required
-python tropo.py migrate --from file --to embedded --root my-vault --yes  # switch to LanceDB
-python tropo.py check --root examples/vault --receipt .vivary/receipts.jsonl
-python tests/test_tropo.py                       # run the test suite
+python tropo.py check --root examples/vault     # validate the included example vault
+python tropo.py find "folder as type decision" --root examples/vault --json
+python tropo.py map --root examples/vault        # read-only filesystem inventory
+
+# Unreleased source-only governed path; core is in the adjacent checkout package.
+(
+demo="$(python3 -c 'import tempfile; print(tempfile.mkdtemp(prefix="tropo-governed-"))')" &&
+trap 'rm -rf -- "${demo:?}"' EXIT &&
+python3 -c 'import shutil,sys; shutil.copytree("examples/vault", sys.argv[1], dirs_exist_ok=True)' "${demo:?}" &&
+git -C "${demo:?}" init -q &&
+git -C "${demo:?}" add -A &&
+git -C "${demo:?}" -c user.name="Vivary Quickstart" -c commit.gpgsign=false \
+ -c user.email="quickstart@vivary.invalid" commit -qm "governed quickstart" &&
+PYTHONPATH=../core python3 tropo.py find "folder as type decision" \
+  --root "${demo:?}" --governed --max-claims 12 --json
+)
 ```
 
-Requires Python 3.11+ (stdlib `tomllib`), zero third-party dependencies for the core.
-Optional extras: `pip install vivary-tropo[embedded]` for LanceDB embedded storage
-and backend-level experiments. Public `tropo find` and default `tropo query` stay
-zero-dependency and read the typed graph directly. `tropo query --mode vector` uses
+Requires Python 3.11+ (stdlib `tomllib`) and the first-party `vivary-core>=0.2.1`
+contract seam. Neither package adds third-party runtime dependencies. Optional
+extras: `python -m pip install "vivary-tropo[embedded]"` for LanceDB embedded storage and
+backend-level experiments. Plain `tropo find` and default `tropo query` read the typed
+graph directly without providers, network calls, or indexing. `tropo query --mode
+vector` uses
 zero-dependency computed vectors for file-backed workspaces; when optional embedded
 storage is configured and current migrated vectors exist, it uses those stored rows
 through the embedded backend. In both cases it preserves type/path/edge filters and
@@ -83,6 +87,12 @@ budget. `tropo query` is the lower-level filtered search primitive; it can filte
 type, path glob, or outbound edge and explain whether a match came from id/title,
 frontmatter, path, body, edge context, or typed vectors. Semantic mode returns
 provider hits as typed Vivary node ids instead of opaque chunks.
+
+Add `--governed` to `tropo find` to opt into the first `vivary-core` adapter: a
+read-only workspace scan becomes a bounded, fingerprinted Task Capsule. Plain
+`tropo find` remains unchanged. The canonical flag rules, safety boundary, evidence
+shape, privacy behavior, and bounds live in the
+[command reference](https://vivary.vercel.app/commands/#tropo--the-typed-knowledge-graph).
 
 Search mode mental model:
 
@@ -187,8 +197,8 @@ ownership.
 - **Location is type.** The directory tree is the type hierarchy.
 - **Tighten, never loosen.** Overlays and packs may add constraints, not remove
   them.
-- **Zero-dependency, CI-clean.** The engine stays a single file with an honest
-  exit code, the one virtue worth keeping from its predecessor.
+- **Dependency-light, CI-clean.** Tropo stays a single-file engine with one
+  first-party core seam and honest exit codes.
 
 ## Layout
 
