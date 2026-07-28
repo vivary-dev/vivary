@@ -10,9 +10,11 @@ $ErrorActionPreference = "Stop"
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot "..")).Path
 $tropoPath = Join-Path $repoRoot "packages\tropo"
+$corePath = Join-Path $repoRoot "packages\core"
 
 $packages = @(
     @{ Name = "vivary-tropo"; Path = "packages\tropo"; Command = "tropo" },
+    @{ Name = "vivary-strato"; Path = "packages\strato"; Command = "strato" },
     @{ Name = "vivary-ozone"; Path = "packages\ozone"; Command = "ozone" },
     @{ Name = "vivary-exo"; Path = "packages\exo"; Command = "exo" },
     @{ Name = "create-vivary"; Path = "packages\create-vivary"; Command = "create-vivary" }
@@ -27,7 +29,7 @@ foreach ($pkg in $packages) {
 }
 
 if (-not $SkipLegacyPipCleanup) {
-    $legacyPipPackages = @("create-vivary", "vivary-ozone", "vivary-exo", "vivary-tropo")
+    $legacyPipPackages = @("create-vivary", "vivary-ozone", "vivary-exo", "vivary-strato", "vivary-tropo")
     $installedLegacy = @()
     foreach ($legacyPackage in $legacyPipPackages) {
         $oldErrorActionPreference = $ErrorActionPreference
@@ -82,7 +84,13 @@ foreach ($pkg in $packages) {
     if ($Editable) {
         $args += "--editable"
     }
-    if ($pkg.Name -ne "vivary-tropo") {
+    if ($Editable) {
+        $args += @("--with-editable", $corePath)
+    }
+    else {
+        $args += @("--with", $corePath)
+    }
+    if ($pkg.Name -notin @("vivary-tropo", "vivary-strato")) {
         if ($Editable) {
             $args += @("--with-editable", $tropoPath)
         }
@@ -103,10 +111,12 @@ if (-not $SkipChecks) {
     Write-Host ""
     Write-Host "Installed CLI smoke checks"
     & tropo --version
+    & strato --version
     & ozone --version
     & exo --version
     & create-vivary --version
     & tropo find --help | Out-Null
+    & strato decide --help | Out-Null
     & ozone packs --json
     & create-vivary capabilities --preset coding --json | Out-Null
 

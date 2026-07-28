@@ -25,7 +25,8 @@ Work out which packages actually changed, then bump only those:
 | `packages/ozone/ozone.py` | `vivary-ozone` | same |
 | `packages/exo/exo.py` | `vivary-exo` | same |
 | `packages/create-vivary/create_vivary.py` or `create_vivary_assets/` | `create-vivary` (PyPI) **and** `@vivary/create` (npm) — always in lockstep | same |
-| `packages/strato/` templates or skills | `create-vivary` + `@vivary/create` (strato has no version — it rides the create-vivary release train; say so in the changelog entry) | same |
+| `packages/strato/` templates or skills | `create-vivary` + `@vivary/create` — templates still ride the scaffolder release train | same |
+| `packages/strato/strato.py`, its tests, or CLI contract | `vivary-strato` — bump the version, but keep it unpublished on `dev`; publish only in the final coordinated train with core and the other role packages | ARCHITECTURE seam section, COMMANDS, README surface row |
 | `packages/memory-cognee/vivary_cognee.py` | `vivary-memory-cognee` | same |
 | `packages/core/` modules or tests | `vivary-core` — bump the version, but keep it unpublished on `dev`; publish it only in the final coordinated train with every dependent role package | ARCHITECTURE seam section, README surface row |
 | dependency floors in `packages/vivary/pyproject.toml` | `vivary` (meta) — bump its floors and patch version when component minimums move | README table |

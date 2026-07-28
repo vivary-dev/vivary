@@ -24,7 +24,7 @@ const pages = [
   ['CONCEPTS', 'concepts', 'What is Vivary?', 'Plain-language intro: what Vivary is, the core ideas, and a glossary. Start here.'],
   ['GETTING-STARTED', 'getting-started', 'Getting started', 'Install Vivary and run your first agent workspace.'],
   ['WALKTHROUGH', 'walkthrough', 'Getting started proof', 'A public, generic product walkthrough showing Vivary scaffold, health, review, coordination, and impact checks.'],
-  ['COMMANDS', 'commands', 'Command reference', 'Every CLI across Vivary: tropo, ozone, exo, create-vivary, and optional adapters.'],
+  ['COMMANDS', 'commands', 'Command reference', 'Every CLI across Vivary: tropo, strato, ozone, exo, create-vivary, and optional adapters.'],
   ['SKILLS', 'skills', 'Agent skills', 'The strato, tropo, and loops skills that operate a Vivary workspace.'],
   ['ACTIVE-CONTEXT', 'active-context', 'Active context', 'Optional CocoIndex-code sidecar guidance for semantic code retrieval.'],
   ['LLM-ACTIVE-CONTEXT', 'llm-active-context', 'LLM active-context guide', 'Copyable agent instructions for graph-first CocoIndex-code retrieval.'],
@@ -248,7 +248,7 @@ Full Documentation: https://vivary.vercel.app/llms-full.txt
 - PyPI knowledge graph CLI: \`vivary-tropo\` ${tropoVersion}, command \`tropo\`
 - PyPI review CLI: \`vivary-ozone\` ${ozoneVersion}, command \`ozone\`
 - PyPI coordination CLI: \`vivary-exo\` ${exoVersion}, command \`exo\`
-- \`strato\` is bundled as workspace templates and agent skills, not a separate package.
+- Strato templates and skills remain bundled; the unpublished source package \`vivary-strato\` exposes experimental command \`strato decide --governed\`.
 - Optional Cognee adapter: \`vivary-memory-cognee\` ${cogneeVersion}, command \`vivary-cognee\`
 - Versions are independent; do not call the whole project "Vivary ${createVivaryPyPI}".
 

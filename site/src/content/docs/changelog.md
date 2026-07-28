@@ -14,14 +14,15 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
-## [Unreleased: Tropo governed-context adapter] — 2026-07-26
+## [Unreleased: governed Tropo and Strato adapters] — 2026-07-26
 
-Affects the source checkout's unreleased `vivary-tropo` **0.5.0** and `vivary`
-meta-package **0.1.1**, Tropo's first `vivary-core` dependency edge, package
-documentation, and CI packaging proof. The published releases remain Tropo **0.4.1**
-and `vivary` **0.1.0**. No package was published, deployed, or enabled by default;
-publication remains part of the final coordinated release train and requires a
-separate human gate.
+Affects the source checkout's unreleased `vivary-tropo` **0.5.0**,
+`vivary-strato` **0.1.0**, and `vivary` meta-package **0.1.1**, the first two
+role-to-`vivary-core` dependency edges, package documentation, and CI packaging proof.
+The published releases remain Tropo **0.4.1** and `vivary` **0.1.0**; Strato and core
+remain unpublished during development. No package was published, deployed, or enabled
+by default; publication remains part of the final coordinated release train and
+requires a separate human gate.
 
 ### Added
 
@@ -50,6 +51,25 @@ separate human gate.
   homes. Tropo's direct `__main__` runner uses the same boundary, keeping observation
   fixtures, dirty facts, and fingerprints reproducible under both supported test
   entry points.
+- `vivary-strato` **0.1.0** — the first independently versioned Strato runtime package.
+  `strato decide --governed` validates a pinned request/policy schema, core-owned actor
+  and authority class, workspace fingerprint, absolute path scope bound to its Task
+  Capsule, a non-empty project audit label, and caller-supplied timestamps before
+  delegating to core's pure budget, capsule/receipt-gate, and next-loop policy.
+  Requests, capsule observations, and receipts have a deterministic 300-second
+  freshness window; a verdict without its receipt is rejected. Unknown fields fail
+  closed, so free-form status text cannot impersonate a human gate. Inputs whose JSON
+  or evidence graphs are too deeply nested fail closed with the explicit
+  `request_too_deeply_nested` reason instead of a traceback. `--json` separates
+  validated `vivary.strato-decision/v0` documents from
+  `vivary.strato-decision-refusal/v0` envelopes with stable reason codes; advisory mode
+  exits `0`, while `--strict` exits `1` for a valid `blocked` or `request_gate` result.
+- Strato's package and CLI contract have direct tests for core delegation, budget
+  exhaustion, intact/insufficient/tampered/stale/malformed/recursive evidence,
+  deterministic results, identity boundaries, malformed and deeply nested documents,
+  advisory/strict exit semantics,
+  and default text output. Isolated package smokes exercise the installed console
+  script on Windows and WSL Linux.
 
 ### Changed
 
@@ -61,6 +81,10 @@ separate human gate.
   advances from 0.1.0 to 0.1.1 and raises its floor to `vivary-tropo>=0.5.0`, so it
   receives core transitively. All three source versions remain unpublished in this
   development train until the coordinated release.
+- `vivary-strato` declares `vivary-core>=0.2.1` with its first runtime import. The
+  `vivary` meta-package does not add Strato yet; completing the one-install role surface
+  remains owned by #207. Both Strato and core stay explicitly allowlisted as
+  unpublished until the final coordinated release gate.
 - Plain `tropo find` keeps its existing typed-context packet and default token budget.
   Governed-only flags, malformed core inputs, and broken core installs fail with the
   documented usage exit code `2`; the command reference owns the exact flag contract.
@@ -131,6 +155,14 @@ separate human gate.
   `UV_CACHE_DIR=$HOME/.cache/uv TMPDIR=/tmp uv run --with pytest python3 -m pytest
   packages/core/tests/ -q -p no:cacheprovider` — **613 passed, 2 platform-specific
   skips** on WSL Linux.
+- `python -m pytest packages/strato/tests -q` — **39 passed** on Windows and
+  **39 passed** on WSL Linux.
+- `python -m pytest packages/core/tests/test_policy.py -q` — **91 passed**;
+  `python -m pytest packages/core/tests/test_control.py -q` — **101 passed**.
+- Isolated Windows venv and WSL `uv run --no-cache --with ./packages/core --with
+  ./packages/strato` smokes built core **0.2.1** and Strato **0.1.0**, then the
+  installed `strato decide --governed --json --strict` command returned `act` with a
+  clear gate and within-budget result.
 - `python -m pytest packages/tropo/tests/test_tropo.py -q -k "governed or
   cmd_find_returns_context_packet"` — **17 passed**.
 - Isolated `uv run --no-cache --with ./packages/core --with ./packages/tropo`
@@ -149,7 +181,7 @@ separate human gate.
   the real-Git oracle.
 - `python scripts/tests/test_package_docs_parity.py` — **10/10 passed**;
   `python scripts/check_package_docs_parity.py` — **6** published manifests and
-  **1** unpublished allowlist entry matched the architecture page.
+  **2** unpublished allowlist entries matched the architecture page.
 - `python scripts/check_line_endings.py --verbose` — **261** tracked text files
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
@@ -158,7 +190,7 @@ separate human gate.
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**
-  site tests passed; **23** pages built; **1,680** local references and **1,054**
+  site tests passed; **23** pages built; **1,683** local references and **1,057**
   anchors checked with zero failures.
 
 ## [Unreleased: cross-platform orientation proof] — 2026-07-26

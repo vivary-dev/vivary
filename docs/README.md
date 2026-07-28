@@ -6,7 +6,7 @@ Start here.
 |---|---|
 | [GETTING-STARTED.md](GETTING-STARTED.md) | Install → create a workspace → run the loop. Begin here. |
 | [WALKTHROUGH.md](WALKTHROUGH.md) | Public, generic proof of the product loop: scaffold, health, review, coordination, impact. |
-| [COMMANDS.md](COMMANDS.md) | Full CLI reference for `tropo` · `ozone` · `exo` · `create-vivary`. |
+| [COMMANDS.md](COMMANDS.md) | Full CLI reference for `tropo` · `strato` · `ozone` · `exo` · `create-vivary`. |
 | [HOWTO.md](HOWTO.md) | Task recipes: add a type, see blast radius, review, CI, multi-agent, … |
 | [SKILLS.md](SKILLS.md) | The agent skills: strato (bootstrap/heartbeat/self-improve), tropo, loops. |
 | [ACTIVE-CONTEXT.md](ACTIVE-CONTEXT.md) | Optional CocoIndex-code sidecar for active semantic code context. |

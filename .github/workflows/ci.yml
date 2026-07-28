@@ -49,10 +49,12 @@ jobs:
         run: |
           python -m pip install pytest packaging
           python -m pytest packages/core/tests/ -q
+      - name: strato governed policy facade
+        run: python -m pytest packages/strato/tests/ -q
       - name: packaged core and optional semantic bridge smoke
         shell: bash
         run: |
-          python -m pip install --no-deps ./packages/core ./packages/tropo ./packages/memory-cognee
+          python -m pip install --no-deps ./packages/core ./packages/tropo ./packages/strato ./packages/memory-cognee
           smoke="$(mktemp -d)"
           mkdir -p "$smoke/ws/.vivary" "$smoke/ws/modules/auth"
           cat > "$smoke/ws/tropo.toml" <<'EOF'
@@ -100,11 +102,34 @@ jobs:
             --governed \
             --max-claims 2 \
             --json > "$smoke/governed.json"
+          python - "$smoke/governed.json" "$smoke/strato-request.json" <<'PY'
+          import json
+          import sys
+
+          capsule = json.loads(open(sys.argv[1], encoding="utf-8").read())
+          observed_at = capsule["workspace"]["observed_at"]
+          request = {
+              "schema": "vivary.strato-decision-request/v0",
+              "policy_version": "vivary.strato-policy/v0",
+              "actor": {"kind": "agent", "id": "agent:ci"},
+              "authority_class": "contributor",
+              "workspace": {"fingerprint": capsule["workspace"]["fingerprint"]},
+              "scope": {"project": "smoke", "paths": capsule["task"]["scope"]},
+              "requested_at": observed_at,
+              "decision_at": observed_at,
+              "capsule": capsule,
+              "state": {"turns_used": 0, "actions_used": 0},
+              "limits": {"max_turns": 3, "max_actions": 3},
+          }
+          with open(sys.argv[2], "w", encoding="utf-8") as target:
+              json.dump(request, target)
+          PY
+          strato decide --governed --json "$smoke/strato-request.json" > "$smoke/strato.json"
           set +e
           tropo query "auth" --root "$smoke/ws" --mode semantic --json > "$smoke/out.json"
           rc=$?
           set -e
-          python - "$smoke/out.json" "$smoke/governed.json" "$rc" <<'PY'
+          python - "$smoke/out.json" "$smoke/governed.json" "$smoke/strato.json" "$rc" <<'PY'
           import json
           import sys
           from packaging.requirements import Requirement
@@ -113,16 +138,26 @@ jobs:
 
           data = json.loads(open(sys.argv[1], encoding="utf-8").read())
           governed = json.loads(open(sys.argv[2], encoding="utf-8").read())
+          strato_decision = json.loads(open(sys.argv[3], encoding="utf-8").read())
           with open("packages/core/pyproject.toml", "rb") as stream:
               core_version = tomllib.load(stream)["project"]["version"]
           with open("packages/tropo/pyproject.toml", "rb") as stream:
               tropo_dependencies = tomllib.load(stream)["project"]["dependencies"]
+          with open("packages/strato/pyproject.toml", "rb") as stream:
+              strato_project = tomllib.load(stream)["project"]
+              strato_version = strato_project["version"]
+              strato_dependencies = strato_project["dependencies"]
           core_requirement = next(
               dependency
               for dependency in tropo_dependencies
               if dependency.startswith("vivary-core")
           )
-          rc = int(sys.argv[3])
+          strato_core_requirement = next(
+              dependency
+              for dependency in strato_dependencies
+              if dependency.startswith("vivary-core")
+          )
+          rc = int(sys.argv[4])
           assert rc == 1, rc
           assert data["mode"] == "semantic"
           assert data["semantic"]["provider"] == "cognee"
@@ -135,6 +170,15 @@ jobs:
               core_requirement,
               core_version,
           )
+          assert version("vivary-strato") == strato_version
+          assert strato_core_requirement in (requires("vivary-strato") or [])
+          assert Requirement(strato_core_requirement).specifier.contains(core_version), (
+              strato_core_requirement,
+              core_version,
+          )
+          assert strato_decision["schema"] == "vivary.strato-decision/v0"
+          assert strato_decision["decision"] in {"act", "request_gate"}
+          assert isinstance(strato_decision["reason_codes"], list)
           assert governed["schema"] == "vivary.task-capsule/v0"
           assert governed["budget"] == {"max_claims": 2}
           assert governed["claims"]
