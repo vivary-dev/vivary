@@ -69,26 +69,52 @@ def _derive_required_checks(checkouts):
     unknowns = []
     seen = set()
 
-    def add(name, command, evidence):
-        if command in seen:
+    def add(name, command, evidence, cwd):
+        key = (cwd, command)
+        if key in seen:
             return
-        seen.add(command)
-        checks.append({"name": name, "command": command, "evidence": evidence})
+        seen.add(key)
+        checks.append(
+            {"name": name, "command": command, "cwd": cwd, "evidence": evidence}
+        )
 
     for node in checkouts:
+        facts = node.get("facts") or {}
         markers = _fact_value(node, "workspace_markers") or []
-        marker_evidence = ((node.get("facts") or {}).get("workspace_markers") or {}).get("evidence")
+        marker_evidence = (facts.get("workspace_markers") or {}).get("evidence")
+        cwd = node.get("path")
+        suffix = f"@{node.get('id')}"
 
         # Vivary's own checks are provable: a tropo.toml means a governed workspace,
         # and these apply whatever the project is written in.
         if "tropo.toml" in markers:
-            add("vivary-graph-doctor", "create-vivary doctor . --json", marker_evidence)
-            add("vivary-graph-check", "tropo check --root . --json", marker_evidence)
+            add(
+                f"vivary-graph-doctor{suffix}",
+                "create-vivary doctor . --json",
+                marker_evidence,
+                cwd,
+            )
+            add(
+                f"vivary-graph-check{suffix}",
+                "tropo check --root . --json",
+                marker_evidence,
+                cwd,
+            )
 
-        npm_test = _fact_value(node, "npm_test_script")
+        npm_test_fact = facts.get("npm_test_script") or {}
+        npm_test = (
+            npm_test_fact.get("value")
+            if npm_test_fact.get("status") == "known"
+            else None
+        )
         if npm_test:
-            add("project-tests", "npm test", marker_evidence)
-        elif any(marker in markers for marker in _AMBIGUOUS_TEST_MARKERS):
+            add(
+                f"project-tests{suffix}",
+                "npm test",
+                npm_test_fact.get("evidence"),
+                cwd,
+            )
+        if any(marker in markers for marker in _AMBIGUOUS_TEST_MARKERS):
             unknowns.append(
                 {
                     "kind": "required_check_undetermined",

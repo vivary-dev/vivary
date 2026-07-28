@@ -123,6 +123,8 @@ plain/query retrieval modifier it does not consume: `--budget`, `--k`, `--mode`,
 `--max-claims` requires `--governed`, and both governed flags are valid only with
 `find`; invalid combinations exit `2` rather than being ignored. Plain `tropo find`
 remains unchanged when the flag is absent.
+Derived required checks use checkout-scoped names and carry both the normalized `cwd`
+where the command must run and the exact observation that justified it.
 Unicode-aware question extraction preserves order, deduplicates terms, and searches at
 most the first `16`; core then caps matched bytes, lines per file, claims, and omission
 detail.

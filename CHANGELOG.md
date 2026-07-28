@@ -52,6 +52,11 @@ and requires a separate human gate.
   so a Git child that fills stderr before stdout cannot deadlock observation. Cleanup
   is bounded, kills stalled children, closes both child pipes, and reports structured
   failure instead of leaking a child process or descriptor.
+- Derived required checks now carry checkout-scoped names, the normalized checkout
+  `cwd`, and the observation that actually proves each command. This prevents one
+  checkout's receipt from clearing another checkout's check. An observed npm test
+  script also no longer suppresses an undetermined Python test-system warning in a
+  polyglot checkout.
 - Command, package, architecture, root overview, and generated-site truth now describe
   the opt-in boundary, dependency direction, and no-fetch/no-write/no-provider
   constraints.
@@ -61,7 +66,7 @@ and requires a separate human gate.
 - `python packages/tropo/tests/test_tropo.py` — **154/154** passed.
 - `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **154/154**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **591 passed**.
+- `python -m pytest packages/core/tests/ -q` — **592 passed**.
 - `python -m pytest packages/tropo/tests/test_tropo.py -q -k "governed or
   cmd_find_returns_context_packet"` — **5 passed**.
 - Isolated `uv run --with ./packages/core --with ./packages/tropo` distribution import

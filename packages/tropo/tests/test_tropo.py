@@ -1726,15 +1726,27 @@ def test_cmd_find_governed_returns_bounded_core_capsule(tmp_path):
     )
     assert any(claim["fact"] == "content_match" for claim in out["claims"])
     assert [
-        (check["name"], check["command"])
+        (check["name"].split("@", 1)[0], check["command"])
         for check in out["required_checks"]
     ] == [
         ("vivary-graph-doctor", "create-vivary doctor . --json"),
         ("vivary-graph-check", "tropo check --root . --json"),
         ("project-tests", "npm test"),
     ]
+    assert all("@" in check["name"] for check in out["required_checks"])
+    assert {
+        check["command"]: check["evidence"] for check in out["required_checks"]
+    } == {
+        "create-vivary doctor . --json": {
+            "command": "fs.stat workspace markers"
+        },
+        "tropo check --root . --json": {
+            "command": "fs.stat workspace markers"
+        },
+        "npm test": {"command": "fs.read package.json scripts.test"},
+    }
     assert all(
-        check["evidence"] == {"command": "fs.stat workspace markers"}
+        check["cwd"] == normalize_path(str(tmp_path))
         for check in out["required_checks"]
     )
     assert out["budget"] == {"max_claims": 2}

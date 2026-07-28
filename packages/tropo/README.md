@@ -98,6 +98,8 @@ calls a provider, or reads memory. `--max-claims N` sets the non-negative claim 
 `--governed`, and both governed flags are valid only with `find`; invalid combinations
 exit `2` rather than being ignored. Without `--governed`, existing `find` output and
 behavior are unchanged.
+Derived required checks use checkout-scoped names and carry both the normalized `cwd`
+where the command must run and the exact observation that justified it.
 Unicode question terms preserve order, deduplicate, and stop at `16`; core separately
 caps matched bytes, lines per file, claims, and omission detail.
 

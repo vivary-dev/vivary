@@ -35,8 +35,9 @@ The governed-context shared seam every Vivary role package will speak through:
   over tracked files only, every truncation recorded.
 - **`capsule_compile` / `capsule_select`** — the bounded Task Capsule:
   relevance-ranked, explainable claim selection with fail-closed structured
-  filters; every budget cut is a recorded omission, and malformed graph nodes
-  or facts are rejected rather than partially compiled.
+  filters; derived checks bind checkout-scoped identities, execution workspaces, and
+  exact observation evidence; every budget cut is a recorded omission, and malformed
+  graph nodes or facts are rejected rather than partially compiled.
 - **`collation`** — JS `localeCompare` ordering (claim/node/edge ranking is
   part of the frozen contract), pinned as an empirical weight table
   extracted from the reference runtime and verified on ~2.1M probe pairs;

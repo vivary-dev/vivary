@@ -47,6 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PY_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, PY_ROOT)
 
+from vivary_core.canonical import normalize_path  # noqa: E402
 from vivary_core.capsule_compile import compile_task_capsule  # noqa: E402
 from vivary_core.workspace_content import observe_content  # noqa: E402
 from vivary_core.workspace_model import project_workspace_graph  # noqa: E402
@@ -885,6 +886,9 @@ def test_required_checks_are_derived_from_the_observed_workspace(fx):
         assert all(c.get("evidence") for c in compile_for()["required_checks"]), (
             "every derived check must carry the evidence that justified it"
         )
+        assert all(
+            c.get("cwd") == normalize_path(repo) for c in compile_for()["required_checks"]
+        ), "every derived check must bind the workspace where it must run"
 
         # 2. An ambiguous test system is reported, never guessed.
         _write(os.path.join(repo, "pyproject.toml"), "[project]\nname = 'x'\n")
@@ -911,17 +915,60 @@ def test_required_checks_are_derived_from_the_observed_workspace(fx):
 
         # 4. A real test script is derived.
         _write(os.path.join(repo, "package.json"), '{"scripts": {"test": "vitest run"}}\n')
-        commands = [c["command"] for c in compile_for()["required_checks"]]
-        assert "npm test" in commands, commands
+        checks = compile_for()["required_checks"]
+        project_test = next(c for c in checks if c["command"] == "npm test")
+        assert project_test["evidence"] == {
+            "command": "fs.read package.json scripts.test"
+        }
+        assert any(
+            u.get("kind") == "required_check_undetermined"
+            and "pyproject.toml" in u.get("observed_markers", [])
+            for u in compile_for()["unknowns"]
+        ), "an npm test command must not hide an undetermined Python check"
 
         # 5. An explicit task list always wins.
-        explicit = compile_for(task={**TASK, "required_checks": [{"name": "mine", "command": "make check"}]})
-        assert explicit["required_checks"] == [{"name": "mine", "command": "make check"}]
+        explicit = compile_for(
+            task={
+                **TASK,
+                "required_checks": [{"name": "mine", "command": "make check"}],
+            }
+        )
+        assert explicit["required_checks"] == [
+            {"name": "mine", "command": "make check"}
+        ]
     finally:
         for name in ("tropo.toml", "pyproject.toml", "package.json"):
             path = os.path.join(repo, name)
             if os.path.exists(path):
                 os.remove(path)
+
+
+
+def test_required_checks_disambiguate_multiple_checkout_execution_roots(fx):
+    roots = [fx["paths"]["canonical"], fx["paths"]["staleNeighbor"]]
+    for root in roots:
+        _write(os.path.join(root, "tropo.toml"), "[base]\nallow_untyped = true\n")
+
+    try:
+        graph = project_workspace_graph(
+            observe_checkouts(roots, allowlist=roots, now=NOW)
+        )
+        capsule = compile_task_capsule(task=TASK, graph=graph)
+        checks = capsule["required_checks"]
+
+        assert len(checks) == 4
+        assert len({check["name"] for check in checks}) == len(checks)
+        assert {check["cwd"] for check in checks} == {
+            normalize_path(root) for root in roots
+        }
+        assert all("@" in check["name"] for check in checks)
+    finally:
+        for root in roots:
+            marker = os.path.join(root, "tropo.toml")
+            if os.path.exists(marker):
+                os.remove(marker)
+
+
 
 
 def test_entire_status_is_not_a_default_check(fx):
