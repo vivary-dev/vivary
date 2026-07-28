@@ -3874,7 +3874,7 @@ def governed_find(root, question, *, max_claims=24):
         project_workspace_graph,
     )
 
-    root = normalize_path(os.path.abspath(root))
+    root = normalize_path(os.path.realpath(os.path.abspath(root)))
     paths = [root]
     observation = observe_checkouts(paths, allowlist=paths)
     checkout = next(

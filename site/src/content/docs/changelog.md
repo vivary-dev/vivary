@@ -36,8 +36,9 @@ and requires a separate human gate.
   adapter: `observe_checkouts`, `observe_content`, `project_workspace_graph`, and
   `compile_task_capsule`.
 - Direct regressions for the real Git-backed pipeline, equivalent Windows root casing,
-  Unicode workspace paths and question terms, observed check derivation, non-negative
-  capsule budgets, missing-core installation errors, and rejection of incompatible
+  symlink aliases of the worktree root, Unicode workspace paths and question terms,
+  observed check derivation, non-negative capsule budgets, missing-core installation
+  errors, and rejection of incompatible
   plain-find/query flags including `--budget 0`.
 - The packaged integration smoke now installs core beside Tropo, proves the wheel's
   declared dependency metadata, and exercises the installed governed command.
@@ -77,14 +78,14 @@ and requires a separate human gate.
 
 ### Verification
 
-- `python packages/tropo/tests/test_tropo.py` — **159/159** passed on Windows.
-- `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **159/159**
+- `python packages/tropo/tests/test_tropo.py` — **160/160** passed on Windows.
+- `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **160/160**
   passed on WSL Linux.
 - `python -m pytest packages/core/tests/ -q` — **601 passed** on Windows;
   `uv run --with pytest python3 -m pytest packages/core/tests/ -q` — **599 passed,
   2 platform-specific skips** on WSL Linux.
 - `python -m pytest packages/tropo/tests/test_tropo.py -q -k "governed or
-  cmd_find_returns_context_packet"` — **10 passed**.
+  cmd_find_returns_context_packet"` — **11 passed**.
 - Isolated `uv run --with ./packages/core --with ./packages/tropo` distribution
   smoke — installed metadata reported core **0.2.1** and Tropo **0.4.2**; governed
   find returned a bounded two-claim Task Capsule with checkout-scoped checks.

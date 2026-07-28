@@ -1865,6 +1865,27 @@ def test_governed_find_excludes_tracked_paths_added_to_ignore_policy(tmp_path):
     assert "privacy_matches_excluded" in serialized
 
 
+def test_governed_find_accepts_symlink_alias_of_worktree_root(tmp_path):
+    workspace = tmp_path / "workspace"
+    alias = tmp_path / "workspace-alias"
+    workspace.mkdir()
+    _search_vault(workspace)
+    _init_git_repo(workspace)
+    try:
+        alias.symlink_to(workspace, target_is_directory=True)
+    except OSError:
+        return
+
+    rc, out = _capture_rc(
+        tropo.cmd_find,
+        _query_args("release workflow", governed=True, max_claims=2),
+        res(str(alias)),
+    )
+
+    assert rc == 0
+    assert out["task"]["scope"] == [normalize_path(os.path.realpath(workspace))]
+
+
 def test_governed_find_accepts_equivalent_windows_root_casing(tmp_path):
     if os.name != "nt":
         return
