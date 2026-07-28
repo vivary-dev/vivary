@@ -394,22 +394,27 @@ The request envelope is `vivary.strato-decision-request/v0`:
 }
 ```
 
-`capsule` must be a complete Task Capsule, and its workspace fingerprint must match
-the envelope. `scope.project` is a non-empty audit label. `scope.paths` must contain
-absolute roots and match `capsule.task.scope`; core's path equivalence normalizes
-separators, ignores root order, and folds case on Windows. A missing or broader capsule
-scope fails closed. Both `requested_at` and caller-supplied `decision_at` are required.
-The request, capsule observation, and any receipt must be no more than **300 seconds**
-old at `decision_at`, ordered consistently, and timezone-aware. Passing the clock in
-the request keeps the facade pure and makes future/stale decisions deterministic.
+`capsule` must be a complete Task Capsule, its body must reproduce its claimed
+fingerprint without non-canonical or numerically lossy values, and its workspace
+fingerprint must match the envelope. A capsule altered after compilation or missing
+compiler-owned Task Capsule fields such as `budget` is an invalid envelope and never
+reaches core policy. `scope.project` is a non-empty audit label. `scope.paths`
+must contain absolute roots and match `capsule.task.scope`; core's path equivalence
+normalizes separators, ignores root order, and folds case on Windows. A missing or
+broader capsule scope fails closed. Both `requested_at` and caller-supplied
+`decision_at` are required. The request, capsule observation, and any receipt must be
+no more than **300 seconds** old at `decision_at`, ordered consistently, and
+timezone-aware. Passing the clock in the request keeps the facade pure and makes
+future/stale decisions deterministic.
 
 `receipt` is optional. `verdict` is optional only with a receipt; a receiptless verdict
 is rejected instead of silently ignored. When both are present, core independently
 binds and validates them before the verdict can clear a gate. Actor kinds are `human`,
 `agent`, and `worker`; authority classes are `contributor` and `owner`, and only a
 human actor may claim `owner`. These vocabularies and their reason codes come from
-core's authority policy. Unknown envelope fields are rejected, so a string such as
-`"status": "approved"` cannot satisfy a human gate.
+core's authority policy. Unknown envelope fields are rejected; the Python facade also
+rejects non-string mapping keys without coercing or sorting them. Free-form text such
+as `"status": "approved"` cannot satisfy a human gate.
 
 By default, output is a short text summary. `--json` emits either a validated
 `vivary.strato-decision/v0` document with identity fields plus core's `decision`,

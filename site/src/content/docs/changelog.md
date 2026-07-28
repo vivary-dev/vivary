@@ -55,12 +55,16 @@ requires a separate human gate.
   `strato decide --governed` validates a pinned request/policy schema, core-owned actor
   and authority class, workspace fingerprint, absolute path scope bound to its Task
   Capsule, a non-empty project audit label, and caller-supplied timestamps before
-  delegating to core's pure budget, capsule/receipt-gate, and next-loop policy.
+  delegating to core's pure budget, capsule/receipt-gate, and next-loop policy. The
+  capsule body fingerprint is recomputed before delegation, so a capsule altered after
+  compilation cannot bypass a review gate. Missing compiler-owned fields and
+  non-canonical values that would be lossy in JavaScript are refused before policy.
   Requests, capsule observations, and receipts have a deterministic 300-second
-  freshness window; a verdict without its receipt is rejected. Unknown fields fail
-  closed, so free-form status text cannot impersonate a human gate. Inputs whose JSON
-  or evidence graphs are too deeply nested fail closed with the explicit
-  `request_too_deeply_nested` reason instead of a traceback. `--json` separates
+  freshness window; a verdict without its receipt is rejected. Unknown fields and
+  non-string Python mapping keys fail closed, so free-form status text cannot
+  impersonate a human gate. Incomplete capsule envelopes and inputs whose JSON or
+  evidence graphs are too deeply nested fail closed with typed refusal
+  reasons instead of reaching core as successful policy evaluations. `--json` separates
   validated `vivary.strato-decision/v0` documents from
   `vivary.strato-decision-refusal/v0` envelopes with stable reason codes; advisory mode
   exits `0`, while `--strict` exits `1` for a valid `blocked` or `request_gate` result.

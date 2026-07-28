@@ -44,16 +44,18 @@ strato decide --governed --json request.json
 ```
 
 It validates the request schema, pinned policy version, core-owned actor and authority
-class, workspace binding, absolute scope roots bound to the Task Capsule, and
-caller-supplied timestamps before delegating the budget/gate/next-loop decision to
-`vivary-core`. Requests, capsule observations, and receipts have a deterministic
-300-second freshness window. A verdict is accepted only beside its receipt. A
-malformed, invalid, or unsafely nested envelope returns a
-`vivary.strato-decision-refusal/v0` document and exit `2`; a valid envelope returns
+class, workspace binding, absolute scope roots bound to the Task Capsule, the capsule's
+body fingerprint, and caller-supplied timestamps before delegating the
+budget/gate/next-loop decision to `vivary-core`. Missing compiler-owned fields and
+non-canonical or numerically lossy capsule values fail closed. Requests, capsule
+observations, and receipts have a deterministic 300-second freshness window. A verdict
+is accepted only beside its receipt. A malformed, invalid, altered, or unsafely nested
+envelope returns a `vivary.strato-decision-refusal/v0` document and exit `2`; a valid
+envelope returns
 `vivary.strato-decision/v0`, is advisory, and exits `0`. Add `--strict` to exit `1`
-when core blocks or requests a gate. Unknown fields are rejected, so free-form status
-text cannot impersonate a human gate. Omit `--json` for a short text
-summary. The full contract is in
+when core blocks or requests a gate. Unknown fields and non-string Python mapping keys
+are rejected, so free-form status text cannot impersonate a human gate. Omit `--json`
+for a short text summary. The full contract is in
 the [command reference](../../docs/COMMANDS.md#strato--the-policy-layer).
 
 Loop *literacy* — running the loop unattended — is strato's domain too; see the loops

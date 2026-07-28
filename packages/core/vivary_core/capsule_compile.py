@@ -33,12 +33,89 @@ from vivary_core.canonical import (
     _utf16_sort_key,
     deterministic_id,
     fingerprint,
+    is_canonical_body_value,
     is_within_allowlist,
 )
 from vivary_core.capsule_select import select_claims
 from vivary_core.collation import CollationDomainError, locale_sort_key
 
 CAPSULE_SCHEMA = "vivary.task-capsule/v0"
+
+
+def is_task_capsule_shape(capsule) -> bool:
+    """Return whether a value has the complete policy-facing Task Capsule shape."""
+
+    if not (
+        isinstance(capsule, dict)
+        and capsule.get("schema") == CAPSULE_SCHEMA
+        and isinstance(capsule.get("capsule_id"), str)
+        and bool(capsule["capsule_id"])
+        and isinstance(capsule.get("fingerprint"), str)
+        and bool(capsule["fingerprint"])
+        and isinstance(capsule.get("workspace"), dict)
+        and isinstance(capsule["workspace"].get("fingerprint"), str)
+        and bool(capsule["workspace"]["fingerprint"])
+        and isinstance(capsule.get("claims"), list)
+        and isinstance(capsule.get("conflicts"), list)
+        and isinstance(capsule.get("unknowns"), list)
+        and isinstance(capsule.get("omissions"), list)
+        and isinstance(capsule.get("required_checks"), list)
+        and isinstance(capsule.get("budget"), dict)
+        and set(capsule["budget"]) == {"max_claims"}
+        and type(capsule["budget"]["max_claims"]) is int
+        and capsule["budget"]["max_claims"] >= 0
+    ):
+        return False
+
+    return (
+        all(
+            isinstance(claim, dict)
+            and isinstance(claim.get("id"), str)
+            and bool(claim["id"])
+            for claim in capsule["claims"]
+        )
+        and all(
+            isinstance(conflict, dict)
+            and isinstance(conflict.get("id"), str)
+            and bool(conflict["id"])
+            and isinstance(conflict.get("decision"), str)
+            and bool(conflict["decision"])
+            for conflict in capsule["conflicts"]
+        )
+        and all(isinstance(unknown, dict) for unknown in capsule["unknowns"])
+        and all(
+            isinstance(omission, dict)
+            and isinstance(omission.get("kind"), str)
+            and bool(omission["kind"])
+            for omission in capsule["omissions"]
+        )
+        and all(
+            isinstance(required_check, dict)
+            and isinstance(required_check.get("name"), str)
+            and bool(required_check["name"])
+            and isinstance(required_check.get("command"), str)
+            and bool(required_check["command"])
+            for required_check in capsule["required_checks"]
+        )
+    )
+
+
+def verify_task_capsule_integrity(capsule) -> bool:
+    """Verify a complete Task Capsule against its claimed body fingerprint."""
+
+    if not is_task_capsule_shape(capsule):
+        return False
+    body = {
+        key: value
+        for key, value in capsule.items()
+        if key not in {"capsule_id", "fingerprint"}
+    }
+    if not is_canonical_body_value(body):
+        return False
+    try:
+        return capsule["fingerprint"] == fingerprint(body)
+    except TypeError:
+        return False
 
 # Checks were hardcoded for every workspace, so a Python-only project was told to
 # run `npm test` and had no way to say otherwise. They are now derived from what was
