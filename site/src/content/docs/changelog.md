@@ -14,6 +14,73 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: Tropo governed-context adapter] — 2026-07-26
+
+Affects the source checkout's unreleased `vivary-tropo` **0.4.2**, its first
+`vivary-core` dependency edge, package documentation, and CI packaging proof. The
+published Tropo release remains **0.4.1**. No package was published, deployed, or
+enabled by default; publication remains part of the final coordinated release train
+and requires a separate human gate.
+
+### Added
+
+- `tropo find <task> --governed [--max-claims N]` — an explicit experimental adapter
+  from one normalized, allowlisted, read-only Tropo root through `vivary-core`
+  observation, content search, evidence-graph projection, and bounded Task Capsule
+  compilation. JSON and human output expose evidence-backed claims, conflicts,
+  unknowns, omissions, observed required checks, stable selection reasons, and the
+  capsule fingerprint. Unicode question terms preserve order, deduplicate, and stop at
+  **16** before the bounded core content search.
+- Top-level `vivary_core` exports for the four deep-module entry points used by the
+  adapter: `observe_checkouts`, `observe_content`, `project_workspace_graph`, and
+  `compile_task_capsule`.
+- Direct regressions for the real Git-backed pipeline, normalized Windows scope,
+  Unicode and bounded question terms, observed check derivation, non-negative capsule
+  budgets, missing-core installation errors, and rejection of incompatible
+  plain-find/query flags including `--budget 0`.
+- The packaged integration smoke now installs core beside Tropo, proves the wheel's
+  declared dependency metadata, and exercises the installed governed command.
+
+### Changed
+
+- `vivary-tropo` now declares `vivary-core>=0.2.0`, the first real package-to-core
+  dependency promised by [#207](https://github.com/vivary-dev/vivary/issues/207), in
+  the same change as its first import. Its source version advances from 0.4.1 to 0.4.2;
+  published package truth remains 0.4.1 until the coordinated train.
+- Plain `tropo find` keeps its existing typed-context packet and default token budget.
+  Governed mode rejects `--budget`, `--k`, `--mode`, `--type`, `--path`, `--edge`,
+  `--snippet`, and `--explain`; `--max-claims` requires `--governed`, and both
+  governed flags require `find`. Invalid flag combinations, invalid core inputs, and
+  broken core installs return the documented usage exit code `2` without a traceback.
+- Core's shared bounded subprocess runner now drains stdout and stderr concurrently,
+  so a Git child that fills stderr before stdout cannot deadlock observation. Cleanup
+  is bounded, kills stalled children, closes both child pipes, and reports structured
+  failure instead of leaking a child process or descriptor.
+- Command, package, architecture, root overview, and generated-site truth now describe
+  the opt-in boundary, dependency direction, and no-fetch/no-write/no-provider
+  constraints.
+
+### Verification
+
+- `python packages/tropo/tests/test_tropo.py` — **154/154** passed.
+- `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **154/154**
+  passed on WSL Linux.
+- `python -m pytest packages/core/tests/ -q` — **591 passed**.
+- `python -m pytest packages/tropo/tests/test_tropo.py -q -k "governed or
+  cmd_find_returns_context_packet"` — **5 passed**.
+- Isolated `uv run --with ./packages/core --with ./packages/tropo` distribution import
+  and `tropo find "folder type" --governed --max-claims 2 --json` smoke — passed with
+  two evidence-backed claims and a normalized Windows scope.
+- `python scripts/check_package_docs_parity.py` — **6** published manifests and **1**
+  unpublished allowlist entry matched the architecture page.
+- `python scripts/check_line_endings.py --verbose` — **258** tracked text files
+  checked; **8** legacy files remain explicitly allowlisted.
+- `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
+  **4** documents, zero errors or warnings.
+- `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**
+  site tests passed; **23** pages built; **1,680** local references and **1,054**
+  anchors checked with zero failures.
+
 ## [Unreleased: cross-platform orientation proof] — 2026-07-26
 
 Affects repository proof automation and CI only. No package version, public command,
@@ -151,10 +218,12 @@ install, version, publication, or deployment action occurs.
 
 ## [Unreleased: vivary-core, the governed-context seam] — 2026-07-26
 
-Adds `vivary-core`, an in-repo library under `packages/core/`. **Not published to PyPI
-and not reachable from any shipping CLI**: wiring it outward is
-[#207](https://github.com/vivary-dev/vivary/issues/207). No existing package changes its published version. The in-repo `vivary-core` version
-is **0.2.0**. Nothing about installing or running Vivary changes because it exists.
+Introduced `vivary-core`, an in-repo library under `packages/core/`. It was not
+published to PyPI or reachable from a shipping CLI in this initial slice; the first
+outward adapter is recorded in the later Tropo governed-context entry above. No
+existing package changed its published version here. The in-repo `vivary-core`
+version is **0.2.0**. Nothing
+about installing or running Vivary changed in this slice.
 Publishing remains a manual human gate. No package publishes before the comprehensive
 coordinated release train is complete and separately approved.
 

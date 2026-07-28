@@ -120,6 +120,10 @@ load the smallest useful context first. `doctor` validates the shell, active pri
 ignore rules, graph health, storage backend, semantic-memory status, and module index
 coverage after creation.
 `tropo find` returns small typed context packets for agents and humans to read first;
+The unreleased `tropo find --governed` path is the first opt-in `vivary-core` adapter:
+it turns one explicitly scoped, read-only workspace scan into a bounded, fingerprinted
+Task Capsule whose claims carry evidence and selection reasons. It performs no fetch,
+write, indexing, provider, or memory operation; plain `tropo find` is unchanged.
 `tropo query` provides filtered graph search, `tropo query --mode vector` adds
 dependency-free local typed-vector search when `.vivary/storage.toml` explicitly
 enables it, and `tropo migrate` handles backend switching. When local vector policy is

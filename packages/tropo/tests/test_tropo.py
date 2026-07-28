@@ -4,6 +4,8 @@ import io
 import json
 import os
 import shutil
+import stat
+import subprocess
 import sys
 import tempfile
 import types
@@ -12,10 +14,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CORE_ROOT = os.path.abspath(os.path.join(PACKAGE_ROOT, "..", "core"))
+sys.path.insert(0, CORE_ROOT)
+sys.path.insert(0, PACKAGE_ROOT)
 import tropo  # noqa: E402
+from vivary_core import normalize_path  # noqa: E402
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = PACKAGE_ROOT
 VAULT = os.path.join(ROOT, "examples", "vault")
 SCRIPT_DIR = ROOT
 REPO_TMP = os.path.abspath(os.path.join(ROOT, "..", "..", "sandboxes"))
@@ -28,13 +34,26 @@ def make_tmp_path():
     return path
 
 
+def remove_workspace(path):
+    def make_writable_and_retry(function, target, _error):
+        os.chmod(target, stat.S_IWRITE)
+        function(target)
+
+    callback = (
+        {"onexc": make_writable_and_retry}
+        if sys.version_info >= (3, 12)
+        else {"onerror": make_writable_and_retry}
+    )
+    shutil.rmtree(path, **callback)
+
+
 @contextmanager
 def temp_workspace():
     path = make_tmp_path()
     try:
         yield path
     finally:
-        shutil.rmtree(path)
+        remove_workspace(path)
 
 
 import argparse  # noqa: E402
@@ -863,17 +882,35 @@ def _search_vault(tmp_path):
     )
 
 
+def _init_git_repo(path):
+    def git(*args):
+        subprocess.run(
+            ["git", "-C", str(path), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    git("init", "-q")
+    git("add", ".")
+    git(
+        "-c", "user.name=Vivary Tests",
+        "-c", "user.email=tests@vivary.invalid",
+        "commit", "-qm", "fixture",
+    )
+
+
 def _query_args(query, **overrides):
     data = {
         "paths": query.split(),
         "json": True,
-        "k": 10,
+        "k": None,
         "type": [],
         "path": [],
         "edge": [],
-        "snippet": 160,
+        "snippet": None,
         "explain": False,
-        "mode": "text",
+        "mode": None,
         "root": None,
         "config": None,
         "strict": False,
@@ -883,7 +920,7 @@ def _query_args(query, **overrides):
         "yes": False,
         "from_backend": None,
         "to_backend": None,
-        "budget": 1200,
+        "budget": None,
     }
     data.update(overrides)
     return argparse.Namespace(**data)
@@ -1645,6 +1682,177 @@ def test_cmd_find_budget_trims_context(tmp_path):
     assert rc == 0
     assert out["estimated_tokens"] <= 30
     assert len(out["results"]) >= 1
+
+
+def test_cmd_find_governed_returns_bounded_core_capsule(tmp_path):
+    terms = tropo._governed_query_terms(
+        "repeat repeat " + " ".join(f"term{index}" for index in range(20))
+    )
+    assert terms == ["repeat", *(f"term{index}" for index in range(15))]
+    assert tropo._governed_query_terms("Réparer l’authentification 身份验证") == [
+        "réparer",
+        "l",
+        "authentification",
+        "身份验证",
+    ]
+
+    _search_vault(tmp_path)
+    (tmp_path / "package.json").write_text(
+        '{"scripts":{"test":"node --test"}}\n',
+        encoding="utf-8",
+    )
+    _init_git_repo(tmp_path)
+
+    rc, out = _capture_rc(
+        tropo.cmd_find,
+        _query_args(
+            "release workflow",
+            governed=True,
+            max_claims=2,
+        ),
+        res(str(tmp_path)),
+    )
+
+    assert rc == 0
+    assert out["schema"] == "vivary.task-capsule/v0"
+    assert out["task"] == {
+        "question": "release workflow",
+        "scope": [normalize_path(str(tmp_path))],
+    }
+    assert 0 < len(out["claims"]) <= 2
+    assert all(
+        claim["subject_path"] == normalize_path(str(tmp_path))
+        for claim in out["claims"]
+    )
+    assert any(claim["fact"] == "content_match" for claim in out["claims"])
+    assert [
+        (check["name"], check["command"])
+        for check in out["required_checks"]
+    ] == [
+        ("vivary-graph-doctor", "create-vivary doctor . --json"),
+        ("vivary-graph-check", "tropo check --root . --json"),
+        ("project-tests", "npm test"),
+    ]
+    assert all(
+        check["evidence"] == {"command": "fs.stat workspace markers"}
+        for check in out["required_checks"]
+    )
+    assert out["budget"] == {"max_claims": 2}
+    assert out["fingerprint"].startswith("sha256:")
+
+
+def test_governed_find_flags_fail_closed_in_both_directions(tmp_path):
+    incompatible = (
+        ({"budget": 0}, "--budget"),
+        ({"k": 0}, "--k"),
+        ({"mode": "text"}, "--mode"),
+        ({"snippet": 0}, "--snippet"),
+        ({"type": ["decision"]}, "--type"),
+        ({"path": ["decisions/*"]}, "--path"),
+        ({"edge": ["affects"]}, "--edge"),
+        ({"explain": True}, "--explain"),
+    )
+    for overrides, expected_flag in incompatible:
+        args = _query_args(
+            "release workflow",
+            governed=True,
+            max_claims=2,
+            **overrides,
+        )
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(tropo, "governed_find") as facade,
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = tropo.cmd_find(
+                args,
+                types.SimpleNamespace(root=str(tmp_path)),
+            )
+        assert rc == 2
+        assert stderr.getvalue() == (
+            "tropo find --governed: unsupported option(s): "
+            f"{expected_flag}\n"
+        )
+        facade.assert_not_called()
+
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        rc = tropo.cmd_find(
+            _query_args("release workflow", max_claims=2),
+            types.SimpleNamespace(root=str(tmp_path)),
+        )
+    assert rc == 2
+    assert stderr.getvalue() == (
+        "tropo find: --max-claims requires --governed\n"
+    )
+
+    for argv in (
+        ["query", "release", "--governed"],
+        ["query", "release", "--max-claims", "2"],
+    ):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            try:
+                tropo._main(argv)
+                assert False, "expected parser usage failure"
+            except SystemExit as error:
+                assert error.code == 2
+        assert stderr.getvalue().endswith(
+            "tropo: error: --governed and --max-claims "
+            "are only valid with find\n"
+        )
+
+
+def test_cmd_find_governed_maps_invalid_core_input_to_usage_error(tmp_path):
+    args = _query_args(
+        "release workflow",
+        governed=True,
+        max_claims=-1,
+    )
+    stderr = io.StringIO()
+
+    with (
+        mock.patch.object(
+            tropo,
+            "governed_find",
+            side_effect=ValueError(
+                "budget.max_claims must be a non-negative integer (got -1)"
+            ),
+        ),
+        contextlib.redirect_stderr(stderr),
+    ):
+        rc = tropo.cmd_find(args, types.SimpleNamespace(root=str(tmp_path)))
+
+    assert rc == 2
+    assert stderr.getvalue() == (
+        "tropo find --governed: "
+        "budget.max_claims must be a non-negative integer (got -1)\n"
+    )
+
+
+def test_cmd_find_governed_maps_missing_core_to_install_error(tmp_path):
+    args = _query_args(
+        "release workflow",
+        governed=True,
+        max_claims=2,
+    )
+    stderr = io.StringIO()
+
+    with (
+        mock.patch.object(
+            tropo,
+            "governed_find",
+            side_effect=ImportError("cannot import vivary_core"),
+        ),
+        contextlib.redirect_stderr(stderr),
+    ):
+        rc = tropo.cmd_find(args, types.SimpleNamespace(root=str(tmp_path)))
+
+    assert rc == 2
+    assert stderr.getvalue() == (
+        "tropo find --governed: vivary-core>=0.2.0 is required; "
+        "install Tropo with its declared dependencies\n"
+    )
 
 
 def test_cmd_query_no_results(tmp_path):
@@ -3025,6 +3233,6 @@ if __name__ == "__main__":
         finally:
             tmp_path = kw.get("tmp_path")
             if tmp_path is not None and tmp_path.exists():
-                shutil.rmtree(tmp_path)
+                remove_workspace(tmp_path)
     print(f"\n{passed}/{len(fns)} passed")
     sys.exit(0 if passed == len(fns) else 1)

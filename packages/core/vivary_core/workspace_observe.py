@@ -20,6 +20,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
@@ -62,6 +63,9 @@ _PINNED_GIT_ENV = {
 }
 
 _MAX_BUFFER = 4 * 1024 * 1024
+_READ_CHUNK = 64 * 1024
+_MAX_STDERR_BYTES = 8 * 1024
+_SUBPROCESS_CLEANUP_TIMEOUT = 2.0
 
 RunGit = Callable[[str, List[str]], Dict[str, Any]]
 
@@ -76,6 +80,117 @@ def _sanitized_git_env() -> Dict[str, str]:
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     env.update(_PINNED_GIT_ENV)
     return env
+
+
+def _capped_run(argv: List[str], env: Dict[str, str], limit: int) -> Dict[str, Any]:
+    """Run ``argv`` with bounded stdout while draining stderr concurrently."""
+    try:
+        proc = subprocess.Popen(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+    except OSError as error:
+        return {
+            "error": str(error),
+            "stdout": b"",
+            "stderr": b"",
+            "code": None,
+            "exceeded": False,
+        }
+
+    stderr_chunks: List[bytes] = []
+    stderr_errors: List[Exception] = []
+
+    def drain_stderr() -> None:
+        captured = 0
+        try:
+            assert proc.stderr is not None
+            while True:
+                chunk = proc.stderr.read(_READ_CHUNK)
+                if not chunk:
+                    break
+                room = _MAX_STDERR_BYTES - captured
+                if room > 0:
+                    kept = chunk[:room]
+                    stderr_chunks.append(kept)
+                    captured += len(kept)
+        except (OSError, ValueError) as error:
+            stderr_errors.append(error)
+
+    stderr_reader = threading.Thread(target=drain_stderr, daemon=True)
+    stderr_reader.start()
+
+    stdout_chunks: List[bytes] = []
+    total = 0
+    exceeded = False
+    stdout_error: Optional[Exception] = None
+    try:
+        assert proc.stdout is not None
+        while True:
+            chunk = proc.stdout.read(_READ_CHUNK)
+            if not chunk:
+                break
+            room = limit - total
+            if room > 0:
+                kept = chunk[:room]
+                stdout_chunks.append(kept)
+                total += len(kept)
+            if len(chunk) > room:
+                exceeded = True
+                proc.kill()
+                break
+    except (OSError, ValueError) as error:
+        stdout_error = error
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    finally:
+        try:
+            code = proc.wait(timeout=_SUBPROCESS_CLEANUP_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            try:
+                code = proc.wait(timeout=_SUBPROCESS_CLEANUP_TIMEOUT)
+            except (OSError, subprocess.TimeoutExpired) as error:
+                code = proc.returncode
+                if stdout_error is None:
+                    stdout_error = error
+        except OSError as error:
+            code = proc.returncode
+            if stdout_error is None:
+                stdout_error = error
+
+        stderr_reader.join(_SUBPROCESS_CLEANUP_TIMEOUT)
+        if stderr_reader.is_alive() and proc.stderr is not None:
+            try:
+                proc.stderr.close()
+            except (OSError, ValueError):
+                pass
+            stderr_reader.join(_SUBPROCESS_CLEANUP_TIMEOUT)
+        if stderr_reader.is_alive():
+            stderr_errors.append(RuntimeError("stderr drain timed out"))
+
+        for pipe in (proc.stdout, proc.stderr):
+            if pipe is not None:
+                try:
+                    pipe.close()
+                except (OSError, ValueError):
+                    pass
+
+    run_error = stdout_error or (stderr_errors[0] if stderr_errors else None)
+    return {
+        "error": str(run_error) if run_error is not None else None,
+        "stdout": b"".join(stdout_chunks),
+        "stderr": b"".join(stderr_chunks),
+        "code": code,
+        "exceeded": exceeded,
+    }
 
 
 _CREDENTIAL_URL_RE = re.compile(r"\A([a-zA-Z][a-zA-Z0-9+.-]*://)(?:[^/@]*@)?(.*)\Z", re.DOTALL)
@@ -107,37 +222,34 @@ def _redact_remote_url(url: str) -> str:
 def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
     full_args = ["--no-optional-locks", "-C", checkout_path, *args]
     command = f"git {' '.join(full_args)}"
-    try:
-        proc = subprocess.run(
-            ["git", *full_args],
-            capture_output=True,
-            env=_sanitized_git_env(),
-        )
-    except OSError as error:
-        return {"ok": False, "stdout": "", "stderr": str(error)[:400], "command": command,
-                "code": None}
-
-    stdout_bytes = proc.stdout or b""
-    # Replicate Node's execFile maxBuffer: if the captured stdout exceeds the
-    # buffer limit, execFile treats the whole invocation as failed (it never
-    # silently returns truncated output) - mirrored here as a post-hoc length
-    # check since Python's subprocess has no equivalent capture ceiling.
-    if len(stdout_bytes) > _MAX_BUFFER:
+    outcome = _capped_run(["git", *full_args], _sanitized_git_env(), _MAX_BUFFER)
+    if outcome["error"] is not None:
         return {
             "ok": False,
             "stdout": "",
-            "stderr": "stdout maxBuffer length exceeded"[:400],
+            "stderr": outcome["error"][:400],
             "command": command,
-            "code": proc.returncode,
+            "code": outcome["code"],
+        }
+    if outcome["exceeded"]:
+        return {
+            "ok": False,
+            "stdout": "",
+            "stderr": "stdout maxBuffer length exceeded",
+            "command": command,
+            "code": outcome["code"],
+        }
+    if outcome["code"] != 0:
+        stderr_text = outcome["stderr"].decode("utf-8", errors="replace")
+        return {
+            "ok": False,
+            "stdout": "",
+            "stderr": stderr_text[:400],
+            "command": command,
+            "code": outcome["code"],
         }
 
-    if proc.returncode != 0:
-        stderr_bytes = proc.stderr or b""
-        stderr_text = stderr_bytes.decode("utf-8", errors="replace")
-        return {"ok": False, "stdout": "", "stderr": stderr_text[:400], "command": command,
-                "code": proc.returncode}
-
-    stdout_text = stdout_bytes.decode("utf-8", errors="replace")
+    stdout_text = outcome["stdout"].decode("utf-8", errors="replace")
     return {"ok": True, "stdout": stdout_text.replace("\r\n", "\n"), "command": command}
 
 

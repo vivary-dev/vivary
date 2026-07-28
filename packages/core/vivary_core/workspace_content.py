@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import re
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
@@ -74,56 +73,9 @@ RunGit = Callable[[str, List[str]], Dict[str, Any]]
 # second copy: the four-key denylist above was bypassable through command-scope
 # config injection here for exactly the same reason, and two independent copies of
 # a security control drift.
-from vivary_core.workspace_observe import _sanitized_git_env  # noqa: E402
+from vivary_core.workspace_observe import _capped_run, _sanitized_git_env  # noqa: E402
 
 
-_READ_CHUNK = 64 * 1024
-
-
-def _capped_run(argv: List[str], env: Dict[str, str], limit: int) -> Dict[str, Any]:
-    """Run `argv`, streaming stdout and killing the child once `limit` is passed.
-
-    `capture_output=True` buffers the whole of stdout *before* any length check can
-    run, so the advertised bound never bounded memory — a broad term matching
-    heavily in a large repository could exhaust the worker first. Reading
-    incrementally and terminating on breach makes the limit real.
-    """
-    try:
-        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
-    except OSError as error:
-        return {"error": str(error), "stdout": b"", "stderr": b"", "code": None, "exceeded": False}
-
-    chunks: List[bytes] = []
-    total = 0
-    exceeded = False
-    try:
-        assert proc.stdout is not None
-        while True:
-            chunk = proc.stdout.read(_READ_CHUNK)
-            if not chunk:
-                break
-            total += len(chunk)
-            if total > limit:
-                exceeded = True
-                proc.kill()
-                break
-            chunks.append(chunk)
-    finally:
-        # `communicate` drains whatever remains on both pipes and reaps the child,
-        # so a killed producer cannot leave a zombie or a blocked stderr writer.
-        try:
-            _, stderr_bytes = proc.communicate()
-        except (OSError, ValueError):
-            stderr_bytes = b""
-            proc.kill()
-
-    return {
-        "error": None,
-        "stdout": b"".join(chunks),
-        "stderr": stderr_bytes or b"",
-        "code": proc.returncode,
-        "exceeded": exceeded,
-    }
 
 
 def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:

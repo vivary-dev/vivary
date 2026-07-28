@@ -49,10 +49,10 @@ jobs:
         run: |
           python -m pip install pytest
           python -m pytest packages/core/tests/ -q
-      - name: packaged optional semantic bridge smoke
+      - name: packaged core and optional semantic bridge smoke
         shell: bash
         run: |
-          python -m pip install --no-deps ./packages/tropo ./packages/memory-cognee
+          python -m pip install --no-deps ./packages/core ./packages/tropo ./packages/memory-cognee
           smoke="$(mktemp -d)"
           mkdir -p "$smoke/ws/.vivary" "$smoke/ws/modules/auth"
           cat > "$smoke/ws/tropo.toml" <<'EOF'
@@ -83,22 +83,50 @@ jobs:
 
           Authentication module.
           EOF
+          git -C "$smoke/ws" init -q
+          git -C "$smoke/ws" add .
+          git -C "$smoke/ws" \
+            -c user.name="Vivary CI" \
+            -c user.email="ci@vivary.invalid" \
+            commit -qm "smoke fixture"
+          tropo find "authentication module" \
+            --root "$smoke/ws" \
+            --governed \
+            --max-claims 2 \
+            --json > "$smoke/governed.json"
           set +e
           tropo query "auth" --root "$smoke/ws" --mode semantic --json > "$smoke/out.json"
           rc=$?
           set -e
-          python - "$smoke/out.json" "$rc" <<'PY'
+          python - "$smoke/out.json" "$smoke/governed.json" "$rc" <<'PY'
           import json
           import sys
+          from importlib.metadata import requires, version
+          import tomllib
 
           data = json.loads(open(sys.argv[1], encoding="utf-8").read())
-          rc = int(sys.argv[2])
+          governed = json.loads(open(sys.argv[2], encoding="utf-8").read())
+          with open("packages/core/pyproject.toml", "rb") as stream:
+              core_version = tomllib.load(stream)["project"]["version"]
+          with open("packages/tropo/pyproject.toml", "rb") as stream:
+              tropo_dependencies = tomllib.load(stream)["project"]["dependencies"]
+          core_requirement = next(
+              dependency
+              for dependency in tropo_dependencies
+              if dependency.startswith("vivary-core")
+          )
+          rc = int(sys.argv[3])
           assert rc == 1, rc
           assert data["mode"] == "semantic"
           assert data["semantic"]["provider"] == "cognee"
           assert data["semantic"]["status"] == "unavailable"
           assert "allow_network" in data["semantic"]["detail"]
           assert data["results"] == []
+          assert version("vivary-core") == core_version
+          assert core_requirement in (requires("vivary-tropo") or [])
+          assert governed["schema"] == "vivary.task-capsule/v0"
+          assert governed["budget"] == {"max_claims": 2}
+          assert governed["claims"]
           PY
       - name: assets parity
         run: python packages/create-vivary/tests/test_assets_parity.py

@@ -37,6 +37,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 from datetime import datetime, timezone
 
 import pytest
@@ -442,3 +443,94 @@ def test_output_cap_terminates_a_runaway_producer():
 
     assert outcome["exceeded"] is True
     assert len(outcome["stdout"]) <= 64 * 1024 + 4096, "output was buffered past the cap"
+
+
+def test_capped_runner_survives_a_stderr_flood_from_a_real_child(monkeypatch):
+    from vivary_core.workspace_content import _capped_run
+
+    real_popen = subprocess.Popen
+    children = []
+
+    def tracking_popen(*args, **kwargs):
+        child = real_popen(*args, **kwargs)
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(subprocess, "Popen", tracking_popen)
+    producer = [
+        sys.executable,
+        "-c",
+        "import sys; sys.stderr.write('e' * (4 << 20)); sys.stderr.flush(); "
+        "sys.stdout.write('done'); sys.stdout.flush()",
+    ]
+    box = {}
+    runner = threading.Thread(
+        target=lambda: box.update(
+            result=_capped_run(producer, dict(os.environ), limit=1 << 20)
+        ),
+        daemon=True,
+    )
+
+    runner.start()
+    runner.join(5)
+    deadlocked = runner.is_alive()
+    if deadlocked:
+        children[0].kill()
+        runner.join(5)
+
+    assert not deadlocked, "_capped_run deadlocked on a full stderr pipe"
+    assert box["result"]["stdout"] == b"done"
+    assert children
+    assert all(child.stdout.closed and child.stderr.closed for child in children)
+
+
+def test_capped_runner_drains_stdout_and_stderr_concurrently(monkeypatch):
+    """A child that fills stderr before stdout must not deadlock the runner."""
+    from vivary_core.workspace_content import _capped_run
+
+    class CoordinatedPipe:
+        def __init__(self, payload):
+            self.payload = payload
+            self.started = threading.Event()
+            self.peer = None
+            self.sent = False
+
+        def read(self, _size):
+            self.started.set()
+            assert self.peer.started.wait(0.5), "the peer pipe was not drained concurrently"
+            if self.sent:
+                return b""
+            self.sent = True
+            return self.payload
+
+        def close(self):
+            self.closed = True
+
+    class FullDuplexPopen:
+        def __init__(self, *_args, **_kwargs):
+            self.stdout = CoordinatedPipe(b"stdout")
+            self.stderr = CoordinatedPipe(b"stderr")
+            self.stdout.peer = self.stderr
+            self.stderr.peer = self.stdout
+            self.returncode = 0
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def communicate(self):
+            return b"", b""
+
+    monkeypatch.setattr(subprocess, "Popen", FullDuplexPopen)
+
+    outcome = _capped_run(["fake-producer"], {}, limit=64)
+
+    assert outcome == {
+        "error": None,
+        "stdout": b"stdout",
+        "stderr": b"stderr",
+        "code": 0,
+        "exceeded": False,
+    }

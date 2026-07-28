@@ -30,6 +30,7 @@ python tropo.py graph  --root examples/vault    # emit typed nodes + edges
 python tropo.py view   --root examples/vault --out examples/vault/graph.html
 python tropo.py fix    --dry-run                 # preview redundant-frontmatter removal
 python tropo.py find "folder as type decision" --root examples/vault --json  # read-this-first packet
+python tropo.py find "folder as type decision" --root examples/vault --governed --max-claims 12 --json
 python tropo.py query "meeting notes" --root examples/vault --type meeting --explain
 python tropo.py query "meeting notes" --root examples/vault --mode vector --json
 python tropo.py query "meeting notes" --root examples/vault --mode semantic --json
@@ -39,10 +40,12 @@ python tropo.py check --root examples/vault --receipt .vivary/receipts.jsonl
 python tests/test_tropo.py                       # run the test suite
 ```
 
-Requires Python 3.11+ (stdlib `tomllib`), zero third-party dependencies for the core.
-Optional extras: `pip install vivary-tropo[embedded]` for LanceDB embedded storage
-and backend-level experiments. Public `tropo find` and default `tropo query` stay
-zero-dependency and read the typed graph directly. `tropo query --mode vector` uses
+Requires Python 3.11+ (stdlib `tomllib`) and the `vivary-core>=0.2.0` contract seam.
+Both packages have zero third-party runtime dependencies. Optional
+extras: `pip install vivary-tropo[embedded]` for LanceDB embedded storage and
+backend-level experiments. Plain `tropo find` and default `tropo query` read the typed
+graph directly without providers, network calls, or indexing. `tropo query --mode
+vector` uses
 zero-dependency computed vectors for file-backed workspaces; when optional embedded
 storage is configured and current migrated vectors exist, it uses those stored rows
 through the embedded backend. In both cases it preserves type/path/edge filters and
@@ -83,6 +86,20 @@ budget. `tropo query` is the lower-level filtered search primitive; it can filte
 type, path glob, or outbound edge and explain whether a match came from id/title,
 frontmatter, path, body, edge context, or typed vectors. Semantic mode returns
 provider hits as typed Vivary node ids instead of opaque chunks.
+
+Add `--governed` to `tropo find` to opt into the first `vivary-core` adapter: one
+read-only scan of the resolved Tropo root becomes a typed evidence graph and then a
+bounded, fingerprinted Task Capsule. The capsule carries claims, evidence, conflicts,
+unknowns, omissions, required checks, and stable selection reasons. The exact
+normalized root is both allowlist and scope; the path never fetches, writes, indexes,
+calls a provider, or reads memory. `--max-claims N` sets the non-negative claim bound
+(default `24`). Governed mode rejects `--budget`, `--k`, `--mode`, `--type`, `--path`,
+`--edge`, `--snippet`, and `--explain`. Conversely, `--max-claims` requires
+`--governed`, and both governed flags are valid only with `find`; invalid combinations
+exit `2` rather than being ignored. Without `--governed`, existing `find` output and
+behavior are unchanged.
+Unicode question terms preserve order, deduplicate, and stop at `16`; core separately
+caps matched bytes, lines per file, claims, and omission detail.
 
 Search mode mental model:
 

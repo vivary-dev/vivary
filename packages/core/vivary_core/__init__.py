@@ -22,6 +22,10 @@ from vivary_core.canonical import (
     normalize_path,
     sha256_hex,
 )
+from vivary_core.capsule_compile import compile_task_capsule
+from vivary_core.workspace_content import observe_content
+from vivary_core.workspace_model import project_workspace_graph
+from vivary_core.workspace_observe import observe_checkouts
 
 __all__ = [
     "canonicalize",
@@ -32,4 +36,8 @@ __all__ = [
     "js_stringify",
     "normalize_path",
     "sha256_hex",
+    "compile_task_capsule",
+    "observe_checkouts",
+    "observe_content",
+    "project_workspace_graph",
 ]
