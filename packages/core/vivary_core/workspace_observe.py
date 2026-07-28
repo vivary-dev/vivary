@@ -376,14 +376,14 @@ def _ignored_paths(
     chunk: List[str] = []
     chunk_chars = 0
     for path in unique_paths:
-        path_chars = len(path) + 1
+        path_chars = len(path) + 3
         if path_chars > 6500:
             return None, evidence_command
         if chunk and (len(chunk) >= 128 or chunk_chars + path_chars > 6500):
             chunks.append(chunk)
             chunk = []
             chunk_chars = 0
-        chunk.append(path)
+        chunk.append(f"./{path}" if not path.startswith("./") else path)
         chunk_chars += path_chars
     if chunk:
         chunks.append(chunk)
@@ -405,6 +405,8 @@ def _ignored_paths(
         if result.get("ok"):
             for ignored_path in result.get("stdout", "").splitlines():
                 normalized_ignored_path = normalize_path(ignored_path)
+                if normalized_ignored_path.startswith("./"):
+                    normalized_ignored_path = normalized_ignored_path[2:]
                 if normalized_ignored_path not in normalized_inputs:
                     return None, evidence_command
                 ignored.add(normalized_ignored_path)

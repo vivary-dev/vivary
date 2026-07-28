@@ -61,9 +61,10 @@ and requires a separate human gate.
   checkout's receipt from clearing another checkout's check. An observed npm test
   script also no longer suppresses an undetermined Python test-system warning in a
   polyglot checkout.
-- Governed content now uses NUL-framed Git output and excludes tracked files covered
-  by repository ignore policy without naming them in evidence. Unexpected ignore
-  output and incomplete injected-runner failures fail closed. Unicode workspace paths
+- Governed content now uses NUL-framed Git output, literalizes every path before
+  `git check-ignore`, and excludes tracked files covered by repository ignore policy
+  without naming them in evidence. Unexpected ignore output and incomplete
+  injected-runner failures fail closed. Unicode workspace paths
   use a deterministic graph-ordering fallback; unrankable non-content capsule facts
   become explicit omissions instead of aborting Unicode queries.
 - Governed mode refuses a Tropo root nested inside a larger Git worktree rather than
@@ -82,8 +83,8 @@ and requires a separate human gate.
 - `python packages/tropo/tests/test_tropo.py` — **160/160** passed on Windows.
 - `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **160/160**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **602 passed** on Windows;
-  `uv run --with pytest python3 -m pytest packages/core/tests/ -q` — **600 passed,
+- `python -m pytest packages/core/tests/ -q` — **604 passed** on Windows;
+  `uv run --with pytest python3 -m pytest packages/core/tests/ -q` — **602 passed,
   2 platform-specific skips** on WSL Linux.
 - `python -m pytest packages/tropo/tests/test_tropo.py -q -k "governed or
   cmd_find_returns_context_packet"` — **11 passed**.

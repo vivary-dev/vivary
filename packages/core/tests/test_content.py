@@ -301,6 +301,80 @@ def test_tracked_path_added_to_ignore_policy_never_enters_content(fx, allowlist)
 
 
 
+def test_ignore_filter_literalizes_git_pathspec_magic():
+    magic_path = ":(top)secret.md"
+
+    def run_git(_path, args):
+        command = "git " + " ".join(args)
+        if "rev-parse" in args:
+            return {
+                "ok": True,
+                "stdout": "a" * 40 + "\n",
+                "code": 0,
+                "command": command,
+            }
+        if "check-ignore" in args:
+            assert args[-1] == f"./{magic_path}"
+            return {
+                "ok": True,
+                "stdout": f"./{magic_path}\n",
+                "code": 0,
+                "command": command,
+            }
+        return {
+            "ok": True,
+            "stdout": f"{magic_path}\0" + "1\0" + "private marker\n",
+            "code": 0,
+            "command": command,
+        }
+
+    result = observe_content(
+        ["C:/fake"],
+        allowlist=["C:/fake"],
+        terms=["private"],
+        run_git=run_git,
+        now=NOW,
+    )
+
+    checkout = result["checkouts"][0]
+    assert checkout["matches"] == []
+    assert any(
+        omission.get("kind") == "privacy_matches_excluded"
+        for omission in checkout["omissions"]
+    )
+
+
+def test_real_git_ignored_pathspec_magic_never_enters_content(tmp_path):
+    if os.name == "nt":
+        return
+
+    base = str(tmp_path)
+    repo = str(tmp_path / "repo")
+    magic_path = ":(top)secret.md"
+    os.makedirs(repo)
+    _write(os.path.join(base, "empty-gitconfig"), "")
+    _git(base, repo, ["init", "-q", "-b", "main"])
+    _write(os.path.join(repo, magic_path), "private marker\n")
+    _git(base, repo, ["add", "--", f"./{magic_path}"])
+    _git(base, repo, ["commit", "-q", "-m", "track private fixture"])
+    _write(os.path.join(repo, ".gitignore"), f"{magic_path}\n")
+
+    result = observe_content(
+        [repo],
+        allowlist=[repo],
+        terms=["private"],
+        now=NOW,
+    )
+
+    checkout = result["checkouts"][0]
+    assert checkout["matches"] == []
+    assert magic_path not in json.dumps(result)
+    assert any(
+        omission.get("kind") == "privacy_matches_excluded"
+        for omission in checkout["omissions"]
+    )
+
+
 @pytest.mark.parametrize(
     "ignore_result",
     [

@@ -125,9 +125,9 @@ where the command must run and the exact observation that justified it. A standa
 `tropo.toml` derives `tropo check`; `create-vivary doctor` is derived only when the
 observed root also carries the scaffold identity markers `AGENTS.md` and `STRATO.md`.
 Governed search drops one-letter ASCII contraction fragments, uses NUL-framed Git
-output, excludes tracked paths covered by repository ignore policy, and refuses a
-Tropo root nested inside a larger Git worktree rather than leaking sibling checkout
-facts.
+output, treats every path passed to `git check-ignore` as literal, excludes tracked
+paths covered by repository ignore policy, and refuses a Tropo root nested inside a
+larger Git worktree rather than leaking sibling checkout facts.
 Unicode terms and content remain supported; unrankable non-content facts become
 explicit omissions instead of aborting the capsule. Question extraction preserves
 order, deduplicates terms, and searches at most the first `16`; core then caps matched
