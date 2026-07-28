@@ -42,10 +42,11 @@ through `modules/index.md`, open that module's `index.md`, and follow deeper lin
 when the task proves they are relevant.
 
 **No lock-in (corollary):** a workspace is plain Markdown + YAML plus a few
-zero-dependency CLIs. It works in any editor or none and on any agent runtime
-(Claude Code via `.claude/`, Codex via `AGENTS.md` + `.agents/`). tropo even ignores
-`.obsidian/`, `.vscode/`, etc. — no editor, plugin, or single-vendor agent is ever
-required.
+lightweight Python CLIs. Governed Tropo composes the first-party `vivary-core` seam,
+but no CLI requires an editor, plugin, provider, network service, or single-vendor
+agent runtime. Workspaces operate in any editor or none, with Claude Code via
+`.claude/` or Codex via `AGENTS.md` + `.agents/`; tropo ignores `.obsidian/`,
+`.vscode/`, and similar tool state.
 
 **Active context is a sidecar.** For codebases, a workspace may opt into
 CocoIndex-code guidance (`--active-context cocoindex-code`) so agents can ask before
@@ -143,9 +144,9 @@ anything unproven is reported `unknown` rather than guessed.
 declares its own floor in the same commit; the `vivary` meta package receives core
 transitively and does not declare it. One owner per edge avoids version-pinning fights.
 `vivary-tropo` is the first importer: its experimental `find --governed` adapter depends
-on `vivary-core>=0.2.0`. Role packages will add their own floors only when their first
-real imports land — never ahead of the code that needs them — so no role manifest
-depends on core yet.
+on `vivary-core>=0.2.1`, the first source version that exposes the adapter's required
+API. Role packages add their own floors only when their first real imports land — never
+ahead of the code that needs them — so no role manifest depends on core yet.
 
 **Status:** merged into `dev`, unpublished during development, and reachable only
 through the explicit experimental `tropo find --governed` flag. Plain Tropo retrieval

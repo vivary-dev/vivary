@@ -1860,7 +1860,12 @@ def _query_terms(text):
 
 def _governed_query_terms(text):
     raw = re.findall(r"[^\W_]+", text.lower(), flags=re.UNICODE)
-    terms = [term for term in raw if term not in _QUERY_STOPWORDS]
+    terms = [
+        term
+        for term in raw
+        if term not in _QUERY_STOPWORDS
+        and (len(term) > 1 or not term.isascii())
+    ]
     bounded = []
     for term in terms or raw:
         if term not in bounded:
@@ -3853,6 +3858,12 @@ def cmd_query(args, resolver):
     return 0
 
 
+def _same_filesystem_path(left, right):
+    if os.name == "nt":
+        return left.casefold() == right.casefold()
+    return left == right
+
+
 def governed_find(root, question, *, max_claims=24):
     """Compile a bounded governed-context capsule for one Tropo workspace."""
     from vivary_core import (
@@ -3866,6 +3877,28 @@ def governed_find(root, question, *, max_claims=24):
     root = normalize_path(os.path.abspath(root))
     paths = [root]
     observation = observe_checkouts(paths, allowlist=paths)
+    checkout = next(
+        (
+            entry
+            for entry in observation.get("checkouts", [])
+            if entry.get("path") == root
+        ),
+        None,
+    )
+    worktree_root = (
+        ((checkout or {}).get("facts") or {}).get("worktree_root") or {}
+    )
+    if (
+        worktree_root.get("status") == "known"
+        and not _same_filesystem_path(
+            normalize_path(worktree_root.get("value")),
+            root,
+        )
+    ):
+        raise ValueError(
+            "the governed Tropo root must be the Git worktree root; "
+            "nested roots are refused to prevent sibling checkout facts from leaking"
+        )
     graph = project_workspace_graph(observation)
     content = observe_content(
         paths,
@@ -3937,7 +3970,7 @@ def cmd_find(args, resolver):
             )
         except ImportError:
             print(
-                "tropo find --governed: vivary-core>=0.2.0 is required; "
+                "tropo find --governed: vivary-core>=0.2.1 is required; "
                 "install Tropo with its declared dependencies",
                 file=sys.stderr,
             )

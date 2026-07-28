@@ -29,9 +29,14 @@ Language mapping notes (decision 0008 / documented rules for this slice):
 
 from __future__ import annotations
 
-from vivary_core.canonical import deterministic_id, fingerprint, is_within_allowlist
+from vivary_core.canonical import (
+    _utf16_sort_key,
+    deterministic_id,
+    fingerprint,
+    is_within_allowlist,
+)
 from vivary_core.capsule_select import select_claims
-from vivary_core.collation import locale_sort_key
+from vivary_core.collation import CollationDomainError, locale_sort_key
 
 CAPSULE_SCHEMA = "vivary.task-capsule/v0"
 
@@ -160,9 +165,9 @@ def _describe_ref(ref):
 # (clean checkouts get no such claim). Lists up to DIRTY_PATHS_CAP paths with
 # their porcelain state; the exact total is always in the claim text, and any
 # truncation is recorded as an omission via `truncation_omissions`.
-# git-ignored paths never appear here: `git status --porcelain` (the source
-# of dirty_entries) never lists an ignored path, so there is no leak risk to
-# guard against - see test_capsule.py.
+# Observation removes paths covered by repository ignore policy before graph
+# projection. If that privacy check cannot be proved, dirty entries stay unknown
+# and this compiler emits no path claim.
 def _dirty_entries_claim(node, truncation_omissions):
     facts = node.get("facts") or {}
     is_dirty = facts.get("is_dirty")
@@ -269,6 +274,48 @@ def _content_match_candidates(content, checkouts_by_path):
     return candidates
 
 
+
+def _candidate_sort_key(candidate):
+    """Preserve frozen locale ordering without feeding it unpinned raw content.
+
+    Graph-derived candidates remain byte-identical to the reference port. Content
+    candidates are a later adaptation; when a raw path or excerpt falls outside the
+    pinned locale domain, place it in a separate deterministic UTF-16 bucket rather
+    than guessing an ICU weight or crashing the governed adapter.
+    """
+    value = (
+        f"{candidate.get('subject')}:{candidate.get('fact')}:"
+        f"{candidate.get('claim')}"
+    )
+    try:
+        return (0, locale_sort_key(value))
+    except CollationDomainError:
+        if candidate.get("fact") != "content_match":
+            raise
+        return (1, _utf16_sort_key(value))
+
+
+def _sort_candidates(candidates):
+    keyed = []
+    omissions = []
+    for candidate in candidates:
+        try:
+            sort_key = _candidate_sort_key(candidate)
+        except CollationDomainError as error:
+            omissions.append(
+                {
+                    "kind": "collation_domain_excluded",
+                    "subject": candidate.get("subject"),
+                    "fact": candidate.get("fact"),
+                    "reason": str(error),
+                }
+            )
+        else:
+            keyed.append((sort_key, candidate))
+    keyed.sort(key=lambda entry: entry[0])
+    return [candidate for _, candidate in keyed], omissions
+
+
 def compile_task_capsule(*, task, graph, budget=None, content=None):
     """Compile a bounded Task Capsule.
 
@@ -372,7 +419,8 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         ]
         candidates.extend(c for c in claims if c is not None)
     candidates.extend(_content_match_candidates(content, checkouts_by_path))
-    candidates.sort(key=lambda c: locale_sort_key(f"{c.get('subject')}:{c.get('fact')}:{c.get('claim')}"))
+    candidates, collation_omissions = _sort_candidates(candidates)
+    truncation_omissions.extend(collation_omissions)
 
     # Filters restrict, ranking orders, the budget cuts - each step explained.
     selection = select_claims(task=task, graph=graph, candidates=candidates, max_claims=max_claims)

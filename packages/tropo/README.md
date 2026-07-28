@@ -40,8 +40,8 @@ python tropo.py check --root examples/vault --receipt .vivary/receipts.jsonl
 python tests/test_tropo.py                       # run the test suite
 ```
 
-Requires Python 3.11+ (stdlib `tomllib`) and the `vivary-core>=0.2.0` contract seam.
-Both packages have zero third-party runtime dependencies. Optional
+Requires Python 3.11+ (stdlib `tomllib`) and the first-party `vivary-core>=0.2.1`
+contract seam. Neither package adds third-party runtime dependencies. Optional
 extras: `pip install vivary-tropo[embedded]` for LanceDB embedded storage and
 backend-level experiments. Plain `tropo find` and default `tropo query` read the typed
 graph directly without providers, network calls, or indexing. `tropo query --mode
@@ -87,21 +87,11 @@ type, path glob, or outbound edge and explain whether a match came from id/title
 frontmatter, path, body, edge context, or typed vectors. Semantic mode returns
 provider hits as typed Vivary node ids instead of opaque chunks.
 
-Add `--governed` to `tropo find` to opt into the first `vivary-core` adapter: one
-read-only scan of the resolved Tropo root becomes a typed evidence graph and then a
-bounded, fingerprinted Task Capsule. The capsule carries claims, evidence, conflicts,
-unknowns, omissions, required checks, and stable selection reasons. The exact
-normalized root is both allowlist and scope; the path never fetches, writes, indexes,
-calls a provider, or reads memory. `--max-claims N` sets the non-negative claim bound
-(default `24`). Governed mode rejects `--budget`, `--k`, `--mode`, `--type`, `--path`,
-`--edge`, `--snippet`, and `--explain`. Conversely, `--max-claims` requires
-`--governed`, and both governed flags are valid only with `find`; invalid combinations
-exit `2` rather than being ignored. Without `--governed`, existing `find` output and
-behavior are unchanged.
-Derived required checks use checkout-scoped names and carry both the normalized `cwd`
-where the command must run and the exact observation that justified it.
-Unicode question terms preserve order, deduplicate, and stop at `16`; core separately
-caps matched bytes, lines per file, claims, and omission detail.
+Add `--governed` to `tropo find` to opt into the first `vivary-core` adapter: a
+read-only workspace scan becomes a bounded, fingerprinted Task Capsule. Plain
+`tropo find` remains unchanged. The canonical flag rules, safety boundary, evidence
+shape, privacy behavior, and bounds live in the
+[command reference](https://vivary.vercel.app/commands/#tropo--the-typed-knowledge-graph).
 
 Search mode mental model:
 
@@ -206,8 +196,8 @@ ownership.
 - **Location is type.** The directory tree is the type hierarchy.
 - **Tighten, never loosen.** Overlays and packs may add constraints, not remove
   them.
-- **Zero-dependency, CI-clean.** The engine stays a single file with an honest
-  exit code, the one virtue worth keeping from its predecessor.
+- **Dependency-light, CI-clean.** Tropo stays a single-file engine with one
+  first-party core seam and honest exit codes.
 
 ## Layout
 

@@ -272,12 +272,11 @@ def test_capsule_binds_the_workspace_fingerprint_it_was_compiled_against(graph):
 
 
 # -- dirty_entries claims (#44 gap 1) ---------------------------------------
-# observe.mjs already carries the individual dirty paths as `dirty_entries`
-# (an array of {state, path}); until now compile.mjs only ever emitted the
-# `is_dirty` boolean, never the paths, even though the fixture's dirty
-# checkout has no git-ignored entries in that array at all - git status
-# --porcelain never lists an ignored path, so surfacing dirty_entries as a
-# claim carries no leak risk by construction, not merely by omission.
+# Observation carries individual dirty paths as `dirty_entries` (an array of
+# {state, path}); compilation previously emitted only the `is_dirty` boolean.
+# The observation boundary now removes paths covered by repository ignore policy
+# and makes the fact unknown when that policy cannot be proved, so compilation may
+# safely project only known dirty entries.
 
 
 def test_a_dirty_checkout_gets_a_bounded_dirty_entries_claim_naming_its_paths_and_exact_count(graph):

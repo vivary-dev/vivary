@@ -33,7 +33,7 @@ from vivary_core.canonical import (
     fingerprint,
     normalize_path,
 )
-from vivary_core.collation import locale_sort_key
+from vivary_core.collation import CollationDomainError, locale_sort_key
 
 GRAPH_SCHEMA = "vivary.workspace-graph/v0"
 
@@ -115,6 +115,14 @@ def _repository_identity(checkout: Dict[str, Any]) -> Dict[str, Any]:
         "identity_status": "inferred" if (remotes is not None and remotes.get("status") == "known") else "unknown",
         "evidence": remotes.get("evidence") if remotes is not None else None,
     }
+
+
+def _path_sort_key(value: str):
+    """Preserve pinned locale order, with deterministic Unicode path fallback."""
+    try:
+        return (0, locale_sort_key(value))
+    except CollationDomainError:
+        return (1, _utf16_sort_key(value))
 
 
 def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
@@ -300,7 +308,7 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
                     }
                     for entry in group
                 ),
-                key=lambda s: locale_sort_key(s["path"]),
+                key=lambda s: _path_sort_key(s["path"]),
             )
             conflicts.append(
                 {
@@ -319,7 +327,8 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
     sorted_nodes = sorted(nodes.values(), key=lambda n: locale_sort_key(n["id"]))
     sorted_edges = sorted(edges.values(), key=lambda e: locale_sort_key(e["id"]))
     core_facts = sorted(
-        (_checkout_core_facts(c) for c in observation["checkouts"]), key=lambda c: locale_sort_key(c["path"])
+        (_checkout_core_facts(c) for c in observation["checkouts"]),
+        key=lambda c: _path_sort_key(c["path"]),
     )
     workspace_fingerprint = fingerprint(core_facts)
 
@@ -335,7 +344,10 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
         "nodes": sorted_nodes,
         "edges": sorted_edges,
         "conflicts": conflicts,
-        "unknowns": sorted(unknowns, key=lambda u: locale_sort_key(f"{u['path']}:{u['fact']}")),
+        "unknowns": sorted(
+            unknowns,
+            key=lambda u: _path_sort_key(f"{u['path']}:{u['fact']}"),
+        ),
         # Only the normalized path crosses into the graph; the caller's raw
         # input string stays in the observation layer.
         "refusals": [{"path": r["path"], "status": r["status"], "reason": r["reason"]} for r in refusals],

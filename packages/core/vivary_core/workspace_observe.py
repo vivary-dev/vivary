@@ -167,21 +167,20 @@ def _capped_run(argv: List[str], env: Dict[str, str], limit: int) -> Dict[str, A
                 stdout_error = error
 
         stderr_reader.join(_SUBPROCESS_CLEANUP_TIMEOUT)
-        if stderr_reader.is_alive() and proc.stderr is not None:
-            try:
-                proc.stderr.close()
-            except (OSError, ValueError):
-                pass
-            stderr_reader.join(_SUBPROCESS_CLEANUP_TIMEOUT)
-        if stderr_reader.is_alive():
+        stderr_drain_timed_out = stderr_reader.is_alive()
+        if stderr_drain_timed_out:
+            # Closing BufferedReader here can block on the same lock held by its
+            # read. The daemon already caps captured bytes, so report the timeout
+            # and return rather than turning cleanup itself into an unbounded wait.
             stderr_errors.append(RuntimeError("stderr drain timed out"))
 
         for pipe in (proc.stdout, proc.stderr):
-            if pipe is not None:
-                try:
-                    pipe.close()
-                except (OSError, ValueError):
-                    pass
+            if pipe is None or (pipe is proc.stderr and stderr_drain_timed_out):
+                continue
+            try:
+                pipe.close()
+            except (OSError, ValueError):
+                pass
 
     run_error = stdout_error or (stderr_errors[0] if stderr_errors else None)
     return {
@@ -319,14 +318,98 @@ def _unknown(reason: str, command: str) -> Dict[str, Any]:
     return {"status": "unknown", "reason": reason, "evidence": {"command": command}}
 
 
-def _parse_porcelain(stdout: str) -> List[Dict[str, str]]:
-    entries = []
-    for line in stdout.split("\n"):
-        if len(line) == 0:
-            continue
-        state = line[:2].strip() or "??"
-        entries.append({"state": state, "path": line[3:]})
+def _parse_porcelain(stdout: str) -> Optional[List[Dict[str, str]]]:
+    """Parse `git status --porcelain=v1 -z` without filename ambiguity."""
+    if stdout == "":
+        return []
+    fields = stdout.split("\0")
+    if fields[-1] != "":
+        return None
+
+    entries: List[Dict[str, str]] = []
+    index = 0
+    while index < len(fields) - 1:
+        record = fields[index]
+        if len(record) < 3 or record[2] != " ":
+            return None
+        state = record[:2].strip() or "??"
+        path = record[3:]
+        index += 1
+        if "R" in state or "C" in state:
+            # With `-z`, Git emits the destination in `record` and the source as
+            # the following field. The source is consumed but never disclosed.
+            if index >= len(fields) - 1:
+                return None
+            index += 1
+        entries.append({"state": state, "path": path})
     return entries
+
+def _ignored_paths(
+    checkout_path: str,
+    paths: List[str],
+    run_git: RunGit,
+) -> tuple[Optional[set[str]], str]:
+    """Return tracked or untracked paths excluded by repository ignore policy.
+
+    `--no-index` is the security-critical part: Git normally stops considering an
+    ignored path once it is tracked, but governed observation must not disclose a
+    path merely because it was committed before the privacy rule was added.
+    Bounded argv chunks avoid one process per dirty path. Paths whose line-oriented
+    `check-ignore` output would be ambiguous, and output real Git cannot produce,
+    fail closed.
+    """
+    unique_paths = list(dict.fromkeys(path for path in paths if path))
+    evidence_command = (
+        f"git -c core.quotePath=false check-ignore --no-index -- "
+        f"<{len(unique_paths)} paths>"
+    )
+    if any(
+        any(ord(char) < 32 for char in path)
+        or (path.startswith('"') and path.endswith('"'))
+        for path in unique_paths
+    ):
+        return None, evidence_command
+
+    chunks: List[List[str]] = []
+    chunk: List[str] = []
+    chunk_chars = 0
+    for path in unique_paths:
+        path_chars = len(path) + 1
+        if path_chars > 6500:
+            return None, evidence_command
+        if chunk and (len(chunk) >= 128 or chunk_chars + path_chars > 6500):
+            chunks.append(chunk)
+            chunk = []
+            chunk_chars = 0
+        chunk.append(path)
+        chunk_chars += path_chars
+    if chunk:
+        chunks.append(chunk)
+
+    normalized_inputs = {normalize_path(path) for path in unique_paths}
+    ignored: set[str] = set()
+    for paths_chunk in chunks:
+        result = run_git(
+            checkout_path,
+            [
+                "-c",
+                "core.quotePath=false",
+                "check-ignore",
+                "--no-index",
+                "--",
+                *paths_chunk,
+            ],
+        )
+        if result.get("ok"):
+            for ignored_path in result.get("stdout", "").splitlines():
+                normalized_ignored_path = normalize_path(ignored_path)
+                if normalized_ignored_path not in normalized_inputs:
+                    return None, evidence_command
+                ignored.add(normalized_ignored_path)
+            continue
+        if result.get("code") != 1:
+            return None, evidence_command
+    return ignored, evidence_command
 
 
 _REMOTE_RE = re.compile(r"^(\S+)\t(.+) \((fetch|push)\)$")
@@ -375,6 +458,7 @@ def _to_iso_string(mtime_ns: int) -> str:
 def _observe_one(raw_path: str, run_git: RunGit) -> Dict[str, Any]:
     path = normalize_path(raw_path)
     facts: Dict[str, Any] = {}
+    worktree_root = path
 
     toplevel = run_git(path, ["rev-parse", "--show-toplevel"])
     if toplevel["ok"]:
@@ -466,14 +550,60 @@ def _observe_one(raw_path: str, run_git: RunGit) -> Dict[str, Any]:
         else:
             facts["head_ref"] = _unknown("head_ref_unresolvable", branch["command"])
 
-    status = run_git(path, ["status", "--porcelain"])
-    if status["ok"]:
-        entries = _parse_porcelain(status["stdout"])
-        facts["dirty_entries"] = _known(entries, status["command"])
-        facts["is_dirty"] = _known(len(entries) > 0, status["command"])
-    else:
+    status = run_git(path, ["status", "--porcelain=v1", "-z"])
+    if not status["ok"]:
         facts["dirty_entries"] = _unknown("status_unavailable", status["command"])
         facts["is_dirty"] = _unknown("status_unavailable", status["command"])
+    else:
+        entries = _parse_porcelain(status["stdout"])
+        if entries is None:
+            facts["dirty_entries"] = _unknown("status_malformed", status["command"])
+            facts["is_dirty"] = _unknown("status_malformed", status["command"])
+        else:
+            ignored, ignore_command = _ignored_paths(
+                worktree_root,
+                [entry.get("path", "") for entry in entries],
+                run_git,
+            )
+            if ignored is None:
+                facts["dirty_entries"] = _unknown(
+                    "ignore_policy_unavailable", ignore_command
+                )
+                facts["is_dirty"] = _unknown(
+                    "ignore_policy_unavailable", ignore_command
+                )
+            else:
+                visible_entries = [
+                    entry
+                    for entry in entries
+                    if normalize_path(entry.get("path", "")) not in ignored
+                ]
+                evidence = {
+                    "command": status["command"],
+                    "privacy_command": ignore_command,
+                }
+                if len(visible_entries) != len(entries):
+                    facts["dirty_entries"] = {
+                        "status": "unknown",
+                        "reason": "ignored_dirty_entries_excluded",
+                        "evidence": evidence,
+                    }
+                    facts["is_dirty"] = {
+                        "status": "unknown",
+                        "reason": "ignored_dirty_entries_excluded",
+                        "evidence": evidence,
+                    }
+                else:
+                    facts["dirty_entries"] = {
+                        "status": "known",
+                        "value": visible_entries,
+                        "evidence": evidence,
+                    }
+                    facts["is_dirty"] = {
+                        "status": "known",
+                        "value": len(entries) > 0,
+                        "evidence": evidence,
+                    }
 
     remote = run_git(path, ["remote", "-v"])
     facts["remotes"] = (
@@ -517,7 +647,8 @@ def observe_checkouts(
     allowlist  explicit allowed roots; a path outside every allowlist entry
                is refused without running git.
     now        injectable clock for determinism.
-    run_git    injectable git runner for tests.
+    run_git    injectable git runner; failed results must include the numeric
+               `code`, because privacy checks fail closed when it is absent.
     """
     if run_git is None:
         run_git = _default_run_git

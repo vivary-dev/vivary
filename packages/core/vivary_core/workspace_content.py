@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
@@ -73,7 +72,11 @@ RunGit = Callable[[str, List[str]], Dict[str, Any]]
 # second copy: the four-key denylist above was bypassable through command-scope
 # config injection here for exactly the same reason, and two independent copies of
 # a security control drift.
-from vivary_core.workspace_observe import _capped_run, _sanitized_git_env  # noqa: E402
+from vivary_core.workspace_observe import (  # noqa: E402
+    _capped_run,
+    _ignored_paths,
+    _sanitized_git_env,
+)
 
 
 
@@ -81,26 +84,66 @@ from vivary_core.workspace_observe import _capped_run, _sanitized_git_env  # noq
 def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
     full_args = ["--no-optional-locks", "-C", checkout_path, *args]
     command = "git " + " ".join(full_args)
-    outcome = _capped_run(["git", *full_args], _sanitized_git_env(), _MAX_GIT_OUTPUT_BYTES)
+    outcome = _capped_run(
+        ["git", *full_args],
+        _sanitized_git_env(),
+        _MAX_GIT_OUTPUT_BYTES,
+    )
     if outcome["error"] is not None:
-        return {"ok": False, "stdout": "", "stderr": outcome["error"][:400], "command": command}
+        return {
+            "ok": False,
+            "stdout": "",
+            "stderr": outcome["error"][:400],
+            "command": command,
+            "code": outcome["code"],
+        }
 
     stdout_bytes = outcome["stdout"]
     stderr_bytes = outcome["stderr"]
 
     if outcome["exceeded"]:
-        return {"ok": False, "stdout": "", "stderr": "stdout maxBuffer length exceeded"[:400], "command": command}
+        return {
+            "ok": False,
+            "stdout": "",
+            "stderr": "stdout maxBuffer length exceeded",
+            "command": command,
+            "code": outcome["code"],
+        }
 
     if outcome["code"] != 0:
         # `git grep` exits 1 to mean "no matches" - that is a successful
         # search, not a failure, and must never be reported as one.
-        if outcome["code"] == 1 and not stdout_bytes and not stderr_bytes:
-            return {"ok": True, "stdout": "", "command": command}
+        if (
+            outcome["code"] == 1
+            and args
+            and args[0] == "grep"
+            and not stdout_bytes
+            and not stderr_bytes
+        ):
+            return {
+                "ok": True,
+                "stdout": "",
+                "command": command,
+                "code": outcome["code"],
+            }
         stderr_text = stderr_bytes.decode("utf-8", errors="replace")
-        return {"ok": False, "stdout": "", "stderr": stderr_text[:400], "command": command}
+        return {
+            "ok": False,
+            "stdout": "",
+            "stderr": stderr_text[:400],
+            "command": command,
+            "code": outcome["code"],
+        }
 
-    stdout_text = stdout_bytes.decode("utf-8", errors="replace").replace("\r\n", "\n")
-    return {"ok": True, "stdout": stdout_text, "command": command}
+    stdout_text = stdout_bytes.decode("utf-8", errors="replace").replace(
+        "\r\n", "\n"
+    )
+    return {
+        "ok": True,
+        "stdout": stdout_text,
+        "command": command,
+        "code": outcome["code"],
+    }
 
 
 def _dedupe_terms(terms: Optional[List[Any]]) -> List[str]:
@@ -181,27 +224,41 @@ def _trim_excerpt(content: str) -> str:
     return _to_well_formed(_js_utf16_slice_wellformed(trimmed, MAX_EXCERPT_LENGTH)) + "…"
 
 
-# One output line from `git grep -n -I -i -e term1 [-e term2 ...]` is
-# "relPath:lineNo:content". Content itself may contain colons, so the split
-# is non-greedy on the path and numeric on the line number.
-_GREP_LINE = re.compile(r"^(.+?):(\d+):(.*)$", re.DOTALL)
-
-
+# `git grep -z -n` emits `path\0line\0content\n`. NUL framing makes the filename
+# unambiguous even when it contains colon-number segments or newlines.
 def _parse_grep_lines(stdout: str, terms: List[str]) -> Dict[str, List[Dict[str, Any]]]:
     by_file: Dict[str, List[Dict[str, Any]]] = {}
-    for line in stdout.split("\n"):
-        if not line:
+    cursor = 0
+    while cursor < len(stdout):
+        path_end = stdout.find("\0", cursor)
+        if path_end < 0:
+            break
+        line_end = stdout.find("\0", path_end + 1)
+        if line_end < 0:
+            break
+        record_end = stdout.find("\n", line_end + 1)
+        if record_end < 0:
+            record_end = len(stdout)
+
+        file_path = stdout[cursor:path_end]
+        line_no_str = stdout[path_end + 1 : line_end]
+        content = stdout[line_end + 1 : record_end]
+        cursor = record_end + 1
+        if not file_path or not line_no_str.isdigit():
             continue
-        match = _GREP_LINE.match(line)
-        if match is None:
-            continue
-        file_path, line_no_str, content = match.group(1), match.group(2), match.group(3)
+
         lower = content.lower()
-        # Deterministic term attribution: the first term (in caller-given
-        # order) that actually appears in the matched line, never a guess.
-        term = next((t for t in terms if t.lower() in lower), terms[0] if terms else None)
+        term = next(
+            (term for term in terms if term.lower() in lower),
+            terms[0] if terms else None,
+        )
         by_file.setdefault(file_path, []).append(
-            {"path": file_path, "line": int(line_no_str), "rawContent": content, "term": term}
+            {
+                "path": file_path,
+                "line": int(line_no_str),
+                "rawContent": content,
+                "term": term,
+            }
         )
     return by_file
 
@@ -287,7 +344,7 @@ def _observe_one_content(raw_path: str, terms: List[str], run_git: RunGit) -> Di
     # `foo.bar` matched `fooXbar`, and `.*` made nearly every tracked line look
     # relevant to the question — silently widening what the capsule claims as
     # evidence. Regex terms are not an advertised part of this API.
-    args = ["grep", "-n", "-I", "-i", "-F"]
+    args = ["grep", "-z", "-n", "-I", "-i", "-F"]
     for term in terms:
         args += ["-e", term]
     result = run_git(path, args)
@@ -304,7 +361,37 @@ def _observe_one_content(raw_path: str, terms: List[str], run_git: RunGit) -> Di
         }
 
     by_file = _parse_grep_lines(result["stdout"], terms)
+    ignored, ignore_command = _ignored_paths(
+        path,
+        list(by_file),
+        run_git,
+    )
+    if ignored is None:
+        return {
+            "raw_path": raw_path,
+            "path": path,
+            "status": "unknown",
+            "reason": "ignore_policy_unavailable",
+            "matches": [],
+            "omissions": [],
+            "evidence": {"command": ignore_command},
+        }
+
+    ignored_count = 0
+    for file_path in list(by_file):
+        if normalize_path(file_path) in ignored:
+            ignored_count += len(by_file.pop(file_path))
+
     bounded = _bound_matches(by_file, {"command": result["command"]})
+    if ignored_count:
+        bounded["omissions"].append(
+            {
+                "kind": "privacy_matches_excluded",
+                "omitted_count": ignored_count,
+                "reason": "repository ignore policy excluded tracked content",
+                "evidence": {"command": ignore_command},
+            }
+        )
     return {
         "raw_path": raw_path,
         "path": path,
@@ -341,7 +428,8 @@ def observe_content(
     :param terms: question terms to search for; empty/absent -> no search is
         run and every checkout reports `no_question_terms`.
     :param now: injectable clock for determinism.
-    :param run_git: injectable git runner for tests.
+    :param run_git: injectable git runner; failed results must include the
+        numeric `code`, because privacy checks fail closed when it is absent.
     """
     if run_git is None:
         run_git = _default_run_git

@@ -251,6 +251,93 @@ def test_dirty_worktree_modified_and_untracked_reported_gitignored_never_observe
     assert "private-note" not in serialized
     assert "secrets/" not in serialized
 
+def test_tracked_ignored_dirty_path_is_never_disclosed(fx, allowlist):
+    repo = fx["paths"]["dirty"]
+    gitignore = os.path.join(repo, ".gitignore")
+    with open(gitignore, encoding="utf-8") as handle:
+        original = handle.read()
+    with open(gitignore, "w", encoding="utf-8", newline="") as handle:
+        handle.write(original + "tracked.md\n")
+    try:
+        result = observe_checkouts([repo], allowlist=allowlist, now=NOW)
+    finally:
+        with open(gitignore, "w", encoding="utf-8", newline="") as handle:
+            handle.write(original)
+
+    facts = result["checkouts"][0]["facts"]
+    assert facts["dirty_entries"]["status"] == "unknown"
+    assert facts["dirty_entries"]["reason"] == "ignored_dirty_entries_excluded"
+    assert facts["is_dirty"]["status"] == "unknown"
+    serialized = json.dumps(result)
+    assert "tracked.md" not in serialized
+    assert "privacy_command" in serialized
+
+def test_non_ascii_dirty_filename_is_reported_without_quoting(tmp_path):
+    base = str(tmp_path)
+    repo = str(tmp_path / "repo")
+    _git(base, base, ["init", "-q", "-b", "main", repo])
+    _commit_file(base, repo, "README.md", "base\n", "base")
+    unicode_name = "身份验证.md"
+    unicode_path = os.path.join(repo, unicode_name)
+    with open(unicode_path, "w", encoding="utf-8", newline="") as handle:
+        handle.write("dirty\n")
+
+    result = observe_checkouts([repo], allowlist=[repo], now=NOW)
+
+    facts = result["checkouts"][0]["facts"]
+    assert facts["dirty_entries"]["status"] == "known"
+    assert unicode_name in {
+        entry["path"] for entry in facts["dirty_entries"]["value"]
+    }
+
+
+def test_ignored_rename_destination_is_never_disclosed(tmp_path):
+    base = str(tmp_path)
+    repo = str(tmp_path / "repo")
+    _git(base, base, ["init", "-q", "-b", "main", repo])
+    _commit_file(base, repo, "README.md", "base\n", "base")
+    _commit_file(
+        base,
+        repo,
+        ".gitignore",
+        "private.md\n",
+        "privacy policy",
+    )
+    _git(base, repo, ["mv", "README.md", "private.md"])
+
+    result = observe_checkouts([repo], allowlist=[repo], now=NOW)
+
+    facts = result["checkouts"][0]["facts"]
+    assert facts["dirty_entries"]["status"] == "unknown"
+    assert facts["dirty_entries"]["reason"] == "ignored_dirty_entries_excluded"
+    assert "private.md" not in json.dumps(result)
+
+
+def test_ignore_filter_batches_more_than_256_dirty_paths(tmp_path):
+    base = str(tmp_path)
+    repo = str(tmp_path / "repo")
+    _git(base, base, ["init", "-q", "-b", "main", repo])
+    _commit_file(base, repo, "README.md", "base\n", "base")
+    for index in range(300):
+        with open(
+            os.path.join(repo, f"bulk-{index:03}.md"),
+            "w",
+            encoding="utf-8",
+            newline="",
+        ) as handle:
+            handle.write("dirty\n")
+
+    result = observe_checkouts([repo], allowlist=[repo], now=NOW)
+
+    facts = result["checkouts"][0]["facts"]
+    assert facts["dirty_entries"]["status"] == "known"
+    paths = {entry["path"] for entry in facts["dirty_entries"]["value"]}
+    assert "bulk-000.md" in paths
+    assert "bulk-299.md" in paths
+
+
+
+
 
 def test_detached_head_is_reported_as_detached_not_flattened_into_a_branch(fx, allowlist):
     result = observe_checkouts([fx["paths"]["detached"]], allowlist=allowlist, now=NOW)

@@ -1691,9 +1691,11 @@ def test_cmd_find_governed_returns_bounded_core_capsule(tmp_path):
     assert terms == ["repeat", *(f"term{index}" for index in range(15))]
     assert tropo._governed_query_terms("Réparer l’authentification 身份验证") == [
         "réparer",
-        "l",
         "authentification",
         "身份验证",
+    ]
+    assert tropo._governed_query_terms("what's authentication") == [
+        "authentication"
     ]
 
     _search_vault(tmp_path)
@@ -1751,6 +1753,154 @@ def test_cmd_find_governed_returns_bounded_core_capsule(tmp_path):
     )
     assert out["budget"] == {"max_claims": 2}
     assert out["fingerprint"].startswith("sha256:")
+
+
+def test_governed_find_drops_contraction_fragments_before_file_cap(tmp_path):
+    _search_vault(tmp_path)
+    for index in range(8):
+        (tmp_path / f"{index:02}-status.md").write_text(
+            "status noise\n",
+            encoding="utf-8",
+        )
+    (tmp_path / "z-authentication.md").write_text(
+        "authentication is the meaningful match\n",
+        encoding="utf-8",
+    )
+    _init_git_repo(tmp_path)
+
+    rc, out = _capture_rc(
+        tropo.cmd_find,
+        _query_args("what's authentication", governed=True, max_claims=24),
+        res(str(tmp_path)),
+    )
+
+    assert rc == 0
+    assert any(
+        claim["fact"] == "content_match"
+        and "z-authentication.md" in claim["claim"]
+        for claim in out["claims"]
+    )
+    assert not any(
+        "status noise" in claim["claim"] for claim in out["claims"]
+    )
+
+
+def test_governed_find_supports_non_latin_content_and_records_unrankable_facts(
+    tmp_path,
+):
+    workspace = tmp_path / "项目"
+    workspace.mkdir()
+    _search_vault(workspace)
+    content_path = workspace / "身份验证.md"
+    content_path.write_text("# 身份验证\n\n受管上下文。\n", encoding="utf-8")
+    _init_git_repo(workspace)
+    subprocess.run(
+        ["git", "-C", str(workspace), "config", "core.quotepath", "false"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    content_path.write_text("# 身份验证\n\n已修改的受管上下文。\n", encoding="utf-8")
+
+    rc, out = _capture_rc(
+        tropo.cmd_find,
+        _query_args("身份验证", governed=True, max_claims=24),
+        res(str(workspace)),
+    )
+
+    assert rc == 0
+    assert any(
+        claim["fact"] == "content_match" and "身份验证.md" in claim["claim"]
+        for claim in out["claims"]
+    )
+    assert any(
+        omission.get("kind") == "collation_domain_excluded"
+        and omission.get("fact") == "dirty_entries"
+        for omission in out["omissions"]
+    )
+
+
+def test_governed_find_excludes_tracked_paths_added_to_ignore_policy(tmp_path):
+    _search_vault(tmp_path)
+    private_path = tmp_path / "USER.md"
+    private_path.write_text("PRIVATE_TRACKED_MARKER original\n", encoding="utf-8")
+    _init_git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text("USER.md\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "add", ".gitignore"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Vivary Tests",
+            "-c",
+            "user.email=tests@vivary.invalid",
+            "commit",
+            "-qm",
+            "privacy policy",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    private_path.write_text("PRIVATE_TRACKED_MARKER modified\n", encoding="utf-8")
+
+    rc, out = _capture_rc(
+        tropo.cmd_find,
+        _query_args("private", governed=True, max_claims=24),
+        res(str(tmp_path)),
+    )
+
+    assert rc == 0
+    serialized = json.dumps(out)
+    assert "USER.md" not in serialized
+    assert "PRIVATE_TRACKED_MARKER" not in serialized
+    assert "ignored_dirty_entries_excluded" in serialized
+    assert "privacy_matches_excluded" in serialized
+
+
+def test_governed_find_accepts_equivalent_windows_root_casing(tmp_path):
+    if os.name != "nt":
+        return
+    workspace = tmp_path / "MixedCaseWorkspace"
+    workspace.mkdir()
+    _search_vault(workspace)
+    _init_git_repo(workspace)
+
+    rc, out = _capture_rc(
+        tropo.cmd_find,
+        _query_args("release workflow", governed=True, max_claims=2),
+        res(str(workspace).swapcase()),
+    )
+
+    assert rc == 0
+    assert out["schema"] == "vivary.task-capsule/v0"
+
+
+def test_governed_find_rejects_a_tropo_root_nested_inside_a_git_worktree(
+    tmp_path,
+):
+    repo = tmp_path / "repo"
+    nested = repo / "vault"
+    nested.mkdir(parents=True)
+    _search_vault(nested)
+    _init_git_repo(repo)
+    stderr = io.StringIO()
+
+    with contextlib.redirect_stderr(stderr):
+        rc = tropo.cmd_find(
+            _query_args("release workflow", governed=True, max_claims=2),
+            res(str(nested)),
+        )
+
+    assert rc == 2
+    assert "must be the Git worktree root" in stderr.getvalue()
 
 
 def test_governed_find_flags_fail_closed_in_both_directions(tmp_path):
@@ -1862,7 +2012,7 @@ def test_cmd_find_governed_maps_missing_core_to_install_error(tmp_path):
 
     assert rc == 2
     assert stderr.getvalue() == (
-        "tropo find --governed: vivary-core>=0.2.0 is required; "
+        "tropo find --governed: vivary-core>=0.2.1 is required; "
         "install Tropo with its declared dependencies\n"
     )
 

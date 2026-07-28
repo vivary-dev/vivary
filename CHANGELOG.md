@@ -25,59 +25,75 @@ and requires a separate human gate.
   observation, content search, evidence-graph projection, and bounded Task Capsule
   compilation. JSON and human output expose evidence-backed claims, conflicts,
   unknowns, omissions, observed required checks, stable selection reasons, and the
-  capsule fingerprint. Unicode question terms preserve order, deduplicate, and stop at
-  **16** before the bounded core content search.
+  capsule fingerprint. Unicode question terms preserve order and deduplicate; one-letter
+  ASCII contraction fragments are discarded before the first **16** meaningful terms
+  enter the bounded core content search.
 - Top-level `vivary_core` exports for the four deep-module entry points used by the
   adapter: `observe_checkouts`, `observe_content`, `project_workspace_graph`, and
   `compile_task_capsule`.
-- Direct regressions for the real Git-backed pipeline, normalized Windows scope,
-  Unicode and bounded question terms, observed check derivation, non-negative capsule
-  budgets, missing-core installation errors, and rejection of incompatible
+- Direct regressions for the real Git-backed pipeline, equivalent Windows root casing,
+  Unicode workspace paths and question terms, observed check derivation, non-negative
+  capsule budgets, missing-core installation errors, and rejection of incompatible
   plain-find/query flags including `--budget 0`.
 - The packaged integration smoke now installs core beside Tropo, proves the wheel's
   declared dependency metadata, and exercises the installed governed command.
+- The cross-platform orientation matrix now runs the full Tropo suite on
+  `windows-latest`, including the governed root-casing contract.
 
 ### Changed
 
-- `vivary-tropo` now declares `vivary-core>=0.2.0`, the first real package-to-core
-  dependency promised by [#207](https://github.com/vivary-dev/vivary/issues/207), in
-  the same change as its first import. Its source version advances from 0.4.1 to 0.4.2;
-  published package truth remains 0.4.1 until the coordinated train.
+- `vivary-core` advances from 0.2.0 to 0.2.1, and `vivary-tropo` now declares
+  `vivary-core>=0.2.1`: the first source version exposing the adapter API and the first
+  real package-to-core dependency promised by
+  [#207](https://github.com/vivary-dev/vivary/issues/207). Tropo source advances from
+  0.4.1 to 0.4.2; both remain unpublished in this development train until the
+  coordinated release.
 - Plain `tropo find` keeps its existing typed-context packet and default token budget.
-  Governed mode rejects `--budget`, `--k`, `--mode`, `--type`, `--path`, `--edge`,
-  `--snippet`, and `--explain`; `--max-claims` requires `--governed`, and both
-  governed flags require `find`. Invalid flag combinations, invalid core inputs, and
-  broken core installs return the documented usage exit code `2` without a traceback.
-- Core's shared bounded subprocess runner now drains stdout and stderr concurrently,
-  so a Git child that fills stderr before stdout cannot deadlock observation. Cleanup
-  is bounded, kills stalled children, closes both child pipes, and reports structured
-  failure instead of leaking a child process or descriptor.
+  Governed-only flags, malformed core inputs, and broken core installs fail with the
+  documented usage exit code `2`; the command reference owns the exact flag contract.
+- Core's shared bounded subprocess runner drains stdout and stderr concurrently, so a
+  Git child that fills stderr first cannot deadlock observation. Cleanup kills stalled
+  children, closes completed pipes, and returns a structured timeout rather than
+  blocking on an inherited stderr handle.
 - Derived required checks now carry checkout-scoped names, the normalized checkout
   `cwd`, and the observation that actually proves each command. This prevents one
   checkout's receipt from clearing another checkout's check. An observed npm test
   script also no longer suppresses an undetermined Python test-system warning in a
   polyglot checkout.
+- Governed content now uses NUL-framed Git output and excludes tracked files covered
+  by repository ignore policy without naming them in evidence. Unexpected ignore
+  output and incomplete injected-runner failures fail closed. Unicode workspace paths
+  use a deterministic graph-ordering fallback; unrankable non-content capsule facts
+  become explicit omissions instead of aborting Unicode queries.
+- Governed mode refuses a Tropo root nested inside a larger Git worktree rather than
+  labeling repository-wide checkout facts as scoped to the nested directory.
 - Command, package, architecture, root overview, and generated-site truth now describe
   the opt-in boundary, dependency direction, and no-fetch/no-write/no-provider
   constraints.
 
 ### Verification
 
-- `python packages/tropo/tests/test_tropo.py` — **154/154** passed.
-- `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **154/154**
+- `python packages/tropo/tests/test_tropo.py` — **159/159** passed on Windows.
+- `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **159/159**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **592 passed**.
+- `python -m pytest packages/core/tests/ -q` — **601 passed** on Windows;
+  `uv run --with pytest python3 -m pytest packages/core/tests/ -q` — **599 passed,
+  2 platform-specific skips** on WSL Linux.
 - `python -m pytest packages/tropo/tests/test_tropo.py -q -k "governed or
-  cmd_find_returns_context_packet"` — **5 passed**.
-- Isolated `uv run --with ./packages/core --with ./packages/tropo` distribution import
-  and `tropo find "folder type" --governed --max-claims 2 --json` smoke — passed with
-  two evidence-backed claims and a normalized Windows scope.
-- `python scripts/check_package_docs_parity.py` — **6** published manifests and **1**
-  unpublished allowlist entry matched the architecture page.
+  cmd_find_returns_context_packet"` — **10 passed**.
+- Isolated `uv run --with ./packages/core --with ./packages/tropo` distribution
+  smoke — installed metadata reported core **0.2.1** and Tropo **0.4.2**; governed
+  find returned a bounded two-claim Task Capsule with checkout-scoped checks.
+- `python scripts/tests/test_package_docs_parity.py` — **10/10 passed**;
+  `python scripts/check_package_docs_parity.py` — **6** published manifests and
+  **1** unpublished allowlist entry matched the architecture page.
 - `python scripts/check_line_endings.py --verbose` — **258** tracked text files
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
+- Repository verification also passed: Ozone **21/21**, Exo **17/17**,
+  create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
+  Strato integrity **6/6**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**
   site tests passed; **23** pages built; **1,680** local references and **1,054**
   anchors checked with zero failures.

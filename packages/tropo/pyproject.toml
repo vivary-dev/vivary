@@ -19,7 +19,7 @@ classifiers = [
     "Topic :: Software Development :: Documentation",
     "Topic :: Text Processing :: Markup :: Markdown",
 ]
-dependencies = ["vivary-core>=0.2.0"]
+dependencies = ["vivary-core>=0.2.1"]
 
 [project.optional-dependencies]
 embedded = ["lancedb>=0.14.0"]

@@ -165,6 +165,9 @@ jobs:
           node-version: "22"
       - name: install pinned uv runner
         run: python -m pip install uv==0.11.21
+      - name: governed context adapter (Windows path contract)
+        if: runner.os == 'Windows'
+        run: python packages/tropo/tests/test_tropo.py
       - name: run disposable orientation proof
         run: python packages/create-vivary/tests/orientation_proof.py --receipt orientation-proof.json
       - name: preserve orientation receipt

@@ -4,9 +4,10 @@ This is the full, technical list of every command. If you're just starting, you 
 need a handful (`create-vivary init`, `doctor`, `tropo check`); the [getting started
 guide](/getting-started/) walks through those. Come back here for the details.
 
-Every CLI across the four layers. All engines are zero-dependency Python (3.11+);
-the CLI command names are `tropo` / `ozone` / `exo` / `create-vivary` regardless of
-how you install them.
+Every CLI across the four layers uses Python 3.11+ and no third-party runtime
+dependency; Tropo's optional governed path composes the first-party `vivary-core`
+contract seam. Command names remain `tropo` / `ozone` / `exo` / `create-vivary`
+regardless of installation method.
 
 - **Install (PyPI):** `pip install vivary`
 - **Run without installing (uv):** `uvx vivary-tropo check`, `uvx vivary-ozone review`, …
@@ -120,10 +121,14 @@ plain/query retrieval modifier it does not consume: `--budget`, `--k`, `--mode`,
 `find`; invalid combinations exit `2` rather than being ignored. Plain `tropo find`
 remains unchanged when the flag is absent.
 Derived required checks use checkout-scoped names and carry both the normalized `cwd`
-where the command must run and the exact observation that justified it.
-Unicode-aware question extraction preserves order, deduplicates terms, and searches at
-most the first `16`; core then caps matched bytes, lines per file, claims, and omission
-detail.
+where the command must run and the exact observation that justified it. Governed
+search drops one-letter ASCII contraction fragments, uses NUL-framed Git output,
+excludes tracked paths covered by repository ignore policy, and refuses a Tropo root
+nested inside a larger Git worktree rather than leaking sibling checkout facts.
+Unicode terms and content remain supported; unrankable non-content facts become
+explicit omissions instead of aborting the capsule. Question extraction preserves
+order, deduplicates terms, and searches at most the first `16`; core then caps matched
+bytes, lines per file, claims, and omission detail.
 `tropo query` is the lower-level filtered search primitive. By default both are
 graph/text retrieval, not the CocoIndex active-context sidecar. On the unreleased
 `dev` branch, `tropo query --mode vector` is a dependency-free typed-vector mode:
