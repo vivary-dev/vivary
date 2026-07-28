@@ -54,7 +54,7 @@ _REPR_FLOAT = re.compile(r"^(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$")
 # beyond that bound are formatted the way JS would format the nearest double.
 _MAX_SAFE_INTEGER = 2**53
 # Contract bodies must also round-trip through JavaScript without numeric loss.
-_MAX_LOSSLESS_INTEGER = 2**53 - 1
+MAX_LOSSLESS_INTEGER = 2**53 - 1
 
 
 def _js_string_escape(value: str) -> str:
@@ -177,7 +177,7 @@ def is_canonical_body_value(value, ancestors=None) -> bool:
     if value is None or value_type in (str, bool):
         return True
     if value_type is int:
-        return -_MAX_LOSSLESS_INTEGER <= value <= _MAX_LOSSLESS_INTEGER
+        return -MAX_LOSSLESS_INTEGER <= value <= MAX_LOSSLESS_INTEGER
     if value_type is float:
         return math.isfinite(value)
     if value_type not in (list, dict):

@@ -30,6 +30,7 @@ Language mapping notes (decision 0008 / documented rules for this slice):
 from __future__ import annotations
 
 from vivary_core.canonical import (
+    MAX_LOSSLESS_INTEGER,
     _utf16_sort_key,
     deterministic_id,
     fingerprint,
@@ -42,12 +43,38 @@ from vivary_core.collation import CollationDomainError, locale_sort_key
 CAPSULE_SCHEMA = "vivary.task-capsule/v0"
 
 
+def _task_capsule_id(task, workspace_fingerprint) -> str:
+    """Derive the capsule identifier from the compiler's pinned identity fields."""
+
+    return deterministic_id(
+        "capsule",
+        {
+            "task": task.get("question"),
+            # JS `task.filters ?? null`: absent/None both collapse to None.
+            "filters": task.get("filters"),
+            "workspace": workspace_fingerprint,
+        },
+    )
+
+
+def _is_required_checks_shape(value) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(required_check, dict)
+        and isinstance(required_check.get("name"), str)
+        and bool(required_check["name"])
+        and isinstance(required_check.get("command"), str)
+        and bool(required_check["command"])
+        for required_check in value
+    )
+
+
 def is_task_capsule_shape(capsule) -> bool:
     """Return whether a value has the complete policy-facing Task Capsule shape."""
 
     if not (
         isinstance(capsule, dict)
         and capsule.get("schema") == CAPSULE_SCHEMA
+        and isinstance(capsule.get("task"), dict)
         and isinstance(capsule.get("capsule_id"), str)
         and bool(capsule["capsule_id"])
         and isinstance(capsule.get("fingerprint"), str)
@@ -59,11 +86,11 @@ def is_task_capsule_shape(capsule) -> bool:
         and isinstance(capsule.get("conflicts"), list)
         and isinstance(capsule.get("unknowns"), list)
         and isinstance(capsule.get("omissions"), list)
-        and isinstance(capsule.get("required_checks"), list)
+        and _is_required_checks_shape(capsule.get("required_checks"))
         and isinstance(capsule.get("budget"), dict)
         and set(capsule["budget"]) == {"max_claims"}
         and type(capsule["budget"]["max_claims"]) is int
-        and capsule["budget"]["max_claims"] >= 0
+        and 0 <= capsule["budget"]["max_claims"] <= MAX_LOSSLESS_INTEGER
     ):
         return False
 
@@ -89,14 +116,6 @@ def is_task_capsule_shape(capsule) -> bool:
             and bool(omission["kind"])
             for omission in capsule["omissions"]
         )
-        and all(
-            isinstance(required_check, dict)
-            and isinstance(required_check.get("name"), str)
-            and bool(required_check["name"])
-            and isinstance(required_check.get("command"), str)
-            and bool(required_check["command"])
-            for required_check in capsule["required_checks"]
-        )
     )
 
 
@@ -113,7 +132,14 @@ def verify_task_capsule_integrity(capsule) -> bool:
     if not is_canonical_body_value(body):
         return False
     try:
-        return capsule["fingerprint"] == fingerprint(body)
+        return (
+            capsule["capsule_id"]
+            == _task_capsule_id(
+                capsule["task"],
+                capsule["workspace"]["fingerprint"],
+            )
+            and capsule["fingerprint"] == fingerprint(body)
+        )
     except TypeError:
         return False
 
@@ -402,7 +428,7 @@ def _sort_candidates(candidates):
 def compile_task_capsule(*, task, graph, budget=None, content=None):
     """Compile a bounded Task Capsule.
 
-    task: {"question": str, "scope": [str] (optional), "filters": [dict] (optional)}
+    task: {"question": str, "scope": [str], "filters": [dict], "required_checks": [dict]} (optional fields)
     graph: output of project_workspace_graph (workspace_model.py)
     budget: {"max_claims": int} (optional)
     content: optional output of observe_content (workspace_content.py),
@@ -410,6 +436,26 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         identical behavior to a capsule compiled with no content argument at
         all.
     """
+    if not isinstance(task, dict):
+        raise ValueError("task must be a mapping")
+    declared_scope = task.get("scope")
+    if (
+        declared_scope is not None
+        and (
+            not isinstance(declared_scope, list)
+            or not declared_scope
+            or any(
+                not isinstance(root, str) or not root
+                for root in declared_scope
+            )
+        )
+    ):
+        raise ValueError("task.scope must be a non-empty list of non-empty strings")
+    declared_checks = task.get("required_checks")
+    if declared_checks is not None and not _is_required_checks_shape(declared_checks):
+        raise ValueError(
+            "task.required_checks must be a list of {name, command} non-empty strings"
+        )
     budget = budget or {}
     max_claims = budget.get("max_claims")
     if max_claims is None:
@@ -417,9 +463,14 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     # Python's negative slicing would quietly include almost every candidate: -1
     # selects all but the last claim and then reports "claim budget -1 reached".
     # A malformed budget must fail closed, not expand the context.
-    if isinstance(max_claims, bool) or not isinstance(max_claims, int) or max_claims < 0:
+    if (
+        isinstance(max_claims, bool)
+        or not isinstance(max_claims, int)
+        or not 0 <= max_claims <= MAX_LOSSLESS_INTEGER
+    ):
         raise ValueError(
-            f"budget.max_claims must be a non-negative integer (got {max_claims!r})"
+            "budget.max_claims must be an integer from 0 through "
+            f"{MAX_LOSSLESS_INTEGER} (got {max_claims!r})"
         )
     nodes = graph.get("nodes") if isinstance(graph, dict) else None
     if not isinstance(nodes, list):
@@ -447,7 +498,6 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     # the capsule carries. Copying it into the output alone let a capsule declare
     # scope ['/a'] while including claims from '/b', so a downstream agent could act
     # on context the capsule itself says is out of scope.
-    declared_scope = task.get("scope")
     def _in_scope(path) -> bool:
         if not declared_scope:
             return True
@@ -545,7 +595,7 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         omissions.append({"kind": "refused_root", "reason": refusal.get("reason"), "path": refusal.get("path")})
     # An explicit task-level list always wins: derivation is a convenience, not a
     # ceiling, and a caller who knows the command should never be argued with.
-    declared_checks = task.get("required_checks")
+    # `declared_checks` was shape-validated at the task boundary.
     if declared_checks is not None:
         required_checks = list(declared_checks)
         check_unknowns: list[dict] = []
@@ -640,14 +690,9 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
 
     capsule_fingerprint = fingerprint(body)
     result = {
-        "capsule_id": deterministic_id(
-            "capsule",
-            {
-                # JS `task.filters ?? null`: absent/None both collapse to None.
-                "task": task.get("question"),
-                "filters": task.get("filters"),
-                "workspace": graph.get("workspace_fingerprint"),
-            },
+        "capsule_id": _task_capsule_id(
+            task,
+            graph.get("workspace_fingerprint"),
         )
     }
     result.update(body)

@@ -398,11 +398,15 @@ The request envelope is `vivary.strato-decision-request/v0`:
 }
 ```
 
-`capsule` must be a complete Task Capsule, its body must reproduce its claimed
-fingerprint without non-canonical or numerically lossy values, and its workspace
-fingerprint must match the envelope. A capsule altered after compilation or missing
+`capsule` must be a complete Task Capsule. Its `capsule_id` must match the
+deterministic identifier derived from its task question, optional filters, and workspace
+fingerprint; its body must reproduce its claimed fingerprint without non-canonical or
+numerically lossy values. `budget.max_claims` must be an integer from `0` through
+`9007199254740991`, the largest integer that round-trips through JavaScript without
+loss. A capsule altered after compilation, given a fabricated identity, or missing
 compiler-owned Task Capsule fields such as `budget` is an invalid envelope and never
-reaches core policy. `scope.project` is a non-empty audit label. `scope.paths`
+reaches core policy. Compiler callers must omit `task.scope` or provide a non-empty list
+of non-empty path strings. `scope.project` is a non-empty audit label. `scope.paths`
 must contain absolute roots and match `capsule.task.scope`; core's path equivalence
 normalizes separators, ignores root order, and folds case on Windows. A missing or
 broader capsule scope fails closed. Both `requested_at` and caller-supplied

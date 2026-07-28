@@ -45,11 +45,13 @@ strato decide --governed --json request.json
 
 It validates the request schema, pinned policy version, core-owned actor and authority
 class, workspace binding, absolute scope roots bound to the Task Capsule, the capsule's
-body fingerprint, and caller-supplied timestamps before delegating the
-budget/gate/next-loop decision to `vivary-core`. Missing compiler-owned fields and
-non-canonical or numerically lossy capsule values fail closed. Requests, capsule
-observations, and receipts have a deterministic 300-second freshness window. A verdict
-is accepted only beside its receipt. A malformed, invalid, altered, or unsafely nested
+deterministic identifier and body fingerprint, and caller-supplied timestamps before
+delegating the budget/gate/next-loop decision to `vivary-core`. The compiler and
+verifier share the JavaScript-lossless `max_claims` bound; fabricated capsule IDs,
+missing compiler-owned fields, malformed task scopes, and non-canonical or numerically
+lossy capsule values fail closed. Requests, capsule observations, and receipts have a
+deterministic 300-second freshness window. A verdict is accepted only beside its
+receipt. A malformed, invalid, altered, or unsafely nested
 envelope returns a `vivary.strato-decision-refusal/v0` document and exit `2`; a valid
 envelope returns
 `vivary.strato-decision/v0`, is advisory, and exits `0`. Add `--strict` to exit `1`

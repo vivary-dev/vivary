@@ -100,7 +100,7 @@ pip install pytest
 python -m pytest packages/core/tests/ -q
 ```
 
-The current platform-specific proof is **615 tests on Windows**; on Linux, it is
-**613 passed plus 2 skips**. It translates the reference contracts across observation,
+The current platform-specific proof is **626 tests on Windows**; on Linux, it is
+**624 passed plus 2 skips**. It translates the reference contracts across observation,
 capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces, corruption
 handling, real-git evidence-store round trips, and byte-exact cross-runtime fixtures.
