@@ -12,9 +12,9 @@ the `v0.1.0` line.
 
 ## [Unreleased: governed Tropo and Strato adapters] — 2026-07-26
 
-Affects the source checkout's unreleased `vivary-tropo` **0.5.0**,
-`vivary-strato` **0.1.0**, and `vivary` meta-package **0.1.1**, the first two
-role-to-`vivary-core` dependency edges, package documentation, and CI packaging proof.
+Affects the source checkout's unreleased `vivary-core` **0.2.2**, `vivary-tropo`
+**0.5.0**, `vivary-strato` **0.1.1**, and `vivary` meta-package **0.1.1**, the first
+two role-to-core dependency edges, package documentation, and CI packaging proof.
 The published releases remain Tropo **0.4.1** and `vivary` **0.1.0**; Strato and core
 remain unpublished during development. No package was published, deployed, or enabled
 by default; publication remains part of the final coordinated release train and
@@ -47,7 +47,7 @@ requires a separate human gate.
   homes. Tropo's direct `__main__` runner uses the same boundary, keeping observation
   fixtures, dirty facts, and fingerprints reproducible under both supported test
   entry points.
-- `vivary-strato` **0.1.0** — the first independently versioned Strato runtime package.
+- `vivary-strato` **0.1.1** — the first independently versioned Strato runtime package.
   `strato decide --governed` validates a pinned request/policy schema, core-owned actor
   and authority class, workspace fingerprint, absolute path scope bound to its Task
   Capsule, a non-empty project audit label, and caller-supplied timestamps before
@@ -77,18 +77,19 @@ requires a separate human gate.
 
 ### Changed
 
-- `vivary-core` advances from 0.2.0 to 0.2.1, and `vivary-tropo` advances from
-  0.4.1 to 0.5.0 because the new governed flags are a user-visible minor feature.
-  Tropo declares `vivary-core>=0.2.1`: the first source version exposing the adapter
-  API and the first real package-to-core dependency promised by
-  [#207](https://github.com/vivary-dev/vivary/issues/207). The `vivary` meta-package
+- `vivary-core` advances from 0.2.0 to 0.2.2. Version 0.2.1 introduced the governed
+  adapter API; 0.2.2 hardens the compiler/verifier integrity boundary.
+  `vivary-tropo` advances from 0.4.1 to 0.5.0 because the governed flags are a
+  user-visible minor feature and keeps `vivary-core>=0.2.1`, the first source version
+  exposing the adapter API. This is the first real package-to-core dependency promised
+  by [#207](https://github.com/vivary-dev/vivary/issues/207). The `vivary` meta-package
   advances from 0.1.0 to 0.1.1 and raises its floor to `vivary-tropo>=0.5.0`, so it
   receives core transitively. All three source versions remain unpublished in this
   development train until the coordinated release.
-- `vivary-strato` declares `vivary-core>=0.2.1` with its first runtime import. The
-  `vivary` meta-package does not add Strato yet; completing the one-install role surface
-  remains owned by #207. Both Strato and core stay explicitly allowlisted as
-  unpublished until the final coordinated release gate.
+- `vivary-strato` advances from 0.1.0 to 0.1.1 for the capsule-integrity hardening and
+  declares `vivary-core>=0.2.2`. The `vivary` meta-package does not add Strato yet;
+  completing the one-install role surface remains owned by #207. Both Strato and core
+  stay explicitly allowlisted as unpublished until the final coordinated release gate.
 - Plain `tropo find` keeps its existing typed-context packet and default token budget.
   Governed-only flags, malformed core inputs, and broken core installs fail with the
   documented usage exit code `2`; the command reference owns the exact flag contract.
@@ -163,19 +164,17 @@ requires a separate human gate.
   **48 passed** on WSL Linux.
 - `python -m pytest packages/core/tests/test_policy.py -q` — **91 passed**;
   `python -m pytest packages/core/tests/test_control.py -q` — **101 passed**.
-- Isolated Windows venv and WSL `uv run --no-cache --with ./packages/core --with
-  ./packages/strato` smokes built core **0.2.1** and Strato **0.1.0**, then the
-  installed `strato decide --governed --json --strict` command returned `act` with a
-  clear gate and within-budget result.
+- Isolated Windows and WSL `uv run --no-cache --with ./packages/core --with
+  ./packages/strato` smokes built core **0.2.2** and Strato **0.1.1**; installed
+  metadata matched Strato's runtime version and `strato decide --help` exposed the
+  governed JSON/strict command surface.
 - `python -m pytest packages/tropo/tests/test_tropo.py -q -k "governed or
   cmd_find_returns_context_packet"` — **17 passed**.
 - Isolated `uv run --no-cache --with ./packages/core --with ./packages/tropo`
-  smoke — installed metadata reported core **0.2.1** and Tropo **0.5.0**; governed
-  find returned a bounded two-claim Task Capsule with the full scaffold's doctor and
-  graph checks.
+  metadata smoke reported core **0.2.2** and Tropo **0.5.0**.
 - Coordinated local `uv run --no-cache --with` smoke across core, Tropo,
   create-vivary, Ozone, Exo, and the meta package reported `vivary` **0.1.1**,
-  Tropo **0.5.0**, and core **0.2.1**.
+  Tropo **0.5.0**, and core **0.2.2**.
   The packaged smoke also verified that the installed core version satisfies Tropo's
   declared requirement specifier, not merely that the metadata names it.
 - `python -m pytest packages/vivary/tests/ -q` — **9 passed**; the manifest/runtime
