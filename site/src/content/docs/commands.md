@@ -14,7 +14,7 @@ contract seam. Command names remain `tropo` / `ozone` / `exo` / `create-vivary`
 regardless of installation method.
 
 - **Install (PyPI):** `pip install vivary`
-- **Run without installing (uv):** `uvx vivary-tropo check`, `uvx vivary-ozone review`, …
+- **Run without installing (uv):** `uvx --from vivary-tropo tropo check`, `uvx --from vivary-ozone ozone review`, …
 - **Scaffold (npm):** `npm create @vivary@latest my-workspace` / `npx @vivary/create@latest my-workspace`
 - **From a repo checkout:** `python packages/tropo/tropo.py check`, etc.
 
@@ -132,6 +132,16 @@ Governed search drops one-letter ASCII contraction fragments, uses NUL-framed Gi
 output, treats every path passed to `git check-ignore` as literal, excludes tracked
 paths covered by repository ignore policy, and refuses a Tropo root nested inside a
 larger Git worktree rather than leaking sibling checkout facts.
+Every default Git command used by checkout observation or content retrieval disables
+repository-configured filesystem monitors. Workspace markers and package scripts pass
+through the same fail-closed ignore-policy filter as content and dirty paths.
+Reparse-point and multiply linked markers are rejected; a bounded package manifest is
+read only through a descriptor whose identity is verified around the open. Ignored or
+externally linked manifests cannot leak facts or derive commands. Core brackets content
+with checkout observations; dirty or privacy-filtered checkouts also require two
+identical content scans inside a stable bracket. A changed bracket retries once.
+Persistent mutation reports content unavailable, while an unobservable dirty state
+reports `dirty_state_unknown`; neither case compiles mixed-state facts and content.
 Unicode terms and content remain supported; unrankable non-content facts become
 explicit omissions instead of aborting the capsule. Question extraction preserves
 order, deduplicates terms, and searches at most the first `16`; core then caps matched
@@ -199,15 +209,15 @@ Useful retrieval flags:
 | `--explain` | Include stable match reasons such as title/id, frontmatter, path, body, or edge context. |
 | `--mode text\|vector\|semantic` | `query` only: use dependency-free graph/text search, dependency-free local typed-vector search, or call the configured optional semantic-memory provider. |
 | `--budget N` | `find` only: approximate token budget for the returned context packet. |
-| `--governed` | `find` only: opt into the experimental Tropo scan → `vivary-core` evidence graph → bounded Task Capsule path. |
-| `--max-claims N` | `find --governed` only: maximum capsule claims; must be a non-negative integer (default `24`). |
+| `--governed` | `find` only, unreleased source: opt into the experimental Tropo scan → `vivary-core` evidence graph → bounded Task Capsule path. |
+| `--max-claims N` | `find --governed` only, unreleased source: maximum capsule claims; must be a non-negative integer (default `24`). |
 
 ```bash
 tropo find "where is release truth owned" --root . --budget 800 --json
-tropo find "where is release truth owned" --root . --governed --max-claims 12 --json
 tropo query "release truth" --type decision --path "decisions/*" --explain --json
 tropo query "agent workspace" --edge affects:agent-workspace
 # Unreleased dev branch until the next package publish:
+tropo find "where is release truth owned" --root . --governed --max-claims 12 --json
 tropo query "release truth" --mode vector --json
 tropo query "release truth" --mode semantic --json
 ```

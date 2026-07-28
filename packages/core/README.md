@@ -76,8 +76,8 @@ version ownership.
 
 This package is a **reference-guided port** of a proven Node.js
 implementation developed and hardened in The Little AI Company's
-governed-context research program (589 tests, adversarially reviewed,
-benchmarked on real workspaces). Frozen JSON contracts remain byte-identical
+governed-context research program (adversarially reviewed, benchmarked on real
+workspaces). Frozen JSON contracts remain byte-identical
 where their owning authority is unchanged: the ContextIntegrityEvent v0
 conformance and replay fixtures (including the pinned projection fingerprint),
 evidence-store JSONL bytes and git object SHAs, and capsule digest and receipt
@@ -99,7 +99,7 @@ pip install pytest
 python -m pytest packages/core/tests/ -q
 ```
 
-The 589-test suite translates the reference contracts across observation,
-capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces,
-corruption handling, real-git evidence-store round trips, and byte-exact
-cross-runtime fixtures.
+The current platform-specific proof is **610 tests on Windows**; on Linux, it is
+**608 passed plus 2 skips**. It translates the reference contracts across observation,
+capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces, corruption
+handling, real-git evidence-store round trips, and byte-exact cross-runtime fixtures.

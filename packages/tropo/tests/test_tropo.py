@@ -19,6 +19,7 @@ CORE_ROOT = os.path.abspath(os.path.join(PACKAGE_ROOT, "..", "core"))
 sys.path.insert(0, CORE_ROOT)
 sys.path.insert(0, PACKAGE_ROOT)
 import tropo  # noqa: E402
+import vivary_core  # noqa: E402
 from vivary_core import normalize_path  # noqa: E402
 
 ROOT = PACKAGE_ROOT
@@ -1862,6 +1863,239 @@ def test_governed_find_excludes_tracked_paths_added_to_ignore_policy(tmp_path):
     assert "privacy_matches_excluded" in serialized
 
 
+def test_governed_find_excludes_an_ignored_tracked_manifest_and_npm_check(tmp_path):
+    _search_vault(tmp_path)
+    manifest = tmp_path / "package.json"
+    manifest.write_text(
+        '{"scripts":{"test":"PRIVATE_MANIFEST_TEST_COMMAND"}}\n',
+        encoding="utf-8",
+    )
+    _init_git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text("package.json\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "add", ".gitignore"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Vivary Tests",
+            "-c",
+            "user.email=tests@vivary.invalid",
+            "commit",
+            "-qm",
+            "manifest privacy policy",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    capsule = tropo.governed_find(str(tmp_path), "release workflow", max_claims=24)
+
+    assert "npm test" not in [check["command"] for check in capsule["required_checks"]]
+    assert "tropo check --root . --json" in [
+        check["command"] for check in capsule["required_checks"]
+    ]
+    serialized = json.dumps(capsule)
+    assert "package.json" not in serialized
+    assert "PRIVATE_MANIFEST_TEST_COMMAND" not in serialized
+
+
+def test_governed_find_keeps_content_when_checkout_state_is_stable(tmp_path):
+    _search_vault(tmp_path)
+    (tmp_path / "state.md").write_text(
+        "STABLE_GOVERNED_CONTENT_MARKER\n",
+        encoding="utf-8",
+    )
+    _init_git_repo(tmp_path)
+
+    capsule = tropo.governed_find(
+        str(tmp_path),
+        "STABLE_GOVERNED_CONTENT_MARKER",
+        max_claims=24,
+    )
+
+    assert any(
+        claim["fact"] == "content_match"
+        and "STABLE_GOVERNED_CONTENT_MARKER" in claim["claim"]
+        for claim in capsule["claims"]
+    )
+    assert any(
+        claim["fact"] == "is_dirty" and claim["claim"] == "worktree is clean"
+        for claim in capsule["claims"]
+    )
+    assert not any(
+        unknown.get("kind") == "content_search_incomplete"
+        for unknown in capsule["unknowns"]
+    )
+
+
+def test_governed_find_labels_unknown_dirty_state_without_claiming_a_race():
+    with tempfile.TemporaryDirectory(prefix="tropo-non-git-") as workspace_dir:
+        workspace = Path(workspace_dir)
+        _search_vault(workspace)
+
+        capsule = tropo.governed_find(
+            str(workspace),
+            "release workflow",
+            max_claims=24,
+        )
+
+        assert not any(
+            claim["fact"] == "content_match" for claim in capsule["claims"]
+        )
+        assert any(
+            unknown.get("kind") == "content_search_incomplete"
+            and unknown.get("reason") == "dirty_state_unknown"
+            for unknown in capsule["unknowns"]
+        )
+        assert not any(
+            unknown.get("reason")
+            == "worktree_state_changed_during_content_observation"
+            for unknown in capsule["unknowns"]
+        )
+
+
+def test_governed_find_retries_when_content_mutates_after_facts(tmp_path):
+    _search_vault(tmp_path)
+    state_path = tmp_path / "state.md"
+    state_path.write_text("before mutation\n", encoding="utf-8")
+    _init_git_repo(tmp_path)
+    original_observe_content = vivary_core.observe_content
+    content_calls = []
+
+    def mutate_before_first_content(*args, **kwargs):
+        if not content_calls:
+            state_path.write_text(
+                "RETRIED_GOVERNED_CONTENT_MARKER\n",
+                encoding="utf-8",
+            )
+        content_calls.append(None)
+        return original_observe_content(*args, **kwargs)
+
+    with mock.patch.object(
+        vivary_core,
+        "observe_content",
+        side_effect=mutate_before_first_content,
+    ):
+        capsule = tropo.governed_find(
+            str(tmp_path),
+            "RETRIED_GOVERNED_CONTENT_MARKER",
+            max_claims=24,
+        )
+
+    assert len(content_calls) == 3
+    assert any(
+        claim["fact"] == "content_match"
+        and "RETRIED_GOVERNED_CONTENT_MARKER" in claim["claim"]
+        for claim in capsule["claims"]
+    )
+    assert any(
+        claim["fact"] == "is_dirty"
+        and claim["claim"] == "worktree has uncommitted changes"
+        for claim in capsule["claims"]
+    )
+    assert not any(
+        claim["fact"] == "is_dirty" and claim["claim"] == "worktree is clean"
+        for claim in capsule["claims"]
+    )
+
+
+def test_governed_find_retries_when_already_dirty_content_changes(tmp_path):
+    _search_vault(tmp_path)
+    state_path = tmp_path / "state.md"
+    state_path.write_text("committed content\n", encoding="utf-8")
+    _init_git_repo(tmp_path)
+    state_path.write_text(
+        "DIRTY_CHURN_MARKER first read\n",
+        encoding="utf-8",
+    )
+    original_observe_content = vivary_core.observe_content
+    content_calls = []
+
+    def mutate_after_first_content(*args, **kwargs):
+        result = original_observe_content(*args, **kwargs)
+        content_calls.append(None)
+        if len(content_calls) == 1:
+            state_path.write_text(
+                "DIRTY_CHURN_MARKER stable read\n",
+                encoding="utf-8",
+            )
+        return result
+
+    with mock.patch.object(
+        vivary_core,
+        "observe_content",
+        side_effect=mutate_after_first_content,
+    ):
+        capsule = tropo.governed_find(
+            str(tmp_path),
+            "DIRTY_CHURN_MARKER",
+            max_claims=24,
+        )
+
+    assert len(content_calls) == 4
+    content_claims = [
+        claim["claim"]
+        for claim in capsule["claims"]
+        if claim["fact"] == "content_match"
+    ]
+    assert any("DIRTY_CHURN_MARKER stable read" in claim for claim in content_claims)
+    assert all("DIRTY_CHURN_MARKER first read" not in claim for claim in content_claims)
+    assert any(
+        claim["fact"] == "is_dirty"
+        and claim["claim"] == "worktree has uncommitted changes"
+        for claim in capsule["claims"]
+    )
+
+
+def test_governed_find_marks_content_unavailable_after_two_changed_brackets(tmp_path):
+    _search_vault(tmp_path)
+    state_path = tmp_path / "state.md"
+    state_path.write_text("before mutation\n", encoding="utf-8")
+    _init_git_repo(tmp_path)
+    original_observe_content = vivary_core.observe_content
+    content_calls = []
+
+    def mutate_before_each_content(*args, **kwargs):
+        state_path.write_text(
+            f"UNSTABLE_GOVERNED_CONTENT_MARKER {len(content_calls)}\n",
+            encoding="utf-8",
+        )
+        if content_calls:
+            (tmp_path / "second-observation-change.md").write_text(
+                "changes the second status snapshot\n",
+                encoding="utf-8",
+            )
+        content_calls.append(None)
+        return original_observe_content(*args, **kwargs)
+
+    with mock.patch.object(
+        vivary_core,
+        "observe_content",
+        side_effect=mutate_before_each_content,
+    ):
+        capsule = tropo.governed_find(
+            str(tmp_path),
+            "UNSTABLE_GOVERNED_CONTENT_MARKER",
+            max_claims=24,
+        )
+
+    assert len(content_calls) == 2
+    assert not any(claim["fact"] == "content_match" for claim in capsule["claims"])
+    assert any(
+        unknown.get("kind") == "content_search_incomplete"
+        and unknown.get("reason") == "worktree_state_changed_during_content_observation"
+        for unknown in capsule["unknowns"]
+    )
+
+
 def test_governed_find_accepts_symlink_alias_of_worktree_root(tmp_path):
     workspace = tmp_path / "workspace"
     alias = tmp_path / "workspace-alias"
@@ -2615,6 +2849,40 @@ def test_semantic_memory_query_config_accepts_leading_utf8_bom(tmp_path):
     assert config["provider"] == "cognee"
 
 
+def test_cmd_query_semantic_mode_reports_invalid_utf8_memory_config(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "memory.toml").write_bytes(b"\xff\xfe\x00")
+
+    rc, out = _capture_rc(
+        tropo.cmd_query,
+        _query_args("release truth", mode="semantic"),
+        res(str(tmp_path)),
+    )
+
+    assert rc == 1
+    assert out["semantic"]["status"] == "misconfigured"
+    assert ".vivary/memory.toml" in out["semantic"]["detail"]
+    assert str(tmp_path) not in out["semantic"]["detail"]
+    assert out["results"] == []
+
+
+def test_semantic_memory_config_oserror_does_not_disclose_path(tmp_path):
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    memory_path = vivary_dir / "memory.toml"
+    memory_path.write_text("[memory]\n", encoding="utf-8")
+    error = PermissionError(13, "Access is denied", str(memory_path))
+
+    with mock.patch("builtins.open", side_effect=error):
+        config = tropo._load_memory_query_config(str(tmp_path))
+
+    assert config["status"] == "misconfigured"
+    assert ".vivary/memory.toml" in config["detail"]
+    assert str(tmp_path) not in config["detail"]
+
+
 def test_semantic_adapter_origin_rejects_workspace_local_module(tmp_path):
     malicious = tmp_path / "vivary_cognee.py"
     malicious.write_text("raise AssertionError('should not import')\n", encoding="utf-8")
@@ -2722,6 +2990,52 @@ def test_cmd_query_semantic_mode_returns_optional_provider_hits(tmp_path):
     assert out["semantic"]["status"] == "ok"
     assert [r["id"] for r in out["results"]] == ["release-workflow"]
     assert out["results"][0]["reason"] == "typed semantic match"
+
+
+def test_cmd_query_semantic_provider_error_does_not_disclose_path(tmp_path):
+    _search_vault(tmp_path)
+    vivary_dir = tmp_path / ".vivary"
+    vivary_dir.mkdir()
+    (vivary_dir / "memory.toml").write_text(
+        '[memory]\nenabled = true\nprovider = "cognee"\n',
+        encoding="utf-8",
+    )
+    sensitive_path = tmp_path.parent / "outside-secret" / "database.sqlite"
+
+    class FakeAdapter:
+        def __init__(self, root):
+            self.root = root
+
+        async def recall(self, query, *, k=10):
+            raise RuntimeError(f"cannot open {sensitive_path}")
+
+    previous = sys.modules.get("vivary_cognee")
+    allowed = Path(ROOT).parent / "memory-cognee" / "vivary_cognee.py"
+    sys.modules["vivary_cognee"] = types.SimpleNamespace(
+        CogneeMemoryAdapter=FakeAdapter,
+        AdapterError=RuntimeError,
+        __file__=str(allowed),
+        __version__="0.1.1",
+        TROPO_SEMANTIC_ADAPTER_API=1,
+        REQUIRES_EXPLICIT_PROVIDER_GATES=True,
+    )
+    try:
+        rc, out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="semantic"),
+            res(str(tmp_path)),
+        )
+    finally:
+        if previous is None:
+            sys.modules.pop("vivary_cognee", None)
+        else:
+            sys.modules["vivary_cognee"] = previous
+
+    assert rc == 1
+    assert out["semantic"]["status"] == "unavailable"
+    assert "semantic-memory provider query failed" in out["semantic"]["detail"]
+    assert str(sensitive_path) not in out["semantic"]["detail"]
+    assert out["results"] == []
 
 
 def test_cmd_query_semantic_mode_rejects_stale_adapter(tmp_path):

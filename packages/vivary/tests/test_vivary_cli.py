@@ -13,6 +13,17 @@ if str(ROOT) not in sys.path:
 import vivary_cli
 
 
+class VivaryReleaseMetadataTests(unittest.TestCase):
+    def test_runtime_version_matches_manifest_and_tropo_floor(self):
+        import tomllib
+
+        manifest = tomllib.loads(
+            (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        )["project"]
+        self.assertEqual(vivary_cli.__version__, manifest["version"])
+        self.assertIn("vivary-tropo>=0.5.0", manifest["dependencies"])
+
+
 class VivaryLogsTests(unittest.TestCase):
     def _run(self, argv):
         out = io.StringIO()

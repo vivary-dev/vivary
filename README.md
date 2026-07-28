@@ -41,6 +41,10 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 | Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
+Development source is ahead but remains unpublished until the coordinated release
+gate: `vivary-core` **0.2.1**, `vivary-tropo` **0.5.0**, and the `vivary` meta-package
+**0.1.1**.
+
 Versions are intentionally independent across the layers and optional adapters: `tropo`
 moved to 0.4.1 for the read-only `map` filesystem inventory command, `create-vivary` /
 `@vivary/create` move to 0.3.1 for brownfield `adopt` and `doctor --trend` drift
@@ -101,8 +105,8 @@ create-vivary init my-workbench --preset knowledge-work --memory local
 create-vivary init my-codebase --preset coding --active-context cocoindex-code
 create-vivary capabilities --preset second-brain --json
 create-vivary doctor my-workspace
-uvx vivary-tropo check --root my-workspace
-uvx vivary-tropo find "where is release truth owned" --root my-workspace --json
+uvx --from vivary-tropo tropo check --root my-workspace
+uvx --from vivary-tropo tropo find "where is release truth owned" --root my-workspace --json
 tropo check --root my-workspace --receipt .vivary/receipts.jsonl
 vivary logs .vivary/receipts.jsonl
 vivary logs email .vivary/receipts.jsonl --to support@example.com --out .vivary/support.eml

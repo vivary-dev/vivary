@@ -3,7 +3,7 @@
 One install for the full Vivary CLI suite:
 
 ```bash
-pip install vivary
+python -m pip install vivary
 ```
 
 That pulls the four layers, each still usable on its own:

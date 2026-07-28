@@ -30,7 +30,8 @@ This workspace **is a typed knowledge graph** — work it, don't just take notes
 - **many agents** — coordinate with `exo` (`conflicts` / `board` / `roles`).
 
 > Tooling: `pip install vivary-tropo vivary-ozone vivary-exo` (or run via `uvx`,
-> e.g. `uvx vivary-tropo check`). No editor required — the graph is plain Markdown.
+> e.g. `uvx --from vivary-tropo tropo check`). No editor required — the
+> graph is plain Markdown.
 
 ## Visible state
 

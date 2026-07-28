@@ -1,7 +1,8 @@
 """Read-only checkout observation. This is the only impure module in the
 slice: it may run read-only git queries and stat files, and nothing else. It
-never fetches, never writes the index (--no-optional-locks), and never
-crawls - it observes exactly the explicit allowlisted roots it is handed.
+never fetches, never writes the index (--no-optional-locks), never honors
+repository fsmonitor hooks, and never crawls - it observes exactly the explicit
+allowlisted roots it is handed.
 
 Reference-guided Python port of src/workspace/observe.mjs (slice 2, ticket
 #84/#88, decision 0008). The Node module is the frozen executable oracle:
@@ -19,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import subprocess
 import threading
 from datetime import datetime, timezone
@@ -65,6 +67,7 @@ _PINNED_GIT_ENV = {
 _MAX_BUFFER = 4 * 1024 * 1024
 _READ_CHUNK = 64 * 1024
 _MAX_STDERR_BYTES = 8 * 1024
+_MAX_MANIFEST_BYTES = 1024 * 1024
 _SUBPROCESS_CLEANUP_TIMEOUT = 2.0
 
 RunGit = Callable[[str, List[str]], Dict[str, Any]]
@@ -219,7 +222,20 @@ def _redact_remote_url(url: str) -> str:
 
 
 def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
-    full_args = ["--no-optional-locks", "-C", checkout_path, *args]
+    # `core.fsmonitor` is repository configuration and can name an executable.
+    # Override it on every Git invocation rather than trusting an observed
+    # worktree's hook while performing a governed, read-only observation. Keep
+    # the override here, at the concrete runner boundary: injected runners retain
+    # their documented subcommand-only `args` contract and supply their own
+    # evidence.
+    full_args = [
+        "--no-optional-locks",
+        "-c",
+        "core.fsmonitor=false",
+        "-C",
+        checkout_path,
+        *args,
+    ]
     command = f"git {' '.join(full_args)}"
     outcome = _capped_run(["git", *full_args], _sanitized_git_env(), _MAX_BUFFER)
     if outcome["error"] is not None:
@@ -252,10 +268,11 @@ def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
     return {"ok": True, "stdout": stdout_text.replace("\r\n", "\n"), "command": command}
 
 
-# Marker files that say something about how a workspace is verified. Presence is
-# stat-only; `package.json` is the one file whose *contents* are read, because
-# presence alone is too weak a signal — a `package.json` for a docs site or a lint
-# hook is common, and telling that workspace to run `npm test` produces a confusing
+# Marker files that say something about how a workspace is verified. They are
+# stat-only after the repository's ignore policy has admitted their names;
+# `package.json` is the one file whose *contents* are read, because presence
+# alone is too weak a signal — a `package.json` for a docs site or a lint hook
+# is common, and telling that workspace to run `npm test` produces a confusing
 # failure rather than a check.
 WORKSPACE_MARKERS = (
     "tropo.toml",
@@ -274,33 +291,101 @@ WORKSPACE_MARKERS = (
 _NPM_PLACEHOLDER_TEST = 'echo "Error: no test specified" && exit 1'
 
 
-def _observe_workspace_markers(worktree_root: str) -> List[str]:
-    """Which known marker files exist at the worktree root.
+def _is_safe_workspace_file(path: str) -> bool:
+    """Reject reparse points and multiply linked files before marker admission."""
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    return (
+        stat.S_ISREG(info.st_mode)
+        and info.st_nlink == 1
+        and not getattr(info, "st_reparse_tag", 0)
+    )
 
-    Stat-only, deterministic, and sorted. Read-only observation in the same sense as
-    the git queries around it — it never executes anything it finds.
+
+def _observe_workspace_markers(
+    worktree_root: str,
+    run_git: RunGit,
+) -> tuple[Optional[List[str]], set[str], str]:
+    """Known root markers admitted by repository ignore policy.
+
+    A marker can derive a required command, so it is governed data just like a
+    dirty path or content match. Check every allowlisted name with
+    `check-ignore --no-index` before statting or reading it: this applies the
+    policy to tracked names too and leaves real tracked and untracked,
+    non-ignored markers observable. An unavailable or malformed policy fails
+    closed for the whole marker set.
     """
+    ignored, ignore_command = _ignored_paths(
+        worktree_root,
+        list(WORKSPACE_MARKERS),
+        run_git,
+    )
+    if ignored is None:
+        return None, set(), ignore_command
+
     found = []
     for marker in WORKSPACE_MARKERS:
-        try:
-            if os.path.isfile(os.path.join(worktree_root, marker)):
-                found.append(marker)
-        except OSError:
+        if marker in ignored:
             continue
-    return sorted(found)
+        path = os.path.join(worktree_root, marker)
+        if _is_safe_workspace_file(path):
+            found.append(marker)
+            continue
+    return sorted(found), ignored, ignore_command
 
 
 def _observe_npm_test_script(worktree_root: str) -> Optional[str]:
-    """`scripts.test` from package.json, or None when there is no real one.
+    """`scripts.test` from one bounded, in-root regular file, or None.
 
-    npm's scaffolded placeholder is treated as absent: it is a known non-check, and
-    deriving a required check from it would hand back a command guaranteed to fail.
+    Open the descriptor without following POSIX symlinks, then bind it to the
+    lstat identity observed before and after the open. The identity checks cover
+    Windows reparse-point swaps where `O_NOFOLLOW` is unavailable. Single-link
+    files only: an in-root hardlink can otherwise disclose a manifest owned
+    outside the governed workspace.
     """
+    path = os.path.join(worktree_root, "package.json")
     try:
-        with open(os.path.join(worktree_root, "package.json"), "r", encoding="utf-8") as handle:
-            manifest = json.load(handle)
-    except (OSError, ValueError):
+        before = os.lstat(path)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or getattr(before, "st_reparse_tag", 0)
+        ):
+            return None
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+    except OSError:
         return None
+
+    try:
+        opened = os.fstat(descriptor)
+        after = os.lstat(path)
+        identities = {
+            (before.st_dev, before.st_ino),
+            (opened.st_dev, opened.st_ino),
+            (after.st_dev, after.st_ino),
+        }
+        if (
+            len(identities) != 1
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or opened.st_size > _MAX_MANIFEST_BYTES
+            or not stat.S_ISREG(after.st_mode)
+            or after.st_nlink != 1
+            or getattr(after, "st_reparse_tag", 0)
+        ):
+            return None
+        with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+            descriptor = -1
+            manifest = json.load(handle)
+    except (OSError, ValueError, RecursionError):
+        return None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
     if not isinstance(manifest, dict):
         return None
     scripts = manifest.get("scripts")
@@ -476,17 +561,38 @@ def _observe_one(raw_path: str, run_git: RunGit) -> Dict[str, Any]:
             )
         else:
             facts["git_common_dir"] = _unknown("git_common_dir_unavailable", common["command"])
-
         worktree_root = facts["worktree_root"]["value"]
-        facts["workspace_markers"] = _known(
-            _observe_workspace_markers(worktree_root), "fs.stat workspace markers"
+
+        markers, ignored_markers, ignore_command = _observe_workspace_markers(
+            worktree_root,
+            run_git,
         )
-        npm_test = _observe_npm_test_script(worktree_root)
-        facts["npm_test_script"] = (
-            _known(npm_test, "fs.read package.json scripts.test")
-            if npm_test is not None
-            else _unknown("no_npm_test_script", "fs.read package.json scripts.test")
-        )
+        if markers is None:
+            facts["workspace_markers"] = _unknown(
+                "ignore_policy_unavailable",
+                ignore_command,
+            )
+            facts["npm_test_script"] = _unknown(
+                "ignore_policy_unavailable",
+                ignore_command,
+            )
+        else:
+            facts["workspace_markers"] = _known(markers, "fs.stat workspace markers")
+            if "package.json" in ignored_markers:
+                # Do not turn a private manifest's existence or scripts into a
+                # fact. It is indistinguishable from a manifest with no usable
+                # test script and cannot derive `npm test`.
+                facts["npm_test_script"] = _unknown(
+                    "no_npm_test_script",
+                    ignore_command,
+                )
+            else:
+                npm_test = _observe_npm_test_script(worktree_root)
+                facts["npm_test_script"] = (
+                    _known(npm_test, "fs.read package.json scripts.test")
+                    if npm_test is not None
+                    else _unknown("no_npm_test_script", "fs.read package.json scripts.test")
+                )
     else:
         # `--show-toplevel` fails for a bare repository too (it has no working
         # tree) - that is not the same fact as "not a git repository at all".

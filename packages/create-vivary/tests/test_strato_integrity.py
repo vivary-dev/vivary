@@ -19,12 +19,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 PKG = ROOT / "packages" / "create-vivary"
 TROPO = ROOT / "packages" / "tropo"
+CORE = ROOT / "packages" / "core"
 
 sys.path.insert(0, str(PKG))
 sys.path.insert(0, str(TROPO))
+sys.path.insert(0, str(CORE))
 
 import create_vivary  # noqa: E402
 import tropo  # noqa: E402
+from vivary_core.capsule_compile import (  # noqa: E402
+    _CREATE_VIVARY_WORKSPACE_MARKERS,
+)
 
 PRESETS = ("coding", "second-brain", "knowledge-work", "writing")
 
@@ -81,6 +86,16 @@ def _scaffold(preset: str, target: Path) -> None:
         storage="file",  # avoid any real backend install during smoke tests
         repo_root=ROOT,
     )
+
+
+class MarkerContractParityTests(unittest.TestCase):
+    """Core and create-vivary must agree on the full scaffold identity."""
+
+    def test_core_marker_gate_matches_scaffolder_contract(self):
+        self.assertEqual(
+            set(_CREATE_VIVARY_WORKSPACE_MARKERS),
+            set(create_vivary.REPAIR_WORKSPACE_MARKERS),
+        )
 
 
 class ScaffoldSmokeTests(unittest.TestCase):

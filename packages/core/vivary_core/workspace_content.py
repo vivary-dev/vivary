@@ -58,12 +58,6 @@ MAX_EXCERPT_LENGTH = 200  # UTF-16 code units kept per excerpt
 # port's test suite drives output that large.
 _MAX_GIT_OUTPUT_BYTES = 4 * 1024 * 1024
 
-# Ambient git-discovery env vars must never override the explicit -C target:
-# this tool always names its repository root directly, so honoring an
-# inherited GIT_DIR/GIT_WORK_TREE/etc. would let an environment variable
-# silently redirect a search to a different repository than the one the
-# caller (and the allowlist check) actually asked about.
-_AMBIENT_GIT_ENV_KEYS = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"]
 
 RunGit = Callable[[str, List[str]], Dict[str, Any]]
 
@@ -82,7 +76,14 @@ from vivary_core.workspace_observe import (  # noqa: E402
 
 
 def _default_run_git(checkout_path: str, args: List[str]) -> Dict[str, Any]:
-    full_args = ["--no-optional-locks", "-C", checkout_path, *args]
+    full_args = [
+        "--no-optional-locks",
+        "-c",
+        "core.fsmonitor=false",
+        "-C",
+        checkout_path,
+        *args,
+    ]
     command = "git " + " ".join(full_args)
     outcome = _capped_run(
         ["git", *full_args],

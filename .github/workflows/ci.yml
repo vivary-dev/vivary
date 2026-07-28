@@ -47,7 +47,7 @@ jobs:
         run: python packages/vivary/tests/test_vivary_cli.py
       - name: core (governed-context seam; suite is the ported reference tests)
         run: |
-          python -m pip install pytest
+          python -m pip install pytest packaging
           python -m pytest packages/core/tests/ -q
       - name: packaged core and optional semantic bridge smoke
         shell: bash
@@ -107,6 +107,7 @@ jobs:
           python - "$smoke/out.json" "$smoke/governed.json" "$rc" <<'PY'
           import json
           import sys
+          from packaging.requirements import Requirement
           from importlib.metadata import requires, version
           import tomllib
 
@@ -130,6 +131,10 @@ jobs:
           assert data["results"] == []
           assert version("vivary-core") == core_version
           assert core_requirement in (requires("vivary-tropo") or [])
+          assert Requirement(core_requirement).specifier.contains(core_version), (
+              core_requirement,
+              core_version,
+          )
           assert governed["schema"] == "vivary.task-capsule/v0"
           assert governed["budget"] == {"max_claims": 2}
           assert governed["claims"]

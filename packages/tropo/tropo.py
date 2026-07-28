@@ -46,7 +46,7 @@ import tomllib
 from collections import Counter, deque
 from fnmatch import fnmatchcase
 
-__version__ = "0.4.2"
+__version__ = "0.5.0"
 RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
 RECEIPT_SCHEMA = "vivary.run_receipt.v1"
 COMMANDS = (
@@ -1415,12 +1415,22 @@ def _load_memory_query_config(root):
             "detail": f"{STORAGE_DIR}/{MEMORY_CONFIG_NAME} does not enable semantic memory",
         }
     try:
-        with open(path, encoding="utf-8-sig") as fh:
-            data = tomllib.loads(fh.read())
-    except (OSError, tomllib.TOMLDecodeError) as e:
+        with open(path, "r", encoding="utf-8-sig") as handle:
+            data = tomllib.loads(handle.read())
+    except OSError as e:
         return {
             "enabled": False,
-            "provider": "unknown",
+            "provider": "none",
+            "status": "misconfigured",
+            "detail": (
+                f"cannot read {STORAGE_DIR}/{MEMORY_CONFIG_NAME}: "
+                f"{e.strerror or e.__class__.__name__}"
+            ),
+        }
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
+        return {
+            "enabled": False,
+            "provider": "none",
             "status": "misconfigured",
             "detail": f"invalid {STORAGE_DIR}/{MEMORY_CONFIG_NAME}: {e}",
         }
@@ -2815,12 +2825,15 @@ def semantic_query(resolver, text, *, k=10, type_filters=None, path_filters=None
         hits = asyncio.run(
             vivary_cognee.CogneeMemoryAdapter(resolver.root).recall(text, k=provider_k)
         )
-    except getattr(vivary_cognee, "AdapterError", RuntimeError) as e:
+    except Exception as e:
         return 1, [], {
             "enabled": True,
             "provider": "cognee",
             "status": "unavailable",
-            "detail": str(e),
+            "detail": (
+                "semantic-memory provider query failed "
+                f"({e.__class__.__name__})"
+            ),
         }
     results = []
     for hit in hits:
@@ -3864,8 +3877,114 @@ def _same_filesystem_path(left, right):
     return left == right
 
 
+def _governed_checkout(observation, root):
+    return next(
+        (
+            entry
+            for entry in observation.get("checkouts", [])
+            if entry.get("path") == root
+        ),
+        None,
+    )
+
+
+def _refuse_nested_governed_root(observation, root, normalize):
+    """Keep governed scope equal to the resolved worktree root."""
+    checkout = _governed_checkout(observation, root)
+    worktree_root = (
+        ((checkout or {}).get("facts") or {}).get("worktree_root") or {}
+    )
+    if (
+        worktree_root.get("status") == "known"
+        and not _same_filesystem_path(
+            normalize(worktree_root.get("value")),
+            root,
+        )
+    ):
+        raise ValueError(
+            "the governed Tropo root must be the Git worktree root; "
+            "nested roots are refused to prevent sibling checkout facts from leaking"
+        )
+
+
+def _governed_observation_state(observation):
+    """The observed checkout state that can enter a governed capsule.
+
+    Timestamps are deliberately excluded: they describe the scan, not the
+    worktree. Every checkout fact and refusal remains in the comparison because
+    either can alter a graph, derived check, claim, unknown, omission, evidence,
+    or fingerprint.
+    """
+    return (
+        observation.get("checkouts", []),
+        observation.get("refusals", []),
+    )
+
+
+def _governed_content_unavailability_reason(observation):
+    """Explain why a stable fact bracket still cannot attest read content."""
+    checkouts = observation.get("checkouts", [])
+    if len(checkouts) != 1:
+        return "dirty_state_unknown"
+    for checkout in checkouts:
+        facts = checkout.get("facts") or {}
+        repository = facts.get("is_git_repository") or {}
+        if repository.get("status") != "known" or repository.get("value") is not True:
+            return "dirty_state_unknown"
+        for name in ("is_dirty", "dirty_entries"):
+            fact = facts.get(name) or {}
+            if (
+                fact.get("status") != "known"
+                and fact.get("reason") != "ignored_dirty_entries_excluded"
+            ):
+                return "dirty_state_unknown"
+    return None
+
+
+def _governed_content_state(content):
+    """Content identity without the observation timestamp."""
+    return (
+        content.get("schema"),
+        content.get("terms", []),
+        content.get("allowlist", []),
+        content.get("checkouts", []),
+        content.get("refusals", []),
+    )
+
+
+def _governed_content_unavailable(
+    content,
+    root,
+    reason="worktree_state_changed_during_content_observation",
+):
+    """Discard content that cannot be bound without changing content schemas."""
+    return {
+        "schema": content.get("schema", "vivary.workspace-content/v0"),
+        "observed_at": content.get("observed_at"),
+        "terms": content.get("terms", []),
+        "allowlist": content.get("allowlist", [root]),
+        "checkouts": [
+            {
+                "raw_path": root,
+                "path": root,
+                "status": "unknown",
+                "reason": reason,
+                "matches": [],
+                "omissions": [],
+            }
+        ],
+        "refusals": [],
+    }
+
+
 def governed_find(root, question, *, max_claims=24):
-    """Compile a bounded governed-context capsule for one Tropo workspace."""
+    """Compile a bounded governed-context capsule for one Tropo workspace.
+
+    Facts and content must describe one worktree state. A content scan is
+    bracketed by two full checkout observations; a changed bracket retries once,
+    then discards the unstable content rather than quietly pairing it with
+    stale facts.
+    """
     from vivary_core import (
         compile_task_capsule,
         observe_checkouts,
@@ -3876,35 +3995,64 @@ def governed_find(root, question, *, max_claims=24):
 
     root = normalize_path(os.path.realpath(os.path.abspath(root)))
     paths = [root]
-    observation = observe_checkouts(paths, allowlist=paths)
-    checkout = next(
-        (
-            entry
-            for entry in observation.get("checkouts", [])
-            if entry.get("path") == root
-        ),
-        None,
-    )
-    worktree_root = (
-        ((checkout or {}).get("facts") or {}).get("worktree_root") or {}
-    )
-    if (
-        worktree_root.get("status") == "known"
-        and not _same_filesystem_path(
-            normalize_path(worktree_root.get("value")),
-            root,
+    terms = _governed_query_terms(question)
+
+    for _attempt in range(2):
+        before = observe_checkouts(paths, allowlist=paths)
+        _refuse_nested_governed_root(before, root, normalize_path)
+        scanned_content = observe_content(
+            paths,
+            allowlist=paths,
+            terms=terms,
         )
-    ):
-        raise ValueError(
-            "the governed Tropo root must be the Git worktree root; "
-            "nested roots are refused to prevent sibling checkout facts from leaking"
+        after = observe_checkouts(paths, allowlist=paths)
+        _refuse_nested_governed_root(after, root, normalize_path)
+        if _governed_observation_state(before) != _governed_observation_state(after):
+            continue
+
+        observation = after
+        unavailable_reason = _governed_content_unavailability_reason(after)
+        if unavailable_reason is not None:
+            content = _governed_content_unavailable(
+                scanned_content,
+                root,
+                reason=unavailable_reason,
+            )
+            break
+
+        checkout = _governed_checkout(after, root) or {}
+        dirty_fact = (checkout.get("facts") or {}).get("is_dirty") or {}
+        requires_rescan = (
+            dirty_fact.get("status") != "known" or dirty_fact.get("value") is True
         )
+        if requires_rescan:
+            rescanned_content = observe_content(
+                paths,
+                allowlist=paths,
+                terms=terms,
+            )
+            final = observe_checkouts(paths, allowlist=paths)
+            _refuse_nested_governed_root(final, root, normalize_path)
+            if (
+                _governed_observation_state(after)
+                != _governed_observation_state(final)
+                or _governed_content_state(scanned_content)
+                != _governed_content_state(rescanned_content)
+            ):
+                continue
+            observation = final
+            content = rescanned_content
+        else:
+            content = scanned_content
+        break
+    else:
+        # Both bounded attempts saw a changing checkout. `after` is still one
+        # coherent fact snapshot, but none of the read content can be bound to
+        # it, so expose that incompleteness instead of mixing observations.
+        observation = after
+        content = _governed_content_unavailable(scanned_content, root)
+
     graph = project_workspace_graph(observation)
-    content = observe_content(
-        paths,
-        allowlist=paths,
-        terms=_governed_query_terms(question),
-    )
     return compile_task_capsule(
         task={"question": question, "scope": paths},
         graph=graph,

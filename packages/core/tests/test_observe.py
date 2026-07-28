@@ -25,9 +25,11 @@ import pytest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
+from vivary_core.workspace_content import observe_content  # noqa: E402
 from vivary_core.workspace_observe import (  # noqa: E402
     OBSERVATION_SCHEMA,
     _parse_remotes,
+    _observe_npm_test_script,
     observe_checkouts,
 )
 
@@ -220,6 +222,52 @@ def test_observation_is_strictly_read_only_git_trees_byte_identical(fx, allowlis
     assert after == before
 
 
+def test_repository_fsmonitor_hook_is_not_invoked_by_default_observation(tmp_path):
+    base = str(tmp_path)
+    repo = str(tmp_path / "repo")
+    _git(base, base, ["init", "-q", "-b", "main", repo])
+    _commit_file(base, repo, "README.md", "fixture\n", "fixture")
+
+    marker = os.path.join(base, "fsmonitor-invoked")
+    marker_for_shell = marker
+    if os.name == "nt":
+        drive, tail = os.path.splitdrive(marker.replace("\\", "/"))
+        marker_for_shell = f"/{drive[0].lower()}{tail}"
+    hook = os.path.join(base, "fsmonitor-hook")
+    with open(hook, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(
+            "#!/bin/sh\n"
+            f"printf invoked > {json.dumps(marker_for_shell)}\n"
+            "printf 'token\\000'\n"
+        )
+    os.chmod(hook, stat.S_IRWXU)
+
+    _git(base, repo, ["config", "core.fsmonitor", hook.replace("\\", "/")])
+    _git(base, repo, ["config", "core.fsmonitorHookVersion", "1"])
+    # Positive control: the repository-local provider is executable on both
+    # platforms before either governed runner applies its command-scoped override.
+    _git(base, repo, ["status", "--porcelain"])
+    assert os.path.isfile(marker)
+    os.remove(marker)
+
+    result = observe_checkouts([repo], allowlist=[repo], now=NOW)
+
+    assert not os.path.exists(marker)
+    status_command = result["checkouts"][0]["facts"]["is_dirty"]["evidence"]["command"]
+    assert "-c core.fsmonitor=false" in status_command
+
+    content = observe_content(
+        [repo],
+        allowlist=[repo],
+        terms=["fixture"],
+        now=NOW,
+    )
+    assert not os.path.exists(marker)
+    assert content["checkouts"][0]["matches"]
+    content_command = content["checkouts"][0]["matches"][0]["evidence"]["command"]
+    assert "-c core.fsmonitor=false" in content_command
+
+
 def test_clean_canonical_checkout_every_core_fact_is_known(fx, allowlist):
     result = observe_checkouts([fx["paths"]["canonical"]], allowlist=allowlist, now=NOW)
     checkout = result["checkouts"][0]
@@ -288,6 +336,95 @@ def test_tracked_ignored_dirty_path_is_never_disclosed(fx, allowlist):
     serialized = json.dumps(result)
     assert "tracked.md" not in serialized
     assert "privacy_command" in serialized
+
+
+def test_ignored_manifest_never_enters_markers_or_npm_script_facts(tmp_path):
+    base = str(tmp_path)
+    repo = str(tmp_path / "repo")
+    _git(base, base, ["init", "-q", "-b", "main", repo])
+    _commit_file(
+        base,
+        repo,
+        "package.json",
+        '{"scripts":{"test":"PRIVATE_MANIFEST_TEST_COMMAND"}}\n',
+        "tracked manifest",
+    )
+    _commit_file(base, repo, ".gitignore", "package.json\n", "privacy policy")
+    with open(os.path.join(repo, "tropo.toml"), "w", encoding="utf-8", newline="") as handle:
+        handle.write("[base]\nallow_untyped = true\n")
+
+    result = observe_checkouts([repo], allowlist=[repo], now=NOW)
+
+    facts = result["checkouts"][0]["facts"]
+    assert "package.json" not in facts["workspace_markers"]["value"]
+    assert "tropo.toml" in facts["workspace_markers"]["value"]
+    assert facts["npm_test_script"]["status"] == "unknown"
+    assert facts["npm_test_script"]["reason"] == "no_npm_test_script"
+    serialized = json.dumps(result)
+    assert "package.json" not in serialized
+    assert "PRIVATE_MANIFEST_TEST_COMMAND" not in serialized
+
+
+def test_hardlinked_manifest_cannot_derive_an_external_check(tmp_path):
+    base = str(tmp_path)
+    repo = str(tmp_path / "repo")
+    _git(base, base, ["init", "-q", "-b", "main", repo])
+    _commit_file(base, repo, "README.md", "base\n", "base")
+
+    external_manifest = tmp_path / "external-package.json"
+    external_manifest.write_text(
+        '{"scripts":{"test":"EXTERNAL_MANIFEST_TEST_COMMAND"}}\n',
+        encoding="utf-8",
+    )
+    os.link(external_manifest, os.path.join(repo, "package.json"))
+
+    result = observe_checkouts([repo], allowlist=[repo], now=NOW)
+
+    facts = result["checkouts"][0]["facts"]
+    assert "package.json" not in facts["workspace_markers"]["value"]
+    assert facts["npm_test_script"]["status"] == "unknown"
+    serialized = json.dumps(result)
+    assert "EXTERNAL_MANIFEST_TEST_COMMAND" not in serialized
+    assert "external-package.json" not in serialized
+
+
+def test_manifest_descriptor_rejects_a_path_identity_swap(tmp_path, monkeypatch):
+    manifest = tmp_path / "package.json"
+    manifest.write_text(
+        '{"scripts":{"test":"ORIGINAL_MANIFEST_TEST_COMMAND"}}\n',
+        encoding="utf-8",
+    )
+    replacement = tmp_path / "replacement.json"
+    replacement.write_text(
+        '{"scripts":{"test":"REPLACEMENT_MANIFEST_TEST_COMMAND"}}\n',
+        encoding="utf-8",
+    )
+    before = os.lstat(manifest)
+    after = os.lstat(replacement)
+    calls = []
+    real_lstat = os.lstat
+
+    def swapped_lstat(path):
+        if os.fspath(path) == os.fspath(manifest):
+            calls.append(None)
+            return before if len(calls) == 1 else after
+        return real_lstat(path)
+
+    monkeypatch.setattr(os, "lstat", swapped_lstat)
+
+    assert _observe_npm_test_script(str(tmp_path)) is None
+    assert len(calls) == 2
+    # The rejected descriptor must be closed; Windows would refuse this unlink
+    # if the defense-in-depth identity check leaked the handle.
+    manifest.unlink()
+
+
+def test_manifest_parser_rejects_excessive_json_nesting(tmp_path):
+    manifest = tmp_path / "package.json"
+    manifest.write_text("[" * 2000 + "]" * 2000, encoding="utf-8")
+
+    assert _observe_npm_test_script(str(tmp_path)) is None
+
 
 def test_non_ascii_dirty_filename_is_reported_without_quoting(tmp_path):
     base = str(tmp_path)

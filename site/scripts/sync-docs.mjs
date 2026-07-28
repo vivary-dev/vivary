@@ -203,27 +203,24 @@ console.log('site docs synced from docs/ (+ CHANGELOG.md).');
 
 // --- Generate llms.txt & llms-full.txt ---
 
-const readPythonVersion = (packagePath) => {
-  const file = path.join(repoRoot, 'packages', packagePath, 'pyproject.toml');
-  const content = fs.readFileSync(file, 'utf8');
-  const match = content.match(/^version\s*=\s*"([^"]+)"/m);
-  if (!match) throw new Error(`Could not find version in pyproject.toml for ${packagePath}`);
-  return match[1];
+const rootReadme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
+
+const readPublishedVersion = (surface) => {
+  const prefix = `| \`${surface}\``;
+  const row = rootReadme.split(/\r?\n/).find((line) => line.startsWith(prefix));
+  const version = row?.split('|')[2]?.trim();
+  if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error(`Could not find published version for ${surface} in README.md`);
+  }
+  return version;
 };
 
-const readNpmVersion = (packagePath) => {
-  const file = path.join(repoRoot, 'packages', packagePath, 'package.json');
-  const content = fs.readFileSync(file, 'utf8');
-  const pkg = JSON.parse(content);
-  return pkg.version;
-};
-
-const createVivaryPyPI = readPythonVersion('create-vivary');
-const createVivaryNpm = readNpmVersion('create-vivary/npm');
-const tropoVersion = readPythonVersion('tropo');
-const ozoneVersion = readPythonVersion('ozone');
-const exoVersion = readPythonVersion('exo');
-const cogneeVersion = readPythonVersion('memory-cognee');
+const createVivaryPyPI = readPublishedVersion('create-vivary');
+const createVivaryNpm = readPublishedVersion('@vivary/create');
+const tropoVersion = readPublishedVersion('vivary-tropo');
+const ozoneVersion = readPublishedVersion('vivary-ozone');
+const exoVersion = readPublishedVersion('vivary-exo');
+const cogneeVersion = readPublishedVersion('vivary-memory-cognee');
 
 const coreDocsList = pages
   .map(([_, slug, title]) => `- ${title}: https://vivary.vercel.app/${slug}/`)

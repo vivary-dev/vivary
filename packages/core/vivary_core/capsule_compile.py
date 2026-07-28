@@ -92,7 +92,7 @@ def _derive_required_checks(checkouts):
         facts = node.get("facts") or {}
         markers = _fact_value(node, "workspace_markers") or []
         marker_evidence = (facts.get("workspace_markers") or {}).get("evidence")
-        cwd = node.get("path")
+        cwd = _fact_value(node, "worktree_root") or node.get("path")
         suffix = f"@{node.get('id')}"
 
         # A standalone Tropo graph can run its graph check. Doctor validates the

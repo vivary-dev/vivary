@@ -10,7 +10,7 @@ The precise, typed knowledge graph — the real edges, coloured by type — rend
 single self-contained HTML file, no editor or plugin needed:
 
 ```bash
-tropo view --root . --out graph.html   # or: uvx vivary-tropo view ...
+tropo view --root . --out graph.html   # or: uvx --from vivary-tropo tropo view ...
 # open graph.html in any browser
 ```
 

@@ -12,11 +12,12 @@ the `v0.1.0` line.
 
 ## [Unreleased: Tropo governed-context adapter] — 2026-07-26
 
-Affects the source checkout's unreleased `vivary-tropo` **0.4.2**, its first
-`vivary-core` dependency edge, package documentation, and CI packaging proof. The
-published Tropo release remains **0.4.1**. No package was published, deployed, or
-enabled by default; publication remains part of the final coordinated release train
-and requires a separate human gate.
+Affects the source checkout's unreleased `vivary-tropo` **0.5.0** and `vivary`
+meta-package **0.1.1**, Tropo's first `vivary-core` dependency edge, package
+documentation, and CI packaging proof. The published releases remain Tropo **0.4.1**
+and `vivary` **0.1.0**. No package was published, deployed, or enabled by default;
+publication remains part of the final coordinated release train and requires a
+separate human gate.
 
 ### Added
 
@@ -43,12 +44,14 @@ and requires a separate human gate.
 
 ### Changed
 
-- `vivary-core` advances from 0.2.0 to 0.2.1, and `vivary-tropo` now declares
-  `vivary-core>=0.2.1`: the first source version exposing the adapter API and the first
-  real package-to-core dependency promised by
-  [#207](https://github.com/vivary-dev/vivary/issues/207). Tropo source advances from
-  0.4.1 to 0.4.2; both remain unpublished in this development train until the
-  coordinated release.
+- `vivary-core` advances from 0.2.0 to 0.2.1, and `vivary-tropo` advances from
+  0.4.1 to 0.5.0 because the new governed flags are a user-visible minor feature.
+  Tropo declares `vivary-core>=0.2.1`: the first source version exposing the adapter
+  API and the first real package-to-core dependency promised by
+  [#207](https://github.com/vivary-dev/vivary/issues/207). The `vivary` meta-package
+  advances from 0.1.0 to 0.1.1 and raises its floor to `vivary-tropo>=0.5.0`, so it
+  receives core transitively. All three source versions remain unpublished in this
+  development train until the coordinated release.
 - Plain `tropo find` keeps its existing typed-context packet and default token budget.
   Governed-only flags, malformed core inputs, and broken core installs fail with the
   documented usage exit code `2`; the command reference owns the exact flag contract.
@@ -74,24 +77,61 @@ and requires a separate human gate.
   query fallback no longer restores filtered stopwords or one-letter ASCII fragments,
   and checkout observation sorts non-Latin remote names with the deterministic Unicode
   fallback instead of aborting.
+- Governed content is bracketed by checkout observations and retried once when the
+  worktree changes. Dirty or privacy-filtered checkouts also require two identical
+  content scans inside a stable fact bracket; persistent mutation produces an explicit
+  content-unavailable unknown instead of a mixed-state capsule. A checkout whose dirty
+  state cannot be established reports `dirty_state_unknown`, not a false mutation race.
+  Every default Git command used for observation or content retrieval disables
+  repository-configured filesystem monitors. Workspace markers and package scripts
+  pass through the same fail-closed ignore-policy filter as content and dirty paths;
+  reparse-point and multiply linked markers are rejected, and package manifests are
+  read through a bounded descriptor whose file identity is verified before and after
+  opening. An ignored or externally linked manifest cannot leak facts or derive an
+  executable check.
+- Derived checks execute from the observed Git worktree root even when the requested
+  checkout path is nested. Excessively nested `package.json` input now degrades to no
+  npm check instead of escaping the structured observation contract.
+- Semantic-memory configuration now returns structured misconfiguration results for
+  unreadable or invalid-UTF-8 TOML. Optional-provider failures identify the provider
+  boundary without returning exception text that can disclose filesystem paths.
+- Generated `llms.txt` package surfaces read published versions from the root release
+  table rather than unreleased source manifests. On-demand examples use
+  `uvx --from <distribution> <command>`, matching each package's console entry point.
+  The Strato integrity gate now locks core's full-scaffold marker set to
+  create-vivary's repair contract.
+- The Tropo package quickstart copies the example vault into a guarded temporary Git
+  fixture, commits it with local throwaway identity, demonstrates content-backed
+  governed claims, and removes the fixture on exit.
 - Command, package, architecture, root overview, and generated-site truth now describe
   the opt-in boundary, dependency direction, and no-fetch/no-write/no-provider
   constraints.
 
 ### Verification
 
-- `python packages/tropo/tests/test_tropo.py` — **160/160** passed on Windows.
-- `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **160/160**
+- `python packages/tropo/tests/test_tropo.py` — **169/169** passed on Windows.
+- `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **169/169**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **604 passed** on Windows;
-  `uv run --with pytest python3 -m pytest packages/core/tests/ -q` — **602 passed,
-  2 platform-specific skips** on WSL Linux.
+- `python -m pytest packages/core/tests/ -q` — **610 passed** on Windows;
+  `UV_CACHE_DIR=$HOME/.cache/uv TMPDIR=/tmp uv run --with pytest python3 -m pytest
+  packages/core/tests/ -q -p no:cacheprovider` — **608 passed, 2 platform-specific
+  skips** on WSL Linux.
 - `python -m pytest packages/tropo/tests/test_tropo.py -q -k "governed or
-  cmd_find_returns_context_packet"` — **11 passed**.
-- Isolated `uv run --with ./packages/core --with ./packages/tropo` distribution
-  smoke — installed metadata reported core **0.2.1** and Tropo **0.4.2**; governed
+  cmd_find_returns_context_packet"` — **17 passed**.
+- Isolated `uv run --no-cache --with ./packages/core --with ./packages/tropo`
+  smoke — installed metadata reported core **0.2.1** and Tropo **0.5.0**; governed
   find returned a bounded two-claim Task Capsule with the full scaffold's doctor and
   graph checks.
+- Coordinated local `uv run --no-cache --with` smoke across core, Tropo,
+  create-vivary, Ozone, Exo, and the meta package reported `vivary` **0.1.1**,
+  Tropo **0.5.0**, and core **0.2.1**.
+  The packaged smoke also verified that the installed core version satisfies Tropo's
+  declared requirement specifier, not merely that the metadata names it.
+- `python -m pytest packages/vivary/tests/ -q` — **9 passed**; the manifest/runtime
+  version and `vivary-tropo>=0.5.0` floor matched.
+- `python packages/create-vivary/tests/test_privacy_differential.py` — **2/2
+  passed** with global Git config, excludes, templates, and fsmonitor isolated from
+  the real-Git oracle.
 - `python scripts/tests/test_package_docs_parity.py` — **10/10 passed**;
   `python scripts/check_package_docs_parity.py` — **6** published manifests and
   **1** unpublished allowlist entry matched the architecture page.
@@ -101,7 +141,7 @@ and requires a separate human gate.
   **4** documents, zero errors or warnings.
 - Repository verification also passed: Ozone **21/21**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
-  Strato integrity **6/6**.
+  Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**
   site tests passed; **23** pages built; **1,680** local references and **1,054**
   anchors checked with zero failures.

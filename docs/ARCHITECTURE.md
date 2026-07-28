@@ -145,8 +145,8 @@ declares its own floor in the same commit; the `vivary` meta package receives co
 transitively and does not declare it. One owner per edge avoids version-pinning fights.
 `vivary-tropo` is the first importer: its experimental `find --governed` adapter depends
 on `vivary-core>=0.2.1`, the first source version that exposes the adapter's required
-API. Role packages add their own floors only when their first real imports land — never
-ahead of the code that needs them — so no role manifest depends on core yet.
+API. No other role manifest depends on core yet; the remaining role packages add their
+own floors only when their first real imports land — never ahead of the code that needs them.
 
 **Status:** merged into `dev`, unpublished during development, and reachable only
 through the explicit experimental `tropo find --governed` flag. Plain Tropo retrieval

@@ -948,6 +948,32 @@ def test_required_checks_are_derived_from_the_observed_workspace(fx):
 
 
 
+def test_required_checks_run_at_the_observed_worktree_root(fx):
+    repo = fx["paths"]["canonical"]
+    nested = os.path.join(repo, "nested")
+    os.makedirs(nested, exist_ok=True)
+    for name in ("tropo.toml", "AGENTS.md", "STRATO.md"):
+        _write(os.path.join(repo, name), f"# {name}\n")
+
+    try:
+        graph = project_workspace_graph(
+            observe_checkouts([nested], allowlist=[repo], now=NOW)
+        )
+        capsule = compile_task_capsule(task=TASK, graph=graph)
+
+        assert capsule["required_checks"]
+        assert all(
+            check["cwd"] == normalize_path(repo)
+            for check in capsule["required_checks"]
+        )
+    finally:
+        for name in ("tropo.toml", "AGENTS.md", "STRATO.md"):
+            marker = os.path.join(repo, name)
+            if os.path.exists(marker):
+                os.remove(marker)
+        os.rmdir(nested)
+
+
 def test_required_checks_disambiguate_multiple_checkout_execution_roots(fx):
     roots = [fx["paths"]["canonical"], fx["paths"]["staleNeighbor"]]
     for root in roots:
