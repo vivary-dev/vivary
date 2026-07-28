@@ -27,26 +27,50 @@ copies.
 | [`STRATO.md`](STRATO.md) | The compressed model — the always-on agent OS (read this) |
 | [`templates/`](templates/) | A workspace's starters: `AGENTS.md`, `SOUL.md`, `USER`/`MEMORY`/`STATE` templates, `bug-risk-playbook.md` |
 | [`.claude/skills/strato/`](.claude/skills/strato/) | The executable: `bootstrap` / `heartbeat` / `self-improve` modes |
+| [`strato.py`](strato.py) | The opt-in `strato decide --governed` facade over `vivary-core` policy |
 | [`.claude/skills/active-context/`](.claude/skills/active-context/) | Optional CocoIndex-code sidecar decision/retrieval policy |
 
 ## How it's used
 
-strato is the **framework**; a workspace is the **instance**. You don't edit strato per
-project — you lay its `templates/` down into a new workspace (`create-vivary` does
-this) and run the strato skill to `bootstrap`, then `heartbeat` on a cadence. The
-workspace's own `AGENTS.md` (from `templates/AGENTS.md`) is distinct from Vivary's root
+strato is the **framework**; a workspace is the **instance**. `create-vivary` lays
+the templates down, and the strato skill runs `bootstrap`, `heartbeat`, and
+`self-improve`. The workspace's own `AGENTS.md` is distinct from Vivary's root
 `AGENTS.md`, which governs agents working on Vivary itself.
+
+The runtime facade is deliberately opt-in:
+
+```console
+strato decide --governed --json request.json
+```
+
+It validates the request schema, pinned policy version, core-owned actor and authority
+class, workspace binding, absolute scope roots bound to the Task Capsule, and
+caller-supplied timestamps before delegating the budget/gate/next-loop decision to
+`vivary-core`. Requests, capsule observations, and receipts have a deterministic
+300-second freshness window. A verdict is accepted only beside its receipt. A
+malformed, invalid, or unsafely nested envelope returns a
+`vivary.strato-decision-refusal/v0` document and exit `2`; a valid envelope returns
+`vivary.strato-decision/v0`, is advisory, and exits `0`. Add `--strict` to exit `1`
+when core blocks or requests a gate. Unknown fields are rejected, so free-form status
+text cannot impersonate a human gate. Omit `--json` for a short text
+summary. The full contract is in
+the [command reference](../../docs/COMMANDS.md#strato--the-policy-layer).
 
 Loop *literacy* — running the loop unattended — is strato's domain too; see the loops
 skill (`.claude/skills/loops/`).
 
 ## Versioning
 
-strato is not independently versioned — it has no version number of its own and
-ships no separate release. Its templates and skills ride the `create-vivary` release
-train: any change here lands in a `create-vivary` release, and the change itself is
-recorded in the root [`CHANGELOG.md`](../../CHANGELOG.md) under that package's entries,
-not under a `strato` heading.
+The `vivary-strato` Python distribution starts at source version **0.1.0** and
+requires `vivary-core>=0.2.1`. Both remain unpublished during development and ship
+only through the final coordinated release gate. The templates and skills remain
+bundled by `create-vivary`; the runtime package does not duplicate or replace them.
+
+From this checkout, install the unpublished pair without consulting a registry:
+
+```console
+python -m pip install --no-deps ./packages/core ./packages/strato
+```
 
 > Distilled from throughline + flywheel (Jeff's own repos, used read-only). Not a
 > verbatim copy — the overlap (duplicate memory templates, gates, proactivity rules)

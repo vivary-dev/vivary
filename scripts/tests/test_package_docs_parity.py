@@ -150,12 +150,12 @@ def test_stale_unpublished_allowlist_fails():
     assert "vivary-ghost" in message, message
 
 
-def test_core_is_allowlisted_as_unpublished():
-    # Pins the #221 decision: vivary-core stays unpublished during development and ships
-    # only in the final comprehensive coordinated release train. Publishing it means
-    # removing it here deliberately, which then requires the architecture doc to name it.
+def test_governed_packages_are_allowlisted_as_unpublished():
+    # Pins the #221 release gate: core and Strato stay unpublished during development.
+    # Publishing either means removing it here deliberately, which then requires the
+    # architecture doc to name the published distribution.
     module = _load()
-    assert "vivary-core" in module.UNPUBLISHED
+    assert {"vivary-core", "vivary-strato"} <= module.UNPUBLISHED
 
 
 if __name__ == "__main__":

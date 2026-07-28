@@ -38,12 +38,13 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 | `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
 | `vivary-memory-cognee` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-memory-cognee/) |
 | `vivary-core` (not published) | unreleased (source 0.2.1) | in-repo: `packages/core/` |
+| `vivary-strato` (not published) | unreleased (source 0.1.0) | in-repo: `packages/strato/` |
 | Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
 Development source is ahead but remains unpublished until the coordinated release
-gate: `vivary-core` **0.2.1**, `vivary-tropo` **0.5.0**, and the `vivary` meta-package
-**0.1.1**.
+gate: `vivary-core` **0.2.1**, `vivary-tropo` **0.5.0**, `vivary-strato` **0.1.0**,
+and the `vivary` meta-package **0.1.1**.
 
 Versions are intentionally independent across the layers and optional adapters: `tropo`
 moved to 0.4.1 for the read-only `map` filesystem inventory command, `create-vivary` /
@@ -128,6 +129,11 @@ The unreleased `tropo find --governed` path is the first opt-in `vivary-core` ad
 it turns one explicitly scoped, read-only workspace scan into a bounded, fingerprinted
 Task Capsule whose claims carry evidence and selection reasons. It performs no fetch,
 write, indexing, provider, or memory operation; plain `tropo find` is unchanged.
+The unreleased `strato decide --governed` facade is the second adapter. It validates
+one authority- and workspace-bound request, then exposes core's budget, capsule/receipt
+gate, and next-loop decision as stable machine-readable output. It is advisory unless
+`--strict` is set, persists nothing, and rejects free-form status text rather than
+treating it as human approval.
 `tropo query` provides filtered graph search, `tropo query --mode vector` adds
 dependency-free local typed-vector search when `.vivary/storage.toml` explicitly
 enables it, and `tropo migrate` handles backend switching. When local vector policy is

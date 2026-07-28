@@ -1,6 +1,6 @@
 ---
 title: "Command reference"
-description: "Every CLI across Vivary: tropo, ozone, exo, create-vivary, and optional adapters."
+description: "Every CLI across Vivary: tropo, strato, ozone, exo, create-vivary, and optional adapters."
 editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/COMMANDS.md"
 ---
 
@@ -8,10 +8,10 @@ This is the full, technical list of every command. If you're just starting, you 
 need a handful (`create-vivary init`, `doctor`, `tropo check`); the [getting started
 guide](/getting-started/) walks through those. Come back here for the details.
 
-Every CLI across the four layers uses Python 3.11+ and no third-party runtime
-dependency; Tropo's optional governed path composes the first-party `vivary-core`
-contract seam. Command names remain `tropo` / `ozone` / `exo` / `create-vivary`
-regardless of installation method.
+Every CLI across the four atmospheric layers uses Python 3.11+ and no third-party
+runtime dependency; the optional governed paths compose the first-party `vivary-core`
+contract seam. Command names are `tropo` / `strato` / `ozone` / `exo`; the scaffolder
+remains `create-vivary`, regardless of installation method.
 
 - **Install (PyPI):** `pip install vivary`
 - **Run without installing (uv):** `uvx --from vivary-tropo tropo check`, `uvx --from vivary-ozone ozone review`, …
@@ -351,6 +351,87 @@ packs = ["repo-graph", "coordination"]
 ```
 
 ---
+## strato — the policy layer
+
+```console
+strato decide --governed [--json] [--strict] <REQUEST.json|->
+```
+
+`decide` is an explicit experimental facade over `vivary-core`'s pure budget,
+capsule/receipt-gate, and next-loop policy. It does not persist loop state, execute
+actions, or accept free-form approvals. `--governed` is required; `-` reads one JSON
+request from standard input.
+
+The request envelope is `vivary.strato-decision-request/v0`:
+
+```json
+{
+  "schema": "vivary.strato-decision-request/v0",
+  "policy_version": "vivary.strato-policy/v0",
+  "actor": {"kind": "agent", "id": "agent:example"},
+  "authority_class": "contributor",
+  "workspace": {"fingerprint": "sha256:..."},
+  "scope": {"project": "example", "paths": ["/workspace"]},
+  "requested_at": "2026-07-26T12:00:00Z",
+  "decision_at": "2026-07-26T12:00:00Z",
+  "capsule": {
+    "schema": "vivary.task-capsule/v0",
+    "capsule_id": "capsule_...",
+    "fingerprint": "sha256:...",
+    "task": {
+      "question": "What is the next safe loop step?",
+      "scope": ["/workspace"]
+    },
+    "workspace": {
+      "fingerprint": "sha256:...",
+      "observed_at": "2026-07-26T12:00:00Z"
+    },
+    "claims": [],
+    "conflicts": [],
+    "unknowns": [],
+    "omissions": [],
+    "required_checks": [],
+    "budget": {"max_claims": 8}
+  },
+  "state": {"turns_used": 0, "actions_used": 0},
+  "limits": {"max_turns": 8, "max_actions": 32}
+}
+```
+
+`capsule` must be a complete Task Capsule, and its workspace fingerprint must match
+the envelope. `scope.project` is a non-empty audit label. `scope.paths` must contain
+absolute roots and match `capsule.task.scope`; core's path equivalence normalizes
+separators, ignores root order, and folds case on Windows. A missing or broader capsule
+scope fails closed. Both `requested_at` and caller-supplied `decision_at` are required.
+The request, capsule observation, and any receipt must be no more than **300 seconds**
+old at `decision_at`, ordered consistently, and timezone-aware. Passing the clock in
+the request keeps the facade pure and makes future/stale decisions deterministic.
+
+`receipt` is optional. `verdict` is optional only with a receipt; a receiptless verdict
+is rejected instead of silently ignored. When both are present, core independently
+binds and validates them before the verdict can clear a gate. Actor kinds are `human`,
+`agent`, and `worker`; authority classes are `contributor` and `owner`, and only a
+human actor may claim `owner`. These vocabularies and their reason codes come from
+core's authority policy. Unknown envelope fields are rejected, so a string such as
+`"status": "approved"` cannot satisfy a human gate.
+
+By default, output is a short text summary. `--json` emits either a validated
+`vivary.strato-decision/v0` document with identity fields plus core's `decision`,
+`reason_codes`, `budget`, and `gate`, or a `vivary.strato-decision-refusal/v0`
+document with refusal reason codes and no unvalidated identity fields. Malformed JSON,
+an invalid envelope, or an input too deeply nested to evaluate safely exits `2`;
+recursive input uses the explicit `request_too_deeply_nested` refusal reason. A valid
+evaluation is advisory and exits `0`; with `--strict`, a valid `blocked` or
+`request_gate` decision exits `1`, so CI can gate on the exit code without parsing
+output.
+
+Envelope reason codes distinguish invalid shapes and policy versions, authority
+refusals, workspace/scope mismatches, stale/future evidence, and a verdict submitted
+without its receipt. Core's loop, budget, gate, receipt-integrity, and Ozone-verdict
+reason codes pass through unchanged.
+
+---
+
 
 ## ozone — the review layer
 

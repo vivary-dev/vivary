@@ -86,7 +86,7 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
 - **Platform.** Windows / PowerShell (`$null`, never `nul`; bash also available).
   `tropo` needs Python 3.11+ (stdlib `tomllib`).
 - **CI runs free** on the public `vivary-dev/vivary` repo (Actions is free for public
-  repos): `.github/workflows/ci.yml` runs all four suites + parity + `tropo check` +
+  repos): `.github/workflows/ci.yml` runs every package suite + parity + `tropo check` +
   the `ozone review --strict` review gate + a cross-platform (Ubuntu/Windows)
   orientation proof + a site build on every PR/push. Verify locally too; the local
   suite is fast.
@@ -111,6 +111,7 @@ python packages/ozone/tests/test_ozone.py                  # 21/21
 python packages/exo/tests/test_exo.py                      # 17/17
 python packages/create-vivary/tests/test_create_vivary.py  # 143 run, 1 skipped
 python -m pytest packages/core/tests/ -q                   # 615 Windows; 613 + 2 skips Linux
+python -m pytest packages/strato/tests/ -q                 # 39/39
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # clean
 ```
 
@@ -118,7 +119,7 @@ Current release truth lives in [README.md](README.md) and [CHANGELOG.md](CHANGEL
 `create-vivary` / `@vivary/create` 0.3.1, `vivary-memory-cognee` 0.1.0,
 `vivary-tropo` 0.4.1, `vivary-exo` 0.2.2, and `vivary-ozone` 0.2.0 are the
 published versions; unpublished source is `vivary-core` 0.2.1, `vivary-tropo` 0.5.0,
-and the `vivary` meta-package 0.1.1. Versions are
+`vivary-strato` 0.1.0, and the `vivary` meta-package 0.1.1. Versions are
 independent; there is no single "Vivary 0.4.1" release. This line adds `tropo map`,
 brownfield `create-vivary adopt`, `doctor --trend` drift tracking, and strato
 integrity gates in CI. Full guides live in [docs/](docs/).

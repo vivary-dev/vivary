@@ -64,9 +64,9 @@ default preset path. See [Optional semantic memory](SEMANTIC-MEMORY.md).
 ## 3. The layer model
 
 A vertical column. Each layer is a standalone module that reads/writes the same graph
-and obeys the same convention. The published CLIs are thin; `strato` is bundled
-agent-OS source/templates inside the repo and generated workspaces, not a separate
-npm/PyPI package today.
+and obeys the same convention. Published CLIs are thin. Strato's agent-OS templates
+remain bundled in generated workspaces, while its new Python facade is declared as the
+unpublished `vivary-strato` source package during development.
 
 ```
         exo      ── multi-agent orchestration            (outermost, optional)
@@ -94,8 +94,8 @@ Baseline = **tropo + strato** (knowledge + the self-improving loop over it).
 The four layers above are the *vertical* column. `vivary-core` is the horizontal
 seam beneath them — the governed-context primitives every role package is *meant* to
 speak through, so that "what is true, and how do we know" ends up with exactly one
-implementation rather than four that drift. No role speaks through it yet; see
-**Status** below for where that stands.
+implementation rather than four that drift. Tropo and Strato now speak through it;
+the remaining role packages adopt the seam in their integration slices.
 
 It is a library, not a layer and not a CLI. Nothing about the baseline changes
 because it exists: you still install and run `tropo`, `strato`, `ozone`, `exo`.
@@ -120,11 +120,15 @@ What it owns:
 - **Receipts and evidence** — what actually ran, bound to the exact capsule and
   workspace fingerprint it ran against, in an append-only store.
 - **Role-policy surfaces** — reference implementations of the governed loop inside
-  `vivary-core`, not yet wiring in the shipping role CLIs:
+  `vivary-core`, exposed incrementally through explicit experimental role adapters:
   - **Strato (`policy_*`)** evaluates budgets, capsule and receipt gates, and the
-    next loop step with fail-closed, pinned reason codes. A configured budget
-    accepts only finite numeric limits and counters; omit a limit to leave that
-    dimension unbounded.
+    next loop step with fail-closed, pinned reason codes. The `vivary-strato`
+    `decide --governed` facade adds the actor/authority, workspace/scope,
+    caller-supplied clock, freshness, and policy-version envelope without duplicating
+    those decisions or persisting loop state.
+    Core's primitive accepts finite numeric limits/counters and treats an omitted limit
+    as unbounded; the role envelope narrows any supplied counter or limit to a
+    non-negative integer before delegation.
   - **Ozone (`verify_*`)** recomputes receipt fingerprints for tamper detection,
     evaluates gate sufficiency without allowing duplicate check names to erase
     worse evidence, and emits bounded repair proposals as gated dry-run data.
@@ -145,14 +149,16 @@ declares its own floor in the same commit; the `vivary` meta package receives co
 transitively and does not declare it. One owner per edge avoids version-pinning fights.
 `vivary-tropo` is the first importer: its experimental `find --governed` adapter depends
 on `vivary-core>=0.2.1`, the first source version that exposes the adapter's required
-API. No other role manifest depends on core yet; the remaining role packages add their
-own floors only when their first real imports land — never ahead of the code that needs them.
+API. `vivary-strato` is the second: its experimental `decide --governed` facade uses
+the same floor for core's policy surface. Remaining role packages add their own floors
+only when their first real imports land — never ahead of the code that needs them.
 
-**Status:** merged into `dev`, unpublished during development, and reachable only
-through the explicit experimental `tropo find --governed` flag. Plain Tropo retrieval
-and every role CLI remain unchanged. The remaining package/role integration is tracked
-in [#207](https://github.com/vivary-dev/vivary/issues/207); publication waits for the
-final comprehensive release train and its separate human gate.
+**Status:** merged Tropo/core integration is on `dev`; the Strato facade is in active
+development. Both are unpublished and reachable only through explicit experimental
+`--governed` flags. Plain Tropo retrieval and the existing role CLIs remain unchanged.
+The remaining package/role integration is tracked in
+[#207](https://github.com/vivary-dev/vivary/issues/207); publication waits for the final
+comprehensive release train and its separate human gate.
 
 ## 4. The moat
 
@@ -179,7 +185,9 @@ The brand owns the namespace; current package truth is:
   ships only as part of the final comprehensive coordinated release train, never in an
   earlier release line than its dependent roles; within that train, dependencies upload
   before dependents, so core uploads first.
-- `strato` is bundled source/templates, not a published npm or PyPI package.
+- `vivary-strato` is declared in-repo and remains unpublished during development.
+  Strato's templates and skills also remain bundled by `create-vivary`; the runtime
+  package adds the policy facade rather than replacing those workspace assets.
 - GitHub: `vivary-dev/vivary` holds the public repo.
 
 Future packages can still use the Vivary namespace, but public docs should only name
