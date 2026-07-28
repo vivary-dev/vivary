@@ -2997,7 +2997,8 @@ def test_cmd_query_semantic_provider_error_does_not_disclose_path(tmp_path):
     vivary_dir = tmp_path / ".vivary"
     vivary_dir.mkdir()
     (vivary_dir / "memory.toml").write_text(
-        '[memory]\nenabled = true\nprovider = "cognee"\n',
+        '[memory]\nenabled = true\nprovider = "cognee"\n'
+        "\n[memory.cognee]\nallow_network = false\n",
         encoding="utf-8",
     )
     sensitive_path = tmp_path.parent / "outside-secret" / "database.sqlite"
@@ -3025,6 +3026,25 @@ def test_cmd_query_semantic_provider_error_does_not_disclose_path(tmp_path):
             _query_args("release truth", mode="semantic"),
             res(str(tmp_path)),
         )
+        (vivary_dir / "memory.toml").write_text(
+            '[memory]\nenabled = true\nprovider = "cognee"\n'
+            "\n[memory.cognee]\nallow_network = true\n",
+            encoding="utf-8",
+        )
+        open_rc, open_out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="semantic"),
+            res(str(tmp_path)),
+        )
+        (vivary_dir / "memory.toml").write_text(
+            '[memory]\nenabled = true\nprovider = "cognee"\n',
+            encoding="utf-8",
+        )
+        default_rc, default_out = _capture_rc(
+            tropo.cmd_query,
+            _query_args("release truth", mode="semantic"),
+            res(str(tmp_path)),
+        )
     finally:
         if previous is None:
             sys.modules.pop("vivary_cognee", None)
@@ -3035,7 +3055,18 @@ def test_cmd_query_semantic_provider_error_does_not_disclose_path(tmp_path):
     assert out["semantic"]["status"] == "unavailable"
     assert "semantic-memory provider query failed" in out["semantic"]["detail"]
     assert str(sensitive_path) not in out["semantic"]["detail"]
+    assert "memory.cognee.allow_network is false" in out["semantic"]["detail"]
     assert out["results"] == []
+    assert "_allow_network" not in out["semantic"]
+    assert open_rc == 1
+    assert open_out["semantic"]["status"] == "unavailable"
+    assert "allow_network" not in open_out["semantic"]["detail"]
+    assert "(RuntimeError)" in open_out["semantic"]["detail"]
+    assert str(sensitive_path) not in open_out["semantic"]["detail"]
+    assert default_rc == 1
+    assert default_out["semantic"]["status"] == "unavailable"
+    assert "memory.cognee.allow_network is false" in default_out["semantic"]["detail"]
+    assert str(sensitive_path) not in default_out["semantic"]["detail"]
 
 
 def test_cmd_query_semantic_mode_rejects_stale_adapter(tmp_path):

@@ -1465,11 +1465,18 @@ def _load_memory_query_config(root):
             "status": "disabled",
             "detail": f"{STORAGE_DIR}/{MEMORY_CONFIG_NAME} does not enable semantic memory",
         }
+    cognee = memory.get("cognee", {})
+    allow_network = (
+        cognee.get("allow_network", False) if isinstance(cognee, dict) else None
+    )
+    if not isinstance(allow_network, bool):
+        allow_network = None
     return {
         "enabled": True,
         "provider": provider,
         "status": "configured",
         "detail": "",
+        "_allow_network": allow_network,
     }
 
 
@@ -2826,13 +2833,19 @@ def semantic_query(resolver, text, *, k=10, type_filters=None, path_filters=None
             vivary_cognee.CogneeMemoryAdapter(resolver.root).recall(text, k=provider_k)
         )
     except Exception as e:
+        policy_detail = ""
+        if config.get("_allow_network") is False:
+            policy_detail = (
+                "; workspace policy: memory.cognee.allow_network is false "
+                "(default deny)"
+            )
         return 1, [], {
             "enabled": True,
             "provider": "cognee",
             "status": "unavailable",
             "detail": (
                 "semantic-memory provider query failed "
-                f"({e.__class__.__name__})"
+                f"({e.__class__.__name__}){policy_detail}"
             ),
         }
     results = []

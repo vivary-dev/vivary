@@ -94,7 +94,8 @@ separate human gate.
   npm check instead of escaping the structured observation contract.
 - Semantic-memory configuration now returns structured misconfiguration results for
   unreadable or invalid-UTF-8 TOML. Optional-provider failures identify the provider
-  boundary without returning exception text that can disclose filesystem paths.
+  boundary and name a workspace-disabled `memory.cognee.allow_network` gate without
+  returning exception text that can disclose filesystem paths.
 - Generated `llms.txt` package surfaces read published versions from the root release
   table rather than unreleased source manifests. On-demand examples use
   `uvx --from <distribution> <command>`, matching each package's console entry point.
