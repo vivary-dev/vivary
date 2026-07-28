@@ -47,8 +47,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PY_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, PY_ROOT)
 
-from vivary_core.canonical import normalize_path  # noqa: E402
-from vivary_core.capsule_compile import compile_task_capsule  # noqa: E402
+from vivary_core.canonical import MAX_LOSSLESS_INTEGER, normalize_path  # noqa: E402
+from vivary_core.capsule_compile import (  # noqa: E402
+    compile_task_capsule,
+    verify_task_capsule_integrity,
+)
 from vivary_core.workspace_content import observe_content  # noqa: E402
 from vivary_core.workspace_model import project_workspace_graph  # noqa: E402
 from vivary_core.workspace_observe import observe_checkouts  # noqa: E402
@@ -261,6 +264,15 @@ def test_capsule_fingerprint_is_deterministic_and_sensitive_to_content(graph):
     assert a["capsule_id"] == b["capsule_id"]
     smaller = compile_task_capsule(task=TASK, graph=graph, budget={"max_claims": 3})
     assert a["fingerprint"] != smaller["fingerprint"]
+
+
+def test_capsule_integrity_binds_its_deterministic_identifier(graph):
+    capsule = compile_task_capsule(task=TASK, graph=graph)
+    assert verify_task_capsule_integrity(capsule)
+
+    capsule["capsule_id"] = "capsule_forged"
+
+    assert not verify_task_capsule_integrity(capsule)
 
 
 def test_capsule_binds_the_workspace_fingerprint_it_was_compiled_against(graph):
@@ -724,6 +736,56 @@ def test_negative_claim_budget_is_rejected_rather_than_inverted(graph):
     """
     with pytest.raises(ValueError, match="max_claims"):
         compile_task_capsule(task=TASK, graph=graph, budget={"max_claims": -1})
+
+
+def test_claim_budget_cannot_exceed_the_lossless_contract_range(graph):
+    capsule = compile_task_capsule(
+        task=TASK,
+        graph=graph,
+        budget={"max_claims": MAX_LOSSLESS_INTEGER},
+    )
+    assert verify_task_capsule_integrity(capsule)
+
+    with pytest.raises(ValueError, match="max_claims"):
+        compile_task_capsule(
+            task=TASK,
+            graph=graph,
+            budget={"max_claims": MAX_LOSSLESS_INTEGER + 1},
+        )
+
+
+@pytest.mark.parametrize(
+    ("task", "message"),
+    [
+        ("not a task mapping", "task must be a mapping"),
+        ({"question": "What changed?", "scope": "/workspace"}, "task.scope"),
+        ({"question": "What changed?", "scope": []}, "task.scope"),
+        ({"question": "What changed?", "scope": [1]}, "task.scope"),
+        ({"question": "What changed?", "required_checks": "npm test"}, "task.required_checks"),
+        ({"question": "What changed?", "required_checks": 5}, "task.required_checks"),
+        ({"question": "What changed?", "required_checks": [{}]}, "task.required_checks"),
+        (
+            {
+                "question": "What changed?",
+                "required_checks": [{"name": "unit", "command": ""}],
+            },
+            "task.required_checks",
+        ),
+    ],
+    ids=[
+        "task-container",
+        "scope-container",
+        "scope-empty",
+        "scope-entry",
+        "checks-container-string",
+        "checks-container-number",
+        "checks-entry-fields",
+        "checks-entry-empty",
+    ],
+)
+def test_compile_task_capsule_rejects_malformed_task_inputs(task, message, graph):
+    with pytest.raises(ValueError, match=message):
+        compile_task_capsule(task=task, graph=graph)
 
 
 @pytest.mark.parametrize(

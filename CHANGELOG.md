@@ -52,10 +52,14 @@ requires a separate human gate.
   and authority class, workspace fingerprint, absolute path scope bound to its Task
   Capsule, a non-empty project audit label, and caller-supplied timestamps before
   delegating to core's pure budget, capsule/receipt-gate, and next-loop policy. The
-  capsule body fingerprint is recomputed before delegation, so a capsule altered after
-  compilation cannot bypass a review gate. Missing compiler-owned fields and
-  non-canonical values that would be lossy in JavaScript are refused before policy.
-  Requests, capsule observations, and receipts have a deterministic 300-second
+  capsule body fingerprint and deterministic identifier are recomputed before
+  delegation, so changing either the capsule contents or its identity after compilation
+  is refused before policy. Receipt integrity is checked separately against the capsule
+  and workspace fingerprints. The compiler and verifier
+  share the JavaScript-lossless `max_claims` bound; malformed task scopes, missing
+  compiler-owned fields, and non-canonical values that would be lossy in JavaScript are
+  refused before policy. Requests, capsule observations, and receipts have a
+  deterministic 300-second
   freshness window; a verdict without its receipt is rejected. Unknown fields and
   non-string Python mapping keys fail closed, so free-form status text cannot
   impersonate a human gate. Incomplete capsule envelopes and inputs whose JSON or
@@ -151,12 +155,12 @@ requires a separate human gate.
 - `python packages/tropo/tests/test_tropo.py` — **169/169** passed on Windows.
 - `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **169/169**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **615 passed** on Windows;
-  `UV_CACHE_DIR=$HOME/.cache/uv TMPDIR=/tmp uv run --with pytest python3 -m pytest
-  packages/core/tests/ -q -p no:cacheprovider` — **613 passed, 2 platform-specific
-  skips** on WSL Linux.
-- `python -m pytest packages/strato/tests -q` — **39 passed** on Windows and
-  **39 passed** on WSL Linux.
+- `python -m pytest packages/core/tests/ -q` — **626 passed** on Windows;
+  `UV_CACHE_DIR=/tmp/vivary-uv-cache TMPDIR=/tmp uv run --no-cache --with pytest
+  python3 -m pytest packages/core/tests/ -q -p no:cacheprovider` — **624 passed,
+  2 platform-specific skips** on WSL Linux.
+- `python -m pytest packages/strato/tests -q` — **48 passed** on Windows and
+  **48 passed** on WSL Linux.
 - `python -m pytest packages/core/tests/test_policy.py -q` — **91 passed**;
   `python -m pytest packages/core/tests/test_control.py -q` — **101 passed**.
 - Isolated Windows venv and WSL `uv run --no-cache --with ./packages/core --with

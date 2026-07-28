@@ -21,7 +21,7 @@ CLI_ENV = {
 }
 
 import strato  # noqa: E402
-from vivary_core.canonical import fingerprint  # noqa: E402
+from vivary_core.canonical import deterministic_id, fingerprint  # noqa: E402
 from vivary_core.capsule_compile import CAPSULE_SCHEMA, compile_task_capsule  # noqa: E402
 from vivary_core.policy_reason_codes import LOOP_DECISION, LOOP_REASON  # noqa: E402
 from vivary_core.receipt import create_integrity_receipt  # noqa: E402
@@ -38,7 +38,7 @@ def test_runtime_version_matches_the_package_manifest():
 def capsule(**overrides):
     value = {
         "schema": CAPSULE_SCHEMA,
-        "capsule_id": "capsule_strato_test",
+        "capsule_id": None,
         "task": {
             "question": "What is the next safe loop step?",
             "scope": ["/repo/packages/strato"],
@@ -52,9 +52,23 @@ def capsule(**overrides):
         "budget": {"max_claims": 24},
     }
     value.update(overrides)
-    value["fingerprint"] = fingerprint(
-        {key: item for key, item in value.items() if key != "capsule_id"}
-    )
+    if "capsule_id" not in overrides:
+        value["capsule_id"] = deterministic_id(
+            "capsule",
+            {
+                "task": value["task"].get("question"),
+                "filters": value["task"].get("filters"),
+                "workspace": value["workspace"]["fingerprint"],
+            },
+        )
+    if "fingerprint" not in overrides:
+        value["fingerprint"] = fingerprint(
+            {
+                key: item
+                for key, item in value.items()
+                if key not in {"capsule_id", "fingerprint"}
+            }
+        )
     return value
 
 
@@ -325,6 +339,15 @@ def test_governed_facade_rejects_a_capsule_modified_after_compilation():
     governed_capsule["conflicts"] = []
 
     result = strato.decide_governed(request(capsule=governed_capsule))
+
+    assert result["schema"] == strato.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["capsule_fingerprint_mismatch"]
+
+
+def test_governed_facade_rejects_a_fabricated_capsule_identifier():
+    result = strato.decide_governed(
+        request(capsule=capsule(capsule_id="capsule_forged"))
+    )
 
     assert result["schema"] == strato.REFUSAL_SCHEMA
     assert result["reason_codes"] == ["capsule_fingerprint_mismatch"]
