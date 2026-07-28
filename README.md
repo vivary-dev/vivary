@@ -37,13 +37,13 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 | `vivary-ozone` | 0.2.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
 | `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
 | `vivary-memory-cognee` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-memory-cognee/) |
-| `vivary-core` (not published) | unreleased (source 0.2.1) | in-repo: `packages/core/` |
-| `vivary-strato` (not published) | unreleased (source 0.1.0) | in-repo: `packages/strato/` |
+| `vivary-core` (not published) | unreleased (source 0.2.2) | in-repo: `packages/core/` |
+| `vivary-strato` (not published) | unreleased (source 0.1.1) | in-repo: `packages/strato/` |
 | Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
 | CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
 Development source is ahead but remains unpublished until the coordinated release
-gate: `vivary-core` **0.2.1**, `vivary-tropo` **0.5.0**, `vivary-strato` **0.1.0**,
+gate: `vivary-core` **0.2.2**, `vivary-tropo` **0.5.0**, `vivary-strato` **0.1.1**,
 and the `vivary` meta-package **0.1.1**.
 
 Versions are intentionally independent across the layers and optional adapters: `tropo`

@@ -15,7 +15,7 @@ from vivary_core.control_actors import ACTOR_KIND, AUTHORITY_CLASS, can_hold_aut
 
 from vivary_core.policy_loop import next_loop_step
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 REQUEST_SCHEMA = "vivary.strato-decision-request/v0"
 DECISION_SCHEMA = "vivary.strato-decision/v0"

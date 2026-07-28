@@ -153,13 +153,14 @@ declares its own floor in the same commit; the `vivary` meta package receives co
 transitively and does not declare it. One owner per edge avoids version-pinning fights.
 `vivary-tropo` is the first importer: its experimental `find --governed` adapter depends
 on `vivary-core>=0.2.1`, the first source version that exposes the adapter's required
-API. `vivary-strato` is the second: its experimental `decide --governed` facade uses
-the same floor for core's policy surface. Remaining role packages add their own floors
-only when their first real imports land — never ahead of the code that needs them.
+API. `vivary-strato` is the second: its experimental `decide --governed` facade requires
+`vivary-core>=0.2.2`, which adds the compiler/verifier integrity boundary. Remaining
+role packages add their own floors only when their first real imports land — never
+ahead of the code that needs them.
 
-**Status:** merged Tropo/core integration is on `dev`; the Strato facade is in active
-development. Both are unpublished and reachable only through explicit experimental
-`--governed` flags. Plain Tropo retrieval and the existing role CLIs remain unchanged.
+**Status:** merged Tropo/core and Strato/core integrations are on `dev`. Both are
+unpublished and reachable only through explicit experimental `--governed` flags.
+Plain Tropo retrieval and the existing role CLIs remain unchanged.
 The remaining package/role integration is tracked in
 [#207](https://github.com/vivary-dev/vivary/issues/207); publication waits for the final
 comprehensive release train and its separate human gate.
