@@ -10,6 +10,7 @@ import sys
 from typing import Any
 
 from vivary_core.canonical import is_absolute_root, is_within_allowlist
+from vivary_core.capsule_compile import is_task_capsule_shape, verify_task_capsule_integrity
 from vivary_core.control_actors import ACTOR_KIND, AUTHORITY_CLASS, can_hold_authority
 
 from vivary_core.policy_loop import next_loop_step
@@ -102,7 +103,11 @@ def _validate_request(request: Any) -> list[str]:
         return ["unknown_request_shape"]
 
     errors: list[str] = []
-    unknown_fields = sorted(set(request) - _ALLOWED_FIELDS)
+    if not all(isinstance(field, str) for field in request):
+        errors.append("invalid_field_name")
+    unknown_fields = sorted(
+        field for field in request if isinstance(field, str) and field not in _ALLOWED_FIELDS
+    )
     errors.extend(f"unknown_field:{field}" for field in unknown_fields)
 
     if request.get("schema") != REQUEST_SCHEMA:
@@ -161,11 +166,14 @@ def _validate_request(request: Any) -> list[str]:
     observed_at = _parse_instant(
         capsule_workspace.get("observed_at") if isinstance(capsule_workspace, dict) else None
     )
-    if not isinstance(capsule, dict):
+    capsule_shape_is_valid = is_task_capsule_shape(capsule)
+    if not capsule_shape_is_valid:
         errors.append("invalid_capsule")
+    elif not verify_task_capsule_integrity(capsule):
+        errors.append("capsule_fingerprint_mismatch")
     elif _nonempty_string(workspace_fingerprint) and workspace_fingerprint != capsule_fingerprint:
         errors.append("workspace_mismatch")
-    if scope_is_valid and isinstance(capsule, dict):
+    if scope_is_valid and capsule_shape_is_valid:
         capsule_task = capsule.get("task")
         capsule_scope = capsule_task.get("scope") if isinstance(capsule_task, dict) else None
         if not _same_scope_roots(scope["paths"], capsule_scope):

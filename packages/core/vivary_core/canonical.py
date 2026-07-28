@@ -53,6 +53,8 @@ _REPR_FLOAT = re.compile(r"^(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$")
 # round-tripped through JS can never carry a bigger integer exactly, so ints
 # beyond that bound are formatted the way JS would format the nearest double.
 _MAX_SAFE_INTEGER = 2**53
+# Contract bodies must also round-trip through JavaScript without numeric loss.
+_MAX_LOSSLESS_INTEGER = 2**53 - 1
 
 
 def _js_string_escape(value: str) -> str:
@@ -166,6 +168,35 @@ def _serialize(value, sort_keys: bool) -> str:
         )
         return "{" + body + "}"
     raise TypeError(f"cannot canonicalize value of type {type(value).__name__}")
+
+
+def is_canonical_body_value(value, ancestors=None) -> bool:
+    """Return whether a JSON-like body has one lossless canonical representation."""
+
+    value_type = type(value)
+    if value is None or value_type in (str, bool):
+        return True
+    if value_type is int:
+        return -_MAX_LOSSLESS_INTEGER <= value <= _MAX_LOSSLESS_INTEGER
+    if value_type is float:
+        return math.isfinite(value)
+    if value_type not in (list, dict):
+        return False
+    if ancestors is None:
+        ancestors = set()
+    identity = id(value)
+    if identity in ancestors:
+        return False
+    ancestors.add(identity)
+    try:
+        if value_type is list:
+            return all(is_canonical_body_value(item, ancestors) for item in value)
+        return all(
+            type(key) is str and is_canonical_body_value(item, ancestors)
+            for key, item in value.items()
+        )
+    finally:
+        ancestors.remove(identity)
 
 
 def canonicalize(value) -> str:

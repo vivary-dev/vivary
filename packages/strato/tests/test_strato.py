@@ -21,7 +21,8 @@ CLI_ENV = {
 }
 
 import strato  # noqa: E402
-from vivary_core.capsule_compile import CAPSULE_SCHEMA  # noqa: E402
+from vivary_core.canonical import fingerprint  # noqa: E402
+from vivary_core.capsule_compile import CAPSULE_SCHEMA, compile_task_capsule  # noqa: E402
 from vivary_core.policy_reason_codes import LOOP_DECISION, LOOP_REASON  # noqa: E402
 from vivary_core.receipt import create_integrity_receipt  # noqa: E402
 
@@ -38,7 +39,6 @@ def capsule(**overrides):
     value = {
         "schema": CAPSULE_SCHEMA,
         "capsule_id": "capsule_strato_test",
-        "fingerprint": "sha256:test-capsule",
         "task": {
             "question": "What is the next safe loop step?",
             "scope": ["/repo/packages/strato"],
@@ -52,6 +52,9 @@ def capsule(**overrides):
         "budget": {"max_claims": 24},
     }
     value.update(overrides)
+    value["fingerprint"] = fingerprint(
+        {key: item for key, item in value.items() if key != "capsule_id"}
+    )
     return value
 
 
@@ -92,6 +95,31 @@ def test_governed_facade_returns_the_core_next_loop_decision():
     assert result["reason_codes"] == []
     assert result["actor"] == {"kind": "agent", "id": "agent:test"}
     assert result["scope"] == {"project": "vivary", "paths": ["/repo/packages/strato"]}
+
+
+def test_governed_facade_accepts_a_freshly_compiled_capsule():
+    compiled_capsule = compile_task_capsule(
+        task={
+            "question": "What is the next safe loop step?",
+            "scope": ["/repo/packages/strato"],
+        },
+        graph={
+            "schema": "vivary.workspace-graph/v0",
+            "observed_at": NOW,
+            "allowlist": ["/repo/packages/strato"],
+            "workspace_fingerprint": "sha256:test-workspace",
+            "nodes": [],
+            "edges": [],
+            "conflicts": [],
+            "unknowns": [],
+            "omissions": [],
+        },
+    )
+
+    result = strato.decide_governed(request(capsule=compiled_capsule))
+
+    assert result["schema"] == strato.DECISION_SCHEMA
+    assert result["decision"] == LOOP_DECISION["ACT"]
 
 
 def test_governed_facade_preserves_the_core_budget_stop():
@@ -234,6 +262,72 @@ def test_status_text_cannot_satisfy_a_human_gate():
 
     assert result["decision"] == LOOP_DECISION["BLOCKED"]
     assert result["reason_codes"] == ["unknown_field:status"]
+
+
+def test_governed_facade_rejects_non_string_request_keys_without_raising():
+    governed = request()
+    governed[1] = "not a field name"
+
+    result = strato.decide_governed(governed)
+
+    assert result["schema"] == strato.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["invalid_field_name"]
+
+
+def test_governed_facade_refuses_non_string_capsule_keys_without_raising():
+    governed_capsule = capsule()
+    governed_capsule["unknowns"] = [{1: "not a canonical object key"}]
+
+    result = strato.decide_governed(request(capsule=governed_capsule))
+
+    assert result["schema"] == strato.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["capsule_fingerprint_mismatch"]
+
+
+def test_governed_facade_refuses_a_self_fingerprinted_capsule_missing_its_budget():
+    incomplete_capsule = capsule()
+    incomplete_capsule.pop("budget")
+    incomplete_capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in incomplete_capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+
+    result = strato.decide_governed(request(capsule=incomplete_capsule))
+
+    assert result["schema"] == strato.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["invalid_capsule"]
+
+
+@pytest.mark.parametrize(
+    "lossy_value",
+    [
+        pytest.param(float("nan"), id="not-a-number"),
+        pytest.param(float("inf"), id="infinity"),
+        pytest.param(2**53, id="unsafe-integer"),
+    ],
+)
+def test_governed_facade_refuses_lossy_capsule_values(lossy_value):
+    lossy_capsule = capsule(unknowns=[{"value": lossy_value}])
+
+    result = strato.decide_governed(request(capsule=lossy_capsule))
+
+    assert result["schema"] == strato.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["capsule_fingerprint_mismatch"]
+
+
+def test_governed_facade_rejects_a_capsule_modified_after_compilation():
+    governed_capsule = capsule(
+        conflicts=[{"id": "conflict:review", "decision": "review_required"}]
+    )
+    governed_capsule["conflicts"] = []
+
+    result = strato.decide_governed(request(capsule=governed_capsule))
+
+    assert result["schema"] == strato.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["capsule_fingerprint_mismatch"]
 
 
 def test_human_owner_authority_alone_cannot_clear_a_capsule_gate():
@@ -389,7 +483,8 @@ def test_cli_returns_usage_failure_for_a_rejected_authority_envelope(tmp_path):
     assert json.loads(result.stdout)["schema"] == strato.REFUSAL_SCHEMA
 
 
-def test_cli_treats_a_core_policy_block_as_a_successful_evaluation(tmp_path):
+@pytest.mark.parametrize("strict_args", [[], ["--strict"]])
+def test_cli_refuses_a_malformed_capsule_envelope(tmp_path, strict_args):
     governed = request(
         capsule={
             "task": {
@@ -402,37 +497,7 @@ def test_cli_treats_a_core_policy_block_as_a_successful_evaluation(tmp_path):
             },
         }
     )
-    request_path = tmp_path / "blocked-capsule.json"
-    request_path.write_text(json.dumps(governed), encoding="utf-8")
-
-    result = subprocess.run(
-        [sys.executable, str(PACKAGE_ROOT / "strato.py"), "decide", "--governed", "--json", str(request_path)],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=CLI_ENV,
-    )
-
-    outcome = json.loads(result.stdout)
-    assert result.returncode == 0
-    assert outcome["decision"] == LOOP_DECISION["BLOCKED"]
-    assert outcome["reason_codes"] == [LOOP_REASON["UNKNOWN_CAPSULE_SHAPE"]]
-
-
-def test_cli_strict_mode_gates_on_a_valid_core_policy_block(tmp_path):
-    governed = request(
-        capsule={
-            "task": {
-                "question": "Malformed capsule",
-                "scope": ["/repo/packages/strato"],
-            },
-            "workspace": {
-                "fingerprint": "sha256:test-workspace",
-                "observed_at": NOW,
-            }
-        }
-    )
-    request_path = tmp_path / "strict-blocked-capsule.json"
+    request_path = tmp_path / "malformed-capsule.json"
     request_path.write_text(json.dumps(governed), encoding="utf-8")
 
     result = subprocess.run(
@@ -442,7 +507,7 @@ def test_cli_strict_mode_gates_on_a_valid_core_policy_block(tmp_path):
             "decide",
             "--governed",
             "--json",
-            "--strict",
+            *strict_args,
             str(request_path),
         ],
         capture_output=True,
@@ -451,8 +516,10 @@ def test_cli_strict_mode_gates_on_a_valid_core_policy_block(tmp_path):
         env=CLI_ENV,
     )
 
-    assert result.returncode == 1
-    assert json.loads(result.stdout)["decision"] == LOOP_DECISION["BLOCKED"]
+    outcome = json.loads(result.stdout)
+    assert result.returncode == 2
+    assert outcome["schema"] == strato.REFUSAL_SCHEMA
+    assert outcome["reason_codes"] == ["invalid_capsule"]
 
 
 def test_cli_default_output_is_a_plain_decision_summary(tmp_path):

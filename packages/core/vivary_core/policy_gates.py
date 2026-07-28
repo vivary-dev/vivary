@@ -42,7 +42,7 @@ Language mapping (documented, per python/README.md):
 
 from __future__ import annotations
 
-from vivary_core.capsule_compile import CAPSULE_SCHEMA
+from vivary_core.capsule_compile import is_task_capsule_shape
 from vivary_core.canonical import fingerprint
 from vivary_core.policy_reason_codes import GATE_DECISION, GATE_REASON
 from vivary_core.receipt import RECEIPT_SCHEMA
@@ -64,40 +64,6 @@ def _is_collection_of_dicts(collection) -> bool:
     return all(isinstance(entry, dict) for entry in collection)
 
 
-def _is_capsule_shape(capsule) -> bool:
-    if not (
-        isinstance(capsule, dict)
-        and capsule.get("schema") == CAPSULE_SCHEMA
-        and _is_non_empty_string(capsule.get("capsule_id"))
-        and _is_non_empty_string(capsule.get("fingerprint"))
-        and isinstance(capsule.get("workspace"), dict)
-        and _is_non_empty_string(capsule["workspace"].get("fingerprint"))
-        and isinstance(capsule.get("claims"), list)
-        and isinstance(capsule.get("conflicts"), list)
-        and isinstance(capsule.get("unknowns"), list)
-        and isinstance(capsule.get("omissions"), list)
-        and isinstance(capsule.get("required_checks"), list)
-    ):
-        return False
-
-    return (
-        _is_collection_of_dicts(capsule["claims"])
-        and all(_is_non_empty_string(claim.get("id")) for claim in capsule["claims"])
-        and _is_collection_of_dicts(capsule["conflicts"])
-        and all(
-            _is_non_empty_string(conflict.get("id")) and _is_non_empty_string(conflict.get("decision"))
-            for conflict in capsule["conflicts"]
-        )
-        and _is_collection_of_dicts(capsule["unknowns"])
-        and _is_collection_of_dicts(capsule["omissions"])
-        and all(_is_non_empty_string(omission.get("kind")) for omission in capsule["omissions"])
-        and _is_collection_of_dicts(capsule["required_checks"])
-        and all(
-            _is_non_empty_string(required_check.get("name"))
-            and _is_non_empty_string(required_check.get("command"))
-            for required_check in capsule["required_checks"]
-        )
-    )
 
 
 def _is_receipt_shape(receipt) -> bool:
@@ -259,7 +225,7 @@ def evaluate_capsule_gate(*, capsule):
 
     Returns {"decision": str, "reason_codes": [str], "gate_requests": [dict]}.
     """
-    if not _is_capsule_shape(capsule):
+    if not is_task_capsule_shape(capsule):
         return {
             "decision": GATE_DECISION["BLOCKED"],
             "reason_codes": [GATE_REASON["UNKNOWN_CAPSULE_SHAPE"]],
@@ -329,7 +295,7 @@ def evaluate_receipt_gate(*, capsule, receipt, verdict=None):
 
     Returns {"decision": str, "reason_codes": [str], "gate_requests": [dict]}.
     """
-    if not _is_capsule_shape(capsule):
+    if not is_task_capsule_shape(capsule):
         return {
             "decision": GATE_DECISION["BLOCKED"],
             "reason_codes": [GATE_REASON["UNKNOWN_CAPSULE_SHAPE"]],

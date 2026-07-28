@@ -25,7 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PY_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, PY_ROOT)
 
-from vivary_core.canonical import canonicalize  # noqa: E402
+from vivary_core.canonical import canonicalize, fingerprint  # noqa: E402
 from vivary_core.policy_gates import GATE_DECISION, evaluate_receipt_gate  # noqa: E402
 from vivary_core.receipt import create_integrity_receipt  # noqa: E402
 from vivary_core.verify_reasons import OUTCOMES, REASON_CODES  # noqa: E402
@@ -136,6 +136,29 @@ def test_receipt_id_substitution_cannot_clear_the_policy_gate():
     outcome = evaluate_receipt_gate(capsule=capsule, receipt=substituted)
     assert outcome["decision"] != GATE_DECISION["CLEAR"]
     assert outcome["reason_codes"]
+
+
+def test_receipt_integrity_rejects_a_self_fingerprinted_lossy_numeric_body():
+    capsule = CAPSULES["capsule-basic"]
+    receipt = create_integrity_receipt(
+        capsule=capsule,
+        runtime=RUNTIME,
+        checks=PASSING_CHECKS,
+        now=NOW,
+    )
+    receipt["provenance"] = [{"kind": "test", "ref": 2**53}]
+    receipt["fingerprint"] = fingerprint(
+        {
+            key: value
+            for key, value in receipt.items()
+            if key not in {"receipt_id", "fingerprint"}
+        }
+    )
+
+    integrity = verify_receipt_integrity(receipt=receipt, capsule=capsule)
+
+    assert integrity["outcome"] == OUTCOMES["INSUFFICIENT"]
+    assert integrity["reason_codes"] == [REASON_CODES["FINGERPRINT_MISMATCH"]]
 
 @pytest.mark.parametrize("capsule_name", CAPSULE_NAMES)
 def test_no_checks_means_nothing_is_verified(capsule_name):

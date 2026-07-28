@@ -30,9 +30,11 @@ correct body fingerprint cannot make an empty binding usable evidence.
 
 from __future__ import annotations
 
-import math
-
-from vivary_core.canonical import deterministic_id, fingerprint as compute_fingerprint
+from vivary_core.canonical import (
+    deterministic_id,
+    fingerprint as compute_fingerprint,
+    is_canonical_body_value,
+)
 from vivary_core.receipt import RECEIPT_SCHEMA
 from vivary_core.verify_reasons import OUTCOMES, REASON_CODES
 
@@ -59,30 +61,6 @@ def _valid_receipt_id(value):
     return value if isinstance(value, str) and len(value) > 0 else None
 
 
-def _is_canonical_body_value(value, ancestors=None):
-    value_type = type(value)
-    if value is None or value_type in (str, bool):
-        return True
-    if value_type is int:
-        return -(2**53 - 1) <= value <= 2**53 - 1
-    if value_type is float:
-        return math.isfinite(value)
-    if value_type not in (list, dict):
-        return False
-    if ancestors is None:
-        ancestors = set()
-    identity = id(value)
-    if identity in ancestors:
-        return False
-    ancestors.add(identity)
-    try:
-        if value_type is list:
-            return all(_is_canonical_body_value(item, ancestors) for item in value)
-        return all(
-            type(key) is str and _is_canonical_body_value(item, ancestors) for key, item in value.items()
-        )
-    finally:
-        ancestors.remove(identity)
 
 
 def verify_receipt_integrity(*, receipt=None, capsule=None):
@@ -140,7 +118,7 @@ def verify_receipt_integrity(*, receipt=None, capsule=None):
     # fingerprint, fingerprint what remains, compare.
     claimed_fingerprint = receipt["fingerprint"]
     body = {k: v for k, v in receipt.items() if k not in ("receipt_id", "fingerprint")}
-    if not _is_canonical_body_value(body):
+    if not is_canonical_body_value(body):
         return _verdict(
             outcome=OUTCOMES["INSUFFICIENT"],
             reason_codes=[REASON_CODES["FINGERPRINT_MISMATCH"]],
