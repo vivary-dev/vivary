@@ -296,52 +296,76 @@ def _repair_graph_is_safe(graph, core):
         and isinstance(graph.get("nodes"), list)
         and isinstance(graph.get("edges"), list)
         and isinstance(graph.get("conflicts"), list)
-        and all(isinstance(node, dict) for node in graph["nodes"])
     ):
         return False
+
+    node_kinds = {}
+    for node in graph["nodes"]:
+        if not (
+            isinstance(node, dict)
+            and _nonempty_string(node.get("id"))
+            and _nonempty_string(node.get("kind"))
+            and node["id"] not in node_kinds
+        ):
+            return False
+        node_kinds[node["id"]] = node["kind"]
+
+    checkout_repositories = {}
     checkout_relations = set()
     for edge in graph["edges"]:
         if not isinstance(edge, dict):
             return False
         if edge.get("kind") == "checkout_of":
+            checkout_id = edge.get("from")
+            repository_id = edge.get("to")
             if not (
-                _nonempty_string(edge.get("from"))
-                and _nonempty_string(edge.get("to"))
+                _nonempty_string(checkout_id)
+                and _nonempty_string(repository_id)
+                and node_kinds.get(checkout_id) == "checkout"
+                and node_kinds.get(repository_id) == "repository"
             ):
                 return False
             try:
-                core["locale_sort_key"](edge["to"])
+                core["locale_sort_key"](checkout_id)
+                core["locale_sort_key"](repository_id)
             except core["CollationDomainError"]:
                 return False
-            relation = (edge["kind"], edge["from"], edge["to"])
+            if checkout_id in checkout_repositories:
+                return False
+            checkout_repositories[checkout_id] = repository_id
+            relation = (checkout_id, repository_id)
             if relation in checkout_relations:
                 return False
             checkout_relations.add(relation)
+
     conflict_pair_count = 0
     for conflict in graph["conflicts"]:
         if not isinstance(conflict, dict):
             return False
-        if conflict.get("repository") is not None and not isinstance(
-            conflict.get("repository"), str
-        ):
-            return False
+        repository_id = conflict.get("repository")
         sides = conflict.get("sides")
-        if sides is not None and not (
-            isinstance(sides, list)
+        if not (
+            _nonempty_string(conflict.get("id"))
+            and conflict.get("kind") == "divergent_checkouts"
+            and _nonempty_string(repository_id)
+            and node_kinds.get(repository_id) == "repository"
+            and isinstance(sides, list)
             and all(
-                isinstance(side, dict) and _nonempty_string(side.get("checkout"))
+                isinstance(side, dict)
+                and _nonempty_string(side.get("checkout"))
+                and node_kinds.get(side["checkout"]) == "checkout"
+                and (side["checkout"], repository_id) in checkout_relations
                 for side in sides
             )
         ):
             return False
-        if sides is not None:
-            checkout_ids = [side["checkout"] for side in sides]
-            if len(set(checkout_ids)) != len(checkout_ids):
-                return False
-            conflict_pair_count += len(checkout_ids) * (len(checkout_ids) - 1) // 2
-            max_checkouts = core["MAX_DEDUPE_CHECKOUTS"]
-            if conflict_pair_count > max_checkouts * (max_checkouts - 1) // 2:
-                return False
+        checkout_ids = [side["checkout"] for side in sides]
+        if len(set(checkout_ids)) != len(checkout_ids):
+            return False
+        conflict_pair_count += len(checkout_ids) * (len(checkout_ids) - 1) // 2
+        max_checkouts = core["MAX_DEDUPE_CHECKOUTS"]
+        if conflict_pair_count > max_checkouts * (max_checkouts - 1) // 2:
+            return False
     return True
 
 

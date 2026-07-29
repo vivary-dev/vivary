@@ -473,6 +473,16 @@ def _governed_request(*, capsule=None, receipt=True, gate=None, graph=False, **o
     return value
 
 
+def _checkout_graph_nodes(edges):
+    nodes = {}
+    for edge in edges:
+        if not isinstance(edge, dict) or edge.get("kind") != "checkout_of":
+            continue
+        nodes[edge["from"]] = {"id": edge["from"], "kind": "checkout"}
+        nodes[edge["to"]] = {"id": edge["to"], "kind": "repository"}
+    return list(nodes.values())
+
+
 def test_governed_verification_returns_raw_bound_core_verdicts():
     result = ozone.verify_governed(_governed_request(graph=True))
 
@@ -692,6 +702,55 @@ def test_governed_repairs_are_typed_bounded_and_dry_run():
     assert proposal["proposals"][0]["requires_gate"] is True
 
 
+def test_governed_verification_refuses_invalid_graph_relationship_endpoints():
+    checkout_edges = [
+        {"kind": "checkout_of", "from": "checkout:a", "to": "repository:x"},
+        {"kind": "checkout_of", "from": "checkout:b", "to": "repository:x"},
+    ]
+    dangling = _governed_request(graph=True)
+    dangling["graph"]["edges"] = checkout_edges
+
+    wrong_kinds = _governed_request(graph=True)
+    wrong_kinds["graph"]["edges"] = checkout_edges
+    wrong_kinds["graph"]["nodes"] = [
+        {"id": "checkout:a", "kind": "repository"},
+        {"id": "checkout:b", "kind": "checkout"},
+        {"id": "repository:x", "kind": "checkout"},
+    ]
+
+    multiple_owners = _governed_request(graph=True)
+    multiple_owners["graph"]["edges"] = [
+        {"kind": "checkout_of", "from": "checkout:a", "to": "repository:x"},
+        {"kind": "checkout_of", "from": "checkout:a", "to": "repository:y"},
+    ]
+    multiple_owners["graph"]["nodes"] = _checkout_graph_nodes(
+        multiple_owners["graph"]["edges"]
+    )
+
+    mismatched_conflict = _governed_request(graph=True)
+    mismatched_conflict["graph"]["edges"] = [
+        {"kind": "checkout_of", "from": "checkout:a", "to": "repository:y"},
+        {"kind": "checkout_of", "from": "checkout:b", "to": "repository:y"},
+    ]
+    mismatched_conflict["graph"]["nodes"] = _checkout_graph_nodes(
+        mismatched_conflict["graph"]["edges"]
+    ) + [{"id": "repository:x", "kind": "repository"}]
+    mismatched_conflict["graph"]["conflicts"] = [
+        {
+            "id": "conflict:x",
+            "kind": "divergent_checkouts",
+            "repository": "repository:x",
+            "sides": [{"checkout": "checkout:a"}, {"checkout": "checkout:b"}],
+        }
+    ]
+
+    for request in (dangling, wrong_kinds, multiple_owners, mismatched_conflict):
+        result = ozone.verify_governed(request)
+
+        assert result["schema"] == ozone.REFUSAL_SCHEMA
+        assert result["reason_codes"] == ["invalid_repair_graph"]
+
+
 def test_governed_verification_refuses_malformed_repair_inputs_without_crashing():
     malformed_graph = {
         "schema": "vivary.workspace-graph/v0",
@@ -724,6 +783,9 @@ def test_governed_verification_refuses_malformed_repair_inputs_without_crashing(
     uncollatable_graph_request["graph"]["edges"] = [
         {"kind": "checkout_of", "from": "checkout:a", "to": "repo:🚀"}
     ]
+    uncollatable_graph_request["graph"]["nodes"] = _checkout_graph_nodes(
+        uncollatable_graph_request["graph"]["edges"]
+    )
     uncollatable_graph = ozone.verify_governed(uncollatable_graph_request)
     duplicate_edge_capsule = _governed_capsule(
         claims=[
@@ -746,6 +808,9 @@ def test_governed_verification_refuses_malformed_repair_inputs_without_crashing(
         "to": "repository:x",
     }
     duplicate_edge_request["graph"]["edges"] = [checkout_edge, dict(checkout_edge)]
+    duplicate_edge_request["graph"]["nodes"] = _checkout_graph_nodes(
+        duplicate_edge_request["graph"]["edges"]
+    )
     duplicate_edge_graph = ozone.verify_governed(duplicate_edge_request)
     oversized_conflict_request = _governed_request(graph=True)
     checkout_ids = [
@@ -755,8 +820,13 @@ def test_governed_verification_refuses_malformed_repair_inputs_without_crashing(
         {"kind": "checkout_of", "from": checkout_id, "to": "repository:x"}
         for checkout_id in checkout_ids
     ]
+    oversized_conflict_request["graph"]["nodes"] = _checkout_graph_nodes(
+        oversized_conflict_request["graph"]["edges"]
+    )
     oversized_conflict_request["graph"]["conflicts"] = [
         {
+            "id": "conflict:oversized",
+            "kind": "divergent_checkouts",
             "repository": "repository:x",
             "sides": [{"checkout": checkout_id} for checkout_id in checkout_ids],
         }
@@ -829,6 +899,7 @@ def test_governed_verification_refuses_unbounded_repair_products():
         {"kind": "checkout_of", "from": checkout_id, "to": "repository:x"}
         for checkout_id in checkout_ids
     ]
+    request["graph"]["nodes"] = _checkout_graph_nodes(request["graph"]["edges"])
 
     result = ozone.verify_governed(request)
 
@@ -875,6 +946,7 @@ def test_governed_verification_refuses_unbounded_checkout_pair_scans():
         for repository_index in range(2)
         for checkout_index in range(MAX_DEDUPE_CHECKOUTS)
     ]
+    request["graph"]["nodes"] = _checkout_graph_nodes(request["graph"]["edges"])
 
     result = ozone.verify_governed(request)
 
@@ -919,6 +991,7 @@ def test_governed_verification_refuses_unbounded_route_evidence():
         }
         for index in range(MAX_DEDUPE_CHECKOUTS + 1)
     ]
+    request["graph"]["nodes"] = _checkout_graph_nodes(request["graph"]["edges"])
 
     result = ozone.verify_governed(request)
 
