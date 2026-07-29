@@ -236,9 +236,13 @@ jobs:
           assert ozone_result["gate_verdict"]["schema"] == "vivary.gate-verdict/v0"
           assert ozone_result["gate_verdict"]["outcome"] == "sufficient"
           assert ozone_result["repair_proposal"] is None
-          assert strato_decision["schema"] == "vivary.strato-decision/v0"
-          assert strato_decision["decision"] == "stop"
-          assert isinstance(strato_decision["reason_codes"], list)
+          assert strato_decision["decision"] == "request_gate"
+          assert strato_decision["reason_codes"] == ["gate_required"]
+          assert strato_decision["gate"]["reason_codes"] == [
+              "unresolved_unknown",
+              "capsule_over_budget",
+          ]
+          assert "verdict_integrity_mismatch" not in strato_decision["gate"]["reason_codes"]
           assert governed["schema"] == "vivary.task-capsule/v0"
           assert governed["budget"] == {"max_claims": 2}
           assert governed["claims"]
