@@ -150,6 +150,7 @@ def _load_core_verification():
         is_task_capsule_shape,
         verify_task_capsule_integrity,
     )
+    from vivary_core.capsule_select import OMITTED_LIST_CAP
     from vivary_core.canonical import (
         MAX_LOSSLESS_INTEGER,
         _utf16_sort_key,
@@ -167,6 +168,7 @@ def _load_core_verification():
     return {
         "is_task_capsule_shape": is_task_capsule_shape,
         "verify_task_capsule_integrity": verify_task_capsule_integrity,
+        "OMITTED_LIST_CAP": OMITTED_LIST_CAP,
         "verify_receipt_integrity": verify_receipt_integrity,
         "propose_context_repairs": propose_context_repairs,
         "evaluate_gate_sufficiency": evaluate_gate_sufficiency,
@@ -197,7 +199,7 @@ def _parse_instant(value):
 
 
 
-def _repair_capsule_is_safe(capsule):
+def _repair_capsule_is_safe(capsule, core):
     claims = capsule.get("claims")
     if not isinstance(claims, list):
         return False
@@ -246,6 +248,8 @@ def _repair_capsule_is_safe(capsule):
             return False
         omitted = omission.get("omitted")
         if not isinstance(omitted, list):
+            return False
+        if len(omitted) != min(omitted_count, core["OMITTED_LIST_CAP"]):
             return False
         if not all(
             isinstance(entry, dict)
@@ -490,8 +494,8 @@ def _validate_governed_request(request, core):
             errors.append("stale_receipt")
 
     if "graph" in request:
-        repair_capsule_is_safe = (
-            capsule_shape_is_valid and _repair_capsule_is_safe(capsule)
+        repair_capsule_is_safe = capsule_shape_is_valid and _repair_capsule_is_safe(
+            capsule, core
         )
         if not repair_capsule_is_safe:
             errors.append("invalid_repair_capsule")

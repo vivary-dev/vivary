@@ -475,6 +475,8 @@ ozone verify request.json --governed --json --strict
 | `receipt` | Execution Receipt bound to the capsule. Omission or malformed/tampered evidence cannot produce a sufficient aggregate result. |
 | `gate` | Named gate with core-owned `required_checks`, `require_claims_verified`, `max_unresolved_conflicts`, and `max_unresolved_unknowns` constraints. |
 | `graph` | Optional matching `vivary.workspace-graph/v0`. When present, Ozone returns a bounded `vivary.context-repair-proposal/v0`; every proposal has `requires_gate: true`, and `writes_performed` is always `0`. |
+A `claims_over_budget` omission must list exactly
+`min(omitted_count, 16)` entries. This matches core's compiler cap.
 Requests whose potential repair count exceeds core's deterministic 300-checkout pair
 ceiling, or whose derived estimates exceed JavaScript's lossless integer range, are
 refused before delegation.

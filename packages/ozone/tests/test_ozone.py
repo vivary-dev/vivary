@@ -19,6 +19,7 @@ import ozone  # noqa: E402
 import strato  # noqa: E402
 from vivary_core.canonical import deterministic_id, fingerprint  # noqa: E402
 from vivary_core.capsule_compile import CAPSULE_SCHEMA  # noqa: E402
+from vivary_core.capsule_select import OMITTED_LIST_CAP  # noqa: E402
 from vivary_core.receipt import create_integrity_receipt  # noqa: E402
 from vivary_core.verify_repair import MAX_DEDUPE_CHECKOUTS  # noqa: E402
 
@@ -840,7 +841,14 @@ def test_governed_verification_refuses_unbounded_repair_products():
                 "kind": "claims_over_budget",
                 "reason": "claim budget reached",
                 "omitted_count": 2**53 - 1,
-                "omitted": [],
+                "omitted": [
+                    {
+                        "subject_path": f"/repo/omitted/{index}",
+                        "fact": f"omitted:{index}",
+                        "tier": "allowlisted",
+                    }
+                    for index in range(OMITTED_LIST_CAP)
+                ],
             }
         ]
     )
@@ -854,6 +862,40 @@ def test_governed_verification_refuses_unbounded_repair_products():
 
     assert oversized_estimate["schema"] == ozone.REFUSAL_SCHEMA
     assert oversized_estimate["reason_codes"] == ["repair_estimate_unbounded"]
+
+
+def test_governed_verification_refuses_unbounded_or_inconsistent_omission_lists():
+    oversized_omitted = [
+        {
+            "subject_path": f"/repo/omitted/{index}",
+            "fact": f"omitted:{index}",
+            "tier": "allowlisted",
+        }
+        for index in range(OMITTED_LIST_CAP + 1)
+    ]
+    inconsistent_omitted = oversized_omitted[:2]
+
+    for omitted_count, omitted in (
+        (len(oversized_omitted), oversized_omitted),
+        (1, inconsistent_omitted),
+    ):
+        capsule = _governed_capsule(
+            omissions=[
+                {
+                    "kind": "claims_over_budget",
+                    "reason": "claim budget reached",
+                    "omitted_count": omitted_count,
+                    "omitted": omitted,
+                }
+            ]
+        )
+
+        result = ozone.verify_governed(
+            _governed_request(capsule=capsule, graph=True)
+        )
+
+        assert result["schema"] == ozone.REFUSAL_SCHEMA
+        assert result["reason_codes"] == ["invalid_repair_capsule"]
 
 
 def test_governed_verification_refuses_unbound_graph_and_unknown_gate_fields():
