@@ -477,9 +477,8 @@ ozone verify request.json --governed --json --strict
 | `graph` | Optional matching `vivary.workspace-graph/v0`. When present, Ozone returns a bounded `vivary.context-repair-proposal/v0`; every proposal has `requires_gate: true`, and `writes_performed` is always `0`. |
 A `claims_over_budget` omission must list exactly
 `min(omitted_count, 16)` entries. This matches core's compiler cap.
-Requests whose potential repair count exceeds core's deterministic 300-checkout pair
-ceiling, or whose derived estimates exceed JavaScript's lossless integer range, are
-refused before delegation.
+Requests whose total checkout-pair scan count, potential repair count, or derived
+estimate exceeds its matching core ceiling are refused before delegation.
 
 Capsule observations and receipts must fall within the deterministic 300-second
 freshness window ending at `verified_at`. Future, stale, mismatched, non-canonical,

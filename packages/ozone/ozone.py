@@ -364,8 +364,12 @@ def _repair_work_is_bounded(capsule, graph, core):
             continue
         checkouts_by_repository.setdefault(edge["to"], []).append(edge["from"])
 
+    pair_scan_count = 0
     for checkouts in checkouts_by_repository.values():
         considered = sorted(checkouts, key=core["_utf16_sort_key"])[:max_checkouts]
+        pair_scan_count += len(considered) * (len(considered) - 1) // 2
+        if pair_scan_count > proposal_limit:
+            return False
         claim_counts = sorted(
             claims_by_subject.get(checkout, 0) for checkout in considered
         )

@@ -84,8 +84,9 @@ remains part of the final coordinated release train and requires a separate huma
   caller-supplied clock, applies a deterministic 300-second evidence window, rejects
   malformed or deeply nested repair inputs before calling core, refuses unknown
   capsule/receipt fields even when the artifact is re-fingerprinted, enforces core's
-  16-entry omission-list/count contract, and bounds derived repair estimates to
-  JavaScript's lossless integer range before delegation.
+  16-entry omission-list/count contract, caps total checkout-pair scans across all
+  repositories, and bounds derived repair estimates to JavaScript's lossless integer
+  range before delegation.
   It returns typed verification or refusal envelopes. Core's fingerprinted receipt/gate
   verdicts and repair proposal pass through unchanged; Strato consumes the raw
   `gate_verdict` without a second verification implementation. Advisory mode exits
@@ -93,7 +94,8 @@ remains part of the final coordinated release train and requires a separate huma
   requests exit `2`.
 - Ozone regressions cover sufficient, wrong-claim-ID, duplicate-claim-ID, missing,
   tampered, stale, workspace-mismatched, budget-limited, unknown-artifact,
-  bounded-repair, omission-bound, estimate-bound, malformed, recursive, repair, CLI,
+  bounded-repair, pair-scan-bound, omission-bound, estimate-bound, malformed, recursive,
+  repair, CLI,
   and real Ozone-to-Strato cases. The installed-package CI smoke proves Ozone's core
   floor, runs the packaged Ozone verdict path, and hands its unchanged verdict to
   Strato.
@@ -217,7 +219,7 @@ remains part of the final coordinated release train and requires a separate huma
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **36/36**, Exo **17/17**,
+- Repository verification also passed: Ozone **37/37**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**

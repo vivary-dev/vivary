@@ -864,6 +864,24 @@ def test_governed_verification_refuses_unbounded_repair_products():
     assert oversized_estimate["reason_codes"] == ["repair_estimate_unbounded"]
 
 
+def test_governed_verification_refuses_unbounded_checkout_pair_scans():
+    request = _governed_request(receipt=False, graph=True)
+    request["graph"]["edges"] = [
+        {
+            "kind": "checkout_of",
+            "from": f"checkout:{repository_index}:{checkout_index}",
+            "to": f"repository:{repository_index}",
+        }
+        for repository_index in range(2)
+        for checkout_index in range(MAX_DEDUPE_CHECKOUTS)
+    ]
+
+    result = ozone.verify_governed(request)
+
+    assert result["schema"] == ozone.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["repair_work_unbounded"]
+
+
 def test_governed_verification_refuses_unbounded_or_inconsistent_omission_lists():
     oversized_omitted = [
         {
