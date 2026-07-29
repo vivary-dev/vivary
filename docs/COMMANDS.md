@@ -487,12 +487,14 @@ Requests whose total checkout-pair scan count, potential repair count, route-pro
 evidence count, or derived estimate exceeds its matching core ceiling are refused
 before delegation.
 
-Capsule observations and receipts must fall within the deterministic 300-second
-freshness window ending at `verified_at`. Future, stale, mismatched, non-canonical,
-unknown-field, malformed, or deeply nested inputs return a typed
-`vivary.ozone-verification-refusal/v0`, never a traceback.
+Envelope-level validation rejects future or stale timestamps, workspace mismatches,
+non-canonical or unknown fields, invalid shapes, and deeply nested request documents
+with a typed `vivary.ozone-verification-refusal/v0`, never a traceback.
 In default plain-text output, reason fragments are JSON-escaped before they are written
 so valid JSON field names cannot cause a terminal encoding failure.
+Malformed or tampered receipt evidence inside an otherwise accepted envelope is not an
+envelope refusal: core's receipt and gate verdicts describe the failure, and the valid
+aggregate outcome is `insufficient`.
 
 A valid result is `vivary.ozone-verification/v0`. Its `receipt_verdict`,
 `gate_verdict`, and optional `repair_proposal` are the raw fingerprinted core

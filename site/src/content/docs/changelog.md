@@ -94,7 +94,7 @@ remains part of the final coordinated release train and requires a separate huma
   `gate_verdict` without a second verification implementation. Plain-text refusal
   output JSON-escapes reason fragments before writing them, including unpaired Unicode
   surrogates. Advisory mode exits `0`, `--strict` exits `1` for a valid insufficient
-  result, and malformed/refused requests exit `2`.
+  result, and malformed request documents or refused request envelopes exit `2`.
 - Ozone regressions cover sufficient, wrong-claim-ID, duplicate-claim-ID, missing,
   tampered, stale, workspace-mismatched, budget-limited, unknown-artifact,
   bounded-repair, pair-scan-bound, route-evidence-bound, identifier-bound,
