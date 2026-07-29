@@ -26,6 +26,7 @@ import argparse
 import datetime
 import importlib.util
 import json
+import math
 import os
 import platform
 import sys
@@ -184,6 +185,31 @@ def _load_core_verification():
 
 def _nonempty_string(value):
     return isinstance(value, str) and bool(value.strip())
+
+
+def _is_finite_number(value):
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, float) and math.isfinite(value)
+
+
+def _gate_constraints_are_valid(gate):
+    required_checks = gate.get("required_checks")
+    if required_checks is not None and (
+        not isinstance(required_checks, list)
+        or not all(isinstance(name, str) for name in required_checks)
+    ):
+        return False
+    if gate.get("require_claims_verified") is not None and not isinstance(
+        gate["require_claims_verified"], bool
+    ):
+        return False
+    return all(
+        gate.get(field) is None or _is_finite_number(gate[field])
+        for field in ("max_unresolved_conflicts", "max_unresolved_unknowns")
+    )
 
 
 def _parse_instant(value):
@@ -479,6 +505,8 @@ def _validate_governed_request(request, core):
         errors.extend(
             f"unknown_gate_field:{field}" for field in unknown_gate_fields
         )
+        if not _gate_constraints_are_valid(gate):
+            errors.append("invalid_gate")
 
     receipt = request.get("receipt")
     if isinstance(receipt, dict):

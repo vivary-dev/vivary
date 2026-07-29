@@ -960,6 +960,37 @@ def test_governed_verification_refuses_unbounded_or_inconsistent_omission_lists(
         assert result["reason_codes"] == ["invalid_repair_capsule"]
 
 
+def test_governed_verification_refuses_malformed_gate_constraints():
+    malformed_constraints = (
+        ("required_checks", "unit"),
+        ("required_checks", ["unit", 1]),
+        ("require_claims_verified", 1),
+        ("max_unresolved_conflicts", "0"),
+        ("max_unresolved_conflicts", True),
+        ("max_unresolved_unknowns", []),
+    )
+
+    for field, value in malformed_constraints:
+        request = _governed_request()
+        request["gate"][field] = value
+
+        result = ozone.verify_governed(request)
+
+        assert result["schema"] == ozone.REFUSAL_SCHEMA
+        assert result["reason_codes"] == ["invalid_gate"]
+
+    nullable_request = _governed_request()
+    nullable_request["gate"].update(
+        {
+            "required_checks": None,
+            "require_claims_verified": None,
+            "max_unresolved_conflicts": None,
+            "max_unresolved_unknowns": None,
+        }
+    )
+    assert ozone.verify_governed(nullable_request)["schema"] == ozone.VERIFICATION_SCHEMA
+
+
 def test_governed_verification_refuses_unbound_graph_and_unknown_gate_fields():
     unbound_graph_request = _governed_request(graph=True)
     del unbound_graph_request["graph"]["workspace_fingerprint"]
