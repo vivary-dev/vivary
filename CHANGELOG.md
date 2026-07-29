@@ -83,8 +83,10 @@ remains part of the final coordinated release train and requires a separate huma
   rejects malformed gate constraints, malformed or contradictory receipt fields,
   invalid typed graph relationships, and malformed or deeply nested repair inputs before
   calling core. Receipt claim lists must be unique and disjoint, and together must equal
-  both `claims_in_scope` and the capsule's claim IDs. It refuses unknown capsule/receipt
-  fields even when the artifact is re-fingerprinted, enforces core's 16-entry
+  both `claims_in_scope` and the capsule's claim IDs. Receipt checks that share a capsule
+  required-check name must carry that exact command, preventing a passing result for
+  another command from clearing the gate. It refuses unknown capsule/receipt fields even
+  when the artifact is re-fingerprinted, enforces core's 16-entry
   omission-list/count contract and a 128-byte JSON-encoded ceiling on repair identifiers,
   rejects semantically duplicate `(subject, fact, claim)` entries before they can
   duplicate deterministic repair IDs, requires the repair graph to preserve every

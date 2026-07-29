@@ -335,6 +335,19 @@ def _receipt_shape_is_valid(receipt, capsule):
 
     if not isinstance(capsule, dict):
         return True
+    required_commands = {}
+    for required_check in capsule.get("required_checks", []):
+        name = required_check["name"]
+        command = required_check["command"]
+        if name in required_commands and required_commands[name] != command:
+            return False
+        required_commands[name] = command
+    if any(
+        check["name"] in required_commands
+        and check.get("command") != required_commands[check["name"]]
+        for check in checks
+    ):
+        return False
     capsule_claim_ids = [claim["id"] for claim in capsule.get("claims", [])]
     capsule_conflicts = [
         {"id": conflict["id"], "decision": conflict["decision"]}

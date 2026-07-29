@@ -476,6 +476,9 @@ ozone verify request.json --governed --json --strict
 | `receipt` | Complete Execution Receipt bound to the capsule. Its check records and claim lists are shape-validated; `claims_verified` and `claims_unverified` must be disjoint and together equal both `claims_in_scope` and the capsule's claim IDs. Omission or malformed/tampered evidence cannot produce a sufficient aggregate result. |
 | `gate` | Named gate with core-owned `required_checks`, `require_claims_verified`, `max_unresolved_conflicts`, and `max_unresolved_unknowns` constraints. |
 | `graph` | Optional matching `vivary.workspace-graph/v0`. When present, Ozone returns a bounded `vivary.context-repair-proposal/v0`; every proposal has `requires_gate: true`, and `writes_performed` is always `0`. |
+Each receipt check that shares a capsule `required_checks` name must carry that exact
+required command; duplicate records for the same name and command remain valid evidence
+for core's worst-outcome aggregation.
 Repair `checkout_of` endpoints must reference existing `checkout` and `repository`
 nodes. The capsule's `workspace.repair_topology_fingerprint` commits the normalized
 repository nodes and `checkout_of` relationships that can drive repair proposals;

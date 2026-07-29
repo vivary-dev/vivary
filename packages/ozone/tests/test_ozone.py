@@ -776,7 +776,7 @@ def test_governed_verification_fails_closed_for_missing_and_tampered_receipts():
     assert "fingerprint_mismatch" in tampered["receipt_verdict"]["reason_codes"]
 
 
-def test_governed_verification_refuses_malformed_receipt_fields():
+def test_governed_verification_refuses_malformed_or_mismatched_receipt_fields():
     governed_capsule = _governed_capsule(
         claims=[{"id": "claim:first", "subject": "checkout:a", "claim": "first"}]
     )
@@ -784,6 +784,10 @@ def test_governed_verification_refuses_malformed_receipt_fields():
     for field, value in (
         ("claims_unverified", "not-a-list"),
         ("checks", [{"name": "unit", "outcome": []}]),
+        (
+            "checks",
+            [{"name": "unit", "command": "false", "outcome": "passed"}],
+        ),
     ):
         governed_receipt = _governed_receipt(governed_capsule)
         governed_receipt[field] = value
@@ -812,8 +816,16 @@ def test_governed_verification_preserves_duplicate_receipt_checks():
         capsule=governed_capsule,
         runtime={"harness": "test", "actor": "agent:test"},
         checks=[
-            {"name": "unit", "outcome": "passed"},
-            {"name": "unit", "outcome": "failed"},
+            {
+                "name": "unit",
+                "command": "python packages/ozone/tests/test_ozone.py",
+                "outcome": "passed",
+            },
+            {
+                "name": "unit",
+                "command": "python packages/ozone/tests/test_ozone.py",
+                "outcome": "failed",
+            },
         ],
         now=lambda: NOW,
     )
@@ -836,6 +848,7 @@ def test_governed_verification_accepts_core_receipt_extensions():
         checks=[
             {
                 "name": "unit",
+                "command": "python packages/ozone/tests/test_ozone.py",
                 "outcome": "passed",
                 "runner": {"attempt": 1},
             }
