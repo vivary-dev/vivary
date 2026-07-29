@@ -384,7 +384,7 @@ def test_review_json_shape():
 NOW = "2026-07-28T12:00:00+00:00"
 
 
-def _governed_capsule(*, claims=None, unknowns=None, omissions=None):
+def _governed_capsule(*, claims=None, conflicts=None, unknowns=None, omissions=None):
     value = {
         "schema": CAPSULE_SCHEMA,
         "capsule_id": None,
@@ -397,7 +397,7 @@ def _governed_capsule(*, claims=None, unknowns=None, omissions=None):
             "observed_at": NOW,
         },
         "claims": [] if claims is None else claims,
-        "conflicts": [],
+        "conflicts": [] if conflicts is None else conflicts,
         "unknowns": [] if unknowns is None else unknowns,
         "omissions": [] if omissions is None else omissions,
         "required_checks": [
@@ -700,6 +700,61 @@ def test_governed_repairs_are_typed_bounded_and_dry_run():
     assert len(proposal["proposals"]) == 1
     assert proposal["proposals"][0]["target"] == "claim:weak"
     assert proposal["proposals"][0]["requires_gate"] is True
+
+
+def test_governed_verification_refuses_graphs_that_drop_capsule_conflicts():
+    checkout_edges = [
+        {"kind": "checkout_of", "from": "checkout:a", "to": "repository:x"},
+        {"kind": "checkout_of", "from": "checkout:b", "to": "repository:x"},
+    ]
+    conflict = {
+        "id": "conflict:divergent",
+        "kind": "divergent_checkouts",
+        "repository": "repository:x",
+        "question": "Which checkout reflects current repository truth?",
+        "sides": [
+            {"checkout": "checkout:a"},
+            {"checkout": "checkout:b"},
+        ],
+        "status": "unresolved",
+        "reason_codes": ["value_conflict", "identity_unresolved"],
+    }
+    capsule_conflict = {**conflict, "decision": "review_required"}
+    claims = [
+        {
+            "id": f"claim:{checkout_id}",
+            "fact": "same_fact",
+            "subject": checkout_id,
+            "claim": "Conflicting checkout claim.",
+            "selection": {"tier": "allowlisted"},
+            "evidence": [],
+        }
+        for checkout_id in ("checkout:a", "checkout:b")
+    ]
+    capsule = _governed_capsule(claims=claims, conflicts=[capsule_conflict])
+    graph = {
+        "schema": "vivary.workspace-graph/v0",
+        "workspace_fingerprint": capsule["workspace"]["fingerprint"],
+        "nodes": _checkout_graph_nodes(checkout_edges),
+        "edges": checkout_edges,
+        "conflicts": [],
+    }
+
+    result = ozone.verify_governed(
+        _governed_request(capsule=capsule, graph=graph)
+    )
+
+    assert result["schema"] == ozone.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["repair_graph_conflicts_mismatch"]
+    matching_graph = {**graph, "conflicts": [conflict]}
+    matching = ozone.verify_governed(
+        _governed_request(capsule=capsule, graph=matching_graph)
+    )
+    assert matching["schema"] == ozone.VERIFICATION_SCHEMA
+    assert all(
+        proposal["kind"] != "deduplicate"
+        for proposal in matching["repair_proposal"]["proposals"]
+    )
 
 
 def test_governed_verification_refuses_invalid_graph_relationship_endpoints():

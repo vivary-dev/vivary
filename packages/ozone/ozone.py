@@ -310,6 +310,30 @@ def _repair_capsule_is_safe(capsule, core):
     return True
 
 
+def _repair_graph_matches_capsule_conflicts(capsule, graph):
+    capsule_conflicts = capsule.get("conflicts")
+    if not isinstance(capsule_conflicts, list):
+        return False
+
+    expected = {}
+    for conflict in capsule_conflicts:
+        if not (
+            isinstance(conflict, dict)
+            and conflict.get("decision") == "review_required"
+            and _bounded_repair_identifier(conflict.get("id"))
+            and conflict["id"] not in expected
+        ):
+            return False
+        graph_conflict = dict(conflict)
+        del graph_conflict["decision"]
+        expected[conflict["id"]] = graph_conflict
+
+    return expected == {
+        conflict["id"]: conflict
+        for conflict in graph["conflicts"]
+    }
+
+
 def _repair_graph_is_safe(graph, core):
     if not (
         isinstance(graph, dict)
@@ -361,6 +385,7 @@ def _repair_graph_is_safe(graph, core):
             checkout_relations.add(relation)
 
     conflict_pair_count = 0
+    conflict_ids = set()
     for conflict in graph["conflicts"]:
         if not isinstance(conflict, dict):
             return False
@@ -368,6 +393,7 @@ def _repair_graph_is_safe(graph, core):
         sides = conflict.get("sides")
         if not (
             _bounded_repair_identifier(conflict.get("id"))
+            and conflict["id"] not in conflict_ids
             and conflict.get("kind") == "divergent_checkouts"
             and _nonempty_string(repository_id)
             and node_kinds.get(repository_id) == "repository"
@@ -381,6 +407,7 @@ def _repair_graph_is_safe(graph, core):
             )
         ):
             return False
+        conflict_ids.add(conflict["id"])
         checkout_ids = [side["checkout"] for side in sides]
         if len(set(checkout_ids)) != len(checkout_ids):
             return False
@@ -584,6 +611,10 @@ def _validate_governed_request(request, core):
             errors.append("invalid_repair_graph")
         elif request["graph"]["workspace_fingerprint"] != workspace_fingerprint:
             errors.append("repair_graph_workspace_mismatch")
+        elif repair_capsule_is_safe and not _repair_graph_matches_capsule_conflicts(
+            capsule, request["graph"]
+        ):
+            errors.append("repair_graph_conflicts_mismatch")
         elif repair_capsule_is_safe and not _repair_estimates_are_canonical(
             capsule, core
         ):

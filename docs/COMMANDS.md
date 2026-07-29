@@ -478,6 +478,8 @@ ozone verify request.json --governed --json --strict
 Repair `checkout_of` endpoints must reference existing `checkout` and `repository`
 nodes. Every divergent-conflict side must reference a checkout related to that
 conflict's repository.
+The graph's conflict set must match the capsule's preserved conflicts exactly; a graph
+cannot omit a conflict to turn conflicting checkout truth into a deduplication proposal.
 Claim IDs, claim facts, graph node IDs, and conflict IDs that repair expansion can
 repeat are limited to 128 bytes in JSON string encoding.
 
