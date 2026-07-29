@@ -380,6 +380,8 @@ def _repair_work_is_bounded(capsule, graph, core):
         if over_budget is not None and sum(
             claims_by_subject.get(checkout, 0) for checkout in checkouts
         ) >= 3:
+            if len(checkouts) > max_checkouts:
+                return False
             proposal_upper_bound += 1
         if proposal_upper_bound > proposal_limit:
             return False

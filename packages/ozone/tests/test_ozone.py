@@ -882,6 +882,50 @@ def test_governed_verification_refuses_unbounded_checkout_pair_scans():
     assert result["reason_codes"] == ["repair_work_unbounded"]
 
 
+def test_governed_verification_refuses_unbounded_route_evidence():
+    overflow_checkout = f"checkout:{MAX_DEDUPE_CHECKOUTS:03d}"
+    capsule = _governed_capsule(
+        claims=[
+            {
+                "id": f"claim:overflow:{index}",
+                "fact": f"fact:{index}",
+                "subject": overflow_checkout,
+                "claim": f"value:{index}",
+                "evidence": [],
+            }
+            for index in range(3)
+        ],
+        omissions=[
+            {
+                "kind": "claims_over_budget",
+                "reason": "claim budget reached",
+                "omitted_count": 1,
+                "omitted": [
+                    {
+                        "subject_path": "/repo/omitted",
+                        "fact": "omitted:0",
+                        "tier": "allowlisted",
+                    }
+                ],
+            }
+        ],
+    )
+    request = _governed_request(capsule=capsule, receipt=False, graph=True)
+    request["graph"]["edges"] = [
+        {
+            "kind": "checkout_of",
+            "from": f"checkout:{index:03d}",
+            "to": "repository:x",
+        }
+        for index in range(MAX_DEDUPE_CHECKOUTS + 1)
+    ]
+
+    result = ozone.verify_governed(request)
+
+    assert result["schema"] == ozone.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["repair_work_unbounded"]
+
+
 def test_governed_verification_refuses_unbounded_or_inconsistent_omission_lists():
     oversized_omitted = [
         {
