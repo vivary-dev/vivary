@@ -495,6 +495,8 @@ Capsule observations and receipts must fall within the deterministic 300-second
 freshness window ending at `verified_at`. Future, stale, mismatched, non-canonical,
 unknown-field, malformed, or deeply nested inputs return a typed
 `vivary.ozone-verification-refusal/v0`, never a traceback.
+In default plain-text output, reason fragments are JSON-escaped before they are written
+so valid JSON field names cannot cause a terminal encoding failure.
 
 A valid result is `vivary.ozone-verification/v0`. Its `receipt_verdict`,
 `gate_verdict`, and optional `repair_proposal` are the raw fingerprinted core

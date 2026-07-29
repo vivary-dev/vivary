@@ -1091,7 +1091,13 @@ def _emit_verification(result, json_output):
         return
     print(f"ozone verify: {result['outcome']}")
     if result["reason_codes"]:
-        print("reasons: " + ", ".join(result["reason_codes"]))
+        print(
+            "reasons: "
+            + ", ".join(
+                json.dumps(reason, ensure_ascii=True)[1:-1]
+                for reason in result["reason_codes"]
+            )
+        )
 
 
 def cmd_verify(args):

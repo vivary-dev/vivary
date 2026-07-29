@@ -1125,6 +1125,33 @@ def test_governed_verification_refuses_unbound_graph_and_unknown_gate_fields():
     assert lossy_integer["reason_codes"] == ["invalid_json_value"]
 
 
+def test_governed_verify_cli_escapes_unencodable_refusal_reasons():
+    with temp_workspace() as td:
+        request_path = td / "request.json"
+        request = _governed_request()
+        request["\ud800"] = True
+        request_path.write_text(json.dumps(request), encoding="utf-8")
+
+        raw_output = io.BytesIO()
+        strict_stdout = io.TextIOWrapper(
+            raw_output,
+            encoding="utf-8",
+            errors="strict",
+        )
+        with contextlib.redirect_stdout(strict_stdout):
+            return_code = ozone.main(
+                ["verify", str(request_path), "--governed"]
+            )
+        strict_stdout.flush()
+        output = raw_output.getvalue().decode("utf-8")
+
+    assert return_code == 2
+    assert output.splitlines() == [
+        "ozone verify: refused",
+        "reasons: unknown_field:\\ud800",
+    ]
+
+
 def test_governed_verify_cli_emits_typed_json_and_honest_exit_codes():
     with temp_workspace() as td:
         request_path = td / "request.json"
