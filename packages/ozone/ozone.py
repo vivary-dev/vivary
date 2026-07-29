@@ -158,6 +158,7 @@ def _load_core_verification():
         MAX_LOSSLESS_INTEGER,
         _utf16_sort_key,
         is_canonical_body_value,
+        is_within_allowlist,
     )
     from vivary_core.collation import CollationDomainError, locale_sort_key
     from vivary_core.verify_receipt import verify_receipt_integrity
@@ -178,6 +179,7 @@ def _load_core_verification():
         "CollationDomainError": CollationDomainError,
         "_utf16_sort_key": _utf16_sort_key,
         "is_canonical_body_value": is_canonical_body_value,
+        "is_within_allowlist": is_within_allowlist,
         "repair_topology_fingerprint": repair_topology_fingerprint,
         "MAX_DEDUPE_CHECKOUTS": MAX_DEDUPE_CHECKOUTS,
         "AVG_OMITTED_CLAIM_TOKENS": AVG_OMITTED_CLAIM_TOKENS,
@@ -247,9 +249,120 @@ def _parse_instant(value):
     return instant if instant.tzinfo is not None else None
 
 
+def _receipt_shape_is_valid(receipt, capsule):
+    if not isinstance(receipt, dict) or not RECEIPT_FIELDS <= set(receipt):
+        return False
+
+    receipt_capsule = receipt.get("capsule")
+    receipt_workspace = receipt.get("workspace")
+    runtime = receipt.get("runtime")
+    checks = receipt.get("checks")
+    claim_lists = [
+        receipt.get("claims_in_scope"),
+        receipt.get("claims_verified"),
+        receipt.get("claims_unverified"),
+    ]
+    if not (
+        isinstance(receipt_capsule, dict)
+        and set(receipt_capsule) == {"id", "fingerprint"}
+        and all(_nonempty_string(value) for value in receipt_capsule.values())
+        and isinstance(receipt_workspace, dict)
+        and set(receipt_workspace) == {"fingerprint", "observed_at"}
+        and _nonempty_string(receipt_workspace.get("fingerprint"))
+        and _parse_instant(receipt_workspace.get("observed_at")) is not None
+        and isinstance(runtime, dict)
+        and _nonempty_string(runtime.get("actor"))
+        and all(
+            field not in runtime or _nonempty_string(runtime[field])
+            for field in ("harness", "model")
+        )
+        and isinstance(checks, list)
+        and all(
+            isinstance(check, dict)
+            and isinstance(check.get("outcome"), str)
+            and check["outcome"] in {"passed", "failed", "skipped"}
+            and _nonempty_string(check.get("name"))
+            and all(
+                _nonempty_string(check[field])
+                for field in ("command", "detail")
+                if field in check
+            )
+            for check in checks
+        )
+        and all(
+            isinstance(values, list)
+            and all(_nonempty_string(value) for value in values)
+            and len(set(values)) == len(values)
+            for values in claim_lists
+        )
+    ):
+        return False
+
+    claims_in_scope, claims_verified, claims_unverified = claim_lists
+    if (
+        set(claims_verified) & set(claims_unverified)
+        or set(claims_verified) | set(claims_unverified) != set(claims_in_scope)
+    ):
+        return False
+
+    unresolved_conflicts = receipt.get("unresolved_conflicts")
+    unresolved_unknowns = receipt.get("unresolved_unknowns")
+    provenance = receipt.get("provenance")
+    if not (
+        isinstance(unresolved_conflicts, list)
+        and all(
+            isinstance(conflict, dict)
+            and set(conflict) == {"id", "decision"}
+            and _nonempty_string(conflict.get("id"))
+            and _nonempty_string(conflict.get("decision"))
+            for conflict in unresolved_conflicts
+        )
+        and len({conflict["id"] for conflict in unresolved_conflicts})
+        == len(unresolved_conflicts)
+        and isinstance(unresolved_unknowns, list)
+        and all(isinstance(unknown, dict) for unknown in unresolved_unknowns)
+        and isinstance(provenance, list)
+        and all(
+            isinstance(entry, dict)
+            and all(
+                _nonempty_string(entry.get(field))
+                for field in ("kind", "ref", "note")
+            )
+            for entry in provenance
+        )
+    ):
+        return False
+
+    if not isinstance(capsule, dict):
+        return True
+    capsule_claim_ids = [claim["id"] for claim in capsule.get("claims", [])]
+    capsule_conflicts = [
+        {"id": conflict["id"], "decision": conflict["decision"]}
+        for conflict in capsule.get("conflicts", [])
+    ]
+    return (
+        receipt_capsule.get("id") == capsule.get("capsule_id")
+        and receipt_capsule.get("fingerprint") == capsule.get("fingerprint")
+        and receipt_workspace.get("fingerprint")
+        == capsule.get("workspace", {}).get("fingerprint")
+        and receipt_workspace.get("observed_at")
+        == capsule.get("workspace", {}).get("observed_at")
+        and claims_in_scope == capsule_claim_ids
+        and unresolved_conflicts == capsule_conflicts
+        and unresolved_unknowns == capsule.get("unknowns")
+    )
+
+
 
 
 def _repair_capsule_is_safe(capsule, core):
+    task = capsule.get("task")
+    declared_scope = task.get("scope") if isinstance(task, dict) else None
+    if declared_scope is not None and (
+        not isinstance(declared_scope, list)
+        or not all(_nonempty_string(root) for root in declared_scope)
+    ):
+        return False
     workspace = capsule.get("workspace")
     if not (
         isinstance(workspace, dict)
@@ -330,7 +443,7 @@ def _repair_capsule_is_safe(capsule, core):
     return True
 
 
-def _repair_graph_matches_capsule_conflicts(capsule, graph):
+def _repair_graph_matches_capsule_conflicts(capsule, graph, core):
     capsule_conflicts = capsule.get("conflicts")
     if not isinstance(capsule_conflicts, list):
         return False
@@ -348,10 +461,34 @@ def _repair_graph_matches_capsule_conflicts(capsule, graph):
         del graph_conflict["decision"]
         expected[conflict["id"]] = graph_conflict
 
-    return expected == {
-        conflict["id"]: conflict
-        for conflict in graph["conflicts"]
+    declared_scope = capsule.get("task", {}).get("scope") or []
+    checkout_paths = {
+        node["id"]: node["path"]
+        for node in graph["nodes"]
+        if node["kind"] == "checkout"
     }
+
+    def conflict_is_in_scope(conflict):
+        if not declared_scope:
+            return True
+        return all(
+            any(
+                core["is_within_allowlist"](
+                    root, checkout_paths.get(side.get("checkout"))
+                )
+                for root in declared_scope
+            )
+            for side in conflict.get("sides") or []
+        )
+
+    actual = {conflict["id"]: conflict for conflict in graph["conflicts"]}
+    return all(
+        actual.get(conflict_id) == conflict
+        for conflict_id, conflict in expected.items()
+    ) and all(
+        conflict["id"] in expected or not conflict_is_in_scope(conflict)
+        for conflict in graph["conflicts"]
+    )
 
 
 def _repair_graph_is_safe(graph, core):
@@ -366,6 +503,7 @@ def _repair_graph_is_safe(graph, core):
         return False
 
     node_kinds = {}
+    checkout_paths = {}
     for node in graph["nodes"]:
         if not (
             isinstance(node, dict)
@@ -375,6 +513,10 @@ def _repair_graph_is_safe(graph, core):
         ):
             return False
         node_kinds[node["id"]] = node["kind"]
+        if node["kind"] == "checkout":
+            if not _nonempty_string(node.get("path")):
+                return False
+            checkout_paths[node["id"]] = node["path"]
 
     checkout_repositories = {}
     checkout_relations = set()
@@ -424,6 +566,8 @@ def _repair_graph_is_safe(graph, core):
                 isinstance(side, dict)
                 and _nonempty_string(side.get("checkout"))
                 and node_kinds.get(side["checkout"]) == "checkout"
+                and _nonempty_string(side.get("path"))
+                and side["path"] == checkout_paths.get(side["checkout"])
                 and (side["checkout"], repository_id) in checkout_relations
                 for side in sides
             )
@@ -557,12 +701,14 @@ def _validate_governed_request(request, core):
     if verified_at is None:
         errors.append("invalid_verified_at")
 
+    unknown_capsule_fields = []
     capsule = request.get("capsule")
     if isinstance(capsule, dict):
         unknown_capsule_fields = sorted(set(capsule) - CAPSULE_FIELDS)
         errors.extend(
             f"unknown_capsule_field:{field}" for field in unknown_capsule_fields
         )
+    capsule_is_valid_for_receipt = False
     capsule_shape_is_valid = core["is_task_capsule_shape"](capsule)
     if not capsule_shape_is_valid:
         errors.append("invalid_capsule")
@@ -578,6 +724,8 @@ def _validate_governed_request(request, core):
         capsule["workspace"]["fingerprint"] != workspace_fingerprint
     ):
         errors.append("workspace_mismatch")
+    else:
+        capsule_is_valid_for_receipt = not unknown_capsule_fields
 
     observed_at = _parse_instant(
         capsule.get("workspace", {}).get("observed_at")
@@ -621,6 +769,12 @@ def _validate_governed_request(request, core):
         errors.extend(
             f"unknown_receipt_field:{field}" for field in unknown_receipt_fields
         )
+    if (
+        isinstance(receipt, dict)
+        and capsule_is_valid_for_receipt
+        and not _receipt_shape_is_valid(receipt, capsule)
+    ):
+        errors.append("invalid_receipt")
     if isinstance(receipt, dict) and "created_at" in receipt:
         receipt_at = _parse_instant(receipt.get("created_at"))
         if receipt_at is None:
@@ -646,7 +800,7 @@ def _validate_governed_request(request, core):
         elif request["graph"]["workspace_fingerprint"] != workspace_fingerprint:
             errors.append("repair_graph_workspace_mismatch")
         elif repair_capsule_is_safe and not _repair_graph_matches_capsule_conflicts(
-            capsule, request["graph"]
+            capsule, request["graph"], core
         ):
             errors.append("repair_graph_conflicts_mismatch")
         elif repair_capsule_is_safe and not _repair_estimates_are_canonical(

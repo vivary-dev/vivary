@@ -473,7 +473,7 @@ ozone verify request.json --governed --json --strict
 | `workspace` | Exactly `{"fingerprint": "..."}`; must match the capsule. |
 | `verified_at` | Caller-supplied timezone-aware instant. |
 | `capsule` | Complete `vivary.task-capsule/v0`; its body fingerprint and deterministic ID are recomputed before core delegation. |
-| `receipt` | Execution Receipt bound to the capsule. Omission or malformed/tampered evidence cannot produce a sufficient aggregate result. |
+| `receipt` | Complete Execution Receipt bound to the capsule. Its check records and claim lists are shape-validated; `claims_verified` and `claims_unverified` must be disjoint and together equal both `claims_in_scope` and the capsule's claim IDs. Omission or malformed/tampered evidence cannot produce a sufficient aggregate result. |
 | `gate` | Named gate with core-owned `required_checks`, `require_claims_verified`, `max_unresolved_conflicts`, and `max_unresolved_unknowns` constraints. |
 | `graph` | Optional matching `vivary.workspace-graph/v0`. When present, Ozone returns a bounded `vivary.context-repair-proposal/v0`; every proposal has `requires_gate: true`, and `writes_performed` is always `0`. |
 Repair `checkout_of` endpoints must reference existing `checkout` and `repository`
@@ -482,9 +482,9 @@ repository nodes and `checkout_of` relationships that can drive repair proposals
 Ozone recomputes it from the supplied graph before delegation. This binds remote-backed
 and inferred no-remote linked-worktree groups without trusting a copied workspace
 fingerprint label. Every divergent conflict has at least two sides and covers every
-checkout related to its repository. The graph's conflict set must match the capsule's
-preserved conflicts exactly; a graph cannot omit a conflict or a conflict side to turn
-conflicting checkout truth into a deduplication proposal.
+checkout related to its repository. The graph must preserve every conflict and conflict
+side carried by the scoped capsule; it may retain additional conflicts from the full
+workspace graph so core can withhold unsafe repair proposals outside that capsule scope.
 Claim IDs, claim facts, graph node IDs, and conflict IDs that repair expansion can
 repeat are limited to 128 bytes in JSON string encoding.
 

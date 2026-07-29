@@ -84,14 +84,17 @@ remains part of the final coordinated release train and requires a separate huma
   experimental facade over core's receipt-integrity, gate-sufficiency, and dry-run
   repair contracts. It recomputes Task Capsule identity, binds the workspace and
   caller-supplied clock, applies a deterministic 300-second evidence window, and
-  rejects malformed gate constraints, invalid typed graph relationships, and malformed
-  or deeply nested repair inputs before calling core. It refuses unknown
-  capsule/receipt fields even when the artifact is re-fingerprinted, enforces core's
-  16-entry omission-list/count contract and a 128-byte JSON-encoded ceiling on repair
-  identifiers, rejects semantically duplicate `(subject, fact, claim)` entries before
-  they can duplicate deterministic repair IDs, binds the repair graph's conflict set to
-  the capsule's preserved conflicts, and recomputes the capsule's normalized
-  repair-topology commitment over repository nodes and `checkout_of` relationships.
+  rejects malformed gate constraints, malformed or contradictory receipt fields,
+  invalid typed graph relationships, and malformed or deeply nested repair inputs before
+  calling core. Receipt claim lists must be unique and disjoint, and together must equal
+  both `claims_in_scope` and the capsule's claim IDs. It refuses unknown capsule/receipt
+  fields even when the artifact is re-fingerprinted, enforces core's 16-entry
+  omission-list/count contract and a 128-byte JSON-encoded ceiling on repair identifiers,
+  rejects semantically duplicate `(subject, fact, claim)` entries before they can
+  duplicate deterministic repair IDs, requires the repair graph to preserve every
+  capsule conflict while allowing a full graph to retain out-of-scope conflicts for
+  repair withholding, and recomputes the capsule's normalized repair-topology commitment
+  over repository nodes and `checkout_of` relationships.
   This authenticates remote-backed and inferred no-remote linked-worktree groups without
   trusting a copied workspace fingerprint label. Ozone also requires each divergent
   conflict to cover every checkout related to its repository, caps total checkout-pair
@@ -104,12 +107,15 @@ remains part of the final coordinated release train and requires a separate huma
   output JSON-escapes reason fragments before writing them, including unpaired Unicode
   surrogates. Advisory mode exits `0`, `--strict` exits `1` for a valid insufficient
   result, and malformed request documents or refused request envelopes exit `2`.
-- Ozone regressions cover sufficient, wrong-claim-ID, duplicate-claim-ID,
-  duplicate-claim-semantics, missing, tampered, stale, workspace-mismatched,
-  budget-limited, unknown-artifact, bounded-repair, pair-scan-bound,
-  route-evidence-bound, identifier-bound, omission-bound, estimate-bound, gate-shape,
-  graph-relationship, conflict-binding, topology-commitment, output-escaping, malformed,
-  recursive, repair, CLI, and real Ozone-to-Strato cases. The installed-package CI smoke
+- Ozone regressions cover sufficient, wrong-claim-ID, contradictory-claim-list,
+  duplicate-claim-ID, duplicate-claim-semantics, duplicate-check, receipt-extension,
+  core-unknown,
+  missing, tampered, stale, workspace-mismatched, budget-limited, unknown-artifact,
+  bounded-repair, pair-scan-bound, route-evidence-bound, identifier-bound,
+  omission-bound, estimate-bound, gate-shape, graph-relationship, scoped-full-graph,
+  forged-in-scope-conflict, conflict-binding, topology-commitment, output-escaping,
+  malformed, recursive, repair, CLI, and real Ozone-to-Strato cases. The
+  installed-package CI smoke
   resolves the complete local meta-package dependency graph, proves Ozone's core floor,
   runs the packaged Ozone verdict path, and hands its unchanged verdict to Strato.
 
@@ -238,7 +244,7 @@ remains part of the final coordinated release train and requires a separate huma
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **45/45**, Exo **17/17**,
+- Repository verification also passed: Ozone **51/51**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**
