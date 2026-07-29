@@ -131,7 +131,10 @@ What it owns:
     non-negative integer before delegation.
   - **Ozone (`verify_*`)** recomputes receipt fingerprints for tamper detection,
     evaluates gate sufficiency without allowing duplicate check names to erase
-    worse evidence, and emits bounded repair proposals as gated dry-run data.
+    worse evidence, and emits bounded repair proposals as gated dry-run data. The
+    `vivary-ozone` `verify --governed` facade adds capsule identity checks, workspace
+    binding, a caller-supplied clock, freshness, repair-input bounds, and typed request
+    refusals. Its raw fingerprinted gate verdict passes to Strato unchanged.
   - **Exo (`control_*`)** governs claims and leases, handoffs, dependencies,
     execution evidence, and task views over caller-owned state. Equivalent
     Win32 drive, UNC, and device-namespace spellings share one scope identity.
@@ -150,14 +153,15 @@ transitively and does not declare it. One owner per edge avoids version-pinning 
 `vivary-tropo` is the first importer: its experimental `find --governed` adapter depends
 on `vivary-core>=0.2.1`, the first source version that exposes the adapter's required
 API. `vivary-strato` is the second: its experimental `decide --governed` facade requires
-`vivary-core>=0.2.2`, which adds the compiler/verifier integrity boundary. Remaining
-role packages add their own floors only when their first real imports land — never
-ahead of the code that needs them.
+`vivary-core>=0.2.2`, which adds the compiler/verifier integrity boundary.
+`vivary-ozone` is the third: `verify --governed` requires that same 0.2.2 integrity
+boundary. Remaining role packages add their own floors only when their first real
+imports land — never ahead of the code that needs them.
 
-**Status:** merged Tropo/core and Strato/core integrations are on `dev`. Both are
-unpublished and reachable only through explicit experimental `--governed` flags.
-Plain Tropo retrieval and the existing role CLIs remain unchanged.
-The remaining package/role integration is tracked in
+**Status:** merged Tropo/core, Strato/core, and Ozone/core integrations are on `dev`.
+All are unpublished at their development versions and reachable only through explicit
+experimental `--governed` flags. Plain Tropo retrieval and Ozone review/impact remain
+unchanged. The remaining package/role integration is tracked in
 [#207](https://github.com/vivary-dev/vivary/issues/207); publication waits for the final
 comprehensive release train and its separate human gate.
 

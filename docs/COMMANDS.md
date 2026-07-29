@@ -443,6 +443,7 @@ reason codes pass through unchanged.
 ```
 ozone [review | impact <id> | packs] [--root DIR] [--json] [--strict]
       [--pack structure|context-budget|editorial|all] [--receipt PATH]
+ozone verify REQUEST --governed [--json] [--strict] [--receipt PATH]
 ```
 
 Where `tropo check` asks "is each document valid?", `ozone` reviews the **whole graph**
@@ -453,6 +454,43 @@ and a change's impact. It reads tropo's graph in-process (one graph, no fork).
 | `review` | Run a deterministic review pack. Defaults to `--pack structure` for stable CI; use `--pack context-budget` for context bloat, `--pack editorial` for writing workspaces, or `--pack all` for every pack. **Advisory by default** (exit 0); `--strict` makes it a gate (exit 1 on warnings). |
 | `impact <id>` | The blast radius of a node — what (transitively) depends on it, with distance + the edge field it came in by. |
 | `packs` | List the available rule packs. |
+| `verify REQUEST --governed` | Verify a governed capsule, receipt, and named gate through core's pure integrity/sufficiency contracts. Optionally include a workspace graph for bounded dry-run repair proposals. |
+
+### Governed evidence verification
+
+`verify` is opt-in and read-only:
+
+```bash
+ozone verify request.json --governed --json --strict
+```
+
+`REQUEST` is a JSON file, or `-` for stdin:
+
+| Field | Contract |
+|---|---|
+| `schema` | Exactly `vivary.ozone-verification-request/v0`. |
+| `workspace` | Exactly `{"fingerprint": "..."}`; must match the capsule. |
+| `verified_at` | Caller-supplied timezone-aware instant. |
+| `capsule` | Complete `vivary.task-capsule/v0`; its body fingerprint and deterministic ID are recomputed before core delegation. |
+| `receipt` | Execution Receipt bound to the capsule. Omission or malformed/tampered evidence cannot produce a sufficient aggregate result. |
+| `gate` | Named gate with core-owned `required_checks`, `require_claims_verified`, `max_unresolved_conflicts`, and `max_unresolved_unknowns` constraints. |
+| `graph` | Optional matching `vivary.workspace-graph/v0`. When present, Ozone returns a bounded `vivary.context-repair-proposal/v0`; every proposal has `requires_gate: true`, and `writes_performed` is always `0`. |
+Requests whose potential repair output exceeds core's deterministic 300-checkout
+pair ceiling are refused before delegation.
+
+Capsule observations and receipts must fall within the deterministic 300-second
+freshness window ending at `verified_at`. Future, stale, mismatched, non-canonical,
+unknown-field, malformed, or deeply nested inputs return a typed
+`vivary.ozone-verification-refusal/v0`, never a traceback.
+
+A valid result is `vivary.ozone-verification/v0`. Its `receipt_verdict`,
+`gate_verdict`, and optional `repair_proposal` are the raw fingerprinted core
+documents, not rewritten copies. Pass `gate_verdict` unchanged to Strato's `verdict`
+field. `--strict` exits `1` when a valid evaluation is `insufficient`;
+invalid request documents and refused request envelopes exit `2`; advisory mode exits
+`0` for a valid evaluation. The
+`--receipt PATH` CLI flag records Ozone's privacy-preserving local run envelope; the
+evidence receipt itself belongs inside `REQUEST`.
 
 ### The `structure` pack
 

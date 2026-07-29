@@ -1,6 +1,6 @@
 # vivary-ozone
 
-> Current release: **0.2.0**. The optional review layer.
+> Current published release: **0.2.0**. Development source: **0.3.0**, held for the final coordinated release train.
 
 **The review layer** — the protective filter. Where `tropo` answers *"is each
 document valid?"*, `ozone` reviews the **whole graph**: the relationship-level gaps a
@@ -10,9 +10,9 @@ typed graph in-process (one graph implementation, never a fork).
 
 The defining idea: **code review and editorial review are the same layer with
 different rule packs.** Ozone ships deterministic packs over the Vivary workspace
-vocabulary, zero dependencies, no LLM. Medium-specific and semantic ("organize by
-meaning") review layer on top later; semantic relatedness is graphify's job, not
-ozone's core.
+vocabulary with no LLM or network calls. Medium-specific and semantic ("organize by
+meaning") review layers can sit on top; semantic relatedness is graphify's job, not
+Ozone's core.
 
 ## Try it locally
 
@@ -25,6 +25,7 @@ python ozone.py review --root <workspace> --strict   # gate mode: exit 1 on warn
 python ozone.py impact <id> --root <workspace> # what depends on <id> (blast radius)
 python ozone.py packs                          # list rule packs
 python ozone.py review --root <workspace> --receipt .vivary/receipts.jsonl
+python ozone.py verify request.json --governed --json --strict
 ```
 
 `review` is **advisory by default** (exit 0) — a work-in-progress change legitimately
@@ -35,6 +36,18 @@ ozone is the relationship/impact review layered on top.
 `ozone review` defaults to `--pack structure` for stable CI. Use
 `--pack context-budget` to review context bloat surfaces, `--pack editorial` to review
 writing-workspace coverage, or `--pack all` to run every deterministic pack.
+
+### Governed evidence verification
+
+`ozone verify REQUEST --governed` is the explicit experimental facade over
+`vivary-core` receipt integrity, gate sufficiency, and dry-run context-repair
+contracts. It preserves core's fingerprinted receipt and gate verdicts unchanged, so
+Strato can consume the returned `gate_verdict` directly. A supplied workspace graph
+adds a typed repair proposal; every proposal requires a gate and reports
+`writes_performed: 0`.
+
+The exact request, result, freshness, and exit-code contract lives in the
+[command reference](https://vivary.vercel.app/commands/#governed-evidence-verification).
 
 For local debugging, pass `--receipt PATH` or set `VIVARY_RECEIPT_LOG=PATH` to append
 a dependency-free JSONL run receipt. Receipts stay local and record only command
@@ -94,8 +107,9 @@ python ../tropo/tropo.py view blast <id> --root <workspace> --out impact.html
 
 ## Requirements
 
-Python 3.11+. Loads the sibling `packages/tropo/tropo.py` engine in-process (no pip
-install needed in the repo); packaged builds depend on the `tropo` package.
+Python 3.11+. In a repo checkout, Ozone loads the sibling Tropo and core packages
+in-process. Packaged builds depend on `vivary-tropo>=0.3.0` and
+`vivary-core>=0.2.2`.
 
 ---
 

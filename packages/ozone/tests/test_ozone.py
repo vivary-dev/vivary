@@ -9,10 +9,20 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import ozone  # noqa: E402
+OZONE_ROOT = Path(__file__).resolve().parents[1]
+CORE_ROOT = OZONE_ROOT.parent / "core"
+STRATO_ROOT = OZONE_ROOT.parent / "strato"
+for package_root in (OZONE_ROOT, CORE_ROOT, STRATO_ROOT):
+    sys.path.insert(0, str(package_root))
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+import ozone  # noqa: E402
+import strato  # noqa: E402
+from vivary_core.canonical import deterministic_id, fingerprint  # noqa: E402
+from vivary_core.capsule_compile import CAPSULE_SCHEMA  # noqa: E402
+from vivary_core.receipt import create_integrity_receipt  # noqa: E402
+from vivary_core.verify_repair import MAX_DEDUPE_CHECKOUTS  # noqa: E402
+
+ROOT = str(OZONE_ROOT)
 REPO_TMP = os.path.abspath(os.path.join(ROOT, "..", "..", "sandboxes"))
 
 
@@ -92,6 +102,16 @@ def _run(argv):
 def _run_json(argv):
     rc, out = _run(argv)
     return rc, json.loads(out)
+
+
+def test_runtime_version_matches_package_manifest():
+    import tomllib
+
+    project = tomllib.loads(
+        (OZONE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]
+    assert ozone.__version__ == project["version"]
+    assert "vivary-core>=0.2.2" in project["dependencies"]
 
 
 def test_run_receipt_appends_jsonl_without_polluting_stdout():
@@ -358,6 +378,482 @@ def test_review_json_shape():
         assert set(data) >= {"reviewed", "warnings", "notes", "findings"}
         for f in data["findings"]:
             assert set(f) >= {"severity", "rule", "id", "type", "path", "message"}
+
+
+NOW = "2026-07-28T12:00:00+00:00"
+
+
+def _governed_capsule(*, claims=None, unknowns=None, omissions=None):
+    value = {
+        "schema": CAPSULE_SCHEMA,
+        "capsule_id": None,
+        "task": {
+            "question": "Can this task pass the release gate?",
+            "scope": ["/repo/packages/ozone"],
+        },
+        "workspace": {
+            "fingerprint": "sha256:test-workspace",
+            "observed_at": NOW,
+        },
+        "claims": [] if claims is None else claims,
+        "conflicts": [],
+        "unknowns": [] if unknowns is None else unknowns,
+        "omissions": [] if omissions is None else omissions,
+        "required_checks": [
+            {"name": "unit", "command": "python packages/ozone/tests/test_ozone.py"}
+        ],
+        "budget": {"max_claims": 24},
+    }
+    value["capsule_id"] = deterministic_id(
+        "capsule",
+        {
+            "task": value["task"]["question"],
+            "filters": None,
+            "workspace": value["workspace"]["fingerprint"],
+        },
+    )
+    value["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in value.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    return value
+
+
+def _governed_receipt(capsule, *, outcome="passed", created_at=NOW):
+    return create_integrity_receipt(
+        capsule=capsule,
+        runtime={"harness": "test", "actor": "agent:test"},
+        checks=[
+            {
+                "name": "unit",
+                "command": "python packages/ozone/tests/test_ozone.py",
+                "outcome": outcome,
+            }
+        ],
+        now=lambda: created_at,
+    )
+
+
+def _governed_request(*, capsule=None, receipt=True, gate=None, graph=False, **overrides):
+    governed_capsule = _governed_capsule() if capsule is None else capsule
+    value = {
+        "schema": ozone.REQUEST_SCHEMA,
+        "workspace": {"fingerprint": governed_capsule["workspace"]["fingerprint"]},
+        "verified_at": NOW,
+        "capsule": governed_capsule,
+        "gate": {
+            "name": "release",
+            "required_checks": ["unit"],
+            "require_claims_verified": True,
+        }
+        if gate is None
+        else gate,
+    }
+    if receipt is not False:
+        value["receipt"] = (
+            _governed_receipt(governed_capsule) if receipt is True else receipt
+        )
+    if graph is not False:
+        value["graph"] = (
+            {
+                "schema": "vivary.workspace-graph/v0",
+                "workspace_fingerprint": governed_capsule["workspace"]["fingerprint"],
+                "nodes": [],
+                "edges": [],
+                "conflicts": [],
+            }
+            if graph is True
+            else graph
+        )
+    value.update(overrides)
+    return value
+
+
+def test_governed_verification_returns_raw_bound_core_verdicts():
+    result = ozone.verify_governed(_governed_request(graph=True))
+
+    assert result["schema"] == ozone.VERIFICATION_SCHEMA
+    assert result["outcome"] == "sufficient"
+    assert result["reason_codes"] == []
+    assert result["receipt_verdict"]["schema"] == "vivary.receipt-verdict/v0"
+    assert result["receipt_verdict"]["outcome"] == "verified"
+    assert result["gate_verdict"]["schema"] == "vivary.gate-verdict/v0"
+    assert result["gate_verdict"]["outcome"] == "sufficient"
+    assert result["repair_proposal"]["schema"] == "vivary.context-repair-proposal/v0"
+    assert result["repair_proposal"]["writes_performed"] == 0
+
+
+def test_governed_verdict_is_consumed_unchanged_by_strato():
+    governed = _governed_request()
+    ozone_result = ozone.verify_governed(governed)
+    strato_result = strato.decide_governed(
+        {
+            "schema": strato.REQUEST_SCHEMA,
+            "policy_version": strato.POLICY_VERSION,
+            "actor": {"kind": "agent", "id": "agent:test"},
+            "authority_class": "contributor",
+            "workspace": governed["workspace"],
+            "scope": {"project": "vivary", "paths": ["/repo/packages/ozone"]},
+            "requested_at": NOW,
+            "decision_at": NOW,
+            "capsule": governed["capsule"],
+            "receipt": governed["receipt"],
+            "verdict": ozone_result["gate_verdict"],
+            "state": {"turns_used": 0, "actions_used": 0},
+            "limits": {"max_turns": 3, "max_actions": 3},
+        }
+    )
+
+    assert strato_result["decision"] == "stop"
+    assert strato_result["reason_codes"] == ["all_checks_clear"]
+    assert "verdict_integrity_mismatch" not in strato_result["gate"]["reason_codes"]
+
+
+def test_governed_claim_sufficiency_matches_ids_not_counts():
+    governed_capsule = _governed_capsule(
+        claims=[
+            {"id": "claim:first", "subject": "checkout:a", "claim": "first"},
+            {"id": "claim:second", "subject": "checkout:a", "claim": "second"},
+        ]
+    )
+    governed_receipt = _governed_receipt(governed_capsule)
+    governed_receipt["claims_verified"] = ["claim:unrelated-a", "claim:unrelated-b"]
+    governed_receipt["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in governed_receipt.items()
+            if key not in {"receipt_id", "fingerprint"}
+        }
+    )
+
+    result = ozone.verify_governed(
+        _governed_request(capsule=governed_capsule, receipt=governed_receipt)
+    )
+
+    assert result["outcome"] == "insufficient"
+    assert "claims_not_fully_verified" in result["gate_verdict"]["reason_codes"]
+    assert result["gate_verdict"]["claims_total"] == 2
+    assert result["gate_verdict"]["claims_verified"] == 0
+
+
+def test_governed_verification_refuses_duplicate_claim_ids():
+    governed_capsule = _governed_capsule(
+        claims=[
+            {"id": "claim:duplicate", "subject": "checkout:a", "claim": "first"},
+            {"id": "claim:duplicate", "subject": "checkout:b", "claim": "second"},
+        ]
+    )
+    governed_receipt = _governed_receipt(governed_capsule)
+    governed_receipt["claims_verified"] = ["claim:duplicate"]
+    governed_receipt["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in governed_receipt.items()
+            if key not in {"receipt_id", "fingerprint"}
+        }
+    )
+
+    result = ozone.verify_governed(
+        _governed_request(capsule=governed_capsule, receipt=governed_receipt)
+    )
+
+    assert result["schema"] == ozone.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["duplicate_claim_id"]
+    over_budget_capsule = _governed_capsule(
+        claims=[{"id": "claim:one", "subject": "checkout:a", "claim": "one"}]
+    )
+    over_budget_capsule["budget"] = {"max_claims": 0}
+    over_budget_capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in over_budget_capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    over_budget = ozone.verify_governed(
+        _governed_request(capsule=over_budget_capsule)
+    )
+
+    assert over_budget["schema"] == ozone.REFUSAL_SCHEMA
+    assert over_budget["reason_codes"] == ["capsule_claim_budget_exceeded"]
+
+
+def test_governed_verification_fails_closed_for_missing_and_tampered_receipts():
+    missing = ozone.verify_governed(_governed_request(receipt=False))
+    tampered_request = _governed_request()
+    tampered_request["receipt"]["checks"][0]["outcome"] = "failed"
+    tampered = ozone.verify_governed(tampered_request)
+
+    assert missing["outcome"] == "insufficient"
+    assert missing["receipt_verdict"]["outcome"] == "refused"
+    assert "receipt_missing_for_required_checks" in missing["gate_verdict"]["reason_codes"]
+    assert tampered["outcome"] == "insufficient"
+    assert tampered["receipt_verdict"]["outcome"] == "insufficient"
+    assert "fingerprint_mismatch" in tampered["receipt_verdict"]["reason_codes"]
+
+
+def test_governed_verification_refuses_stale_and_mismatched_evidence():
+    stale_request = _governed_request()
+    stale_request["verified_at"] = "2026-07-28T12:06:00+00:00"
+    mismatch_request = _governed_request()
+    mismatch_request["workspace"] = {"fingerprint": "sha256:other-workspace"}
+
+    stale = ozone.verify_governed(stale_request)
+    mismatch = ozone.verify_governed(mismatch_request)
+
+    assert stale["schema"] == ozone.REFUSAL_SCHEMA
+    assert "stale_capsule" in stale["reason_codes"]
+    assert "stale_receipt" in stale["reason_codes"]
+    assert mismatch["schema"] == ozone.REFUSAL_SCHEMA
+    assert mismatch["reason_codes"] == ["workspace_mismatch"]
+
+
+def test_governed_verification_enforces_gate_budgets():
+    governed_capsule = _governed_capsule(unknowns=[{"id": "unknown:release"}])
+    result = ozone.verify_governed(
+        _governed_request(
+            capsule=governed_capsule,
+            gate={"name": "release", "max_unresolved_unknowns": 0},
+        )
+    )
+
+    assert result["outcome"] == "insufficient"
+    assert result["gate_verdict"]["unresolved_unknowns"] == 1
+    assert "unresolved_unknowns_exceed_limit" in result["reason_codes"]
+
+
+def test_governed_repairs_are_typed_bounded_and_dry_run():
+    governed_capsule = _governed_capsule(
+        claims=[
+            {
+                "id": "claim:weak",
+                "fact": "weak_evidence",
+                "subject": "checkout:a",
+                "claim": "Open the source before relying on this claim.",
+                "selection": {"tier": "allowlisted"},
+                "evidence": [],
+            }
+        ]
+    )
+    result = ozone.verify_governed(
+        _governed_request(capsule=governed_capsule, graph=True)
+    )
+    proposal = result["repair_proposal"]
+
+    assert proposal["writes_performed"] == 0
+    assert proposal["requires_gate"] is True
+    assert len(proposal["proposals"]) == 1
+    assert proposal["proposals"][0]["target"] == "claim:weak"
+    assert proposal["proposals"][0]["requires_gate"] is True
+
+
+def test_governed_verification_refuses_malformed_repair_inputs_without_crashing():
+    malformed_graph = {
+        "schema": "vivary.workspace-graph/v0",
+        "workspace_fingerprint": "sha256:test-workspace",
+        "nodes": [],
+        "edges": [None],
+        "conflicts": [],
+    }
+    malformed = ozone.verify_governed(_governed_request(graph=malformed_graph))
+    malformed_claim_capsule = _governed_capsule(
+        claims=[
+            {
+                "id": "claim:malformed",
+                "fact": [],
+                "subject": "checkout:a",
+                "claim": "This fact cannot be used as a dedupe key.",
+                "selection": {"tier": "allowlisted"},
+                "evidence": [],
+            }
+        ]
+    )
+    malformed_claim = ozone.verify_governed(
+        _governed_request(capsule=malformed_claim_capsule, graph=True)
+    )
+    missing_capsule_request = _governed_request(graph=True)
+    missing_capsule_request["capsule"] = None
+    missing_capsule = ozone.verify_governed(missing_capsule_request)
+    mismatched_graph_request = _governed_request(graph=True)
+    uncollatable_graph_request = _governed_request(graph=True)
+    uncollatable_graph_request["graph"]["edges"] = [
+        {"kind": "checkout_of", "from": "checkout:a", "to": "repo:🚀"}
+    ]
+    uncollatable_graph = ozone.verify_governed(uncollatable_graph_request)
+    duplicate_edge_capsule = _governed_capsule(
+        claims=[
+            {
+                "id": "claim:checkout-a",
+                "fact": "head_revision",
+                "subject": "checkout:a",
+                "claim": "abc123",
+                "evidence": [],
+            }
+        ]
+    )
+    duplicate_edge_request = _governed_request(
+        capsule=duplicate_edge_capsule,
+        graph=True,
+    )
+    checkout_edge = {
+        "kind": "checkout_of",
+        "from": "checkout:a",
+        "to": "repository:x",
+    }
+    duplicate_edge_request["graph"]["edges"] = [checkout_edge, dict(checkout_edge)]
+    duplicate_edge_graph = ozone.verify_governed(duplicate_edge_request)
+    oversized_conflict_request = _governed_request(graph=True)
+    checkout_ids = [
+        f"checkout:{index}" for index in range(MAX_DEDUPE_CHECKOUTS + 1)
+    ]
+    oversized_conflict_request["graph"]["edges"] = [
+        {"kind": "checkout_of", "from": checkout_id, "to": "repository:x"}
+        for checkout_id in checkout_ids
+    ]
+    oversized_conflict_request["graph"]["conflicts"] = [
+        {
+            "repository": "repository:x",
+            "sides": [{"checkout": checkout_id} for checkout_id in checkout_ids],
+        }
+    ]
+    oversized_conflict_graph = ozone.verify_governed(oversized_conflict_request)
+    mismatched_graph_request["graph"]["workspace_fingerprint"] = "sha256:other"
+    mismatched_graph = ozone.verify_governed(mismatched_graph_request)
+    recursive_request = _governed_request()
+    nested = []
+    cursor = nested
+    for _ in range(1100):
+        child = []
+        cursor.append(child)
+        cursor = child
+    recursive_request["receipt"] = nested
+    recursive = ozone.verify_governed(recursive_request)
+
+    assert malformed["schema"] == ozone.REFUSAL_SCHEMA
+    assert malformed["reason_codes"] == ["invalid_repair_graph"]
+    assert malformed_claim["schema"] == ozone.REFUSAL_SCHEMA
+    assert malformed_claim["reason_codes"] == ["invalid_repair_capsule"]
+    assert missing_capsule["schema"] == ozone.REFUSAL_SCHEMA
+    assert missing_capsule["reason_codes"] == [
+        "invalid_capsule",
+        "invalid_capsule_observed_at",
+        "invalid_repair_capsule",
+    ]
+    assert uncollatable_graph["schema"] == ozone.REFUSAL_SCHEMA
+    assert uncollatable_graph["reason_codes"] == ["invalid_repair_graph"]
+    assert duplicate_edge_graph["schema"] == ozone.REFUSAL_SCHEMA
+    assert duplicate_edge_graph["reason_codes"] == ["invalid_repair_graph"]
+    assert oversized_conflict_graph["schema"] == ozone.REFUSAL_SCHEMA
+    assert oversized_conflict_graph["reason_codes"] == ["invalid_repair_graph"]
+    assert mismatched_graph["schema"] == ozone.REFUSAL_SCHEMA
+    assert mismatched_graph["reason_codes"] == ["repair_graph_workspace_mismatch"]
+    assert recursive["schema"] == ozone.REFUSAL_SCHEMA
+    assert recursive["reason_codes"] == ["request_too_deeply_nested"]
+
+
+def test_governed_verification_refuses_unbounded_repair_products():
+    checkout_ids = [
+        f"checkout:{index}" for index in range(MAX_DEDUPE_CHECKOUTS)
+    ]
+    claims = [
+        {
+            "id": f"claim:{checkout_id}:{fact_index}",
+            "fact": f"fact:{fact_index}",
+            "subject": checkout_id,
+            "claim": f"value:{fact_index}",
+            "evidence": [],
+        }
+        for checkout_id in checkout_ids
+        for fact_index in range(2)
+    ]
+    governed_capsule = _governed_capsule(claims=claims)
+    governed_capsule["budget"] = {"max_claims": len(claims)}
+    governed_capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in governed_capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    request = _governed_request(
+        capsule=governed_capsule,
+        receipt=False,
+        graph=True,
+    )
+    request["graph"]["edges"] = [
+        {"kind": "checkout_of", "from": checkout_id, "to": "repository:x"}
+        for checkout_id in checkout_ids
+    ]
+
+    result = ozone.verify_governed(request)
+
+    assert result["schema"] == ozone.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["repair_work_unbounded"]
+
+
+def test_governed_verification_refuses_unbound_graph_and_unknown_gate_fields():
+    unbound_graph_request = _governed_request(graph=True)
+    del unbound_graph_request["graph"]["workspace_fingerprint"]
+    unbound_graph = ozone.verify_governed(unbound_graph_request)
+    unknown_gate_request = _governed_request()
+    unknown_gate_request["gate"]["max_unresolved_conflict"] = 0
+    unknown_gate = ozone.verify_governed(unknown_gate_request)
+
+    lossy_integer_request = _governed_request()
+    lossy_integer_request["gate"]["max_unresolved_unknowns"] = 2**53
+    lossy_integer = ozone.verify_governed(lossy_integer_request)
+
+    assert unbound_graph["schema"] == ozone.REFUSAL_SCHEMA
+    assert unbound_graph["reason_codes"] == ["invalid_repair_graph"]
+    assert unknown_gate["schema"] == ozone.REFUSAL_SCHEMA
+    assert unknown_gate["reason_codes"] == [
+        "unknown_gate_field:max_unresolved_conflict"
+    ]
+    assert lossy_integer["schema"] == ozone.REFUSAL_SCHEMA
+    assert lossy_integer["reason_codes"] == ["invalid_json_value"]
+
+
+def test_governed_verify_cli_emits_typed_json_and_honest_exit_codes():
+    with temp_workspace() as td:
+        request_path = td / "request.json"
+        request_path.write_text(
+            json.dumps(_governed_request()),
+            encoding="utf-8",
+        )
+        sufficient_rc, sufficient = _run_json(
+            ["verify", str(request_path), "--governed", "--json", "--strict"]
+        )
+
+        tampered_request = _governed_request()
+        tampered_request["receipt"]["checks"][0]["outcome"] = "failed"
+        request_path.write_text(json.dumps(tampered_request), encoding="utf-8")
+        insufficient_rc, insufficient = _run_json(
+            ["verify", str(request_path), "--governed", "--json", "--strict"]
+        )
+        refused_request = _governed_request(gate={})
+        request_path.write_text(json.dumps(refused_request), encoding="utf-8")
+        refused_rc, refused = _run_json(
+            ["verify", str(request_path), "--governed", "--json"]
+        )
+
+        request_path.write_text("{", encoding="utf-8")
+        malformed_rc, malformed = _run_json(
+            ["verify", str(request_path), "--governed", "--json"]
+        )
+
+    assert sufficient_rc == 0
+    assert sufficient["outcome"] == "sufficient"
+    assert insufficient_rc == 1
+    assert insufficient["outcome"] == "insufficient"
+    assert refused_rc == 2
+    assert refused["schema"] == ozone.REFUSAL_SCHEMA
+    assert refused["reason_codes"] == ["invalid_gate"]
+    assert malformed_rc == 2
+    assert malformed["schema"] == ozone.REFUSAL_SCHEMA
+    assert malformed["reason_codes"] == ["invalid_request_document"]
 
 
 if __name__ == "__main__":

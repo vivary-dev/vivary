@@ -44,7 +44,7 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
 Development source is ahead but remains unpublished until the coordinated release
 gate: `vivary-core` **0.2.2**, `vivary-tropo` **0.5.0**, `vivary-strato` **0.1.1**,
-and the `vivary` meta-package **0.1.1**.
+`vivary-ozone` **0.3.0**, and the `vivary` meta-package **0.1.2**.
 
 Versions are intentionally independent across the layers and optional adapters: `tropo`
 moved to 0.4.1 for the read-only `map` filesystem inventory command, `create-vivary` /
@@ -76,7 +76,8 @@ Current command surface:
 - `create-vivary init` / `doctor` / `wizard` / `capabilities` / `adopt` /
   `doctor --trend`
 - `tropo check` / `graph` / `find` / `query` / `migrate` / `map` / `init --packs`
-- `ozone review` / `impact`
+- `strato decide --governed`
+- `ozone review` / `impact` / `verify --governed`
 - `exo board` / `conflicts` / `claim` / `roles`
 - `vivary-cognee doctor` / `index` / `recall` / `forget` from the optional
   `vivary-memory-cognee` package

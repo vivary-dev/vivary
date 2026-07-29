@@ -10,15 +10,15 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
-## [Unreleased: governed Tropo and Strato adapters] — 2026-07-26
+## [Unreleased: governed Tropo, Strato, and Ozone adapters] — 2026-07-26
 
 Affects the source checkout's unreleased `vivary-core` **0.2.2**, `vivary-tropo`
-**0.5.0**, `vivary-strato` **0.1.1**, and `vivary` meta-package **0.1.1**, the first
-two role-to-core dependency edges, package documentation, and CI packaging proof.
-The published releases remain Tropo **0.4.1** and `vivary` **0.1.0**; Strato and core
-remain unpublished during development. No package was published, deployed, or enabled
-by default; publication remains part of the final coordinated release train and
-requires a separate human gate.
+**0.5.0**, `vivary-strato` **0.1.1**, `vivary-ozone` **0.3.0**, and `vivary`
+meta-package **0.1.2**, the first three role-to-core dependency edges, package
+documentation, and CI packaging proof. The published releases remain Tropo **0.4.1**,
+Ozone **0.2.0**, and `vivary` **0.1.0**; Strato and core remain unpublished during
+development. No package was published, deployed, or enabled by default; publication
+remains part of the final coordinated release train and requires a separate human gate.
 
 ### Added
 
@@ -74,6 +74,21 @@ requires a separate human gate.
   advisory/strict exit semantics,
   and default text output. Isolated package smokes exercise the installed console
   script on Windows and WSL Linux.
+- `vivary-ozone` **0.3.0** adds `ozone verify REQUEST --governed`, an explicit
+  experimental facade over core's receipt-integrity, gate-sufficiency, and dry-run
+  repair contracts. It recomputes Task Capsule identity, binds the workspace and
+  caller-supplied clock, applies a deterministic 300-second evidence window, rejects
+  malformed or deeply nested repair inputs before calling core, and returns typed
+  verification or refusal envelopes. Core's fingerprinted receipt/gate verdicts and
+  repair proposal pass through unchanged; Strato consumes the raw `gate_verdict`
+  without a second verification implementation. Advisory mode exits `0`, `--strict`
+  exits `1` for a valid insufficient result, and malformed/refused requests exit `2`.
+- Ozone regressions cover sufficient, wrong-claim-ID, duplicate-claim-ID, missing,
+  tampered, stale, workspace-mismatched, budget-limited, bounded-repair, malformed,
+  recursive, repair, CLI, and real
+  Ozone-to-Strato cases. The installed-package CI smoke now proves Ozone's core floor,
+  runs the packaged Ozone verdict path, and hands its unchanged verdict to packaged
+  Strato.
 
 ### Changed
 
@@ -83,13 +98,18 @@ requires a separate human gate.
   user-visible minor feature and keeps `vivary-core>=0.2.1`, the first source version
   exposing the adapter API. This is the first real package-to-core dependency promised
   by [#207](https://github.com/vivary-dev/vivary/issues/207). The `vivary` meta-package
-  advances from 0.1.0 to 0.1.1 and raises its floor to `vivary-tropo>=0.5.0`, so it
-  receives core transitively. All three source versions remain unpublished in this
-  development train until the coordinated release.
+  advances from 0.1.0 to 0.1.2: 0.1.1 raised its floor to `vivary-tropo>=0.5.0`, and
+  0.1.2 raises its floor to `vivary-ozone>=0.3.0`, so a fresh suite install cannot
+  resolve the pre-verification Ozone CLI. All development versions remain unpublished
+  until the coordinated release.
 - `vivary-strato` advances from 0.1.0 to 0.1.1 for the capsule-integrity hardening and
   declares `vivary-core>=0.2.2`. The `vivary` meta-package does not add Strato yet;
   completing the one-install role surface remains owned by #207. Both Strato and core
   stay explicitly allowlisted as unpublished until the final coordinated release gate.
+- `vivary-ozone` advances from 0.2.0 to 0.3.0 because `verify --governed` is a
+  user-visible command and declares `vivary-core>=0.2.2` with its first real core
+  import. Plain `review`, `impact`, and `packs` behavior remains unchanged. Ozone
+  0.3.0 stays unpublished until the final coordinated release gate.
 - Plain `tropo find` keeps its existing typed-context packet and default token budget.
   Governed-only flags, malformed core inputs, and broken core installs fail with the
   documented usage exit code `2`; the command reference owns the exact flag contract.
@@ -173,7 +193,7 @@ requires a separate human gate.
 - Isolated `uv run --no-cache --with ./packages/core --with ./packages/tropo`
   metadata smoke reported core **0.2.2** and Tropo **0.5.0**.
 - Coordinated local `uv run --no-cache --with` smoke across core, Tropo,
-  create-vivary, Ozone, Exo, and the meta package reported `vivary` **0.1.1**,
+  create-vivary, Ozone, Exo, and the meta package reported `vivary` **0.1.2**,
   Tropo **0.5.0**, and core **0.2.2**.
   The packaged smoke also verified that the installed core version satisfies Tropo's
   declared requirement specifier, not merely that the metadata names it.
@@ -185,15 +205,15 @@ requires a separate human gate.
 - `python scripts/tests/test_package_docs_parity.py` — **10/10 passed**;
   `python scripts/check_package_docs_parity.py` — **6** published manifests and
   **2** unpublished allowlist entries matched the architecture page.
-- `python scripts/check_line_endings.py --verbose` — **261** tracked text files
+- `python scripts/check_line_endings.py --verbose` — **265** tracked text files
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **21/21**, Exo **17/17**,
+- Repository verification also passed: Ozone **34/34**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**
-  site tests passed; **23** pages built; **1,683** local references and **1,057**
+  site tests passed; **23** pages built; **1,686** local references and **1,060**
   anchors checked with zero failures.
 
 ## [Unreleased: cross-platform orientation proof] — 2026-07-26
