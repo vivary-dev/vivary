@@ -486,6 +486,47 @@ def test_governed_verification_returns_raw_bound_core_verdicts():
     assert result["repair_proposal"]["writes_performed"] == 0
 
 
+def test_governed_verification_refuses_unknown_artifact_fields():
+    unknown_capsule = _governed_capsule()
+    unknown_capsule["unexpected"] = "accepted"
+    unknown_capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in unknown_capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    capsule_result = ozone.verify_governed(
+        _governed_request(
+            capsule=unknown_capsule,
+            receipt=_governed_receipt(unknown_capsule),
+        )
+    )
+
+    receipt_capsule = _governed_capsule()
+    unknown_receipt = _governed_receipt(receipt_capsule)
+    unknown_receipt["unexpected"] = "accepted"
+    unknown_receipt["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in unknown_receipt.items()
+            if key not in {"receipt_id", "fingerprint"}
+        }
+    )
+    receipt_result = ozone.verify_governed(
+        _governed_request(capsule=receipt_capsule, receipt=unknown_receipt)
+    )
+
+    assert capsule_result["schema"] == ozone.REFUSAL_SCHEMA
+    assert capsule_result["reason_codes"] == [
+        "unknown_capsule_field:unexpected"
+    ]
+    assert receipt_result["schema"] == ozone.REFUSAL_SCHEMA
+    assert receipt_result["reason_codes"] == [
+        "unknown_receipt_field:unexpected"
+    ]
+
+
 def test_governed_verdict_is_consumed_unchanged_by_strato():
     governed = _governed_request()
     ozone_result = ozone.verify_governed(governed)
@@ -792,6 +833,27 @@ def test_governed_verification_refuses_unbounded_repair_products():
 
     assert result["schema"] == ozone.REFUSAL_SCHEMA
     assert result["reason_codes"] == ["repair_work_unbounded"]
+
+    oversized_estimate_capsule = _governed_capsule(
+        omissions=[
+            {
+                "kind": "claims_over_budget",
+                "reason": "claim budget reached",
+                "omitted_count": 2**53 - 1,
+                "omitted": [],
+            }
+        ]
+    )
+    oversized_estimate = ozone.verify_governed(
+        _governed_request(
+            capsule=oversized_estimate_capsule,
+            receipt=_governed_receipt(oversized_estimate_capsule),
+            graph=True,
+        )
+    )
+
+    assert oversized_estimate["schema"] == ozone.REFUSAL_SCHEMA
+    assert oversized_estimate["reason_codes"] == ["repair_estimate_unbounded"]
 
 
 def test_governed_verification_refuses_unbound_graph_and_unknown_gate_fields():

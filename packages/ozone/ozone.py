@@ -38,6 +38,39 @@ REQUEST_SCHEMA = "vivary.ozone-verification-request/v0"
 VERIFICATION_SCHEMA = "vivary.ozone-verification/v0"
 REFUSAL_SCHEMA = "vivary.ozone-verification-refusal/v0"
 MAX_EVIDENCE_AGE_SECONDS = 300
+CAPSULE_FIELDS = frozenset(
+    {
+        "schema",
+        "capsule_id",
+        "task",
+        "workspace",
+        "claims",
+        "conflicts",
+        "unknowns",
+        "omissions",
+        "required_checks",
+        "budget",
+        "fingerprint",
+    }
+)
+RECEIPT_FIELDS = frozenset(
+    {
+        "schema",
+        "receipt_id",
+        "capsule",
+        "workspace",
+        "runtime",
+        "checks",
+        "claims_in_scope",
+        "claims_verified",
+        "claims_unverified",
+        "unresolved_conflicts",
+        "unresolved_unknowns",
+        "provenance",
+        "created_at",
+        "fingerprint",
+    }
+)
 COMMANDS = ("review", "impact", "packs", "verify")
 RECEIPT_VALUE_FLAGS = {"--pack", "--receipt", "--root"}
 RECEIPT_KNOWN_FLAGS = RECEIPT_VALUE_FLAGS | {
@@ -117,10 +150,15 @@ def _load_core_verification():
         is_task_capsule_shape,
         verify_task_capsule_integrity,
     )
-    from vivary_core.canonical import _utf16_sort_key, is_canonical_body_value
+    from vivary_core.canonical import (
+        MAX_LOSSLESS_INTEGER,
+        _utf16_sort_key,
+        is_canonical_body_value,
+    )
     from vivary_core.collation import CollationDomainError, locale_sort_key
     from vivary_core.verify_receipt import verify_receipt_integrity
     from vivary_core.verify_repair import (
+        AVG_OMITTED_CLAIM_TOKENS,
         MAX_DEDUPE_CHECKOUTS,
         propose_context_repairs,
     )
@@ -136,6 +174,8 @@ def _load_core_verification():
         "_utf16_sort_key": _utf16_sort_key,
         "is_canonical_body_value": is_canonical_body_value,
         "MAX_DEDUPE_CHECKOUTS": MAX_DEDUPE_CHECKOUTS,
+        "AVG_OMITTED_CLAIM_TOKENS": AVG_OMITTED_CLAIM_TOKENS,
+        "MAX_LOSSLESS_INTEGER": MAX_LOSSLESS_INTEGER,
         "locale_sort_key": locale_sort_key,
     }
 
@@ -275,6 +315,17 @@ def _repair_graph_is_safe(graph, core):
     return True
 
 
+def _repair_estimates_are_canonical(capsule, core):
+    max_omitted_count = (
+        core["MAX_LOSSLESS_INTEGER"] // core["AVG_OMITTED_CLAIM_TOKENS"]
+    )
+    return all(
+        omission.get("kind") != "claims_over_budget"
+        or omission["omitted_count"] <= max_omitted_count
+        for omission in capsule["omissions"]
+    )
+
+
 def _repair_work_is_bounded(capsule, graph, core):
     max_checkouts = core["MAX_DEDUPE_CHECKOUTS"]
     proposal_limit = max_checkouts * (max_checkouts - 1) // 2
@@ -364,6 +415,11 @@ def _validate_governed_request(request, core):
         errors.append("invalid_verified_at")
 
     capsule = request.get("capsule")
+    if isinstance(capsule, dict):
+        unknown_capsule_fields = sorted(set(capsule) - CAPSULE_FIELDS)
+        errors.extend(
+            f"unknown_capsule_field:{field}" for field in unknown_capsule_fields
+        )
     capsule_shape_is_valid = core["is_task_capsule_shape"](capsule)
     if not capsule_shape_is_valid:
         errors.append("invalid_capsule")
@@ -415,6 +471,11 @@ def _validate_governed_request(request, core):
         )
 
     receipt = request.get("receipt")
+    if isinstance(receipt, dict):
+        unknown_receipt_fields = sorted(set(receipt) - RECEIPT_FIELDS)
+        errors.extend(
+            f"unknown_receipt_field:{field}" for field in unknown_receipt_fields
+        )
     if isinstance(receipt, dict) and "created_at" in receipt:
         receipt_at = _parse_instant(receipt.get("created_at"))
         if receipt_at is None:
@@ -439,6 +500,10 @@ def _validate_governed_request(request, core):
             errors.append("invalid_repair_graph")
         elif request["graph"]["workspace_fingerprint"] != workspace_fingerprint:
             errors.append("repair_graph_workspace_mismatch")
+        elif repair_capsule_is_safe and not _repair_estimates_are_canonical(
+            capsule, core
+        ):
+            errors.append("repair_estimate_unbounded")
         elif repair_capsule_is_safe and not _repair_work_is_bounded(
             capsule, request["graph"], core
         ):
