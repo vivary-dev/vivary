@@ -755,6 +755,32 @@ def test_governed_verification_refuses_graphs_that_drop_capsule_conflicts():
         proposal["kind"] != "deduplicate"
         for proposal in matching["repair_proposal"]["proposals"]
     )
+    incomplete_edges = [
+        *checkout_edges,
+        {"kind": "checkout_of", "from": "checkout:c", "to": "repository:x"},
+    ]
+    incomplete_conflict = {
+        **conflict,
+        "sides": [
+            {"checkout": "checkout:a"},
+            {"checkout": "checkout:c"},
+        ],
+    }
+    incomplete_capsule = _governed_capsule(
+        claims=claims,
+        conflicts=[{**incomplete_conflict, "decision": "review_required"}],
+    )
+    incomplete_graph = {
+        **graph,
+        "nodes": _checkout_graph_nodes(incomplete_edges),
+        "edges": incomplete_edges,
+        "conflicts": [incomplete_conflict],
+    }
+    incomplete = ozone.verify_governed(
+        _governed_request(capsule=incomplete_capsule, graph=incomplete_graph)
+    )
+    assert incomplete["schema"] == ozone.REFUSAL_SCHEMA
+    assert incomplete["reason_codes"] == ["invalid_repair_graph"]
 
 
 def test_governed_verification_refuses_invalid_graph_relationship_endpoints():

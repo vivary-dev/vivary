@@ -358,6 +358,7 @@ def _repair_graph_is_safe(graph, core):
 
     checkout_repositories = {}
     checkout_relations = set()
+    repository_checkouts = {}
     for edge in graph["edges"]:
         if not isinstance(edge, dict):
             return False
@@ -379,6 +380,7 @@ def _repair_graph_is_safe(graph, core):
             if checkout_id in checkout_repositories:
                 return False
             checkout_repositories[checkout_id] = repository_id
+            repository_checkouts.setdefault(repository_id, set()).add(checkout_id)
             relation = (checkout_id, repository_id)
             if relation in checkout_relations:
                 return False
@@ -409,7 +411,12 @@ def _repair_graph_is_safe(graph, core):
             return False
         conflict_ids.add(conflict["id"])
         checkout_ids = [side["checkout"] for side in sides]
-        if len(set(checkout_ids)) != len(checkout_ids):
+        checkout_id_set = set(checkout_ids)
+        if (
+            len(checkout_id_set) != len(checkout_ids)
+            or len(checkout_ids) < 2
+            or checkout_id_set != repository_checkouts.get(repository_id, set())
+        ):
             return False
         conflict_pair_count += len(checkout_ids) * (len(checkout_ids) - 1) // 2
         max_checkouts = core["MAX_DEDUPE_CHECKOUTS"]

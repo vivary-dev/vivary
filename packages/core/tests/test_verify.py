@@ -33,6 +33,7 @@ import pytest
 HERE = os.path.dirname(os.path.abspath(__file__))
 PY_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, PY_ROOT)
+import vivary_core.verify_sufficiency as verify_sufficiency  # noqa: E402
 
 from vivary_core.canonical import deterministic_id, fingerprint  # noqa: E402
 from vivary_core.capsule_compile import compile_task_capsule  # noqa: E402
@@ -383,6 +384,38 @@ def test_a_receipt_with_unrelated_verified_claim_ids_is_insufficient(capsule, re
 
     assert verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
     assert REASON_CODES["CLAIMS_NOT_FULLY_VERIFIED"] in verdict["reason_codes"]
+
+
+def test_claim_coverage_indexes_receipt_ids_before_matching(
+    monkeypatch, capsule, receipt
+):
+    class LinearMembershipTrap(list):
+        def __contains__(self, item):
+            raise AssertionError("claim coverage performed a linear membership scan")
+
+    instrumented_receipt = {
+        **receipt,
+        "claims_verified": LinearMembershipTrap(["claim:unrelated"]),
+    }
+    monkeypatch.setattr(
+        verify_sufficiency,
+        "verify_receipt_integrity",
+        lambda **_kwargs: {
+            "outcome": OUTCOMES["VERIFIED"],
+            "receipt_id": receipt["receipt_id"],
+        },
+    )
+
+    verdict = verify_sufficiency.evaluate_gate_sufficiency(
+        gate={"name": "ci", "require_claims_verified": True},
+        capsule=capsule,
+        receipt=instrumented_receipt,
+    )
+
+    assert verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
+    assert verdict["claims_verified"] == 0
+    assert REASON_CODES["CLAIMS_NOT_FULLY_VERIFIED"] in verdict["reason_codes"]
+
 
 
 def test_a_missing_required_check_is_insufficient_with_a_named_failing_check(capsule, receipt):

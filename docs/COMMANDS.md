@@ -476,10 +476,10 @@ ozone verify request.json --governed --json --strict
 | `gate` | Named gate with core-owned `required_checks`, `require_claims_verified`, `max_unresolved_conflicts`, and `max_unresolved_unknowns` constraints. |
 | `graph` | Optional matching `vivary.workspace-graph/v0`. When present, Ozone returns a bounded `vivary.context-repair-proposal/v0`; every proposal has `requires_gate: true`, and `writes_performed` is always `0`. |
 Repair `checkout_of` endpoints must reference existing `checkout` and `repository`
-nodes. Every divergent-conflict side must reference a checkout related to that
-conflict's repository.
-The graph's conflict set must match the capsule's preserved conflicts exactly; a graph
-cannot omit a conflict to turn conflicting checkout truth into a deduplication proposal.
+nodes. Every divergent conflict has at least two sides and covers every checkout related
+to its repository. The graph's conflict set must match the capsule's preserved conflicts
+exactly; a graph cannot omit a conflict or a conflict side to turn conflicting checkout
+truth into a deduplication proposal.
 Claim IDs, claim facts, graph node IDs, and conflict IDs that repair expansion can
 repeat are limited to 128 bytes in JSON string encoding.
 

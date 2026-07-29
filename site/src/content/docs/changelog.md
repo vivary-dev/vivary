@@ -87,7 +87,8 @@ remains part of the final coordinated release train and requires a separate huma
   capsule/receipt fields even when the artifact is re-fingerprinted, enforces core's
   16-entry omission-list/count contract and a 128-byte JSON-encoded ceiling on repair
   identifiers, binds the repair graph's conflict set to the capsule's preserved
-  conflicts, caps total checkout-pair scans across all repositories, bounds
+  conflicts, requires each divergent conflict to cover every checkout related to its
+  repository, caps total checkout-pair scans across all repositories, bounds
   route-proposal evidence to core's checkout cap, and bounds derived repair estimates
   to JavaScript's lossless integer range before delegation.
   It returns typed verification or refusal envelopes. Core's fingerprinted receipt/gate
@@ -131,6 +132,8 @@ remains part of the final coordinated release train and requires a separate huma
   Git child that fills stderr first cannot deadlock observation. Cleanup kills stalled
   children, closes completed pipes, and returns a structured timeout rather than
   blocking on an inherited stderr handle.
+- Core gate-sufficiency evaluation indexes validated receipt claim IDs once before
+  matching capsule coverage, keeping the evidence check linear in request size.
 - Derived required checks now carry checkout-scoped names, the normalized checkout
   `cwd`, and the observation that actually proves each command. This prevents one
   checkout's receipt from clearing another checkout's check. An observed npm test
@@ -190,9 +193,9 @@ remains part of the final coordinated release train and requires a separate huma
 - `python packages/tropo/tests/test_tropo.py` — **169/169** passed on Windows.
 - `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **169/169**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **626 passed** on Windows;
+- `python -m pytest packages/core/tests/ -q` — **627 passed** on Windows;
   `UV_CACHE_DIR=/tmp/vivary-uv-cache TMPDIR=/tmp uv run --no-cache --with pytest
-  python3 -m pytest packages/core/tests/ -q -p no:cacheprovider` — **624 passed,
+  python3 -m pytest packages/core/tests/ -q -p no:cacheprovider` — **625 passed,
   2 platform-specific skips** on WSL Linux.
 - `python -m pytest packages/strato/tests -q` — **48 passed** on Windows and
   **48 passed** on WSL Linux.
