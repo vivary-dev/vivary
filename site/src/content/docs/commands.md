@@ -503,9 +503,9 @@ non-canonical or unknown fields, invalid shapes, and deeply nested request docum
 with a typed `vivary.ozone-verification-refusal/v0`, never a traceback.
 In default plain-text output, reason fragments are JSON-escaped before they are written
 so valid JSON field names cannot cause a terminal encoding failure.
-Malformed or tampered receipt evidence inside an otherwise accepted envelope is not an
-envelope refusal: core's receipt and gate verdicts describe the failure, and the valid
-aggregate outcome is `insufficient`.
+Malformed receipt shapes are envelope refusals with exit code `2`. An intact receipt
+whose fingerprint or capsule binding was tampered with reaches core's receipt and gate
+verdicts; that valid aggregate evaluation is `insufficient`.
 
 A valid result is `vivary.ozone-verification/v0`. Its `receipt_verdict`,
 `gate_verdict`, and optional `repair_proposal` are the raw fingerprinted core
