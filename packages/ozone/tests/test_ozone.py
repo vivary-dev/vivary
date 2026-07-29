@@ -751,6 +751,45 @@ def test_governed_verification_refuses_invalid_graph_relationship_endpoints():
         assert result["reason_codes"] == ["invalid_repair_graph"]
 
 
+def test_governed_verification_refuses_oversized_repair_identifiers():
+    oversized_checkout = "checkout:" + "x" * 1024
+    graph_request = _governed_request(graph=True)
+    graph_request["graph"]["edges"] = [
+        {
+            "kind": "checkout_of",
+            "from": oversized_checkout,
+            "to": "repository:x",
+        }
+    ]
+    graph_request["graph"]["nodes"] = _checkout_graph_nodes(
+        graph_request["graph"]["edges"]
+    )
+
+    oversized_fact_capsule = _governed_capsule(
+        claims=[
+            {
+                "id": "claim:oversized-fact",
+                "fact": "x" * 1024,
+                "subject": "checkout:a",
+                "claim": "value",
+                "evidence": [],
+            }
+        ]
+    )
+    capsule_request = _governed_request(
+        capsule=oversized_fact_capsule,
+        graph=True,
+    )
+
+    graph_result = ozone.verify_governed(graph_request)
+    capsule_result = ozone.verify_governed(capsule_request)
+
+    assert graph_result["schema"] == ozone.REFUSAL_SCHEMA
+    assert graph_result["reason_codes"] == ["invalid_repair_graph"]
+    assert capsule_result["schema"] == ozone.REFUSAL_SCHEMA
+    assert capsule_result["reason_codes"] == ["invalid_repair_capsule"]
+
+
 def test_governed_verification_refuses_malformed_repair_inputs_without_crashing():
     malformed_graph = {
         "schema": "vivary.workspace-graph/v0",

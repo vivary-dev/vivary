@@ -39,6 +39,7 @@ REQUEST_SCHEMA = "vivary.ozone-verification-request/v0"
 VERIFICATION_SCHEMA = "vivary.ozone-verification/v0"
 REFUSAL_SCHEMA = "vivary.ozone-verification-refusal/v0"
 MAX_EVIDENCE_AGE_SECONDS = 300
+MAX_REPAIR_IDENTIFIER_JSON_BYTES = 128
 CAPSULE_FIELDS = frozenset(
     {
         "schema",
@@ -187,6 +188,27 @@ def _nonempty_string(value):
     return isinstance(value, str) and bool(value.strip())
 
 
+def _bounded_repair_identifier(value):
+    if not _nonempty_string(value):
+        return False
+    encoded_length = 2
+    for character in value:
+        codepoint = ord(character)
+        if character in {'"', "\\"}:
+            encoded_length += 2
+        elif codepoint < 0x20:
+            encoded_length += 6
+        elif codepoint <= 0x7F:
+            encoded_length += 1
+        elif codepoint <= 0xFFFF:
+            encoded_length += 6
+        else:
+            encoded_length += 12
+        if encoded_length > MAX_REPAIR_IDENTIFIER_JSON_BYTES:
+            return False
+    return True
+
+
 def _is_finite_number(value):
     if isinstance(value, bool):
         return False
@@ -232,9 +254,9 @@ def _repair_capsule_is_safe(capsule, core):
     for claim in claims:
         if not isinstance(claim, dict):
             return False
-        if not _nonempty_string(claim.get("id")) or not _nonempty_string(
-            claim.get("fact")
-        ):
+        if not _bounded_repair_identifier(
+            claim.get("id")
+        ) or not _bounded_repair_identifier(claim.get("fact")):
             return False
         if claim.get("subject") is not None and not isinstance(
             claim.get("subject"), str
@@ -303,7 +325,7 @@ def _repair_graph_is_safe(graph, core):
     for node in graph["nodes"]:
         if not (
             isinstance(node, dict)
-            and _nonempty_string(node.get("id"))
+            and _bounded_repair_identifier(node.get("id"))
             and _nonempty_string(node.get("kind"))
             and node["id"] not in node_kinds
         ):
@@ -345,7 +367,7 @@ def _repair_graph_is_safe(graph, core):
         repository_id = conflict.get("repository")
         sides = conflict.get("sides")
         if not (
-            _nonempty_string(conflict.get("id"))
+            _bounded_repair_identifier(conflict.get("id"))
             and conflict.get("kind") == "divergent_checkouts"
             and _nonempty_string(repository_id)
             and node_kinds.get(repository_id) == "repository"

@@ -478,6 +478,8 @@ ozone verify request.json --governed --json --strict
 Repair `checkout_of` endpoints must reference existing `checkout` and `repository`
 nodes. Every divergent-conflict side must reference a checkout related to that
 conflict's repository.
+Claim IDs, claim facts, graph node IDs, and conflict IDs that repair expansion can
+repeat are limited to 128 bytes in JSON string encoding.
 
 A `claims_over_budget` omission must list exactly
 `min(omitted_count, 16)` entries. This matches core's compiler cap.
