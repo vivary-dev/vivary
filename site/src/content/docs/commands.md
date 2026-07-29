@@ -384,6 +384,7 @@ The request envelope is `vivary.strato-decision-request/v0`:
     },
     "workspace": {
       "fingerprint": "sha256:...",
+      "repair_topology_fingerprint": "sha256:...",
       "observed_at": "2026-07-26T12:00:00Z"
     },
     "claims": [],
@@ -480,10 +481,14 @@ ozone verify request.json --governed --json --strict
 | `gate` | Named gate with core-owned `required_checks`, `require_claims_verified`, `max_unresolved_conflicts`, and `max_unresolved_unknowns` constraints. |
 | `graph` | Optional matching `vivary.workspace-graph/v0`. When present, Ozone returns a bounded `vivary.context-repair-proposal/v0`; every proposal has `requires_gate: true`, and `writes_performed` is always `0`. |
 Repair `checkout_of` endpoints must reference existing `checkout` and `repository`
-nodes. Every divergent conflict has at least two sides and covers every checkout related
-to its repository. The graph's conflict set must match the capsule's preserved conflicts
-exactly; a graph cannot omit a conflict or a conflict side to turn conflicting checkout
-truth into a deduplication proposal.
+nodes. The capsule's `workspace.repair_topology_fingerprint` commits the normalized
+repository nodes and `checkout_of` relationships that can drive repair proposals;
+Ozone recomputes it from the supplied graph before delegation. This binds remote-backed
+and inferred no-remote linked-worktree groups without trusting a copied workspace
+fingerprint label. Every divergent conflict has at least two sides and covers every
+checkout related to its repository. The graph's conflict set must match the capsule's
+preserved conflicts exactly; a graph cannot omit a conflict or a conflict side to turn
+conflicting checkout truth into a deduplication proposal.
 Claim IDs, claim facts, graph node IDs, and conflict IDs that repair expansion can
 repeat are limited to 128 bytes in JSON string encoding.
 

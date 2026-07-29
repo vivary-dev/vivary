@@ -45,6 +45,9 @@ contracts. It preserves core's fingerprinted receipt and gate verdicts unchanged
 Strato can consume the returned `gate_verdict` directly. A supplied workspace graph
 adds a typed repair proposal; every proposal requires a gate and reports
 `writes_performed: 0`.
+The capsule commits the normalized repository nodes and `checkout_of` relationships
+that can drive repair proposals. Ozone recomputes that topology commitment from the
+supplied graph, including inferred no-remote linked-worktree groups, before delegation.
 
 The exact request, result, freshness, and exit-code contract lives in the
 [command reference](https://vivary.vercel.app/commands/#governed-evidence-verification).

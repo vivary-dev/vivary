@@ -43,6 +43,44 @@ from vivary_core.collation import CollationDomainError, locale_sort_key
 CAPSULE_SCHEMA = "vivary.task-capsule/v0"
 
 
+def repair_topology_fingerprint(graph) -> str:
+    """Commit the graph relationships that can drive context-repair proposals."""
+
+    repositories = sorted(
+        (
+            {
+                "id": node.get("id"),
+                "identity": node.get("identity"),
+                "identity_status": node.get("identity_status"),
+            }
+            for node in graph.get("nodes", [])
+            if node.get("kind") == "repository"
+        ),
+        key=lambda node: _utf16_sort_key(node["id"]),
+    )
+    checkout_of = sorted(
+        (
+            {
+                "checkout": edge.get("from"),
+                "repository": edge.get("to"),
+            }
+            for edge in graph.get("edges", [])
+            if edge.get("kind") == "checkout_of"
+        ),
+        key=lambda relationship: (
+            _utf16_sort_key(relationship["checkout"]),
+            _utf16_sort_key(relationship["repository"]),
+        ),
+    )
+    return fingerprint(
+        {
+            "schema": "vivary.repair-topology/v0",
+            "repositories": repositories,
+            "checkout_of": checkout_of,
+        }
+    )
+
+
 def _task_capsule_id(task, workspace_fingerprint) -> str:
     """Derive the capsule identifier from the compiler's pinned identity fields."""
 
@@ -675,6 +713,7 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         "workspace": {
             "fingerprint": graph.get("workspace_fingerprint"),
             "observed_at": graph.get("observed_at"),
+            "repair_topology_fingerprint": repair_topology_fingerprint(graph),
         },
         "claims": included,
         "conflicts": conflicts,

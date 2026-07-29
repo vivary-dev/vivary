@@ -50,6 +50,7 @@ sys.path.insert(0, PY_ROOT)
 from vivary_core.canonical import MAX_LOSSLESS_INTEGER, normalize_path  # noqa: E402
 from vivary_core.capsule_compile import (  # noqa: E402
     compile_task_capsule,
+    repair_topology_fingerprint,
     verify_task_capsule_integrity,
 )
 from vivary_core.workspace_content import observe_content  # noqa: E402
@@ -278,6 +279,20 @@ def test_capsule_integrity_binds_its_deterministic_identifier(graph):
 def test_capsule_binds_the_workspace_fingerprint_it_was_compiled_against(graph):
     capsule = compile_task_capsule(task=TASK, graph=graph)
     assert capsule["workspace"]["fingerprint"] == graph["workspace_fingerprint"]
+    assert (
+        capsule["workspace"]["repair_topology_fingerprint"]
+        == repair_topology_fingerprint(graph)
+    )
+    changed_topology = json.loads(json.dumps(graph))
+    checkout_edge = next(
+        edge for edge in changed_topology["edges"]
+        if edge["kind"] == "checkout_of"
+    )
+    checkout_edge["to"] = "repository_forged"
+    assert (
+        capsule["workspace"]["repair_topology_fingerprint"]
+        != repair_topology_fingerprint(changed_topology)
+    )
     # Checks are derived from what was observed, so a plain git fixture with no
     # tropo.toml and no package.json yields none rather than three invented ones.
     assert capsule["required_checks"] == []

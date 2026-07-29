@@ -150,6 +150,7 @@ def _load_core_verification():
         sys.path.insert(0, sibling_core)
     from vivary_core.capsule_compile import (
         is_task_capsule_shape,
+        repair_topology_fingerprint,
         verify_task_capsule_integrity,
     )
     from vivary_core.capsule_select import OMITTED_LIST_CAP
@@ -177,6 +178,7 @@ def _load_core_verification():
         "CollationDomainError": CollationDomainError,
         "_utf16_sort_key": _utf16_sort_key,
         "is_canonical_body_value": is_canonical_body_value,
+        "repair_topology_fingerprint": repair_topology_fingerprint,
         "MAX_DEDUPE_CHECKOUTS": MAX_DEDUPE_CHECKOUTS,
         "AVG_OMITTED_CLAIM_TOKENS": AVG_OMITTED_CLAIM_TOKENS,
         "MAX_LOSSLESS_INTEGER": MAX_LOSSLESS_INTEGER,
@@ -248,9 +250,19 @@ def _parse_instant(value):
 
 
 def _repair_capsule_is_safe(capsule, core):
+    workspace = capsule.get("workspace")
+    if not (
+        isinstance(workspace, dict)
+        and _bounded_repair_identifier(
+            workspace.get("repair_topology_fingerprint")
+        )
+    ):
+        return False
+
     claims = capsule.get("claims")
     if not isinstance(claims, list):
         return False
+    claim_semantics = set()
     for claim in claims:
         if not isinstance(claim, dict):
             return False
@@ -278,6 +290,14 @@ def _repair_capsule_is_safe(capsule, core):
         evidence = claim.get("evidence")
         if evidence is not None and not isinstance(evidence, list):
             return False
+        semantics = (
+            claim.get("subject"),
+            claim.get("fact"),
+            claim.get("claim"),
+        )
+        if semantics in claim_semantics:
+            return False
+        claim_semantics.add(semantics)
 
     omissions = capsule.get("omissions")
     if not isinstance(omissions, list):
@@ -423,6 +443,13 @@ def _repair_graph_is_safe(graph, core):
         if conflict_pair_count > max_checkouts * (max_checkouts - 1) // 2:
             return False
     return True
+
+
+def _repair_graph_topology_is_bound(capsule, graph, core):
+    return (
+        capsule["workspace"]["repair_topology_fingerprint"]
+        == core["repair_topology_fingerprint"](graph)
+    )
 
 
 def _repair_estimates_are_canonical(capsule, core):
@@ -630,6 +657,10 @@ def _validate_governed_request(request, core):
             capsule, request["graph"], core
         ):
             errors.append("repair_work_unbounded")
+        elif repair_capsule_is_safe and not _repair_graph_topology_is_bound(
+            capsule, request["graph"], core
+        ):
+            errors.append("repair_graph_topology_unbound")
 
     return errors
 

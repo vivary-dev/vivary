@@ -42,8 +42,10 @@ remains part of the final coordinated release train and requires a separate huma
   observed check derivation, non-negative capsule budgets, missing-core installation
   errors, and rejection of incompatible
   plain-find/query flags including `--budget 0`.
-- The packaged integration smoke now installs core beside Tropo, proves the wheel's
-  declared dependency metadata, and exercises the installed governed command.
+- The packaged integration smoke builds every coordinated local wheel, installs the
+  `vivary` meta-package with dependency resolution enabled from an isolated wheelhouse,
+  installs Strato through the same resolver, and then exercises the installed governed
+  Tropo → Ozone → Strato path.
 - The cross-platform orientation matrix now runs the full Tropo suite on
   `windows-latest`, including the governed root-casing contract.
 - Session-scoped test harnesses isolate the core and Tropo suites from host user Git
@@ -86,24 +88,30 @@ remains part of the final coordinated release train and requires a separate huma
   or deeply nested repair inputs before calling core. It refuses unknown
   capsule/receipt fields even when the artifact is re-fingerprinted, enforces core's
   16-entry omission-list/count contract and a 128-byte JSON-encoded ceiling on repair
-  identifiers, binds the repair graph's conflict set to the capsule's preserved
-  conflicts, requires each divergent conflict to cover every checkout related to its
-  repository, caps total checkout-pair scans across all repositories, bounds
-  route-proposal evidence to core's checkout cap, and bounds derived repair estimates
-  to JavaScript's lossless integer range before delegation.
+  identifiers, rejects semantically duplicate `(subject, fact, claim)` entries before
+  they can duplicate deterministic repair IDs, binds the repair graph's conflict set to
+  the capsule's preserved conflicts, and recomputes the capsule's normalized
+  repair-topology commitment over repository nodes and `checkout_of` relationships.
+  This authenticates remote-backed and inferred no-remote linked-worktree groups without
+  trusting a copied workspace fingerprint label. Ozone also requires each divergent
+  conflict to cover every checkout related to its repository, caps total checkout-pair
+  scans across all repositories, bounds route-proposal evidence to core's checkout cap,
+  and bounds derived repair estimates to JavaScript's lossless integer range before
+  delegation.
   It returns typed verification or refusal envelopes. Core's fingerprinted receipt/gate
   verdicts and repair proposal pass through unchanged; Strato consumes the raw
   `gate_verdict` without a second verification implementation. Plain-text refusal
   output JSON-escapes reason fragments before writing them, including unpaired Unicode
   surrogates. Advisory mode exits `0`, `--strict` exits `1` for a valid insufficient
   result, and malformed request documents or refused request envelopes exit `2`.
-- Ozone regressions cover sufficient, wrong-claim-ID, duplicate-claim-ID, missing,
-  tampered, stale, workspace-mismatched, budget-limited, unknown-artifact,
-  bounded-repair, pair-scan-bound, route-evidence-bound, identifier-bound,
-  omission-bound, estimate-bound, gate-shape, graph-relationship, conflict-binding,
-  output-escaping, malformed, recursive, repair, CLI, and real Ozone-to-Strato cases.
-  The installed-package CI smoke proves Ozone's core floor, runs the packaged Ozone
-  verdict path, and hands its unchanged verdict to Strato.
+- Ozone regressions cover sufficient, wrong-claim-ID, duplicate-claim-ID,
+  duplicate-claim-semantics, missing, tampered, stale, workspace-mismatched,
+  budget-limited, unknown-artifact, bounded-repair, pair-scan-bound,
+  route-evidence-bound, identifier-bound, omission-bound, estimate-bound, gate-shape,
+  graph-relationship, conflict-binding, topology-commitment, output-escaping, malformed,
+  recursive, repair, CLI, and real Ozone-to-Strato cases. The installed-package CI smoke
+  resolves the complete local meta-package dependency graph, proves Ozone's core floor,
+  runs the packaged Ozone verdict path, and hands its unchanged verdict to Strato.
 
 ### Changed
 
@@ -214,6 +222,10 @@ remains part of the final coordinated release train and requires a separate huma
   Tropo **0.5.0**, and core **0.2.2**.
   The packaged smoke also verified that the installed core version satisfies Tropo's
   declared requirement specifier, not merely that the metadata names it.
+- A local wheelhouse built core, Tropo, Strato, Ozone, Exo, create-vivary, the
+  `vivary` meta-package, and memory-cognee; `pip install --dry-run --ignore-installed
+  --no-index --find-links <wheelhouse> vivary==0.1.2 vivary-strato==0.1.1` resolved
+  the coordinated graph entirely from those wheels.
 - `python -m pytest packages/vivary/tests/ -q` — **9 passed**; the manifest/runtime
   version and `vivary-tropo>=0.5.0` floor matched.
 - `python packages/create-vivary/tests/test_privacy_differential.py` — **2/2
@@ -226,7 +238,7 @@ remains part of the final coordinated release train and requires a separate huma
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **43/43**, Exo **17/17**,
+- Repository verification also passed: Ozone **45/45**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**
