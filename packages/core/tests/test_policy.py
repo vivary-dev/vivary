@@ -281,7 +281,10 @@ def complete_claim_like(overrides=None):
         "status": "known",
         "evidence": [{"kind": "test"}],
         "selection_reason": "test fixture",
-        "selection": {"tier": "allowlisted", "signals": []},
+        "selection": {
+            "tier": "allowlisted",
+            "signals": [{"signal": "allowlisted"}],
+        },
     }
     claim.update(overrides or {})
     return claim

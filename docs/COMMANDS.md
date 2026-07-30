@@ -482,7 +482,12 @@ The capsule task question must be a nonempty string. A declared task scope bound
 narrated claim, conflict side, unknown, and omission path to at least one declared root.
 Every capsule claim must retain its compiler-owned nonempty identity, subject, path,
 fact, text, status, and selection reason plus list-shaped evidence and selection
-signals. A re-fingerprinted partial claim is still an invalid capsule.
+signals. With task filters, every claim must retain the exact normalized
+`matched_filters` record; claim-owned fact and path values must satisfy that record.
+Without task filters, the record must be absent. Question/content match signals imply
+the `question_match` tier unless a preserved conflict takes precedence. The
+`allowlisted` tier carries only its baseline signal. A re-fingerprinted partial or
+semantically inconsistent claim is still an invalid capsule.
 Each capsule conflict must retain its compiler-owned kind, repository, question, status,
 reason codes, and `review_required` decision. It must preserve at least two distinct
 checkout sides, each with a nonempty checkout ID and path plus `head_revision`,
@@ -542,8 +547,10 @@ invalid request documents and refused request envelopes exit `2`; advisory mode 
 `0` for a valid evaluation. The
 `--receipt PATH` CLI flag records Ozone's privacy-preserving local run envelope; the
 evidence receipt itself belongs inside `REQUEST`.
-The run-receipt target must not identify the request document, including through a
-hard-link alias or redirected stdin when `REQUEST` is `-`.
+For a file-backed request, the run-receipt target must not identify the request
+document, including through a hard-link alias. When `REQUEST` is `-`, Ozone refuses
+run-receipt output entirely because stdin does not expose enough source identity to
+prove the receipt target is distinct.
 
 ### The `structure` pack
 

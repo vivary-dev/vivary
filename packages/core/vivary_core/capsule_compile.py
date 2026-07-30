@@ -37,7 +37,12 @@ from vivary_core.canonical import (
     is_canonical_body_value,
     is_within_allowlist,
 )
-from vivary_core.capsule_select import TIER_NAMES, select_claims, validate_filters
+from vivary_core.capsule_select import (
+    TIER_NAMES,
+    question_terms,
+    select_claims,
+    validate_filters,
+)
 from vivary_core.collation import CollationDomainError, locale_sort_key
 
 CAPSULE_SCHEMA = "vivary.task-capsule/v0"
@@ -257,30 +262,100 @@ def _is_conflict_shape(conflict) -> bool:
     )
 
 
-def _conflict_claim_selections_are_valid(capsule) -> bool:
+def _selection_signal_is_valid(signal, terms) -> bool:
+    signal_kind = signal.get("signal")
+    if signal_kind == "conflict_side":
+        return set(signal) == {"signal", "conflict"} and _nonempty_string(
+            signal.get("conflict")
+        )
+    if signal_kind == "question_term_match":
+        return (
+            set(signal) == {"signal", "term", "field"}
+            and signal.get("term") in terms
+            and signal.get("field") in {"label", "repository", "branch"}
+        )
+    if signal_kind == "content_term_match":
+        return (
+            set(signal) == {"signal", "term", "path"}
+            and _nonempty_string(signal.get("term"))
+            and _nonempty_string(signal.get("path"))
+        )
+    return signal == {"signal": "allowlisted"}
+
+
+def _claim_matches_task_filters(task, claim) -> bool:
+    expected_filters = validate_filters(task.get("filters"))
+    selection = claim["selection"]
+    if not expected_filters:
+        return "matched_filters" not in selection
+    if selection.get("matched_filters") != expected_filters:
+        return False
+    for task_filter in expected_filters:
+        if task_filter["field"] == "fact":
+            observed = claim["fact"]
+        elif task_filter["field"] == "path":
+            observed = claim["subject_path"]
+        else:
+            # Label, repository, and branch are graph-profile fields that do not
+            # enter the claim. Their compiler-owned normalized match record is the
+            # capsule's portable proof when no graph accompanies verification.
+            continue
+        if task_filter["operator"] == "equals":
+            if observed != task_filter["value"]:
+                return False
+        elif task_filter["value"].lower() not in observed.lower():
+            return False
+    return True
+
+
+def _claim_selections_are_valid(capsule) -> bool:
     conflict_ids_by_checkout = {}
     for conflict in capsule["conflicts"]:
         for side in conflict["sides"]:
             conflict_ids_by_checkout.setdefault(side["checkout"], set()).add(
                 conflict["id"]
             )
+    terms = set(question_terms(capsule["task"]["question"]))
     for claim in capsule["claims"]:
         selection = claim["selection"]
-        if selection["tier"] not in TIER_NAMES:
+        tier = selection["tier"]
+        signals = selection["signals"]
+        if (
+            tier not in TIER_NAMES
+            or not signals
+            or not all(_selection_signal_is_valid(signal, terms) for signal in signals)
+            or any(signal in signals[:index] for index, signal in enumerate(signals))
+            or not _claim_matches_task_filters(capsule["task"], claim)
+        ):
             return False
+
         expected_conflicts = conflict_ids_by_checkout.get(claim["subject"], set())
         observed_conflicts = {
-            signal.get("conflict")
-            for signal in selection["signals"]
-            if signal.get("signal") == "conflict_side"
+            signal["conflict"]
+            for signal in signals
+            if signal["signal"] == "conflict_side"
         }
+        has_question_match = any(
+            signal["signal"] in {"question_term_match", "content_term_match"}
+            for signal in signals
+        )
+        has_allowlisted = any(
+            signal["signal"] == "allowlisted"
+            for signal in signals
+        )
         if expected_conflicts:
             if (
-                selection["tier"] != "conflict_side"
+                tier != "conflict_side"
                 or observed_conflicts != expected_conflicts
+                or has_allowlisted
             ):
                 return False
-        elif selection["tier"] == "conflict_side" or observed_conflicts:
+        elif observed_conflicts:
+            return False
+        elif has_question_match:
+            if tier != "question_match" or has_allowlisted:
+                return False
+        elif tier != "allowlisted" or signals != [{"signal": "allowlisted"}]:
             return False
     return True
 
@@ -324,7 +399,7 @@ def is_task_capsule_shape(capsule) -> bool:
             and bool(omission["kind"])
             for omission in capsule["omissions"]
         )
-        and _conflict_claim_selections_are_valid(capsule)
+        and _claim_selections_are_valid(capsule)
     )
 
 

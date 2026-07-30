@@ -1547,10 +1547,10 @@ def _receipt_targets_request(request_path, receipt_path):
     try:
         receipt_target = os.path.expanduser(receipt_path)
         if request_path == "-":
-            return os.path.samestat(
-                os.fstat(sys.stdin.fileno()),
-                os.stat(receipt_target),
-            )
+            # A pipe has no source-file identity to compare with the receipt
+            # target. Fail closed rather than let observability corrupt a request
+            # file whose distinctness cannot be proved.
+            return True
         return os.path.samefile(
             os.path.expanduser(request_path),
             receipt_target,

@@ -69,10 +69,12 @@ The exact request, result, freshness, and exit-code contract lives in the
 
 For local debugging, pass `--receipt PATH` or set `VIVARY_RECEIPT_LOG=PATH` to append
 a dependency-free JSONL run receipt. The receipt target must not identify a file-backed
-verification request, including through a hard-link alias. Receipts stay local and
-record only command envelope data such as tool version, command, flag names, exit code,
-duration, Python, and platform. They do not capture stdout, stderr, file contents,
-target ids, local paths, or graph content.
+verification request, including through a hard-link alias. Ozone refuses run-receipt
+output when `REQUEST` is `-`, because stdin does not expose enough source identity to
+prove the target is distinct. Receipts stay local and record only command envelope data
+such as tool version, command, flag names, exit code, duration, Python, and platform.
+They do not capture stdout, stderr, file contents, target ids, local paths, or graph
+content.
 
 ## The `structure` pack
 

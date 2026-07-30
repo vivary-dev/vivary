@@ -449,10 +449,16 @@ def _governed_capsule(
             "status": "known",
             "evidence": [],
             "selection_reason": "test fixture",
-            "selection": {"tier": "allowlisted", "signals": []},
+            "selection": {
+                "tier": "allowlisted",
+                "signals": [{"signal": "allowlisted"}],
+            },
         }
         complete_claim.update(claim)
-        selection = {"tier": "allowlisted", "signals": []}
+        selection = {
+            "tier": "allowlisted",
+            "signals": [{"signal": "allowlisted"}],
+        }
         selection.update(complete_claim.get("selection", {}))
         complete_claim["selection"] = selection
         complete_claims.append(complete_claim)
@@ -1156,6 +1162,81 @@ def test_governed_verification_accepts_compiler_filters_and_omissions_without_gr
     )
 
     assert result["schema"] == ozone.VERIFICATION_SCHEMA
+
+
+def test_governed_verification_refuses_claims_that_violate_declared_filters():
+    graph = _projected_remote_graph(
+        ["https://example.test/shared.git"] * 2,
+        ["a" * 40, "a" * 40],
+    )
+    compiled = compile_task_capsule(
+        task={
+            "question": "Review the shared repository.",
+            "scope": ["/repo"],
+            "filters": [{"field": "fact", "equals": "head_revision"}],
+        },
+        graph=graph,
+        budget={"max_claims": 1},
+    )
+
+    for keep_match_record in (False, True):
+        capsule = json.loads(json.dumps(compiled))
+        capsule["claims"][0]["fact"] = "is_dirty"
+        if not keep_match_record:
+            capsule["claims"][0]["selection"].pop("matched_filters")
+        capsule["fingerprint"] = fingerprint(
+            {
+                key: item
+                for key, item in capsule.items()
+                if key not in {"capsule_id", "fingerprint"}
+            }
+        )
+        result = ozone.verify_governed(
+            _governed_request(
+                capsule=capsule,
+                receipt=_governed_receipt(capsule),
+            )
+        )
+
+        assert result["schema"] == ozone.REFUSAL_SCHEMA
+        assert result["reason_codes"] == ["invalid_capsule"]
+
+
+def test_governed_verification_binds_question_match_signals_to_their_tier():
+    malformed_selections = (
+        {
+            "tier": "allowlisted",
+            "signals": [
+                {
+                    "signal": "question_term_match",
+                    "term": "task",
+                    "field": "label",
+                }
+            ],
+        },
+        {
+            "tier": "question_match",
+            "signals": [{"signal": "allowlisted"}],
+        },
+    )
+    for index, selection in enumerate(malformed_selections):
+        capsule = _governed_capsule(
+            claims=[
+                {
+                    "id": f"claim:selection:{index}",
+                    "selection": selection,
+                }
+            ]
+        )
+        result = ozone.verify_governed(
+            _governed_request(
+                capsule=capsule,
+                receipt=_governed_receipt(capsule),
+            )
+        )
+
+        assert result["schema"] == ozone.REFUSAL_SCHEMA
+        assert result["reason_codes"] == ["invalid_capsule"]
 
 def test_governed_verification_preserves_duplicate_receipt_checks():
     governed_capsule = _governed_capsule(
@@ -2231,6 +2312,28 @@ def test_governed_verify_rejects_receipts_that_identify_request():
             )
             assert request_path.read_bytes() == original
 
+            piped = subprocess.run(
+                [
+                    sys.executable,
+                    str(OZONE_ROOT / "ozone.py"),
+                    "verify",
+                    "-",
+                    *governed_args,
+                    "--receipt",
+                    str(request_path),
+                ],
+                input=json.dumps(request),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert piped.returncode == 2
+            assert piped.stdout == ""
+            assert piped.stderr == (
+                "ozone: receipt: receipt path must not identify the verification request\n"
+            )
+            assert request_path.read_bytes() == original
+
         invalid_stdout = io.StringIO()
         invalid_stderr = io.StringIO()
         with (
@@ -2333,21 +2436,28 @@ def test_governed_verify_rejects_receipts_that_identify_request():
 
         previous_stdin = sys.stdin
         stdin_stdout = io.StringIO()
+        stdin_stderr = io.StringIO()
         try:
             sys.stdin = io.StringIO(json.dumps(request))
-            with contextlib.redirect_stdout(stdin_stdout):
+            with (
+                contextlib.redirect_stdout(stdin_stdout),
+                contextlib.redirect_stderr(stdin_stderr),
+            ):
                 stdin_return_code = ozone.main(
                     ["verify", "-", "--governed", "--json", "--receipt", str(receipt_path)]
                 )
         finally:
             sys.stdin = previous_stdin
-        assert stdin_return_code == 0
-        assert json.loads(stdin_stdout.getvalue())["outcome"] == "sufficient"
+        assert stdin_return_code == 2
+        assert stdin_stdout.getvalue() == ""
+        assert stdin_stderr.getvalue() == (
+            "ozone: receipt: receipt path must not identify the verification request\n"
+        )
         records = [
             json.loads(line)
             for line in receipt_path.read_text(encoding="utf-8").splitlines()
         ]
-        assert [record["command"] for record in records] == ["verify", "verify"]
+        assert [record["command"] for record in records] == ["verify"]
 
 
 def test_governed_verify_cli_emits_typed_json_and_honest_exit_codes():

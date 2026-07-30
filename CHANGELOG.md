@@ -84,10 +84,11 @@ remains part of the final coordinated release train and requires a separate huma
   caller-supplied clock, applies a deterministic 300-second evidence window, and
   rejects malformed gate constraints, scalar receipt identities, supplied non-mapping
   receipts, contradictory receipt fields, incomplete capsule claims or conflicts,
-  duplicate conflict sides, malformed task questions, scopes, or filters, narrated
-  paths outside the declared scope, invalid typed graph relationships, and malformed
-  or deeply nested repair inputs before calling core. Receipt claim lists must be
-  unique and disjoint. Together,
+  duplicate conflict sides, malformed task questions, scopes, or filters, claims that
+  violate declared filters, mismatched selection tiers and signals, narrated paths
+  outside the declared scope, invalid typed graph relationships, and malformed or
+  deeply nested repair inputs before calling core. Receipt claim lists must be unique
+  and disjoint. Together,
   they must equal both `claims_in_scope` and the capsule's claim IDs. All claims are
   verified only when the check list is nonempty and every check passed. Otherwise, all
   claims remain unverified. Every receipt check must carry a nonempty command. A check
@@ -117,17 +118,20 @@ remains part of the final coordinated release train and requires a separate huma
   verdicts and repair proposal pass through unchanged; Strato consumes the raw
   `gate_verdict` without a second verification implementation. The CLI rejects
   `--governed` on `review`, `impact`, and `packs` rather than silently running an
-  ordinary command. Plain-text refusal output JSON-escapes reason fragments before
-  writing them, including unpaired Unicode
-  surrogates. Advisory mode exits `0`, `--strict` exits `1` for a valid insufficient
-  result, and malformed request documents or refused request envelopes exit `2`.
+  ordinary command. It refuses run-receipt output whenever `REQUEST` is `-`, because a
+  pipe or redirection does not expose enough source identity to prove the target is
+  distinct. Plain-text refusal output JSON-escapes reason fragments before writing
+  them, including unpaired Unicode surrogates. Advisory mode exits `0`, `--strict`
+  exits `1` for a valid insufficient result, and malformed request documents or
+  refused request envelopes exit `2`.
 - Ozone regressions cover sufficient, wrong-claim-ID, contradictory-claim-list,
   duplicate-claim-ID, duplicate-claim-semantics, duplicate-check, receipt-extension,
   core-unknown, command-presence, flag-scope, non-mapping-receipt, incomplete-claim,
   topology-identifier, missing, tampered, stale, workspace-mismatched, budget-limited,
-  request/receipt-alias, unknown-artifact, bounded-repair, pair-scan-bound,
-  route-evidence-bound, identifier-bound, omission-bound, estimate-bound, gate-shape,
-  graph-relationship, scoped-full-graph, forged-in-scope-conflict, conflict-binding,
+  request/receipt-alias, piped-stdin-receipt, unknown-artifact, bounded-repair,
+  pair-scan-bound, route-evidence-bound, identifier-bound, omission-bound,
+  estimate-bound, gate-shape, graph-relationship, scoped-full-graph,
+  forged-in-scope-conflict, filter-binding, conflict-binding, selection-binding,
   topology-commitment, output-escaping, malformed, recursive, repair, CLI, and real
   Ozone-to-Strato cases.
   The installed-package CI smoke
@@ -167,9 +171,9 @@ remains part of the final coordinated release train and requires a separate huma
   matching capsule coverage, keeping the evidence check linear in request size.
 - Core context-repair generation indexes conflicts by repository once before expansion,
   avoiding a repository-by-conflict cross-product.
-- Ozone refuses a run-receipt target that identifies the verification request's source
-  file, including through a hard-link alias or redirected stdin, before reading or
-  appending.
+- Ozone refuses a run-receipt target that identifies a file-backed verification
+  request, including through a hard-link alias. It refuses all run-receipt output when
+  `REQUEST` is `-`, because stdin cannot prove that the target is distinct.
 - Derived required checks now carry checkout-scoped names, the normalized checkout
   `cwd`, and the observation that actually proves each command. This prevents one
   checkout's receipt from clearing another checkout's check. An observed npm test
@@ -266,7 +270,7 @@ remains part of the final coordinated release train and requires a separate huma
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **64/64**, Exo **17/17**,
+- Repository verification also passed: Ozone **66/66**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**
