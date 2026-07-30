@@ -1504,7 +1504,7 @@ def _verify_request_path(argv):
             if name in RECEIPT_VALUE_FLAGS and "=" not in token:
                 skip_value = True
                 continue
-            if name is not None or token.startswith("-"):
+            if name is not None or (token != "-" and token.startswith("-")):
                 continue
         if command is None:
             command = token
@@ -1516,14 +1516,20 @@ def _verify_request_path(argv):
 
 
 def _receipt_targets_request(request_path, receipt_path):
-    if request_path in (None, "-") or not receipt_path:
+    if request_path is None or not receipt_path:
         return False
     try:
+        receipt_target = os.path.expanduser(receipt_path)
+        if request_path == "-":
+            return os.path.samestat(
+                os.fstat(sys.stdin.fileno()),
+                os.stat(receipt_target),
+            )
         return os.path.samefile(
             os.path.expanduser(request_path),
-            os.path.expanduser(receipt_path),
+            receipt_target,
         )
-    except OSError:
+    except (OSError, ValueError, AttributeError):
         return False
 
 

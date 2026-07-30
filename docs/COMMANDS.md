@@ -534,7 +534,7 @@ invalid request documents and refused request envelopes exit `2`; advisory mode 
 `--receipt PATH` CLI flag records Ozone's privacy-preserving local run envelope; the
 evidence receipt itself belongs inside `REQUEST`.
 The run-receipt target must not identify the request document, including through a
-hard-link alias.
+hard-link alias or redirected stdin when `REQUEST` is `-`.
 
 ### The `structure` pack
 

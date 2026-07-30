@@ -4,6 +4,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import uuid
 from contextlib import contextmanager
@@ -2084,6 +2085,30 @@ def test_governed_verify_rejects_receipts_that_identify_request():
                 os.environ.pop(ozone.RECEIPT_ENV, None)
             else:
                 os.environ[ozone.RECEIPT_ENV] = previous_receipt_path
+
+        for governed_args in (["--governed"], []):
+            with request_path.open("rb") as stdin:
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        str(OZONE_ROOT / "ozone.py"),
+                        "verify",
+                        "-",
+                        *governed_args,
+                        "--receipt",
+                        str(request_path),
+                    ],
+                    stdin=stdin,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            assert completed.returncode == 2
+            assert completed.stdout == ""
+            assert completed.stderr == (
+                "ozone: receipt: receipt path must not identify the verification request\n"
+            )
+            assert request_path.read_bytes() == original
 
         invalid_stdout = io.StringIO()
         invalid_stderr = io.StringIO()

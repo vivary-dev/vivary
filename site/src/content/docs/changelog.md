@@ -165,8 +165,9 @@ remains part of the final coordinated release train and requires a separate huma
   matching capsule coverage, keeping the evidence check linear in request size.
 - Core context-repair generation indexes conflicts by repository once before expansion,
   avoiding a repository-by-conflict cross-product.
-- Ozone refuses a run-receipt target that identifies its file-backed verification
-  request, including through a hard-link alias, before reading or appending either file.
+- Ozone refuses a run-receipt target that identifies the verification request's source
+  file, including through a hard-link alias or redirected stdin, before reading or
+  appending.
 - Derived required checks now carry checkout-scoped names, the normalized checkout
   `cwd`, and the observation that actually proves each command. This prevents one
   checkout's receipt from clearing another checkout's check. An observed npm test
