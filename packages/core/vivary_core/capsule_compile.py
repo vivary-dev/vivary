@@ -43,34 +43,60 @@ from vivary_core.collation import CollationDomainError, locale_sort_key
 CAPSULE_SCHEMA = "vivary.task-capsule/v0"
 
 
+def _nonempty_string(value) -> bool:
+    return isinstance(value, str) and bool(value)
+
+
 def repair_topology_fingerprint(graph) -> str:
     """Commit the graph relationships that can drive context-repair proposals."""
 
-    repositories = sorted(
-        (
+    if not isinstance(graph, dict):
+        raise ValueError("workspace graph must be a mapping")
+    graph_nodes = graph.get("nodes", [])
+    graph_edges = graph.get("edges", [])
+    if not isinstance(graph_nodes, list) or not isinstance(graph_edges, list):
+        raise ValueError("workspace graph topology must use node and edge lists")
+
+    repositories = []
+    for node in graph_nodes:
+        if not isinstance(node, dict):
+            raise ValueError("workspace graph contains an invalid node")
+        if node.get("kind") != "repository":
+            continue
+        if not _nonempty_string(node.get("id")):
+            raise ValueError("repository topology nodes require non-empty string IDs")
+        repositories.append(
             {
-                "id": node.get("id"),
+                "id": node["id"],
                 "identity": node.get("identity"),
                 "identity_status": node.get("identity_status"),
             }
-            for node in graph.get("nodes", [])
-            if node.get("kind") == "repository"
-        ),
-        key=lambda node: _utf16_sort_key(node["id"]),
-    )
-    checkout_of = sorted(
-        (
+        )
+    repositories.sort(key=lambda node: _utf16_sort_key(node["id"]))
+
+    checkout_of = []
+    for edge in graph_edges:
+        if not isinstance(edge, dict):
+            raise ValueError("workspace graph contains an invalid edge")
+        if edge.get("kind") != "checkout_of":
+            continue
+        if not _nonempty_string(edge.get("from")) or not _nonempty_string(
+            edge.get("to")
+        ):
+            raise ValueError(
+                "checkout_of topology edges require non-empty string endpoints"
+            )
+        checkout_of.append(
             {
-                "checkout": edge.get("from"),
-                "repository": edge.get("to"),
+                "checkout": edge["from"],
+                "repository": edge["to"],
             }
-            for edge in graph.get("edges", [])
-            if edge.get("kind") == "checkout_of"
-        ),
+        )
+    checkout_of.sort(
         key=lambda relationship: (
             _utf16_sort_key(relationship["checkout"]),
             _utf16_sort_key(relationship["repository"]),
-        ),
+        )
     )
     return fingerprint(
         {
@@ -106,6 +132,38 @@ def _is_required_checks_shape(value) -> bool:
     )
 
 
+def _is_claim_shape(claim) -> bool:
+    if not isinstance(claim, dict) or not all(
+        _nonempty_string(claim.get(field))
+        for field in (
+            "id",
+            "subject",
+            "subject_path",
+            "fact",
+            "claim",
+            "status",
+            "selection_reason",
+        )
+    ):
+        return False
+    evidence = claim.get("evidence")
+    selection = claim.get("selection")
+    if (
+        not isinstance(evidence, list)
+        or not all(isinstance(item, dict) for item in evidence)
+        or not isinstance(selection, dict)
+        or not _nonempty_string(selection.get("tier"))
+        or not isinstance(selection.get("signals"), list)
+        or not all(isinstance(signal, dict) for signal in selection["signals"])
+    ):
+        return False
+    matched_filters = selection.get("matched_filters")
+    return matched_filters is None or (
+        isinstance(matched_filters, list)
+        and all(isinstance(item, dict) for item in matched_filters)
+    )
+
+
 def is_task_capsule_shape(capsule) -> bool:
     """Return whether a value has the complete policy-facing Task Capsule shape."""
 
@@ -133,12 +191,7 @@ def is_task_capsule_shape(capsule) -> bool:
         return False
 
     return (
-        all(
-            isinstance(claim, dict)
-            and isinstance(claim.get("id"), str)
-            and bool(claim["id"])
-            for claim in capsule["claims"]
-        )
+        all(_is_claim_shape(claim) for claim in capsule["claims"])
         and all(
             isinstance(conflict, dict)
             and isinstance(conflict.get("id"), str)

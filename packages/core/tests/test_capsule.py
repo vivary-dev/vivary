@@ -47,7 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PY_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, PY_ROOT)
 
-from vivary_core.canonical import MAX_LOSSLESS_INTEGER, normalize_path  # noqa: E402
+from vivary_core.canonical import MAX_LOSSLESS_INTEGER, fingerprint, normalize_path  # noqa: E402
 from vivary_core.capsule_compile import (  # noqa: E402
     compile_task_capsule,
     repair_topology_fingerprint,
@@ -274,6 +274,51 @@ def test_capsule_integrity_binds_its_deterministic_identifier(graph):
     capsule["capsule_id"] = "capsule_forged"
 
     assert not verify_task_capsule_integrity(capsule)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "subject",
+        "subject_path",
+        "fact",
+        "claim",
+        "status",
+        "evidence",
+        "selection_reason",
+        "selection",
+    ],
+)
+def test_capsule_integrity_rejects_incomplete_claims(graph, field):
+    capsule = compile_task_capsule(task=TASK, graph=graph)
+    capsule["claims"][0].pop(field)
+    capsule["fingerprint"] = fingerprint(
+        {
+            key: value
+            for key, value in capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+
+    assert not verify_task_capsule_integrity(capsule)
+
+
+@pytest.mark.parametrize(
+    "malformed_graph",
+    [
+        {"nodes": [{"kind": "repository"}], "edges": []},
+        {"nodes": [{"kind": "repository", "id": 123}], "edges": []},
+        {
+            "nodes": [],
+            "edges": [{"kind": "checkout_of", "from": None, "to": "repository:a"}],
+        },
+    ],
+)
+def test_repair_topology_fingerprint_rejects_malformed_identifiers(
+    malformed_graph,
+):
+    with pytest.raises(ValueError, match="topology"):
+        repair_topology_fingerprint(malformed_graph)
 
 
 def test_capsule_binds_the_workspace_fingerprint_it_was_compiled_against(graph):

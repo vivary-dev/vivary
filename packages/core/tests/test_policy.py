@@ -271,6 +271,22 @@ def base_capsule_like(overrides=None):
     return capsule
 
 
+def complete_claim_like(overrides=None):
+    claim = {
+        "id": "claim-test",
+        "subject": "checkout:test",
+        "subject_path": "/repo/test",
+        "fact": "test_fact",
+        "claim": "test claim",
+        "status": "known",
+        "evidence": [{"kind": "test"}],
+        "selection_reason": "test fixture",
+        "selection": {"tier": "allowlisted", "signals": []},
+    }
+    claim.update(overrides or {})
+    return claim
+
+
 def base_receipt_like(capsule, overrides=None):
     receipt = create_integrity_receipt(
         capsule=capsule,
@@ -554,7 +570,15 @@ def test_evaluate_capsule_gate_gate_required_when_the_capsule_blew_its_claim_bud
 
 def test_evaluate_capsule_gate_gate_required_when_a_claim_carries_no_evidence():
     capsule = base_capsule_like(
-        {"claims": [{"id": "claim_no_evidence", "subject": "s", "fact": "f", "claim": "c", "status": "known", "evidence": []}]}
+        {"claims": [complete_claim_like(
+            {
+                "id": "claim_no_evidence",
+                "subject": "s",
+                "fact": "f",
+                "claim": "c",
+                "evidence": [],
+            }
+        )]}
     )
     outcome = evaluate_capsule_gate(capsule=capsule)
     assert outcome == {
@@ -816,7 +840,9 @@ def test_evaluate_receipt_gate_a_sufficient_ozone_verdict_clears_the_required_ch
     ],
 )
 def test_evaluate_receipt_gate_rejects_recomputed_sufficient_claim_projections(projection):
-    capsule = base_capsule_like({"claims": [{"id": "claim-one"}]})
+    capsule = base_capsule_like(
+        {"claims": [complete_claim_like({"id": "claim-one"})]}
+    )
     receipt = base_receipt_like(
         capsule,
         {"claims_verified": [], "claims_unverified": ["claim-one"]},
@@ -847,7 +873,9 @@ def test_evaluate_receipt_gate_rejects_recomputed_sufficient_claim_projections(p
 
 
 def test_evaluate_receipt_gate_clears_a_legitimate_sufficient_claim_projection():
-    capsule = base_capsule_like({"claims": [{"id": "claim-one"}]})
+    capsule = base_capsule_like(
+        {"claims": [complete_claim_like({"id": "claim-one"})]}
+    )
     receipt = base_receipt_like(capsule)
     verdict = evaluate_gate_sufficiency(
         gate={"name": "ci", "require_claims_verified": True},
@@ -1363,7 +1391,11 @@ def test_next_loop_step_stop_with_all_checks_clear_once_a_receipt_clears_every_g
 def test_next_loop_step_retains_capsule_evidence_and_budget_gates_after_a_clean_receipt():
     capsule = base_capsule_like(
         {
-            "claims": [{"id": "claim_missing_evidence", "evidence": []}],
+            "claims": [
+                complete_claim_like(
+                    {"id": "claim_missing_evidence", "evidence": []}
+                )
+            ],
             "omissions": [{"kind": "claims_over_budget", "omitted_count": 2}],
         }
     )

@@ -790,7 +790,7 @@ def _validate_governed_request(request, core):
             f"unknown_receipt_field:{field}" for field in unknown_receipt_fields
         )
     if (
-        isinstance(receipt, dict)
+        "receipt" in request
         and capsule_is_valid_for_receipt
         and not _receipt_shape_is_valid(
             receipt, capsule, core["EXECUTION_RECEIPT_SCHEMA"]

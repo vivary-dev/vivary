@@ -107,10 +107,10 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
 
 ```bash
 python packages/tropo/tests/test_tropo.py                  # 169/169
-python packages/ozone/tests/test_ozone.py                  # 52/52
+python packages/ozone/tests/test_ozone.py                  # 53/53
 python packages/exo/tests/test_exo.py                      # 17/17
 python packages/create-vivary/tests/test_create_vivary.py  # 143 run, 1 skipped
-python -m pytest packages/core/tests/ -q                   # 627 Windows; 625 + 2 skips Linux
+python -m pytest packages/core/tests/ -q                   # 638 Windows; 636 + 2 skips Linux
 python -m pytest packages/strato/tests/ -q                 # 48/48
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # clean
 ```

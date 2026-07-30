@@ -57,10 +57,13 @@ remains part of the final coordinated release train and requires a separate huma
   capsule body fingerprint and deterministic identifier are recomputed before
   delegation, so changing either the capsule contents or its identity after compilation
   is refused before policy. Receipt integrity is checked separately against the capsule
-  and workspace fingerprints. The compiler and verifier
-  share the JavaScript-lossless `max_claims` bound; malformed task scopes, missing
-  compiler-owned fields, and non-canonical values that would be lossy in JavaScript are
-  refused before policy. Requests, capsule observations, and receipts have a
+  and workspace fingerprints. The compiler and verifier share the JavaScript-lossless
+  `max_claims` bound. Complete claims retain their compiler-owned subject, path, fact,
+  text, status, evidence, and selection explanation; malformed repository IDs and
+  `checkout_of` endpoints are rejected before topology sorting. Malformed task scopes,
+  missing compiler-owned fields, and non-canonical values that would be lossy in
+  JavaScript are refused before policy. Requests, capsule observations, and receipts
+  have a
   deterministic 300-second
   freshness window; a verdict without its receipt is rejected. Unknown fields and
   non-string Python mapping keys fail closed, so free-form status text cannot
@@ -80,11 +83,11 @@ remains part of the final coordinated release train and requires a separate huma
   experimental facade over core's receipt-integrity, gate-sufficiency, and dry-run
   repair contracts. It recomputes Task Capsule identity, binds the workspace and
   caller-supplied clock, applies a deterministic 300-second evidence window, and
-  rejects malformed gate constraints, malformed scalar receipt identities, contradictory
-  receipt fields, invalid typed graph relationships, and malformed or deeply nested
-  repair inputs before calling core. Receipt claim lists must be unique and disjoint,
-  and together must equal
-  both `claims_in_scope` and the capsule's claim IDs. Every receipt check must carry a
+  rejects malformed gate constraints, scalar receipt identities, supplied non-mapping
+  receipts, contradictory receipt fields, incomplete capsule claims, invalid typed graph
+  relationships, and malformed or deeply nested repair inputs before calling core.
+  Receipt claim lists must be unique and disjoint, and together must equal both
+  `claims_in_scope` and the capsule's claim IDs. Every receipt check must carry a
   nonempty command, and a check that shares a capsule required-check name must carry that
   exact command, preventing a passing result for another command from clearing the gate.
   It refuses unknown capsule/receipt fields even when the artifact is re-fingerprinted,
@@ -111,13 +114,13 @@ remains part of the final coordinated release train and requires a separate huma
   result, and malformed request documents or refused request envelopes exit `2`.
 - Ozone regressions cover sufficient, wrong-claim-ID, contradictory-claim-list,
   duplicate-claim-ID, duplicate-claim-semantics, duplicate-check, receipt-extension,
-  core-unknown, command-presence, flag-scope, missing, tampered, stale,
-  workspace-mismatched, budget-limited, unknown-artifact, bounded-repair,
-  pair-scan-bound, route-evidence-bound, identifier-bound, omission-bound,
-  estimate-bound, gate-shape, graph-relationship, scoped-full-graph,
-  forged-in-scope-conflict, conflict-binding, topology-commitment, output-escaping,
-  malformed, recursive, repair, CLI, and real Ozone-to-Strato cases. The
-  installed-package CI smoke
+  core-unknown, command-presence, flag-scope, non-mapping-receipt, incomplete-claim,
+  topology-identifier, missing, tampered, stale, workspace-mismatched, budget-limited,
+  unknown-artifact, bounded-repair, pair-scan-bound, route-evidence-bound,
+  identifier-bound, omission-bound, estimate-bound, gate-shape, graph-relationship,
+  scoped-full-graph, forged-in-scope-conflict, conflict-binding, topology-commitment,
+  output-escaping, malformed, recursive, repair, CLI, and real Ozone-to-Strato cases.
+  The installed-package CI smoke
   resolves the complete local meta-package dependency graph, proves Ozone's core floor,
   runs the packaged Ozone verdict path, and hands its unchanged verdict to Strato.
 
@@ -210,9 +213,9 @@ remains part of the final coordinated release train and requires a separate huma
 - `python packages/tropo/tests/test_tropo.py` — **169/169** passed on Windows.
 - `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **169/169**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **627 passed** on Windows;
+- `python -m pytest packages/core/tests/ -q` — **638 passed** on Windows;
   `UV_CACHE_DIR=/tmp/vivary-uv-cache TMPDIR=/tmp uv run --no-cache --with pytest
-  python3 -m pytest packages/core/tests/ -q -p no:cacheprovider` — **625 passed,
+  python3 -m pytest packages/core/tests/ -q -p no:cacheprovider` — **636 passed,
   2 platform-specific skips** on WSL Linux.
 - `python -m pytest packages/strato/tests -q` — **48 passed** on Windows and
   **48 passed** on WSL Linux.
@@ -247,7 +250,7 @@ remains part of the final coordinated release train and requires a separate huma
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **52/52**, Exo **17/17**,
+- Repository verification also passed: Ozone **53/53**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**

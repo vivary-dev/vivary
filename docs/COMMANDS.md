@@ -477,16 +477,22 @@ ozone verify request.json --governed --json --strict
 | `receipt` | Complete Execution Receipt bound to the capsule. Its check records and claim lists are shape-validated; `claims_verified` and `claims_unverified` must be disjoint and together equal both `claims_in_scope` and the capsule's claim IDs. Omission or malformed/tampered evidence cannot produce a sufficient aggregate result. |
 | `gate` | Named gate with core-owned `required_checks`, `require_claims_verified`, `max_unresolved_conflicts`, and `max_unresolved_unknowns` constraints. |
 | `graph` | Optional matching `vivary.workspace-graph/v0`. When present, Ozone returns a bounded `vivary.context-repair-proposal/v0`; every proposal has `requires_gate: true`, and `writes_performed` is always `0`. |
-The receipt `schema` must be exactly `vivary.execution-receipt/v0`; `receipt_id` and
-`fingerprint` must be nonempty strings. Malformed identity fields are refused before
-core delegation.
+Every capsule claim must retain its compiler-owned nonempty identity, subject, path,
+fact, text, status, and selection reason plus list-shaped evidence and selection
+signals. A re-fingerprinted partial claim is still an invalid capsule.
+The `receipt` field may be omitted, producing core's valid missing-evidence result. When
+the field is present, it must be a complete mapping whose `schema` is exactly
+`vivary.execution-receipt/v0`; `receipt_id` and `fingerprint` must be nonempty strings.
+Malformed receipt values are refused before core delegation.
 Every receipt check must carry a nonempty name and command plus a valid outcome. A check
 that shares a capsule `required_checks` name must carry that exact required command;
 duplicate records for the same name and command remain valid evidence for core's
 worst-outcome aggregation.
 Repair `checkout_of` endpoints must reference existing `checkout` and `repository`
-nodes. The capsule's `workspace.repair_topology_fingerprint` commits the normalized
-repository nodes and `checkout_of` relationships that can drive repair proposals;
+nodes. Repository IDs and both `checkout_of` endpoint IDs must be nonempty strings
+before topology sorting. The capsule's `workspace.repair_topology_fingerprint` commits
+the normalized repository nodes and `checkout_of` relationships that can drive repair
+proposals;
 Ozone recomputes it from the supplied graph before delegation. This binds remote-backed
 and inferred no-remote linked-worktree groups without trusting a copied workspace
 fingerprint label. Every divergent conflict has at least two sides and covers every
