@@ -497,9 +497,11 @@ Requests whose total checkout-pair scan count, potential repair count, route-pro
 evidence count, or derived estimate exceeds its matching core ceiling are refused
 before delegation.
 
-Envelope-level validation rejects future or stale timestamps, workspace mismatches,
-non-canonical or unknown fields, invalid shapes, and deeply nested request documents
-with a typed `vivary.ozone-verification-refusal/v0`, never a traceback.
+Envelope-level validation requires the capsule's workspace `observed_at` and the
+receipt's `created_at` to be at or before the request's `verified_at` and no more than
+300 seconds earlier; the receipt also cannot predate the capsule observation. It rejects
+workspace mismatches, non-canonical or unknown fields, invalid shapes, and deeply nested
+request documents with a typed `vivary.ozone-verification-refusal/v0`, never a traceback.
 In default plain-text output, reason fragments are JSON-escaped before they are written
 so valid JSON field names cannot cause a terminal encoding failure.
 Malformed receipt shapes are envelope refusals with exit code `2`. An intact receipt

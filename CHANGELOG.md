@@ -127,8 +127,9 @@ remains part of the final coordinated release train and requires a separate huma
   by [#207](https://github.com/vivary-dev/vivary/issues/207). The `vivary` meta-package
   advances from 0.1.0 to 0.1.2: 0.1.1 raised its floor to `vivary-tropo>=0.5.0`, and
   0.1.2 raises its floor to `vivary-ozone>=0.3.0`, so a fresh suite install cannot
-  resolve the pre-verification Ozone CLI. All development versions remain unpublished
-  until the coordinated release.
+  resolve the pre-verification Ozone CLI. Its public package README now surfaces
+  `ozone verify --governed` from that installed Ozone floor. All development versions
+  remain unpublished until the coordinated release.
 - `vivary-strato` advances from 0.1.0 to 0.1.1 for the capsule-integrity hardening and
   declares `vivary-core>=0.2.2`. The `vivary` meta-package does not add Strato yet;
   completing the one-install role surface remains owned by #207. Both Strato and core

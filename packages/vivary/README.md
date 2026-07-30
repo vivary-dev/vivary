@@ -10,8 +10,14 @@ That pulls the four layers, each still usable on its own:
 
 - `create-vivary` — scaffold or adopt an agent-native workspace
 - `tropo` (`vivary-tropo`) — the typed knowledge graph
-- `ozone` (`vivary-ozone`) — graph-aware review
+- `ozone` (`vivary-ozone`) — graph-aware review and governed evidence verification
 - `exo` (`vivary-exo`) — multi-agent coordination
+
+Ozone's opt-in governed path verifies capsule-bound evidence without writing:
+
+```bash
+ozone verify request.json --governed --json --strict
+```
 
 It also installs the small `vivary` helper CLI for local receipt visibility:
 
