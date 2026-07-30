@@ -48,11 +48,18 @@ adds a typed repair proposal; every proposal requires a gate and reports
 The capsule commits the normalized repository nodes and `checkout_of` relationships
 that can drive repair proposals. Ozone recomputes that topology commitment from the
 supplied graph, including inferred no-remote linked-worktree groups, before delegation.
-Ozone validates the complete receipt shape and requires its disjoint verified and
-unverified claim lists to cover exactly the capsule's claim IDs. Receipt checks that
-share a capsule required-check name must also carry its exact command. A full workspace
-graph may retain conflicts outside a scoped capsule; every conflict preserved in the
-capsule must still match exactly.
+Ozone validates the complete receipt shape and requires its verified and unverified
+claim lists to be disjoint. Together, the lists must contain exactly the capsule's claim
+IDs. The claim lists must also match the check outcomes. `claims_verified` contains
+every claim only when the check list is nonempty and every check passed. Otherwise,
+`claims_unverified` contains every claim.
+
+Receipt checks that share a capsule required-check name must also carry its exact command.
+Ozone validates optional
+`task.scope` entries whether or not the request supplies a graph. A full workspace graph
+may retain conflicts outside a scoped capsule, but every preserved capsule conflict must
+match exactly. Ozone caps scope-to-conflict comparisons before it creates a repair
+proposal.
 
 The exact request, result, freshness, and exit-code contract lives in the
 [command reference](https://vivary.vercel.app/commands/#governed-evidence-verification).
@@ -60,8 +67,8 @@ The exact request, result, freshness, and exit-code contract lives in the
 For local debugging, pass `--receipt PATH` or set `VIVARY_RECEIPT_LOG=PATH` to append
 a dependency-free JSONL run receipt. Receipts stay local and record only command
 envelope data such as tool version, command, flag names, exit code, duration, Python,
-and platform; they do not capture stdout, stderr, file contents, target ids, local
-paths, or graph content.
+and platform. They do not capture stdout, stderr, file contents, target ids, local paths,
+or graph content.
 
 ## The `structure` pack
 

@@ -312,6 +312,16 @@ def _receipt_shape_is_valid(receipt, capsule, expected_schema):
     ):
         return False
 
+    all_checks_passed = bool(checks) and all(
+        check["outcome"] == "passed" for check in checks
+    )
+    if claims_verified != (
+        claims_in_scope if all_checks_passed else []
+    ) or claims_unverified != (
+        [] if all_checks_passed else claims_in_scope
+    ):
+        return False
+
     unresolved_conflicts = receipt.get("unresolved_conflicts")
     unresolved_unknowns = receipt.get("unresolved_unknowns")
     provenance = receipt.get("provenance")
@@ -375,13 +385,25 @@ def _receipt_shape_is_valid(receipt, capsule, expected_schema):
 
 
 
-def _repair_capsule_is_safe(capsule, core):
+def _capsule_scope_is_valid(capsule):
     task = capsule.get("task")
-    declared_scope = task.get("scope") if isinstance(task, dict) else None
-    if declared_scope is not None and (
-        not isinstance(declared_scope, list)
-        or not all(_nonempty_string(root) for root in declared_scope)
-    ):
+    if not isinstance(task, dict):
+        return False
+    if "scope" not in task:
+        return True
+    declared_scope = task["scope"]
+    return (
+        isinstance(declared_scope, list)
+        and bool(declared_scope)
+        and all(
+            isinstance(root, str) and bool(root)
+            for root in declared_scope
+        )
+    )
+
+
+def _repair_capsule_is_safe(capsule, core):
+    if not _capsule_scope_is_valid(capsule):
         return False
     workspace = capsule.get("workspace")
     if not (
@@ -466,7 +488,7 @@ def _repair_capsule_is_safe(capsule, core):
 def _repair_graph_matches_capsule_conflicts(capsule, graph, core):
     capsule_conflicts = capsule.get("conflicts")
     if not isinstance(capsule_conflicts, list):
-        return False
+        return False, True
 
     expected = {}
     for conflict in capsule_conflicts:
@@ -476,7 +498,7 @@ def _repair_graph_matches_capsule_conflicts(capsule, graph, core):
             and _bounded_repair_identifier(conflict.get("id"))
             and conflict["id"] not in expected
         ):
-            return False
+            return False, True
         graph_conflict = dict(conflict)
         del graph_conflict["decision"]
         expected[conflict["id"]] = graph_conflict
@@ -487,28 +509,47 @@ def _repair_graph_matches_capsule_conflicts(capsule, graph, core):
         for node in graph["nodes"]
         if node["kind"] == "checkout"
     }
+    comparison_limit = (
+        core["MAX_DEDUPE_CHECKOUTS"]
+        * (core["MAX_DEDUPE_CHECKOUTS"] - 1)
+        // 2
+    )
+    comparison_count = 0
 
     def conflict_is_in_scope(conflict):
+        nonlocal comparison_count
         if not declared_scope:
             return True
-        return all(
-            any(
-                core["is_within_allowlist"](
+        for side in conflict.get("sides") or []:
+            side_is_in_scope = False
+            for root in declared_scope:
+                comparison_count += 1
+                if comparison_count > comparison_limit:
+                    return None
+                if core["is_within_allowlist"](
                     root, checkout_paths.get(side.get("checkout"))
-                )
-                for root in declared_scope
-            )
-            for side in conflict.get("sides") or []
-        )
+                ):
+                    side_is_in_scope = True
+                    break
+            if not side_is_in_scope:
+                return False
+        return True
 
     actual = {conflict["id"]: conflict for conflict in graph["conflicts"]}
-    return all(
+    if not all(
         actual.get(conflict_id) == conflict
         for conflict_id, conflict in expected.items()
-    ) and all(
-        conflict["id"] in expected or not conflict_is_in_scope(conflict)
-        for conflict in graph["conflicts"]
-    )
+    ):
+        return False, True
+    for conflict in graph["conflicts"]:
+        if conflict["id"] in expected:
+            continue
+        in_scope = conflict_is_in_scope(conflict)
+        if in_scope is None:
+            return False, False
+        if in_scope:
+            return False, True
+    return True, True
 
 
 def _repair_graph_is_safe(graph, core):
@@ -746,6 +787,12 @@ def _validate_governed_request(request, core):
         errors.append("workspace_mismatch")
     else:
         capsule_is_valid_for_receipt = not unknown_capsule_fields
+    if (
+        capsule_shape_is_valid
+        and "graph" not in request
+        and not _capsule_scope_is_valid(capsule)
+    ):
+        errors.append("invalid_repair_capsule")
 
     observed_at = _parse_instant(
         capsule.get("workspace", {}).get("observed_at")
@@ -821,22 +868,24 @@ def _validate_governed_request(request, core):
             errors.append("invalid_repair_graph")
         elif request["graph"]["workspace_fingerprint"] != workspace_fingerprint:
             errors.append("repair_graph_workspace_mismatch")
-        elif repair_capsule_is_safe and not _repair_graph_matches_capsule_conflicts(
-            capsule, request["graph"], core
-        ):
-            errors.append("repair_graph_conflicts_mismatch")
-        elif repair_capsule_is_safe and not _repair_estimates_are_canonical(
-            capsule, core
-        ):
-            errors.append("repair_estimate_unbounded")
-        elif repair_capsule_is_safe and not _repair_work_is_bounded(
-            capsule, request["graph"], core
-        ):
-            errors.append("repair_work_unbounded")
-        elif repair_capsule_is_safe and not _repair_graph_topology_is_bound(
-            capsule, request["graph"], core
-        ):
-            errors.append("repair_graph_topology_unbound")
+        elif repair_capsule_is_safe:
+            conflicts_match, conflict_work_is_bounded = (
+                _repair_graph_matches_capsule_conflicts(
+                    capsule, request["graph"], core
+                )
+            )
+            if not conflict_work_is_bounded:
+                errors.append("repair_work_unbounded")
+            elif not conflicts_match:
+                errors.append("repair_graph_conflicts_mismatch")
+            elif not _repair_estimates_are_canonical(capsule, core):
+                errors.append("repair_estimate_unbounded")
+            elif not _repair_work_is_bounded(capsule, request["graph"], core):
+                errors.append("repair_work_unbounded")
+            elif not _repair_graph_topology_is_bound(
+                capsule, request["graph"], core
+            ):
+                errors.append("repair_graph_topology_unbound")
 
     return errors
 

@@ -88,12 +88,14 @@ remains part of the final coordinated release train and requires a separate huma
   repair contracts. It recomputes Task Capsule identity, binds the workspace and
   caller-supplied clock, applies a deterministic 300-second evidence window, and
   rejects malformed gate constraints, scalar receipt identities, supplied non-mapping
-  receipts, contradictory receipt fields, incomplete capsule claims, invalid typed graph
-  relationships, and malformed or deeply nested repair inputs before calling core.
-  Receipt claim lists must be unique and disjoint, and together must equal both
-  `claims_in_scope` and the capsule's claim IDs. Every receipt check must carry a
-  nonempty command, and a check that shares a capsule required-check name must carry that
-  exact command, preventing a passing result for another command from clearing the gate.
+  receipts, contradictory receipt fields, incomplete capsule claims, malformed optional
+  task scopes, invalid typed graph relationships, and malformed or deeply nested repair
+  inputs before calling core. Receipt claim lists must be unique and disjoint. Together,
+  they must equal both `claims_in_scope` and the capsule's claim IDs. All claims are
+  verified only when the check list is nonempty and every check passed. Otherwise, all
+  claims remain unverified. Every receipt check must carry a nonempty command. A check
+  that shares a capsule required-check name must carry that exact command, preventing a
+  passing result for another command from clearing the gate.
   It refuses unknown capsule/receipt fields even when the artifact is re-fingerprinted,
   enforces core's 16-entry
   omission-list/count contract and a 128-byte JSON-encoded ceiling on repair identifiers,
@@ -105,9 +107,9 @@ remains part of the final coordinated release train and requires a separate huma
   This authenticates remote-backed and inferred no-remote linked-worktree groups without
   trusting a copied workspace fingerprint label. Ozone also requires each divergent
   conflict to cover every checkout related to its repository, caps total checkout-pair
-  scans across all repositories, bounds route-proposal evidence to core's checkout cap,
-  and bounds derived repair estimates to JavaScript's lossless integer range before
-  delegation.
+  scans across all repositories, and bounds scope-to-conflict comparisons before repair
+  construction. It also bounds route-proposal evidence to core's checkout cap and
+  derived repair estimates to JavaScript's lossless integer range before delegation.
   It returns typed verification or refusal envelopes. Core's fingerprinted receipt/gate
   verdicts and repair proposal pass through unchanged; Strato consumes the raw
   `gate_verdict` without a second verification implementation. The CLI rejects
