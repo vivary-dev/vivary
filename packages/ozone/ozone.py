@@ -290,10 +290,9 @@ def _receipt_shape_is_valid(receipt, capsule, expected_schema):
             and isinstance(check.get("outcome"), str)
             and check["outcome"] in {"passed", "failed", "skipped"}
             and _nonempty_string(check.get("name"))
-            and all(
-                _nonempty_string(check[field])
-                for field in ("command", "detail")
-                if field in check
+            and _nonempty_string(check.get("command"))
+            and (
+                "detail" not in check or _nonempty_string(check["detail"])
             )
             for check in checks
         )
@@ -1550,6 +1549,8 @@ def _main(argv=None):
     p.add_argument("--receipt", default=None, metavar="PATH",
                    help=f"append a local privacy-preserving JSONL run receipt (or set {RECEIPT_ENV})")
     args = p.parse_args(argv)
+    if args.governed and args.command != "verify":
+        p.error("--governed is only valid with verify")
     if args.command == "verify":
         if not args.governed:
             p.error("verify requires --governed")

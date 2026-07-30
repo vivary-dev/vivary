@@ -170,6 +170,23 @@ def test_packs_lists_structure_and_context_budget():
     assert {"structure", "context-budget", "editorial"} <= names
 
 
+def test_governed_flag_is_verify_only():
+    for argv in (
+        ["review", "--governed"],
+        ["impact", "node:test", "--governed"],
+        ["packs", "--governed"],
+    ):
+        stderr = io.StringIO()
+        exit_code = None
+        try:
+            with contextlib.redirect_stderr(stderr):
+                ozone._main(argv)
+        except SystemExit as exc:
+            exit_code = exc.code
+        assert exit_code == 2
+        assert "--governed is only valid with verify" in stderr.getvalue()
+
+
 def test_review_flags_unverified_change():
     with temp_workspace() as td:
         _vault(td)
@@ -788,6 +805,7 @@ def test_governed_verification_refuses_malformed_or_mismatched_receipt_fields():
             "checks",
             [{"name": "unit", "command": "false", "outcome": "passed"}],
         ),
+        ("checks", [{"name": "security", "outcome": "passed"}]),
     ):
         governed_receipt = _governed_receipt(governed_capsule)
         governed_receipt[field] = value

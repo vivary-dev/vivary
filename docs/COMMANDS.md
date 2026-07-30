@@ -459,7 +459,8 @@ and a change's impact. It reads tropo's graph in-process (one graph, no fork).
 
 ### Governed evidence verification
 
-`verify` is opt-in and read-only:
+`verify` is opt-in and read-only. `--governed` is rejected on `review`, `impact`, and
+`packs`; it cannot silently select an ordinary command:
 
 ```bash
 ozone verify request.json --governed --json --strict
@@ -479,9 +480,10 @@ ozone verify request.json --governed --json --strict
 The receipt `schema` must be exactly `vivary.execution-receipt/v0`; `receipt_id` and
 `fingerprint` must be nonempty strings. Malformed identity fields are refused before
 core delegation.
-Each receipt check that shares a capsule `required_checks` name must carry that exact
-required command; duplicate records for the same name and command remain valid evidence
-for core's worst-outcome aggregation.
+Every receipt check must carry a nonempty name and command plus a valid outcome. A check
+that shares a capsule `required_checks` name must carry that exact required command;
+duplicate records for the same name and command remain valid evidence for core's
+worst-outcome aggregation.
 Repair `checkout_of` endpoints must reference existing `checkout` and `repository`
 nodes. The capsule's `workspace.repair_topology_fingerprint` commits the normalized
 repository nodes and `checkout_of` relationships that can drive repair proposals;

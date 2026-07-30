@@ -88,10 +88,11 @@ remains part of the final coordinated release train and requires a separate huma
   receipt fields, invalid typed graph relationships, and malformed or deeply nested
   repair inputs before calling core. Receipt claim lists must be unique and disjoint,
   and together must equal
-  both `claims_in_scope` and the capsule's claim IDs. Receipt checks that share a capsule
-  required-check name must carry that exact command, preventing a passing result for
-  another command from clearing the gate. It refuses unknown capsule/receipt fields even
-  when the artifact is re-fingerprinted, enforces core's 16-entry
+  both `claims_in_scope` and the capsule's claim IDs. Every receipt check must carry a
+  nonempty command, and a check that shares a capsule required-check name must carry that
+  exact command, preventing a passing result for another command from clearing the gate.
+  It refuses unknown capsule/receipt fields even when the artifact is re-fingerprinted,
+  enforces core's 16-entry
   omission-list/count contract and a 128-byte JSON-encoded ceiling on repair identifiers,
   rejects semantically duplicate `(subject, fact, claim)` entries before they can
   duplicate deterministic repair IDs, requires the repair graph to preserve every
@@ -106,16 +107,18 @@ remains part of the final coordinated release train and requires a separate huma
   delegation.
   It returns typed verification or refusal envelopes. Core's fingerprinted receipt/gate
   verdicts and repair proposal pass through unchanged; Strato consumes the raw
-  `gate_verdict` without a second verification implementation. Plain-text refusal
-  output JSON-escapes reason fragments before writing them, including unpaired Unicode
+  `gate_verdict` without a second verification implementation. The CLI rejects
+  `--governed` on `review`, `impact`, and `packs` rather than silently running an
+  ordinary command. Plain-text refusal output JSON-escapes reason fragments before
+  writing them, including unpaired Unicode
   surrogates. Advisory mode exits `0`, `--strict` exits `1` for a valid insufficient
   result, and malformed request documents or refused request envelopes exit `2`.
 - Ozone regressions cover sufficient, wrong-claim-ID, contradictory-claim-list,
   duplicate-claim-ID, duplicate-claim-semantics, duplicate-check, receipt-extension,
-  core-unknown,
-  missing, tampered, stale, workspace-mismatched, budget-limited, unknown-artifact,
-  bounded-repair, pair-scan-bound, route-evidence-bound, identifier-bound,
-  omission-bound, estimate-bound, gate-shape, graph-relationship, scoped-full-graph,
+  core-unknown, command-presence, flag-scope, missing, tampered, stale,
+  workspace-mismatched, budget-limited, unknown-artifact, bounded-repair,
+  pair-scan-bound, route-evidence-bound, identifier-bound, omission-bound,
+  estimate-bound, gate-shape, graph-relationship, scoped-full-graph,
   forged-in-scope-conflict, conflict-binding, topology-commitment, output-escaping,
   malformed, recursive, repair, CLI, and real Ozone-to-Strato cases. The
   installed-package CI smoke
@@ -248,7 +251,7 @@ remains part of the final coordinated release train and requires a separate huma
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **51/51**, Exo **17/17**,
+- Repository verification also passed: Ozone **52/52**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**
