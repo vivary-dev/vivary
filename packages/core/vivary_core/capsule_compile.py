@@ -37,7 +37,7 @@ from vivary_core.canonical import (
     is_canonical_body_value,
     is_within_allowlist,
 )
-from vivary_core.capsule_select import select_claims, validate_filters
+from vivary_core.capsule_select import TIER_NAMES, select_claims, validate_filters
 from vivary_core.collation import CollationDomainError, locale_sort_key
 
 CAPSULE_SCHEMA = "vivary.task-capsule/v0"
@@ -135,7 +135,7 @@ def _is_required_checks_shape(value) -> bool:
 def _is_task_shape(task) -> bool:
     if not (
         isinstance(task, dict)
-        and "question" in task
+        and _nonempty_string(task.get("question"))
         and set(task) <= {"question", "scope", "filters"}
     ):
         return False
@@ -250,10 +250,39 @@ def _is_conflict_shape(conflict) -> bool:
         isinstance(sides, list)
         and len(sides) >= 2
         and all(_is_conflict_side_shape(side) for side in sides)
+        and len({side["checkout"] for side in sides}) == len(sides)
         and isinstance(reason_codes, list)
         and bool(reason_codes)
         and all(_nonempty_string(reason_code) for reason_code in reason_codes)
     )
+
+
+def _conflict_claim_selections_are_valid(capsule) -> bool:
+    conflict_ids_by_checkout = {}
+    for conflict in capsule["conflicts"]:
+        for side in conflict["sides"]:
+            conflict_ids_by_checkout.setdefault(side["checkout"], set()).add(
+                conflict["id"]
+            )
+    for claim in capsule["claims"]:
+        selection = claim["selection"]
+        if selection["tier"] not in TIER_NAMES:
+            return False
+        expected_conflicts = conflict_ids_by_checkout.get(claim["subject"], set())
+        observed_conflicts = {
+            signal.get("conflict")
+            for signal in selection["signals"]
+            if signal.get("signal") == "conflict_side"
+        }
+        if expected_conflicts:
+            if (
+                selection["tier"] != "conflict_side"
+                or observed_conflicts != expected_conflicts
+            ):
+                return False
+        elif selection["tier"] == "conflict_side" or observed_conflicts:
+            return False
+    return True
 
 
 def is_task_capsule_shape(capsule) -> bool:
@@ -295,6 +324,7 @@ def is_task_capsule_shape(capsule) -> bool:
             and bool(omission["kind"])
             for omission in capsule["omissions"]
         )
+        and _conflict_claim_selections_are_valid(capsule)
     )
 
 
@@ -607,7 +637,8 @@ def _sort_candidates(candidates):
 def compile_task_capsule(*, task, graph, budget=None, content=None):
     """Compile a bounded Task Capsule.
 
-    task: {"question": str, "scope": [str], "filters": [dict], "required_checks": [dict]} (optional fields)
+    task: {"question": str, "scope": [str], "filters": [dict], "required_checks": [dict]}
+        (`question` is required; the remaining fields are optional)
     graph: output of project_workspace_graph (workspace_model.py)
     budget: {"max_claims": int} (optional)
     content: optional output of observe_content (workspace_content.py),
@@ -617,6 +648,8 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     """
     if not isinstance(task, dict):
         raise ValueError("task must be a mapping")
+    if not _nonempty_string(task.get("question")):
+        raise ValueError("task.question must be a non-empty string")
     declared_scope = task.get("scope")
     if (
         declared_scope is not None
@@ -702,6 +735,29 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
                 return False
         return True
 
+    scoped_conflicts = []
+    scope_conflict_omissions = []
+    for conflict in graph["conflicts"]:
+        if _entry_in_scope(conflict):
+            scoped_conflicts.append(conflict)
+            continue
+        for side in conflict.get("sides") or []:
+            if (
+                not isinstance(side, dict)
+                or not side.get("path")
+                or not _in_scope(side["path"])
+            ):
+                continue
+            scope_conflict_omissions.append(
+                {
+                    "kind": "conflict_outside_scope",
+                    "conflict": conflict.get("id"),
+                    "subject": side.get("checkout"),
+                    "subject_path": side["path"],
+                    "reason": "one or more conflict sides are outside the declared scope",
+                }
+            )
+
     if declared_scope:
         checkouts = [n for n in checkouts if _in_scope(n.get("path"))]
     checkouts_by_path = {n.get("path"): n for n in checkouts}
@@ -735,7 +791,12 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     truncation_omissions.extend(collation_omissions)
 
     # Filters restrict, ranking orders, the budget cuts - each step explained.
-    selection = select_claims(task=task, graph=graph, candidates=candidates, max_claims=max_claims)
+    selection = select_claims(
+        task=task,
+        graph={**graph, "conflicts": scoped_conflicts},
+        candidates=candidates,
+        max_claims=max_claims,
+    )
     selected, filtered_out, over_budget = (
         selection["included"],
         selection["filtered_out"],
@@ -756,6 +817,7 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
             "kind": "ignored_paths_excluded",
             "reason": "git-ignored paths are excluded from observation by policy and never enter a capsule",
         },
+        *scope_conflict_omissions,
         *truncation_omissions,
     ]
     if filtered_out is not None:
@@ -835,9 +897,7 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     # Conflicts and unknowns pass through unreduced: a capsule may narrate them,
     # never resolve them. Every conflict is handed to review, not to confidence.
     conflicts = []
-    for conflict in graph["conflicts"]:
-        if not _entry_in_scope(conflict):
-            continue
+    for conflict in scoped_conflicts:
         entry = dict(conflict)
         entry["decision"] = "review_required"
         conflicts.append(entry)
@@ -863,7 +923,11 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
             *[u for u in content_unknowns if _entry_in_scope(u)],
             *[u for u in check_unknowns if _entry_in_scope(u)],
         ],
-        "omissions": omissions,
+        "omissions": [
+            omission
+            for omission in omissions
+            if _entry_in_scope(omission)
+        ],
         "required_checks": required_checks,
         "budget": {"max_claims": max_claims},
     }

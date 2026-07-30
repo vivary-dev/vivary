@@ -1009,11 +1009,45 @@ def test_governed_verification_refuses_incomplete_capsule_conflict_sides():
         assert result["schema"] == ozone.REFUSAL_SCHEMA
         assert result["reason_codes"] == ["invalid_capsule"]
 
+    duplicate_side_capsule = json.loads(json.dumps(capsule))
+    duplicate_side_capsule["conflicts"][0]["sides"][1] = json.loads(
+        json.dumps(duplicate_side_capsule["conflicts"][0]["sides"][0])
+    )
+    duplicate_side_capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in duplicate_side_capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    duplicate_side = ozone.verify_governed(
+        _governed_request(
+            capsule=duplicate_side_capsule,
+            receipt=_governed_receipt(duplicate_side_capsule),
+        )
+    )
+    assert duplicate_side["schema"] == ozone.REFUSAL_SCHEMA
+    assert duplicate_side["reason_codes"] == ["invalid_capsule"]
 
-def test_governed_verification_refuses_malformed_task_filters_without_repair_graph():
-    for malformed_filters in (None, "not-a-list"):
+
+def test_governed_verification_refuses_malformed_task_without_repair_graph():
+    for malformed_task in (
+        {"filters": None},
+        {"filters": "not-a-list"},
+        {"question": None},
+        {"question": []},
+        {"question": ""},
+    ):
         capsule = _governed_capsule()
-        capsule["task"]["filters"] = malformed_filters
+        capsule["task"].update(malformed_task)
+        capsule["capsule_id"] = deterministic_id(
+            "capsule",
+            {
+                "task": capsule["task"].get("question"),
+                "filters": capsule["task"].get("filters"),
+                "workspace": capsule["workspace"]["fingerprint"],
+            },
+        )
         capsule["fingerprint"] = fingerprint(
             {
                 key: item
@@ -1391,6 +1425,23 @@ def test_governed_verification_refuses_malformed_scope_without_repair_graph():
         assert result["schema"] == ozone.REFUSAL_SCHEMA
         assert result["reason_codes"] == ["invalid_capsule"]
 
+    outside_claim_capsule = _governed_capsule(
+        claims=[
+            {
+                "id": "claim:outside",
+                "subject_path": "/repo/outside",
+            }
+        ]
+    )
+    outside_claim = ozone.verify_governed(
+        _governed_request(
+            capsule=outside_claim_capsule,
+            receipt=_governed_receipt(outside_claim_capsule),
+        )
+    )
+    assert outside_claim["schema"] == ozone.REFUSAL_SCHEMA
+    assert outside_claim["reason_codes"] == ["invalid_repair_capsule"]
+
 
 def test_governed_verification_accepts_compiler_valid_scope_without_repair_graph():
     capsule = _governed_capsule()
@@ -1427,7 +1478,15 @@ def test_governed_verification_refuses_graphs_that_drop_capsule_conflicts():
             "fact": "same_fact",
             "subject": checkout_id,
             "claim": "Conflicting checkout claim.",
-            "selection": {"tier": "allowlisted"},
+            "selection": {
+                "tier": "conflict_side",
+                "signals": [
+                    {
+                        "signal": "conflict_side",
+                        "conflict": conflict["id"],
+                    }
+                ],
+            },
             "evidence": [],
         }
         for index, checkout_id in enumerate(checkout_ids)
@@ -1438,6 +1497,22 @@ def test_governed_verification_refuses_graphs_that_drop_capsule_conflicts():
         conflicts=[{**conflict, "decision": "review_required"}],
         workspace_fingerprint=matching_graph["workspace_fingerprint"],
     )
+    capsule["task"]["scope"] = ["/repo"]
+    capsule["capsule_id"] = deterministic_id(
+        "capsule",
+        {
+            "task": capsule["task"]["question"],
+            "filters": capsule["task"].get("filters"),
+            "workspace": capsule["workspace"]["fingerprint"],
+        },
+    )
+    capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
     dropped_graph = {**matching_graph, "conflicts": []}
 
     dropped = ozone.verify_governed(
@@ -1446,6 +1521,52 @@ def test_governed_verification_refuses_graphs_that_drop_capsule_conflicts():
 
     assert dropped["schema"] == ozone.REFUSAL_SCHEMA
     assert dropped["reason_codes"] == ["repair_graph_conflicts_mismatch"]
+    relabeled_capsule = json.loads(json.dumps(capsule))
+    relabeled_capsule["claims"][0]["selection"] = {
+        "tier": "allowlisted",
+        "signals": [],
+    }
+    relabeled_capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in relabeled_capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    relabeled = ozone.verify_governed(
+        _governed_request(
+            capsule=relabeled_capsule,
+            receipt=_governed_receipt(relabeled_capsule),
+            graph=matching_graph,
+        )
+    )
+    assert relabeled["schema"] == ozone.REFUSAL_SCHEMA
+    assert relabeled["reason_codes"] == ["invalid_capsule"]
+
+    promoted_capsule = _governed_capsule(
+        claims=[
+            {
+                "id": "claim:promoted",
+                "selection": {
+                    "tier": "conflict_side",
+                    "signals": [
+                        {
+                            "signal": "conflict_side",
+                            "conflict": "conflict:missing",
+                        }
+                    ],
+                },
+            }
+        ]
+    )
+    promoted = ozone.verify_governed(
+        _governed_request(
+            capsule=promoted_capsule,
+            receipt=_governed_receipt(promoted_capsule),
+        )
+    )
+    assert promoted["schema"] == ozone.REFUSAL_SCHEMA
+    assert promoted["reason_codes"] == ["invalid_capsule"]
     matching = ozone.verify_governed(
         _governed_request(capsule=capsule, graph=matching_graph)
     )

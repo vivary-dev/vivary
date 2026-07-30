@@ -1703,6 +1703,20 @@ def test_cmd_find_returns_context_packet(tmp_path):
     assert out["results"][0]["reason"]
 
 
+def test_cmd_find_rejects_a_blank_query_before_governed_compilation(tmp_path):
+    args = _query_args("placeholder", governed=True)
+    args.paths = [""]
+
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        rc = tropo.cmd_find(args, types.SimpleNamespace(root=str(tmp_path)))
+
+    assert rc == 2
+    assert stderr.getvalue() == (
+        "tropo find: provide a task or question — e.g. tropo find \"auth module\"\n"
+    )
+
+
 def test_cmd_find_budget_trims_context(tmp_path):
     _search_vault(tmp_path)
     rc, out = _capture_rc(

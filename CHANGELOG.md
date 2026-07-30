@@ -35,9 +35,9 @@ remains part of the final coordinated release train and requires a separate huma
   `compile_task_capsule`.
 - Direct regressions for the real Git-backed pipeline, equivalent Windows root casing,
   symlink aliases of the worktree root, Unicode workspace paths and question terms,
-  observed check derivation, non-negative capsule budgets, missing-core installation
-  errors, and rejection of incompatible
-  plain-find/query flags including `--budget 0`.
+  observed check derivation, non-negative capsule budgets, blank-task rejection,
+  missing-core installation errors, and rejection of incompatible plain-find/query
+  flags including `--budget 0`.
 - The packaged integration smoke builds every coordinated local wheel, installs the
   `vivary` meta-package with dependency resolution enabled from an isolated wheelhouse,
   installs Strato through the same resolver, and then exercises the installed governed
@@ -84,9 +84,10 @@ remains part of the final coordinated release train and requires a separate huma
   caller-supplied clock, applies a deterministic 300-second evidence window, and
   rejects malformed gate constraints, scalar receipt identities, supplied non-mapping
   receipts, contradictory receipt fields, incomplete capsule claims or conflicts,
-  malformed optional task scopes, invalid typed graph relationships, and malformed or
-  deeply nested repair
-  inputs before calling core. Receipt claim lists must be unique and disjoint. Together,
+  duplicate conflict sides, malformed task questions, scopes, or filters, narrated
+  paths outside the declared scope, invalid typed graph relationships, and malformed
+  or deeply nested repair inputs before calling core. Receipt claim lists must be
+  unique and disjoint. Together,
   they must equal both `claims_in_scope` and the capsule's claim IDs. All claims are
   verified only when the check list is nonempty and every check passed. Otherwise, all
   claims remain unverified. Every receipt check must carry a nonempty command. A check
@@ -100,7 +101,12 @@ remains part of the final coordinated release train and requires a separate huma
   duplicate deterministic repair IDs, requires the repair graph to preserve every
   capsule conflict while allowing a full graph to retain out-of-scope conflicts for
   repair withholding, and recomputes the capsule's normalized repair-topology commitment
-  over repository nodes and `checkout_of` relationships.
+  over repository nodes and `checkout_of` relationships. A conflict that crosses a
+  declared task scope becomes an omission naming only its in-scope subject and opaque
+  conflict ID; no out-of-scope side or path enters the capsule.
+  Claims on preserved conflict sides must keep the compiler's `conflict_side` tier and
+  exact matching conflict-signal set. Claims without a preserved conflict cannot assert
+  that tier or signal, so re-labeling cannot change their repair eligibility.
   This authenticates remote-backed and inferred no-remote linked-worktree groups without
   trusting a copied workspace fingerprint label. Ozone also requires each divergent
   conflict to cover every checkout related to its repository, caps total checkout-pair
@@ -220,12 +226,12 @@ remains part of the final coordinated release train and requires a separate huma
 
 ### Verification
 
-- `python packages/tropo/tests/test_tropo.py` — **169/169** passed on Windows.
-- `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **169/169**
+- `python packages/tropo/tests/test_tropo.py` — **170/170** passed on Windows.
+- `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **170/170**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **639 passed** on Windows;
+- `python -m pytest packages/core/tests/ -q` — **643 passed** on Windows;
   `UV_CACHE_DIR=/tmp/vivary-uv-cache TMPDIR=/tmp uv run --no-cache --with pytest
-  python3 -m pytest packages/core/tests/ -q -p no:cacheprovider` — **637 passed,
+  python3 -m pytest packages/core/tests/ -q -p no:cacheprovider` — **641 passed,
   2 platform-specific skips** on WSL Linux.
 - `python -m pytest packages/strato/tests -q` — **48 passed** on Windows and
   **48 passed** on WSL Linux.
@@ -236,7 +242,7 @@ remains part of the final coordinated release train and requires a separate huma
   metadata matched Strato's runtime version and `strato decide --help` exposed the
   governed JSON/strict command surface.
 - `python -m pytest packages/tropo/tests/test_tropo.py -q -k "governed or
-  cmd_find_returns_context_packet"` — **17 passed**.
+  cmd_find_returns_context_packet"` — **18 passed**.
 - Isolated `uv run --no-cache --with ./packages/core --with ./packages/tropo`
   metadata smoke reported core **0.2.3** and Tropo **0.5.0**.
 - Coordinated local `uv run --no-cache --with` smoke across core, Tropo,

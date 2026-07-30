@@ -481,13 +481,22 @@ ozone verify request.json --governed --json --strict
 | `receipt` | Complete Execution Receipt bound to the capsule. Its check records and claim lists are shape-validated; `claims_verified` and `claims_unverified` must be disjoint and together equal both `claims_in_scope` and the capsule's claim IDs. All claims are verified only when the check list is nonempty and every check passed. Otherwise, all claims remain unverified. Omission or malformed/tampered evidence cannot produce a sufficient aggregate result. |
 | `gate` | Named gate with core-owned `required_checks`, `require_claims_verified`, `max_unresolved_conflicts`, and `max_unresolved_unknowns` constraints. |
 | `graph` | Optional matching `vivary.workspace-graph/v0`. When present, Ozone returns a bounded `vivary.context-repair-proposal/v0`; every proposal has `requires_gate: true`, and `writes_performed` is always `0`. Ozone bounds checkout-pair scans, route evidence, and scope-to-conflict comparisons before repair construction. |
+
+The capsule task question must be a nonempty string. A declared task scope bounds every
+narrated claim, conflict side, unknown, and omission path to at least one declared root.
 Every capsule claim must retain its compiler-owned nonempty identity, subject, path,
 fact, text, status, and selection reason plus list-shaped evidence and selection
 signals. A re-fingerprinted partial claim is still an invalid capsule.
 Each capsule conflict must retain its compiler-owned kind, repository, question, status,
-reason codes, and `review_required` decision. It must preserve at least two sides, each
-with a nonempty checkout ID and path plus `head_revision`, `head_ref`, `last_fetch`, and
-evidence fields. A re-fingerprinted partial conflict is still an invalid capsule.
+reason codes, and `review_required` decision. It must preserve at least two distinct
+checkout sides, each with a nonempty checkout ID and path plus `head_revision`,
+`head_ref`, `last_fetch`, and evidence fields. A re-fingerprinted partial or duplicate
+conflict side is still an invalid capsule. Claims whose subjects occur on preserved
+conflict sides must retain the compiler's `conflict_side` tier and the exact matching
+conflict-signal set; claims without a preserved conflict cannot assert that tier or
+signal. A conflict that crosses a declared scope becomes a `conflict_outside_scope`
+omission naming only the in-scope subject path and opaque conflict ID. No out-of-scope
+side or path enters the capsule.
 The `receipt` field may be omitted, producing core's valid missing-evidence result. When
 the field is present, it must be a complete mapping whose `schema` is exactly
 `vivary.execution-receipt/v0`; `receipt_id` and `fingerprint` must be nonempty strings.

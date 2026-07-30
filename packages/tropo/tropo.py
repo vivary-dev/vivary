@@ -4088,9 +4088,13 @@ def _print_governed_find(capsule):
 
 def cmd_find(args, resolver):
     """Return a small typed context packet or an experimental governed capsule."""
-    if not args.paths:
-        sys.exit("tropo find: provide a task or question — e.g. tropo find \"auth module\"")
-    text = " ".join(args.paths)
+    text = " ".join(args.paths).strip()
+    if not text:
+        print(
+            "tropo find: provide a task or question — e.g. tropo find \"auth module\"",
+            file=sys.stderr,
+        )
+        return 2
 
     if getattr(args, "governed", False):
         unsupported = []

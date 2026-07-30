@@ -786,6 +786,52 @@ def test_scope_narrower_than_the_graph_excludes_out_of_scope_checkouts(graph, fx
         f"out-of-scope paths named in conflicts/unknowns/omissions: {leaked}"
     )
 
+    outside_scope = fx["paths"]["dirty"]
+    capsule_with_content_omissions = compile_task_capsule(
+        task={**TASK, "scope": [in_scope]},
+        graph=graph,
+        content={
+            "checkouts": [
+                {
+                    "path": outside_scope,
+                    "omissions": [
+                        {
+                            "kind": "content_lines_truncated",
+                            "path": outside_scope,
+                        }
+                    ],
+                }
+            ],
+            "refusals": [
+                {
+                    "path": outside_scope,
+                    "reason": "outside_allowlist",
+                }
+            ],
+        },
+    )
+    scoped_content = json.dumps(
+        capsule_with_content_omissions["omissions"]
+    ).replace("\\", "/").lower()
+    assert outside_scope.replace("\\", "/").lower() not in scoped_content
+    conflict_scope_omissions = [
+        omission
+        for omission in capsule["omissions"]
+        if omission.get("kind") == "conflict_outside_scope"
+    ]
+    assert conflict_scope_omissions
+    assert all(
+        omission.get("conflict")
+        and "outside the declared scope" in omission["reason"]
+        for omission in conflict_scope_omissions
+    )
+    assert len(
+        {
+            (omission["conflict"], omission["subject_path"])
+            for omission in conflict_scope_omissions
+        }
+    ) == len(conflict_scope_omissions)
+
 
 def test_negative_claim_budget_is_rejected_rather_than_inverted(graph):
     """Negative slicing quietly includes almost everything.
@@ -818,6 +864,10 @@ def test_claim_budget_cannot_exceed_the_lossless_contract_range(graph):
     ("task", "message"),
     [
         ("not a task mapping", "task must be a mapping"),
+        ({}, "task.question"),
+        ({"question": None}, "task.question"),
+        ({"question": []}, "task.question"),
+        ({"question": ""}, "task.question"),
         ({"question": "What changed?", "scope": "/workspace"}, "task.scope"),
         ({"question": "What changed?", "scope": []}, "task.scope"),
         ({"question": "What changed?", "scope": [1]}, "task.scope"),
@@ -834,6 +884,10 @@ def test_claim_budget_cannot_exceed_the_lossless_contract_range(graph):
     ],
     ids=[
         "task-container",
+        "question-missing",
+        "question-null",
+        "question-container",
+        "question-empty",
         "scope-container",
         "scope-empty",
         "scope-entry",

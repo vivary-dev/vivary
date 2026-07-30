@@ -385,25 +385,51 @@ def _receipt_shape_is_valid(receipt, capsule, expected_schema):
 
 
 
-def _capsule_scope_is_valid(capsule):
+def _capsule_scope_is_valid(capsule, core):
     task = capsule.get("task")
     if not isinstance(task, dict):
         return False
     if "scope" not in task:
         return True
     declared_scope = task["scope"]
-    return (
+    if not (
         isinstance(declared_scope, list)
         and bool(declared_scope)
         and all(
             isinstance(root, str) and bool(root)
             for root in declared_scope
         )
-    )
+    ):
+        return False
+
+    narrated_entries = [
+        *capsule.get("claims", []),
+        *capsule.get("conflicts", []),
+        *capsule.get("unknowns", []),
+        *capsule.get("omissions", []),
+    ]
+    for entry in narrated_entries:
+        paths = [entry.get("path"), entry.get("subject_path")]
+        sides = entry.get("sides")
+        if isinstance(sides, list):
+            paths.extend(
+                side.get("path")
+                for side in sides
+                if isinstance(side, dict)
+            )
+        for path in paths:
+            if path is None:
+                continue
+            if not _nonempty_string(path) or not any(
+                core["is_within_allowlist"](root, path)
+                for root in declared_scope
+            ):
+                return False
+    return True
 
 
 def _repair_capsule_is_safe(capsule, core):
-    if not _capsule_scope_is_valid(capsule):
+    if not _capsule_scope_is_valid(capsule, core):
         return False
     workspace = capsule.get("workspace")
     if not (
