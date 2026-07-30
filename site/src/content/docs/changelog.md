@@ -84,9 +84,10 @@ remains part of the final coordinated release train and requires a separate huma
   experimental facade over core's receipt-integrity, gate-sufficiency, and dry-run
   repair contracts. It recomputes Task Capsule identity, binds the workspace and
   caller-supplied clock, applies a deterministic 300-second evidence window, and
-  rejects malformed gate constraints, malformed or contradictory receipt fields,
-  invalid typed graph relationships, and malformed or deeply nested repair inputs before
-  calling core. Receipt claim lists must be unique and disjoint, and together must equal
+  rejects malformed gate constraints, malformed scalar receipt identities, contradictory
+  receipt fields, invalid typed graph relationships, and malformed or deeply nested
+  repair inputs before calling core. Receipt claim lists must be unique and disjoint,
+  and together must equal
   both `claims_in_scope` and the capsule's claim IDs. Receipt checks that share a capsule
   required-check name must carry that exact command, preventing a passing result for
   another command from clearing the gate. It refuses unknown capsule/receipt fields even

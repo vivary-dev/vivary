@@ -162,6 +162,7 @@ def _load_core_verification():
     )
     from vivary_core.collation import CollationDomainError, locale_sort_key
     from vivary_core.verify_receipt import verify_receipt_integrity
+    from vivary_core.receipt import RECEIPT_SCHEMA as EXECUTION_RECEIPT_SCHEMA
     from vivary_core.verify_repair import (
         AVG_OMITTED_CLAIM_TOKENS,
         MAX_DEDUPE_CHECKOUTS,
@@ -174,6 +175,7 @@ def _load_core_verification():
         "verify_task_capsule_integrity": verify_task_capsule_integrity,
         "OMITTED_LIST_CAP": OMITTED_LIST_CAP,
         "verify_receipt_integrity": verify_receipt_integrity,
+        "EXECUTION_RECEIPT_SCHEMA": EXECUTION_RECEIPT_SCHEMA,
         "propose_context_repairs": propose_context_repairs,
         "evaluate_gate_sufficiency": evaluate_gate_sufficiency,
         "CollationDomainError": CollationDomainError,
@@ -249,8 +251,14 @@ def _parse_instant(value):
     return instant if instant.tzinfo is not None else None
 
 
-def _receipt_shape_is_valid(receipt, capsule):
-    if not isinstance(receipt, dict) or not RECEIPT_FIELDS <= set(receipt):
+def _receipt_shape_is_valid(receipt, capsule, expected_schema):
+    if (
+        not isinstance(receipt, dict)
+        or not RECEIPT_FIELDS <= set(receipt)
+        or receipt.get("schema") != expected_schema
+        or not _nonempty_string(receipt.get("receipt_id"))
+        or not _nonempty_string(receipt.get("fingerprint"))
+    ):
         return False
 
     receipt_capsule = receipt.get("capsule")
@@ -785,7 +793,9 @@ def _validate_governed_request(request, core):
     if (
         isinstance(receipt, dict)
         and capsule_is_valid_for_receipt
-        and not _receipt_shape_is_valid(receipt, capsule)
+        and not _receipt_shape_is_valid(
+            receipt, capsule, core["EXECUTION_RECEIPT_SCHEMA"]
+        )
     ):
         errors.append("invalid_receipt")
     if isinstance(receipt, dict) and "created_at" in receipt:

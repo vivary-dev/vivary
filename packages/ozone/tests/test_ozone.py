@@ -799,6 +799,22 @@ def test_governed_verification_refuses_malformed_or_mismatched_receipt_fields():
             }
         )
         malformed_receipts.append(governed_receipt)
+    for field, value in (
+        ("schema", 123),
+        ("receipt_id", 123),
+        ("fingerprint", 123),
+    ):
+        governed_receipt = _governed_receipt(governed_capsule)
+        governed_receipt[field] = value
+        if field != "fingerprint":
+            governed_receipt["fingerprint"] = fingerprint(
+                {
+                    key: item
+                    for key, item in governed_receipt.items()
+                    if key not in {"receipt_id", "fingerprint"}
+                }
+            )
+        malformed_receipts.append(governed_receipt)
 
     for governed_receipt in malformed_receipts:
         result = ozone.verify_governed(
