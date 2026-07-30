@@ -355,7 +355,21 @@ def test_governed_facade_rejects_a_fabricated_capsule_identifier():
 
 def test_human_owner_authority_alone_cannot_clear_a_capsule_gate():
     gated_capsule = capsule(
-        conflicts=[{"id": "conflict:review", "decision": "review_required"}]
+        conflicts=[
+            {
+                "id": "conflict:review",
+                "kind": "divergent_checkouts",
+                "repository": "repository:test",
+                "question": "Which checkout is current?",
+                "sides": [
+                    {"checkout": "checkout:a", "path": "/repo/a"},
+                    {"checkout": "checkout:b", "path": "/repo/b"},
+                ],
+                "status": "unresolved",
+                "reason_codes": ["value_conflict", "identity_unresolved"],
+                "decision": "review_required",
+            }
+        ]
     )
 
     result = strato.decide_governed(
