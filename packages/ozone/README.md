@@ -53,6 +53,9 @@ claim lists to be disjoint. Together, the lists must contain exactly the capsule
 IDs. The claim lists must also match the check outcomes. `claims_verified` contains
 every claim only when the check list is nonempty and every check passed. Otherwise,
 `claims_unverified` contains every claim.
+Each capsule conflict must retain its compiler-owned kind, repository, question, sides,
+status, reason codes, and `review_required` decision. It must preserve at least two
+checkout/path sides.
 
 Receipt checks that share a capsule required-check name must also carry its exact command.
 Ozone validates optional

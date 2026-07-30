@@ -88,8 +88,9 @@ remains part of the final coordinated release train and requires a separate huma
   repair contracts. It recomputes Task Capsule identity, binds the workspace and
   caller-supplied clock, applies a deterministic 300-second evidence window, and
   rejects malformed gate constraints, scalar receipt identities, supplied non-mapping
-  receipts, contradictory receipt fields, incomplete capsule claims, malformed optional
-  task scopes, invalid typed graph relationships, and malformed or deeply nested repair
+  receipts, contradictory receipt fields, incomplete capsule claims or conflicts,
+  malformed optional task scopes, invalid typed graph relationships, and malformed or
+  deeply nested repair
   inputs before calling core. Receipt claim lists must be unique and disjoint. Together,
   they must equal both `claims_in_scope` and the capsule's claim IDs. All claims are
   verified only when the check list is nonempty and every check passed. Otherwise, all
@@ -256,7 +257,7 @@ remains part of the final coordinated release train and requires a separate huma
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **53/53**, Exo **17/17**,
+- Repository verification also passed: Ozone **58/58**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**

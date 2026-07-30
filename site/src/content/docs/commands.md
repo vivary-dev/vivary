@@ -484,6 +484,10 @@ ozone verify request.json --governed --json --strict
 Every capsule claim must retain its compiler-owned nonempty identity, subject, path,
 fact, text, status, and selection reason plus list-shaped evidence and selection
 signals. A re-fingerprinted partial claim is still an invalid capsule.
+Each capsule conflict must retain its compiler-owned kind, repository, question, status,
+reason codes, and `review_required` decision. It must preserve at least two sides, each
+with a nonempty checkout ID and path. A re-fingerprinted partial conflict is still an
+invalid capsule.
 The `receipt` field may be omitted, producing core's valid missing-evidence result. When
 the field is present, it must be a complete mapping whose `schema` is exactly
 `vivary.execution-receipt/v0`; `receipt_id` and `fingerprint` must be nonempty strings.

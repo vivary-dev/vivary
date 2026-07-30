@@ -164,6 +164,35 @@ def _is_claim_shape(claim) -> bool:
     )
 
 
+def _is_conflict_shape(conflict) -> bool:
+    if not (
+        isinstance(conflict, dict)
+        and conflict.get("kind") == "divergent_checkouts"
+        and conflict.get("status") == "unresolved"
+        and conflict.get("decision") == "review_required"
+        and all(
+            _nonempty_string(conflict.get(field))
+            for field in ("id", "repository", "question")
+        )
+    ):
+        return False
+    sides = conflict.get("sides")
+    reason_codes = conflict.get("reason_codes")
+    return (
+        isinstance(sides, list)
+        and len(sides) >= 2
+        and all(
+            isinstance(side, dict)
+            and _nonempty_string(side.get("checkout"))
+            and _nonempty_string(side.get("path"))
+            for side in sides
+        )
+        and isinstance(reason_codes, list)
+        and bool(reason_codes)
+        and all(_nonempty_string(reason_code) for reason_code in reason_codes)
+    )
+
+
 def is_task_capsule_shape(capsule) -> bool:
     """Return whether a value has the complete policy-facing Task Capsule shape."""
 
@@ -193,11 +222,7 @@ def is_task_capsule_shape(capsule) -> bool:
     return (
         all(_is_claim_shape(claim) for claim in capsule["claims"])
         and all(
-            isinstance(conflict, dict)
-            and isinstance(conflict.get("id"), str)
-            and bool(conflict["id"])
-            and isinstance(conflict.get("decision"), str)
-            and bool(conflict["decision"])
+            _is_conflict_shape(conflict)
             for conflict in capsule["conflicts"]
         )
         and all(isinstance(unknown, dict) for unknown in capsule["unknowns"])

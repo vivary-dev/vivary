@@ -917,6 +917,30 @@ def test_governed_verification_refuses_incomplete_capsule_claims():
     assert result["reason_codes"] == ["invalid_capsule"]
 
 
+def test_governed_verification_refuses_incomplete_capsule_conflicts():
+    governed_capsule = _governed_capsule()
+    governed_capsule["conflicts"] = [
+        {"id": "conflict:fake", "decision": "review_required"}
+    ]
+    governed_capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in governed_capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    request = _governed_request(
+        capsule=governed_capsule,
+        receipt=_governed_receipt(governed_capsule),
+    )
+    request["gate"]["max_unresolved_conflicts"] = 1
+
+    result = ozone.verify_governed(request)
+
+    assert result["schema"] == ozone.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["invalid_capsule"]
+
+
 def test_governed_verification_preserves_duplicate_receipt_checks():
     governed_capsule = _governed_capsule(
         claims=[{"id": "claim:first", "subject": "checkout:a", "claim": "first"}]
