@@ -244,9 +244,11 @@ def test_conflicts_survive_compilation_with_both_sides_and_review_required(graph
 
 
 def test_unknowns_pass_through_unreduced(graph):
+    graph["unknowns"][0]["reason"] = None
     capsule = compile_task_capsule(task=TASK, graph=graph)
     assert capsule["unknowns"] == graph["unknowns"]
     assert len(capsule["unknowns"]) > 0
+    assert verify_task_capsule_integrity(capsule)
 
 
 def test_refused_roots_and_ignored_path_policy_are_visible_omissions_no_private_path_leaks(graph):
@@ -868,6 +870,7 @@ def test_claim_budget_cannot_exceed_the_lossless_contract_range(graph):
         ({"question": None}, "task.question"),
         ({"question": []}, "task.question"),
         ({"question": ""}, "task.question"),
+        ({"question": "   "}, "non-blank string"),
         ({"question": "What changed?", "scope": "/workspace"}, "task.scope"),
         ({"question": "What changed?", "scope": []}, "task.scope"),
         ({"question": "What changed?", "scope": [1]}, "task.scope"),
@@ -888,6 +891,7 @@ def test_claim_budget_cannot_exceed_the_lossless_contract_range(graph):
         "question-null",
         "question-container",
         "question-empty",
+        "question-blank",
         "scope-container",
         "scope-empty",
         "scope-entry",
@@ -967,7 +971,9 @@ def test_content_search_failure_becomes_a_capsule_unknown(graph, fx):
     content = {
         "checkouts": [
             {"path": path, "status": "unknown", "reason": "grep_unavailable",
-             "matches": [], "omissions": []}
+             "matches": [], "omissions": []},
+            {"status": "unknown", "reason": "unbound_content_search",
+             "matches": [], "omissions": []},
         ],
         "refusals": [{"path": fx["paths"]["disallowed"], "reason": "outside_allowlist"}],
     }
@@ -981,6 +987,8 @@ def test_content_search_failure_becomes_a_capsule_unknown(graph, fx):
     assert "outside_allowlist" in recorded, (
         "a refused content root left no trace in the capsule"
     )
+    assert "unbound_content_search" in recorded
+    assert verify_task_capsule_integrity(capsule)
 
 
 def test_content_from_a_different_revision_is_not_used_as_evidence(fx):
@@ -1027,6 +1035,7 @@ def test_content_from_a_different_revision_is_not_used_as_evidence(fx):
     assert any(u.get("kind") == "content_snapshot_stale" for u in capsule["unknowns"]), (
         "dropping stale content silently is its own dishonesty; it must be reported"
     )
+    assert verify_task_capsule_integrity(capsule)
 
 
 def test_required_checks_are_derived_from_the_observed_workspace(fx):
@@ -1082,6 +1091,7 @@ def test_required_checks_are_derived_from_the_observed_workspace(fx):
         ]
         assert undetermined, "an undeterminable test command must be reported, not dropped"
         assert "pyproject.toml" in undetermined[0]["observed_markers"]
+        assert verify_task_capsule_integrity(capsule)
 
         # 3. npm's scaffolded placeholder is a known non-check, not a command.
         _write(

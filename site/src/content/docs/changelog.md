@@ -87,8 +87,9 @@ remains part of the final coordinated release train and requires a separate huma
   repair contracts. It recomputes Task Capsule identity, binds the workspace and
   caller-supplied clock, applies a deterministic 300-second evidence window, and
   rejects malformed gate constraints, scalar receipt identities, supplied non-mapping
-  receipts, contradictory receipt fields, incomplete capsule claims or conflicts,
-  duplicate conflict sides, malformed task questions, scopes, or filters, claims that
+  receipts, contradictory receipt fields, incomplete capsule claims, conflicts, or
+  compiler-owned unknown records, duplicate conflict sides, blank task questions, malformed
+  task scopes or filters, claims that
   violate declared filters, mismatched selection tiers and signals, narrated paths
   outside the declared scope, invalid typed graph relationships, and malformed or
   deeply nested repair inputs before calling core. Receipt claim lists must be unique
@@ -99,7 +100,8 @@ remains part of the final coordinated release train and requires a separate huma
   that shares a capsule required-check name must carry that exact command, preventing a
   passing result for another command from clearing the gate.
   It refuses unknown capsule/receipt fields even when the artifact is re-fingerprinted,
-  enforces core's 16-entry omission-list/count contract and exact `truncated` marker
+  validates each compiler-owned unknown-record variant, and enforces core's 16-entry
+  omission-list/count contract and exact `truncated` marker
   semantics even when no repair graph is requested, applies a 128-byte JSON-encoded
   ceiling on repair identifiers, and rejects semantically duplicate
   `(subject, fact, claim)` entries before they can
@@ -237,9 +239,9 @@ remains part of the final coordinated release train and requires a separate huma
 - `python packages/tropo/tests/test_tropo.py` — **170/170** passed on Windows.
 - `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **170/170**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **643 passed** on Windows;
+- `python -m pytest packages/core/tests/ -q` — **644 passed** on Windows;
   `UV_CACHE_DIR=/tmp/vivary-uv-cache TMPDIR=/tmp uv run --no-cache --with pytest
-  python3 -m pytest packages/core/tests/ -q -p no:cacheprovider` — **641 passed,
+  python3 -m pytest packages/core/tests/ -q -p no:cacheprovider` — **642 passed,
   2 platform-specific skips** on WSL Linux.
 - `python -m pytest packages/strato/tests -q` — **48 passed** on Windows and
   **48 passed** on WSL Linux.

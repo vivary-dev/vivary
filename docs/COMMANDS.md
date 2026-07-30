@@ -478,7 +478,7 @@ ozone verify request.json --governed --json --strict
 | `gate` | Named gate with core-owned `required_checks`, `require_claims_verified`, `max_unresolved_conflicts`, and `max_unresolved_unknowns` constraints. |
 | `graph` | Optional matching `vivary.workspace-graph/v0`. When present, Ozone returns a bounded `vivary.context-repair-proposal/v0`; every proposal has `requires_gate: true`, and `writes_performed` is always `0`. Ozone bounds checkout-pair scans, route evidence, and scope-to-conflict comparisons before repair construction. |
 
-The capsule task question must be a nonempty string. A declared task scope bounds every
+The capsule task question must be a nonblank string. A declared task scope bounds every
 narrated claim, conflict side, unknown, and omission path to at least one declared root.
 Every capsule claim must retain its compiler-owned nonempty identity, subject, path,
 fact, text, status, and selection reason plus list-shaped evidence and selection
@@ -488,6 +488,10 @@ Without task filters, the record must be absent. Question/content match signals 
 the `question_match` tier unless a preserved conflict takes precedence. The
 `allowlisted` tier carries only its baseline signal. A re-fingerprinted partial or
 semantically inconsistent claim is still an invalid capsule.
+Each capsule unknown must match one complete compiler-owned variant: an unknown graph
+fact, undetermined required check, stale content snapshot, or incomplete content search.
+Variant-specific identity, status, reason, marker, revision, and evidence fields retain
+their compiler-defined types; optional unobserved source fields may remain `null`.
 Each capsule conflict must retain its compiler-owned kind, repository, question, status,
 reason codes, and `review_required` decision. It must preserve at least two distinct
 checkout sides, each with a nonempty checkout ID and path plus `head_revision`,

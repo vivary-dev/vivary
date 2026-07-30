@@ -52,6 +52,10 @@ def _nonempty_string(value) -> bool:
     return isinstance(value, str) and bool(value)
 
 
+def _nonblank_string(value) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
 def repair_topology_fingerprint(graph) -> str:
     """Commit the graph relationships that can drive context-repair proposals."""
 
@@ -140,7 +144,7 @@ def _is_required_checks_shape(value) -> bool:
 def _is_task_shape(task) -> bool:
     if not (
         isinstance(task, dict)
-        and _nonempty_string(task.get("question"))
+        and _nonblank_string(task.get("question"))
         and set(task) <= {"question", "scope", "filters"}
     ):
         return False
@@ -235,6 +239,102 @@ def _is_claim_shape(claim) -> bool:
         isinstance(matched_filters, list)
         and all(isinstance(item, dict) for item in matched_filters)
     )
+
+
+def _is_unknown_shape(unknown) -> bool:
+    if not isinstance(unknown, dict):
+        return False
+
+    def evidence_is_valid(value) -> bool:
+        return isinstance(value, list) and all(
+            isinstance(item, dict) for item in value
+        )
+
+    kind = unknown.get("kind")
+    if kind is None:
+        return (
+            set(unknown) == {"checkout", "path", "fact", "reason"}
+            and all(
+                _nonempty_string(unknown.get(field))
+                for field in ("checkout", "path", "fact")
+            )
+            and (
+                unknown["reason"] is None
+                or _nonempty_string(unknown["reason"])
+            )
+        )
+    if kind == "required_check_undetermined":
+        return (
+            set(unknown)
+            == {
+                "kind",
+                "subject",
+                "subject_path",
+                "reason",
+                "observed_markers",
+                "resolution",
+                "evidence",
+            }
+            and all(
+                _nonempty_string(unknown.get(field))
+                for field in ("subject", "subject_path", "reason", "resolution")
+            )
+            and isinstance(unknown["observed_markers"], list)
+            and bool(unknown["observed_markers"])
+            and all(
+                _nonempty_string(marker)
+                for marker in unknown["observed_markers"]
+            )
+            and evidence_is_valid(unknown["evidence"])
+        )
+    if kind == "content_snapshot_stale":
+        return (
+            set(unknown)
+            == {
+                "kind",
+                "subject",
+                "subject_path",
+                "reason",
+                "observed_revision",
+                "searched_revision",
+                "evidence",
+            }
+            and all(
+                _nonempty_string(unknown.get(field))
+                for field in ("subject", "subject_path", "reason")
+            )
+            and all(
+                revision is None or _nonempty_string(revision)
+                for revision in (
+                    unknown["observed_revision"],
+                    unknown["searched_revision"],
+                )
+            )
+            and evidence_is_valid(unknown["evidence"])
+        )
+    if kind == "content_search_incomplete":
+        return (
+            set(unknown)
+            == {
+                "kind",
+                "subject",
+                "subject_path",
+                "status",
+                "reason",
+                "evidence",
+            }
+            and all(
+                unknown.get(field) is None
+                or _nonempty_string(unknown.get(field))
+                for field in ("subject", "subject_path")
+            )
+            and all(
+                _nonempty_string(unknown.get(field))
+                for field in ("status", "reason")
+            )
+            and evidence_is_valid(unknown["evidence"])
+        )
+    return False
 
 
 def _is_conflict_shape(conflict) -> bool:
@@ -392,7 +492,7 @@ def is_task_capsule_shape(capsule) -> bool:
             _is_conflict_shape(conflict)
             for conflict in capsule["conflicts"]
         )
-        and all(isinstance(unknown, dict) for unknown in capsule["unknowns"])
+        and all(_is_unknown_shape(unknown) for unknown in capsule["unknowns"])
         and all(
             isinstance(omission, dict)
             and isinstance(omission.get("kind"), str)
@@ -723,8 +823,8 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     """
     if not isinstance(task, dict):
         raise ValueError("task must be a mapping")
-    if not _nonempty_string(task.get("question")):
-        raise ValueError("task.question must be a non-empty string")
+    if not _nonblank_string(task.get("question")):
+        raise ValueError("task.question must be a non-blank string")
     declared_scope = task.get("scope")
     if (
         declared_scope is not None

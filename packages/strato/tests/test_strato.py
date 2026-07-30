@@ -290,7 +290,9 @@ def test_governed_facade_rejects_non_string_request_keys_without_raising():
 
 def test_governed_facade_refuses_non_string_capsule_keys_without_raising():
     governed_capsule = capsule()
-    governed_capsule["unknowns"] = [{1: "not a canonical object key"}]
+    governed_capsule["omissions"] = [
+        {"kind": "test", 1: "not a canonical object key"}
+    ]
 
     result = strato.decide_governed(request(capsule=governed_capsule))
 
@@ -324,7 +326,9 @@ def test_governed_facade_refuses_a_self_fingerprinted_capsule_missing_its_budget
     ],
 )
 def test_governed_facade_refuses_lossy_capsule_values(lossy_value):
-    lossy_capsule = capsule(unknowns=[{"value": lossy_value}])
+    lossy_capsule = capsule(
+        omissions=[{"kind": "test", "value": lossy_value}]
+    )
 
     result = strato.decide_governed(request(capsule=lossy_capsule))
 

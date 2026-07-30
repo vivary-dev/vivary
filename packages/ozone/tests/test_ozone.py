@@ -924,27 +924,42 @@ def test_governed_verification_refuses_verified_claims_after_failed_checks():
     assert result["reason_codes"] == ["invalid_receipt"]
 
 
-def test_governed_verification_refuses_incomplete_capsule_claims():
-    governed_capsule = _governed_capsule(
-        claims=[{"id": "claim:empty"}]
-    )
-    governed_capsule["claims"] = [{"id": "claim:empty"}]
-    governed_capsule["fingerprint"] = fingerprint(
-        {
-            key: item
-            for key, item in governed_capsule.items()
-            if key not in {"capsule_id", "fingerprint"}
-        }
-    )
-    result = ozone.verify_governed(
-        _governed_request(
-            capsule=governed_capsule,
-            receipt=_governed_receipt(governed_capsule),
+def test_governed_verification_refuses_incomplete_capsule_records():
+    for field, malformed_records in (
+        ("claims", [{"id": "claim:empty"}]),
+        ("unknowns", [{}]),
+        (
+            "unknowns",
+            [
+                {
+                    "kind": "content_snapshot_stale",
+                    "subject": "checkout:a",
+                    "subject_path": "/repo",
+                    "reason": "stale",
+                    "observed_revision": None,
+                    "searched_revision": None,
+                }
+            ],
+        ),
+    ):
+        governed_capsule = _governed_capsule()
+        governed_capsule[field] = malformed_records
+        governed_capsule["fingerprint"] = fingerprint(
+            {
+                key: item
+                for key, item in governed_capsule.items()
+                if key not in {"capsule_id", "fingerprint"}
+            }
         )
-    )
+        result = ozone.verify_governed(
+            _governed_request(
+                capsule=governed_capsule,
+                receipt=_governed_receipt(governed_capsule),
+            )
+        )
 
-    assert result["schema"] == ozone.REFUSAL_SCHEMA
-    assert result["reason_codes"] == ["invalid_capsule"]
+        assert result["schema"] == ozone.REFUSAL_SCHEMA
+        assert result["reason_codes"] == ["invalid_capsule"]
 
 
 def test_governed_verification_refuses_incomplete_capsule_conflicts():
@@ -1043,6 +1058,7 @@ def test_governed_verification_refuses_malformed_task_without_repair_graph():
         {"question": None},
         {"question": []},
         {"question": ""},
+        {"question": "   "},
     ):
         capsule = _governed_capsule()
         capsule["task"].update(malformed_task)
@@ -1319,7 +1335,16 @@ def test_governed_verification_refuses_stale_and_mismatched_evidence():
 
 
 def test_governed_verification_enforces_gate_budgets():
-    governed_capsule = _governed_capsule(unknowns=[{"id": "unknown:release"}])
+    governed_capsule = _governed_capsule(
+        unknowns=[
+            {
+                "checkout": "checkout:a",
+                "path": "/repo/packages/ozone",
+                "fact": "last_fetch",
+                "reason": "not_observed",
+            }
+        ]
+    )
     result = ozone.verify_governed(
         _governed_request(
             capsule=governed_capsule,
