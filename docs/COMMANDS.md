@@ -484,8 +484,12 @@ Every capsule claim must retain its compiler-owned nonempty identity, subject, p
 fact, text, status, and selection reason plus list-shaped evidence and selection
 signals. With task filters, every claim must retain the exact normalized
 `matched_filters` record; claim-owned fact and path values must satisfy that record.
-Without task filters, the record must be absent. Question/content match signals imply
-the `question_match` tier unless a preserved conflict takes precedence. The
+When the request includes a graph, label, repository, and branch filters must also
+match the graph profile for every claim subject. Without task filters, the record must
+be absent. Question/content match signals imply the `question_match` tier unless a
+preserved conflict takes precedence. A content-match signal belongs only to a known
+`content_match` claim and must reproduce its normalized question term and narrated
+path. Signal identities are checked once in linear time; duplicates are invalid. The
 `allowlisted` tier carries only its baseline signal. A re-fingerprinted partial or
 semantically inconsistent claim is still an invalid capsule.
 Each capsule unknown must match one complete compiler-owned variant: an unknown graph
@@ -553,8 +557,10 @@ invalid request documents and refused request envelopes exit `2`; advisory mode 
 evidence receipt itself belongs inside `REQUEST`.
 For a file-backed request, the run-receipt target must not identify the request
 document, including through a hard-link alias. When `REQUEST` is `-`, Ozone refuses
-run-receipt output entirely because stdin does not expose enough source identity to
-prove the receipt target is distinct.
+run-receipt output because stdin does not expose enough source identity to prove the
+receipt target is distinct. Parser-only help and version actions do not read a request;
+if their receipt target could alias the request, Ozone shows the requested output and
+suppresses that run receipt.
 
 ### The `structure` pack
 

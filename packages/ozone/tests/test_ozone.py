@@ -1217,6 +1217,91 @@ def test_governed_verification_refuses_claims_that_violate_declared_filters():
         assert result["schema"] == ozone.REFUSAL_SCHEMA
         assert result["reason_codes"] == ["invalid_capsule"]
 
+    profile_filter_cases = (
+        (
+            {"field": "label", "equals": "checkout-0"},
+            {"field": "label", "equals": "other-checkout"},
+        ),
+        (
+            {"field": "branch", "equals": "main"},
+            {"field": "branch", "equals": "other-branch"},
+        ),
+        (
+            {"field": "repository", "includes": "shared.git"},
+            {"field": "repository", "includes": "other.git"},
+        ),
+    )
+    for original_filter, forged_filter in profile_filter_cases:
+        capsule = compile_task_capsule(
+            task={
+                "question": "Review the shared repository.",
+                "scope": ["/repo"],
+                "filters": [original_filter],
+            },
+            graph=graph,
+            budget={"max_claims": 1},
+        )
+        capsule["task"]["filters"] = [forged_filter]
+        operator = "equals" if "equals" in forged_filter else "includes"
+        capsule["claims"][0]["selection"]["matched_filters"] = [
+            {
+                "field": forged_filter["field"],
+                "operator": operator,
+                "value": forged_filter[operator],
+            }
+        ]
+        capsule["capsule_id"] = deterministic_id(
+            "capsule",
+            {
+                "task": capsule["task"]["question"],
+                "filters": capsule["task"]["filters"],
+                "workspace": capsule["workspace"]["fingerprint"],
+            },
+        )
+        capsule["fingerprint"] = fingerprint(
+            {
+                key: item
+                for key, item in capsule.items()
+                if key not in {"capsule_id", "fingerprint"}
+            }
+        )
+        result = ozone.verify_governed(
+            _governed_request(
+                capsule=capsule,
+                receipt=_governed_receipt(capsule),
+                graph=graph,
+            )
+        )
+
+        assert result["schema"] == ozone.REFUSAL_SCHEMA
+        assert "repair_graph_filters_mismatch" in result["reason_codes"]
+
+    filtered_capsule = compile_task_capsule(
+        task={
+            "question": "Review the shared repository.",
+            "scope": ["/repo"],
+            "filters": [{"field": "label", "equals": "checkout-0"}],
+        },
+        graph=graph,
+        budget={"max_claims": 1},
+    )
+    malformed_facts_graph = json.loads(json.dumps(graph))
+    checkout_node = next(
+        node
+        for node in malformed_facts_graph["nodes"]
+        if node["kind"] == "checkout"
+    )
+    checkout_node["facts"] = "not a facts mapping"
+    malformed_facts = ozone.verify_governed(
+        _governed_request(
+            capsule=filtered_capsule,
+            receipt=_governed_receipt(filtered_capsule),
+            graph=malformed_facts_graph,
+        )
+    )
+    assert malformed_facts["schema"] == ozone.REFUSAL_SCHEMA
+    assert malformed_facts["reason_codes"] == ["invalid_repair_graph"]
+
 
 def test_governed_verification_binds_question_match_signals_to_their_tier():
     malformed_selections = (
@@ -1233,6 +1318,16 @@ def test_governed_verification_binds_question_match_signals_to_their_tier():
         {
             "tier": "question_match",
             "signals": [{"signal": "allowlisted"}],
+        },
+        {
+            "tier": "question_match",
+            "signals": [
+                {
+                    "signal": "content_term_match",
+                    "term": "task",
+                    "path": "forged.md",
+                }
+            ],
         },
     )
     for index, selection in enumerate(malformed_selections):
@@ -2380,19 +2475,78 @@ def test_governed_verify_rejects_receipts_that_identify_request():
         )
         assert request_path.read_bytes() == original
 
+        help_stdout = io.StringIO()
         help_stderr = io.StringIO()
-        with contextlib.redirect_stderr(help_stderr):
-            help_return_code = ozone.main(
-                [
-                    "verify",
-                    str(request_path),
-                    "--rece",
-                    str(request_path),
-                    "--he",
-                ]
-            )
-        assert help_return_code == 2
-        assert help_stderr.getvalue() == invalid_stderr.getvalue()
+        help_exit = None
+        try:
+            with (
+                contextlib.redirect_stdout(help_stdout),
+                contextlib.redirect_stderr(help_stderr),
+            ):
+                ozone.main(
+                    [
+                        "verify",
+                        str(request_path),
+                        "--rece",
+                        str(request_path),
+                        "--he",
+                    ]
+                )
+        except SystemExit as exc:
+            help_exit = exc
+        assert help_exit is not None
+        assert help_exit.code == 0
+        assert "usage: ozone" in help_stdout.getvalue()
+        assert help_stderr.getvalue() == ""
+        assert request_path.read_bytes() == original
+
+        stdin_help_receipt = td / "stdin-help.jsonl"
+        stdin_help_stdout = io.StringIO()
+        stdin_help_exit = None
+        try:
+            with (
+                contextlib.redirect_stdout(stdin_help_stdout),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                ozone.main(
+                    [
+                        "verify",
+                        "-",
+                        "--governed",
+                        "--receipt",
+                        str(stdin_help_receipt),
+                        "--help",
+                    ]
+                )
+        except SystemExit as exc:
+            stdin_help_exit = exc
+        assert stdin_help_exit is not None
+        assert stdin_help_exit.code == 0
+        assert "usage: ozone" in stdin_help_stdout.getvalue()
+        assert not stdin_help_receipt.exists()
+
+        separator_stderr = io.StringIO()
+        try:
+            os.environ[ozone.RECEIPT_ENV] = str(request_path)
+            with contextlib.redirect_stderr(separator_stderr):
+                separator_return_code = ozone.main(
+                    [
+                        "verify",
+                        "--governed",
+                        str(request_path),
+                        "--",
+                        "--help",
+                    ]
+                )
+        finally:
+            if previous_receipt_path is None:
+                os.environ.pop(ozone.RECEIPT_ENV, None)
+            else:
+                os.environ[ozone.RECEIPT_ENV] = previous_receipt_path
+        assert separator_return_code == 2
+        assert separator_stderr.getvalue() == (
+            "ozone: receipt: receipt path must not identify the verification request\n"
+        )
         assert request_path.read_bytes() == original
 
         invalid_receipt = td / "invalid-runs.jsonl"

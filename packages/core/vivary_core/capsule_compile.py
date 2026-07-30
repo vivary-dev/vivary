@@ -29,6 +29,8 @@ Language mapping notes (decision 0008 / documented rules for this slice):
 
 from __future__ import annotations
 
+import re
+
 from vivary_core.canonical import (
     MAX_LOSSLESS_INTEGER,
     _utf16_sort_key,
@@ -39,8 +41,11 @@ from vivary_core.canonical import (
 )
 from vivary_core.capsule_select import (
     TIER_NAMES,
+    _filter_field_value,
+    _match_filter,
     question_terms,
     select_claims,
+    subject_profiles,
     validate_filters,
 )
 from vivary_core.collation import CollationDomainError, locale_sort_key
@@ -54,6 +59,10 @@ def _nonempty_string(value) -> bool:
 
 def _nonblank_string(value) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+def _content_question_terms(question) -> set[str]:
+    text = "" if question is None else str(question)
+    return set(re.findall(r"[^\W_]+", text.lower(), flags=re.UNICODE))
 
 
 def repair_topology_fingerprint(graph) -> str:
@@ -362,7 +371,7 @@ def _is_conflict_shape(conflict) -> bool:
     )
 
 
-def _selection_signal_is_valid(signal, terms) -> bool:
+def _selection_signal_is_valid(signal, terms, content_terms, claim) -> bool:
     signal_kind = signal.get("signal")
     if signal_kind == "conflict_side":
         return set(signal) == {"signal", "conflict"} and _nonempty_string(
@@ -375,12 +384,30 @@ def _selection_signal_is_valid(signal, terms) -> bool:
             and signal.get("field") in {"label", "repository", "branch"}
         )
     if signal_kind == "content_term_match":
+        term = signal.get("term")
+        path = signal.get("path")
         return (
             set(signal) == {"signal", "term", "path"}
-            and _nonempty_string(signal.get("term"))
-            and _nonempty_string(signal.get("path"))
+            and term in content_terms
+            and _nonempty_string(path)
+            and claim.get("fact") == "content_match"
+            and claim.get("status") == "known"
+            and claim.get("claim", "").startswith(f"{path}:")
+            and f" matches '{term}': \"" in claim["claim"]
         )
     return signal == {"signal": "allowlisted"}
+
+
+def _selection_signals_are_valid(signals, terms, content_terms, claim) -> bool:
+    identities = set()
+    for signal in signals:
+        if not _selection_signal_is_valid(signal, terms, content_terms, claim):
+            return False
+        identity = tuple(sorted(signal.items()))
+        if identity in identities:
+            return False
+        identities.add(identity)
+    return True
 
 
 def _claim_matches_task_filters(task, claim) -> bool:
@@ -408,6 +435,36 @@ def _claim_matches_task_filters(task, claim) -> bool:
     return True
 
 
+def capsule_profile_filters_match_graph(capsule, graph) -> bool:
+    """Verify graph-profile filters against the graph supplied to a verifier."""
+
+    profile_filters = [
+        task_filter
+        for task_filter in validate_filters(capsule["task"].get("filters"))
+        if task_filter["field"] in {"label", "repository", "branch"}
+    ]
+    if not profile_filters:
+        return True
+    profiles = subject_profiles(graph)
+    return all(
+        claim["subject"] in profiles
+        and all(
+            _match_filter(
+                task_filter,
+                _filter_field_value(
+                    profiles[claim["subject"]],
+                    claim,
+                    task_filter["field"],
+                ),
+            )
+            for task_filter in profile_filters
+        )
+        for claim in capsule["claims"]
+    )
+
+
+
+
 def _claim_selections_are_valid(capsule) -> bool:
     conflict_ids_by_checkout = {}
     for conflict in capsule["conflicts"]:
@@ -416,6 +473,7 @@ def _claim_selections_are_valid(capsule) -> bool:
                 conflict["id"]
             )
     terms = set(question_terms(capsule["task"]["question"]))
+    content_terms = _content_question_terms(capsule["task"]["question"])
     for claim in capsule["claims"]:
         selection = claim["selection"]
         tier = selection["tier"]
@@ -423,8 +481,9 @@ def _claim_selections_are_valid(capsule) -> bool:
         if (
             tier not in TIER_NAMES
             or not signals
-            or not all(_selection_signal_is_valid(signal, terms) for signal in signals)
-            or any(signal in signals[:index] for index, signal in enumerate(signals))
+            or not _selection_signals_are_valid(
+                signals, terms, content_terms, claim
+            )
             or not _claim_matches_task_filters(capsule["task"], claim)
         ):
             return False
@@ -739,10 +798,11 @@ def _content_is_bound_to(node, checkout_content):
     return bool(observed) and bool(searched) and observed == searched
 
 
-def _content_match_candidates(content, checkouts_by_path):
+def _content_match_candidates(content, checkouts_by_path, task_terms):
     if not content or not isinstance(content.get("checkouts"), list):
-        return []
+        return [], []
     candidates = []
+    excluded_count = 0
     for checkout_content in content["checkouts"]:
         node = checkouts_by_path.get(checkout_content.get("path"))
         if node is None:
@@ -750,6 +810,9 @@ def _content_match_candidates(content, checkouts_by_path):
         if not _content_is_bound_to(node, checkout_content):
             continue
         for match in checkout_content.get("matches") or []:
+            if match.get("term") not in task_terms:
+                excluded_count += 1
+                continue
             evidence = match.get("evidence")
             candidates.append(
                 {
@@ -764,7 +827,16 @@ def _content_match_candidates(content, checkouts_by_path):
                     ],
                 }
             )
-    return candidates
+    omissions = []
+    if excluded_count:
+        omissions.append(
+            {
+                "kind": "content_matches_outside_task",
+                "omitted_count": excluded_count,
+                "reason": "content match terms must be normalized task question terms",
+            }
+        )
+    return candidates, omissions
 
 
 
@@ -961,7 +1033,11 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
             _fact_claim(checkout, "last_fetch", lambda at: f"last recorded fetch at {at}"),
         ]
         candidates.extend(c for c in claims if c is not None)
-    candidates.extend(_content_match_candidates(content, checkouts_by_path))
+    content_candidates, content_candidate_omissions = _content_match_candidates(
+        content, checkouts_by_path, _content_question_terms(task["question"])
+    )
+    candidates.extend(content_candidates)
+    truncation_omissions.extend(content_candidate_omissions)
     candidates, collation_omissions = _sort_candidates(candidates)
     truncation_omissions.extend(collation_omissions)
 

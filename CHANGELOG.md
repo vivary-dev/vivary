@@ -30,6 +30,8 @@ remains part of the final coordinated release train and requires a separate huma
   capsule fingerprint. Unicode question terms preserve order and deduplicate; one-letter
   ASCII contraction fragments are discarded before the first **16** meaningful terms
   enter the bounded core content search.
+  Content matches bind to those Unicode question terms; matches outside them become an
+  explicit `content_matches_outside_task` omission instead of disappearing silently.
 - Top-level `vivary_core` exports for the four deep-module entry points used by the
   adapter: `observe_checkouts`, `observe_content`, `project_workspace_graph`, and
   `compile_task_capsule`.
@@ -84,12 +86,12 @@ remains part of the final coordinated release train and requires a separate huma
   caller-supplied clock, applies a deterministic 300-second evidence window, and
   rejects malformed gate constraints, scalar receipt identities, supplied non-mapping
   receipts, contradictory receipt fields, incomplete capsule claims, conflicts, or
-  compiler-owned unknown records, duplicate conflict sides, blank task questions, malformed
-  task scopes or filters, claims that
-  violate declared filters, mismatched selection tiers and signals, narrated paths
-  outside the declared scope, invalid typed graph relationships, and malformed or
-  deeply nested repair inputs before calling core. Receipt claim lists must be unique
-  and disjoint. Together,
+  compiler-owned unknown records, duplicate conflict sides, blank task questions,
+  malformed task scopes or filters, claims that violate declared or graph-backed
+  profile filters, content signals attached to non-content claims, mismatched selection
+  tiers and signals, narrated paths outside the declared scope, invalid typed graph
+  relationships, and malformed or deeply nested repair inputs before calling core.
+  Receipt claim lists must be unique and disjoint. Together,
   they must equal both `claims_in_scope` and the capsule's claim IDs. All claims are
   verified only when the check list is nonempty and every check passed. Otherwise, all
   claims remain unverified. Every receipt check must carry a nonempty command. A check
@@ -99,9 +101,11 @@ remains part of the final coordinated release train and requires a separate huma
   validates each compiler-owned unknown-record variant, and enforces core's 16-entry
   omission-list/count contract and exact `truncated` marker
   semantics even when no repair graph is requested, applies a 128-byte JSON-encoded
-  ceiling on repair identifiers, and rejects semantically duplicate
-  `(subject, fact, claim)` entries before they can
-  duplicate deterministic repair IDs, requires the repair graph to preserve every
+  ceiling on repair identifiers, rejects semantically duplicate selection signals in
+  linear time, and rejects duplicate `(subject, fact, claim)` entries before they can
+  duplicate deterministic repair IDs. Parser-only help and version actions suppress a
+  run receipt that could alias the unread request instead of refusing the requested
+  output. It requires the repair graph to preserve every
   capsule conflict while allowing a full graph to retain out-of-scope conflicts for
   repair withholding, and recomputes the capsule's normalized repair-topology commitment
   over repository nodes and `checkout_of` relationships. A conflict that crosses a

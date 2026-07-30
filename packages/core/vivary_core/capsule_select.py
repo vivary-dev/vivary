@@ -102,10 +102,12 @@ def question_terms(question) -> list[str]:
     text = "" if question is None else str(question)
     tokens = _TOKEN_RE.findall(text.lower())
     terms: list[str] = []
+    seen = set()
     for token in tokens:
-        if len(token) < 3 or token in STOPWORDS or token in terms:
+        if len(token) < 3 or token in STOPWORDS or token in seen:
             continue
         terms.append(token)
+        seen.add(token)
     return terms
 
 

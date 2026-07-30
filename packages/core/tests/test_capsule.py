@@ -685,6 +685,13 @@ def test_content_match_candidate_is_bounded_intrinsically_question_matched_and_s
                         "term": "modified",
                         "excerpt": "the widget assembly was modified",
                         "evidence": {"command": "git grep modified"},
+                    },
+                    {
+                        "path": "other.md",
+                        "line": 4,
+                        "term": "UNRELATED",
+                        "excerpt": "not part of the task question",
+                        "evidence": {"command": "git grep unrelated"},
                     }
                 ],
                 "omissions": [
@@ -726,6 +733,13 @@ def test_content_match_candidate_is_bounded_intrinsically_question_matched_and_s
     assert "content match: term 'modified' was found in notes.md" == content_claim["selection_reason"]
     # The intrinsic ranking hint never leaks into the public claim shape.
     assert "intrinsic_signals" not in content_claim
+    assert verify_task_capsule_integrity(with_content)
+    excluded = next(
+        omission
+        for omission in with_content["omissions"]
+        if omission["kind"] == "content_matches_outside_task"
+    )
+    assert excluded["omitted_count"] == 1
 
     # No candidate at all for the out-of-graph checkout.
     assert not any(c["subject_path"] == "/not/a/graph/checkout" for c in with_content["claims"])

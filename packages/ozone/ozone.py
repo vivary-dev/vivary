@@ -149,6 +149,7 @@ def _load_core_verification():
     ):
         sys.path.insert(0, sibling_core)
     from vivary_core.capsule_compile import (
+        capsule_profile_filters_match_graph,
         is_task_capsule_shape,
         repair_topology_fingerprint,
         verify_task_capsule_integrity,
@@ -171,6 +172,7 @@ def _load_core_verification():
     from vivary_core.verify_sufficiency import evaluate_gate_sufficiency
 
     return {
+        "capsule_profile_filters_match_graph": capsule_profile_filters_match_graph,
         "is_task_capsule_shape": is_task_capsule_shape,
         "verify_task_capsule_integrity": verify_task_capsule_integrity,
         "OMITTED_LIST_CAP": OMITTED_LIST_CAP,
@@ -603,6 +605,10 @@ def _repair_graph_is_safe(graph, core):
             and _bounded_repair_identifier(node.get("id"))
             and _nonempty_string(node.get("kind"))
             and node["id"] not in node_kinds
+            and (
+                node.get("facts") is None
+                or isinstance(node.get("facts"), dict)
+            )
         ):
             return False
         node_kinds[node["id"]] = node["kind"]
@@ -897,23 +903,28 @@ def _validate_governed_request(request, core):
         elif request["graph"]["workspace_fingerprint"] != workspace_fingerprint:
             errors.append("repair_graph_workspace_mismatch")
         elif repair_capsule_is_safe:
-            conflicts_match, conflict_work_is_bounded = (
-                _repair_graph_matches_capsule_conflicts(
-                    capsule, request["graph"], core
-                )
-            )
-            if not conflict_work_is_bounded:
-                errors.append("repair_work_unbounded")
-            elif not conflicts_match:
-                errors.append("repair_graph_conflicts_mismatch")
-            elif not _repair_estimates_are_canonical(capsule, core):
-                errors.append("repair_estimate_unbounded")
-            elif not _repair_work_is_bounded(capsule, request["graph"], core):
-                errors.append("repair_work_unbounded")
-            elif not _repair_graph_topology_is_bound(
-                capsule, request["graph"], core
+            if not core["capsule_profile_filters_match_graph"](
+                capsule, request["graph"]
             ):
-                errors.append("repair_graph_topology_unbound")
+                errors.append("repair_graph_filters_mismatch")
+            else:
+                conflicts_match, conflict_work_is_bounded = (
+                    _repair_graph_matches_capsule_conflicts(
+                        capsule, request["graph"], core
+                    )
+                )
+                if not conflict_work_is_bounded:
+                    errors.append("repair_work_unbounded")
+                elif not conflicts_match:
+                    errors.append("repair_graph_conflicts_mismatch")
+                elif not _repair_estimates_are_canonical(capsule, core):
+                    errors.append("repair_estimate_unbounded")
+                elif not _repair_work_is_bounded(capsule, request["graph"], core):
+                    errors.append("repair_work_unbounded")
+                elif not _repair_graph_topology_is_bound(
+                    capsule, request["graph"], core
+                ):
+                    errors.append("repair_graph_topology_unbound")
 
     return errors
 
@@ -1489,11 +1500,7 @@ def _receipt_flags(argv):
 
 
 def _receipt_command(argv):
-    options = {_canonical_receipt_option(token) for token in argv}
-    if "--version" in options:
-        return "version"
-    if "-h" in options or "--help" in options:
-        return "help"
+    command = None
     skip_value = False
     for token in argv:
         if token == "--":
@@ -1505,11 +1512,15 @@ def _receipt_command(argv):
         if name in RECEIPT_VALUE_FLAGS and "=" not in token:
             skip_value = True
             continue
+        if name == "--version":
+            return "version"
+        if name in {"-h", "--help"}:
+            return "help"
         if name is not None:
             continue
-        if token in COMMANDS:
-            return token
-    return "review"
+        if token in COMMANDS and command is None:
+            command = token
+    return command or "review"
 
 
 
@@ -1712,11 +1723,16 @@ def main(argv=None):
     receipt_path, receipt_source = _extract_receipt_path(raw_argv)
     request_path = _verify_request_path(raw_argv)
     if _receipt_targets_request(request_path, receipt_path):
-        print(
-            "ozone: receipt: receipt path must not identify the verification request",
-            file=sys.stderr,
-        )
-        return 2
+        if _receipt_command(raw_argv) in {"help", "version"}:
+            # Terminating parser actions never read the request. Disable a
+            # colliding receipt rather than rejecting help or corrupting input.
+            receipt_path, receipt_source = None, None
+        else:
+            print(
+                "ozone: receipt: receipt path must not identify the verification request",
+                file=sys.stderr,
+            )
+            return 2
     args = None
     try:
         args = _parse_args(raw_argv)
