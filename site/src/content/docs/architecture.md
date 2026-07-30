@@ -98,8 +98,8 @@ Baseline = **tropo + strato** (knowledge + the self-improving loop over it).
 The four layers above are the *vertical* column. `vivary-core` is the horizontal
 seam beneath them — the governed-context primitives every role package is *meant* to
 speak through, so that "what is true, and how do we know" ends up with exactly one
-implementation rather than four that drift. Tropo and Strato now speak through it;
-the remaining role packages adopt the seam in their integration slices.
+implementation rather than four that drift. Tropo, Strato, and Ozone now speak
+through it; the remaining role packages adopt the seam in their integration slices.
 
 It is a library, not a layer and not a CLI. Nothing about the baseline changes
 because it exists: you still install and run `tropo`, `strato`, `ozone`, `exo`.
@@ -157,10 +157,10 @@ transitively and does not declare it. One owner per edge avoids version-pinning 
 `vivary-tropo` is the first importer: its experimental `find --governed` adapter depends
 on `vivary-core>=0.2.1`, the first source version that exposes the adapter's required
 API. `vivary-strato` is the second: its experimental `decide --governed` facade requires
-`vivary-core>=0.2.2`, which adds the compiler/verifier integrity boundary.
-`vivary-ozone` is the third: `verify --governed` requires that same 0.2.2 integrity
-boundary. Remaining role packages add their own floors only when their first real
-imports land — never ahead of the code that needs them.
+`vivary-core>=0.2.3`, which includes complete compiler-owned capsule validation.
+`vivary-ozone` is the third: `verify --governed` requires the same 0.2.3 boundary,
+including the repair-topology commitment API. Remaining role packages add their own
+floors only when their first real imports land — never ahead of the code that needs them.
 
 **Status:** merged Tropo/core, Strato/core, and Ozone/core integrations are on `dev`.
 All are unpublished at their development versions and reachable only through explicit

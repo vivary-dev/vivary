@@ -117,7 +117,7 @@ def test_runtime_version_matches_package_manifest():
         (OZONE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )["project"]
     assert ozone.__version__ == project["version"]
-    assert "vivary-core>=0.2.2" in project["dependencies"]
+    assert "vivary-core>=0.2.3" in project["dependencies"]
 
 
 def test_run_receipt_appends_jsonl_without_polluting_stdout():
@@ -136,6 +136,29 @@ def test_run_receipt_appends_jsonl_without_polluting_stdout():
         assert "--json" in record["flags"]
         assert "--receipt" not in record["flags"]
         assert str(td) not in json.dumps(record, sort_keys=True)
+
+        for early_exit in ("--help", "--version"):
+            exit_result = None
+            try:
+                with (
+                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stderr(io.StringIO()),
+                ):
+                    ozone.main([early_exit, "--receipt", str(receipt)])
+            except SystemExit as exc:
+                exit_result = exc
+            assert exit_result is not None
+            assert exit_result.code == 0
+
+        records = [
+            json.loads(line)
+            for line in receipt.read_text(encoding="utf-8").splitlines()
+        ]
+        assert [record["command"] for record in records] == [
+            "packs",
+            "help",
+            "version",
+        ]
 
 
 def test_impact_receipt_does_not_record_target_id():
@@ -2019,6 +2042,166 @@ def test_governed_verify_cli_escapes_unencodable_refusal_reasons():
         "ozone verify: refused",
         "reasons: unknown_field:\\ud800",
     ]
+
+
+def test_governed_verify_rejects_receipts_that_identify_request():
+    with temp_workspace() as td:
+        request_path = td / "request.json"
+        request = _governed_request()
+        request_path.write_text(json.dumps(request), encoding="utf-8")
+        receipt_alias = td / "request-receipt.json"
+        os.link(request_path, receipt_alias)
+        original = request_path.read_bytes()
+        previous_receipt_path = os.environ.get(ozone.RECEIPT_ENV)
+        try:
+            for receipt_args, env_receipt_path in (
+                (["--receipt", str(request_path)], None),
+                ([], str(receipt_alias)),
+            ):
+                if env_receipt_path is None:
+                    os.environ.pop(ozone.RECEIPT_ENV, None)
+                else:
+                    os.environ[ozone.RECEIPT_ENV] = env_receipt_path
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with (
+                    contextlib.redirect_stdout(stdout),
+                    contextlib.redirect_stderr(stderr),
+                ):
+                    return_code = ozone.main(
+                        ["verify", str(request_path), "--governed", *receipt_args]
+                    )
+
+                assert return_code == 2
+                assert stdout.getvalue() == ""
+                assert stderr.getvalue() == (
+                    "ozone: receipt: receipt path must not identify the verification request\n"
+                )
+                assert request_path.read_bytes() == original
+                assert json.loads(request_path.read_text(encoding="utf-8")) == request
+        finally:
+            if previous_receipt_path is None:
+                os.environ.pop(ozone.RECEIPT_ENV, None)
+            else:
+                os.environ[ozone.RECEIPT_ENV] = previous_receipt_path
+
+        invalid_stdout = io.StringIO()
+        invalid_stderr = io.StringIO()
+        with (
+            contextlib.redirect_stdout(invalid_stdout),
+            contextlib.redirect_stderr(invalid_stderr),
+        ):
+            invalid_return_code = ozone.main(
+                [
+                    "verify",
+                    str(request_path),
+                    "--receipt",
+                    str(request_path),
+                ]
+            )
+        assert invalid_return_code == 2
+        assert invalid_stdout.getvalue() == ""
+        assert invalid_stderr.getvalue() == (
+            "ozone: receipt: receipt path must not identify the verification request\n"
+        )
+        assert request_path.read_bytes() == original
+
+        help_stderr = io.StringIO()
+        with contextlib.redirect_stderr(help_stderr):
+            help_return_code = ozone.main(
+                [
+                    "verify",
+                    str(request_path),
+                    "--rece",
+                    str(request_path),
+                    "--he",
+                ]
+            )
+        assert help_return_code == 2
+        assert help_stderr.getvalue() == invalid_stderr.getvalue()
+        assert request_path.read_bytes() == original
+
+        invalid_receipt = td / "invalid-runs.jsonl"
+        invalid_usage_exit = None
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                ozone.main(
+                    [
+                        "verify",
+                        str(request_path),
+                        "--receipt",
+                        str(invalid_receipt),
+                    ]
+                )
+        except SystemExit as exc:
+            invalid_usage_exit = exc
+        assert invalid_usage_exit is not None
+        assert invalid_usage_exit.code == 2
+        invalid_record = json.loads(invalid_receipt.read_text(encoding="utf-8"))
+        assert invalid_record["command"] == "verify"
+        assert invalid_record["exit_code"] == 2
+
+        abbreviated_stdout = io.StringIO()
+        abbreviated_stderr = io.StringIO()
+        with (
+            contextlib.redirect_stdout(abbreviated_stdout),
+            contextlib.redirect_stderr(abbreviated_stderr),
+        ):
+            abbreviated_return_code = ozone.main(
+                [
+                    "verify",
+                    str(request_path),
+                    "--governed",
+                    "--roo",
+                    str(td),
+                    "--rece",
+                    str(request_path),
+                ]
+            )
+        assert abbreviated_return_code == 2
+        assert abbreviated_stdout.getvalue() == ""
+        assert abbreviated_stderr.getvalue() == (
+            "ozone: receipt: receipt path must not identify the verification request\n"
+        )
+        assert request_path.read_bytes() == original
+        receipt_path = td / "runs.jsonl"
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            distinct_return_code = ozone.main(
+                [
+                    "verify",
+                    str(request_path),
+                    "--governed",
+                    "--json",
+                    "--receipt",
+                    str(receipt_path),
+                ]
+            )
+        assert distinct_return_code == 0
+        assert json.loads(stdout.getvalue())["outcome"] == "sufficient"
+        records = [
+            json.loads(line)
+            for line in receipt_path.read_text(encoding="utf-8").splitlines()
+        ]
+        assert [record["command"] for record in records] == ["verify"]
+
+        previous_stdin = sys.stdin
+        stdin_stdout = io.StringIO()
+        try:
+            sys.stdin = io.StringIO(json.dumps(request))
+            with contextlib.redirect_stdout(stdin_stdout):
+                stdin_return_code = ozone.main(
+                    ["verify", "-", "--governed", "--json", "--receipt", str(receipt_path)]
+                )
+        finally:
+            sys.stdin = previous_stdin
+        assert stdin_return_code == 0
+        assert json.loads(stdin_stdout.getvalue())["outcome"] == "sufficient"
+        records = [
+            json.loads(line)
+            for line in receipt_path.read_text(encoding="utf-8").splitlines()
+        ]
+        assert [record["command"] for record in records] == ["verify", "verify"]
 
 
 def test_governed_verify_cli_emits_typed_json_and_honest_exit_codes():

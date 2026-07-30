@@ -1417,17 +1417,28 @@ def cmd_verify(args):
     return 1 if args.strict and result["outcome"] != "sufficient" else 0
 
 
+def _canonical_receipt_option(token):
+    name = token.split("=", 1)[0]
+    if name in RECEIPT_KNOWN_FLAGS:
+        return name
+    if not name.startswith("--"):
+        return None
+    matches = [flag for flag in RECEIPT_KNOWN_FLAGS if flag.startswith(name)]
+    return matches[0] if len(matches) == 1 else None
+
+
 def _extract_receipt_path(argv):
     for index, token in enumerate(argv):
         if token == "--":
             break
-        if token == "--receipt":
-            if index + 1 < len(argv) and not argv[index + 1].startswith("-"):
-                return argv[index + 1], "flag"
-            return None, None
-        if token.startswith("--receipt="):
+        if _canonical_receipt_option(token) != "--receipt":
+            continue
+        if "=" in token:
             path = token.split("=", 1)[1]
             return (path, "flag") if path else (None, None)
+        if index + 1 < len(argv) and not argv[index + 1].startswith("-"):
+            return argv[index + 1], "flag"
+        return None, None
     env_path = os.environ.get(RECEIPT_ENV)
     if env_path:
         return env_path, "env"
@@ -1443,21 +1454,19 @@ def _receipt_flags(argv):
         if skip_value:
             skip_value = False
             continue
-        if token.startswith("--"):
-            name = token.split("=", 1)[0]
-            if name in RECEIPT_KNOWN_FLAGS and name != "--receipt":
-                flags.add(name)
-            if name in RECEIPT_VALUE_FLAGS and "=" not in token:
-                skip_value = True
-        elif token in RECEIPT_KNOWN_FLAGS:
-            flags.add(token)
+        name = _canonical_receipt_option(token)
+        if name is not None and name != "--receipt":
+            flags.add(name)
+        if name in RECEIPT_VALUE_FLAGS and "=" not in token:
+            skip_value = True
     return sorted(flags)
 
 
 def _receipt_command(argv):
-    if "--version" in argv:
+    options = {_canonical_receipt_option(token) for token in argv}
+    if "--version" in options:
         return "version"
-    if any(token in ("-h", "--help") for token in argv):
+    if "-h" in options or "--help" in options:
         return "help"
     skip_value = False
     for token in argv:
@@ -1466,14 +1475,56 @@ def _receipt_command(argv):
         if skip_value:
             skip_value = False
             continue
-        if token.startswith("--"):
-            name = token.split("=", 1)[0]
-            if name in RECEIPT_VALUE_FLAGS and "=" not in token:
-                skip_value = True
+        name = _canonical_receipt_option(token)
+        if name in RECEIPT_VALUE_FLAGS and "=" not in token:
+            skip_value = True
+            continue
+        if name is not None:
             continue
         if token in COMMANDS:
             return token
     return "review"
+
+
+
+
+def _verify_request_path(argv):
+    command = None
+    options_ended = False
+    skip_value = False
+    for token in argv:
+        if not options_ended:
+            if token == "--":
+                options_ended = True
+                continue
+            if skip_value:
+                skip_value = False
+                continue
+            name = _canonical_receipt_option(token)
+            if name in RECEIPT_VALUE_FLAGS and "=" not in token:
+                skip_value = True
+                continue
+            if name is not None or token.startswith("-"):
+                continue
+        if command is None:
+            command = token
+        elif command == "verify":
+            return token
+        else:
+            return None
+    return None
+
+
+def _receipt_targets_request(request_path, receipt_path):
+    if request_path in (None, "-") or not receipt_path:
+        return False
+    try:
+        return os.path.samefile(
+            os.path.expanduser(request_path),
+            os.path.expanduser(receipt_path),
+        )
+    except OSError:
+        return False
 
 
 def _exit_code_value(code):
@@ -1578,7 +1629,7 @@ def _append_run_receipt(
     return True
 
 
-def _main(argv=None):
+def _parse_args(argv=None):
     p = argparse.ArgumentParser(
         prog="ozone",
         description="Vivary review, impact, and governed evidence verification.",
@@ -1607,6 +1658,10 @@ def _main(argv=None):
             p.error("verify requires --governed")
         if not args.id:
             p.error("verify requires a request JSON file or - for stdin")
+    return args
+
+
+def _run_args(args):
     return {
         "review": cmd_review,
         "impact": cmd_impact,
@@ -1615,12 +1670,34 @@ def _main(argv=None):
     }[args.command](args)
 
 
+def _main(argv=None):
+    return _run_args(_parse_args(argv))
+
+
 def main(argv=None):
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     started_at = time.monotonic()
     receipt_path, receipt_source = _extract_receipt_path(raw_argv)
+    request_path = _verify_request_path(raw_argv)
+    if _receipt_targets_request(request_path, receipt_path):
+        print(
+            "ozone: receipt: receipt path must not identify the verification request",
+            file=sys.stderr,
+        )
+        return 2
+    args = None
     try:
-        rc = _main(raw_argv)
+        args = _parse_args(raw_argv)
+        if args.receipt is not None:
+            receipt_path, receipt_source = args.receipt, "flag"
+        request_path = args.id if args.command == "verify" else None
+        if _receipt_targets_request(request_path, receipt_path):
+            print(
+                "ozone: receipt: receipt path must not identify the verification request",
+                file=sys.stderr,
+            )
+            return 2
+        rc = _run_args(args)
     except SystemExit as e:
         code = _exit_code_value(e.code)
         receipt_ok = _append_run_receipt(

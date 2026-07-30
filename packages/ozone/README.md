@@ -68,10 +68,11 @@ The exact request, result, freshness, and exit-code contract lives in the
 [command reference](https://vivary.vercel.app/commands/#governed-evidence-verification).
 
 For local debugging, pass `--receipt PATH` or set `VIVARY_RECEIPT_LOG=PATH` to append
-a dependency-free JSONL run receipt. Receipts stay local and record only command
-envelope data such as tool version, command, flag names, exit code, duration, Python,
-and platform. They do not capture stdout, stderr, file contents, target ids, local paths,
-or graph content.
+a dependency-free JSONL run receipt. The receipt target must not identify a file-backed
+verification request, including through a hard-link alias. Receipts stay local and
+record only command envelope data such as tool version, command, flag names, exit code,
+duration, Python, and platform. They do not capture stdout, stderr, file contents,
+target ids, local paths, or graph content.
 
 ## The `structure` pack
 
@@ -127,7 +128,7 @@ python ../tropo/tropo.py view blast <id> --root <workspace> --out impact.html
 
 Python 3.11+. In a repo checkout, Ozone loads the sibling Tropo and core packages
 in-process. Packaged builds depend on `vivary-tropo>=0.3.0` and
-`vivary-core>=0.2.2`.
+`vivary-core>=0.2.3`.
 
 ---
 

@@ -825,6 +825,114 @@ def test_deduplicate_is_withheld_not_proposed_when_the_pair_is_a_side_of_an_unre
     ]
 
 
+def test_deduplicate_indexes_conflicts_once_without_changing_multi_repository_output():
+    class CountingConflicts(list):
+        def __init__(self, values):
+            super().__init__(values)
+            self.scan_count = 0
+
+        def __iter__(self):
+            self.scan_count += 1
+            return super().__iter__()
+
+    edges = []
+    claims = []
+    conflicts = []
+    expected_withheld = []
+    expected_proposals = []
+    for index in range(50):
+        repository = f"repository_{index:03d}"
+        checkout_a = f"checkout_{index:03d}_aaaa"
+        checkout_b = f"checkout_{index:03d}_bbbb"
+        edges.extend(
+            [
+                {"id": f"edge_{index:03d}_a", "kind": "checkout_of", "from": checkout_a, "to": repository, "evidence": None},
+                {"id": f"edge_{index:03d}_b", "kind": "checkout_of", "from": checkout_b, "to": repository, "evidence": None},
+            ]
+        )
+        claim_a = synthetic_claim(subject=checkout_a, fact="head_revision")
+        claim_b = synthetic_claim(subject=checkout_b, fact="head_revision")
+        claims.extend([claim_a, claim_b])
+        if index % 2 == 0:
+            conflicts.append(
+                {
+                    "id": f"conflict_{index:03d}",
+                    "kind": "divergent_checkouts",
+                    "repository": repository,
+                    "sides": [{"checkout": checkout_a}, {"checkout": checkout_b}],
+                    "status": "unresolved",
+                }
+            )
+            expected_withheld.append(
+                {
+                    "kind": REPAIR_KINDS["DEDUPLICATE"],
+                    "repository": repository,
+                    "sides": [checkout_a, checkout_b],
+                    "reason": "conflict_unresolved",
+                }
+            )
+        else:
+            expected_proposals.append(
+                {
+                    "id": deterministic_id(
+                        "repair",
+                        {
+                            "kind": REPAIR_KINDS["DEDUPLICATE"],
+                            "repository": repository,
+                            "sides": [checkout_a, checkout_b],
+                            "fact": "head_revision",
+                        },
+                    ),
+                    "kind": REPAIR_KINDS["DEDUPLICATE"],
+                    "status": "proposed",
+                    "target": repository,
+                    "purpose": (
+                        f"checkouts {checkout_a} and {checkout_b} of the same repository both carry a claim for "
+                        "'head_revision'; route the fact through one owning checkout instead of duplicating it in the capsule"
+                    ),
+                    "evidence": [claim_a["id"], claim_b["id"]],
+                    "cites": [checkout_a, checkout_b],
+                    "ownership": {"subject": None, "basis": "tie_no_preference"},
+                    "requires_gate": True,
+                    "estimate": {"token_savings": 7, "estimate_quality": "approximate"},
+                }
+            )
+    # This pair belongs to another repository. A flat conflict-pair index
+    # would incorrectly withhold repository_001's otherwise valid proposal.
+    conflicts.append(
+        {
+            "id": "conflict_miskeyed",
+            "kind": "divergent_checkouts",
+            "repository": "repository_000",
+            "sides": [{"checkout": "checkout_001_aaaa"}, {"checkout": "checkout_001_bbbb"}],
+            "status": "unresolved",
+        }
+    )
+
+    counting_conflicts = CountingConflicts(conflicts)
+    graph = {
+        "schema": "vivary.workspace-graph/v0",
+        "workspace_fingerprint": "sha256:" + "0" * 64,
+        "nodes": [],
+        "edges": edges,
+        "conflicts": counting_conflicts,
+    }
+    capsule_fx = synthetic_capsule(claims=claims)
+
+    result = propose_context_repairs(capsule=capsule_fx, graph=graph)
+
+    expected_body = {
+        "schema": REPAIR_PROPOSAL_SCHEMA,
+        "capsule": {"id": capsule_fx["capsule_id"], "fingerprint": capsule_fx["fingerprint"]},
+        "proposals": expected_proposals,
+        "withheld": expected_withheld,
+        "writes_performed": 0,
+        "requires_gate": True,
+    }
+    assert result == {**expected_body, "fingerprint": fingerprint(expected_body)}
+    assert counting_conflicts.scan_count <= 1
+
+
 def test_deduplicate_does_not_fire_when_the_fact_name_matches_but_the_asserted_value_differs():
     # Same fact, genuinely different content (e.g. one checkout dirty, the
     # other clean) - not duplication, so there is nothing to route through

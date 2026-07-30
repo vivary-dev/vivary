@@ -32,7 +32,7 @@ def test_runtime_version_matches_the_package_manifest():
     project = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
 
     assert strato.__version__ == project["version"]
-    assert "vivary-core>=0.2.2" in project["dependencies"]
+    assert "vivary-core>=0.2.3" in project["dependencies"]
 
 
 def capsule(**overrides):

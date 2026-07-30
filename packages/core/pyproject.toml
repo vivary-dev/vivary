@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vivary-core"
-version = "0.2.2"
+version = "0.2.3"
 description = "Vivary's governed-context seam for deterministic evidence, task capsules, receipts, and Strato, Ozone, Exo, and Bellamente policy surfaces."
 readme = "README.md"
 requires-python = ">=3.11"

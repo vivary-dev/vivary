@@ -16,7 +16,7 @@ the `v0.1.0` line.
 
 ## [Unreleased: governed Tropo, Strato, and Ozone adapters] — 2026-07-26
 
-Affects the source checkout's unreleased `vivary-core` **0.2.2**, `vivary-tropo`
+Affects the source checkout's unreleased `vivary-core` **0.2.3**, `vivary-tropo`
 **0.5.0**, `vivary-strato` **0.1.1**, `vivary-ozone` **0.3.0**, and `vivary`
 meta-package **0.1.2**, the first three role-to-core dependency edges, package
 documentation, and CI packaging proof. The published releases remain Tropo **0.4.1**,
@@ -123,18 +123,20 @@ remains part of the final coordinated release train and requires a separate huma
   duplicate-claim-ID, duplicate-claim-semantics, duplicate-check, receipt-extension,
   core-unknown, command-presence, flag-scope, non-mapping-receipt, incomplete-claim,
   topology-identifier, missing, tampered, stale, workspace-mismatched, budget-limited,
-  unknown-artifact, bounded-repair, pair-scan-bound, route-evidence-bound,
-  identifier-bound, omission-bound, estimate-bound, gate-shape, graph-relationship,
-  scoped-full-graph, forged-in-scope-conflict, conflict-binding, topology-commitment,
-  output-escaping, malformed, recursive, repair, CLI, and real Ozone-to-Strato cases.
+  request/receipt-alias, unknown-artifact, bounded-repair, pair-scan-bound,
+  route-evidence-bound, identifier-bound, omission-bound, estimate-bound, gate-shape,
+  graph-relationship, scoped-full-graph, forged-in-scope-conflict, conflict-binding,
+  topology-commitment, output-escaping, malformed, recursive, repair, CLI, and real
+  Ozone-to-Strato cases.
   The installed-package CI smoke
   resolves the complete local meta-package dependency graph, proves Ozone's core floor,
   runs the packaged Ozone verdict path, and hands its unchanged verdict to Strato.
 
 ### Changed
 
-- `vivary-core` advances from 0.2.0 to 0.2.2. Version 0.2.1 introduced the governed
-  adapter API; 0.2.2 hardens the compiler/verifier integrity boundary.
+- `vivary-core` advances from 0.2.0 to 0.2.3. Version 0.2.1 introduced the governed
+  adapter API; 0.2.2 hardened the compiler/verifier integrity boundary; 0.2.3 adds the
+  repair-topology commitment API and complete compiler-owned capsule validation.
   `vivary-tropo` advances from 0.4.1 to 0.5.0 because the governed flags are a
   user-visible minor feature and keeps `vivary-core>=0.2.1`, the first source version
   exposing the adapter API. This is the first real package-to-core dependency promised
@@ -145,11 +147,11 @@ remains part of the final coordinated release train and requires a separate huma
   `ozone verify --governed` from that installed Ozone floor. All development versions
   remain unpublished until the coordinated release.
 - `vivary-strato` advances from 0.1.0 to 0.1.1 for the capsule-integrity hardening and
-  declares `vivary-core>=0.2.2`. The `vivary` meta-package does not add Strato yet;
+  declares `vivary-core>=0.2.3`. The `vivary` meta-package does not add Strato yet;
   completing the one-install role surface remains owned by #207. Both Strato and core
   stay explicitly allowlisted as unpublished until the final coordinated release gate.
 - `vivary-ozone` advances from 0.2.0 to 0.3.0 because `verify --governed` is a
-  user-visible command and declares `vivary-core>=0.2.2` with its first real core
+  user-visible command and declares `vivary-core>=0.2.3` with its first real core
   import. Plain `review`, `impact`, and `packs` behavior remains unchanged. Ozone
   0.3.0 stays unpublished until the final coordinated release gate.
 - Plain `tropo find` keeps its existing typed-context packet and default token budget.
@@ -161,6 +163,10 @@ remains part of the final coordinated release train and requires a separate huma
   blocking on an inherited stderr handle.
 - Core gate-sufficiency evaluation indexes validated receipt claim IDs once before
   matching capsule coverage, keeping the evidence check linear in request size.
+- Core context-repair generation indexes conflicts by repository once before expansion,
+  avoiding a repository-by-conflict cross-product.
+- Ozone refuses a run-receipt target that identifies its file-backed verification
+  request, including through a hard-link alias, before reading or appending either file.
 - Derived required checks now carry checkout-scoped names, the normalized checkout
   `cwd`, and the observation that actually proves each command. This prevents one
   checkout's receipt from clearing another checkout's check. An observed npm test
@@ -220,25 +226,25 @@ remains part of the final coordinated release train and requires a separate huma
 - `python packages/tropo/tests/test_tropo.py` — **169/169** passed on Windows.
 - `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **169/169**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **638 passed** on Windows;
+- `python -m pytest packages/core/tests/ -q` — **639 passed** on Windows;
   `UV_CACHE_DIR=/tmp/vivary-uv-cache TMPDIR=/tmp uv run --no-cache --with pytest
-  python3 -m pytest packages/core/tests/ -q -p no:cacheprovider` — **636 passed,
+  python3 -m pytest packages/core/tests/ -q -p no:cacheprovider` — **637 passed,
   2 platform-specific skips** on WSL Linux.
 - `python -m pytest packages/strato/tests -q` — **48 passed** on Windows and
   **48 passed** on WSL Linux.
 - `python -m pytest packages/core/tests/test_policy.py -q` — **91 passed**;
   `python -m pytest packages/core/tests/test_control.py -q` — **101 passed**.
 - Isolated Windows and WSL `uv run --no-cache --with ./packages/core --with
-  ./packages/strato` smokes built core **0.2.2** and Strato **0.1.1**; installed
+  ./packages/strato` smokes built core **0.2.3** and Strato **0.1.1**; installed
   metadata matched Strato's runtime version and `strato decide --help` exposed the
   governed JSON/strict command surface.
 - `python -m pytest packages/tropo/tests/test_tropo.py -q -k "governed or
   cmd_find_returns_context_packet"` — **17 passed**.
 - Isolated `uv run --no-cache --with ./packages/core --with ./packages/tropo`
-  metadata smoke reported core **0.2.2** and Tropo **0.5.0**.
+  metadata smoke reported core **0.2.3** and Tropo **0.5.0**.
 - Coordinated local `uv run --no-cache --with` smoke across core, Tropo,
   create-vivary, Ozone, Exo, and the meta package reported `vivary` **0.1.2**,
-  Tropo **0.5.0**, and core **0.2.2**.
+  Tropo **0.5.0**, and core **0.2.3**.
   The packaged smoke also verified that the installed core version satisfies Tropo's
   declared requirement specifier, not merely that the metadata names it.
 - A local wheelhouse built core, Tropo, Strato, Ozone, Exo, create-vivary, the
@@ -257,7 +263,7 @@ remains part of the final coordinated release train and requires a separate huma
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **63/63**, Exo **17/17**,
+- Repository verification also passed: Ozone **64/64**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**
