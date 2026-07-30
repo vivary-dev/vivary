@@ -37,7 +37,7 @@ from vivary_core.canonical import (
     is_canonical_body_value,
     is_within_allowlist,
 )
-from vivary_core.capsule_select import select_claims
+from vivary_core.capsule_select import select_claims, validate_filters
 from vivary_core.collation import CollationDomainError, locale_sort_key
 
 CAPSULE_SCHEMA = "vivary.task-capsule/v0"
@@ -132,6 +132,74 @@ def _is_required_checks_shape(value) -> bool:
     )
 
 
+def _is_task_shape(task) -> bool:
+    if not (
+        isinstance(task, dict)
+        and "question" in task
+        and set(task) <= {"question", "scope", "filters"}
+    ):
+        return False
+    if "scope" in task and not (
+        isinstance(task["scope"], list)
+        and bool(task["scope"])
+        and all(_nonempty_string(root) for root in task["scope"])
+    ):
+        return False
+    if "filters" in task:
+        if task["filters"] is None:
+            return False
+        try:
+            validate_filters(task["filters"])
+        except TypeError:
+            return False
+    return True
+
+
+def _is_conflict_side_shape(side) -> bool:
+    if not (
+        isinstance(side, dict)
+        and {
+            "checkout",
+            "path",
+            "head_revision",
+            "head_ref",
+            "last_fetch",
+            "evidence",
+        }
+        <= set(side)
+        and _nonempty_string(side.get("checkout"))
+        and _nonempty_string(side.get("path"))
+    ):
+        return False
+    head_revision = side["head_revision"]
+    head_ref = side["head_ref"]
+    last_fetch = side["last_fetch"]
+    evidence = side["evidence"]
+    return (
+        (head_revision is None or _nonempty_string(head_revision))
+        and (
+            head_ref is None
+            or (
+                isinstance(head_ref, dict)
+                and _nonempty_string(head_ref.get("kind"))
+                and (
+                    head_ref["kind"] != "branch"
+                    or _nonempty_string(head_ref.get("name"))
+                )
+            )
+        )
+        and (last_fetch is None or isinstance(last_fetch, str))
+        and (
+            evidence is None
+            or isinstance(evidence, dict)
+            or (
+                isinstance(evidence, list)
+                and all(isinstance(item, dict) for item in evidence)
+            )
+        )
+    )
+
+
 def _is_claim_shape(claim) -> bool:
     if not isinstance(claim, dict) or not all(
         _nonempty_string(claim.get(field))
@@ -181,12 +249,7 @@ def _is_conflict_shape(conflict) -> bool:
     return (
         isinstance(sides, list)
         and len(sides) >= 2
-        and all(
-            isinstance(side, dict)
-            and _nonempty_string(side.get("checkout"))
-            and _nonempty_string(side.get("path"))
-            for side in sides
-        )
+        and all(_is_conflict_side_shape(side) for side in sides)
         and isinstance(reason_codes, list)
         and bool(reason_codes)
         and all(_nonempty_string(reason_code) for reason_code in reason_codes)
@@ -199,7 +262,7 @@ def is_task_capsule_shape(capsule) -> bool:
     if not (
         isinstance(capsule, dict)
         and capsule.get("schema") == CAPSULE_SCHEMA
-        and isinstance(capsule.get("task"), dict)
+        and _is_task_shape(capsule.get("task"))
         and isinstance(capsule.get("capsule_id"), str)
         and bool(capsule["capsule_id"])
         and isinstance(capsule.get("fingerprint"), str)

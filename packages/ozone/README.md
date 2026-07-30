@@ -55,14 +55,14 @@ every claim only when the check list is nonempty and every check passed. Otherwi
 `claims_unverified` contains every claim.
 Each capsule conflict must retain its compiler-owned kind, repository, question, sides,
 status, reason codes, and `review_required` decision. It must preserve at least two
-checkout/path sides.
+checkout/path sides with head revision, head reference, last fetch, and evidence fields.
 
 Receipt checks that share a capsule required-check name must also carry its exact command.
-Ozone validates optional
-`task.scope` entries whether or not the request supplies a graph. A full workspace graph
-may retain conflicts outside a scoped capsule, but every preserved capsule conflict must
-match exactly. Ozone caps scope-to-conflict comparisons before it creates a repair
-proposal.
+Ozone validates optional `task.scope` and `task.filters` entries whether or not the
+request supplies a graph. It also validates bounded omission records on every governed
+request. A full workspace graph may retain conflicts outside a scoped capsule, but every
+preserved capsule conflict must match exactly. Ozone caps scope-to-conflict comparisons
+before it creates a repair proposal.
 
 The exact request, result, freshness, and exit-code contract lives in the
 [command reference](https://vivary.vercel.app/commands/#governed-evidence-verification).

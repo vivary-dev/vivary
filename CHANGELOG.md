@@ -60,11 +60,10 @@ remains part of the final coordinated release train and requires a separate huma
   and workspace fingerprints. The compiler and verifier share the JavaScript-lossless
   `max_claims` bound. Complete claims retain their compiler-owned subject, path, fact,
   text, status, evidence, and selection explanation; malformed repository IDs and
-  `checkout_of` endpoints are rejected before topology sorting. Malformed task scopes,
-  missing compiler-owned fields, and non-canonical values that would be lossy in
-  JavaScript are refused before policy. Requests, capsule observations, and receipts
-  have a
-  deterministic 300-second
+  `checkout_of` endpoints are rejected before topology sorting. Malformed task scopes
+  or filters, incomplete conflict-side evidence, missing compiler-owned fields, and
+  non-canonical values that would be lossy in JavaScript are refused before policy.
+  Requests, capsule observations, and receipts have a deterministic 300-second
   freshness window; a verdict without its receipt is rejected. Unknown fields and
   non-string Python mapping keys fail closed, so free-form status text cannot
   impersonate a human gate. Incomplete capsule envelopes and inputs whose JSON or
@@ -94,9 +93,10 @@ remains part of the final coordinated release train and requires a separate huma
   that shares a capsule required-check name must carry that exact command, preventing a
   passing result for another command from clearing the gate.
   It refuses unknown capsule/receipt fields even when the artifact is re-fingerprinted,
-  enforces core's 16-entry
-  omission-list/count contract and a 128-byte JSON-encoded ceiling on repair identifiers,
-  rejects semantically duplicate `(subject, fact, claim)` entries before they can
+  enforces core's 16-entry omission-list/count contract and exact `truncated` marker
+  semantics even when no repair graph is requested, applies a 128-byte JSON-encoded
+  ceiling on repair identifiers, and rejects semantically duplicate
+  `(subject, fact, claim)` entries before they can
   duplicate deterministic repair IDs, requires the repair graph to preserve every
   capsule conflict while allowing a full graph to retain out-of-scope conflicts for
   repair withholding, and recomputes the capsule's normalized repair-topology commitment
@@ -253,7 +253,7 @@ remains part of the final coordinated release train and requires a separate huma
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **58/58**, Exo **17/17**,
+- Repository verification also passed: Ozone **63/63**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**

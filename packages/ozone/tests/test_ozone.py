@@ -941,6 +941,164 @@ def test_governed_verification_refuses_incomplete_capsule_conflicts():
     assert result["reason_codes"] == ["invalid_capsule"]
 
 
+
+def test_governed_verification_refuses_incomplete_capsule_conflict_sides():
+    graph = _projected_remote_graph(
+        ["https://example.test/shared.git"] * 2,
+        ["a" * 40, "b" * 40],
+    )
+    capsule = compile_task_capsule(
+        task={
+            "question": "Review the shared repository.",
+            "scope": ["/repo"],
+            "required_checks": [
+                {"name": "unit", "command": "python packages/ozone/tests/test_ozone.py"}
+            ],
+        },
+        graph=graph,
+    )
+    assert capsule["conflicts"]
+
+    for missing_field in (
+        "head_revision",
+        "head_ref",
+        "last_fetch",
+        "evidence",
+    ):
+        malformed_capsule = json.loads(json.dumps(capsule))
+        del malformed_capsule["conflicts"][0]["sides"][0][missing_field]
+        malformed_capsule["fingerprint"] = fingerprint(
+            {
+                key: item
+                for key, item in malformed_capsule.items()
+                if key not in {"capsule_id", "fingerprint"}
+            }
+        )
+
+        result = ozone.verify_governed(
+            _governed_request(
+                capsule=malformed_capsule,
+                receipt=_governed_receipt(malformed_capsule),
+            )
+        )
+
+        assert result["schema"] == ozone.REFUSAL_SCHEMA
+        assert result["reason_codes"] == ["invalid_capsule"]
+
+
+def test_governed_verification_refuses_malformed_task_filters_without_repair_graph():
+    for malformed_filters in (None, "not-a-list"):
+        capsule = _governed_capsule()
+        capsule["task"]["filters"] = malformed_filters
+        capsule["fingerprint"] = fingerprint(
+            {
+                key: item
+                for key, item in capsule.items()
+                if key not in {"capsule_id", "fingerprint"}
+            }
+        )
+
+        result = ozone.verify_governed(
+            _governed_request(
+                capsule=capsule,
+                receipt=_governed_receipt(capsule),
+            )
+        )
+
+        assert result["schema"] == ozone.REFUSAL_SCHEMA
+        assert result["reason_codes"] == ["invalid_capsule"]
+
+
+def test_governed_verification_validates_budget_omissions_without_repair_graph():
+    capsule = _governed_capsule(
+        omissions=[
+            {
+                "kind": "claims_over_budget",
+                "reason": "claim budget reached",
+            }
+        ]
+    )
+
+    result = ozone.verify_governed(
+        _governed_request(
+            capsule=capsule,
+            receipt=_governed_receipt(capsule),
+        )
+    )
+
+    assert result["schema"] == ozone.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["invalid_repair_capsule"]
+
+
+def test_governed_verification_requires_exact_omission_truncation_marker_without_graph():
+    complete_omitted = [
+        {
+            "subject_path": f"/repo/omitted/{index}",
+            "fact": f"omitted:{index}",
+            "tier": "allowlisted",
+        }
+        for index in range(OMITTED_LIST_CAP)
+    ]
+    malformed_omissions = (
+        {
+            "kind": "claims_over_budget",
+            "reason": "claim budget reached",
+            "omitted_count": OMITTED_LIST_CAP + 1,
+            "omitted": complete_omitted,
+        },
+        {
+            "kind": "claims_over_budget",
+            "reason": "claim budget reached",
+            "omitted_count": 1,
+            "omitted": complete_omitted[:1],
+            "truncated": True,
+        },
+    )
+
+    for omission in malformed_omissions:
+        capsule = _governed_capsule(omissions=[omission])
+        result = ozone.verify_governed(
+            _governed_request(
+                capsule=capsule,
+                receipt=_governed_receipt(capsule),
+            )
+        )
+
+        assert result["schema"] == ozone.REFUSAL_SCHEMA
+        assert result["reason_codes"] == ["invalid_repair_capsule"]
+
+
+def test_governed_verification_accepts_compiler_filters_and_omissions_without_graph():
+    graph = _projected_remote_graph(
+        ["https://example.test/shared.git"] * 2,
+        ["a" * 40, "a" * 40],
+    )
+    capsule = compile_task_capsule(
+        task={
+            "question": "Review the shared repository.",
+            "scope": ["/repo"],
+            "filters": [{"field": "fact", "includes": ""}],
+            "required_checks": [
+                {"name": "unit", "command": "python packages/ozone/tests/test_ozone.py"}
+            ],
+        },
+        graph=graph,
+        budget={"max_claims": 1},
+    )
+    assert any(
+        omission["kind"] == "claims_over_budget"
+        for omission in capsule["omissions"]
+    )
+
+    result = ozone.verify_governed(
+        _governed_request(
+            capsule=capsule,
+            receipt=_governed_receipt(capsule),
+        )
+    )
+
+    assert result["schema"] == ozone.VERIFICATION_SCHEMA
+
 def test_governed_verification_preserves_duplicate_receipt_checks():
     governed_capsule = _governed_capsule(
         claims=[{"id": "claim:first", "subject": "checkout:a", "claim": "first"}]
@@ -1184,7 +1342,7 @@ def test_governed_verification_refuses_forged_in_scope_conflicts():
     assert outside_path["schema"] == ozone.REFUSAL_SCHEMA
     assert outside_path["reason_codes"] == ["invalid_repair_graph"]
     assert malformed_scope["schema"] == ozone.REFUSAL_SCHEMA
-    assert malformed_scope["reason_codes"] == ["invalid_repair_capsule"]
+    assert malformed_scope["reason_codes"] == ["invalid_capsule"]
 
 
 def test_governed_verification_refuses_malformed_scope_without_repair_graph():
@@ -1207,7 +1365,7 @@ def test_governed_verification_refuses_malformed_scope_without_repair_graph():
         )
 
         assert result["schema"] == ozone.REFUSAL_SCHEMA
-        assert result["reason_codes"] == ["invalid_repair_capsule"]
+        assert result["reason_codes"] == ["invalid_capsule"]
 
 
 def test_governed_verification_accepts_compiler_valid_scope_without_repair_graph():
@@ -1536,15 +1694,11 @@ def test_governed_verification_refuses_malformed_repair_inputs_without_crashing(
     assert malformed["schema"] == ozone.REFUSAL_SCHEMA
     assert malformed["reason_codes"] == ["invalid_repair_graph"]
     assert malformed_claim["schema"] == ozone.REFUSAL_SCHEMA
-    assert malformed_claim["reason_codes"] == [
-        "invalid_capsule",
-        "invalid_repair_capsule",
-    ]
+    assert malformed_claim["reason_codes"] == ["invalid_capsule"]
     assert missing_capsule["schema"] == ozone.REFUSAL_SCHEMA
     assert missing_capsule["reason_codes"] == [
         "invalid_capsule",
         "invalid_capsule_observed_at",
-        "invalid_repair_capsule",
     ]
     assert uncollatable_graph["schema"] == ozone.REFUSAL_SCHEMA
     assert uncollatable_graph["reason_codes"] == ["invalid_repair_graph"]
@@ -1612,6 +1766,7 @@ def test_governed_verification_refuses_unbounded_repair_products():
                     }
                     for index in range(OMITTED_LIST_CAP)
                 ],
+                "truncated": True,
             }
         ]
     )

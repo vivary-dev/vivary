@@ -477,7 +477,7 @@ ozone verify request.json --governed --json --strict
 | `schema` | Exactly `vivary.ozone-verification-request/v0`. |
 | `workspace` | Exactly `{"fingerprint": "..."}`; must match the capsule. |
 | `verified_at` | Caller-supplied timezone-aware instant. |
-| `capsule` | Complete `vivary.task-capsule/v0`; its body fingerprint and deterministic ID are recomputed before core delegation. Optional `task.scope` must contain at least one nonempty string, whether or not the request includes a graph. |
+| `capsule` | Complete `vivary.task-capsule/v0`; its body fingerprint and deterministic ID are recomputed before core delegation. Optional `task.scope` must contain at least one nonempty string. Optional `task.filters` must use the compiler's list-shaped `{field, equals\|includes}` contract. Both rules apply whether or not the request includes a graph. |
 | `receipt` | Complete Execution Receipt bound to the capsule. Its check records and claim lists are shape-validated; `claims_verified` and `claims_unverified` must be disjoint and together equal both `claims_in_scope` and the capsule's claim IDs. All claims are verified only when the check list is nonempty and every check passed. Otherwise, all claims remain unverified. Omission or malformed/tampered evidence cannot produce a sufficient aggregate result. |
 | `gate` | Named gate with core-owned `required_checks`, `require_claims_verified`, `max_unresolved_conflicts`, and `max_unresolved_unknowns` constraints. |
 | `graph` | Optional matching `vivary.workspace-graph/v0`. When present, Ozone returns a bounded `vivary.context-repair-proposal/v0`; every proposal has `requires_gate: true`, and `writes_performed` is always `0`. Ozone bounds checkout-pair scans, route evidence, and scope-to-conflict comparisons before repair construction. |
@@ -486,8 +486,8 @@ fact, text, status, and selection reason plus list-shaped evidence and selection
 signals. A re-fingerprinted partial claim is still an invalid capsule.
 Each capsule conflict must retain its compiler-owned kind, repository, question, status,
 reason codes, and `review_required` decision. It must preserve at least two sides, each
-with a nonempty checkout ID and path. A re-fingerprinted partial conflict is still an
-invalid capsule.
+with a nonempty checkout ID and path plus `head_revision`, `head_ref`, `last_fetch`, and
+evidence fields. A re-fingerprinted partial conflict is still an invalid capsule.
 The `receipt` field may be omitted, producing core's valid missing-evidence result. When
 the field is present, it must be a complete mapping whose `schema` is exactly
 `vivary.execution-receipt/v0`; `receipt_id` and `fingerprint` must be nonempty strings.
@@ -511,7 +511,9 @@ Claim IDs, claim facts, graph node IDs, and conflict IDs that repair expansion c
 repeat are limited to 128 bytes in JSON string encoding.
 
 A `claims_over_budget` omission must list exactly
-`min(omitted_count, 16)` entries. This matches core's compiler cap.
+`min(omitted_count, 16)` entries, whether or not the request includes a graph. When the
+count exceeds `16`, `truncated` must be `true`; at or below the cap, that field must be
+absent. This matches core's compiler contract.
 Requests whose total checkout-pair scan count, potential repair count, route-proposal
 evidence count, or derived estimate exceeds its matching core ceiling are refused
 before delegation.

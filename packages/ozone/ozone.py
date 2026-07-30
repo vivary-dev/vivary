@@ -464,15 +464,21 @@ def _repair_capsule_is_safe(capsule, core):
             continue
         omitted_count = omission.get("omitted_count")
         if (
-            not isinstance(omitted_count, int)
+            not _nonempty_string(omission.get("reason"))
+            or not isinstance(omitted_count, int)
             or isinstance(omitted_count, bool)
-            or omitted_count < 0
+            or omitted_count <= 0
         ):
             return False
         omitted = omission.get("omitted")
         if not isinstance(omitted, list):
             return False
         if len(omitted) != min(omitted_count, core["OMITTED_LIST_CAP"]):
+            return False
+        if omitted_count > core["OMITTED_LIST_CAP"]:
+            if omission.get("truncated") is not True:
+                return False
+        elif "truncated" in omission:
             return False
         if not all(
             isinstance(entry, dict)
@@ -771,6 +777,11 @@ def _validate_governed_request(request, core):
         )
     capsule_is_valid_for_receipt = False
     capsule_shape_is_valid = core["is_task_capsule_shape"](capsule)
+    repair_capsule_is_safe = capsule_shape_is_valid and _repair_capsule_is_safe(
+        capsule, core
+    )
+    if capsule_shape_is_valid and not repair_capsule_is_safe:
+        errors.append("invalid_repair_capsule")
     if not capsule_shape_is_valid:
         errors.append("invalid_capsule")
     elif len({claim["id"] for claim in capsule["claims"]}) != len(
@@ -786,13 +797,9 @@ def _validate_governed_request(request, core):
     ):
         errors.append("workspace_mismatch")
     else:
-        capsule_is_valid_for_receipt = not unknown_capsule_fields
-    if (
-        capsule_shape_is_valid
-        and "graph" not in request
-        and not _capsule_scope_is_valid(capsule)
-    ):
-        errors.append("invalid_repair_capsule")
+        capsule_is_valid_for_receipt = (
+            not unknown_capsule_fields and repair_capsule_is_safe
+        )
 
     observed_at = _parse_instant(
         capsule.get("workspace", {}).get("observed_at")
@@ -858,11 +865,6 @@ def _validate_governed_request(request, core):
             errors.append("stale_receipt")
 
     if "graph" in request:
-        repair_capsule_is_safe = capsule_shape_is_valid and _repair_capsule_is_safe(
-            capsule, core
-        )
-        if not repair_capsule_is_safe:
-            errors.append("invalid_repair_capsule")
         graph_is_safe = _repair_graph_is_safe(request["graph"], core)
         if not graph_is_safe:
             errors.append("invalid_repair_graph")
