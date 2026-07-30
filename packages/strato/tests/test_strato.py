@@ -362,8 +362,22 @@ def test_human_owner_authority_alone_cannot_clear_a_capsule_gate():
                 "repository": "repository:test",
                 "question": "Which checkout is current?",
                 "sides": [
-                    {"checkout": "checkout:a", "path": "/repo/a"},
-                    {"checkout": "checkout:b", "path": "/repo/b"},
+                    {
+                        "checkout": "checkout:a",
+                        "path": "/repo/a",
+                        "head_revision": "a" * 40,
+                        "head_ref": {"kind": "branch", "name": "main"},
+                        "last_fetch": None,
+                        "evidence": [],
+                    },
+                    {
+                        "checkout": "checkout:b",
+                        "path": "/repo/b",
+                        "head_revision": "b" * 40,
+                        "head_ref": {"kind": "branch", "name": "main"},
+                        "last_fetch": None,
+                        "evidence": [],
+                    },
                 ],
                 "status": "unresolved",
                 "reason_codes": ["value_conflict", "identity_unresolved"],
@@ -395,7 +409,7 @@ def test_scope_binding_uses_core_path_equivalence_and_rejects_an_unscoped_capsul
         )
     )
     unscoped = strato.decide_governed(
-        request(capsule=capsule(task={"question": "Unscoped", "scope": None}))
+        request(capsule=capsule(task={"question": "Unscoped"}))
     )
 
     assert equivalent["decision"] == LOOP_DECISION["ACT"]
