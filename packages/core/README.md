@@ -35,14 +35,15 @@ The governed-context shared seam every Vivary role package will speak through:
 - **`workspace_content`** — bounded, read-only `git grep` content search
   over tracked files only, every truncation recorded.
 - **`capsule_compile` / `capsule_select`** — the bounded Task Capsule:
-  relevance-ranked, explainable claim selection with fail-closed structured filters;
-  complete claims retain their subject, fact, text, status, evidence, and selection
-  explanation. Complete conflicts retain their repository, question, review decision,
-  reason codes, and at least two checkout/path sides. Derived checks bind checkout-scoped
-  identities, execution workspaces, and exact observation evidence. A repair-topology
-  fingerprint commits repository nodes
-  and `checkout_of` relationships; malformed topology identifiers, graph nodes, or facts
-  are rejected rather than partially compiled. Every budget cut is a recorded omission.
+  relevance-ranked, explainable claim selection with fail-closed structured filters.
+  Complete claims retain their compiler-derived identity, subject path, fact, text,
+  status, evidence, and selection explanation. Complete conflicts retain their
+  repository, question, review decision, reason codes, and at least two checkout/path
+  sides. Derived checks bind checkout-scoped identities, execution workspaces, and exact
+  observation evidence. A repair-topology fingerprint commits checkout IDs and paths,
+  repository nodes, and `checkout_of` relationships. Malformed topology identifiers,
+  graph nodes, or facts are rejected rather than partially compiled. Every budget cut is
+  a recorded omission.
 - **`collation`** — JS `localeCompare` ordering (claim/node/edge ranking is
   part of the frozen contract), pinned as an empirical weight table
   extracted from the reference runtime and verified on ~2.1M probe pairs;
@@ -104,7 +105,7 @@ pip install pytest
 python -m pytest packages/core/tests/ -q
 ```
 
-The current platform-specific proof is **644 tests on Windows**. On Linux, it is
-**642 passed plus 2 skips**. The suite translates the reference contracts across observation,
+The current platform-specific proof is **645 tests on Windows**. On Linux, it is
+**643 passed plus 2 skips**. The suite translates the reference contracts across observation,
 capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces, corruption
 handling, real-git evidence-store round trips, and byte-exact cross-runtime fixtures.

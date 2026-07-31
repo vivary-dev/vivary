@@ -41,6 +41,11 @@ REFUSAL_SCHEMA = "vivary.ozone-verification-refusal/v0"
 MAX_EVIDENCE_AGE_SECONDS = 300
 MAX_REPAIR_IDENTIFIER_JSON_BYTES = 128
 MAX_SCOPE_PATH_COMPARISONS = 100_000
+MAX_SCOPE_ROOTS = 1_000
+MAX_REPAIR_GRAPH_NODES = 1_000
+MAX_REPAIR_GRAPH_EDGES = 1_000
+MAX_REPAIR_GRAPH_CONFLICTS = 300
+MAX_REPAIR_GRAPH_UNKNOWNS = 1_000
 CAPSULE_FIELDS = frozenset(
     {
         "schema",
@@ -150,7 +155,7 @@ def _load_core_verification():
     ):
         sys.path.insert(0, sibling_core)
     from vivary_core.capsule_compile import (
-        capsule_claims_match_graph,
+        capsule_context_matches_graph,
         is_task_capsule_shape,
         repair_topology_fingerprint,
         verify_task_capsule_integrity,
@@ -173,7 +178,7 @@ def _load_core_verification():
     from vivary_core.verify_sufficiency import evaluate_gate_sufficiency
 
     return {
-        "capsule_claims_match_graph": capsule_claims_match_graph,
+        "capsule_context_matches_graph": capsule_context_matches_graph,
         "is_task_capsule_shape": is_task_capsule_shape,
         "verify_task_capsule_integrity": verify_task_capsule_integrity,
         "OMITTED_LIST_CAP": OMITTED_LIST_CAP,
@@ -402,6 +407,7 @@ def _capsule_scope_is_valid(capsule, core):
             isinstance(root, str) and bool(root)
             for root in declared_scope
         )
+        and len(declared_scope) <= MAX_SCOPE_ROOTS
     ):
         return False
 
@@ -601,6 +607,22 @@ def _repair_graph_is_safe(graph, core):
         and isinstance(graph.get("nodes"), list)
         and isinstance(graph.get("edges"), list)
         and isinstance(graph.get("conflicts"), list)
+        and isinstance(graph.get("unknowns"), list)
+        and len(graph["nodes"]) <= MAX_REPAIR_GRAPH_NODES
+        and len(graph["edges"]) <= MAX_REPAIR_GRAPH_EDGES
+        and len(graph["conflicts"]) <= MAX_REPAIR_GRAPH_CONFLICTS
+        and len(graph["unknowns"]) <= MAX_REPAIR_GRAPH_UNKNOWNS
+        and all(
+            isinstance(unknown, dict)
+            and all(
+                path is None or _nonempty_string(path)
+                for path in (
+                    unknown.get("path"),
+                    unknown.get("subject_path"),
+                )
+            )
+            for unknown in graph["unknowns"]
+        )
     ):
         return False
 
@@ -693,6 +715,35 @@ def _repair_graph_is_safe(graph, core):
         if conflict_pair_count > max_checkouts * (max_checkouts - 1) // 2:
             return False
     return True
+
+
+def _graph_context_work_is_bounded(capsule, graph):
+    scope = capsule["task"].get("scope") or []
+    if not scope:
+        return True
+    claim_subjects = {claim["subject"] for claim in capsule["claims"]}
+    checkout_count = sum(
+        1
+        for node in graph["nodes"]
+        if (
+            node.get("kind") == "checkout"
+            and isinstance((node.get("facts") or {}).get("is_git_repository"), dict)
+            and node["facts"]["is_git_repository"].get("value") is True
+            and node.get("id") in claim_subjects
+        )
+    )
+    unknown_path_count = sum(
+        1
+        for unknown in graph["unknowns"]
+        for path in (
+            unknown.get("path"),
+            unknown.get("subject_path"),
+        )
+        if path is not None
+    )
+    return (
+        checkout_count + unknown_path_count
+    ) * len(scope) <= MAX_SCOPE_PATH_COMPARISONS
 
 
 def _repair_graph_topology_is_bound(capsule, graph, core):
@@ -910,8 +961,10 @@ def _validate_governed_request(request, core):
         elif request["graph"]["workspace_fingerprint"] != workspace_fingerprint:
             errors.append("repair_graph_workspace_mismatch")
         elif repair_capsule_is_safe:
-            if not core["capsule_claims_match_graph"](capsule, request["graph"]):
-                errors.append("repair_graph_claims_mismatch")
+            if not _graph_context_work_is_bounded(capsule, request["graph"]):
+                errors.append("repair_work_unbounded")
+            elif not core["capsule_context_matches_graph"](capsule, request["graph"]):
+                errors.append("repair_graph_context_mismatch")
             else:
                 conflicts_match, conflict_work_is_bounded = (
                     _repair_graph_matches_capsule_conflicts(

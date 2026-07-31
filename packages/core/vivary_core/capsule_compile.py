@@ -34,6 +34,7 @@ import re
 from vivary_core.canonical import (
     MAX_LOSSLESS_INTEGER,
     _utf16_sort_key,
+    canonicalize,
     deterministic_id,
     fingerprint,
     is_canonical_body_value,
@@ -53,6 +54,7 @@ from vivary_core.capsule_select import (
 from vivary_core.collation import CollationDomainError, locale_sort_key
 
 CAPSULE_SCHEMA = "vivary.task-capsule/v0"
+MAX_GRAPH_CONTEXT_CHECKOUTS = 300
 
 
 def _nonempty_string(value) -> bool:
@@ -76,6 +78,21 @@ def repair_topology_fingerprint(graph) -> str:
     graph_edges = graph.get("edges", [])
     if not isinstance(graph_nodes, list) or not isinstance(graph_edges, list):
         raise ValueError("workspace graph topology must use node and edge lists")
+
+    checkouts = []
+    for node in graph_nodes:
+        if not isinstance(node, dict):
+            raise ValueError("workspace graph contains an invalid node")
+        if node.get("kind") != "checkout":
+            continue
+        if not _nonempty_string(node.get("id")) or not _nonempty_string(
+            node.get("path")
+        ):
+            raise ValueError(
+                "checkout topology nodes require non-empty string IDs and paths"
+            )
+        checkouts.append({"id": node["id"], "path": node["path"]})
+    checkouts.sort(key=lambda node: _utf16_sort_key(node["id"]))
 
     repositories = []
     for node in graph_nodes:
@@ -121,6 +138,7 @@ def repair_topology_fingerprint(graph) -> str:
     return fingerprint(
         {
             "schema": "vivary.repair-topology/v0",
+            "checkouts": checkouts,
             "repositories": repositories,
             "checkout_of": checkout_of,
         }
@@ -220,6 +238,17 @@ def _is_conflict_side_shape(side) -> bool:
     )
 
 
+def _claim_id(claim) -> str:
+    return deterministic_id(
+        "claim",
+        {
+            "subject": claim.get("subject"),
+            "fact": claim.get("fact"),
+            "claim": claim.get("claim"),
+        },
+    )
+
+
 def _is_claim_shape(claim) -> bool:
     if not isinstance(claim, dict) or not all(
         _nonempty_string(claim.get(field))
@@ -244,6 +273,8 @@ def _is_claim_shape(claim) -> bool:
         or not isinstance(selection.get("signals"), list)
         or not all(isinstance(signal, dict) for signal in selection["signals"])
     ):
+        return False
+    if claim["id"] != _claim_id(claim):
         return False
     matched_filters = selection.get("matched_filters")
     return matched_filters is None or (
@@ -437,8 +468,8 @@ def _claim_matches_task_filters(task, claim) -> bool:
     return True
 
 
-def capsule_claims_match_graph(capsule, graph) -> bool:
-    """Bind every claim and graph-derived selection signal to the supplied graph."""
+def capsule_context_matches_graph(capsule, graph) -> bool:
+    """Bind compiler-owned capsule context to the graph supplied to a verifier."""
 
     profile_filters = [
         task_filter
@@ -446,11 +477,62 @@ def capsule_claims_match_graph(capsule, graph) -> bool:
         if task_filter["field"] in {"label", "repository", "branch"}
     ]
     profiles = subject_profiles(graph)
+    scope = capsule["task"].get("scope")
+    claim_subjects = {claim["subject"] for claim in capsule["claims"]}
+    graph_checkouts = [
+        node
+        for node in graph["nodes"]
+        if (
+            node.get("kind") == "checkout"
+            and isinstance((node.get("facts") or {}).get("is_git_repository"), dict)
+            and node["facts"]["is_git_repository"].get("value") is True
+            and node.get("id") in claim_subjects
+        )
+    ]
+    if len(graph_checkouts) > MAX_GRAPH_CONTEXT_CHECKOUTS:
+        return False
+    checkouts = [
+        node
+        for node in graph_checkouts
+        if (
+            not scope
+            or any(
+                is_within_allowlist(root, node.get("path"))
+                for root in scope
+            )
+        )
+    ]
+    try:
+        graph_claims = {
+            (claim["subject"], claim["fact"]): claim
+            for claim in _graph_claim_candidates(checkouts, [])
+        }
+    except (AttributeError, TypeError):
+        return False
+
     for claim in capsule["claims"]:
         profile = profiles.get(claim["subject"])
+        expected = graph_claims.get((claim["subject"], claim["fact"]))
         if (
             profile is None
             or claim["subject_path"] != profile.get("path")
+            or (
+                claim["fact"] != "content_match"
+                and (
+                    expected is None
+                    or any(
+                        claim[field] != expected[field]
+                        for field in (
+                            "subject",
+                            "subject_path",
+                            "fact",
+                            "claim",
+                            "status",
+                            "evidence",
+                        )
+                    )
+                )
+            )
             or any(
                 not _match_filter(
                     task_filter,
@@ -469,6 +551,26 @@ def capsule_claims_match_graph(capsule, graph) -> bool:
                 )
             ):
                 return False
+
+    scope = capsule["task"].get("scope")
+    expected_unknowns = []
+    for unknown in graph.get("unknowns", []):
+        paths = [unknown.get("path"), unknown.get("subject_path")]
+        if scope and any(
+            path is not None
+            and not any(is_within_allowlist(root, path) for root in scope)
+            for path in paths
+        ):
+            continue
+        expected_unknowns.append(canonicalize(unknown))
+    available_unknowns = {}
+    for unknown in capsule["unknowns"]:
+        key = canonicalize(unknown)
+        available_unknowns[key] = available_unknowns.get(key, 0) + 1
+    for key in expected_unknowns:
+        if available_unknowns.get(key, 0) == 0:
+            return False
+        available_unknowns[key] -= 1
     return True
 
 
@@ -775,6 +877,46 @@ def _dirty_entries_claim(node, truncation_omissions):
     }
 
 
+def _graph_claim_candidates(checkouts, truncation_omissions):
+    candidates = []
+    for checkout in checkouts:
+        claims = [
+            _fact_claim(checkout, "head_revision", lambda sha: f"HEAD revision is {sha}"),
+            _fact_claim(checkout, "head_ref", _describe_ref),
+            _fact_claim(
+                checkout,
+                "is_dirty",
+                lambda dirty: (
+                    "worktree has uncommitted changes"
+                    if dirty
+                    else "worktree is clean"
+                ),
+            ),
+            _dirty_entries_claim(checkout, truncation_omissions),
+            _fact_claim(
+                checkout,
+                "remotes",
+                lambda remotes: (
+                    "no remotes are configured"
+                    if len(remotes) == 0
+                    else "remotes: "
+                    + ", ".join(
+                        f"{remote.get('name')} -> "
+                        f"{remote.get('fetch_url') if remote.get('fetch_url') is not None else '?'}"
+                        for remote in remotes
+                    )
+                ),
+            ),
+            _fact_claim(
+                checkout,
+                "last_fetch",
+                lambda at: f"last recorded fetch at {at}",
+            ),
+        ]
+        candidates.extend(claim for claim in claims if claim is not None)
+    return candidates
+
+
 # Bounded content-match candidate claims from an (optional) observeContent
 # output. Matches are mapped to the graph checkout node sharing their exact
 # path - the caller is responsible for redacting both the observation and
@@ -1019,29 +1161,7 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     checkouts_by_path = {n.get("path"): n for n in checkouts}
 
     truncation_omissions: list[dict] = []
-    candidates: list[dict] = []
-    for checkout in checkouts:
-        claims = [
-            _fact_claim(checkout, "head_revision", lambda sha: f"HEAD revision is {sha}"),
-            _fact_claim(checkout, "head_ref", _describe_ref),
-            _fact_claim(
-                checkout,
-                "is_dirty",
-                lambda dirty: "worktree has uncommitted changes" if dirty else "worktree is clean",
-            ),
-            _dirty_entries_claim(checkout, truncation_omissions),
-            _fact_claim(
-                checkout,
-                "remotes",
-                lambda remotes: (
-                    "no remotes are configured"
-                    if len(remotes) == 0
-                    else "remotes: " + ", ".join(f"{r.get('name')} -> {r.get('fetch_url') if r.get('fetch_url') is not None else '?'}" for r in remotes)
-                ),
-            ),
-            _fact_claim(checkout, "last_fetch", lambda at: f"last recorded fetch at {at}"),
-        ]
-        candidates.extend(c for c in claims if c is not None)
+    candidates = _graph_claim_candidates(checkouts, truncation_omissions)
     content_candidates, content_candidate_omissions = _content_match_candidates(
         content, checkouts_by_path, _content_question_terms(task["question"])
     )
@@ -1064,11 +1184,7 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     )
     included = []
     for claim in selected:
-        entry = {
-            "id": deterministic_id(
-                "claim", {"subject": claim.get("subject"), "fact": claim.get("fact"), "claim": claim.get("claim")}
-            )
-        }
+        entry = {"id": _claim_id(claim)}
         entry.update(claim)
         included.append(entry)
 

@@ -438,6 +438,7 @@ def _governed_capsule(
     omissions=None,
     workspace_fingerprint="sha256:test-workspace",
     topology_fingerprint=None,
+    preserve_claim_ids=False,
 ):
     complete_claims = []
     for claim in [] if claims is None else claims:
@@ -461,6 +462,15 @@ def _governed_capsule(
         }
         selection.update(complete_claim.get("selection", {}))
         complete_claim["selection"] = selection
+        if not preserve_claim_ids:
+            complete_claim["id"] = deterministic_id(
+                "claim",
+                {
+                    "subject": complete_claim["subject"],
+                    "fact": complete_claim["fact"],
+                    "claim": complete_claim["claim"],
+                },
+            )
         complete_claims.append(complete_claim)
     value = {
         "schema": CAPSULE_SCHEMA,
@@ -547,6 +557,7 @@ def _governed_request(*, capsule=None, receipt=True, gate=None, graph=False, **o
                 "nodes": [],
                 "edges": [],
                 "conflicts": [],
+                "unknowns": [],
             }
             if graph is True
             else graph
@@ -564,6 +575,43 @@ def _checkout_graph_nodes(edges):
             "id": edge["from"],
             "kind": "checkout",
             "path": f"/repo/{edge['from']}",
+            "facts": {
+                "is_git_repository": {
+                    "status": "known",
+                    "value": True,
+                    "evidence": [],
+                },
+                "head_revision": {
+                    "status": "known",
+                    "value": "a" * 40,
+                    "evidence": [],
+                },
+                "head_ref": {
+                    "status": "known",
+                    "value": {"kind": "branch", "name": "main"},
+                    "evidence": [],
+                },
+                "is_dirty": {
+                    "status": "known",
+                    "value": False,
+                    "evidence": [],
+                },
+                "dirty_entries": {
+                    "status": "known",
+                    "value": [],
+                    "evidence": [],
+                },
+                "remotes": {
+                    "status": "known",
+                    "value": [],
+                    "evidence": [],
+                },
+                "last_fetch": {
+                    "status": "known",
+                    "value": NOW,
+                    "evidence": [],
+                },
+            },
         }
         nodes[edge["to"]] = {"id": edge["to"], "kind": "repository"}
     return list(nodes.values())
@@ -749,12 +797,13 @@ def test_governed_verification_refuses_receipt_claim_ids_outside_capsule():
 def test_governed_verification_refuses_duplicate_claim_ids():
     governed_capsule = _governed_capsule(
         claims=[
-            {"id": "claim:duplicate", "subject": "checkout:a", "claim": "first"},
-            {"id": "claim:duplicate", "subject": "checkout:b", "claim": "second"},
+            {"subject": "checkout:a", "claim": "first"},
+            {"subject": "checkout:a", "claim": "first"},
         ]
     )
     governed_receipt = _governed_receipt(governed_capsule)
-    governed_receipt["claims_verified"] = ["claim:duplicate"]
+    duplicate_id = governed_capsule["claims"][0]["id"]
+    governed_receipt["claims_verified"] = [duplicate_id]
     governed_receipt["fingerprint"] = fingerprint(
         {
             key: item
@@ -768,7 +817,10 @@ def test_governed_verification_refuses_duplicate_claim_ids():
     )
 
     assert result["schema"] == ozone.REFUSAL_SCHEMA
-    assert result["reason_codes"] == ["duplicate_claim_id"]
+    assert result["reason_codes"] == [
+        "invalid_repair_capsule",
+        "duplicate_claim_id",
+    ]
     over_budget_capsule = _governed_capsule(
         claims=[{"id": "claim:one", "subject": "checkout:a", "claim": "one"}]
     )
@@ -823,7 +875,10 @@ def test_governed_verification_refuses_duplicate_repair_claim_semantics():
     )
 
     assert result["schema"] == ozone.REFUSAL_SCHEMA
-    assert result["reason_codes"] == ["invalid_repair_capsule"]
+    assert result["reason_codes"] == [
+        "invalid_repair_capsule",
+        "duplicate_claim_id",
+    ]
 
 
 def test_governed_verification_fails_closed_for_missing_and_tampered_receipts():
@@ -1274,7 +1329,7 @@ def test_governed_verification_refuses_claims_that_violate_declared_filters():
         )
 
         assert result["schema"] == ozone.REFUSAL_SCHEMA
-        assert "repair_graph_claims_mismatch" in result["reason_codes"]
+        assert "repair_graph_context_mismatch" in result["reason_codes"]
 
     filtered_capsule = compile_task_capsule(
         task={
@@ -1308,6 +1363,17 @@ def test_governed_verification_binds_claims_and_question_signals_to_graph():
         ["https://example.test/shared.git"] * 2,
         ["a" * 40, "a" * 40],
     )
+    checkout_nodes = [
+        node for node in graph["nodes"] if node["kind"] == "checkout"
+    ]
+    checkout_nodes[1]["facts"]["is_dirty"]["value"] = True
+    graph_unknown = {
+        "checkout": checkout_nodes[0]["id"],
+        "path": checkout_nodes[0]["path"],
+        "fact": "last_fetch",
+        "reason": "not_observed",
+    }
+    graph["unknowns"].append(graph_unknown)
     compiled = compile_task_capsule(
         task={
             "question": "Does the example checkout mirror upstream?",
@@ -1328,6 +1394,14 @@ def test_governed_verification_binds_claims_and_question_signals_to_graph():
     variants = []
     missing_subject = json.loads(json.dumps(compiled))
     missing_subject["claims"][0]["subject"] = "checkout:missing"
+    missing_subject["claims"][0]["id"] = deterministic_id(
+        "claim",
+        {
+            "subject": missing_subject["claims"][0]["subject"],
+            "fact": missing_subject["claims"][0]["fact"],
+            "claim": missing_subject["claims"][0]["claim"],
+        },
+    )
     variants.append(missing_subject)
 
     mismatched_path = json.loads(json.dumps(compiled))
@@ -1343,6 +1417,35 @@ def test_governed_verification_binds_claims_and_question_signals_to_graph():
     )
     signal["term"] = "mirror"
     variants.append(forged_signal)
+
+    forged_semantics = json.loads(json.dumps(compiled))
+    dirty_claims = [
+        claim
+        for claim in forged_semantics["claims"]
+        if claim["fact"] == "is_dirty"
+    ]
+    clean_claim = next(
+        claim for claim in dirty_claims if claim["claim"] == "worktree is clean"
+    )
+    dirty_claim = next(
+        claim
+        for claim in dirty_claims
+        if claim["claim"] == "worktree has uncommitted changes"
+    )
+    dirty_claim["claim"] = clean_claim["claim"]
+    dirty_claim["id"] = deterministic_id(
+        "claim",
+        {
+            "subject": dirty_claim["subject"],
+            "fact": dirty_claim["fact"],
+            "claim": dirty_claim["claim"],
+        },
+    )
+    variants.append(forged_semantics)
+
+    missing_unknown = json.loads(json.dumps(compiled))
+    missing_unknown["unknowns"].remove(graph_unknown)
+    variants.append(missing_unknown)
 
     for capsule in variants:
         capsule["fingerprint"] = fingerprint(
@@ -1360,7 +1463,26 @@ def test_governed_verification_binds_claims_and_question_signals_to_graph():
             )
         )
         assert result["schema"] == ozone.REFUSAL_SCHEMA
-        assert result["reason_codes"] == ["repair_graph_claims_mismatch"]
+        assert result["reason_codes"] == ["repair_graph_context_mismatch"]
+
+    forged_id = json.loads(json.dumps(compiled))
+    forged_id["claims"][0]["id"] = "claim:forged"
+    forged_id["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in forged_id.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    invalid_id = ozone.verify_governed(
+        _governed_request(
+            capsule=forged_id,
+            receipt=_governed_receipt(forged_id),
+            graph=graph,
+        )
+    )
+    assert invalid_id["schema"] == ozone.REFUSAL_SCHEMA
+    assert invalid_id["reason_codes"] == ["invalid_capsule"]
 
     ambiguous_identity_graph = json.loads(json.dumps(graph))
     repository_node = next(
@@ -1384,7 +1506,7 @@ def test_governed_verification_binds_claims_and_question_signals_to_graph():
         )
     )
     assert ambiguous_identity["schema"] == ozone.REFUSAL_SCHEMA
-    assert ambiguous_identity["reason_codes"] == ["repair_graph_claims_mismatch"]
+    assert ambiguous_identity["reason_codes"] == ["repair_graph_context_mismatch"]
 
 
 def test_governed_verification_binds_question_match_signals_to_their_tier():
@@ -1556,33 +1678,44 @@ def test_governed_verification_accepts_core_unknown_receipt_records():
 
 
 def test_governed_repairs_are_typed_bounded_and_dry_run():
+    edge = {
+        "kind": "checkout_of",
+        "from": "checkout:a",
+        "to": "repository:a",
+    }
+    graph = {
+        "schema": "vivary.workspace-graph/v0",
+        "workspace_fingerprint": "sha256:test-workspace",
+        "nodes": _checkout_graph_nodes([edge]),
+        "edges": [edge],
+        "conflicts": [],
+        "unknowns": [],
+    }
+    checkout_node = next(
+        node for node in graph["nodes"] if node["kind"] == "checkout"
+    )
+    checkout_node["path"] = "/repo/packages/ozone"
     governed_capsule = _governed_capsule(
         claims=[
             {
-                "id": "claim:weak",
-                "fact": "weak_evidence",
+                "fact": "is_dirty",
                 "subject": "checkout:a",
-                "claim": "Open the source before relying on this claim.",
+                "claim": "worktree is clean",
                 "selection": {"tier": "allowlisted"},
                 "evidence": [],
             }
-        ]
+        ],
+        topology_fingerprint=repair_topology_fingerprint(graph),
     )
-    request = _governed_request(capsule=governed_capsule, graph=True)
-    request["graph"]["nodes"] = [
-        {
-            "id": "checkout:a",
-            "kind": "checkout",
-            "path": "/repo/packages/ozone",
-        }
-    ]
-    result = ozone.verify_governed(request)
+    result = ozone.verify_governed(
+        _governed_request(capsule=governed_capsule, graph=graph)
+    )
     proposal = result["repair_proposal"]
 
     assert proposal["writes_performed"] == 0
     assert proposal["requires_gate"] is True
     assert len(proposal["proposals"]) == 1
-    assert proposal["proposals"][0]["target"] == "claim:weak"
+    assert proposal["proposals"][0]["target"] == governed_capsule["claims"][0]["id"]
     assert proposal["proposals"][0]["requires_gate"] is True
 
 
@@ -1766,13 +1899,18 @@ def test_governed_verification_refuses_graphs_that_drop_capsule_conflicts():
     checkout_paths = {
         side["checkout"]: side["path"] for side in conflict["sides"]
     }
+    checkout_heads = {
+        node["id"]: node["facts"]["head_revision"]["value"]
+        for node in matching_graph["nodes"]
+        if node["kind"] == "checkout"
+    }
     claims = [
         {
-            "id": f"claim:{index}",
-            "fact": "same_fact",
+            "fact": "head_revision",
             "subject": checkout_id,
             "subject_path": checkout_paths[checkout_id],
-            "claim": "Conflicting checkout claim.",
+            "claim": f"HEAD revision is {checkout_heads[checkout_id]}",
+            "status": "known",
             "selection": {
                 "tier": "conflict_side",
                 "signals": [
@@ -1963,6 +2101,44 @@ def test_governed_verification_binds_graph_topology_commitment():
     )
     assert committed_local["schema"] == ozone.VERIFICATION_SCHEMA
 
+    scoped_graph = _projected_remote_graph(
+        ["https://example.test/shared.git"] * 2,
+        ["a" * 40, "b" * 40],
+    )
+    scoped_capsule = compile_task_capsule(
+        task={"question": "Review divergence.", "scope": ["/repo"]},
+        graph=scoped_graph,
+        budget={"max_claims": 0},
+    )
+    assert scoped_capsule["conflicts"]
+    forged_capsule = json.loads(json.dumps(scoped_capsule))
+    forged_capsule["conflicts"] = []
+    forged_capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in forged_capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    moved_graph = json.loads(json.dumps(scoped_graph))
+    moved_paths = {}
+    for node in moved_graph["nodes"]:
+        if node["kind"] == "checkout":
+            node["path"] = f"/outside/{node['id']}"
+            moved_paths[node["id"]] = node["path"]
+    for conflict in moved_graph["conflicts"]:
+        for side in conflict["sides"]:
+            side["path"] = moved_paths[side["checkout"]]
+    moved = ozone.verify_governed(
+        _governed_request(
+            capsule=forged_capsule,
+            receipt=_governed_receipt(forged_capsule),
+            graph=moved_graph,
+        )
+    )
+    assert moved["schema"] == ozone.REFUSAL_SCHEMA
+    assert moved["reason_codes"] == ["repair_graph_topology_unbound"]
+
 
 def test_governed_verification_refuses_invalid_graph_relationship_endpoints():
     checkout_edges = [
@@ -2079,6 +2255,9 @@ def test_governed_verification_refuses_malformed_repair_inputs_without_crashing(
     missing_capsule_request = _governed_request(graph=True)
     missing_capsule_request["capsule"] = None
     missing_capsule = ozone.verify_governed(missing_capsule_request)
+    malformed_unknown_request = _governed_request(graph=True)
+    malformed_unknown_request["graph"]["unknowns"] = [None]
+    malformed_unknown = ozone.verify_governed(malformed_unknown_request)
     mismatched_graph_request = _governed_request(graph=True)
     uncollatable_graph_request = _governed_request(graph=True)
     uncollatable_graph_request["graph"]["edges"] = [
@@ -2149,6 +2328,8 @@ def test_governed_verification_refuses_malformed_repair_inputs_without_crashing(
     assert malformed["reason_codes"] == ["invalid_repair_graph"]
     assert malformed_claim["schema"] == ozone.REFUSAL_SCHEMA
     assert malformed_claim["reason_codes"] == ["invalid_capsule"]
+    assert malformed_unknown["schema"] == ozone.REFUSAL_SCHEMA
+    assert malformed_unknown["reason_codes"] == ["invalid_repair_graph"]
     assert missing_capsule["schema"] == ozone.REFUSAL_SCHEMA
     assert missing_capsule["reason_codes"] == [
         "invalid_capsule",
@@ -2170,16 +2351,20 @@ def test_governed_verification_refuses_unbounded_repair_products():
     checkout_ids = [
         f"checkout:{index}" for index in range(MAX_DEDUPE_CHECKOUTS)
     ]
+    claim_facts = (
+        ("head_revision", f"HEAD revision is {'a' * 40}"),
+        ("is_dirty", "worktree is clean"),
+    )
     claims = [
         {
-            "id": f"claim:{checkout_id}:{fact_index}",
-            "fact": f"fact:{fact_index}",
+            "fact": fact,
             "subject": checkout_id,
-            "claim": f"value:{fact_index}",
+            "claim": claim,
+            "status": "known",
             "evidence": [],
         }
         for checkout_id in checkout_ids
-        for fact_index in range(2)
+        for fact, claim in claim_facts
     ]
     governed_capsule = _governed_capsule(claims=claims)
     governed_capsule["budget"] = {"max_claims": len(claims)}
@@ -2283,6 +2468,35 @@ def test_governed_verification_bounds_scope_path_comparisons():
     )
 
 
+def test_governed_verification_bounds_graph_context_scope_comparisons():
+    scope_count = 101
+    unknown_count = ozone.MAX_SCOPE_PATH_COMPARISONS // (scope_count * 2) + 1
+    capsule = _governed_capsule()
+    capsule["task"]["scope"] = [
+        f"/scope/{index}" for index in range(scope_count)
+    ]
+    capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    request = _governed_request(capsule=capsule, receipt=False, graph=True)
+    request["graph"]["unknowns"] = [
+        {
+            "path": f"/outside/{index}",
+            "subject_path": f"/elsewhere/{index}",
+        }
+        for index in range(unknown_count)
+    ]
+
+    result = ozone.verify_governed(request)
+
+    assert result["schema"] == ozone.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["repair_work_unbounded"]
+
+
 def test_governed_verification_bounds_actual_scope_conflict_comparisons():
     def request_for(scope_count, conflict_count):
         capsule = _governed_capsule()
@@ -2346,16 +2560,21 @@ def test_governed_verification_bounds_actual_scope_conflict_comparisons():
 
 def test_governed_verification_refuses_unbounded_route_evidence():
     overflow_checkout = f"checkout:{MAX_DEDUPE_CHECKOUTS:03d}"
+    claim_facts = (
+        ("head_revision", f"HEAD revision is {'a' * 40}"),
+        ("is_dirty", "worktree is clean"),
+        ("remotes", "no remotes are configured"),
+    )
     capsule = _governed_capsule(
         claims=[
             {
-                "id": f"claim:overflow:{index}",
-                "fact": f"fact:{index}",
+                "fact": fact,
                 "subject": overflow_checkout,
-                "claim": f"value:{index}",
+                "claim": claim,
+                "status": "known",
                 "evidence": [],
             }
-            for index in range(3)
+            for fact, claim in claim_facts
         ],
         omissions=[
             {

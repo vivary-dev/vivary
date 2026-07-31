@@ -310,6 +310,7 @@ def test_capsule_integrity_rejects_incomplete_claims(graph, field):
     [
         {"nodes": [{"kind": "repository"}], "edges": []},
         {"nodes": [{"kind": "repository", "id": 123}], "edges": []},
+        {"nodes": [{"kind": "checkout", "id": "checkout:a"}], "edges": []},
         {
             "nodes": [],
             "edges": [{"kind": "checkout_of", "from": None, "to": "repository:a"}],
@@ -339,6 +340,15 @@ def test_capsule_binds_the_workspace_fingerprint_it_was_compiled_against(graph):
     assert (
         capsule["workspace"]["repair_topology_fingerprint"]
         != repair_topology_fingerprint(changed_topology)
+    )
+    moved_checkout = json.loads(json.dumps(graph))
+    checkout_node = next(
+        node for node in moved_checkout["nodes"] if node["kind"] == "checkout"
+    )
+    checkout_node["path"] = f"{checkout_node['path']}-moved"
+    assert (
+        capsule["workspace"]["repair_topology_fingerprint"]
+        != repair_topology_fingerprint(moved_checkout)
     )
     # Checks are derived from what was observed, so a plain git fixture with no
     # tropo.toml and no package.json yields none rather than three invented ones.

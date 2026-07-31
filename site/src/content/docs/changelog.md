@@ -91,11 +91,12 @@ remains part of the final coordinated release train and requires a separate huma
   rejects malformed gate constraints, scalar receipt identities, supplied non-mapping
   receipts, contradictory receipt fields, incomplete capsule claims, conflicts, or
   compiler-owned unknown records, duplicate conflict sides, blank task questions,
-  malformed task scopes or filters, claims that violate declared filters, claims that
-  do not map to the supplied graph's subject paths or graph-profile filters, forged
-  question or content signals, mismatched selection tiers, narrated paths outside the
-  declared scope, invalid typed graph relationships, and malformed or deeply nested
-  repair inputs before calling core.
+  malformed task scopes or filters, forged claim IDs, graph-derived claims that do not
+  reproduce their source fact semantics, omitted in-scope graph unknowns, claims that
+  violate declared filters, claims that do not map to the supplied graph's subject paths
+  or graph-profile filters, forged question or content signals, mismatched selection
+  tiers, narrated paths outside the declared scope, invalid typed graph relationships,
+  and malformed or deeply nested repair inputs before calling core.
   Receipt claim lists must be unique and disjoint. Together,
   they must equal both `claims_in_scope` and the capsule's claim IDs. All claims are
   verified only when the check list is nonempty and every check passed. Otherwise, all
@@ -110,22 +111,23 @@ remains part of the final coordinated release train and requires a separate huma
   linear time, and rejects duplicate `(subject, fact, claim)` entries before they can
   duplicate deterministic repair IDs. Parser-only help and version actions suppress a
   run receipt that could alias the unread request instead of refusing the requested
-  output. It requires the repair graph to preserve every
-  capsule conflict while allowing a full graph to retain out-of-scope conflicts for
-  repair withholding, and recomputes the capsule's normalized repair-topology commitment
-  over repository nodes and `checkout_of` relationships. A conflict that crosses a
-  declared task scope becomes an omission naming only its in-scope subject and opaque
-  conflict ID; no out-of-scope side or path enters the capsule.
+  output. It requires the repair graph to preserve every capsule conflict and in-scope
+  graph unknown while allowing a full graph to retain out-of-scope conflicts for repair
+  withholding. It recomputes the capsule's normalized repair-topology commitment over
+  checkout IDs and paths, repository nodes, and `checkout_of` relationships. A conflict
+  that crosses a declared task scope becomes an omission naming only its in-scope subject
+  and opaque conflict ID; no out-of-scope side or path enters the capsule.
   Claims on preserved conflict sides must keep the compiler's `conflict_side` tier and
   exact matching conflict-signal set. Claims without a preserved conflict cannot assert
   that tier or signal, so re-labeling cannot change their repair eligibility.
   This authenticates remote-backed and inferred no-remote linked-worktree groups without
-  trusting a copied workspace fingerprint label. Ozone also requires each divergent
-  conflict to cover every checkout related to its repository. It caps scope-path checks
-  at 100,000 comparisons, total checkout-pair scans across all repositories, and
-  scope-to-conflict comparisons before repair construction. It also bounds
-  route-proposal evidence to core's checkout cap and derived repair estimates to
-  JavaScript's lossless integer range before delegation.
+  trusting a copied workspace fingerprint label. Ozone requires each divergent conflict
+  to cover every checkout related to its repository. Ozone caps scope roots, graph nodes,
+  graph edges, and graph unknowns at 1,000 each, graph conflicts at 300, and graph claim
+  subjects at 300. It also caps scope-path checks at 100,000 comparisons, total
+  checkout-pair scans across all repositories, and scope-to-conflict comparisons before
+  repair construction. Route-proposal evidence stays within core's checkout cap, and
+  derived repair estimates stay within JavaScript's lossless integer range.
   It returns typed verification or refusal envelopes. Core's fingerprinted receipt/gate
   verdicts and repair proposal pass through unchanged; Strato consumes the raw
   `gate_verdict` without a second verification implementation. The CLI rejects
@@ -245,10 +247,10 @@ remains part of the final coordinated release train and requires a separate huma
 - `python packages/tropo/tests/test_tropo.py` — **170/170** passed on Windows.
 - `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **170/170**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **644 passed** on Windows;
-  `UV_CACHE_DIR=/tmp/vivary-uv-cache TMPDIR=/tmp uv run --no-cache --with pytest
-  python3 -m pytest packages/core/tests/ -q -p no:cacheprovider` — **642 passed,
-  2 platform-specific skips** on WSL Linux.
+- `python -m pytest packages/core/tests/ -q` — **645 passed** on Windows;
+  `UV_CACHE_DIR=/tmp/vivary-uv-cache TMPDIR=/tmp uv run --no-cache --with
+  pytest==9.0.2 --with python-dateutil==2.9.0.post0 --with jsonschema==4.26.0 pytest
+  packages/core/tests/ -q` — **643 passed, 2 platform-specific skips** on WSL Linux.
 - `python -m pytest packages/strato/tests -q` — **48 passed** on Windows and
   **48 passed** on WSL Linux.
 - `python -m pytest packages/core/tests/test_policy.py -q` — **91 passed**;
@@ -282,7 +284,7 @@ remains part of the final coordinated release train and requires a separate huma
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **66/66**, Exo **17/17**,
+- Repository verification also passed: Ozone **69/69**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**

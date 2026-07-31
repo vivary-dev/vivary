@@ -46,7 +46,7 @@ from vivary_core.capsule_compile import (  # noqa: E402
     CAPSULE_SCHEMA,
     compile_task_capsule,
 )
-from vivary_core.canonical import fingerprint  # noqa: E402
+from vivary_core.canonical import deterministic_id, fingerprint  # noqa: E402
 from vivary_core.receipt import RECEIPT_SCHEMA, create_integrity_receipt  # noqa: E402
 from vivary_core.workspace_model import project_workspace_graph  # noqa: E402
 from vivary_core.workspace_observe import observe_checkouts  # noqa: E402
@@ -273,7 +273,7 @@ def base_capsule_like(overrides=None):
 
 def complete_claim_like(overrides=None):
     claim = {
-        "id": "claim-test",
+        "id": None,
         "subject": "checkout:test",
         "subject_path": "/repo/test",
         "fact": "test_fact",
@@ -287,6 +287,15 @@ def complete_claim_like(overrides=None):
         },
     }
     claim.update(overrides or {})
+    if claim["id"] is None:
+        claim["id"] = deterministic_id(
+            "claim",
+            {
+                "subject": claim["subject"],
+                "fact": claim["fact"],
+                "claim": claim["claim"],
+            },
+        )
     return claim
 
 
@@ -575,7 +584,6 @@ def test_evaluate_capsule_gate_gate_required_when_a_claim_carries_no_evidence():
     capsule = base_capsule_like(
         {"claims": [complete_claim_like(
             {
-                "id": "claim_no_evidence",
                 "subject": "s",
                 "fact": "f",
                 "claim": "c",
@@ -587,7 +595,7 @@ def test_evaluate_capsule_gate_gate_required_when_a_claim_carries_no_evidence():
     assert outcome == {
         "decision": GATE_DECISION["GATE_REQUIRED"],
         "reason_codes": [GATE_REASON["CLAIM_MISSING_EVIDENCE"]],
-        "gate_requests": [{"reason_code": GATE_REASON["CLAIM_MISSING_EVIDENCE"], "target": "claim_no_evidence"}],
+        "gate_requests": [{"reason_code": GATE_REASON["CLAIM_MISSING_EVIDENCE"], "target": capsule["claims"][0]["id"]}],
     }
 
 
@@ -844,11 +852,11 @@ def test_evaluate_receipt_gate_a_sufficient_ozone_verdict_clears_the_required_ch
 )
 def test_evaluate_receipt_gate_rejects_recomputed_sufficient_claim_projections(projection):
     capsule = base_capsule_like(
-        {"claims": [complete_claim_like({"id": "claim-one"})]}
+        {"claims": [complete_claim_like()]}
     )
     receipt = base_receipt_like(
         capsule,
-        {"claims_verified": [], "claims_unverified": ["claim-one"]},
+        {"claims_verified": [], "claims_unverified": [capsule["claims"][0]["id"]]},
     )
     insufficient = evaluate_gate_sufficiency(
         gate={"name": "ci", "require_claims_verified": True},
@@ -877,7 +885,7 @@ def test_evaluate_receipt_gate_rejects_recomputed_sufficient_claim_projections(p
 
 def test_evaluate_receipt_gate_clears_a_legitimate_sufficient_claim_projection():
     capsule = base_capsule_like(
-        {"claims": [complete_claim_like({"id": "claim-one"})]}
+        {"claims": [complete_claim_like()]}
     )
     receipt = base_receipt_like(capsule)
     verdict = evaluate_gate_sufficiency(
@@ -1395,9 +1403,7 @@ def test_next_loop_step_retains_capsule_evidence_and_budget_gates_after_a_clean_
     capsule = base_capsule_like(
         {
             "claims": [
-                complete_claim_like(
-                    {"id": "claim_missing_evidence", "evidence": []}
-                )
+                complete_claim_like({"evidence": []})
             ],
             "omissions": [{"kind": "claims_over_budget", "omitted_count": 2}],
         }
@@ -1410,7 +1416,7 @@ def test_next_loop_step_retains_capsule_evidence_and_budget_gates_after_a_clean_
     assert outcome["reason_codes"] == [LOOP_REASON["GATE_REQUIRED"]]
     assert GATE_REASON["CLAIM_MISSING_EVIDENCE"] in outcome["gate"]["reason_codes"]
     assert GATE_REASON["CAPSULE_OVER_BUDGET"] in outcome["gate"]["reason_codes"]
-    assert {"reason_code": GATE_REASON["CLAIM_MISSING_EVIDENCE"], "target": "claim_missing_evidence"} in outcome["gate"]["gate_requests"]
+    assert {"reason_code": GATE_REASON["CLAIM_MISSING_EVIDENCE"], "target": capsule["claims"][0]["id"]} in outcome["gate"]["gate_requests"]
     assert {"reason_code": GATE_REASON["CAPSULE_OVER_BUDGET"], "omitted_count": 2} in outcome["gate"]["gate_requests"]
 
 
