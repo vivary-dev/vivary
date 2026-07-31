@@ -166,7 +166,6 @@ def _load_core_verification():
     from vivary_core.workspace_model import (
         repair_graph_is_canonical,
         projected_neighbor_pair_count,
-        workspace_fingerprint_from_graph,
     )
     from vivary_core.capsule_select import OMITTED_LIST_CAP
     from vivary_core.canonical import (
@@ -201,7 +200,6 @@ def _load_core_verification():
         "is_canonical_body_value": is_canonical_body_value,
         "is_within_allowlist": is_within_allowlist,
         "repair_topology_fingerprint": repair_topology_fingerprint,
-        "workspace_fingerprint_from_graph": workspace_fingerprint_from_graph,
         "repair_graph_is_canonical": repair_graph_is_canonical,
         "projected_neighbor_pair_count": projected_neighbor_pair_count,
         "MAX_GRAPH_CONTEXT_CHECKOUTS": MAX_GRAPH_CONTEXT_CHECKOUTS,

@@ -52,6 +52,7 @@ from vivary_core.capsule_compile import (  # noqa: E402
     capsule_context_matches_graph,
     compile_task_capsule,
     repair_topology_fingerprint,
+    is_task_capsule_shape,
     verify_task_capsule_integrity,
 )
 from vivary_core.workspace_content import observe_content  # noqa: E402
@@ -235,6 +236,106 @@ def test_selection_is_bounded_by_budget_and_the_overflow_is_recorded_as_an_omiss
     assert overflow["omitted_count"] > 0
 
 
+def test_graph_matcher_preserves_compiler_selection_omissions(graph):
+    capsule = compile_task_capsule(
+        task=TASK,
+        graph=graph,
+        budget={"max_claims": 1},
+    )
+    assert any(
+        omission["kind"] == "claims_over_budget"
+        for omission in capsule["omissions"]
+    )
+    stripped = json.loads(json.dumps(capsule))
+    stripped["omissions"] = [
+        omission
+        for omission in stripped["omissions"]
+        if omission["kind"] != "claims_over_budget"
+    ]
+
+    assert not capsule_context_matches_graph(stripped, graph)
+
+
+def test_graph_matcher_allows_opaque_content_to_raise_selection_omission_totals(
+    graph,
+):
+    checkout = next(
+        node
+        for node in graph["nodes"]
+        if node.get("kind") == "checkout"
+        and (node.get("facts", {}).get("head_revision") or {}).get("status")
+        == "known"
+    )
+    task = {
+        "question": "What modified content exists?",
+        "scope": [checkout["path"]],
+    }
+    content = {
+        "checkouts": [
+            {
+                "path": checkout["path"],
+                "head_revision": checkout["facts"]["head_revision"]["value"],
+                "matches": [
+                    {
+                        "path": f"notes-{index}.md",
+                        "line": index,
+                        "term": "modified",
+                        "excerpt": "modified content",
+                        "evidence": {"command": "git grep modified"},
+                    }
+                    for index in range(1, 4)
+                ],
+                "omissions": [],
+            }
+        ]
+    }
+    over_budget = compile_task_capsule(
+        task=task,
+        graph=graph,
+        content=content,
+        budget={"max_claims": 1},
+    )
+    assert any(
+        omission["kind"] == "claims_over_budget"
+        for omission in over_budget["omissions"]
+    )
+    assert capsule_context_matches_graph(over_budget, graph)
+
+    filtered = compile_task_capsule(
+        task={
+            **task,
+            "filters": [{"field": "fact", "equals": "head_revision"}],
+        },
+        graph=graph,
+        content=content,
+    )
+    assert any(
+        omission["kind"] == "filtered_out"
+        for omission in filtered["omissions"]
+    )
+    assert capsule_context_matches_graph(filtered, graph)
+
+
+@pytest.mark.parametrize(
+    "forged_omission",
+    [
+        {"kind": "anything_i_want", "reason": "unbound narrative"},
+        {
+            "kind": "ignored_paths_excluded",
+            "reason": "unbound narrative",
+            "omitted_count": 99,
+        },
+    ],
+)
+def test_capsule_shape_rejects_unrecognized_or_reshaped_omissions(
+    graph, forged_omission
+):
+    capsule = compile_task_capsule(task=TASK, graph=graph)
+    capsule["omissions"].append(forged_omission)
+
+    assert not is_task_capsule_shape(capsule)
+
+
 def test_conflicts_survive_compilation_with_both_sides_and_review_required(graph):
     capsule = compile_task_capsule(task=TASK, graph=graph)
     assert len(capsule["conflicts"]) == 1
@@ -259,6 +360,23 @@ def test_refused_roots_and_ignored_path_policy_are_visible_omissions_no_private_
     serialized = json.dumps(capsule)
     assert "private-note" not in serialized
     assert "secrets/" not in serialized
+
+
+def test_graph_matcher_preserves_refused_root_omissions(graph):
+    capsule = compile_task_capsule(task=TASK, graph=graph)
+    assert capsule_context_matches_graph(capsule, graph)
+    assert any(
+        omission["kind"] == "refused_root"
+        for omission in capsule["omissions"]
+    )
+    stripped = json.loads(json.dumps(capsule))
+    stripped["omissions"] = [
+        omission
+        for omission in stripped["omissions"]
+        if omission["kind"] != "refused_root"
+    ]
+
+    assert not capsule_context_matches_graph(stripped, graph)
 
 
 def test_capsule_fingerprint_is_deterministic_and_sensitive_to_content(graph):
@@ -481,7 +599,14 @@ def test_content_omissions_surface_into_capsule_omissions(graph):
             {
                 "path": dirty_node["path"],
                 "matches": [],
-                "omissions": [{"kind": "content_files_truncated", "omitted_count": 2, "total_files_matched": 10}],
+                "omissions": [
+                    {
+                        "kind": "content_files_truncated",
+                        "omitted_count": 2,
+                        "total_files_matched": 10,
+                        "reason": "matched-file listing capped at 8 files per checkout",
+                    }
+                ],
             },
         ]
     }
@@ -490,6 +615,11 @@ def test_content_omissions_surface_into_capsule_omissions(graph):
     assert surfaced["omitted_count"] == 2
     assert surfaced["total_files_matched"] == 10
     assert surfaced["subject"] == dirty_node["id"]
+
+    malformed = json.loads(json.dumps(content))
+    del malformed["checkouts"][0]["omissions"][0]["reason"]
+    with pytest.raises(ValueError, match="malformed omission"):
+        compile_task_capsule(task=TASK, graph=graph, content=malformed)
 
 
 # -- dirty_entries claims (#44 gap 1), continued -----------------------------
@@ -706,7 +836,12 @@ def test_content_match_candidate_is_bounded_intrinsically_question_matched_and_s
                     }
                 ],
                 "omissions": [
-                    {"kind": "content_files_truncated", "omitted_count": 2, "total_files_matched": 10}
+                    {
+                        "kind": "content_files_truncated",
+                        "omitted_count": 2,
+                        "total_files_matched": 10,
+                        "reason": "matched-file listing capped at 8 files per checkout",
+                    }
                 ],
             },
             # A match against a checkout outside the graph is ignored, never
@@ -825,6 +960,8 @@ def test_scope_narrower_than_the_graph_excludes_out_of_scope_checkouts(graph, fx
                         {
                             "kind": "content_lines_truncated",
                             "path": outside_scope,
+                            "omitted_count": 1,
+                            "reason": "matched-line listing capped at 20 per file",
                         }
                     ],
                 }
@@ -939,6 +1076,77 @@ def test_claim_budget_cannot_exceed_the_lossless_contract_range(graph):
 def test_compile_task_capsule_rejects_malformed_task_inputs(task, message, graph):
     with pytest.raises(ValueError, match=message):
         compile_task_capsule(task=task, graph=graph)
+
+
+def test_capsule_shape_binds_graphless_declared_checks(graph):
+    checkout = next(
+        node
+        for node in graph["nodes"]
+        if node.get("kind") == "checkout"
+        and (node.get("facts", {}).get("is_git_repository") or {}).get("value")
+        is True
+    )
+    cwd = (
+        (checkout["facts"].get("worktree_root") or {}).get("value")
+        or checkout["path"]
+    )
+    declared = {
+        "name": "declared-unit",
+        "command": "python -m pytest",
+        "cwd": cwd,
+    }
+    capsule = compile_task_capsule(
+        task={
+            **TASK,
+            "scope": [checkout["path"]],
+            "required_checks": [declared],
+        },
+        graph=graph,
+    )
+    assert is_task_capsule_shape(capsule)
+
+    replaced = json.loads(json.dumps(capsule))
+    replaced["required_checks"] = [
+        {"name": "declared-unit", "command": "true", "cwd": cwd}
+    ]
+    assert not is_task_capsule_shape(replaced)
+
+
+@pytest.mark.parametrize(
+    "declarations",
+    [
+        [{"name": "   ", "command": "python -m pytest"}],
+        [{"name": "unit", "command": "   "}],
+        [
+            {"name": "unit", "command": "python -m pytest"},
+            {"name": "unit", "command": "python -m pytest"},
+        ],
+    ],
+    ids=["blank-name", "blank-command", "duplicate-name"],
+)
+def test_compile_rejects_ambiguous_declared_checks(graph, declarations):
+    checkout = next(
+        node
+        for node in graph["nodes"]
+        if node.get("kind") == "checkout"
+        and (node.get("facts", {}).get("is_git_repository") or {}).get("value")
+        is True
+    )
+    cwd = (
+        (checkout["facts"].get("worktree_root") or {}).get("value")
+        or checkout["path"]
+    )
+    checks = [{**declaration, "cwd": cwd} for declaration in declarations]
+
+    with pytest.raises(ValueError, match="task.required_checks"):
+        compile_task_capsule(
+            task={
+                **TASK,
+                "scope": [checkout["path"]],
+                "required_checks": checks,
+            },
+            graph=graph,
+        )
 
 
 @pytest.mark.parametrize(

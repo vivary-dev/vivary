@@ -484,14 +484,14 @@ absent. When present, it must already match core's normalized path projection.
 The capsule task question must be a nonblank string. A declared task scope bounds every
 narrated claim, conflict side, unknown, and omission path to at least one declared root.
 Optional `task.required_checks` must be a nonempty list of nonblank `name`, `command`,
-and normalized `cwd` records. Each `cwd` must name an observed Git checkout execution
-root related to `task.scope`; a package-scoped task may name its nearest enclosing
-checkout root.
-Declarations add checks, never remove or rewrite commands derived from workspace
-evidence, and resolve `required_check_undetermined` unknowns only for their checkout.
-The capsule retains the declaration so Ozone can distinguish explicit authority from
-derived checks. Without a declaration, Ozone re-derives required checks and
-undetermined-check unknowns from the supplied graph.
+and normalized `cwd` records with unique names. Each `cwd` must name an observed Git
+checkout execution root related to `task.scope`; a package-scoped task may name its
+nearest enclosing checkout root. Declarations add checks, never remove or rewrite
+commands derived from workspace evidence, and resolve `required_check_undetermined`
+unknowns only for their checkout. The capsule retains each declaration unchanged in its
+top-level required-check list, even when verification has no graph. Without a
+declaration, Ozone re-derives required checks and undetermined-check unknowns from the
+supplied graph.
 Every capsule claim must retain its compiler-owned nonempty identity, subject, path,
 fact, text, status, and selection reason plus list-shaped evidence and selection
 signals. Core recomputes each claim ID from its subject, fact, and claim text. With task
@@ -499,9 +499,15 @@ filters, every claim must retain the exact normalized `matched_filters` record.
 Claim-owned fact and path values must satisfy that record.
 When the request includes a graph, core reconstructs compiler selection from graph
 candidates and the capsule's retained `content_match` candidates. It uses the capsule's
-task, filters, scope, and budget. The complete capsule claim list must match the
-reconstruction. This check binds graph coverage and ranking. Ozone validates retained
-content claims through their capsule shape and signals; it does not re-read files.
+task, filters, scope, and budget. The complete capsule claim list must match that
+reconstruction. `filtered_out` and `claims_over_budget` omissions cannot understate the
+graph-reconstructable minimum and must match exactly when their counts equal that
+minimum. Opaque content candidates may only raise the totals because Ozone does not
+re-read files. Their bounded over-budget entries remain capsule-attested rather than
+graph-bound, but each entry must name an in-scope checkout path and a graph fact or
+`content_match`. Observation refusals must retain exactly matching `refused_root`
+omissions. Omission variants have fixed field shapes; unknown or reshaped variants are
+invalid capsule data. These checks bind graph coverage and ranking.
 Each graph-derived claim must reproduce the graph fact's
 compiler-generated path, fact, text, status, and evidence. Every claim subject must name
 a checkout in that graph, and the claim path must equal the checkout path. Label,
@@ -542,13 +548,13 @@ that shares a capsule `required_checks` name must carry that exact required comm
 duplicate records for the same name and command remain valid evidence for core's
 worst-outcome aggregation.
 The graph `workspace_fingerprint` commits its emitted checkout paths, effective worktree
-roots, and core facts. Core reprojects the complete derived graph from those facts.
-Checkout, repository, revision, branch, remote, and dirty-artifact nodes must retain
-their exact generated fields and deterministic IDs. Edges must retain their generated
-endpoints, evidence, and IDs.
-Conflicts must retain their generated IDs, sides, evidence, and reason codes. Unknowns
-and omissions must match the projection exactly. A copied fingerprint cannot validate
-forged graph contents.
+roots, fact statuses and semantic values, and normalized observation refusals. Evidence
+command text does not enter that identity. Core reprojects the complete derived graph
+from the committed facts. Checkout, repository, revision, branch, remote, and
+dirty-artifact nodes must retain their exact generated fields and deterministic IDs.
+Edges must retain their generated endpoints, evidence, and IDs. Conflicts, unknowns,
+omissions, and refusals must match the projection exactly. A copied fingerprint cannot
+validate forged graph contents. Invalid fact statuses fail closed before projection.
 
 `neighbor_of` is symmetric but its stored direction follows observation order. Core
 normalizes only that direction during comparison and still validates the original edge

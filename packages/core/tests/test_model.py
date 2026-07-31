@@ -263,6 +263,115 @@ def test_workspace_fingerprint_commits_to_worktree_root(observation):
     assert not repair_graph_is_canonical(retained_fingerprint)
 
 
+@pytest.mark.parametrize(
+    "fact_name",
+    [
+        "is_git_repository",
+        "git_common_dir",
+        "workspace_markers",
+        "npm_test_script",
+    ],
+)
+def test_workspace_fingerprint_commits_gate_driving_fact_records(fact_name):
+    graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": ["/repo"],
+            "refusals": [],
+            "checkouts": [
+                {
+                    "path": "/repo",
+                    "facts": {
+                        "is_git_repository": {
+                            "status": "known",
+                            "value": True,
+                            "evidence": [],
+                        },
+                        "git_common_dir": {
+                            "status": "known",
+                            "value": "/repo/.git",
+                            "evidence": [],
+                        },
+                        "workspace_markers": {
+                            "status": "known",
+                            "value": ["tropo.toml"],
+                            "evidence": [],
+                        },
+                        "npm_test_script": {
+                            "status": "known",
+                            "value": "vitest run",
+                            "evidence": [],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+    forged = json.loads(json.dumps(graph))
+    checkout = next(
+        node for node in forged["nodes"] if node["kind"] == "checkout"
+    )
+    checkout["facts"][fact_name] = {
+        "status": "unknown",
+        "reason": "forged",
+        "evidence": [],
+    }
+
+    assert (
+        workspace_fingerprint_from_graph(forged)
+        != graph["workspace_fingerprint"]
+    )
+
+
+def test_projection_rejects_invalid_fact_status():
+    with pytest.raises(ValueError, match="fact status"):
+        project_workspace_graph(
+            {
+                "observed_at": NOW(),
+                "allowlist": ["/repo"],
+                "refusals": [],
+                "checkouts": [
+                    {
+                        "path": "/repo",
+                        "facts": {
+                            "is_git_repository": {
+                                "status": "bogus",
+                                "value": True,
+                                "evidence": [],
+                            }
+                        },
+                    }
+                ],
+            }
+        )
+
+
+def test_workspace_fingerprint_and_canonicality_preserve_refusals():
+    graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": ["/repo"],
+            "refusals": [
+                {
+                    "path": "/outside",
+                    "status": "refused",
+                    "reason": "outside_allowlist",
+                }
+            ],
+            "checkouts": [],
+        }
+    )
+    assert repair_graph_is_canonical(graph)
+
+    removed = json.loads(json.dumps(graph))
+    removed["refusals"] = []
+    assert (
+        workspace_fingerprint_from_graph(removed)
+        != graph["workspace_fingerprint"]
+    )
+    assert not repair_graph_is_canonical(removed)
+
+
 def test_node_ids_derive_only_from_stable_identity_not_observation_order(fx, observation):
     graph = project_workspace_graph(observation)
     canonical_id = deterministic_id("checkout", {"path": normalize_path(fx["paths"]["canonical"])})

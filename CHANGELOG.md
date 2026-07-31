@@ -112,19 +112,27 @@ remains part of the final coordinated release train and requires a separate huma
   evidence field, and workspace fingerprint must match. The optional graph allowlist
   may be absent; when present, it must be normalized. Unknown graph fields and
   non-string question/content signal terms, fields, and paths fail closed.
-  The workspace fingerprint commits each checkout's effective worktree root. Ozone
-  refuses a graph that retains the fingerprint but changes an execution root as
-  `invalid_repair_graph`.
-  Capsules retain nonempty explicit `task.required_checks`, each bound to an observed
-  Git checkout execution root related to task scope. A package-scoped task may run its
-  check at the nearest enclosing checkout root. Validation uses the observed execution
-  root for ancestor scopes, so a checkout path cannot authorize an unrelated relocated
-  root or a more distant enclosing checkout.
-  Explicit checks add to evidence-derived checks, cannot rewrite their commands, and
-  resolve undetermined-check unknowns only for their checkout. Empty declarations are
-  rejected. Without a declaration, Ozone re-derives required checks and
-  `required_check_undetermined` unknowns from the graph, so deleting a derived unknown
-  and re-fingerprinting the capsule fails closed.
+  The workspace fingerprint commits each checkout's effective worktree root, semantic
+  fact statuses and values, and normalized observation refusals. It excludes evidence
+  command text. Ozone refuses retained-fingerprint changes to gate-driving
+  `workspace_markers` and `npm_test_script` facts as `invalid_repair_graph`. Invalid
+  fact statuses fail closed before projection.
+  Capsules retain nonempty explicit `task.required_checks` with unique nonblank names.
+  Each check binds to an observed Git checkout execution root related to task scope. A
+  package-scoped task may run its check at the nearest enclosing checkout root.
+  Validation uses the observed execution root for ancestor scopes, so a checkout path
+  cannot authorize an unrelated relocated root or a more distant enclosing checkout.
+  Explicit checks remain unchanged in the capsule even without a graph, add to
+  evidence-derived checks, cannot rewrite their commands, and resolve
+  undetermined-check unknowns only for their checkout. Without a declaration, Ozone
+  re-derives required checks and `required_check_undetermined` unknowns from the graph.
+  Re-fingerprinted deletion or replacement fails closed.
+  Graph-backed verification reconstructs the complete claim list. `filtered_out` and
+  `claims_over_budget` omissions cannot understate the graph-reconstructable minimum
+  and match exactly when their counts equal it. Opaque content may only raise totals;
+  its bounded over-budget entries remain capsule-attested but must name an in-scope
+  checkout path and known fact. Unknown or reshaped omission variants fail closed.
+  Each observation refusal must retain its exact `refused_root` omission.
   It requires the repair graph to preserve every capsule conflict and in-scope
   graph unknown while allowing a full graph to retain out-of-scope conflicts for repair
   withholding. It recomputes the capsule's normalized repair-topology commitment over
@@ -275,10 +283,10 @@ remains part of the final coordinated release train and requires a separate huma
 - `python packages/tropo/tests/test_tropo.py` — **170/170** passed on Windows.
 - `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **170/170**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **653 passed** on Windows;
+- `python -m pytest packages/core/tests/ -q` — **668 passed** on Windows;
   `UV_CACHE_DIR=/tmp/vivary-uv-cache TMPDIR=/tmp uv run --no-cache --with
   pytest==9.0.2 --with python-dateutil==2.9.0.post0 --with jsonschema==4.26.0 pytest
-  packages/core/tests/ -q` — **651 passed, 2 platform-specific skips** on WSL Linux.
+  packages/core/tests/ -q` — **666 passed, 2 platform-specific skips** on WSL Linux.
 - `python -m pytest packages/strato/tests -q` — **48 passed** on Windows and
   **48 passed** on WSL Linux.
 - `python -m pytest packages/core/tests/test_policy.py -q` — **91 passed**;
@@ -312,7 +320,7 @@ remains part of the final coordinated release train and requires a separate huma
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **78/78**, Exo **17/17**,
+- Repository verification also passed: Ozone **83/83**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**

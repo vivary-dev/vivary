@@ -1405,7 +1405,25 @@ def test_next_loop_step_retains_capsule_evidence_and_budget_gates_after_a_clean_
             "claims": [
                 complete_claim_like({"evidence": []})
             ],
-            "omissions": [{"kind": "claims_over_budget", "omitted_count": 2}],
+            "omissions": [
+                {
+                    "kind": "claims_over_budget",
+                    "reason": "claim budget 1 reached",
+                    "omitted_count": 2,
+                    "omitted": [
+                        {
+                            "subject_path": "/workspace",
+                            "fact": "head_revision",
+                            "tier": "allowlisted",
+                        },
+                        {
+                            "subject_path": "/workspace",
+                            "fact": "head_ref",
+                            "tier": "allowlisted",
+                        },
+                    ],
+                }
+            ],
         }
     )
     receipt = base_receipt_like(capsule)

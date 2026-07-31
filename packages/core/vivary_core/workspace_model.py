@@ -52,6 +52,74 @@ GRAPH_SCHEMA = "vivary.workspace-graph/v0"
 MAX_NEIGHBOR_OF_GROUP = 300
 
 
+VALID_FACT_STATUSES = frozenset(("known", "unknown"))
+
+
+def workspace_facts_are_valid(facts: Any) -> bool:
+    return isinstance(facts, dict) and all(
+        detail is None
+        or (
+            isinstance(detail, dict)
+            and detail.get("status") in VALID_FACT_STATUSES
+        )
+        for detail in facts.values()
+    )
+
+
+def _fact_commitment(facts: Dict[str, Any], name: str) -> Any:
+    detail = facts.get(name)
+    if detail is None:
+        return None
+    commitment = {"status": detail.get("status")}
+    if detail.get("status") == "known":
+        value = detail.get("value")
+        if name == "dirty_entries" and isinstance(value, list):
+            value = sorted(
+                value,
+                key=lambda item: _utf16_sort_key(
+                    f"{item.get('path')}:{item.get('state')}"
+                ),
+            )
+        elif name == "workspace_markers" and isinstance(value, list):
+            value = sorted(value, key=_utf16_sort_key)
+        commitment["value"] = value
+    elif "reason" in detail:
+        commitment["reason"] = detail.get("reason")
+    return commitment
+
+
+def _normalized_refusals(refusals: Any) -> List[Dict[str, str]]:
+    if refusals is None:
+        return []
+    if not isinstance(refusals, list):
+        raise ValueError("workspace graph refusals must be a list")
+    normalized = []
+    for refusal in refusals:
+        if (
+            not isinstance(refusal, dict)
+            or not isinstance(refusal.get("path"), str)
+            or not refusal["path"]
+            or normalize_path(refusal["path"]) != refusal["path"]
+            or refusal.get("status") != "refused"
+            or not isinstance(refusal.get("reason"), str)
+            or not refusal["reason"]
+        ):
+            raise ValueError("workspace graph contains an invalid refusal")
+        normalized.append(
+            {
+                "path": refusal["path"],
+                "status": refusal["status"],
+                "reason": refusal["reason"],
+            }
+        )
+    return sorted(
+        normalized,
+        key=lambda refusal: _path_sort_key(
+            f"{refusal['path']}:{refusal['reason']}"
+        ),
+    )
+
+
 def _fact_field(facts: Dict[str, Any], name: str, field: str) -> Any:
     # Replicates `facts.name?.field ?? null`: an absent fact, or a present
     # fact missing that field, both yield None - never a KeyError/AttributeError.
@@ -81,6 +149,10 @@ def _checkout_core_facts(checkout: Dict[str, Any]) -> Dict[str, Any]:
         "is_dirty": _fact_field(f, "is_dirty", "value"),
         "dirty_paths": dirty_paths,
         "remotes": remotes,
+        "facts": {
+            name: _fact_commitment(f, name)
+            for name in sorted(f, key=_utf16_sort_key)
+        },
     }
 
 
@@ -141,15 +213,20 @@ def workspace_fingerprint_from_graph(graph: Dict[str, Any]) -> str:
         if (
             not isinstance(node.get("path"), str)
             or not node["path"]
-            or not isinstance(node.get("facts"), dict)
+            or not workspace_facts_are_valid(node.get("facts"))
         ):
-            raise ValueError("workspace graph checkouts require path and facts")
+            raise ValueError("workspace graph checkouts require valid path and facts")
         checkouts.append(node)
     core_facts = sorted(
         (_checkout_core_facts(checkout) for checkout in checkouts),
         key=lambda checkout: _path_sort_key(checkout["path"]),
     )
-    return fingerprint(core_facts)
+    return fingerprint(
+        {
+            "checkouts": core_facts,
+            "refusals": _normalized_refusals(graph.get("refusals")),
+        }
+    )
 
 
 def projected_neighbor_pair_count(graph: Dict[str, Any]) -> Optional[int]:
@@ -191,8 +268,8 @@ def repair_graph_is_canonical(graph: Dict[str, Any]) -> bool:
 
     ``neighbor_of`` direction follows observation order, which the sorted graph
     does not retain. Normalize that symmetric edge while still validating its
-    original deterministic ID. Refusals are not compared because they come from
-    observation policy rather than checkout facts.
+    original deterministic ID. Refusals remain observation-policy records, but
+    their normalized paths and reasons are committed and compared.
     """
     if not (
         isinstance(graph, dict)
@@ -282,12 +359,13 @@ def repair_graph_is_canonical(graph: Dict[str, Any]) -> bool:
         return sorted(items, key=lambda item: _utf16_sort_key(fingerprint(item)))
 
     try:
+        normalized_refusals = _normalized_refusals(graph.get("refusals"))
         recomputed = project_workspace_graph(
             {
                 "observed_at": graph.get("observed_at"),
                 "allowlist": graph.get("allowlist") or [],
                 "checkouts": checkouts,
-                "refusals": [],
+                "refusals": normalized_refusals,
             }
         )
         if (
@@ -314,6 +392,8 @@ def repair_graph_is_canonical(graph: Dict[str, Any]) -> bool:
         if _sorted_values(graph.get("omissions", [])) != _sorted_values(
             recomputed.get("omissions", [])
         ):
+            return False
+        if graph.get("refusals", []) != recomputed["refusals"]:
             return False
     except (
         AttributeError,
@@ -346,6 +426,13 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
             edges[edge_id] = {"id": edge_id, "kind": kind, "from": from_, "to": to, "evidence": evidence}
 
     for checkout in observation["checkouts"]:
+        if (
+            not isinstance(checkout, dict)
+            or not isinstance(checkout.get("path"), str)
+            or not checkout["path"]
+            or not workspace_facts_are_valid(checkout.get("facts"))
+        ):
+            raise ValueError("workspace graph contains an invalid fact status")
         checkout_id = deterministic_id("checkout", {"path": checkout["path"]})
 
 
@@ -547,13 +634,10 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
 
     sorted_nodes = sorted(nodes.values(), key=lambda n: locale_sort_key(n["id"]))
     sorted_edges = sorted(edges.values(), key=lambda e: locale_sort_key(e["id"]))
+    normalized_refusals = _normalized_refusals(observation.get("refusals"))
     workspace_fingerprint = workspace_fingerprint_from_graph(
-        {"nodes": sorted_nodes}
+        {"nodes": sorted_nodes, "refusals": normalized_refusals}
     )
-
-    refusals = observation.get("refusals")
-    if refusals is None:
-        refusals = []
 
     result: Dict[str, Any] = {
         "schema": GRAPH_SCHEMA,
@@ -567,9 +651,7 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
             unknowns,
             key=lambda u: _path_sort_key(f"{u['path']}:{u['fact']}"),
         ),
-        # Only the normalized path crosses into the graph; the caller's raw
-        # input string stays in the observation layer.
-        "refusals": [{"path": r["path"], "status": r["status"], "reason": r["reason"]} for r in refusals],
+        "refusals": normalized_refusals,
     }
     # Only present when the neighbor_of cardinality cap actually engaged, so
     # an ordinary (uncapped) graph stays byte-identical to before #68 - no

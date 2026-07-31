@@ -42,6 +42,8 @@ from vivary_core.canonical import (
     is_within_allowlist,
 )
 from vivary_core.capsule_select import (
+    OMITTED_LIST_CAP,
+    FILTER_FIELDS,
     TIER_NAMES,
     _filter_field_value,
     _match_filter,
@@ -53,9 +55,64 @@ from vivary_core.capsule_select import (
     validate_filters,
 )
 from vivary_core.collation import CollationDomainError, locale_sort_key
+from vivary_core.workspace_model import workspace_facts_are_valid
 
 CAPSULE_SCHEMA = "vivary.task-capsule/v0"
 MAX_GRAPH_CONTEXT_CHECKOUTS = 300
+
+_OMISSION_EXACT_KEYS = {
+    "filtered_out": frozenset(
+        {"kind", "reason", "omitted_count", "filters"}
+    ),
+    "refused_root": frozenset({"kind", "reason", "path"}),
+    "dirty_paths_truncated": frozenset(
+        {"kind", "subject", "subject_path", "omitted_count", "reason"}
+    ),
+    "content_matches_outside_task": frozenset(
+        {"kind", "omitted_count", "reason"}
+    ),
+    "collation_domain_excluded": frozenset(
+        {"kind", "subject", "fact", "reason"}
+    ),
+    "conflict_outside_scope": frozenset(
+        {"kind", "conflict", "subject", "subject_path", "reason"}
+    ),
+    "ignored_paths_excluded": frozenset({"kind", "reason"}),
+    "neighbor_of_pairs_capped": frozenset(
+        {"kind", "repository", "reason", "omitted_count"}
+    ),
+    "content_lines_truncated": frozenset(
+        {
+            "kind",
+            "subject",
+            "subject_path",
+            "path",
+            "omitted_count",
+            "reason",
+        }
+    ),
+    "content_files_truncated": frozenset(
+        {
+            "kind",
+            "subject",
+            "subject_path",
+            "omitted_count",
+            "total_files_matched",
+            "reason",
+        }
+    ),
+    "privacy_matches_excluded": frozenset(
+        {
+            "kind",
+            "subject",
+            "subject_path",
+            "omitted_count",
+            "reason",
+            "evidence",
+        }
+    ),
+    "content_root_refused": frozenset({"kind", "reason", "path"}),
+}
 
 
 def _nonempty_string(value) -> bool:
@@ -163,28 +220,32 @@ def _task_capsule_id(task, workspace_fingerprint) -> str:
 def _is_required_checks_shape(value) -> bool:
     return isinstance(value, list) and all(
         isinstance(required_check, dict)
-        and isinstance(required_check.get("name"), str)
-        and bool(required_check["name"])
-        and isinstance(required_check.get("command"), str)
-        and bool(required_check["command"])
+        and _nonblank_string(required_check.get("name"))
+        and _nonblank_string(required_check.get("command"))
         for required_check in value
     )
 
 
 def _is_declared_required_checks_shape(value) -> bool:
-    return _is_required_checks_shape(value) and all(
-        set(required_check) == {"name", "command", "cwd"}
-        and _nonblank_string(required_check["cwd"])
-        and normalize_path(required_check["cwd"]) == required_check["cwd"]
-        for required_check in value
-    )
+    if not (
+        _is_required_checks_shape(value)
+        and all(
+            set(required_check) == {"name", "command", "cwd"}
+            and _nonblank_string(required_check["cwd"])
+            and normalize_path(required_check["cwd"]) == required_check["cwd"]
+            for required_check in value
+        )
+    ):
+        return False
+    names = [required_check["name"] for required_check in value]
+    return len(names) == len(set(names))
 
 
 def is_git_checkout(node) -> bool:
     if not isinstance(node, dict) or node.get("kind") != "checkout":
         return False
     facts = node.get("facts")
-    if not isinstance(facts, dict):
+    if not workspace_facts_are_valid(facts):
         return False
     repository_fact = facts.get("is_git_repository")
     return (
@@ -436,6 +497,93 @@ def _is_conflict_shape(conflict) -> bool:
     )
 
 
+def _is_omission_shape(omission) -> bool:
+    if not isinstance(omission, dict):
+        return False
+    kind = omission.get("kind")
+    if not _nonblank_string(kind) or not _nonblank_string(
+        omission.get("reason")
+    ):
+        return False
+    if kind == "claims_over_budget":
+        required_keys = {"kind", "reason", "omitted_count", "omitted"}
+        allowed_keys = required_keys | {"truncated"}
+        if set(omission) not in (required_keys, allowed_keys):
+            return False
+        omitted = omission["omitted"]
+        omitted_count = omission["omitted_count"]
+        return (
+            type(omitted_count) is int
+            and omitted_count > 0
+            and isinstance(omitted, list)
+            and len(omitted) <= OMITTED_LIST_CAP
+            and len(omitted) == min(omitted_count, OMITTED_LIST_CAP)
+            and all(
+                set(entry) == {"subject_path", "fact", "tier"}
+                and all(
+                    _nonempty_string(entry.get(field))
+                    for field in ("subject_path", "fact", "tier")
+                )
+                and entry["tier"] in TIER_NAMES
+                for entry in omitted
+            )
+            and (
+                omission.get("truncated") is True
+                if omitted_count > OMITTED_LIST_CAP
+                else "truncated" not in omission
+            )
+        )
+    expected_keys = _OMISSION_EXACT_KEYS.get(kind)
+    if expected_keys is None or set(omission) != expected_keys:
+        return False
+    if "omitted_count" in omission and (
+        type(omission["omitted_count"]) is not int
+        or omission["omitted_count"] <= 0
+    ):
+        return False
+    if kind == "filtered_out":
+        filters = omission["filters"]
+        if not (
+            isinstance(filters, list)
+            and bool(filters)
+            and all(
+                isinstance(task_filter, dict)
+                and task_filter.get("field") in FILTER_FIELDS
+                and len(task_filter) == 2
+                and sum(
+                    operator in task_filter
+                    for operator in ("equals", "includes")
+                )
+                == 1
+                and _nonempty_string(
+                    task_filter.get("equals", task_filter.get("includes"))
+                )
+                for task_filter in filters
+            )
+        ):
+            return False
+    if kind == "content_files_truncated" and (
+        type(omission["total_files_matched"]) is not int
+        or omission["total_files_matched"] <= omission["omitted_count"]
+    ):
+        return False
+    if kind == "privacy_matches_excluded" and not isinstance(
+        omission["evidence"], dict
+    ):
+        return False
+    for field in (
+        "path",
+        "subject",
+        "subject_path",
+        "fact",
+        "conflict",
+        "repository",
+    ):
+        if field in omission and not _nonempty_string(omission[field]):
+            return False
+    return True
+
+
 def _selection_signal_is_valid(signal, terms, content_terms, claim) -> bool:
     signal_kind = signal.get("signal")
     if signal_kind == "conflict_side":
@@ -505,6 +653,143 @@ def _claim_matches_task_filters(task, claim) -> bool:
     return True
 
 
+def _selection_omissions(selection, max_claims):
+    omissions = []
+    filtered_out = selection["filtered_out"]
+    if filtered_out is not None:
+        omissions.append(
+            {
+                "kind": "filtered_out",
+                "reason": "structured task filters excluded candidate claims",
+                **filtered_out,
+            }
+        )
+    over_budget = selection["over_budget"]
+    if over_budget is not None:
+        omissions.append(
+            {
+                "kind": "claims_over_budget",
+                "reason": (
+                    f"claim budget {max_claims} reached; cuts ranked by relevance "
+                    "tier, weakest evidence first"
+                ),
+                **over_budget,
+            }
+        )
+    return omissions
+
+
+def _refusal_omissions(graph, task_scope):
+    graph_allowlist = graph.get("allowlist") or []
+    refusal_scope = None if task_scope == graph_allowlist else task_scope
+    omissions = []
+    for refusal in graph.get("refusals") or []:
+        path = refusal.get("path")
+        if refusal_scope and not any(
+            is_within_allowlist(root, path) for root in refusal_scope
+        ):
+            continue
+        omissions.append(
+            {
+                "kind": "refused_root",
+                "reason": refusal.get("reason"),
+                "path": path,
+            }
+        )
+    return omissions
+
+
+def _canonical_multiset(items):
+    return sorted(
+        (canonicalize(item) for item in items),
+        key=_utf16_sort_key,
+    )
+
+
+def _compiler_omissions_match(
+    observed, expected, task, max_claims, checkout_paths, fact_names
+) -> bool:
+    selection_kinds = {"filtered_out", "claims_over_budget"}
+    observed_selection = [
+        omission
+        for omission in observed
+        if omission["kind"] in selection_kinds
+    ]
+    expected_selection = {
+        omission["kind"]: omission
+        for omission in expected
+        if omission["kind"] in selection_kinds
+    }
+    if len({item["kind"] for item in observed_selection}) != len(
+        observed_selection
+    ):
+        return False
+    for omission in observed_selection:
+        if omission["kind"] != "claims_over_budget":
+            continue
+        if any(
+            entry["subject_path"] not in checkout_paths
+            or entry["fact"] not in fact_names
+            for entry in omission["omitted"]
+        ):
+            return False
+
+    observed_refusals = [
+        omission
+        for omission in observed
+        if omission["kind"] == "refused_root"
+    ]
+    expected_refusals = [
+        omission
+        for omission in expected
+        if omission["kind"] == "refused_root"
+    ]
+    if _canonical_multiset(observed_refusals) != _canonical_multiset(
+        expected_refusals
+    ):
+        return False
+
+    observed_by_kind = {
+        omission["kind"]: omission for omission in observed_selection
+    }
+    normalized_filters = [
+        {
+            "field": task_filter["field"],
+            task_filter["operator"]: task_filter["value"],
+        }
+        for task_filter in validate_filters(task.get("filters"))
+    ]
+    for kind in selection_kinds:
+        omission = observed_by_kind.get(kind)
+        minimum = expected_selection.get(kind)
+        if omission is None:
+            if minimum is not None:
+                return False
+            continue
+        if kind == "filtered_out":
+            if (
+                omission["reason"]
+                != "structured task filters excluded candidate claims"
+                or omission["filters"] != normalized_filters
+            ):
+                return False
+        elif omission["reason"] != (
+            f"claim budget {max_claims} reached; cuts ranked by relevance "
+            "tier, weakest evidence first"
+        ):
+            return False
+        if minimum is None:
+            continue
+        if omission["omitted_count"] < minimum["omitted_count"]:
+            return False
+        if (
+            omission["omitted_count"] == minimum["omitted_count"]
+            and omission != minimum
+        ):
+            return False
+    return True
+
+
 def capsule_context_matches_graph(capsule, graph) -> bool:
     """Bind compiler-owned capsule context to the graph supplied to a verifier."""
 
@@ -555,7 +840,7 @@ def capsule_context_matches_graph(capsule, graph) -> bool:
         capsule_conflict_ids = {
             conflict["id"] for conflict in capsule["conflicts"]
         }
-        expected_claims = select_claims(
+        selection = select_claims(
             task=capsule["task"],
             graph={
                 **graph,
@@ -567,17 +852,46 @@ def capsule_context_matches_graph(capsule, graph) -> bool:
             },
             candidates=candidates,
             max_claims=capsule["budget"]["max_claims"],
-        )["included"]
+        )
         expected_claims = [
             {"id": _claim_id(claim), **claim}
-            for claim in expected_claims
+            for claim in selection["included"]
         ]
         graph_claims = {
             (claim["subject"], claim["fact"]): claim
             for claim in candidates
             if claim["fact"] != "content_match"
         }
-    except (AttributeError, KeyError, TypeError):
+        expected_omissions = [
+            *_selection_omissions(
+                selection, capsule["budget"]["max_claims"]
+            ),
+            *_refusal_omissions(graph, scope),
+        ]
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return False
+    compiler_omission_kinds = {
+        "filtered_out",
+        "claims_over_budget",
+        "refused_root",
+    }
+    observed_omissions = [
+        omission
+        for omission in capsule["omissions"]
+        if omission.get("kind") in compiler_omission_kinds
+    ]
+    checkout_paths = {checkout["path"] for checkout in checkouts}
+    fact_names = {"content_match"}
+    for checkout in checkouts:
+        fact_names.update(checkout["facts"])
+    if not _compiler_omissions_match(
+        observed_omissions,
+        expected_omissions,
+        capsule["task"],
+        capsule["budget"]["max_claims"],
+        checkout_paths,
+        fact_names,
+    ):
         return False
     declared_checks = capsule["task"].get("required_checks")
     expected_checks, check_unknowns = _derive_required_checks(checkouts)
@@ -762,6 +1076,19 @@ def is_task_capsule_shape(capsule) -> bool:
     ):
         return False
 
+    declared_checks = capsule["task"].get("required_checks")
+    if declared_checks is not None and any(
+        not any(
+            all(
+                required_check.get(field) == declared_check[field]
+                for field in ("name", "command", "cwd")
+            )
+            for required_check in capsule["required_checks"]
+        )
+        for declared_check in declared_checks
+    ):
+        return False
+
     return (
         all(_is_claim_shape(claim) for claim in capsule["claims"])
         and all(
@@ -770,9 +1097,7 @@ def is_task_capsule_shape(capsule) -> bool:
         )
         and all(_is_unknown_shape(unknown) for unknown in capsule["unknowns"])
         and all(
-            isinstance(omission, dict)
-            and isinstance(omission.get("kind"), str)
-            and bool(omission["kind"])
+            _is_omission_shape(omission)
             for omission in capsule["omissions"]
         )
         and _claim_selections_are_valid(capsule)
@@ -1270,10 +1595,8 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         facts = node.get("facts")
         if facts is None:
             facts = {}
-        if not isinstance(facts, dict) or any(
-            fact is not None and not isinstance(fact, dict) for fact in facts.values()
-        ):
-            raise ValueError("workspace graph contains an invalid fact")
+        if not workspace_facts_are_valid(facts):
+            raise ValueError("workspace graph contains an invalid fact status")
         if is_git_checkout(node):
             checkouts.append(node)
     # A declared scope narrower than the graph's allowlist must actually bound what
@@ -1350,11 +1673,7 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         candidates=candidates,
         max_claims=max_claims,
     )
-    selected, filtered_out, over_budget = (
-        selection["included"],
-        selection["filtered_out"],
-        selection["over_budget"],
-    )
+    selected = selection["included"]
     included = []
     for claim in selected:
         entry = {"id": _claim_id(claim)}
@@ -1369,26 +1688,15 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         *scope_conflict_omissions,
         *truncation_omissions,
     ]
-    if filtered_out is not None:
-        omissions.append({"kind": "filtered_out", "reason": "structured task filters excluded candidate claims", **filtered_out})
-    if over_budget is not None:
-        omissions.append(
-            {
-                "kind": "claims_over_budget",
-                "reason": f"claim budget {max_claims} reached; cuts ranked by relevance tier, weakest evidence first",
-                **over_budget,
-            }
+    omissions.extend(_selection_omissions(selection, max_claims))
+    omissions.extend(
+        _refusal_omissions(
+            graph,
+            declared_scope
+            if declared_scope is not None
+            else graph.get("allowlist") or [],
         )
-    for refusal in graph.get("refusals") or []:
-        if not _in_scope(refusal.get("path")):
-            continue
-        omissions.append(
-            {
-                "kind": "refused_root",
-                "reason": refusal.get("reason"),
-                "path": refusal.get("path"),
-            }
-        )
+    )
     scoped_checkouts = [
         checkout for checkout in checkouts if _in_scope(checkout.get("path"))
     ]
@@ -1413,11 +1721,19 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     content_unknowns: list[dict] = []
     for checkout_content in (content.get("checkouts") if content else None) or []:
         node = checkouts_by_path.get(checkout_content.get("path"))
-        for content_omission in checkout_content.get("omissions") or []:
-            entry = dict(content_omission)
-            entry["subject"] = node.get("id") if node is not None else None
-            entry["subject_path"] = checkout_content.get("path")
-            omissions.append(entry)
+        if node is not None:
+            for content_omission in checkout_content.get("omissions") or []:
+                try:
+                    entry = dict(content_omission)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        "content contains a malformed omission"
+                    ) from None
+                entry["subject"] = node.get("id")
+                entry["subject_path"] = checkout_content.get("path")
+                if not _is_omission_shape(entry):
+                    raise ValueError("content contains a malformed omission")
+                omissions.append(entry)
         # A search that could not run is not a search that found nothing. Reading
         # only `omissions` made `grep_unavailable` — and a root `observe_content`
         # refused outright — vanish from the capsule, so a failed search was
@@ -1477,6 +1793,17 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     if declared_checks is not None:
         task_out["required_checks"] = list(declared_checks)
 
+    scoped_omissions = [
+        omission
+        for omission in omissions
+        if _entry_in_scope(omission)
+    ]
+    if not all(
+        _is_omission_shape(omission)
+        for omission in scoped_omissions
+    ):
+        raise ValueError("compiled capsule omission is malformed")
+
     body = {
         "schema": CAPSULE_SCHEMA,
         "task": task_out,
@@ -1492,11 +1819,7 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
             *[u for u in content_unknowns if _entry_in_scope(u)],
             *[u for u in check_unknowns if _entry_in_scope(u)],
         ],
-        "omissions": [
-            omission
-            for omission in omissions
-            if _entry_in_scope(omission)
-        ],
+        "omissions": scoped_omissions,
         "required_checks": required_checks,
         "budget": {"max_claims": max_claims},
     }

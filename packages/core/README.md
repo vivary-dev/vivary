@@ -33,8 +33,8 @@ The governed-context shared seam every Vivary role package will speak through:
   evidence graph; divergent checkouts become explicit unresolved conflicts
   with both sides and their evidence preserved — never auto-resolved.
   The workspace fingerprint commits each emitted checkout's path, effective worktree
-  root, and core facts. Repeated observations that collapse to one checkout identity
-  cannot create an unverifiable commitment.
+  root, semantic fact status and value, and normalized observation refusals. Evidence
+  command text does not enter that identity.
 - **`workspace_content`** — bounded, read-only `git grep` content search
   over tracked files only, every truncation recorded.
 - **`capsule_compile` / `capsule_select`** — the bounded Task Capsule:
@@ -65,15 +65,20 @@ The governed-context shared seam every Vivary role package will speak through:
   and carries `requires_gate`. Duplicate check names preserve their worst
   recorded outcome.
   Graph-backed verification reconstructs compiler selection from the supplied graph
-  and retained content-match candidates. At a fixed budget and retained content set,
-  added, removed, or rewritten graph claims fail closed. Repair graphs are reprojected
-  from checkout paths and facts; every derived node, edge, conflict, unknown, omission,
-  deterministic ID, evidence field, and workspace fingerprint must match.
-  Explicit task-required checks remain visible in the capsule, bind to an observed Git
-  checkout execution root related to task scope, and add to rather than replace
-  evidence-derived checks. They resolve undetermined-check unknowns only for that
-  checkout. Otherwise, graph-derived checks and undetermined-check unknowns are
-  re-derived during verification.
+  and retained content-match candidates. Added, removed, or rewritten graph claims fail
+  closed. Selection omissions cannot understate the graph-reconstructable minimum and
+  match exactly when their counts equal it. Opaque content can only raise totals; its
+  bounded over-budget entries remain capsule-attested but must name an in-scope checkout
+  path and known fact. Unknown or reshaped omission variants fail closed.
+  Repair graphs are reprojected from checkout paths, facts, and normalized refusals;
+  every derived node, edge, conflict, unknown, omission, deterministic ID, evidence
+  field, and workspace fingerprint must match. Invalid fact statuses fail closed.
+  Explicit task-required checks use unique nonblank names, remain visible in the
+  capsule even without a graph, and bind to an observed Git checkout execution root
+  related to task scope. They add to rather than replace evidence-derived checks and
+  resolve undetermined-check unknowns only for that checkout. Without a declaration,
+  graph-derived checks and undetermined-check unknowns are re-derived during
+  verification.
 - **`control_*`** (Exo) — claims, leases, handoffs, dependency cycles,
   execution evidence, and task views over caller-owned state; one active claim
   per scope, including equivalent Win32 device-path spellings. Malformed leases
