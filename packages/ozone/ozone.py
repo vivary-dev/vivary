@@ -40,6 +40,7 @@ VERIFICATION_SCHEMA = "vivary.ozone-verification/v0"
 REFUSAL_SCHEMA = "vivary.ozone-verification-refusal/v0"
 MAX_EVIDENCE_AGE_SECONDS = 300
 MAX_REPAIR_IDENTIFIER_JSON_BYTES = 128
+MAX_SCOPE_PATH_COMPARISONS = 100_000
 CAPSULE_FIELDS = frozenset(
     {
         "schema",
@@ -149,7 +150,7 @@ def _load_core_verification():
     ):
         sys.path.insert(0, sibling_core)
     from vivary_core.capsule_compile import (
-        capsule_profile_filters_match_graph,
+        capsule_claims_match_graph,
         is_task_capsule_shape,
         repair_topology_fingerprint,
         verify_task_capsule_integrity,
@@ -172,7 +173,7 @@ def _load_core_verification():
     from vivary_core.verify_sufficiency import evaluate_gate_sufficiency
 
     return {
-        "capsule_profile_filters_match_graph": capsule_profile_filters_match_graph,
+        "capsule_claims_match_graph": capsule_claims_match_graph,
         "is_task_capsule_shape": is_task_capsule_shape,
         "verify_task_capsule_integrity": verify_task_capsule_integrity,
         "OMITTED_LIST_CAP": OMITTED_LIST_CAP,
@@ -404,30 +405,36 @@ def _capsule_scope_is_valid(capsule, core):
     ):
         return False
 
-    narrated_entries = [
-        *capsule.get("claims", []),
-        *capsule.get("conflicts", []),
-        *capsule.get("unknowns", []),
-        *capsule.get("omissions", []),
-    ]
-    for entry in narrated_entries:
-        paths = [entry.get("path"), entry.get("subject_path")]
-        sides = entry.get("sides")
-        if isinstance(sides, list):
-            paths.extend(
-                side.get("path")
-                for side in sides
-                if isinstance(side, dict)
-            )
-        for path in paths:
-            if path is None:
-                continue
-            if not _nonempty_string(path) or not any(
-                core["is_within_allowlist"](root, path)
-                for root in declared_scope
-            ):
-                return False
-    return True
+    narrated_paths = []
+    for entries in (
+        capsule.get("claims", []),
+        capsule.get("conflicts", []),
+        capsule.get("unknowns", []),
+        capsule.get("omissions", []),
+    ):
+        for entry in entries:
+            narrated_paths.extend((entry.get("path"), entry.get("subject_path")))
+            sides = entry.get("sides")
+            if isinstance(sides, list):
+                narrated_paths.extend(
+                    side.get("path")
+                    for side in sides
+                    if isinstance(side, dict)
+                )
+    narrated_paths = [path for path in narrated_paths if path is not None]
+    if (
+        len(narrated_paths) * len(declared_scope)
+        > MAX_SCOPE_PATH_COMPARISONS
+    ):
+        return False
+    return all(
+        _nonempty_string(path)
+        and any(
+            core["is_within_allowlist"](root, path)
+            for root in declared_scope
+        )
+        for path in narrated_paths
+    )
 
 
 def _repair_capsule_is_safe(capsule, core):
@@ -903,10 +910,8 @@ def _validate_governed_request(request, core):
         elif request["graph"]["workspace_fingerprint"] != workspace_fingerprint:
             errors.append("repair_graph_workspace_mismatch")
         elif repair_capsule_is_safe:
-            if not core["capsule_profile_filters_match_graph"](
-                capsule, request["graph"]
-            ):
-                errors.append("repair_graph_filters_mismatch")
+            if not core["capsule_claims_match_graph"](capsule, request["graph"]):
+                errors.append("repair_graph_claims_mismatch")
             else:
                 conflicts_match, conflict_work_is_bounded = (
                     _repair_graph_matches_capsule_conflicts(

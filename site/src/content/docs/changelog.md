@@ -91,10 +91,11 @@ remains part of the final coordinated release train and requires a separate huma
   rejects malformed gate constraints, scalar receipt identities, supplied non-mapping
   receipts, contradictory receipt fields, incomplete capsule claims, conflicts, or
   compiler-owned unknown records, duplicate conflict sides, blank task questions,
-  malformed task scopes or filters, claims that violate declared or graph-backed
-  profile filters, content signals attached to non-content claims, mismatched selection
-  tiers and signals, narrated paths outside the declared scope, invalid typed graph
-  relationships, and malformed or deeply nested repair inputs before calling core.
+  malformed task scopes or filters, claims that violate declared filters, claims that
+  do not map to the supplied graph's subject paths or graph-profile filters, forged
+  question or content signals, mismatched selection tiers, narrated paths outside the
+  declared scope, invalid typed graph relationships, and malformed or deeply nested
+  repair inputs before calling core.
   Receipt claim lists must be unique and disjoint. Together,
   they must equal both `claims_in_scope` and the capsule's claim IDs. All claims are
   verified only when the check list is nonempty and every check passed. Otherwise, all
@@ -120,10 +121,11 @@ remains part of the final coordinated release train and requires a separate huma
   that tier or signal, so re-labeling cannot change their repair eligibility.
   This authenticates remote-backed and inferred no-remote linked-worktree groups without
   trusting a copied workspace fingerprint label. Ozone also requires each divergent
-  conflict to cover every checkout related to its repository, caps total checkout-pair
-  scans across all repositories, and bounds scope-to-conflict comparisons before repair
-  construction. It also bounds route-proposal evidence to core's checkout cap and
-  derived repair estimates to JavaScript's lossless integer range before delegation.
+  conflict to cover every checkout related to its repository. It caps scope-path checks
+  at 100,000 comparisons, total checkout-pair scans across all repositories, and
+  scope-to-conflict comparisons before repair construction. It also bounds
+  route-proposal evidence to core's checkout cap and derived repair estimates to
+  JavaScript's lossless integer range before delegation.
   It returns typed verification or refusal envelopes. Core's fingerprinted receipt/gate
   verdicts and repair proposal pass through unchanged; Strato consumes the raw
   `gate_verdict` without a second verification implementation. The CLI rejects

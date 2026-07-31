@@ -43,7 +43,9 @@ from vivary_core.capsule_select import (
     TIER_NAMES,
     _filter_field_value,
     _match_filter,
+    _question_match_value,
     question_terms,
+    word_match,
     select_claims,
     subject_profiles,
     validate_filters,
@@ -435,32 +437,39 @@ def _claim_matches_task_filters(task, claim) -> bool:
     return True
 
 
-def capsule_profile_filters_match_graph(capsule, graph) -> bool:
-    """Verify graph-profile filters against the graph supplied to a verifier."""
+def capsule_claims_match_graph(capsule, graph) -> bool:
+    """Bind every claim and graph-derived selection signal to the supplied graph."""
 
     profile_filters = [
         task_filter
         for task_filter in validate_filters(capsule["task"].get("filters"))
         if task_filter["field"] in {"label", "repository", "branch"}
     ]
-    if not profile_filters:
-        return True
     profiles = subject_profiles(graph)
-    return all(
-        claim["subject"] in profiles
-        and all(
-            _match_filter(
-                task_filter,
-                _filter_field_value(
-                    profiles[claim["subject"]],
-                    claim,
-                    task_filter["field"],
-                ),
+    for claim in capsule["claims"]:
+        profile = profiles.get(claim["subject"])
+        if (
+            profile is None
+            or claim["subject_path"] != profile.get("path")
+            or any(
+                not _match_filter(
+                    task_filter,
+                    _filter_field_value(profile, claim, task_filter["field"]),
+                )
+                for task_filter in profile_filters
             )
-            for task_filter in profile_filters
-        )
-        for claim in capsule["claims"]
-    )
+        ):
+            return False
+        for signal in claim["selection"]["signals"]:
+            if (
+                signal["signal"] == "question_term_match"
+                and not word_match(
+                    signal["term"],
+                    _question_match_value(profile, signal["field"]),
+                )
+            ):
+                return False
+    return True
 
 
 

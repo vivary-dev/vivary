@@ -173,6 +173,18 @@ def _filter_field_value(profile, claim, field):
     return None
 
 
+def _question_match_value(profile, field):
+    if field == "repository":
+        repository = profile.get("repository") if profile else None
+        if (
+            not isinstance(repository, dict)
+            or repository.get("identity_status") != "known"
+        ):
+            return None
+        return repository.get("identity")
+    return _filter_field_value(profile, {}, field)
+
+
 def validate_filters(filters):
     if filters is None:
         return []
@@ -228,14 +240,12 @@ def rank_claim(profile, terms, intrinsic_signals=None):
     signals = []
     for conflict in (profile.get("conflicts") if profile else None) or []:
         signals.append({"signal": "conflict_side", "conflict": conflict.get("id")})
-    repository = profile.get("repository") if profile else None
-    repository_identity = None
-    if isinstance(repository, dict) and repository.get("identity_status") == "known":
-        repository_identity = repository.get("identity")
     match_surfaces = [
-        ("label", profile.get("label") if profile else None),
-        ("repository", repository_identity),
-        ("branch", profile.get("branch") if profile else None),
+        (
+            field,
+            _question_match_value(profile, field),
+        )
+        for field in ("label", "repository", "branch")
     ]
     for term in terms:
         for field, value in match_surfaces:

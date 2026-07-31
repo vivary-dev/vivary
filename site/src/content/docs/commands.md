@@ -480,7 +480,7 @@ ozone verify request.json --governed --json --strict
 | `capsule` | Complete `vivary.task-capsule/v0`; its body fingerprint and deterministic ID are recomputed before core delegation. Optional `task.scope` must contain at least one nonempty string. Optional `task.filters` must use the compiler's list-shaped `{field, equals\|includes}` contract. Both rules apply whether or not the request includes a graph. |
 | `receipt` | Complete Execution Receipt bound to the capsule. Its check records and claim lists are shape-validated; `claims_verified` and `claims_unverified` must be disjoint and together equal both `claims_in_scope` and the capsule's claim IDs. All claims are verified only when the check list is nonempty and every check passed. Otherwise, all claims remain unverified. Omission or malformed/tampered evidence cannot produce a sufficient aggregate result. |
 | `gate` | Named gate with core-owned `required_checks`, `require_claims_verified`, `max_unresolved_conflicts`, and `max_unresolved_unknowns` constraints. |
-| `graph` | Optional matching `vivary.workspace-graph/v0`. When present, Ozone returns a bounded `vivary.context-repair-proposal/v0`; every proposal has `requires_gate: true`, and `writes_performed` is always `0`. Ozone bounds checkout-pair scans, route evidence, and scope-to-conflict comparisons before repair construction. |
+| `graph` | Optional matching `vivary.workspace-graph/v0`. When present, every claim subject, path, graph-profile filter, and question-match signal must match the graph. Ozone returns a bounded `vivary.context-repair-proposal/v0`. Every proposal has `requires_gate: true`, and `writes_performed` is always `0`. Ozone limits scope-path checks to 100,000 comparisons and bounds checkout-pair scans, route evidence, and scope-to-conflict comparisons before repair construction. |
 
 The capsule task question must be a nonblank string. A declared task scope bounds every
 narrated claim, conflict side, unknown, and omission path to at least one declared root.
@@ -488,12 +488,15 @@ Every capsule claim must retain its compiler-owned nonempty identity, subject, p
 fact, text, status, and selection reason plus list-shaped evidence and selection
 signals. With task filters, every claim must retain the exact normalized
 `matched_filters` record; claim-owned fact and path values must satisfy that record.
-When the request includes a graph, label, repository, and branch filters must also
-match the graph profile for every claim subject. Without task filters, the record must
-be absent. Question/content match signals imply the `question_match` tier unless a
-preserved conflict takes precedence. A content-match signal belongs only to a known
-`content_match` claim and must reproduce its normalized question term and narrated
-path. Signal identities are checked once in linear time; duplicates are invalid. The
+When the request includes a graph, every claim subject must name a checkout in that
+graph, and the claim path must equal the checkout path. Label, repository, and branch
+filters must match the graph profile for every claim subject. Question-match signals
+must match the named profile field. Repository identity signals require a known
+repository identity. Without task filters, the `matched_filters` record must be absent.
+Question/content match signals imply the `question_match` tier unless a preserved
+conflict takes precedence. A content-match signal belongs only to a known
+`content_match` claim and must reproduce its normalized question term and narrated path.
+Signal identities are checked once in linear time; duplicates are invalid. The
 `allowlisted` tier carries only its baseline signal. A re-fingerprinted partial or
 semantically inconsistent claim is still an invalid capsule.
 Each capsule unknown must match one complete compiler-owned variant: an unknown graph
