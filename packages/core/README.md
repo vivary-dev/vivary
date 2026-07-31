@@ -32,6 +32,9 @@ The governed-context shared seam every Vivary role package will speak through:
 - **`workspace_model`** — pure projection of observations into a typed
   evidence graph; divergent checkouts become explicit unresolved conflicts
   with both sides and their evidence preserved — never auto-resolved.
+  The workspace fingerprint is recomputed from the emitted checkout nodes. Repeated
+  observations that collapse to one checkout identity cannot create an unverifiable
+  commitment.
 - **`workspace_content`** — bounded, read-only `git grep` content search
   over tracked files only, every truncation recorded.
 - **`capsule_compile` / `capsule_select`** — the bounded Task Capsule:
@@ -61,6 +64,9 @@ The governed-context shared seam every Vivary role package will speak through:
   gate constraints remain absent constraints. Every proposed write is named
   and carries `requires_gate`. Duplicate check names preserve their worst
   recorded outcome.
+  Graph-backed verification reconstructs compiler selection from the supplied graph
+  candidates and any retained content-match candidates. At a fixed budget and retained
+  content set, added, removed, or rewritten graph claims fail closed.
 - **`control_*`** (Exo) — claims, leases, handoffs, dependency cycles,
   execution evidence, and task views over caller-owned state; one active claim
   per scope, including equivalent Win32 device-path spellings. Malformed leases

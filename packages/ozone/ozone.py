@@ -160,10 +160,12 @@ def _load_core_verification():
         repair_topology_fingerprint,
         verify_task_capsule_integrity,
     )
+    from vivary_core.workspace_model import workspace_fingerprint_from_graph
     from vivary_core.capsule_select import OMITTED_LIST_CAP
     from vivary_core.canonical import (
         MAX_LOSSLESS_INTEGER,
         _utf16_sort_key,
+        deterministic_id,
         is_canonical_body_value,
         is_within_allowlist,
     )
@@ -191,6 +193,8 @@ def _load_core_verification():
         "is_canonical_body_value": is_canonical_body_value,
         "is_within_allowlist": is_within_allowlist,
         "repair_topology_fingerprint": repair_topology_fingerprint,
+        "workspace_fingerprint_from_graph": workspace_fingerprint_from_graph,
+        "deterministic_id": deterministic_id,
         "MAX_DEDUPE_CHECKOUTS": MAX_DEDUPE_CHECKOUTS,
         "AVG_OMITTED_CLAIM_TOKENS": AVG_OMITTED_CLAIM_TOKENS,
         "MAX_LOSSLESS_INTEGER": MAX_LOSSLESS_INTEGER,
@@ -604,6 +608,7 @@ def _repair_graph_is_safe(graph, core):
         isinstance(graph, dict)
         and graph.get("schema") == "vivary.workspace-graph/v0"
         and _nonempty_string(graph.get("workspace_fingerprint"))
+        and _parse_instant(graph.get("observed_at")) is not None
         and isinstance(graph.get("nodes"), list)
         and isinstance(graph.get("edges"), list)
         and isinstance(graph.get("conflicts"), list)
@@ -714,23 +719,29 @@ def _repair_graph_is_safe(graph, core):
         max_checkouts = core["MAX_DEDUPE_CHECKOUTS"]
         if conflict_pair_count > max_checkouts * (max_checkouts - 1) // 2:
             return False
-    return True
+    try:
+        return (
+            core["workspace_fingerprint_from_graph"](graph)
+            == graph["workspace_fingerprint"]
+        )
+    except (
+        AttributeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        core["CollationDomainError"],
+    ):
+        return False
 
 
 def _graph_context_work_is_bounded(capsule, graph):
     scope = capsule["task"].get("scope") or []
     if not scope:
         return True
-    claim_subjects = {claim["subject"] for claim in capsule["claims"]}
     checkout_count = sum(
         1
         for node in graph["nodes"]
-        if (
-            node.get("kind") == "checkout"
-            and isinstance((node.get("facts") or {}).get("is_git_repository"), dict)
-            and node["facts"]["is_git_repository"].get("value") is True
-            and node.get("id") in claim_subjects
-        )
+        if node.get("kind") == "checkout"
     )
     unknown_path_count = sum(
         1
@@ -960,11 +971,19 @@ def _validate_governed_request(request, core):
             errors.append("invalid_repair_graph")
         elif request["graph"]["workspace_fingerprint"] != workspace_fingerprint:
             errors.append("repair_graph_workspace_mismatch")
+        elif (
+            repair_capsule_is_safe
+            and request["graph"]["observed_at"]
+            != capsule["workspace"]["observed_at"]
+        ):
+            errors.append("repair_graph_context_mismatch")
         elif repair_capsule_is_safe:
             if not _graph_context_work_is_bounded(capsule, request["graph"]):
                 errors.append("repair_work_unbounded")
-            elif not core["capsule_context_matches_graph"](capsule, request["graph"]):
-                errors.append("repair_graph_context_mismatch")
+            elif not _repair_estimates_are_canonical(capsule, core):
+                errors.append("repair_estimate_unbounded")
+            elif not _repair_work_is_bounded(capsule, request["graph"], core):
+                errors.append("repair_work_unbounded")
             else:
                 conflicts_match, conflict_work_is_bounded = (
                     _repair_graph_matches_capsule_conflicts(
@@ -975,14 +994,14 @@ def _validate_governed_request(request, core):
                     errors.append("repair_work_unbounded")
                 elif not conflicts_match:
                     errors.append("repair_graph_conflicts_mismatch")
-                elif not _repair_estimates_are_canonical(capsule, core):
-                    errors.append("repair_estimate_unbounded")
-                elif not _repair_work_is_bounded(capsule, request["graph"], core):
-                    errors.append("repair_work_unbounded")
                 elif not _repair_graph_topology_is_bound(
                     capsule, request["graph"], core
                 ):
                     errors.append("repair_graph_topology_unbound")
+                elif not core["capsule_context_matches_graph"](
+                    capsule, request["graph"]
+                ):
+                    errors.append("repair_graph_context_mismatch")
 
     return errors
 

@@ -27,7 +27,10 @@ from vivary_core.capsule_compile import (  # noqa: E402
 from vivary_core.capsule_select import OMITTED_LIST_CAP  # noqa: E402
 from vivary_core.receipt import create_integrity_receipt  # noqa: E402
 from vivary_core.verify_repair import MAX_DEDUPE_CHECKOUTS  # noqa: E402
-from vivary_core.workspace_model import project_workspace_graph  # noqa: E402
+from vivary_core.workspace_model import (  # noqa: E402
+    project_workspace_graph,
+    workspace_fingerprint_from_graph,
+)
 
 ROOT = str(OZONE_ROOT)
 REPO_TMP = os.path.abspath(os.path.join(ROOT, "..", "..", "sandboxes"))
@@ -436,10 +439,12 @@ def _governed_capsule(
     conflicts=None,
     unknowns=None,
     omissions=None,
-    workspace_fingerprint="sha256:test-workspace",
+    workspace_fingerprint=None,
     topology_fingerprint=None,
     preserve_claim_ids=False,
 ):
+    if workspace_fingerprint is None:
+        workspace_fingerprint = workspace_fingerprint_from_graph({"nodes": []})
     complete_claims = []
     for claim in [] if claims is None else claims:
         complete_claim = {
@@ -554,6 +559,7 @@ def _governed_request(*, capsule=None, receipt=True, gate=None, graph=False, **o
             {
                 "schema": "vivary.workspace-graph/v0",
                 "workspace_fingerprint": governed_capsule["workspace"]["fingerprint"],
+                "observed_at": NOW,
                 "nodes": [],
                 "edges": [],
                 "conflicts": [],
@@ -562,8 +568,37 @@ def _governed_request(*, capsule=None, receipt=True, gate=None, graph=False, **o
             if graph is True
             else graph
         )
+        if graph is True:
+            _bind_request_graph_workspace(value)
     value.update(overrides)
     return value
+
+def _bind_request_graph_workspace(request):
+    graph = request["graph"]
+    capsule = request["capsule"]
+    graph["observed_at"] = capsule["workspace"]["observed_at"]
+    graph["workspace_fingerprint"] = workspace_fingerprint_from_graph(graph)
+    request["workspace"]["fingerprint"] = graph["workspace_fingerprint"]
+    capsule["workspace"]["fingerprint"] = graph["workspace_fingerprint"]
+    capsule["capsule_id"] = deterministic_id(
+        "capsule",
+        {
+            "task": capsule["task"]["question"],
+            "filters": capsule["task"].get("filters"),
+            "workspace": capsule["workspace"]["fingerprint"],
+        },
+    )
+    capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    if isinstance(request.get("receipt"), dict):
+        request["receipt"] = _governed_receipt(capsule)
+    return request
+
 
 
 def _checkout_graph_nodes(edges):
@@ -1374,6 +1409,7 @@ def test_governed_verification_binds_claims_and_question_signals_to_graph():
         "reason": "not_observed",
     }
     graph["unknowns"].append(graph_unknown)
+    graph["workspace_fingerprint"] = workspace_fingerprint_from_graph(graph)
     compiled = compile_task_capsule(
         task={
             "question": "Does the example checkout mirror upstream?",
@@ -1446,6 +1482,9 @@ def test_governed_verification_binds_claims_and_question_signals_to_graph():
     missing_unknown = json.loads(json.dumps(compiled))
     missing_unknown["unknowns"].remove(graph_unknown)
     variants.append(missing_unknown)
+    missing_claims = json.loads(json.dumps(compiled))
+    missing_claims["claims"] = []
+    variants.append(missing_claims)
 
     for capsule in variants:
         capsule["fingerprint"] = fingerprint(
@@ -1491,6 +1530,17 @@ def test_governed_verification_binds_claims_and_question_signals_to_graph():
         if node["kind"] == "repository"
     )
     repository_node["identity_status"] = "ambiguous"
+    ambiguous_identity_capsule = json.loads(json.dumps(compiled))
+    ambiguous_identity_capsule["workspace"]["repair_topology_fingerprint"] = (
+        repair_topology_fingerprint(ambiguous_identity_graph)
+    )
+    ambiguous_identity_capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in ambiguous_identity_capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
     repository_signal = next(
         signal
         for claim in compiled["claims"]
@@ -1500,13 +1550,160 @@ def test_governed_verification_binds_claims_and_question_signals_to_graph():
     assert repository_signal["signal"] == "question_term_match"
     ambiguous_identity = ozone.verify_governed(
         _governed_request(
-            capsule=compiled,
-            receipt=_governed_receipt(compiled),
+            capsule=ambiguous_identity_capsule,
+            receipt=_governed_receipt(ambiguous_identity_capsule),
             graph=ambiguous_identity_graph,
         )
     )
     assert ambiguous_identity["schema"] == ozone.REFUSAL_SCHEMA
     assert ambiguous_identity["reason_codes"] == ["repair_graph_context_mismatch"]
+
+def test_governed_verification_preserves_content_ranked_graph_claims():
+    graph = _projected_remote_graph(
+        ["https://example.test/shared.git"],
+        ["a" * 40],
+    )
+    checkout = next(node for node in graph["nodes"] if node["kind"] == "checkout")
+    content = {
+        "checkouts": [
+            {
+                "path": checkout["path"],
+                "head_revision": "a" * 40,
+                "matches": [
+                    {
+                        "path": "notes.md",
+                        "line": 1,
+                        "term": "needle",
+                        "excerpt": "needle marker",
+                        "evidence": {"command": "git grep needle"},
+                    }
+                ],
+                "omissions": [],
+            }
+        ]
+    }
+    capsule = compile_task_capsule(
+        task={"question": "Find needle.", "scope": ["/repo"]},
+        graph=graph,
+        content=content,
+        budget={"max_claims": 4},
+    )
+    assert any(claim["fact"] == "content_match" for claim in capsule["claims"])
+
+    accepted = ozone.verify_governed(
+        _governed_request(capsule=capsule, receipt=False, graph=graph)
+    )
+
+    assert accepted["schema"] == ozone.VERIFICATION_SCHEMA
+
+    missing_graph_claim = json.loads(json.dumps(capsule))
+    missing_graph_claim["claims"].remove(
+        next(
+            claim
+            for claim in missing_graph_claim["claims"]
+            if claim["fact"] != "content_match"
+        )
+    )
+    missing_graph_claim["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in missing_graph_claim.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    refused = ozone.verify_governed(
+        _governed_request(
+            capsule=missing_graph_claim,
+            receipt=False,
+            graph=graph,
+        )
+    )
+
+    assert refused["schema"] == ozone.REFUSAL_SCHEMA
+    assert refused["reason_codes"] == ["repair_graph_context_mismatch"]
+
+
+def test_governed_verification_binds_graph_identity_freshness_and_node_ids():
+    graph = _projected_remote_graph(
+        ["https://example.test/shared.git"],
+        ["a" * 40],
+    )
+    task = {
+        "question": "Does the example checkout mirror upstream?",
+        "scope": ["/repo"],
+    }
+
+    stale_graph = json.loads(json.dumps(graph))
+    stale_graph["observed_at"] = "2026-07-28T11:00:00+00:00"
+    stale_capsule = compile_task_capsule(
+        task=task,
+        graph=stale_graph,
+        budget={"max_claims": 24},
+    )
+    stale_capsule["workspace"]["observed_at"] = NOW
+    stale_capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in stale_capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    stale = ozone.verify_governed(
+        _governed_request(
+            capsule=stale_capsule,
+            receipt=_governed_receipt(stale_capsule),
+            graph=stale_graph,
+        )
+    )
+    assert stale["schema"] == ozone.REFUSAL_SCHEMA
+    assert stale["reason_codes"] == ["repair_graph_context_mismatch"]
+
+    altered_graph = json.loads(json.dumps(graph))
+    altered_checkout = next(
+        node for node in altered_graph["nodes"] if node["kind"] == "checkout"
+    )
+    altered_checkout["facts"]["is_dirty"]["value"] = True
+    altered_capsule = compile_task_capsule(
+        task=task,
+        graph=altered_graph,
+        budget={"max_claims": 24},
+    )
+    altered = ozone.verify_governed(
+        _governed_request(
+            capsule=altered_capsule,
+            receipt=_governed_receipt(altered_capsule),
+            graph=altered_graph,
+        )
+    )
+    assert altered["schema"] == ozone.REFUSAL_SCHEMA
+    assert altered["reason_codes"] == ["invalid_repair_graph"]
+
+    forged_graph = json.loads(json.dumps(graph))
+    forged_checkout = next(
+        node for node in forged_graph["nodes"] if node["kind"] == "checkout"
+    )
+    original_id = forged_checkout["id"]
+    forged_checkout["id"] = "checkout:forged"
+    for edge in forged_graph["edges"]:
+        if edge.get("from") == original_id:
+            edge["from"] = forged_checkout["id"]
+        if edge.get("to") == original_id:
+            edge["to"] = forged_checkout["id"]
+    forged_capsule = compile_task_capsule(
+        task=task,
+        graph=forged_graph,
+        budget={"max_claims": 24},
+    )
+    forged = ozone.verify_governed(
+        _governed_request(
+            capsule=forged_capsule,
+            receipt=_governed_receipt(forged_capsule),
+            graph=forged_graph,
+        )
+    )
+    assert forged["schema"] == ozone.REFUSAL_SCHEMA
+    assert forged["reason_codes"] == ["repair_graph_context_mismatch"]
+
 
 
 def test_governed_verification_binds_question_match_signals_to_their_tier():
@@ -1678,34 +1875,17 @@ def test_governed_verification_accepts_core_unknown_receipt_records():
 
 
 def test_governed_repairs_are_typed_bounded_and_dry_run():
-    edge = {
-        "kind": "checkout_of",
-        "from": "checkout:a",
-        "to": "repository:a",
-    }
-    graph = {
-        "schema": "vivary.workspace-graph/v0",
-        "workspace_fingerprint": "sha256:test-workspace",
-        "nodes": _checkout_graph_nodes([edge]),
-        "edges": [edge],
-        "conflicts": [],
-        "unknowns": [],
-    }
-    checkout_node = next(
-        node for node in graph["nodes"] if node["kind"] == "checkout"
+    graph = _projected_remote_graph(
+        ["https://example.test/alpha.git"],
+        ["a" * 40],
     )
-    checkout_node["path"] = "/repo/packages/ozone"
-    governed_capsule = _governed_capsule(
-        claims=[
-            {
-                "fact": "is_dirty",
-                "subject": "checkout:a",
-                "claim": "worktree is clean",
-                "selection": {"tier": "allowlisted"},
-                "evidence": [],
-            }
-        ],
-        topology_fingerprint=repair_topology_fingerprint(graph),
+    governed_capsule = compile_task_capsule(
+        task={
+            "question": "Review the checkout.",
+            "scope": ["/repo"],
+        },
+        graph=graph,
+        budget={"max_claims": 24},
     )
     result = ozone.verify_governed(
         _governed_request(capsule=governed_capsule, graph=graph)
@@ -1714,8 +1894,9 @@ def test_governed_repairs_are_typed_bounded_and_dry_run():
 
     assert proposal["writes_performed"] == 0
     assert proposal["requires_gate"] is True
-    assert len(proposal["proposals"]) == 1
-    assert proposal["proposals"][0]["target"] == governed_capsule["claims"][0]["id"]
+    assert proposal["proposals"]
+    claim_ids = {claim["id"] for claim in governed_capsule["claims"]}
+    assert all(item["target"] in claim_ids for item in proposal["proposals"])
     assert proposal["proposals"][0]["requires_gate"] is True
 
 
@@ -1894,57 +2075,19 @@ def test_governed_verification_refuses_graphs_that_drop_capsule_conflicts():
         ["https://example.test/shared.git"] * 2,
         ["a" * 40, "b" * 40],
     )
-    conflict = matching_graph["conflicts"][0]
-    checkout_ids = [side["checkout"] for side in conflict["sides"]]
-    checkout_paths = {
-        side["checkout"]: side["path"] for side in conflict["sides"]
-    }
-    checkout_heads = {
-        node["id"]: node["facts"]["head_revision"]["value"]
-        for node in matching_graph["nodes"]
-        if node["kind"] == "checkout"
-    }
-    claims = [
-        {
-            "fact": "head_revision",
-            "subject": checkout_id,
-            "subject_path": checkout_paths[checkout_id],
-            "claim": f"HEAD revision is {checkout_heads[checkout_id]}",
-            "status": "known",
-            "selection": {
-                "tier": "conflict_side",
-                "signals": [
-                    {
-                        "signal": "conflict_side",
-                        "conflict": conflict["id"],
-                    }
-                ],
-            },
-            "evidence": [],
-        }
-        for index, checkout_id in enumerate(checkout_ids)
-    ]
-    capsule = _governed_capsule(
-        claims=claims,
-        topology_fingerprint=repair_topology_fingerprint(matching_graph),
-        conflicts=[{**conflict, "decision": "review_required"}],
-        workspace_fingerprint=matching_graph["workspace_fingerprint"],
-    )
-    capsule["task"]["scope"] = ["/repo"]
-    capsule["capsule_id"] = deterministic_id(
-        "capsule",
-        {
-            "task": capsule["task"]["question"],
-            "filters": capsule["task"].get("filters"),
-            "workspace": capsule["workspace"]["fingerprint"],
+    capsule = compile_task_capsule(
+        task={
+            "question": "Review divergence.",
+            "scope": ["/repo"],
         },
+        graph=matching_graph,
+        budget={"max_claims": 24},
     )
-    capsule["fingerprint"] = fingerprint(
-        {
-            key: item
-            for key, item in capsule.items()
-            if key not in {"capsule_id", "fingerprint"}
-        }
+    assert capsule["conflicts"]
+    conflict_claim_index = next(
+        index
+        for index, claim in enumerate(capsule["claims"])
+        if claim["selection"]["tier"] == "conflict_side"
     )
     dropped_graph = {**matching_graph, "conflicts": []}
 
@@ -1955,7 +2098,7 @@ def test_governed_verification_refuses_graphs_that_drop_capsule_conflicts():
     assert dropped["schema"] == ozone.REFUSAL_SCHEMA
     assert dropped["reason_codes"] == ["repair_graph_conflicts_mismatch"]
     relabeled_capsule = json.loads(json.dumps(capsule))
-    relabeled_capsule["claims"][0]["selection"] = {
+    relabeled_capsule["claims"][conflict_claim_index]["selection"] = {
         "tier": "allowlisted",
         "signals": [],
     }
@@ -2129,13 +2272,13 @@ def test_governed_verification_binds_graph_topology_commitment():
     for conflict in moved_graph["conflicts"]:
         for side in conflict["sides"]:
             side["path"] = moved_paths[side["checkout"]]
-    moved = ozone.verify_governed(
-        _governed_request(
-            capsule=forged_capsule,
-            receipt=_governed_receipt(forged_capsule),
-            graph=moved_graph,
-        )
+    moved_request = _governed_request(
+        capsule=forged_capsule,
+        receipt=_governed_receipt(forged_capsule),
+        graph=moved_graph,
     )
+    _bind_request_graph_workspace(moved_request)
+    moved = ozone.verify_governed(moved_request)
     assert moved["schema"] == ozone.REFUSAL_SCHEMA
     assert moved["reason_codes"] == ["repair_graph_topology_unbound"]
 
@@ -2258,7 +2401,11 @@ def test_governed_verification_refuses_malformed_repair_inputs_without_crashing(
     malformed_unknown_request = _governed_request(graph=True)
     malformed_unknown_request["graph"]["unknowns"] = [None]
     malformed_unknown = ozone.verify_governed(malformed_unknown_request)
-    mismatched_graph_request = _governed_request(graph=True)
+    empty_graph = _governed_request(graph=True)["graph"]
+    mismatched_graph_request = _governed_request(
+        capsule=_governed_capsule(workspace_fingerprint="sha256:other"),
+        graph=empty_graph,
+    )
     uncollatable_graph_request = _governed_request(graph=True)
     uncollatable_graph_request["graph"]["edges"] = [
         {"kind": "checkout_of", "from": "checkout:a", "to": "repo:🚀"}
@@ -2312,7 +2459,6 @@ def test_governed_verification_refuses_malformed_repair_inputs_without_crashing(
         }
     ]
     oversized_conflict_graph = ozone.verify_governed(oversized_conflict_request)
-    mismatched_graph_request["graph"]["workspace_fingerprint"] = "sha256:other"
     mismatched_graph = ozone.verify_governed(mismatched_graph_request)
     recursive_request = _governed_request()
     nested = []
@@ -2388,6 +2534,7 @@ def test_governed_verification_refuses_unbounded_repair_products():
     for node in request["graph"]["nodes"]:
         if node["kind"] == "checkout":
             node["path"] = "/repo/packages/ozone"
+    _bind_request_graph_workspace(request)
 
     result = ozone.verify_governed(request)
 
@@ -2436,6 +2583,7 @@ def test_governed_verification_refuses_unbounded_checkout_pair_scans():
         for checkout_index in range(MAX_DEDUPE_CHECKOUTS)
     ]
     request["graph"]["nodes"] = _checkout_graph_nodes(request["graph"]["edges"])
+    _bind_request_graph_workspace(request)
 
     result = ozone.verify_governed(request)
 
@@ -2495,6 +2643,40 @@ def test_governed_verification_bounds_graph_context_scope_comparisons():
 
     assert result["schema"] == ozone.REFUSAL_SCHEMA
     assert result["reason_codes"] == ["repair_work_unbounded"]
+    checkout_graph = _governed_request(graph=True)["graph"]
+    checkout_graph["nodes"] = [
+        {
+            "id": f"checkout:{index}",
+            "kind": "checkout",
+            "path": f"/outside/checkout-{index}",
+            "facts": {},
+        }
+        for index in range(1_000)
+    ]
+    checkout_graph["workspace_fingerprint"] = (
+        workspace_fingerprint_from_graph(checkout_graph)
+    )
+    checkout_capsule = _governed_capsule(
+        workspace_fingerprint=checkout_graph["workspace_fingerprint"]
+    )
+    checkout_capsule["task"]["scope"] = list(capsule["task"]["scope"])
+    checkout_capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in checkout_capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    checkout_result = ozone.verify_governed(
+        _governed_request(
+            capsule=checkout_capsule,
+            receipt=False,
+            graph=checkout_graph,
+        )
+    )
+
+    assert checkout_result["schema"] == ozone.REFUSAL_SCHEMA
+    assert checkout_result["reason_codes"] == ["repair_work_unbounded"]
 
 
 def test_governed_verification_bounds_actual_scope_conflict_comparisons():
@@ -2516,6 +2698,9 @@ def test_governed_verification_bounds_actual_scope_conflict_comparisons():
         request["graph"]["nodes"] = _checkout_graph_nodes(
             request["graph"]["edges"]
         )
+        for node in request["graph"]["nodes"]:
+            if node["kind"] == "checkout":
+                node["facts"] = {}
         request["graph"]["conflicts"] = [
             {
                 "id": f"conflict:{conflict_index}",
@@ -2541,6 +2726,7 @@ def test_governed_verification_bounds_actual_scope_conflict_comparisons():
                 if key not in {"capsule_id", "fingerprint"}
             }
         )
+        _bind_request_graph_workspace(request)
         request["receipt"] = _governed_receipt(capsule)
         return request
 
@@ -2604,6 +2790,7 @@ def test_governed_verification_refuses_unbounded_route_evidence():
     for node in request["graph"]["nodes"]:
         if node["id"] == overflow_checkout:
             node["path"] = "/repo/packages/ozone"
+    _bind_request_graph_workspace(request)
 
     result = ozone.verify_governed(request)
 

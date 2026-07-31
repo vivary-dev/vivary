@@ -45,7 +45,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 from vivary_core.canonical import deterministic_id, normalize_path  # noqa: E402
-from vivary_core.workspace_model import project_workspace_graph  # noqa: E402
+from vivary_core.workspace_model import (  # noqa: E402
+    project_workspace_graph,
+    workspace_fingerprint_from_graph,
+)
 
 try:
     from vivary_core.workspace_observe import observe_checkouts
@@ -216,6 +219,19 @@ def test_projection_is_deterministic_same_observation_byte_identical_graph(obser
     b = project_workspace_graph(observation)
     assert a == b
     assert json.dumps(a) == json.dumps(b)
+
+def test_workspace_fingerprint_commits_to_emitted_checkout_nodes(observation):
+    duplicated = json.loads(json.dumps(observation))
+    duplicated["checkouts"].append(
+        json.loads(json.dumps(duplicated["checkouts"][0]))
+    )
+
+    graph = project_workspace_graph(duplicated)
+
+    assert graph["workspace_fingerprint"] == workspace_fingerprint_from_graph(graph)
+    assert len([node for node in graph["nodes"] if node["kind"] == "checkout"]) == len(
+        {checkout["path"] for checkout in duplicated["checkouts"]}
+    )
 
 
 def test_node_ids_derive_only_from_stable_identity_not_observation_order(fx, observation):

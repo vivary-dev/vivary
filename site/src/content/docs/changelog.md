@@ -223,6 +223,13 @@ remains part of the final coordinated release train and requires a separate huma
   `GIT_*` injection or overriding repository-scoped ignore policy. Host ignore
   policy can therefore legitimately change dirty facts, workspace fingerprints, and
   capsule IDs between machines, matching the host's own `git status`.
+- Governed graph verification recomputes the workspace fingerprint from emitted
+  checkout nodes and requires the graph timestamp to match the capsule observation.
+  It reconstructs compiler selection from graph candidates and retained content-match
+  candidates under the capsule's task, filters, scope, and budget. At a fixed budget
+  and retained content set, added, removed, moved, or rewritten graph claims fail closed
+  without rejecting content-ranked capsules.
+  Global graph and repair-work caps run before claim reconstruction.
 - Derived checks execute from the observed Git worktree root even when the requested
   checkout path is nested. Excessively nested `package.json` input now degrades to no
   npm check instead of escaping the structured observation contract.
@@ -247,10 +254,10 @@ remains part of the final coordinated release train and requires a separate huma
 - `python packages/tropo/tests/test_tropo.py` — **170/170** passed on Windows.
 - `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **170/170**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **645 passed** on Windows;
+- `python -m pytest packages/core/tests/ -q` — **646 passed** on Windows;
   `UV_CACHE_DIR=/tmp/vivary-uv-cache TMPDIR=/tmp uv run --no-cache --with
   pytest==9.0.2 --with python-dateutil==2.9.0.post0 --with jsonschema==4.26.0 pytest
-  packages/core/tests/ -q` — **643 passed, 2 platform-specific skips** on WSL Linux.
+  packages/core/tests/ -q` — **644 passed, 2 platform-specific skips** on WSL Linux.
 - `python -m pytest packages/strato/tests -q` — **48 passed** on Windows and
   **48 passed** on WSL Linux.
 - `python -m pytest packages/core/tests/test_policy.py -q` — **91 passed**;
@@ -284,7 +291,7 @@ remains part of the final coordinated release train and requires a separate huma
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **69/69**, Exo **17/17**,
+- Repository verification also passed: Ozone **71/71**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**

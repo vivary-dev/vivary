@@ -480,7 +480,7 @@ ozone verify request.json --governed --json --strict
 | `capsule` | Complete `vivary.task-capsule/v0`; its body fingerprint and deterministic ID are recomputed before core delegation. Optional `task.scope` must contain at least one nonempty string. Optional `task.filters` must use the compiler's list-shaped `{field, equals\|includes}` contract. Both rules apply whether or not the request includes a graph. |
 | `receipt` | Complete Execution Receipt bound to the capsule. Its check records and claim lists are shape-validated; `claims_verified` and `claims_unverified` must be disjoint and together equal both `claims_in_scope` and the capsule's claim IDs. All claims are verified only when the check list is nonempty and every check passed. Otherwise, all claims remain unverified. Omission or malformed/tampered evidence cannot produce a sufficient aggregate result. |
 | `gate` | Named gate with core-owned `required_checks`, `require_claims_verified`, `max_unresolved_conflicts`, and `max_unresolved_unknowns` constraints. |
-| `graph` | Optional matching `vivary.workspace-graph/v0`. When present, every graph-derived claim and unknown must match it. Claim subjects, paths, profile filters, and question-match signals also bind to it. Ozone returns a bounded `vivary.context-repair-proposal/v0`. Every proposal has `requires_gate: true`, and `writes_performed` is always `0`. Ozone accepts at most 1,000 scope roots, graph nodes, graph edges, and graph unknowns, plus 300 graph conflicts. Core matches claims from at most 300 checkout subjects. Ozone limits scope-path checks to 100,000 comparisons and bounds checkout-pair scans, route evidence, and scope-to-conflict comparisons before repair construction. |
+| `graph` | Optional matching `vivary.workspace-graph/v0`. Its `workspace_fingerprint` must equal the commitment recomputed from its checkout nodes, and its `observed_at` must equal the capsule observation timestamp. The capsule's graph-derived claims and unknowns must equal the compiler-selected records for the same graph, task, filters, scope, and budget. Claim subjects, paths, profile filters, and question-match signals also bind to the graph. Ozone returns a bounded `vivary.context-repair-proposal/v0`. Every proposal has `requires_gate: true`, and `writes_performed` is always `0`. Ozone accepts at most 1,000 scope roots, graph nodes, graph edges, and graph unknowns, plus 300 graph conflicts. Core matches claims from at most 300 checkout subjects. Ozone limits scope-path checks to 100,000 comparisons and bounds checkout-pair scans, route evidence, and scope-to-conflict comparisons before repair construction. |
 
 The capsule task question must be a nonblank string. A declared task scope bounds every
 narrated claim, conflict side, unknown, and omission path to at least one declared root.
@@ -488,13 +488,19 @@ Every capsule claim must retain its compiler-owned nonempty identity, subject, p
 fact, text, status, and selection reason plus list-shaped evidence and selection
 signals. Core recomputes each claim ID from its subject, fact, and claim text. With task
 filters, every claim must retain the exact normalized `matched_filters` record.
-Claim-owned fact and path values must satisfy that record. When the request includes a
-graph, every graph-derived claim must reproduce the graph fact's compiler-generated
-path, fact, text, status, and evidence. Every claim subject must name a checkout in that
-graph, and the claim path must equal the checkout path. Label, repository, and branch
-filters must match the graph profile for every claim subject. Question-match signals
-must match the named profile field. Repository identity signals require a known
-repository identity. Without task filters, the `matched_filters` record must be absent.
+Claim-owned fact and path values must satisfy that record.
+When the request includes a graph, core reconstructs compiler selection from graph
+candidates and the capsule's retained `content_match` candidates. It uses the capsule's
+task, filters, scope, and budget. The complete capsule claim list must match the
+reconstruction. This check binds graph coverage and ranking. Ozone validates retained
+content claims through their capsule shape and signals; it does not re-read files.
+Each graph-derived claim must reproduce the graph fact's
+compiler-generated path, fact, text, status, and evidence. Every claim subject must name
+a checkout in that graph, and the claim path must equal the checkout path. Label,
+repository, and branch filters must match the graph profile for every claim subject.
+Question-match signals must match the named profile field. Repository identity signals
+require a known repository identity. Without task filters, the `matched_filters` record
+must be absent.
 Question/content match signals imply the `question_match` tier unless a preserved
 conflict takes precedence. A content-match signal belongs only to a known
 `content_match` claim and must reproduce its normalized question term and narrated path.
@@ -525,6 +531,9 @@ Every receipt check must carry a nonempty name and command plus a valid outcome.
 that shares a capsule `required_checks` name must carry that exact required command;
 duplicate records for the same name and command remain valid evidence for core's
 worst-outcome aggregation.
+The graph `workspace_fingerprint` is the canonical commitment to its emitted checkout
+paths and facts. Ozone recomputes the value before it compares the graph to the request
+workspace binding. A copied or stale fingerprint label makes the graph invalid.
 Repair `checkout_of` endpoints must reference existing `checkout` and `repository`
 nodes. Checkout IDs, checkout paths, repository IDs, and both `checkout_of` endpoint IDs
 must be nonempty strings before topology sorting. The capsule's

@@ -125,6 +125,30 @@ def _path_sort_key(value: str):
         return (1, _utf16_sort_key(value))
 
 
+def workspace_fingerprint_from_graph(graph: Dict[str, Any]) -> str:
+    """Recompute the workspace commitment from projected checkout facts."""
+    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+        raise ValueError("workspace graph nodes must be a list")
+    checkouts = []
+    for node in graph["nodes"]:
+        if not isinstance(node, dict):
+            raise ValueError("workspace graph nodes must be mappings")
+        if node.get("kind") != "checkout":
+            continue
+        if (
+            not isinstance(node.get("path"), str)
+            or not node["path"]
+            or not isinstance(node.get("facts"), dict)
+        ):
+            raise ValueError("workspace graph checkouts require path and facts")
+        checkouts.append(node)
+    core_facts = sorted(
+        (_checkout_core_facts(checkout) for checkout in checkouts),
+        key=lambda checkout: _path_sort_key(checkout["path"]),
+    )
+    return fingerprint(core_facts)
+
+
 def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
     nodes: Dict[str, Any] = {}
     edges: Dict[str, Any] = {}
@@ -326,11 +350,9 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
 
     sorted_nodes = sorted(nodes.values(), key=lambda n: locale_sort_key(n["id"]))
     sorted_edges = sorted(edges.values(), key=lambda e: locale_sort_key(e["id"]))
-    core_facts = sorted(
-        (_checkout_core_facts(c) for c in observation["checkouts"]),
-        key=lambda c: _path_sort_key(c["path"]),
+    workspace_fingerprint = workspace_fingerprint_from_graph(
+        {"nodes": sorted_nodes}
     )
-    workspace_fingerprint = fingerprint(core_facts)
 
     refusals = observation.get("refusals")
     if refusals is None:

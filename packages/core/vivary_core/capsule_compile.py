@@ -478,19 +478,11 @@ def capsule_context_matches_graph(capsule, graph) -> bool:
     ]
     profiles = subject_profiles(graph)
     scope = capsule["task"].get("scope")
-    claim_subjects = {claim["subject"] for claim in capsule["claims"]}
     graph_checkouts = [
         node
         for node in graph["nodes"]
-        if (
-            node.get("kind") == "checkout"
-            and isinstance((node.get("facts") or {}).get("is_git_repository"), dict)
-            and node["facts"]["is_git_repository"].get("value") is True
-            and node.get("id") in claim_subjects
-        )
+        if node.get("kind") == "checkout"
     ]
-    if len(graph_checkouts) > MAX_GRAPH_CONTEXT_CHECKOUTS:
-        return False
     checkouts = [
         node
         for node in graph_checkouts
@@ -502,20 +494,83 @@ def capsule_context_matches_graph(capsule, graph) -> bool:
             )
         )
     ]
+    if len(checkouts) > MAX_GRAPH_CONTEXT_CHECKOUTS:
+        return False
     try:
+        content_candidates = [
+            {
+                "subject": claim["subject"],
+                "subject_path": claim["subject_path"],
+                "claim": claim["claim"],
+                "fact": claim["fact"],
+                "status": claim["status"],
+                "evidence": claim["evidence"],
+                "intrinsic_signals": [
+                    signal
+                    for signal in claim["selection"]["signals"]
+                    if signal.get("signal") == "content_term_match"
+                ],
+            }
+            for claim in capsule["claims"]
+            if claim["fact"] == "content_match"
+        ]
+        candidates, _ = _sort_candidates(
+            _graph_claim_candidates(checkouts, []) + content_candidates
+        )
+        capsule_conflict_ids = {
+            conflict["id"] for conflict in capsule["conflicts"]
+        }
+        expected_claims = select_claims(
+            task=capsule["task"],
+            graph={
+                **graph,
+                "conflicts": [
+                    conflict
+                    for conflict in graph["conflicts"]
+                    if conflict.get("id") in capsule_conflict_ids
+                ],
+            },
+            candidates=candidates,
+            max_claims=capsule["budget"]["max_claims"],
+        )["included"]
+        expected_claims = [
+            {"id": _claim_id(claim), **claim}
+            for claim in expected_claims
+        ]
         graph_claims = {
             (claim["subject"], claim["fact"]): claim
-            for claim in _graph_claim_candidates(checkouts, [])
+            for claim in candidates
+            if claim["fact"] != "content_match"
         }
-    except (AttributeError, TypeError):
+    except (AttributeError, KeyError, TypeError):
         return False
 
+    if (
+        len(capsule["claims"]) != len(expected_claims)
+        or sorted(canonicalize(claim) for claim in capsule["claims"])
+        != sorted(canonicalize(claim) for claim in expected_claims)
+    ):
+        return False
     for claim in capsule["claims"]:
         profile = profiles.get(claim["subject"])
         expected = graph_claims.get((claim["subject"], claim["fact"]))
+        repository = profile.get("repository") if profile is not None else None
         if (
             profile is None
             or claim["subject_path"] != profile.get("path")
+            or claim["subject"]
+            != deterministic_id("checkout", {"path": profile.get("path")})
+            or (
+                repository is not None
+                and (
+                    not _nonempty_string(repository.get("identity"))
+                    or repository.get("id")
+                    != deterministic_id(
+                        "repository",
+                        {"identity": repository.get("identity")},
+                    )
+                )
+            )
             or (
                 claim["fact"] != "content_match"
                 and (

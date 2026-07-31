@@ -49,6 +49,8 @@ The capsule commits checkout IDs and paths, normalized repository nodes, and
 `checkout_of` relationships that can drive repair proposals. Ozone recomputes that
 topology commitment from the supplied graph, including inferred no-remote
 linked-worktree groups, before delegation.
+Ozone also recomputes the workspace fingerprint from the supplied checkout nodes and
+requires the graph timestamp to equal the capsule observation timestamp.
 Ozone validates the complete receipt shape and requires its verified and unverified
 claim lists to be disjoint. Together, the lists must contain exactly the capsule's claim
 IDs. The claim lists must also match the check outcomes. `claims_verified` contains
@@ -60,12 +62,17 @@ checkout/path sides with head revision, head reference, last fetch, and evidence
 
 Receipt checks that share a capsule required-check name must also carry its exact command.
 Ozone validates optional `task.scope` and `task.filters` entries whether or not the
-request supplies a graph. With a graph, claim identities and graph-derived semantics,
-subjects, paths, profile filters, question signals, and in-scope graph unknowns must all
-match. A full workspace graph may retain conflicts outside a scoped capsule, but every
-preserved capsule conflict must match exactly. Ozone bounds graph collections,
-claim-subject checkouts, scope paths, checkout-pair scans, route evidence, and
-scope-to-conflict comparisons before it creates a repair proposal.
+request supplies a graph. With a graph, claim identities, graph-derived semantics,
+subjects, paths, profile filters, question signals, and in-scope graph unknowns must
+all match. Ozone reconstructs compiler selection from the graph candidates and any
+retained content-match candidates under the same task, filters, scope, and budget.
+The full capsule claim list must match that reconstruction. Ozone validates retained
+content-match claims through their capsule shape and signals; it does not re-read files.
+A full workspace graph may
+retain conflicts outside a scoped capsule, but every preserved capsule conflict must
+match exactly. Ozone bounds graph collections, claim-subject checkouts, scope paths,
+checkout-pair scans, route evidence, and scope-to-conflict comparisons before it
+creates a repair proposal.
 
 The exact request, result, freshness, and exit-code contract lives in the
 [command reference](https://vivary.vercel.app/commands/#governed-evidence-verification).
