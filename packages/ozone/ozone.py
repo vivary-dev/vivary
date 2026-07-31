@@ -46,6 +46,7 @@ MAX_REPAIR_GRAPH_NODES = 1_000
 MAX_REPAIR_GRAPH_EDGES = 1_000
 MAX_REPAIR_GRAPH_CONFLICTS = 300
 MAX_REPAIR_GRAPH_UNKNOWNS = 1_000
+MAX_REPAIR_PROJECTION_WORK = 10_000_000
 CAPSULE_FIELDS = frozenset(
     {
         "schema",
@@ -158,11 +159,13 @@ def _load_core_verification():
         MAX_GRAPH_CONTEXT_CHECKOUTS,
         capsule_context_matches_graph,
         is_task_capsule_shape,
+        is_git_checkout,
         repair_topology_fingerprint,
         verify_task_capsule_integrity,
     )
     from vivary_core.workspace_model import (
         repair_graph_is_canonical,
+        projected_neighbor_pair_count,
         workspace_fingerprint_from_graph,
     )
     from vivary_core.capsule_select import OMITTED_LIST_CAP
@@ -186,6 +189,7 @@ def _load_core_verification():
     return {
         "capsule_context_matches_graph": capsule_context_matches_graph,
         "is_task_capsule_shape": is_task_capsule_shape,
+        "is_git_checkout": is_git_checkout,
         "verify_task_capsule_integrity": verify_task_capsule_integrity,
         "OMITTED_LIST_CAP": OMITTED_LIST_CAP,
         "verify_receipt_integrity": verify_receipt_integrity,
@@ -199,6 +203,7 @@ def _load_core_verification():
         "repair_topology_fingerprint": repair_topology_fingerprint,
         "workspace_fingerprint_from_graph": workspace_fingerprint_from_graph,
         "repair_graph_is_canonical": repair_graph_is_canonical,
+        "projected_neighbor_pair_count": projected_neighbor_pair_count,
         "MAX_GRAPH_CONTEXT_CHECKOUTS": MAX_GRAPH_CONTEXT_CHECKOUTS,
         "deterministic_id": deterministic_id,
         "MAX_DEDUPE_CHECKOUTS": MAX_DEDUPE_CHECKOUTS,
@@ -231,6 +236,41 @@ def _bounded_repair_identifier(value):
         if encoded_length > MAX_REPAIR_IDENTIFIER_JSON_BYTES:
             return False
     return True
+
+
+def _bounded_json_work_units(value, limit):
+    """Count canonical-JSON work without allocating the serialized value."""
+    work = 0
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        work += 1
+        if work > limit:
+            return None
+        if isinstance(item, str):
+            for character in item:
+                codepoint = ord(character)
+                if character in {'"', "\\"}:
+                    work += 2
+                elif codepoint < 0x20:
+                    work += 6
+                elif codepoint <= 0x7F:
+                    work += 1
+                elif codepoint <= 0xFFFF:
+                    work += 6
+                else:
+                    work += 12
+                if work > limit:
+                    return None
+        elif isinstance(item, dict):
+            for key, nested in item.items():
+                stack.append(key)
+                stack.append(nested)
+        elif isinstance(item, list):
+            stack.extend(item)
+    return work
+
+
 
 
 def _is_finite_number(value):
@@ -725,7 +765,9 @@ def _repair_graph_is_safe(graph, core):
         max_checkouts = core["MAX_DEDUPE_CHECKOUTS"]
         if conflict_pair_count > max_checkouts * (max_checkouts - 1) // 2:
             return False
-    return core["repair_graph_is_canonical"](graph)
+    if core["projected_neighbor_pair_count"](graph) is None:
+        return False
+    return True
 
 
 def _graph_context_checkouts_bounded(capsule, graph, core):
@@ -740,7 +782,7 @@ def _graph_context_checkouts_bounded(capsule, graph, core):
     checkouts = [
         node
         for node in graph["nodes"]
-        if node.get("kind") == "checkout"
+        if core["is_git_checkout"](node)
         and (
             not scope
             or any(
@@ -750,6 +792,50 @@ def _graph_context_checkouts_bounded(capsule, graph, core):
         )
     ]
     return len(checkouts) <= core["MAX_GRAPH_CONTEXT_CHECKOUTS"]
+
+
+def _repair_projection_work_is_bounded(graph, core):
+    """Bound serialized input and derived-node expansion before re-projection."""
+    expansion_count = 0
+    checkout_expansions = []
+    for node in graph["nodes"]:
+        if node.get("kind") != "checkout":
+            continue
+        facts = node.get("facts")
+        if not isinstance(facts, dict):
+            continue
+        node_expansions = 0
+        for fact_name in ("remotes", "dirty_entries"):
+            detail = facts.get(fact_name)
+            if not isinstance(detail, dict) or detail.get("status") != "known":
+                continue
+            values = detail.get("value")
+            if not isinstance(values, list):
+                return False
+            node_expansions += len(values)
+        expansion_count += node_expansions
+        if expansion_count > MAX_REPAIR_GRAPH_NODES:
+            return False
+        checkout_expansions.append((node.get("path"), node_expansions))
+    pair_count = core["projected_neighbor_pair_count"](graph)
+    if pair_count is None or pair_count > MAX_REPAIR_GRAPH_EDGES:
+        return False
+
+    work = _bounded_json_work_units(graph, MAX_REPAIR_PROJECTION_WORK)
+    if work is None:
+        return False
+    for path, node_expansions in checkout_expansions:
+        path_work = _bounded_json_work_units(
+            path, MAX_REPAIR_PROJECTION_WORK
+        )
+        if path_work is None:
+            return False
+        work += path_work * node_expansions
+        if work > MAX_REPAIR_PROJECTION_WORK:
+            return False
+    return True
+
+
 
 
 def _graph_context_work_is_bounded(capsule, graph):
@@ -984,32 +1070,37 @@ def _validate_governed_request(request, core):
             errors.append("stale_receipt")
 
     if "graph" in request:
-        graph_is_safe = _repair_graph_is_safe(request["graph"], core)
-        if not graph_is_safe:
+        graph = request["graph"]
+        graph_shape_is_safe = _repair_graph_is_safe(graph, core)
+        if not graph_shape_is_safe:
             errors.append("invalid_repair_graph")
-        elif request["graph"]["workspace_fingerprint"] != workspace_fingerprint:
+        elif graph["workspace_fingerprint"] != workspace_fingerprint:
             errors.append("repair_graph_workspace_mismatch")
         elif (
             repair_capsule_is_safe
-            and request["graph"]["observed_at"]
+            and graph["observed_at"]
             != capsule["workspace"].get("observed_at")
         ):
             errors.append("repair_graph_context_mismatch")
         elif repair_capsule_is_safe:
             if not _graph_context_checkouts_bounded(
-                capsule, request["graph"], core
+                capsule, graph, core
             ):
                 errors.append("repair_work_unbounded")
-            elif not _graph_context_work_is_bounded(capsule, request["graph"]):
+            elif not _graph_context_work_is_bounded(capsule, graph):
                 errors.append("repair_work_unbounded")
             elif not _repair_estimates_are_canonical(capsule, core):
                 errors.append("repair_estimate_unbounded")
-            elif not _repair_work_is_bounded(capsule, request["graph"], core):
+            elif not _repair_work_is_bounded(capsule, graph, core):
                 errors.append("repair_work_unbounded")
+            elif not _repair_projection_work_is_bounded(graph, core):
+                errors.append("repair_work_unbounded")
+            elif not core["repair_graph_is_canonical"](graph):
+                errors.append("invalid_repair_graph")
             else:
                 conflicts_match, conflict_work_is_bounded = (
                     _repair_graph_matches_capsule_conflicts(
-                        capsule, request["graph"], core
+                        capsule, graph, core
                     )
                 )
                 if not conflict_work_is_bounded:
@@ -1017,11 +1108,11 @@ def _validate_governed_request(request, core):
                 elif not conflicts_match:
                     errors.append("repair_graph_conflicts_mismatch")
                 elif not _repair_graph_topology_is_bound(
-                    capsule, request["graph"], core
+                    capsule, graph, core
                 ):
                     errors.append("repair_graph_topology_unbound")
                 elif not core["capsule_context_matches_graph"](
-                    capsule, request["graph"]
+                    capsule, graph
                 ):
                     errors.append("repair_graph_context_mismatch")
 

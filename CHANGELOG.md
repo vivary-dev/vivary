@@ -107,7 +107,25 @@ remains part of the final coordinated release train and requires a separate huma
   linear time, and rejects duplicate `(subject, fact, claim)` entries before they can
   duplicate deterministic repair IDs. Parser-only help and version actions suppress a
   run receipt that could alias the unread request instead of refusing the requested
-  output. It requires the repair graph to preserve every capsule conflict and in-scope
+  output. Repair graphs are reprojected from checkout paths and facts before repair
+  use. Every derived node, edge, conflict, unknown, omission, deterministic ID,
+  evidence field, and workspace fingerprint must match. The optional graph allowlist
+  may be absent; when present, it must be normalized. Unknown graph fields and
+  non-string question/content signal terms, fields, and paths fail closed.
+  The workspace fingerprint commits each checkout's effective worktree root. Ozone
+  refuses a graph that retains the fingerprint but changes an execution root as
+  `invalid_repair_graph`.
+  Capsules retain nonempty explicit `task.required_checks`, each bound to an observed
+  Git checkout execution root related to task scope. A package-scoped task may run its
+  check at the nearest enclosing checkout root. Validation uses the observed execution
+  root for ancestor scopes, so a checkout path cannot authorize an unrelated relocated
+  root or a more distant enclosing checkout.
+  Explicit checks add to evidence-derived checks, cannot rewrite their commands, and
+  resolve undetermined-check unknowns only for their checkout. Empty declarations are
+  rejected. Without a declaration, Ozone re-derives required checks and
+  `required_check_undetermined` unknowns from the graph, so deleting a derived unknown
+  and re-fingerprinting the capsule fails closed.
+  It requires the repair graph to preserve every capsule conflict and in-scope
   graph unknown while allowing a full graph to retain out-of-scope conflicts for repair
   withholding. It recomputes the capsule's normalized repair-topology commitment over
   checkout IDs and paths, repository nodes, and `checkout_of` relationships. A conflict
@@ -121,9 +139,13 @@ remains part of the final coordinated release train and requires a separate huma
   to cover every checkout related to its repository. Ozone caps scope roots, graph nodes,
   graph edges, and graph unknowns at 1,000 each, graph conflicts at 300, and graph claim
   subjects at 300. It also caps scope-path checks at 100,000 comparisons, total
-  checkout-pair scans across all repositories, and scope-to-conflict comparisons before
-  repair construction. Route-proposal evidence stays within core's checkout cap, and
-  derived repair estimates stay within JavaScript's lossless integer range.
+  checkout-pair scans across all repositories, scope-to-conflict comparisons, and
+  canonical re-projection work before repair construction. Projected `neighbor_of`
+  pairs must also fit the 1,000-edge repair-graph ceiling. Remaining re-projection
+  work counts graph JSON and repeated checkout-path expansion, with a cap of
+  10,000,000 canonical-JSON work units. Route-proposal evidence stays within core's
+  checkout cap. Derived repair estimates stay within JavaScript's lossless integer
+  range.
   It returns typed verification or refusal envelopes. Core's fingerprinted receipt/gate
   verdicts and repair proposal pass through unchanged; Strato consumes the raw
   `gate_verdict` without a second verification implementation. The CLI rejects
@@ -139,8 +161,10 @@ remains part of the final coordinated release train and requires a separate huma
   core-unknown, command-presence, flag-scope, non-mapping-receipt, incomplete-claim,
   topology-identifier, missing, tampered, stale, workspace-mismatched, budget-limited,
   request/receipt-alias, piped-stdin-receipt, unknown-artifact, bounded-repair,
-  pair-scan-bound, route-evidence-bound, identifier-bound, omission-bound,
-  estimate-bound, gate-shape, graph-relationship, scoped-full-graph,
+  pair-scan-bound, route-evidence-bound, repair-product-bound, identifier-bound,
+  omission-bound, estimate-bound, gate-shape, graph-relationship, full canonical graph,
+  every derived node kind, forged edge/conflict identity, exact unknown/omission
+  projection, optional allowlist, non-string signals, scoped-full-graph,
   forged-in-scope-conflict, filter-binding, conflict-binding, selection-binding,
   topology-commitment, output-escaping, malformed, recursive, repair, CLI, and real
   Ozone-to-Strato cases.
@@ -220,7 +244,8 @@ remains part of the final coordinated release train and requires a separate huma
   policy can therefore legitimately change dirty facts, workspace fingerprints, and
   capsule IDs between machines, matching the host's own `git status`.
 - Governed graph verification recomputes the workspace fingerprint from emitted
-  checkout nodes and requires the graph timestamp to match the capsule observation.
+  checkout nodes, including their effective worktree roots, and requires the graph
+  timestamp to match the capsule observation.
   It reconstructs compiler selection from graph candidates and retained content-match
   candidates under the capsule's task, filters, scope, and budget. At a fixed budget
   and retained content set, added, removed, moved, or rewritten graph claims fail closed
@@ -250,10 +275,10 @@ remains part of the final coordinated release train and requires a separate huma
 - `python packages/tropo/tests/test_tropo.py` — **170/170** passed on Windows.
 - `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **170/170**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **646 passed** on Windows;
+- `python -m pytest packages/core/tests/ -q` — **653 passed** on Windows;
   `UV_CACHE_DIR=/tmp/vivary-uv-cache TMPDIR=/tmp uv run --no-cache --with
   pytest==9.0.2 --with python-dateutil==2.9.0.post0 --with jsonschema==4.26.0 pytest
-  packages/core/tests/ -q` — **644 passed, 2 platform-specific skips** on WSL Linux.
+  packages/core/tests/ -q` — **651 passed, 2 platform-specific skips** on WSL Linux.
 - `python -m pytest packages/strato/tests -q` — **48 passed** on Windows and
   **48 passed** on WSL Linux.
 - `python -m pytest packages/core/tests/test_policy.py -q` — **91 passed**;
@@ -287,7 +312,7 @@ remains part of the final coordinated release train and requires a separate huma
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **71/71**, Exo **17/17**,
+- Repository verification also passed: Ozone **78/78**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**

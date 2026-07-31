@@ -47,6 +47,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 from vivary_core.canonical import deterministic_id, normalize_path  # noqa: E402
 from vivary_core.workspace_model import (  # noqa: E402
     project_workspace_graph,
+    repair_graph_is_canonical,
     workspace_fingerprint_from_graph,
 )
 
@@ -234,6 +235,34 @@ def test_workspace_fingerprint_commits_to_emitted_checkout_nodes(observation):
     )
 
 
+def test_workspace_fingerprint_commits_to_worktree_root(observation):
+    honest = project_workspace_graph(observation)
+    forged_observation = json.loads(json.dumps(observation))
+    checkout = next(
+        item
+        for item in forged_observation["checkouts"]
+        if (item["facts"].get("worktree_root") or {}).get("status") == "known"
+    )
+    checkout["facts"]["worktree_root"]["value"] = "/forged/worktree"
+    forged = project_workspace_graph(forged_observation)
+
+    assert forged["workspace_fingerprint"] != honest["workspace_fingerprint"]
+
+    retained_fingerprint = json.loads(json.dumps(honest))
+    graph_checkout = next(
+        node
+        for node in retained_fingerprint["nodes"]
+        if node.get("kind") == "checkout"
+        and (node.get("facts", {}).get("worktree_root") or {}).get("status") == "known"
+    )
+    graph_checkout["facts"]["worktree_root"]["value"] = "/forged/worktree"
+    assert (
+        workspace_fingerprint_from_graph(retained_fingerprint)
+        != retained_fingerprint["workspace_fingerprint"]
+    )
+    assert not repair_graph_is_canonical(retained_fingerprint)
+
+
 def test_node_ids_derive_only_from_stable_identity_not_observation_order(fx, observation):
     graph = project_workspace_graph(observation)
     canonical_id = deterministic_id("checkout", {"path": normalize_path(fx["paths"]["canonical"])})
@@ -271,6 +300,230 @@ def test_unknowns_survive_projection_as_first_class_entries(fx, observation):
     facts = [u["fact"] for u in graph["unknowns"] if u["path"] == no_origin_path]
     assert "upstream" in facts
     assert "last_fetch" in facts
+
+
+def test_repair_graph_canonicality_binds_recomputable_derived_content():
+    graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": [],
+            "refusals": [],
+            "checkouts": [
+                {
+                    "path": "/repo/checkout",
+                    "facts": {
+                        "is_git_repository": {
+                            "status": "known",
+                            "value": True,
+                            "evidence": [],
+                        },
+                        "git_common_dir": {
+                            "status": "known",
+                            "value": "/repo/shared/.git",
+                            "evidence": ["common-dir"],
+                        },
+                        "last_fetch": {
+                            "status": "unknown",
+                            "reason": "not_observed",
+                            "evidence": [],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+    assert repair_graph_is_canonical(graph)
+    forged_field = json.loads(json.dumps(graph))
+    forged_field["forged"] = True
+    assert not repair_graph_is_canonical(forged_field)
+
+    unnormalized_allowlist = json.loads(json.dumps(graph))
+    unnormalized_allowlist["allowlist"] = ["/repo/"]
+    assert not repair_graph_is_canonical(unnormalized_allowlist)
+
+    missing_unknown = json.loads(json.dumps(graph))
+    missing_unknown["unknowns"] = []
+    assert not repair_graph_is_canonical(missing_unknown)
+
+    forged_unknown = json.loads(json.dumps(graph))
+    checkout = next(
+        node for node in forged_unknown["nodes"] if node["kind"] == "checkout"
+    )
+    forged_unknown["unknowns"].append(
+        {
+            "checkout": checkout["id"],
+            "path": checkout["path"],
+            "fact": "totally_made_up",
+            "reason": "forged",
+        }
+    )
+    assert not repair_graph_is_canonical(forged_unknown)
+
+    forged_status = json.loads(json.dumps(graph))
+    repository = next(
+        node for node in forged_status["nodes"] if node["kind"] == "repository"
+    )
+    repository["identity_status"] = "known"
+    assert not repair_graph_is_canonical(forged_status)
+
+    forged_label = json.loads(json.dumps(graph))
+    checkout = next(
+        node for node in forged_label["nodes"] if node["kind"] == "checkout"
+    )
+    checkout["label"] = "forged"
+    assert not repair_graph_is_canonical(forged_label)
+
+    forged_evidence = json.loads(json.dumps(graph))
+    checkout_of = next(
+        edge for edge in forged_evidence["edges"] if edge["kind"] == "checkout_of"
+    )
+    checkout_of["evidence"] = ["forged"]
+    assert not repair_graph_is_canonical(forged_evidence)
+
+
+def test_repair_graph_canonicality_binds_non_git_unknown_projection():
+    graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": [],
+            "refusals": [],
+            "checkouts": [
+                {
+                    "path": "/repo/not-git",
+                    "facts": {
+                        "is_git_repository": {
+                            "status": "unknown",
+                            "reason": "not_a_git_repository_or_git_failed",
+                            "evidence": [],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert graph["unknowns"] == [
+        {
+            "checkout": deterministic_id(
+                "checkout", {"path": "/repo/not-git"}
+            ),
+            "path": "/repo/not-git",
+            "fact": "is_git_repository",
+            "reason": "not_a_git_repository_or_git_failed",
+        }
+    ]
+    assert repair_graph_is_canonical(graph)
+    discarded_unknown_graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": [],
+            "refusals": [],
+            "checkouts": [
+                {
+                    "path": "/repo/known-not-git",
+                    "facts": {
+                        "is_git_repository": {
+                            "status": "known",
+                            "value": False,
+                            "evidence": [],
+                        },
+                        "head_revision": {
+                            "status": "unknown",
+                            "reason": "not_observed",
+                            "evidence": [],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+    assert discarded_unknown_graph["unknowns"] == []
+    assert repair_graph_is_canonical(discarded_unknown_graph)
+
+    empty_facts_graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": [],
+            "refusals": [],
+            "checkouts": [{"path": "/repo/no-facts", "facts": {}}],
+        }
+    )
+    assert repair_graph_is_canonical(empty_facts_graph)
+
+    forged_unknown = json.loads(json.dumps(graph))
+    forged_unknown["unknowns"].append(
+        {
+            "checkout": deterministic_id(
+                "checkout", {"path": "/repo/not-git"}
+            ),
+            "path": "/repo/not-git",
+            "fact": "last_fetch",
+            "reason": "forged",
+        }
+    )
+    assert not repair_graph_is_canonical(forged_unknown)
+
+
+def test_repair_graph_canonicality_normalizes_neighbors_and_binds_omissions():
+    def checkout(index):
+        return {
+            "path": f"/repo/checkout-{index}",
+            "facts": {
+                "is_git_repository": {
+                    "status": "known",
+                    "value": True,
+                    "evidence": [],
+                },
+                "git_common_dir": {
+                    "status": "known",
+                    "value": "/repo/shared/.git",
+                    "evidence": [],
+                },
+            },
+        }
+
+    neighbor_graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": [],
+            "refusals": [],
+            "checkouts": [checkout(0), checkout(1)],
+        }
+    )
+    neighbor = next(
+        edge
+        for edge in neighbor_graph["edges"]
+        if edge["kind"] == "neighbor_of"
+    )
+    neighbor["from"], neighbor["to"] = neighbor["to"], neighbor["from"]
+    neighbor["id"] = deterministic_id(
+        "edge",
+        {
+            "kind": neighbor["kind"],
+            "from": neighbor["from"],
+            "to": neighbor["to"],
+        },
+    )
+    assert repair_graph_is_canonical(neighbor_graph)
+    neighbor["id"] = "edge:forged"
+    assert not repair_graph_is_canonical(neighbor_graph)
+
+    capped_graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": [],
+            "refusals": [],
+            "checkouts": [checkout(index) for index in range(301)],
+        }
+    )
+    assert capped_graph["omissions"]
+    assert repair_graph_is_canonical(capped_graph)
+
+    omission = capped_graph["omissions"].pop()
+    assert not repair_graph_is_canonical(capped_graph)
+    capped_graph["omissions"].append(omission)
+    omission["reason"] = "forged"
+    assert not repair_graph_is_canonical(capped_graph)
 
 
 def test_detached_checkout_produces_no_branch_node_dirty_artifacts_become_nodes(fx, observation):

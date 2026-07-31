@@ -38,6 +38,7 @@ from vivary_core.canonical import (
     deterministic_id,
     fingerprint,
     is_canonical_body_value,
+    normalize_path,
     is_within_allowlist,
 )
 from vivary_core.capsule_select import (
@@ -170,11 +171,34 @@ def _is_required_checks_shape(value) -> bool:
     )
 
 
+def _is_declared_required_checks_shape(value) -> bool:
+    return _is_required_checks_shape(value) and all(
+        set(required_check) == {"name", "command", "cwd"}
+        and _nonblank_string(required_check["cwd"])
+        and normalize_path(required_check["cwd"]) == required_check["cwd"]
+        for required_check in value
+    )
+
+
+def is_git_checkout(node) -> bool:
+    if not isinstance(node, dict) or node.get("kind") != "checkout":
+        return False
+    facts = node.get("facts")
+    if not isinstance(facts, dict):
+        return False
+    repository_fact = facts.get("is_git_repository")
+    return (
+        isinstance(repository_fact, dict)
+        and repository_fact.get("status") == "known"
+        and repository_fact.get("value") is True
+    )
+
+
 def _is_task_shape(task) -> bool:
     if not (
         isinstance(task, dict)
         and _nonblank_string(task.get("question"))
-        and set(task) <= {"question", "scope", "filters"}
+        and set(task) <= {"question", "scope", "filters", "required_checks"}
     ):
         return False
     if "scope" in task and not (
@@ -190,6 +214,14 @@ def _is_task_shape(task) -> bool:
             validate_filters(task["filters"])
         except TypeError:
             return False
+    if (
+        "required_checks" in task
+        and (
+            not task["required_checks"]
+            or not _is_declared_required_checks_shape(task["required_checks"])
+        )
+    ):
+        return False
     return True
 
 
@@ -484,9 +516,7 @@ def capsule_context_matches_graph(capsule, graph) -> bool:
     profiles = subject_profiles(graph)
     scope = capsule["task"].get("scope")
     graph_checkouts = [
-        node
-        for node in graph["nodes"]
-        if node.get("kind") == "checkout"
+        node for node in graph["nodes"] if is_git_checkout(node)
     ]
     checkouts = [
         node
@@ -548,6 +578,22 @@ def capsule_context_matches_graph(capsule, graph) -> bool:
             if claim["fact"] != "content_match"
         }
     except (AttributeError, KeyError, TypeError):
+        return False
+    declared_checks = capsule["task"].get("required_checks")
+    expected_checks, check_unknowns = _derive_required_checks(checkouts)
+    if declared_checks is not None:
+        if not _declared_check_cwds_match_checkouts(
+            declared_checks, graph_checkouts, scope
+        ):
+            return False
+        merged = _merge_declared_required_checks(expected_checks, declared_checks)
+        if merged is None:
+            return False
+        expected_checks, resolving_cwds = merged
+        check_unknowns = _unresolved_check_unknowns(
+            check_unknowns, checkouts, resolving_cwds
+        )
+    if capsule["required_checks"] != expected_checks:
         return False
 
     if (
@@ -614,7 +660,7 @@ def capsule_context_matches_graph(capsule, graph) -> bool:
 
     scope = capsule["task"].get("scope")
     expected_unknowns = []
-    for unknown in graph.get("unknowns", []):
+    for unknown in [*graph.get("unknowns", []), *check_unknowns]:
         paths = [unknown.get("path"), unknown.get("subject_path")]
         if scope and any(
             path is not None
@@ -850,11 +896,80 @@ def _derive_required_checks(checkouts):
                     "subject_path": node.get("path"),
                     "reason": "a test system is present but the command it is run with cannot be determined from observation",
                     "observed_markers": [m for m in markers if m in _AMBIGUOUS_TEST_MARKERS],
-                    "resolution": "pass task.required_checks to state the command explicitly",
+                    "resolution": "pass task.required_checks with this checkout's cwd to state the command explicitly",
                     "evidence": [marker_evidence] if marker_evidence else [],
                 }
             )
     return checks, unknowns
+
+
+def _declared_check_cwds_match_checkouts(declared_checks, checkouts, scope):
+    observed_roots = []
+    for node in checkouts:
+        node_path = node.get("path")
+        execution_root = _fact_value(node, "worktree_root") or node_path
+        if _nonempty_string(node_path) and _nonempty_string(execution_root):
+            observed_roots.append((node_path, execution_root))
+    execution_roots = {
+        execution_root
+        for node_path, execution_root in observed_roots
+        if not scope
+        or any(
+            is_within_allowlist(scope_root, node_path)
+            for scope_root in scope
+        )
+    }
+    if scope:
+        for scope_root in scope:
+            nearest_root = None
+            for _, execution_root in observed_roots:
+                if (
+                    is_within_allowlist(execution_root, scope_root)
+                    and (
+                        nearest_root is None
+                        or len(execution_root) > len(nearest_root)
+                    )
+                ):
+                    nearest_root = execution_root
+            if nearest_root is not None:
+                execution_roots.add(nearest_root)
+    return all(check["cwd"] in execution_roots for check in declared_checks)
+
+
+
+def _merge_declared_required_checks(derived_checks, declared_checks):
+    """Add explicit checks without allowing them to rewrite observed commands."""
+    merged = list(derived_checks)
+    by_name = {check["name"]: check for check in derived_checks}
+    resolving_cwds = set()
+    for declared in declared_checks:
+        existing = by_name.get(declared["name"])
+        if existing is not None:
+            if (
+                existing["command"] != declared["command"]
+                or existing.get("cwd") != declared["cwd"]
+            ):
+                return None
+            continue
+        explicit = dict(declared)
+        merged.append(explicit)
+        by_name[explicit["name"]] = explicit
+        resolving_cwds.add(explicit["cwd"])
+    return merged, resolving_cwds
+
+
+def _unresolved_check_unknowns(unknowns, checkouts, resolving_cwds):
+    if not resolving_cwds:
+        return list(unknowns)
+    resolved_subjects = {
+        node.get("id")
+        for node in checkouts
+        if (_fact_value(node, "worktree_root") or node.get("path")) in resolving_cwds
+    }
+    return [
+        unknown for unknown in unknowns
+        if unknown.get("subject") not in resolved_subjects
+    ]
 
 # How many dirty paths a dirty_entries claim may list by name; the exact
 # total count is always reported in the claim text regardless of the cap, so
@@ -1122,9 +1237,11 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     ):
         raise ValueError("task.scope must be a non-empty list of non-empty strings")
     declared_checks = task.get("required_checks")
-    if declared_checks is not None and not _is_required_checks_shape(declared_checks):
+    if declared_checks is not None and (
+        not declared_checks or not _is_declared_required_checks_shape(declared_checks)
+    ):
         raise ValueError(
-            "task.required_checks must be a list of {name, command} non-empty strings"
+            "task.required_checks must be a nonempty list of normalized {name, command, cwd} records"
         )
     budget = budget or {}
     max_claims = budget.get("max_claims")
@@ -1157,12 +1274,7 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
             fact is not None and not isinstance(fact, dict) for fact in facts.values()
         ):
             raise ValueError("workspace graph contains an invalid fact")
-        repository_fact = facts.get("is_git_repository")
-        if (
-            node.get("kind") == "checkout"
-            and isinstance(repository_fact, dict)
-            and repository_fact.get("value") is True
-        ):
+        if is_git_checkout(node):
             checkouts.append(node)
     # A declared scope narrower than the graph's allowlist must actually bound what
     # the capsule carries. Copying it into the output alone let a capsule declare
@@ -1216,6 +1328,7 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
                 }
             )
 
+    all_checkouts = list(checkouts)
     if declared_scope:
         checkouts = [n for n in checkouts if _in_scope(n.get("path"))]
     checkouts_by_path = {n.get("path"): n for n in checkouts}
@@ -1269,15 +1382,33 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     for refusal in graph.get("refusals") or []:
         if not _in_scope(refusal.get("path")):
             continue
-        omissions.append({"kind": "refused_root", "reason": refusal.get("reason"), "path": refusal.get("path")})
-    # An explicit task-level list always wins: derivation is a convenience, not a
-    # ceiling, and a caller who knows the command should never be argued with.
-    # `declared_checks` was shape-validated at the task boundary.
+        omissions.append(
+            {
+                "kind": "refused_root",
+                "reason": refusal.get("reason"),
+                "path": refusal.get("path"),
+            }
+        )
+    scoped_checkouts = [
+        checkout for checkout in checkouts if _in_scope(checkout.get("path"))
+    ]
+    required_checks, check_unknowns = _derive_required_checks(scoped_checkouts)
     if declared_checks is not None:
-        required_checks = list(declared_checks)
-        check_unknowns: list[dict] = []
-    else:
-        required_checks, check_unknowns = _derive_required_checks(checkouts)
+        if not _declared_check_cwds_match_checkouts(
+            declared_checks, all_checkouts, declared_scope
+        ):
+            raise ValueError(
+                "task.required_checks cwd must name a Git checkout execution root related to task.scope"
+            )
+        merged = _merge_declared_required_checks(required_checks, declared_checks)
+        if merged is None:
+            raise ValueError(
+                "task.required_checks cannot rewrite an observed check command or cwd"
+            )
+        required_checks, resolving_cwds = merged
+        check_unknowns = _unresolved_check_unknowns(
+            check_unknowns, scoped_checkouts, resolving_cwds
+        )
 
     content_unknowns: list[dict] = []
     for checkout_content in (content.get("checkouts") if content else None) or []:
@@ -1343,6 +1474,8 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     task_out["scope"] = scope if scope is not None else graph.get("allowlist")
     if "filters" in task and task.get("filters") is not None:
         task_out["filters"] = task["filters"]
+    if declared_checks is not None:
+        task_out["required_checks"] = list(declared_checks)
 
     body = {
         "schema": CAPSULE_SCHEMA,

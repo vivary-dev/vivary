@@ -49,6 +49,7 @@ sys.path.insert(0, PY_ROOT)
 
 from vivary_core.canonical import MAX_LOSSLESS_INTEGER, fingerprint, normalize_path  # noqa: E402
 from vivary_core.capsule_compile import (  # noqa: E402
+    capsule_context_matches_graph,
     compile_task_capsule,
     repair_topology_fingerprint,
     verify_task_capsule_integrity,
@@ -898,9 +899,17 @@ def test_claim_budget_cannot_exceed_the_lossless_contract_range(graph):
         ({"question": "What changed?", "scope": "/workspace"}, "task.scope"),
         ({"question": "What changed?", "scope": []}, "task.scope"),
         ({"question": "What changed?", "scope": [1]}, "task.scope"),
+        ({"question": "What changed?", "required_checks": []}, "task.required_checks"),
         ({"question": "What changed?", "required_checks": "npm test"}, "task.required_checks"),
         ({"question": "What changed?", "required_checks": 5}, "task.required_checks"),
         ({"question": "What changed?", "required_checks": [{}]}, "task.required_checks"),
+        (
+            {
+                "question": "What changed?",
+                "required_checks": [{"name": "unit", "command": "python -m pytest"}],
+            },
+            "task.required_checks",
+        ),
         (
             {
                 "question": "What changed?",
@@ -919,9 +928,11 @@ def test_claim_budget_cannot_exceed_the_lossless_contract_range(graph):
         "scope-container",
         "scope-empty",
         "scope-entry",
+        "checks-empty",
         "checks-container-string",
         "checks-container-number",
         "checks-entry-fields",
+        "checks-entry-cwd-missing",
         "checks-entry-empty",
     ],
 )
@@ -1140,22 +1151,199 @@ def test_required_checks_are_derived_from_the_observed_workspace(fx):
             for u in compile_for()["unknowns"]
         ), "an npm test command must not hide an undetermined Python check"
 
-        # 5. An explicit task list always wins.
+        # 5. An explicit task list adds a checkout-bound command without
+        # replacing evidence-backed derived checks.
+        explicit_check = {
+            "name": "mine",
+            "command": "make check",
+            "cwd": normalize_path(repo),
+        }
         explicit = compile_for(
             task={
                 **TASK,
-                "required_checks": [{"name": "mine", "command": "make check"}],
+                "required_checks": [explicit_check],
             }
         )
-        assert explicit["required_checks"] == [
-            {"name": "mine", "command": "make check"}
-        ]
+        assert project_test in explicit["required_checks"]
+        assert explicit_check in explicit["required_checks"]
+        assert not any(
+            unknown.get("kind") == "required_check_undetermined"
+            for unknown in explicit["unknowns"]
+        )
+
+        with pytest.raises(ValueError, match="cannot rewrite"):
+            compile_for(
+                task={
+                    **TASK,
+                    "required_checks": [
+                        {
+                            "name": project_test["name"],
+                            "command": "true",
+                            "cwd": normalize_path(repo),
+                        }
+                    ],
+                }
+            )
     finally:
         for name in ("tropo.toml", "AGENTS.md", "STRATO.md", "pyproject.toml", "package.json"):
             path = os.path.join(repo, name)
             if os.path.exists(path):
                 os.remove(path)
 
+
+
+def test_declared_required_check_resolves_only_its_checkout(fx):
+    roots = [fx["paths"]["canonical"], fx["paths"]["staleNeighbor"]]
+    normalized_roots = [normalize_path(root) for root in roots]
+    for root in roots:
+        _write(os.path.join(root, "pyproject.toml"), "[project]\nname = 'x'\n")
+
+    try:
+        observation = observe_checkouts(roots, allowlist=roots, now=NOW)
+        graph = project_workspace_graph(observation)
+        explicit = {
+            "name": "python-tests",
+            "command": "python -m pytest",
+            "cwd": normalized_roots[0],
+        }
+        capsule = compile_task_capsule(
+            task={
+                **TASK,
+                "scope": normalized_roots,
+                "required_checks": [explicit],
+            },
+            graph=graph,
+        )
+        unresolved_paths = {
+            unknown["subject_path"]
+            for unknown in capsule["unknowns"]
+            if unknown.get("kind") == "required_check_undetermined"
+        }
+        assert unresolved_paths == {normalized_roots[1]}
+
+        ancestor_scope = normalize_path(
+            os.path.join(normalized_roots[0], "package")
+        )
+        ancestor = compile_task_capsule(
+            task={
+                **TASK,
+                "scope": [ancestor_scope],
+                "required_checks": [explicit],
+            },
+            graph=graph,
+        )
+        assert ancestor["required_checks"] == [explicit]
+        assert not any(
+            unknown.get("kind") == "required_check_undetermined"
+            for unknown in ancestor["unknowns"]
+        )
+
+        relocated_graph = json.loads(json.dumps(graph))
+        relocated_checkout = next(
+            node
+            for node in relocated_graph["nodes"]
+            if node.get("kind") == "checkout"
+            and node.get("path") == normalized_roots[0]
+        )
+        relocated_checkout["facts"]["worktree_root"]["value"] = normalized_roots[1]
+        relocated_in_scope = compile_task_capsule(
+            task={
+                **TASK,
+                "scope": [normalized_roots[0]],
+                "required_checks": [
+                    {
+                        **explicit,
+                        "cwd": normalized_roots[1],
+                    }
+                ],
+            },
+            graph=relocated_graph,
+        )
+        assert relocated_in_scope["required_checks"] == [
+            {
+                **explicit,
+                "cwd": normalized_roots[1],
+            }
+        ]
+        assert not any(
+            unknown.get("kind") == "required_check_undetermined"
+            for unknown in relocated_in_scope["unknowns"]
+        )
+        with pytest.raises(ValueError, match="related to task.scope"):
+            compile_task_capsule(
+                task={
+                    **TASK,
+                    "scope": [ancestor_scope],
+                    "required_checks": [
+                        {
+                            **explicit,
+                            "cwd": normalized_roots[1],
+                        }
+                    ],
+                },
+                graph=relocated_graph,
+            )
+
+        nested_observation = json.loads(json.dumps(observation))
+        nested_root = normalize_path(
+            os.path.join(normalized_roots[0], "nested-checkout")
+        )
+        inner_observation = next(
+            checkout
+            for checkout in nested_observation["checkouts"]
+            if checkout.get("path") == normalized_roots[1]
+        )
+        inner_observation["path"] = nested_root
+        inner_observation["facts"]["worktree_root"]["value"] = nested_root
+        nested_graph = project_workspace_graph(nested_observation)
+        inner_check = {**explicit, "cwd": nested_root}
+        inner_capsule = compile_task_capsule(
+            task={
+                **TASK,
+                "scope": [nested_root],
+                "required_checks": [inner_check],
+            },
+            graph=nested_graph,
+        )
+        assert inner_capsule["required_checks"] == [inner_check]
+        with pytest.raises(ValueError, match="related to task.scope"):
+            compile_task_capsule(
+                task={
+                    **TASK,
+                    "scope": [nested_root],
+                    "required_checks": [explicit],
+                },
+                graph=nested_graph,
+            )
+        nested_base = compile_task_capsule(
+            task={**TASK, "scope": [nested_root]},
+            graph=nested_graph,
+        )
+        assert capsule_context_matches_graph(nested_base, nested_graph)
+        forged_outer_check = json.loads(json.dumps(nested_base))
+        forged_outer_check["task"]["required_checks"] = [explicit]
+        forged_outer_check["required_checks"] = [explicit]
+        assert not capsule_context_matches_graph(
+            forged_outer_check, nested_graph
+        )
+
+        with pytest.raises(ValueError, match="related to task.scope"):
+            compile_task_capsule(
+                task={
+                    **TASK,
+                    "scope": [normalized_roots[0]],
+                    "required_checks": [
+                        {
+                            **explicit,
+                            "cwd": normalized_roots[1],
+                        }
+                    ],
+                },
+                graph=graph,
+            )
+    finally:
+        for root in roots:
+            os.remove(os.path.join(root, "pyproject.toml"))
 
 
 def test_required_checks_run_at_the_observed_worktree_root(fx):
@@ -1169,13 +1357,26 @@ def test_required_checks_run_at_the_observed_worktree_root(fx):
         graph = project_workspace_graph(
             observe_checkouts([nested], allowlist=[repo], now=NOW)
         )
-        capsule = compile_task_capsule(task=TASK, graph=graph)
-
+        explicit = {
+            "name": "manual-tests",
+            "command": "python -m pytest",
+            "cwd": normalize_path(repo),
+        }
+        capsule = compile_task_capsule(
+            task={
+                **TASK,
+                "scope": [normalize_path(nested)],
+                "required_checks": [explicit],
+            },
+            graph=graph,
+        )
         assert capsule["required_checks"]
         assert all(
             check["cwd"] == normalize_path(repo)
             for check in capsule["required_checks"]
         )
+        assert explicit in capsule["required_checks"]
+        assert capsule_context_matches_graph(capsule, graph)
     finally:
         for name in ("tropo.toml", "AGENTS.md", "STRATO.md"):
             marker = os.path.join(repo, name)

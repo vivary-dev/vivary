@@ -73,6 +73,9 @@ def _checkout_core_facts(checkout: Dict[str, Any]) -> Dict[str, Any]:
         remotes = []
     return {
         "path": checkout["path"],
+        "worktree_root": (
+            _fact_field(f, "worktree_root", "value") or checkout["path"]
+        ),
         "head_revision": _fact_field(f, "head_revision", "value"),
         "head_ref": _fact_field(f, "head_ref", "value"),
         "is_dirty": _fact_field(f, "is_dirty", "value"),
@@ -149,56 +152,134 @@ def workspace_fingerprint_from_graph(graph: Dict[str, Any]) -> str:
     return fingerprint(core_facts)
 
 
+def projected_neighbor_pair_count(graph: Dict[str, Any]) -> Optional[int]:
+    """Count pairwise neighbor edges a checkout-seeded projection would emit."""
+    groups: Dict[str, int] = {}
+    try:
+        for node in graph["nodes"]:
+            if node.get("kind") != "checkout":
+                continue
+            checkout = {"path": node["path"], "facts": node["facts"]}
+            if (
+                _fact_field(
+                    checkout["facts"], "is_git_repository", "value"
+                )
+                is not True
+            ):
+                continue
+            repository = _repository_identity(checkout)
+            repository_id = deterministic_id(
+                "repository", {"identity": repository["identity"]}
+            )
+            groups[repository_id] = groups.get(repository_id, 0) + 1
+    except (AttributeError, KeyError, TypeError):
+        return None
+    return sum(
+        min(size, MAX_NEIGHBOR_OF_GROUP)
+        * (min(size, MAX_NEIGHBOR_OF_GROUP) - 1)
+        // 2
+        for size in groups.values()
+    )
+
+
 def repair_graph_is_canonical(graph: Dict[str, Any]) -> bool:
-    """Reject a supplied repair graph whose derived structure is not a faithful
-    projection of its own checkout primitives.
+    """Validate every graph field derivable from checkout paths and facts.
 
-    Every node id, the repository grouping, the ``checkout_of`` topology, the
-    preserved conflicts, and the workspace fingerprint are compiler-derived from
-    checkout paths and facts alone. A caller that forges a node id (or relabels
-    stale facts) while keeping the graph internally consistent would otherwise
-    satisfy topology and fingerprint binding, because those commitments are
-    recomputed from the same forged values. Re-projecting the graph from its own
-    checkout nodes and requiring an identical node/edge/conflict identity set and
-    workspace fingerprint closes that forgery class in one place, so downstream
-    repair evidence can never carry a non-canonical subject, repository, or
-    relationship id.
+    Checkout nodes are the only re-projection seed. Repository, revision,
+    branch, remote, artifact, edge, conflict, unknown, omission, and workspace
+    fingerprint data must match the compiler's projection.
 
-    Only ``kind == "checkout"`` nodes seed the re-projection: every other node,
-    edge, and conflict is derived, so seeding from a supplied repository or
-    revision node would validate the forgery against itself.
+    ``neighbor_of`` direction follows observation order, which the sorted graph
+    does not retain. Normalize that symmetric edge while still validating its
+    original deterministic ID. Refusals are not compared because they come from
+    observation policy rather than checkout facts.
     """
-    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+    if not (
+        isinstance(graph, dict)
+        and graph.get("schema") == GRAPH_SCHEMA
+        and isinstance(graph.get("nodes"), list)
+        and isinstance(graph.get("edges"), list)
+        and isinstance(graph.get("conflicts"), list)
+        and isinstance(graph.get("unknowns"), list)
+    ):
         return False
+    allowed_fields = {
+        "schema",
+        "observed_at",
+        "allowlist",
+        "workspace_fingerprint",
+        "nodes",
+        "edges",
+        "conflicts",
+        "unknowns",
+        "refusals",
+        "omissions",
+    }
+    if any(field not in allowed_fields for field in graph):
+        return False
+
     checkouts = []
     for node in graph["nodes"]:
         if not isinstance(node, dict):
             return False
         if node.get("kind") != "checkout":
             continue
+        checkout_id = node.get("id")
         path = node.get("path")
         facts = node.get("facts")
-        if not isinstance(path, str) or not path or not isinstance(facts, dict):
+        if (
+            not isinstance(checkout_id, str)
+            or not checkout_id
+            or not isinstance(path, str)
+            or not path
+            or not isinstance(facts, dict)
+        ):
             return False
-        checkouts.append({"path": path, "facts": facts})
-
-    def _edge_key(edge):
-        kind = edge.get("kind")
-        endpoints = (edge.get("from"), edge.get("to"))
-        # ``neighbor_of`` is a symmetric redundancy edge whose direction follows
-        # observation append order, while the re-projection is seeded from the
-        # id-sorted nodes; compare it as an unordered pair so a faithful graph is
-        # never rejected for an order-only difference.
-        if kind == "neighbor_of":
-            return (kind, frozenset(endpoints))
-        return (kind, endpoints[0], endpoints[1])
-
-    def _conflict_key(conflict):
-        return (
-            conflict.get("id"),
-            conflict.get("repository"),
-            tuple(sorted(side.get("checkout") for side in conflict.get("sides", []))),
+        checkouts.append(
+            {
+                "path": path,
+                "facts": {
+                    name: detail
+                    for name, detail in facts.items()
+                    if detail is not None
+                },
+            }
         )
+
+    def _normalized_edge(edge):
+        if not isinstance(edge, dict):
+            raise ValueError("workspace graph edges must be mappings")
+        kind = edge.get("kind")
+        from_ = edge.get("from")
+        to = edge.get("to")
+        if not all(isinstance(value, str) and value for value in (kind, from_, to)):
+            raise ValueError("workspace graph edges require kind and endpoints")
+        if edge.get("id") != deterministic_id(
+            "edge", {"kind": kind, "from": from_, "to": to}
+        ):
+            raise ValueError("workspace graph edge id is not canonical")
+        normalized = dict(edge)
+        if kind == "neighbor_of":
+            normalized_from, normalized_to = sorted(
+                (from_, to), key=_utf16_sort_key
+            )
+            normalized["from"] = normalized_from
+            normalized["to"] = normalized_to
+            normalized["id"] = deterministic_id(
+                "edge",
+                {
+                    "kind": kind,
+                    "from": normalized_from,
+                    "to": normalized_to,
+                },
+            )
+        return normalized
+
+    def _sorted_by_id(items):
+        return sorted(items, key=lambda item: _utf16_sort_key(item["id"]))
+
+    def _sorted_values(items):
+        return sorted(items, key=lambda item: _utf16_sort_key(fingerprint(item)))
 
     try:
         recomputed = project_workspace_graph(
@@ -209,23 +290,43 @@ def repair_graph_is_canonical(graph: Dict[str, Any]) -> bool:
                 "refusals": [],
             }
         )
-        if {node.get("id") for node in graph["nodes"]} != {
-            node["id"] for node in recomputed["nodes"]
-        }:
+        if (
+            "allowlist" in graph
+            and graph["allowlist"] != recomputed["allowlist"]
+        ):
             return False
-        if {_edge_key(edge) for edge in graph.get("edges", []) if isinstance(edge, dict)} != {
-            _edge_key(edge) for edge in recomputed["edges"]
-        }:
+        if _sorted_by_id(graph["nodes"]) != _sorted_by_id(recomputed["nodes"]):
             return False
-        if {
-            _conflict_key(conflict)
-            for conflict in graph.get("conflicts", [])
-            if isinstance(conflict, dict)
-        } != {_conflict_key(conflict) for conflict in recomputed["conflicts"]}:
+        if _sorted_by_id(
+            [_normalized_edge(edge) for edge in graph["edges"]]
+        ) != _sorted_by_id(
+            [_normalized_edge(edge) for edge in recomputed["edges"]]
+        ):
             return False
-    except (AttributeError, KeyError, TypeError, ValueError, CollationDomainError):
+        if _sorted_by_id(graph["conflicts"]) != _sorted_by_id(
+            recomputed["conflicts"]
+        ):
+            return False
+        if _sorted_values(graph["unknowns"]) != _sorted_values(
+            recomputed["unknowns"]
+        ):
+            return False
+        if _sorted_values(graph.get("omissions", [])) != _sorted_values(
+            recomputed.get("omissions", [])
+        ):
+            return False
+    except (
+        AttributeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        CollationDomainError,
+    ):
         return False
-    return graph.get("workspace_fingerprint") == recomputed["workspace_fingerprint"]
+    return (
+        graph.get("workspace_fingerprint")
+        == recomputed["workspace_fingerprint"]
+    )
 
 
 def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
@@ -247,14 +348,21 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
     for checkout in observation["checkouts"]:
         checkout_id = deterministic_id("checkout", {"path": checkout["path"]})
 
-        for fact, detail in checkout["facts"].items():
-            if detail.get("status") == "unknown":
-                unknowns.append(
-                    {"checkout": checkout_id, "path": checkout["path"], "fact": fact, "reason": detail.get("reason")}
-                )
 
         if _fact_field(checkout["facts"], "is_git_repository", "value") is not True:
             is_git_repository = checkout["facts"].get("is_git_repository")
+            if (
+                isinstance(is_git_repository, dict)
+                and is_git_repository.get("status") == "unknown"
+            ):
+                unknowns.append(
+                    {
+                        "checkout": checkout_id,
+                        "path": checkout["path"],
+                        "fact": "is_git_repository",
+                        "reason": is_git_repository.get("reason"),
+                    }
+                )
             add_node(
                 {
                     "id": checkout_id,
@@ -265,6 +373,16 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
                 }
             )
             continue
+        for fact, detail in checkout["facts"].items():
+            if detail.get("status") == "unknown":
+                unknowns.append(
+                    {
+                        "checkout": checkout_id,
+                        "path": checkout["path"],
+                        "fact": fact,
+                        "reason": detail.get("reason"),
+                    }
+                )
 
         add_node(
             {
