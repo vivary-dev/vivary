@@ -411,16 +411,21 @@ def _selection_signal_is_valid(signal, terms, content_terms, claim) -> bool:
             signal.get("conflict")
         )
     if signal_kind == "question_term_match":
+        term = signal.get("term")
+        field = signal.get("field")
         return (
             set(signal) == {"signal", "term", "field"}
-            and signal.get("term") in terms
-            and signal.get("field") in {"label", "repository", "branch"}
+            and isinstance(term, str)
+            and term in terms
+            and isinstance(field, str)
+            and field in {"label", "repository", "branch"}
         )
     if signal_kind == "content_term_match":
         term = signal.get("term")
         path = signal.get("path")
         return (
             set(signal) == {"signal", "term", "path"}
+            and isinstance(term, str)
             and term in content_terms
             and _nonempty_string(path)
             and claim.get("fact") == "content_match"

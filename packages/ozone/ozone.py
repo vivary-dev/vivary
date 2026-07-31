@@ -155,12 +155,16 @@ def _load_core_verification():
     ):
         sys.path.insert(0, sibling_core)
     from vivary_core.capsule_compile import (
+        MAX_GRAPH_CONTEXT_CHECKOUTS,
         capsule_context_matches_graph,
         is_task_capsule_shape,
         repair_topology_fingerprint,
         verify_task_capsule_integrity,
     )
-    from vivary_core.workspace_model import workspace_fingerprint_from_graph
+    from vivary_core.workspace_model import (
+        repair_graph_is_canonical,
+        workspace_fingerprint_from_graph,
+    )
     from vivary_core.capsule_select import OMITTED_LIST_CAP
     from vivary_core.canonical import (
         MAX_LOSSLESS_INTEGER,
@@ -194,6 +198,8 @@ def _load_core_verification():
         "is_within_allowlist": is_within_allowlist,
         "repair_topology_fingerprint": repair_topology_fingerprint,
         "workspace_fingerprint_from_graph": workspace_fingerprint_from_graph,
+        "repair_graph_is_canonical": repair_graph_is_canonical,
+        "MAX_GRAPH_CONTEXT_CHECKOUTS": MAX_GRAPH_CONTEXT_CHECKOUTS,
         "deterministic_id": deterministic_id,
         "MAX_DEDUPE_CHECKOUTS": MAX_DEDUPE_CHECKOUTS,
         "AVG_OMITTED_CLAIM_TOKENS": AVG_OMITTED_CLAIM_TOKENS,
@@ -719,19 +725,31 @@ def _repair_graph_is_safe(graph, core):
         max_checkouts = core["MAX_DEDUPE_CHECKOUTS"]
         if conflict_pair_count > max_checkouts * (max_checkouts - 1) // 2:
             return False
-    try:
-        return (
-            core["workspace_fingerprint_from_graph"](graph)
-            == graph["workspace_fingerprint"]
+    return core["repair_graph_is_canonical"](graph)
+
+
+def _graph_context_checkouts_bounded(capsule, graph, core):
+    """Bound the scope-filtered checkout set the graph-context matcher reselects.
+
+    ``capsule_context_matches_graph`` re-runs claim selection over these
+    checkouts, so the ceiling is a repair-work bound owned by core; surface it as
+    ``repair_work_unbounded`` here rather than letting the matcher return a
+    context mismatch for an over-large but otherwise faithful graph.
+    """
+    scope = capsule["task"].get("scope") or []
+    checkouts = [
+        node
+        for node in graph["nodes"]
+        if node.get("kind") == "checkout"
+        and (
+            not scope
+            or any(
+                core["is_within_allowlist"](root, node.get("path"))
+                for root in scope
+            )
         )
-    except (
-        AttributeError,
-        KeyError,
-        TypeError,
-        ValueError,
-        core["CollationDomainError"],
-    ):
-        return False
+    ]
+    return len(checkouts) <= core["MAX_GRAPH_CONTEXT_CHECKOUTS"]
 
 
 def _graph_context_work_is_bounded(capsule, graph):
@@ -974,11 +992,15 @@ def _validate_governed_request(request, core):
         elif (
             repair_capsule_is_safe
             and request["graph"]["observed_at"]
-            != capsule["workspace"]["observed_at"]
+            != capsule["workspace"].get("observed_at")
         ):
             errors.append("repair_graph_context_mismatch")
         elif repair_capsule_is_safe:
-            if not _graph_context_work_is_bounded(capsule, request["graph"]):
+            if not _graph_context_checkouts_bounded(
+                capsule, request["graph"], core
+            ):
+                errors.append("repair_work_unbounded")
+            elif not _graph_context_work_is_bounded(capsule, request["graph"]):
                 errors.append("repair_work_unbounded")
             elif not _repair_estimates_are_canonical(capsule, core):
                 errors.append("repair_estimate_unbounded")

@@ -149,6 +149,85 @@ def workspace_fingerprint_from_graph(graph: Dict[str, Any]) -> str:
     return fingerprint(core_facts)
 
 
+def repair_graph_is_canonical(graph: Dict[str, Any]) -> bool:
+    """Reject a supplied repair graph whose derived structure is not a faithful
+    projection of its own checkout primitives.
+
+    Every node id, the repository grouping, the ``checkout_of`` topology, the
+    preserved conflicts, and the workspace fingerprint are compiler-derived from
+    checkout paths and facts alone. A caller that forges a node id (or relabels
+    stale facts) while keeping the graph internally consistent would otherwise
+    satisfy topology and fingerprint binding, because those commitments are
+    recomputed from the same forged values. Re-projecting the graph from its own
+    checkout nodes and requiring an identical node/edge/conflict identity set and
+    workspace fingerprint closes that forgery class in one place, so downstream
+    repair evidence can never carry a non-canonical subject, repository, or
+    relationship id.
+
+    Only ``kind == "checkout"`` nodes seed the re-projection: every other node,
+    edge, and conflict is derived, so seeding from a supplied repository or
+    revision node would validate the forgery against itself.
+    """
+    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+        return False
+    checkouts = []
+    for node in graph["nodes"]:
+        if not isinstance(node, dict):
+            return False
+        if node.get("kind") != "checkout":
+            continue
+        path = node.get("path")
+        facts = node.get("facts")
+        if not isinstance(path, str) or not path or not isinstance(facts, dict):
+            return False
+        checkouts.append({"path": path, "facts": facts})
+
+    def _edge_key(edge):
+        kind = edge.get("kind")
+        endpoints = (edge.get("from"), edge.get("to"))
+        # ``neighbor_of`` is a symmetric redundancy edge whose direction follows
+        # observation append order, while the re-projection is seeded from the
+        # id-sorted nodes; compare it as an unordered pair so a faithful graph is
+        # never rejected for an order-only difference.
+        if kind == "neighbor_of":
+            return (kind, frozenset(endpoints))
+        return (kind, endpoints[0], endpoints[1])
+
+    def _conflict_key(conflict):
+        return (
+            conflict.get("id"),
+            conflict.get("repository"),
+            tuple(sorted(side.get("checkout") for side in conflict.get("sides", []))),
+        )
+
+    try:
+        recomputed = project_workspace_graph(
+            {
+                "observed_at": graph.get("observed_at"),
+                "allowlist": graph.get("allowlist") or [],
+                "checkouts": checkouts,
+                "refusals": [],
+            }
+        )
+        if {node.get("id") for node in graph["nodes"]} != {
+            node["id"] for node in recomputed["nodes"]
+        }:
+            return False
+        if {_edge_key(edge) for edge in graph.get("edges", []) if isinstance(edge, dict)} != {
+            _edge_key(edge) for edge in recomputed["edges"]
+        }:
+            return False
+        if {
+            _conflict_key(conflict)
+            for conflict in graph.get("conflicts", [])
+            if isinstance(conflict, dict)
+        } != {_conflict_key(conflict) for conflict in recomputed["conflicts"]}:
+            return False
+    except (AttributeError, KeyError, TypeError, ValueError, CollationDomainError):
+        return False
+    return graph.get("workspace_fingerprint") == recomputed["workspace_fingerprint"]
+
+
 def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
     nodes: Dict[str, Any] = {}
     edges: Dict[str, Any] = {}
