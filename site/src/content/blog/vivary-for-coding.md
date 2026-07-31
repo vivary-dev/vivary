@@ -4,8 +4,7 @@ description: "The coding preset's surfaces, blast radius before risky changes, t
 date: 2026-07-24
 author: "Jeff Kazzee"
 tags: ["coding", "howto", "gates"]
-draft: true
----
+draft: false---
 
 If you've used an agent on a real codebase for more than a few sessions, you've
 hit this: it re-reads the same files every time because nothing tells it what

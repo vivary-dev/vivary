@@ -4,8 +4,7 @@ description: "A flat notes.md degrades silently and nothing tells you. A typed g
 date: 2026-07-13
 author: "Jeff Kazzee"
 tags: ["tropo", "memory", "deep-dive"]
-draft: true
----
+draft: false---
 
 Every agent project I've worked on eventually grows a `notes.md` or a
 `STATE.md` or a `context.md`, some flat file where decisions and status live.

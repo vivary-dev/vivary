@@ -4,8 +4,7 @@ description: "tropo blast and ozone impact answer what depends on the thing you'
 date: 2026-07-31
 author: "Jeff Kazzee"
 tags: ["tropo", "ozone", "risk"]
-draft: true
----
+draft: false---
 
 A text diff answers one question well: what did this file look like before,
 and what does it look like now. It answers a completely different question
