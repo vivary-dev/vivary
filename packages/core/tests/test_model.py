@@ -48,6 +48,7 @@ from vivary_core.canonical import deterministic_id, normalize_path  # noqa: E402
 from vivary_core.workspace_model import (  # noqa: E402
     project_workspace_graph,
     repair_graph_is_canonical,
+    workspace_facts_are_valid,
     workspace_fingerprint_from_graph,
 )
 
@@ -214,6 +215,45 @@ def observation(fx):
 
 # --- tests --------------------------------------------------------------------
 
+def _known_workspace_facts():
+    return {
+        "is_git_repository": {"status": "known", "value": True},
+        "worktree_root": {"status": "known", "value": "/repo"},
+        "git_common_dir": {"status": "known", "value": "/repo/.git"},
+        "head_revision": {"status": "known", "value": "a" * 40},
+        "head_ref": {
+            "status": "known",
+            "value": {"kind": "branch", "name": "main"},
+        },
+        "dirty_entries": {
+            "status": "known",
+            "value": [{"path": "README.md", "state": " M"}],
+        },
+        "is_dirty": {"status": "known", "value": True},
+        "remotes": {
+            "status": "known",
+            "value": [
+                {
+                    "name": "origin",
+                    "fetch_url": "https://example.test/repo.git",
+                }
+            ],
+        },
+        "upstream": {"status": "known", "value": "origin/main"},
+        "last_fetch": {"status": "known", "value": "2026-07-02T00:00:00.000Z"},
+        "workspace_markers": {"status": "known", "value": ["package.json"]},
+        "npm_test_script": {"status": "known", "value": "pytest -q"},
+    }
+
+
+def _workspace_observation(facts):
+    return {
+        "observed_at": NOW(),
+        "allowlist": ["/repo"],
+        "refusals": [],
+        "checkouts": [{"path": "/repo", "facts": facts}],
+    }
+
 
 def test_projection_is_deterministic_same_observation_byte_identical_graph(observation):
     a = project_workspace_graph(observation)
@@ -344,6 +384,116 @@ def test_projection_rejects_invalid_fact_status():
                 ],
             }
         )
+
+@pytest.mark.parametrize(
+    "fact_name",
+    (
+        "is_git_repository",
+        "worktree_root",
+        "git_common_dir",
+        "head_revision",
+        "head_ref",
+        "dirty_entries",
+        "is_dirty",
+        "remotes",
+        "upstream",
+        "last_fetch",
+        "workspace_markers",
+        "npm_test_script",
+    ),
+)
+def test_workspace_facts_reject_known_gate_facts_without_value(fact_name):
+    facts = _known_workspace_facts()
+    facts[fact_name] = {"status": "known"}
+
+    assert not workspace_facts_are_valid(facts)
+
+
+@pytest.mark.parametrize(
+    ("fact_name", "invalid_value"),
+    (
+        pytest.param(
+            "is_git_repository",
+            "yes",
+            id="is_git_repository-requires-bool",
+        ),
+        pytest.param("is_dirty", "yes", id="is_dirty-requires-bool"),
+        pytest.param("worktree_root", 1, id="worktree_root-requires-string"),
+        pytest.param(
+            "npm_test_script",
+            "",
+            id="npm_test_script-requires-nonblank-string",
+        ),
+        pytest.param(
+            "workspace_markers",
+            [1],
+            id="workspace_markers-requires-list-of-strings",
+        ),
+        pytest.param(
+            "head_ref",
+            {"kind": "branch"},
+            id="head_ref-requires-complete-ref-shape",
+        ),
+        pytest.param("head_ref", "main", id="head_ref-requires-mapping"),
+        pytest.param(
+            "dirty_entries",
+            [{"path": "README.md", "state": 1}],
+            id="dirty_entries-requires-string-state",
+        ),
+        pytest.param(
+            "dirty_entries",
+            "M README.md",
+            id="dirty_entries-requires-list",
+        ),
+        pytest.param(
+            "remotes",
+            [{"name": "origin", "fetch_url": 1}],
+            id="remotes-requires-string-urls",
+        ),
+    ),
+)
+def test_workspace_facts_reject_wrong_semantic_values_for_gate_categories(
+    fact_name, invalid_value
+):
+    facts = _known_workspace_facts()
+    facts[fact_name]["value"] = invalid_value
+
+    assert not workspace_facts_are_valid(facts)
+
+
+def test_projection_rejects_known_is_dirty_without_value():
+    facts = _known_workspace_facts()
+    facts["is_dirty"] = {"status": "known"}
+
+    with pytest.raises(ValueError, match="invalid fact"):
+        project_workspace_graph(_workspace_observation(facts))
+
+
+def test_workspace_fact_validation_and_projection_preserve_valid_unknowns():
+    facts = _known_workspace_facts()
+    facts["is_dirty"] = {
+        "status": "unknown",
+        "reason": "status_unavailable",
+    }
+
+    assert workspace_facts_are_valid(facts)
+    graph = project_workspace_graph(_workspace_observation(facts))
+    assert graph["unknowns"] == [
+        {
+            "checkout": deterministic_id("checkout", {"path": "/repo"}),
+            "path": "/repo",
+            "fact": "is_dirty",
+            "reason": "status_unavailable",
+        }
+    ]
+    assert repair_graph_is_canonical(graph)
+
+
+def test_repair_graph_canonicality_requires_allowlist_field():
+    graph = project_workspace_graph(_workspace_observation(_known_workspace_facts()))
+    del graph["allowlist"]
+
+    assert not repair_graph_is_canonical(graph)
 
 
 def test_workspace_fingerprint_and_canonicality_preserve_refusals():

@@ -21,6 +21,25 @@ from datetime import datetime, timezone
 from vivary_core.canonical import deterministic_id, fingerprint
 
 RECEIPT_SCHEMA = "vivary.execution-receipt/v0"
+EXECUTION_RECEIPT_FIELDS = frozenset(
+    {
+        "receipt_id",
+        "schema",
+        "capsule",
+        "workspace",
+        "runtime",
+        "checks",
+        "claims_in_scope",
+        "claims_verified",
+        "claims_unverified",
+        "unresolved_conflicts",
+        "unresolved_unknowns",
+        "provenance",
+        "created_at",
+        "fingerprint",
+    }
+)
+
 
 
 def _default_clock() -> str:

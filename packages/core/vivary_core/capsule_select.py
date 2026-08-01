@@ -28,7 +28,7 @@ Language mapping notes (decision 0008 / documented rules for this slice):
     plain JS relational operators `<`/`>`. For strings, plain `<`/`>` is
     UTF-16 code-unit order (NOT ICU/localeCompare collation) - so the
     tie-break string in `sortKey[1]` is ordered here via
-    `vivary_core.canonical._utf16_sort_key`, not `collation.locale_sort_key`.
+    `vivary_core.canonical.utf16_sort_key`, not `collation.locale_sort_key`.
     (compile.mjs's own candidate sort, by contrast, calls
     `.localeCompare(...)` explicitly and so uses `locale_sort_key` - see
     capsule_compile.py.)
@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import re
 
-from vivary_core.canonical import _utf16_sort_key
+from vivary_core.canonical import utf16_sort_key
 
 TIER_NAMES = ["conflict_side", "question_match", "allowlisted"]
 
@@ -207,9 +207,12 @@ def validate_filters(filters):
                 f"filter on '{filt.get('field')}' must carry exactly one of equals|includes"
             )
         operator = "equals" if has_equals else "includes"
-        if not isinstance(filt.get(operator), str):
+        if (
+            not isinstance(filt.get(operator), str)
+            or not filt[operator].strip()
+        ):
             raise TypeError(
-                f"filter {operator} value on '{filt.get('field')}' must be a string"
+                f"filter {operator} value on '{filt.get('field')}' must be a non-blank string"
             )
         result.append({"field": filt["field"], "operator": operator, "value": filt[operator]})
     return result
@@ -333,7 +336,7 @@ def select_claims(*, task, graph, candidates, max_claims):
         claim["selection_reason"] = rank["reason"]
         claim["selection"] = selection
         tiebreak = f"{candidate.get('subject')}:{candidate.get('fact')}:{candidate.get('claim')}"
-        surviving.append({"claim": claim, "sort_key": (budget_rank, _utf16_sort_key(tiebreak))})
+        surviving.append({"claim": claim, "sort_key": (budget_rank, utf16_sort_key(tiebreak))})
 
     # select.mjs compares sortKey entries with plain `<`/`>`: numeric compare
     # for budget_rank, UTF-16-code-unit compare for the tiebreak string (NOT

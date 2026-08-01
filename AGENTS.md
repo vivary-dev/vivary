@@ -107,10 +107,10 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
 
 ```bash
 python packages/tropo/tests/test_tropo.py                  # 170/170
-python packages/ozone/tests/test_ozone.py                  # 83/83
+python packages/ozone/tests/test_ozone.py                  # 89/89
 python packages/exo/tests/test_exo.py                      # 17/17
 python packages/create-vivary/tests/test_create_vivary.py  # 143 run, 1 skipped
-python -m pytest packages/core/tests/ -q                   # 668 Windows; 666 + 2 skips Linux
+python -m pytest packages/core/tests/ -q                   # 713 Windows; 712 + 1 skip Linux
 python -m pytest packages/strato/tests/ -q                 # 48/48
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # clean
 ```
@@ -118,8 +118,8 @@ python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # cl
 Current release truth lives in [README.md](README.md) and [CHANGELOG.md](CHANGELOG.md):
 `create-vivary` / `@vivary/create` 0.3.1, `vivary-memory-cognee` 0.1.0,
 `vivary-tropo` 0.4.1, `vivary-exo` 0.2.2, and `vivary-ozone` 0.2.0 are the
-published versions. Development source is `vivary-core` 0.2.3, `vivary-tropo` 0.5.0,
-`vivary-strato` 0.1.1, `vivary-ozone` 0.3.0, and the `vivary` meta-package 0.1.2.
-Versions are independent; there is no single "Vivary 0.4.1" release. This line adds `tropo map`,
-brownfield `create-vivary adopt`, `doctor --trend` drift tracking, and strato
-integrity gates in CI. Full guides live in [docs/](docs/).
+published versions. Development source is `vivary-core` 0.2.4, `vivary-tropo` 0.5.0,
+`vivary-strato` 0.1.2, `vivary-ozone` 0.3.1, and the `vivary` meta-package 0.1.3.
+Versions are independent; there is no single "Vivary 0.4.1" release. This line adds
+`tropo map`, brownfield `create-vivary adopt`, `doctor --trend` drift tracking, Strato
+integrity gates, and governed-verification hardening. Full guides live in [docs/](docs/).

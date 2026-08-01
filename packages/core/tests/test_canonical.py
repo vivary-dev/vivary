@@ -14,6 +14,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 PY_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, PY_ROOT)
+import vivary_core  # noqa: E402
 
 from vivary_core.canonical import (  # noqa: E402
     canonicalize,
@@ -23,7 +24,16 @@ from vivary_core.canonical import (  # noqa: E402
     is_within,
     normalize_path,
     sha256_hex,
+    utf16_sort_key,
 )
+from vivary_core.capsule_compile import TASK_CAPSULE_FIELDS  # noqa: E402
+from vivary_core.receipt import EXECUTION_RECEIPT_FIELDS  # noqa: E402
+
+
+def test_public_core_exports_own_artifact_fields_and_utf16_ordering():
+    assert vivary_core.TASK_CAPSULE_FIELDS is TASK_CAPSULE_FIELDS
+    assert vivary_core.EXECUTION_RECEIPT_FIELDS is EXECUTION_RECEIPT_FIELDS
+    assert vivary_core.utf16_sort_key is utf16_sort_key
 
 # ---------------------------------------------------------------------------
 # normalize_path

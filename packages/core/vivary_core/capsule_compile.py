@@ -17,7 +17,7 @@ Language mapping notes (decision 0008 / documented rules for this slice):
   - 0 and "" must pass through unchanged, e.g. `budget.max_claims ?? 24`).
 - compile.mjs's candidate sort calls `.localeCompare(...)` explicitly, so it
   is ordered here via `collation.locale_sort_key` (ICU-equivalent
-  collation) - NOT `canonical._utf16_sort_key`, which is reserved for sites
+  collation) - NOT `canonical.utf16_sort_key`, which is reserved for sites
   using plain JS relational operators (see capsule_select.py's own sort).
 - JS object-spread-then-override (`{...obj, key: value}`) keeps a
   pre-existing key in its ORIGINAL insertion position while updating its
@@ -33,10 +33,11 @@ import re
 
 from vivary_core.canonical import (
     MAX_LOSSLESS_INTEGER,
-    _utf16_sort_key,
+    utf16_sort_key,
     canonicalize,
     deterministic_id,
     fingerprint,
+    is_absolute_root,
     is_canonical_body_value,
     normalize_path,
     is_within_allowlist,
@@ -58,7 +59,25 @@ from vivary_core.collation import CollationDomainError, locale_sort_key
 from vivary_core.workspace_model import workspace_facts_are_valid
 
 CAPSULE_SCHEMA = "vivary.task-capsule/v0"
+TASK_CAPSULE_FIELDS = frozenset(
+    {
+        "capsule_id",
+        "schema",
+        "task",
+        "workspace",
+        "claims",
+        "conflicts",
+        "unknowns",
+        "omissions",
+        "required_checks",
+        "budget",
+        "fingerprint",
+    }
+)
+
 MAX_GRAPH_CONTEXT_CHECKOUTS = 300
+MAX_CAPSULE_CANDIDATE_WORK = 10_000
+MAX_TASK_SCOPE_ROOTS = 1_000
 
 _OMISSION_EXACT_KEYS = {
     "filtered_out": frozenset(
@@ -127,6 +146,54 @@ def _content_question_terms(question) -> set[str]:
     return set(re.findall(r"[^\W_]+", text.lower(), flags=re.UNICODE))
 
 
+def _path_is_in_scope(path, scope) -> bool:
+    if not scope or not path:
+        return True
+    return any(is_within_allowlist(root, path) for root in scope)
+
+
+def _entry_is_in_scope(entry, scope) -> bool:
+    if not scope or not isinstance(entry, dict):
+        return True
+    for key in ("path", "subject_path"):
+        if entry.get(key) and not _path_is_in_scope(entry[key], scope):
+            return False
+    for side in entry.get("sides") or []:
+        if (
+            isinstance(side, dict)
+            and side.get("path")
+            and not _path_is_in_scope(side["path"], scope)
+        ):
+            return False
+    return True
+
+
+def _scope_conflicts(conflicts, scope):
+    scoped = []
+    omissions = []
+    for conflict in conflicts:
+        if _entry_is_in_scope(conflict, scope):
+            scoped.append(conflict)
+            continue
+        for side in conflict.get("sides") or []:
+            if (
+                not isinstance(side, dict)
+                or not side.get("path")
+                or not _path_is_in_scope(side["path"], scope)
+            ):
+                continue
+            omissions.append(
+                {
+                    "kind": "conflict_outside_scope",
+                    "conflict": conflict.get("id"),
+                    "subject": side.get("checkout"),
+                    "subject_path": side["path"],
+                    "reason": "one or more conflict sides are outside the declared scope",
+                }
+            )
+    return scoped, omissions
+
+
 def repair_topology_fingerprint(graph) -> str:
     """Commit the graph relationships that can drive context-repair proposals."""
 
@@ -150,7 +217,7 @@ def repair_topology_fingerprint(graph) -> str:
                 "checkout topology nodes require non-empty string IDs and paths"
             )
         checkouts.append({"id": node["id"], "path": node["path"]})
-    checkouts.sort(key=lambda node: _utf16_sort_key(node["id"]))
+    checkouts.sort(key=lambda node: utf16_sort_key(node["id"]))
 
     repositories = []
     for node in graph_nodes:
@@ -167,7 +234,7 @@ def repair_topology_fingerprint(graph) -> str:
                 "identity_status": node.get("identity_status"),
             }
         )
-    repositories.sort(key=lambda node: _utf16_sort_key(node["id"]))
+    repositories.sort(key=lambda node: utf16_sort_key(node["id"]))
 
     checkout_of = []
     for edge in graph_edges:
@@ -189,8 +256,8 @@ def repair_topology_fingerprint(graph) -> str:
         )
     checkout_of.sort(
         key=lambda relationship: (
-            _utf16_sort_key(relationship["checkout"]),
-            _utf16_sort_key(relationship["repository"]),
+            utf16_sort_key(relationship["checkout"]),
+            utf16_sort_key(relationship["repository"]),
         )
     )
     return fingerprint(
@@ -265,7 +332,8 @@ def _is_task_shape(task) -> bool:
     if "scope" in task and not (
         isinstance(task["scope"], list)
         and bool(task["scope"])
-        and all(_nonempty_string(root) for root in task["scope"])
+        and len(task["scope"]) <= MAX_TASK_SCOPE_ROOTS
+        and all(is_absolute_root(root) for root in task["scope"])
     ):
         return False
     if "filters" in task:
@@ -680,13 +748,11 @@ def _selection_omissions(selection, max_claims):
 
 
 def _refusal_omissions(graph, task_scope):
-    graph_allowlist = graph.get("allowlist") or []
-    refusal_scope = None if task_scope == graph_allowlist else task_scope
     omissions = []
     for refusal in graph.get("refusals") or []:
         path = refusal.get("path")
-        if refusal_scope and not any(
-            is_within_allowlist(root, path) for root in refusal_scope
+        if task_scope and not any(
+            is_within_allowlist(root, path) for root in task_scope
         ):
             continue
         omissions.append(
@@ -702,7 +768,7 @@ def _refusal_omissions(graph, task_scope):
 def _canonical_multiset(items):
     return sorted(
         (canonicalize(item) for item in items),
-        key=_utf16_sort_key,
+        key=utf16_sort_key,
     )
 
 
@@ -734,18 +800,18 @@ def _compiler_omissions_match(
         ):
             return False
 
-    observed_refusals = [
+    observed_fixed = [
         omission
         for omission in observed
-        if omission["kind"] == "refused_root"
+        if omission["kind"] not in selection_kinds
     ]
-    expected_refusals = [
+    expected_fixed = [
         omission
         for omission in expected
-        if omission["kind"] == "refused_root"
+        if omission["kind"] not in selection_kinds
     ]
-    if _canonical_multiset(observed_refusals) != _canonical_multiset(
-        expected_refusals
+    if _canonical_multiset(observed_fixed) != _canonical_multiset(
+        expected_fixed
     ):
         return False
 
@@ -800,6 +866,9 @@ def capsule_context_matches_graph(capsule, graph) -> bool:
     ]
     profiles = subject_profiles(graph)
     scope = capsule["task"].get("scope")
+    scoped_conflicts, conflict_scope_omissions = _scope_conflicts(
+        graph["conflicts"], scope
+    )
     graph_checkouts = [
         node for node in graph["nodes"] if is_git_checkout(node)
     ]
@@ -842,14 +911,7 @@ def capsule_context_matches_graph(capsule, graph) -> bool:
         }
         selection = select_claims(
             task=capsule["task"],
-            graph={
-                **graph,
-                "conflicts": [
-                    conflict
-                    for conflict in graph["conflicts"]
-                    if conflict.get("id") in capsule_conflict_ids
-                ],
-            },
+            graph={**graph, "conflicts": scoped_conflicts},
             candidates=candidates,
             max_claims=capsule["budget"]["max_claims"],
         )
@@ -867,6 +929,7 @@ def capsule_context_matches_graph(capsule, graph) -> bool:
                 selection, capsule["budget"]["max_claims"]
             ),
             *_refusal_omissions(graph, scope),
+            *conflict_scope_omissions,
         ]
     except (AttributeError, KeyError, TypeError, ValueError):
         return False
@@ -874,6 +937,7 @@ def capsule_context_matches_graph(capsule, graph) -> bool:
         "filtered_out",
         "claims_over_budget",
         "refused_root",
+        "conflict_outside_scope",
     }
     observed_omissions = [
         omission
@@ -1055,6 +1119,7 @@ def is_task_capsule_shape(capsule) -> bool:
 
     if not (
         isinstance(capsule, dict)
+        and set(capsule) == TASK_CAPSULE_FIELDS
         and capsule.get("schema") == CAPSULE_SCHEMA
         and _is_task_shape(capsule.get("task"))
         and isinstance(capsule.get("capsule_id"), str)
@@ -1449,18 +1514,40 @@ def _content_is_bound_to(node, checkout_content):
     return bool(observed) and bool(searched) and observed == searched
 
 
-def _content_match_candidates(content, checkouts_by_path, task_terms):
+def _is_safe_content_match_path(path) -> bool:
+    return (
+        _nonblank_string(path)
+        and normalize_path(path) == path
+        and not is_absolute_root(path)
+        and re.match(r"^[A-Za-z]:", path) is None
+        and ".." not in path.split("/")
+    )
+
+
+def _content_match_candidates(
+    content, checkouts_by_path, task_terms, work_limit
+):
     if not content or not isinstance(content.get("checkouts"), list):
         return [], []
     candidates = []
     excluded_count = 0
+    work = 0
     for checkout_content in content["checkouts"]:
+        work += 1
+        if work > work_limit:
+            raise ValueError("content candidate work exceeds the compiler limit")
         node = checkouts_by_path.get(checkout_content.get("path"))
         if node is None:
             continue
         if not _content_is_bound_to(node, checkout_content):
             continue
         for match in checkout_content.get("matches") or []:
+            work += 1
+            if work > work_limit:
+                raise ValueError("content candidate work exceeds the compiler limit")
+            if not _is_safe_content_match_path(match.get("path")):
+                excluded_count += 1
+                continue
             if match.get("term") not in task_terms:
                 excluded_count += 1
                 continue
@@ -1508,7 +1595,7 @@ def _candidate_sort_key(candidate):
     except CollationDomainError:
         if candidate.get("fact") != "content_match":
             raise
-        return (1, _utf16_sort_key(value))
+        return (1, utf16_sort_key(value))
 
 
 def _sort_candidates(candidates):
@@ -1554,13 +1641,18 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         and (
             not isinstance(declared_scope, list)
             or not declared_scope
-            or any(
-                not isinstance(root, str) or not root
-                for root in declared_scope
-            )
+            or len(declared_scope) > MAX_TASK_SCOPE_ROOTS
+            or any(not is_absolute_root(root) for root in declared_scope)
         )
     ):
-        raise ValueError("task.scope must be a non-empty list of non-empty strings")
+        raise ValueError(
+            "task.scope must be a non-empty list of absolute roots"
+        )
+    if "filters" in task:
+        try:
+            validate_filters(task["filters"])
+        except TypeError as error:
+            raise ValueError(f"task.filters is invalid: {error}") from None
     declared_checks = task.get("required_checks")
     if declared_checks is not None and (
         not declared_checks or not _is_declared_required_checks_shape(declared_checks)
@@ -1599,67 +1691,31 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
             raise ValueError("workspace graph contains an invalid fact status")
         if is_git_checkout(node):
             checkouts.append(node)
-    # A declared scope narrower than the graph's allowlist must actually bound what
-    # the capsule carries. Copying it into the output alone let a capsule declare
-    # scope ['/a'] while including claims from '/b', so a downstream agent could act
-    # on context the capsule itself says is out of scope.
-    def _in_scope(path) -> bool:
-        if not declared_scope:
-            return True
-        if not path:
-            # A scoped capsule may still narrate something with no path of its own;
-            # only entries that positively name an out-of-scope path are dropped.
-            return True
-        return any(is_within_allowlist(root, path) for root in declared_scope)
-
-    def _entry_in_scope(entry) -> bool:
-        """Scope applies to everything a capsule narrates, not only its claims.
-
-        A conflict, unknown or refusal naming an out-of-scope checkout is still
-        context about a place the capsule says it is not looking.
-        """
-        if not declared_scope or not isinstance(entry, dict):
-            return True
-        for key in ("path", "subject_path"):
-            if entry.get(key) and not _in_scope(entry[key]):
-                return False
-        for side in entry.get("sides") or []:
-            if isinstance(side, dict) and side.get("path") and not _in_scope(side["path"]):
-                return False
-        return True
-
-    scoped_conflicts = []
-    scope_conflict_omissions = []
-    for conflict in graph["conflicts"]:
-        if _entry_in_scope(conflict):
-            scoped_conflicts.append(conflict)
-            continue
-        for side in conflict.get("sides") or []:
-            if (
-                not isinstance(side, dict)
-                or not side.get("path")
-                or not _in_scope(side["path"])
-            ):
-                continue
-            scope_conflict_omissions.append(
-                {
-                    "kind": "conflict_outside_scope",
-                    "conflict": conflict.get("id"),
-                    "subject": side.get("checkout"),
-                    "subject_path": side["path"],
-                    "reason": "one or more conflict sides are outside the declared scope",
-                }
-            )
-
+            if len(checkouts) > MAX_GRAPH_CONTEXT_CHECKOUTS:
+                raise ValueError(
+                    "workspace graph contains too many Git checkouts"
+                )
+    scoped_conflicts, scope_conflict_omissions = _scope_conflicts(
+        graph["conflicts"], declared_scope
+    )
     all_checkouts = list(checkouts)
     if declared_scope:
-        checkouts = [n for n in checkouts if _in_scope(n.get("path"))]
+        checkouts = [
+            node
+            for node in checkouts
+            if _path_is_in_scope(node.get("path"), declared_scope)
+        ]
     checkouts_by_path = {n.get("path"): n for n in checkouts}
 
     truncation_omissions: list[dict] = []
     candidates = _graph_claim_candidates(checkouts, truncation_omissions)
+    if len(candidates) > MAX_CAPSULE_CANDIDATE_WORK:
+        raise ValueError("graph candidate work exceeds the compiler limit")
     content_candidates, content_candidate_omissions = _content_match_candidates(
-        content, checkouts_by_path, _content_question_terms(task["question"])
+        content,
+        checkouts_by_path,
+        _content_question_terms(task["question"]),
+        MAX_CAPSULE_CANDIDATE_WORK - len(candidates),
     )
     candidates.extend(content_candidates)
     truncation_omissions.extend(content_candidate_omissions)
@@ -1689,16 +1745,11 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         *truncation_omissions,
     ]
     omissions.extend(_selection_omissions(selection, max_claims))
-    omissions.extend(
-        _refusal_omissions(
-            graph,
-            declared_scope
-            if declared_scope is not None
-            else graph.get("allowlist") or [],
-        )
-    )
+    omissions.extend(_refusal_omissions(graph, declared_scope))
     scoped_checkouts = [
-        checkout for checkout in checkouts if _in_scope(checkout.get("path"))
+        checkout
+        for checkout in checkouts
+        if _path_is_in_scope(checkout.get("path"), declared_scope)
     ]
     required_checks, check_unknowns = _derive_required_checks(scoped_checkouts)
     if declared_checks is not None:
@@ -1786,8 +1837,8 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         conflicts.append(entry)
 
     task_out = {"question": task.get("question")}
-    scope = task.get("scope")
-    task_out["scope"] = scope if scope is not None else graph.get("allowlist")
+    if declared_scope is not None:
+        task_out["scope"] = list(declared_scope)
     if "filters" in task and task.get("filters") is not None:
         task_out["filters"] = task["filters"]
     if declared_checks is not None:
@@ -1796,7 +1847,7 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     scoped_omissions = [
         omission
         for omission in omissions
-        if _entry_in_scope(omission)
+        if _entry_is_in_scope(omission, declared_scope)
     ]
     if not all(
         _is_omission_shape(omission)
@@ -1815,9 +1866,21 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         "claims": included,
         "conflicts": conflicts,
         "unknowns": [
-            *[u for u in graph["unknowns"] if _entry_in_scope(u)],
-            *[u for u in content_unknowns if _entry_in_scope(u)],
-            *[u for u in check_unknowns if _entry_in_scope(u)],
+            *[
+                unknown
+                for unknown in graph["unknowns"]
+                if _entry_is_in_scope(unknown, declared_scope)
+            ],
+            *[
+                unknown
+                for unknown in content_unknowns
+                if _entry_is_in_scope(unknown, declared_scope)
+            ],
+            *[
+                unknown
+                for unknown in check_unknowns
+                if _entry_is_in_scope(unknown, declared_scope)
+            ],
         ],
         "omissions": scoped_omissions,
         "required_checks": required_checks,

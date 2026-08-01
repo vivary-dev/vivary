@@ -21,8 +21,10 @@ from vivary_core.canonical import (
     js_stringify,
     normalize_path,
     sha256_hex,
+    utf16_sort_key,
 )
-from vivary_core.capsule_compile import compile_task_capsule
+from vivary_core.capsule_compile import TASK_CAPSULE_FIELDS, compile_task_capsule
+from vivary_core.receipt import EXECUTION_RECEIPT_FIELDS
 from vivary_core.workspace_content import observe_content
 from vivary_core.workspace_model import project_workspace_graph
 from vivary_core.workspace_observe import observe_checkouts
@@ -36,6 +38,9 @@ __all__ = [
     "js_stringify",
     "normalize_path",
     "sha256_hex",
+    "utf16_sort_key",
+    "TASK_CAPSULE_FIELDS",
+    "EXECUTION_RECEIPT_FIELDS",
     "compile_task_capsule",
     "observe_checkouts",
     "observe_content",

@@ -19,7 +19,7 @@ Language-mapping notes (python/README.md):
 - ``sortedFiles = [...byFile.keys()].sort()`` and the final
   ``allowlist.map(normalizePath).sort()`` are both PLAIN sorts with no
   comparator - JS UTF-16 code-unit order, not locale order - reproduced with
-  ``vivary_core.canonical._utf16_sort_key``.
+  ``vivary_core.canonical.utf16_sort_key``.
 - ``trimExcerpt``'s length cap and ``String#toWellFormed`` operate on JS
   UTF-16 code units, not Python codepoints; ``_js_utf16_length`` /
   ``_js_utf16_slice_wellformed`` below replicate that index space exactly
@@ -39,7 +39,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from vivary_core.canonical import (
     _JS_TRIM_CHARS,
-    _utf16_sort_key,
+    utf16_sort_key,
     is_absolute_root,
     is_within,
     is_within_allowlist,
@@ -281,7 +281,7 @@ def _bound_matches(by_file: Dict[str, List[Dict[str, Any]]], evidence: Dict[str,
     # included file (sorted by line number), excerpts capped to
     # MAX_EXCERPT_LENGTH. Everything a cap removes is recorded as a
     # structured omission - never silently dropped.
-    sorted_files = sorted(by_file.keys(), key=_utf16_sort_key)
+    sorted_files = sorted(by_file.keys(), key=utf16_sort_key)
     included_files = sorted_files[:MAX_FILES_PER_CHECKOUT]
     omitted_files = sorted_files[MAX_FILES_PER_CHECKOUT:]
 
@@ -514,7 +514,7 @@ def observe_content(
         "schema": CONTENT_SCHEMA,
         "observed_at": clock(),
         "terms": search_terms,
-        "allowlist": sorted((normalize_path(root) for root in allowlist), key=_utf16_sort_key),
+        "allowlist": sorted((normalize_path(root) for root in allowlist), key=utf16_sort_key),
         "checkouts": checkouts,
         "refusals": refusals,
     }

@@ -121,7 +121,7 @@ def test_runtime_version_matches_package_manifest():
         (OZONE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )["project"]
     assert ozone.__version__ == project["version"]
-    assert "vivary-core>=0.2.3" in project["dependencies"]
+    assert "vivary-core>=0.2.4" in project["dependencies"]
 
 
 def test_run_receipt_appends_jsonl_without_polluting_stdout():
@@ -1333,6 +1333,99 @@ def test_governed_verification_binds_graphless_declared_checks():
     assert result["reason_codes"] == ["invalid_capsule"]
 
 
+def test_governed_verification_refuses_graphless_checks_not_declared_by_task():
+    capsule = _governed_capsule()
+    capsule["required_checks"].append(
+        {
+            "name": "integration",
+            "command": "python -m pytest packages/ozone/tests/test_ozone.py",
+            "cwd": "/repo/checkout-0",
+        }
+    )
+    capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+
+    result = ozone.verify_governed(
+        _governed_request(
+            capsule=capsule,
+            receipt=_governed_receipt(capsule),
+        )
+    )
+
+    assert result["schema"] == ozone.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["graph_required_for_effective_checks"]
+
+
+def test_governed_verification_refuses_graphless_checks_without_task_declaration():
+    capsule = _governed_capsule()
+    del capsule["task"]["required_checks"]
+    capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+
+    result = ozone.verify_governed(
+        _governed_request(
+            capsule=capsule,
+            receipt=_governed_receipt(capsule),
+        )
+    )
+
+    assert result["schema"] == ozone.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["graph_required_for_effective_checks"]
+
+
+def test_governed_verification_requires_graph_for_derived_checks():
+    graph = _projected_remote_graph(
+        ["https://example.test/project.git"],
+        ["a" * 40],
+        fact_overrides=[
+            {
+                "workspace_markers": {
+                    "status": "known",
+                    "value": ["tropo.toml"],
+                    "evidence": [],
+                }
+            }
+        ],
+    )
+    capsule = compile_task_capsule(
+        task={"question": "Review the project.", "scope": ["/repo"]},
+        graph=graph,
+    )
+    assert capsule["required_checks"]
+    assert "required_checks" not in capsule["task"]
+
+    graphless = ozone.verify_governed(
+        _governed_request(
+            capsule=capsule,
+            receipt=_governed_receipt(capsule),
+        )
+    )
+    graph_backed = ozone.verify_governed(
+        _governed_request(
+            capsule=capsule,
+            receipt=_governed_receipt(capsule),
+            graph=graph,
+        )
+    )
+
+    assert graphless["schema"] == ozone.REFUSAL_SCHEMA
+    assert graphless["reason_codes"] == [
+        "graph_required_for_effective_checks"
+    ]
+    assert graph_backed["schema"] == ozone.VERIFICATION_SCHEMA
+
+
+
 def test_governed_verification_binds_gate_driving_facts():
     for fact_name, value, forged_value in (
         ("workspace_markers", ["tropo.toml"], []),
@@ -1557,7 +1650,7 @@ def test_governed_verification_accepts_compiler_filters_and_omissions_without_gr
         task={
             "question": "Review the shared repository.",
             "scope": ["/repo"],
-            "filters": [{"field": "fact", "includes": ""}],
+            "filters": [{"field": "fact", "includes": "is_"}],
             "required_checks": [
                 {
                     "name": "unit",
@@ -1582,6 +1675,40 @@ def test_governed_verification_accepts_compiler_filters_and_omissions_without_gr
     )
 
     assert result["schema"] == ozone.VERIFICATION_SCHEMA
+
+
+def test_governed_verification_refuses_blank_filter_values():
+    graph = _projected_remote_graph(
+        ["https://example.test/shared.git"] * 2,
+        ["a" * 40, "a" * 40],
+    )
+    capsule = compile_task_capsule(
+        task={
+            "question": "Review the shared repository.",
+            "scope": ["/repo"],
+            "filters": [{"field": "fact", "includes": "is_"}],
+        },
+        graph=graph,
+        budget={"max_claims": 1},
+    )
+    capsule["task"]["filters"] = [{"field": "fact", "includes": ""}]
+    capsule["fingerprint"] = fingerprint(
+        {
+            key: item
+            for key, item in capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+
+    result = ozone.verify_governed(
+        _governed_request(
+            capsule=capsule,
+            receipt=_governed_receipt(capsule),
+        )
+    )
+
+    assert result["schema"] == ozone.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["invalid_capsule"]
 
 
 def test_governed_verification_refuses_claims_that_violate_declared_filters():
@@ -1707,6 +1834,33 @@ def test_governed_verification_refuses_claims_that_violate_declared_filters():
     assert malformed_facts["reason_codes"] == ["invalid_repair_graph"]
 
 
+def test_governed_verification_requires_canonical_graph_allowlist():
+    graph = _projected_remote_graph(
+        ["https://example.test/shared.git"] * 2,
+        ["a" * 40, "a" * 40],
+    )
+    capsule = compile_task_capsule(
+        task={
+            "question": "Does the example checkout mirror upstream?",
+            "scope": ["/repo"],
+        },
+        graph=graph,
+        budget={"max_claims": 24},
+    )
+    del graph["allowlist"]
+
+    result = ozone.verify_governed(
+        _governed_request(
+            capsule=capsule,
+            receipt=_governed_receipt(capsule),
+            graph=graph,
+        )
+    )
+
+    assert result["schema"] == ozone.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["invalid_repair_graph"]
+
+
 def test_governed_verification_binds_claims_and_question_signals_to_graph():
     graph = _projected_remote_graph(
         ["https://example.test/shared.git"] * 2,
@@ -1750,16 +1904,6 @@ def test_governed_verification_binds_claims_and_question_signals_to_graph():
     )
     assert accepted["schema"] == ozone.VERIFICATION_SCHEMA
 
-    graph_without_allowlist = json.loads(json.dumps(graph))
-    del graph_without_allowlist["allowlist"]
-    without_allowlist = ozone.verify_governed(
-        _governed_request(
-            capsule=compiled,
-            receipt=_governed_receipt(compiled),
-            graph=graph_without_allowlist,
-        )
-    )
-    assert without_allowlist["schema"] == ozone.VERIFICATION_SCHEMA
 
     variants = []
     missing_subject = json.loads(json.dumps(compiled))
@@ -2831,8 +2975,12 @@ def test_governed_verification_refuses_malformed_scope_without_repair_graph():
     assert outside_claim["reason_codes"] == ["invalid_repair_capsule"]
 
 
-def test_governed_verification_accepts_compiler_valid_scope_without_repair_graph():
-    capsule = _governed_capsule()
+
+
+def test_governed_verification_refuses_whitespace_scope_wildcard_without_repair_graph():
+    capsule = _governed_capsule(
+        claims=[{"subject_path": "/repo/outside"}]
+    )
     capsule["task"]["scope"] = [" "]
     capsule["fingerprint"] = fingerprint(
         {
@@ -2849,8 +2997,9 @@ def test_governed_verification_accepts_compiler_valid_scope_without_repair_graph
         )
     )
 
-    assert result["schema"] == ozone.VERIFICATION_SCHEMA
-    assert result["outcome"] == "sufficient"
+    assert result["schema"] == ozone.REFUSAL_SCHEMA
+    assert result["reason_codes"] == ["invalid_capsule"]
+
 
 
 def test_governed_verification_refuses_graphs_that_drop_capsule_conflicts():
@@ -3287,6 +3436,22 @@ def test_governed_verification_refuses_malformed_repair_inputs_without_crashing(
     assert mismatched_graph["reason_codes"] == ["repair_graph_workspace_mismatch"]
     assert recursive["schema"] == ozone.REFUSAL_SCHEMA
     assert recursive["reason_codes"] == ["request_too_deeply_nested"]
+
+
+def test_governed_verification_refuses_oversized_flat_request_before_evaluation():
+    request = _governed_request()
+    request["receipt"]["checks"][0]["detail"] = "x" * (
+        ozone.MAX_REPAIR_PROJECTION_WORK + 1
+    )
+
+    result = ozone.verify_governed(request)
+
+    assert result["schema"] == ozone.REFUSAL_SCHEMA
+    assert result["outcome"] == "refused"
+    assert result["reason_codes"] == ["request_work_unbounded"]
+    assert result["receipt_verdict"] is None
+    assert result["gate_verdict"] is None
+
 
 
 def test_governed_verification_refuses_unbounded_repair_products():

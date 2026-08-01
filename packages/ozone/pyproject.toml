@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vivary-ozone"
-version = "0.3.0"
+version = "0.3.1"
 description = "The review layer: graph-aware review, impact analysis, and governed evidence verification."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,7 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Software Development :: Quality Assurance",
 ]
-dependencies = ["vivary-core>=0.2.3", "vivary-tropo>=0.3.0"]
+dependencies = ["vivary-core>=0.2.4", "vivary-tropo>=0.3.0"]
 
 [project.urls]
 Homepage = "https://vivary.vercel.app/"

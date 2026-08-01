@@ -51,6 +51,9 @@ from vivary_core.canonical import MAX_LOSSLESS_INTEGER, fingerprint, normalize_p
 from vivary_core.capsule_compile import (  # noqa: E402
     capsule_context_matches_graph,
     compile_task_capsule,
+    MAX_TASK_SCOPE_ROOTS,
+    MAX_CAPSULE_CANDIDATE_WORK,
+    MAX_GRAPH_CONTEXT_CHECKOUTS,
     repair_topology_fingerprint,
     is_task_capsule_shape,
     verify_task_capsule_integrity,
@@ -374,6 +377,27 @@ def test_graph_matcher_preserves_refused_root_omissions(graph):
         omission
         for omission in stripped["omissions"]
         if omission["kind"] != "refused_root"
+    ]
+
+    assert not capsule_context_matches_graph(stripped, graph)
+
+
+def test_graph_matcher_rejects_missing_conflict_outside_scope_omission(graph, fx):
+    capsule = compile_task_capsule(
+        task={**TASK, "scope": [fx["paths"]["canonical"]]},
+        graph=graph,
+    )
+    assert capsule_context_matches_graph(capsule, graph)
+    assert any(
+        omission["kind"] == "conflict_outside_scope"
+        for omission in capsule["omissions"]
+    )
+
+    stripped = json.loads(json.dumps(capsule))
+    stripped["omissions"] = [
+        omission
+        for omission in stripped["omissions"]
+        if omission["kind"] != "conflict_outside_scope"
     ]
 
     assert not capsule_context_matches_graph(stripped, graph)
@@ -897,6 +921,46 @@ def test_content_match_candidate_is_bounded_intrinsically_question_matched_and_s
     assert surfaced["subject_path"] == "/w/gadget"
 
 
+@pytest.mark.parametrize(
+    "unsafe_path",
+    ["/private/secret.md", "../private/secret.md", "c:private/secret.md"],
+    ids=["absolute", "traversal", "drive-relative"],
+)
+def test_unsafe_content_match_paths_never_become_claims(unsafe_path):
+    graph = _tiered_graph()
+    content = {
+        "checkouts": [
+            {
+                "path": "/w/gadget",
+                "head_revision": "a" * 40,
+                "matches": [
+                    {
+                        "path": unsafe_path,
+                        "line": 1,
+                        "term": "modified",
+                        "excerpt": "modified private content",
+                        "evidence": {"command": "git grep modified"},
+                    }
+                ],
+            }
+        ]
+    }
+
+    try:
+        capsule = compile_task_capsule(
+            task=TIERED_TASK,
+            graph=graph,
+            content=content,
+            budget={"max_claims": 100},
+        )
+    except ValueError:
+        return
+
+    assert not [
+        claim for claim in capsule["claims"] if claim["fact"] == "content_match"
+    ], f"unsafe content path became a claim: {unsafe_path}"
+
+
 def test_absent_content_is_byte_identical_to_explicit_none_and_empty_checkouts():
     graph = _tiered_graph()
     omitted = compile_task_capsule(task=TIERED_TASK, graph=graph)
@@ -997,6 +1061,27 @@ def test_scope_narrower_than_the_graph_excludes_out_of_scope_checkouts(graph, fx
     ) == len(conflict_scope_omissions)
 
 
+def test_explicit_graph_allowlist_scope_preserves_only_in_scope_refusals(graph):
+    scoped_graph = json.loads(json.dumps(graph))
+    in_scope_path = scoped_graph["allowlist"][0]
+    scoped_graph["refusals"] = [
+        {"path": in_scope_path, "reason": "in_scope_refusal"},
+        {"path": f"{in_scope_path}-outside", "reason": "outside_scope_refusal"},
+    ]
+
+    capsule = compile_task_capsule(
+        task={**TASK, "scope": list(scoped_graph["allowlist"])},
+        graph=scoped_graph,
+    )
+
+    assert [
+        omission["path"]
+        for omission in capsule["omissions"]
+        if omission["kind"] == "refused_root"
+    ] == [in_scope_path]
+    assert capsule_context_matches_graph(capsule, scoped_graph)
+
+
 def test_negative_claim_budget_is_rejected_rather_than_inverted(graph):
     """Negative slicing quietly includes almost everything.
 
@@ -1077,6 +1162,98 @@ def test_compile_task_capsule_rejects_malformed_task_inputs(task, message, graph
     with pytest.raises(ValueError, match=message):
         compile_task_capsule(task=task, graph=graph)
 
+
+@pytest.mark.parametrize(
+    "filter_rule",
+    [
+        {"field": "fact", "equals": ""},
+        {"field": "path", "includes": ""},
+    ],
+    ids=["equals", "includes"],
+)
+def test_empty_filter_values_are_rejected_at_task_boundary(graph, filter_rule):
+    with pytest.raises(ValueError, match=r"task\.filters"):
+        compile_task_capsule(
+            task={**TASK, "filters": [filter_rule]},
+            graph=graph,
+        )
+
+
+@pytest.mark.parametrize(
+    "scope_root",
+    ["   ", ".", "packages/core", "c:relative"],
+    ids=["whitespace", "dot", "relative", "drive-relative"],
+)
+def test_non_absolute_scope_roots_are_rejected(graph, scope_root):
+    with pytest.raises(ValueError, match=r"task\.scope"):
+        compile_task_capsule(
+            task={**TASK, "scope": [scope_root]},
+            graph=graph,
+        )
+
+
+def test_task_scope_root_count_is_bounded_before_context_matching(graph):
+    with pytest.raises(ValueError, match=r"task\.scope"):
+        compile_task_capsule(
+            task={
+                **TASK,
+                "scope": [
+                    f"/scope/{index}"
+                    for index in range(MAX_TASK_SCOPE_ROOTS + 1)
+                ],
+            },
+            graph=graph,
+        )
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        ["packages/core"],
+        [f"/scope/{index}" for index in range(MAX_TASK_SCOPE_ROOTS + 1)],
+    ],
+    ids=["relative", "too-many-roots"],
+)
+def test_capsule_shape_rejects_self_fingerprinted_unsafe_scope(scope, graph):
+    capsule = compile_task_capsule(task=TASK, graph=graph)
+    capsule["task"]["scope"] = scope
+    body = {
+        key: value
+        for key, value in capsule.items()
+        if key not in {"capsule_id", "fingerprint"}
+    }
+    capsule["fingerprint"] = fingerprint(body)
+
+    assert capsule["fingerprint"] == fingerprint(body)
+    assert not is_task_capsule_shape(capsule)
+
+
+
+
+def test_direct_compilation_bounds_checkout_and_content_candidate_work(graph):
+    checkout = next(
+        node for node in graph["nodes"] if node.get("kind") == "checkout"
+    )
+    oversized_graph = json.loads(json.dumps(graph))
+    oversized_graph["nodes"] = [
+        json.loads(json.dumps(checkout))
+        for _ in range(MAX_GRAPH_CONTEXT_CHECKOUTS + 1)
+    ]
+    with pytest.raises(ValueError, match="too many Git checkouts"):
+        compile_task_capsule(task=TASK, graph=oversized_graph)
+
+    oversized_content = {
+        "checkouts": [
+            {"path": "/not/a/checkout", "matches": []}
+            for _ in range(MAX_CAPSULE_CANDIDATE_WORK + 1)
+        ]
+    }
+    with pytest.raises(ValueError, match="candidate work"):
+        compile_task_capsule(
+            task=TASK,
+            graph=graph,
+            content=oversized_content,
+        )
 
 def test_capsule_shape_binds_graphless_declared_checks(graph):
     checkout = next(

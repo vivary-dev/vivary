@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vivary-strato"
-version = "0.1.1"
+version = "0.1.2"
 description = "The policy layer: governed loop decisions, budgets, and human gates over Vivary task capsules."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,7 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Software Development :: Quality Assurance",
 ]
-dependencies = ["vivary-core>=0.2.3"]
+dependencies = ["vivary-core>=0.2.4"]
 
 [project.urls]
 Homepage = "https://vivary.vercel.app/"

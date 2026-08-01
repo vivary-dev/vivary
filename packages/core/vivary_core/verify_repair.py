@@ -21,7 +21,7 @@ Language mapping notes specific to this module:
   comparator).
 - Every OTHER `.sort()` in this module (conflict sides, tiers-cut, the
   per-repository checkout list) is a plain, comparator-less JS string sort -
-  UTF-16 code-unit order - mapped to ``vivary_core.canonical._utf16_sort_key``,
+  UTF-16 code-unit order - mapped to ``vivary_core.canonical.utf16_sort_key``,
   the same rule python/README.md documents for the rest of this port.
 - Every dict this module returns is fingerprinted via
   ``vivary_core.canonical.fingerprint``, which canonicalizes with sorted
@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import math
 
-from vivary_core.canonical import _utf16_sort_key, deterministic_id, fingerprint as compute_fingerprint
+from vivary_core.canonical import utf16_sort_key, deterministic_id, fingerprint as compute_fingerprint
 from vivary_core.collation import locale_sort_key
 
 REPAIR_PROPOSAL_SCHEMA = "vivary.context-repair-proposal/v0"
@@ -102,7 +102,7 @@ def _conflict_side_pairs_by_repository(graph):
         raw_sides = conflict.get("sides")
         sides = sorted(
             (side.get("checkout") for side in (raw_sides if raw_sides is not None else [])),
-            key=_utf16_sort_key,
+            key=utf16_sort_key,
         )
         for i in range(len(sides)):
             for j in range(i + 1, len(sides)):
@@ -182,7 +182,7 @@ def propose_context_repairs(*, capsule, graph):
             deterministic_id("omitted-claim", {"subject_path": entry.get("subject_path"), "fact": entry.get("fact")})
             for entry in omitted_entries
         ]
-        tiers_cut = sorted(dict.fromkeys(entry.get("tier") for entry in omitted_entries), key=_utf16_sort_key)
+        tiers_cut = sorted(dict.fromkeys(entry.get("tier") for entry in omitted_entries), key=utf16_sort_key)
         proposals.append(
             {
                 "id": deterministic_id("repair", {"kind": REPAIR_KINDS["SPLIT"], "capsule": capsule.get("capsule_id")}),
@@ -213,7 +213,7 @@ def propose_context_repairs(*, capsule, graph):
         if len(checkouts) < 2:
             continue
         conflict_pairs = conflict_pairs_by_repository.get(repository_id)
-        sorted_checkouts = sorted(checkouts, key=_utf16_sort_key)
+        sorted_checkouts = sorted(checkouts, key=utf16_sort_key)
 
         repository_claim_count = 0
         for checkout_id in sorted_checkouts:

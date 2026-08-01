@@ -57,7 +57,6 @@ except ImportError as exc:  # pragma: no cover - only until the parallel port la
 # evidence dir syncs to the empty tree" edge case unambiguously.
 GIT_EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-FIXTURE_BASE = os.path.join(HERE, ".fixtures", "evidence")
 SINK = {"project": "vivary-lattice-lab", "visibility": "local", "policy_version": "policy/v0"}
 IDENTITY = {"name": "Lattice Evidence Sync", "email": "evidence-sync@lattice.local"}
 DATE_A = "2026-07-21T00:00:00Z"
@@ -69,12 +68,13 @@ DATE_B = "2026-07-21T01:00:00Z"
 
 @pytest.fixture
 def fixture_dir():
-    os.makedirs(FIXTURE_BASE, exist_ok=True)
-    d = tempfile.mkdtemp(dir=FIXTURE_BASE)
-    with open(os.path.join(d, "empty-gitconfig"), "w", encoding="utf-8") as handle:
-        handle.write("")
-    yield d
-    _rmtree_force(d)
+    d = tempfile.mkdtemp(prefix="vivary-evidence-fixtures-")
+    try:
+        with open(os.path.join(d, "empty-gitconfig"), "w", encoding="utf-8") as handle:
+            handle.write("")
+        yield d
+    finally:
+        _rmtree_force(d)
 
 
 def _rmtree_force(path):

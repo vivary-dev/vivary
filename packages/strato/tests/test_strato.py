@@ -32,7 +32,7 @@ def test_runtime_version_matches_the_package_manifest():
     project = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
 
     assert strato.__version__ == project["version"]
-    assert "vivary-core>=0.2.3" in project["dependencies"]
+    assert "vivary-core>=0.2.4" in project["dependencies"]
 
 
 def capsule(**overrides):
@@ -500,7 +500,7 @@ def test_python_facade_rejects_recursive_evidence():
     for _ in range(sys.getrecursionlimit() * 2):
         nested = [nested]
     governed = request(receipt=receipt())
-    governed["receipt"]["untrusted"] = nested
+    governed["receipt"]["checks"][0]["evidence"] = nested
 
     result = strato.decide_governed(governed)
 
@@ -513,7 +513,7 @@ def test_cli_rejects_recursive_evidence_without_a_traceback(tmp_path):
     for _ in range(600):
         nested = [nested]
     governed = request(receipt=receipt())
-    governed["receipt"]["untrusted"] = nested
+    governed["receipt"]["checks"][0]["evidence"] = nested
     request_path = tmp_path / "recursive-receipt.json"
     request_path.write_text(json.dumps(governed), encoding="utf-8")
 

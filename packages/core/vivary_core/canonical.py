@@ -120,7 +120,7 @@ def _js_number_to_string(value) -> str:
     return _js_float_to_string(value)
 
 
-def _utf16_sort_key(key: str) -> bytes:
+def utf16_sort_key(key: str) -> bytes:
     # JS Array.prototype.sort compares strings by UTF-16 code units;
     # big-endian UTF-16 bytes compare identically (surrogatepass keeps lone
     # surrogates comparable too).
@@ -160,7 +160,7 @@ def _serialize(value, sort_keys: bool) -> str:
             if not isinstance(key, str):
                 raise TypeError(f"object keys must be str, got {type(key).__name__}")
         if sort_keys:
-            keys.sort(key=_utf16_sort_key)
+            keys.sort(key=utf16_sort_key)
         else:
             keys = _js_object_key_order(keys)
         body = ",".join(

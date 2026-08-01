@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from vivary_core.canonical import deterministic_id
 from vivary_core.control_reason_codes import EXECUTION_REASON
-from vivary_core.receipt import RECEIPT_SCHEMA
+from vivary_core.receipt import EXECUTION_RECEIPT_FIELDS, RECEIPT_SCHEMA
 from vivary_core.verify_receipt import verify_receipt_integrity
 
 __all__ = [
@@ -55,6 +55,7 @@ def _is_receipt_shape(receipt):
     return (
         bool(receipt)
         and isinstance(receipt, dict)
+        and set(receipt) <= EXECUTION_RECEIPT_FIELDS
         and receipt.get("schema") == RECEIPT_SCHEMA
         and isinstance(receipt.get("checks"), list)
         and all(_is_check_shape(check) for check in receipt["checks"])

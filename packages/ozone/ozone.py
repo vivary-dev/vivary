@@ -32,7 +32,7 @@ import platform
 import sys
 import time
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
 RECEIPT_SCHEMA = "vivary.run_receipt.v1"
 REQUEST_SCHEMA = "vivary.ozone-verification-request/v0"
@@ -47,39 +47,6 @@ MAX_REPAIR_GRAPH_EDGES = 1_000
 MAX_REPAIR_GRAPH_CONFLICTS = 300
 MAX_REPAIR_GRAPH_UNKNOWNS = 1_000
 MAX_REPAIR_PROJECTION_WORK = 10_000_000
-CAPSULE_FIELDS = frozenset(
-    {
-        "schema",
-        "capsule_id",
-        "task",
-        "workspace",
-        "claims",
-        "conflicts",
-        "unknowns",
-        "omissions",
-        "required_checks",
-        "budget",
-        "fingerprint",
-    }
-)
-RECEIPT_FIELDS = frozenset(
-    {
-        "schema",
-        "receipt_id",
-        "capsule",
-        "workspace",
-        "runtime",
-        "checks",
-        "claims_in_scope",
-        "claims_verified",
-        "claims_unverified",
-        "unresolved_conflicts",
-        "unresolved_unknowns",
-        "provenance",
-        "created_at",
-        "fingerprint",
-    }
-)
 COMMANDS = ("review", "impact", "packs", "verify")
 RECEIPT_VALUE_FLAGS = {"--pack", "--receipt", "--root"}
 RECEIPT_KNOWN_FLAGS = RECEIPT_VALUE_FLAGS | {
@@ -157,6 +124,7 @@ def _load_core_verification():
         sys.path.insert(0, sibling_core)
     from vivary_core.capsule_compile import (
         MAX_GRAPH_CONTEXT_CHECKOUTS,
+        TASK_CAPSULE_FIELDS,
         capsule_context_matches_graph,
         is_task_capsule_shape,
         is_git_checkout,
@@ -170,14 +138,17 @@ def _load_core_verification():
     from vivary_core.capsule_select import OMITTED_LIST_CAP
     from vivary_core.canonical import (
         MAX_LOSSLESS_INTEGER,
-        _utf16_sort_key,
+        utf16_sort_key,
         deterministic_id,
         is_canonical_body_value,
         is_within_allowlist,
     )
     from vivary_core.collation import CollationDomainError, locale_sort_key
     from vivary_core.verify_receipt import verify_receipt_integrity
-    from vivary_core.receipt import RECEIPT_SCHEMA as EXECUTION_RECEIPT_SCHEMA
+    from vivary_core.receipt import (
+        EXECUTION_RECEIPT_FIELDS,
+        RECEIPT_SCHEMA as EXECUTION_RECEIPT_SCHEMA,
+    )
     from vivary_core.verify_repair import (
         AVG_OMITTED_CLAIM_TOKENS,
         MAX_DEDUPE_CHECKOUTS,
@@ -188,15 +159,17 @@ def _load_core_verification():
     return {
         "capsule_context_matches_graph": capsule_context_matches_graph,
         "is_task_capsule_shape": is_task_capsule_shape,
+        "TASK_CAPSULE_FIELDS": TASK_CAPSULE_FIELDS,
         "is_git_checkout": is_git_checkout,
         "verify_task_capsule_integrity": verify_task_capsule_integrity,
         "OMITTED_LIST_CAP": OMITTED_LIST_CAP,
         "verify_receipt_integrity": verify_receipt_integrity,
         "EXECUTION_RECEIPT_SCHEMA": EXECUTION_RECEIPT_SCHEMA,
+        "EXECUTION_RECEIPT_FIELDS": EXECUTION_RECEIPT_FIELDS,
         "propose_context_repairs": propose_context_repairs,
         "evaluate_gate_sufficiency": evaluate_gate_sufficiency,
         "CollationDomainError": CollationDomainError,
-        "_utf16_sort_key": _utf16_sort_key,
+        "utf16_sort_key": utf16_sort_key,
         "is_canonical_body_value": is_canonical_body_value,
         "is_within_allowlist": is_within_allowlist,
         "repair_topology_fingerprint": repair_topology_fingerprint,
@@ -261,11 +234,19 @@ def _bounded_json_work_units(value, limit):
                 if work > limit:
                     return None
         elif isinstance(item, dict):
+            if 2 * len(item) > limit - work:
+                return None
             for key, nested in item.items():
                 stack.append(key)
                 stack.append(nested)
+            if work + len(stack) > limit:
+                return None
         elif isinstance(item, list):
+            if len(item) > limit - work:
+                return None
             stack.extend(item)
+            if work + len(stack) > limit:
+                return None
     return work
 
 
@@ -307,10 +288,12 @@ def _parse_instant(value):
     return instant if instant.tzinfo is not None else None
 
 
-def _receipt_shape_is_valid(receipt, capsule, expected_schema):
+def _receipt_shape_is_valid(
+    receipt, capsule, expected_schema, execution_receipt_fields
+):
     if (
         not isinstance(receipt, dict)
-        or not RECEIPT_FIELDS <= set(receipt)
+        or not execution_receipt_fields <= set(receipt)
         or receipt.get("schema") != expected_schema
         or not _nonempty_string(receipt.get("receipt_id"))
         or not _nonempty_string(receipt.get("fingerprint"))
@@ -913,7 +896,7 @@ def _repair_work_is_bounded(capsule, graph, core):
 
     pair_scan_count = 0
     for checkouts in checkouts_by_repository.values():
-        considered = sorted(checkouts, key=core["_utf16_sort_key"])[:max_checkouts]
+        considered = sorted(checkouts, key=core["utf16_sort_key"])[:max_checkouts]
         pair_scan_count += len(considered) * (len(considered) - 1) // 2
         if pair_scan_count > proposal_limit:
             return False
@@ -974,35 +957,44 @@ def _validate_governed_request(request, core):
     unknown_capsule_fields = []
     capsule = request.get("capsule")
     if isinstance(capsule, dict):
-        unknown_capsule_fields = sorted(set(capsule) - CAPSULE_FIELDS)
+        unknown_capsule_fields = sorted(
+            set(capsule) - core["TASK_CAPSULE_FIELDS"]
+        )
         errors.extend(
             f"unknown_capsule_field:{field}" for field in unknown_capsule_fields
         )
     capsule_is_valid_for_receipt = False
-    capsule_shape_is_valid = core["is_task_capsule_shape"](capsule)
-    repair_capsule_is_safe = capsule_shape_is_valid and _repair_capsule_is_safe(
-        capsule, core
-    )
-    if capsule_shape_is_valid and not repair_capsule_is_safe:
-        errors.append("invalid_repair_capsule")
-    if not capsule_shape_is_valid:
-        errors.append("invalid_capsule")
-    elif len({claim["id"] for claim in capsule["claims"]}) != len(
-        capsule["claims"]
-    ):
-        errors.append("duplicate_claim_id")
-    elif len(capsule["claims"]) > capsule["budget"]["max_claims"]:
-        errors.append("capsule_claim_budget_exceeded")
-    elif not core["verify_task_capsule_integrity"](capsule):
-        errors.append("capsule_fingerprint_mismatch")
-    elif _nonempty_string(workspace_fingerprint) and (
-        capsule["workspace"]["fingerprint"] != workspace_fingerprint
-    ):
-        errors.append("workspace_mismatch")
-    else:
-        capsule_is_valid_for_receipt = (
-            not unknown_capsule_fields and repair_capsule_is_safe
+    capsule_shape_is_valid = False
+    repair_capsule_is_safe = False
+    if not unknown_capsule_fields:
+        capsule_shape_is_valid = core["is_task_capsule_shape"](capsule)
+        repair_capsule_is_safe = (
+            capsule_shape_is_valid and _repair_capsule_is_safe(capsule, core)
         )
+        if capsule_shape_is_valid and not repair_capsule_is_safe:
+            errors.append("invalid_repair_capsule")
+        if not capsule_shape_is_valid:
+            errors.append("invalid_capsule")
+        elif len({claim["id"] for claim in capsule["claims"]}) != len(
+            capsule["claims"]
+        ):
+            errors.append("duplicate_claim_id")
+        elif len(capsule["claims"]) > capsule["budget"]["max_claims"]:
+            errors.append("capsule_claim_budget_exceeded")
+        elif not core["verify_task_capsule_integrity"](capsule):
+            errors.append("capsule_fingerprint_mismatch")
+        elif _nonempty_string(workspace_fingerprint) and (
+            capsule["workspace"]["fingerprint"] != workspace_fingerprint
+        ):
+            errors.append("workspace_mismatch")
+        elif (
+            "graph" not in request
+            and capsule["required_checks"]
+            != capsule["task"].get("required_checks", [])
+        ):
+            errors.append("graph_required_for_effective_checks")
+        else:
+            capsule_is_valid_for_receipt = repair_capsule_is_safe
 
     observed_at = _parse_instant(
         capsule.get("workspace", {}).get("observed_at")
@@ -1042,7 +1034,9 @@ def _validate_governed_request(request, core):
 
     receipt = request.get("receipt")
     if isinstance(receipt, dict):
-        unknown_receipt_fields = sorted(set(receipt) - RECEIPT_FIELDS)
+        unknown_receipt_fields = sorted(
+            set(receipt) - core["EXECUTION_RECEIPT_FIELDS"]
+        )
         errors.extend(
             f"unknown_receipt_field:{field}" for field in unknown_receipt_fields
         )
@@ -1050,7 +1044,10 @@ def _validate_governed_request(request, core):
         "receipt" in request
         and capsule_is_valid_for_receipt
         and not _receipt_shape_is_valid(
-            receipt, capsule, core["EXECUTION_RECEIPT_SCHEMA"]
+            receipt,
+            capsule,
+            core["EXECUTION_RECEIPT_SCHEMA"],
+            core["EXECUTION_RECEIPT_FIELDS"],
         )
     ):
         errors.append("invalid_receipt")
@@ -1131,6 +1128,10 @@ def _verification_refusal(reason_codes):
 def verify_governed(request):
     """Verify one governed capsule, receipt, and gate without performing writes."""
     try:
+        if _bounded_json_work_units(
+            request, MAX_REPAIR_PROJECTION_WORK
+        ) is None:
+            return _verification_refusal(["request_work_unbounded"])
         core = _load_core_verification()
         errors = _validate_governed_request(request, core)
         if errors:

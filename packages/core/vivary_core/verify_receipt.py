@@ -35,7 +35,7 @@ from vivary_core.canonical import (
     fingerprint as compute_fingerprint,
     is_canonical_body_value,
 )
-from vivary_core.receipt import RECEIPT_SCHEMA
+from vivary_core.receipt import EXECUTION_RECEIPT_FIELDS, RECEIPT_SCHEMA
 from vivary_core.verify_reasons import OUTCOMES, REASON_CODES
 
 RECEIPT_VERDICT_SCHEMA = "vivary.receipt-verdict/v0"
@@ -113,6 +113,13 @@ def verify_receipt_integrity(*, receipt=None, capsule=None):
             reason_codes=shape_reasons,
             receipt_id=receipt_id,
         )
+    if set(receipt) != EXECUTION_RECEIPT_FIELDS:
+        return _verdict(
+            outcome=OUTCOMES["INSUFFICIENT"],
+            reason_codes=[REASON_CODES["RECEIPT_INVALID"]],
+            receipt_id=receipt_id,
+        )
+
 
     # Recompute exactly as receipt.py's own module derived it: strip id and
     # fingerprint, fingerprint what remains, compare.

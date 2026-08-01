@@ -299,6 +299,24 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: git diff --check "$BASE_SHA...HEAD"
 
+  governed-platform-proof:
+    name: governed verification (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: install test runner
+        run: python -m pip install pytest packaging
+      - name: core governed-context contract
+        run: python -m pytest packages/core/tests/ -q
+      - name: ozone governed-verification facade
+        run: python packages/ozone/tests/test_ozone.py
+      - name: strato governed-policy consumer
+        run: python -m pytest packages/strato/tests/ -q
+
   orientation-proof:
     name: orientation proof (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

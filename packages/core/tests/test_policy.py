@@ -609,6 +609,22 @@ def test_evaluate_capsule_gate_fails_closed_on_an_unrecognized_capsule_shape():
         }
 
 
+def test_policy_surfaces_reject_self_consistent_capsules_with_unknown_fields():
+    capsule = base_capsule_like({"unexpected": "smuggled"})
+
+    assert evaluate_budget(capsule=capsule) == {
+        "decision": BUDGET_DECISION["REFUSED"],
+        "reason_codes": [BUDGET_REASON["UNKNOWN_CAPSULE_SHAPE"]],
+        "details": {},
+    }
+    assert evaluate_capsule_gate(capsule=capsule) == {
+        "decision": GATE_DECISION["BLOCKED"],
+        "reason_codes": [GATE_REASON["UNKNOWN_CAPSULE_SHAPE"]],
+        "gate_requests": [],
+    }
+    assert next_loop_step(capsule=capsule)["decision"] == LOOP_DECISION["BLOCKED"]
+
+
 @pytest.mark.parametrize(
     "workspace",
     [None, {}, {"fingerprint": ""}, {"fingerprint": None}],
@@ -1341,6 +1357,17 @@ def test_evaluate_receipt_gate_blocks_malformed_collection_entries_and_required_
             "reason_codes": [GATE_REASON["UNKNOWN_RECEIPT_SHAPE"]],
             "gate_requests": [],
         }
+
+
+def test_receipt_gate_rejects_self_consistent_receipts_with_unknown_fields():
+    capsule = base_capsule_like()
+    receipt = base_receipt_like(capsule, {"unexpected": "smuggled"})
+
+    assert evaluate_receipt_gate(capsule=capsule, receipt=receipt) == {
+        "decision": GATE_DECISION["BLOCKED"],
+        "reason_codes": [GATE_REASON["UNKNOWN_RECEIPT_SHAPE"]],
+        "gate_requests": [],
+    }
 def test_evaluate_receipt_gate_fails_closed_on_an_unrecognized_receipt_or_capsule_shape():
     capsule = build_clean_capsule()
     good_receipt = base_receipt_like(capsule)

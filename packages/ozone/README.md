@@ -1,6 +1,6 @@
 # vivary-ozone
 
-> Current published release: **0.2.0**. Development source: **0.3.0**, held for the final coordinated release train.
+> Current published release: **0.2.0**. Development source: **0.3.1**, held for the final coordinated release train.
 
 **The review layer** — the protective filter. Where `tropo` answers *"is each
 document valid?"*, `ozone` reviews the **whole graph**: the relationship-level gaps a
@@ -45,15 +45,21 @@ contracts. It preserves core's fingerprinted receipt and gate verdicts unchanged
 Strato can consume the returned `gate_verdict` directly. A supplied workspace graph
 adds a typed repair proposal; every proposal requires a gate and reports
 `writes_performed: 0`.
+The request is preflighted with an iterative JSON-work ceiling before recursive
+canonical validation or Core loading. Oversized input returns the typed
+`request_work_unbounded` refusal. Core owns the exact top-level capsule and receipt
+field sets; Ozone reports deterministic `unknown_capsule_field:*` and
+`unknown_receipt_field:*` reasons without adding a generic artifact-shape reason.
 The capsule commits checkout IDs and paths, normalized repository nodes, and
 `checkout_of` relationships that can drive repair proposals. Ozone recomputes that
 topology commitment from the supplied graph, including inferred no-remote
 linked-worktree groups.
 Core also reprojects the complete graph from checkout paths, facts, and normalized
 observation refusals. Every derived node, edge, conflict, unknown, omission,
-deterministic ID, evidence field, effective worktree root, and semantic fact commitment
-must match. Invalid fact statuses fail closed. The workspace fingerprint and graph
-timestamp must match the request and capsule.
+deterministic ID, evidence field, effective worktree root, canonical allowlist, and
+semantic fact commitment must match. Known fact values must match their fact-specific
+type; unknown facts require a reason. The workspace fingerprint and graph timestamp
+must match the request and capsule.
 Ozone validates the complete receipt shape and requires its verified and unverified
 claim lists to be disjoint. Together, the lists must contain exactly the capsule's claim
 IDs. The claim lists must also match the check outcomes. `claims_verified` contains
@@ -64,19 +70,23 @@ status, reason codes, and `review_required` decision. It must preserve at least 
 checkout/path sides with head revision, head reference, last fetch, and evidence fields.
 
 Receipt checks that share a capsule required-check name must also carry its exact
-command. Ozone validates optional `task.scope` and `task.filters` entries whether or
-not the request supplies a graph. With a graph, claim identities, graph-derived
-semantics, subjects, paths, profile filters, question signals, in-scope graph unknowns,
-selection omissions, and observation refusals must match or verification fails closed.
-Signal terms, fields, and paths must be strings.
+command. Declared `task.scope` roots must be absolute, nonblank, and bounded in count.
+Optional `task.filters` entries must carry a nonblank `equals` or `includes` value,
+whether or not the request supplies a graph. With a graph, claim identities,
+graph-derived semantics, subjects, paths, profile filters, question signals, in-scope
+graph unknowns, selection omissions, and observation refusals must match or
+verification fails closed. Signal terms, fields, and paths must be strings.
 Selection omissions cannot understate the graph-reconstructable minimum and match
-exactly when their counts equal it. Opaque content can only raise the
-totals; bounded over-budget entries remain capsule-attested but must name an in-scope
-checkout path and known fact. Unknown or reshaped omission variants are invalid.
+exactly when their counts equal it. Opaque content can only raise the totals; bounded
+over-budget entries remain capsule-attested but must name an in-scope checkout and a
+safe checkout-relative content path. Unknown or reshaped omission variants are invalid.
 Explicit task-required checks have unique nonblank names, remain visible in the capsule
 without a graph, bind to an observed Git checkout execution root related to task scope,
-and cannot rewrite evidence-derived commands. Without them, Ozone re-derives required
-checks and undetermined-check unknowns from the supplied graph.
+and cannot rewrite evidence-derived commands. Without a graph, the capsule's effective
+check list must equal that declaration exactly; without a declaration, it must be empty.
+Otherwise Ozone returns `graph_required_for_effective_checks`, and the caller must
+resubmit with the matching graph so Core can reconstruct derived checks. With a graph,
+Ozone derives required checks and undetermined-check unknowns from graph evidence.
 Ozone reconstructs the full claim list from graph candidates and retained content-match
 candidates under the same task, filters, scope, and budget. Retained content-match
 claims are validated through their capsule shape and signals; Ozone does not re-read
@@ -154,7 +164,7 @@ python ../tropo/tropo.py view blast <id> --root <workspace> --out impact.html
 
 Python 3.11+. In a repo checkout, Ozone loads the sibling Tropo and core packages
 in-process. Packaged builds depend on `vivary-tropo>=0.3.0` and
-`vivary-core>=0.2.3`.
+`vivary-core>=0.2.4`.
 
 ---
 

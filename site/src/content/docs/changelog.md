@@ -16,9 +16,9 @@ the `v0.1.0` line.
 
 ## [Unreleased: governed Tropo, Strato, and Ozone adapters] — 2026-07-26
 
-Affects the source checkout's unreleased `vivary-core` **0.2.3**, `vivary-tropo`
-**0.5.0**, `vivary-strato` **0.1.1**, `vivary-ozone` **0.3.0**, and `vivary`
-meta-package **0.1.2**, the first three role-to-core dependency edges, package
+Affects the source checkout's unreleased `vivary-core` **0.2.4**, `vivary-tropo`
+**0.5.0**, `vivary-strato` **0.1.2**, `vivary-ozone` **0.3.1**, and `vivary`
+meta-package **0.1.3**, the first three role-to-core dependency edges, package
 documentation, and CI packaging proof. The published releases remain Tropo **0.4.1**,
 Ozone **0.2.0**, and `vivary` **0.1.0**; Strato and core remain unpublished during
 development. No package was published, deployed, or enabled by default; publication
@@ -113,9 +113,9 @@ remains part of the final coordinated release train and requires a separate huma
   run receipt that could alias the unread request instead of refusing the requested
   output. Repair graphs are reprojected from checkout paths and facts before repair
   use. Every derived node, edge, conflict, unknown, omission, deterministic ID,
-  evidence field, and workspace fingerprint must match. The optional graph allowlist
-  may be absent; when present, it must be normalized. Unknown graph fields and
-  non-string question/content signal terms, fields, and paths fail closed.
+  evidence field, canonical allowlist, and workspace fingerprint must match. Missing
+  allowlists, unknown graph fields, invalid semantic fact values, and non-string
+  question/content signal terms, fields, and paths fail closed.
   The workspace fingerprint commits each checkout's effective worktree root, semantic
   fact statuses and values, and normalized observation refusals. It excludes evidence
   command text. Ozone refuses retained-fingerprint changes to gate-driving
@@ -176,7 +176,7 @@ remains part of the final coordinated release train and requires a separate huma
   pair-scan-bound, route-evidence-bound, repair-product-bound, identifier-bound,
   omission-bound, estimate-bound, gate-shape, graph-relationship, full canonical graph,
   every derived node kind, forged edge/conflict identity, exact unknown/omission
-  projection, optional allowlist, non-string signals, scoped-full-graph,
+  projection, required allowlist, non-string signals, scoped-full-graph,
   forged-in-scope-conflict, filter-binding, conflict-binding, selection-binding,
   topology-commitment, output-escaping, malformed, recursive, repair, CLI, and real
   Ozone-to-Strato cases.
@@ -186,26 +186,46 @@ remains part of the final coordinated release train and requires a separate huma
 
 ### Changed
 
-- `vivary-core` advances from 0.2.0 to 0.2.3. Version 0.2.1 introduced the governed
-  adapter API; 0.2.2 hardened the compiler/verifier integrity boundary; 0.2.3 adds the
-  repair-topology commitment API and complete compiler-owned capsule validation.
+- `vivary-core` advances from 0.2.0 to 0.2.4. Version 0.2.1 introduced the governed
+  adapter API; 0.2.2 hardened the compiler/verifier integrity boundary; 0.2.3 added the
+  repair-topology commitment API and complete compiler-owned capsule validation; 0.2.4
+  centralizes exact Task Capsule and Execution Receipt field ownership, exports the
+  shared UTF-16 ordering key, and hardens capsule/graph reconstruction.
   `vivary-tropo` advances from 0.4.1 to 0.5.0 because the governed flags are a
   user-visible minor feature and keeps `vivary-core>=0.2.1`, the first source version
   exposing the adapter API. This is the first real package-to-core dependency promised
-  by [#207](https://github.com/vivary-dev/vivary/issues/207). The `vivary` meta-package
-  advances from 0.1.0 to 0.1.2: 0.1.1 raised its floor to `vivary-tropo>=0.5.0`, and
-  0.1.2 raises its floor to `vivary-ozone>=0.3.0`, so a fresh suite install cannot
-  resolve the pre-verification Ozone CLI. Its public package README now surfaces
-  `ozone verify --governed` from that installed Ozone floor. All development versions
-  remain unpublished until the coordinated release.
-- `vivary-strato` advances from 0.1.0 to 0.1.1 for the capsule-integrity hardening and
-  declares `vivary-core>=0.2.3`. The `vivary` meta-package does not add Strato yet;
-  completing the one-install role surface remains owned by #207. Both Strato and core
-  stay explicitly allowlisted as unpublished until the final coordinated release gate.
-- `vivary-ozone` advances from 0.2.0 to 0.3.0 because `verify --governed` is a
-  user-visible command and declares `vivary-core>=0.2.3` with its first real core
-  import. Plain `review`, `impact`, and `packs` behavior remains unchanged. Ozone
-  0.3.0 stays unpublished until the final coordinated release gate.
+  by [#207](https://github.com/vivary-dev/vivary/issues/207).
+- The `vivary` meta-package advances from 0.1.0 to 0.1.3: 0.1.1 raised its floor to
+  `vivary-tropo>=0.5.0`, 0.1.2 raised its floor to `vivary-ozone>=0.3.0`, and 0.1.3
+  raises that floor to `vivary-ozone>=0.3.1`. A fresh suite install cannot resolve the
+  pre-hardening Ozone CLI. All development versions remain unpublished until the
+  coordinated release.
+- `vivary-strato` advances from 0.1.0 to 0.1.2 and declares
+  `vivary-core>=0.2.4`. Version 0.1.1 introduced the governed runtime and capsule
+  integrity boundary; 0.1.2 consumes Core's exact artifact schemas. The `vivary` meta
+  package does not add Strato yet; completing the one-install role surface remains
+  owned by #207. Both Strato and core stay explicitly allowlisted as unpublished until
+  the final coordinated release gate.
+- `vivary-ozone` advances from 0.2.0 to 0.3.1. Version 0.3.0 introduced the user-visible
+  `verify --governed` command; 0.3.1 declares `vivary-core>=0.2.4` and hardens that
+  request boundary. Plain `review`, `impact`, and `packs` behavior remains unchanged.
+  Ozone 0.3.1 stays unpublished until the final coordinated release gate.
+- Core rejects blank or non-absolute declared scope roots, blank filter values,
+  excessive checkout/content candidate work, unsafe content-match paths, malformed
+  semantic fact values, missing canonical allowlists, altered compiler-owned omissions,
+  and top-level capsule or receipt field smuggling. Scoped conflict omissions and
+  explicit full-workspace refusal reconstruction now match compilation exactly.
+  `compile_task_capsule` now normalizes malformed filter-contract errors to
+  `ValueError`; direct `validate_filters` callers retain its lower-level `TypeError`.
+- Ozone preflights whole-request JSON work before Core loading or recursive validation.
+  Graphless effective checks must equal the task declaration exactly. Capsules carrying
+  derived checks return `graph_required_for_effective_checks` until the matching graph
+  is supplied. Unknown artifact fields retain their specific sorted refusal reasons
+  without an added generic shape reason.
+- Core's observe, evidence, and topology tests use process-unique OS temporary fixture
+  roots, preventing concurrent Windows/WSL sessions from deleting each other's data.
+  CI adds an explicit Windows/Python 3.11 governed-verification job across Core, Ozone,
+  and Strato.
 - Plain `tropo find` keeps its existing typed-context packet and default token budget.
   Governed-only flags, malformed core inputs, and broken core installs fail with the
   documented usage exit code `2`; the command reference owns the exact flag contract.
@@ -287,33 +307,33 @@ remains part of the final coordinated release train and requires a separate huma
 - `python packages/tropo/tests/test_tropo.py` — **170/170** passed on Windows.
 - `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **170/170**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **668 passed** on Windows;
-  `UV_CACHE_DIR=/tmp/vivary-uv-cache TMPDIR=/tmp uv run --no-cache --with
-  pytest==9.0.2 --with python-dateutil==2.9.0.post0 --with jsonschema==4.26.0 pytest
-  packages/core/tests/ -q` — **666 passed, 2 platform-specific skips** on WSL Linux.
+- `python -m pytest packages/core/tests/ -q` — **713 passed** on Windows;
+  `/home/jeffk/.local/bin/uv run --no-cache --with pytest python -m pytest
+  packages/core/tests/ -q` — **712 passed, 1 platform-specific skip** on WSL Linux.
 - `python -m pytest packages/strato/tests -q` — **48 passed** on Windows and
   **48 passed** on WSL Linux.
-- `python -m pytest packages/core/tests/test_policy.py -q` — **91 passed**;
-  `python -m pytest packages/core/tests/test_control.py -q` — **101 passed**.
-- Isolated Windows and WSL `uv run --no-cache --with ./packages/core --with
-  ./packages/strato` smokes built core **0.2.3** and Strato **0.1.1**; installed
-  metadata matched Strato's runtime version and `strato decide --help` exposed the
-  governed JSON/strict command surface.
+- `python -m pytest packages/core/tests/test_policy.py -q` — **93 passed**;
+  `python -m pytest packages/core/tests/test_control.py -q` — **103 passed**.
+- Local `uv run --no-cache --with ./packages/core --with ./packages/strato` smoke built
+  core **0.2.4** and Strato **0.1.2**; installed metadata matched Strato's runtime
+  version.
 - `python -m pytest packages/tropo/tests/test_tropo.py -q -k "governed or
   cmd_find_returns_context_packet"` — **18 passed**.
-- Isolated `uv run --no-cache --with ./packages/core --with ./packages/tropo`
-  metadata smoke reported core **0.2.3** and Tropo **0.5.0**.
+- Local `uv run --no-cache --with ./packages/core --with ./packages/tropo` metadata
+  smoke reported core **0.2.4** and Tropo **0.5.0**.
+  The installed Core version also satisfied Tropo's declared `vivary-core>=0.2.1`
+  requirement specifier.
 - Coordinated local `uv run --no-cache --with` smoke across core, Tropo,
-  create-vivary, Ozone, Exo, and the meta package reported `vivary` **0.1.2**,
-  Tropo **0.5.0**, and core **0.2.3**.
-  The packaged smoke also verified that the installed core version satisfies Tropo's
-  declared requirement specifier, not merely that the metadata names it.
+  create-vivary, Ozone, Exo, and the meta package reported `vivary` **0.1.3**,
+  Tropo **0.5.0**, Ozone **0.3.1**, and core **0.2.4**.
 - A local wheelhouse built core, Tropo, Strato, Ozone, Exo, create-vivary, the
   `vivary` meta-package, and memory-cognee; `pip install --dry-run --ignore-installed
-  --no-index --find-links <wheelhouse> vivary==0.1.2 vivary-strato==0.1.1` resolved
+  --no-index --find-links <wheelhouse> vivary==0.1.3 vivary-strato==0.1.2` resolved
   the coordinated graph entirely from those wheels.
+  The resolver selected core **0.2.4** through the role-package floors rather than only
+  reading component metadata.
 - `python -m pytest packages/vivary/tests/ -q` — **9 passed**; the manifest/runtime
-  version and `vivary-tropo>=0.5.0` floor matched.
+  version and `vivary-tropo>=0.5.0` / `vivary-ozone>=0.3.1` floors matched.
 - `python packages/create-vivary/tests/test_privacy_differential.py` — **2/2
   passed** with global Git config, excludes, templates, and fsmonitor isolated from
   the real-Git oracle.
@@ -324,7 +344,7 @@ remains part of the final coordinated release train and requires a separate huma
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **83/83**, Exo **17/17**,
+- Repository verification also passed: Ozone **89/89**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**

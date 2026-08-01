@@ -22,7 +22,7 @@ class VivaryReleaseMetadataTests(unittest.TestCase):
         )["project"]
         self.assertEqual(vivary_cli.__version__, manifest["version"])
         self.assertIn("vivary-tropo>=0.5.0", manifest["dependencies"])
-        self.assertIn("vivary-ozone>=0.3.0", manifest["dependencies"])
+        self.assertIn("vivary-ozone>=0.3.1", manifest["dependencies"])
 
 
 class VivaryLogsTests(unittest.TestCase):

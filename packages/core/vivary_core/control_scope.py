@@ -10,7 +10,7 @@ synchronous, no I/O.
 
 Language mapping: JS `[...new Set(paths.map(normalizePath))].sort()` uses
 JS's default string `.sort()` (UTF-16 code-unit order) - mapped to
-``canonical._utf16_sort_key`` per the pinned rule (plain string `.sort()`,
+``canonical.utf16_sort_key`` per the pinned rule (plain string `.sort()`,
 never ``collation.locale_sort_key``).
 
 ADAPTATION - lexical scope identity: scope paths collapse separators and dot
@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import re
 
-from vivary_core.canonical import _JS_TRIM_CHARS, _utf16_sort_key
+from vivary_core.canonical import _JS_TRIM_CHARS, utf16_sort_key
 
 
 _DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
@@ -122,7 +122,7 @@ def normalize_scope(scope):
     scope = scope if isinstance(scope, dict) else {}
     raw_paths = scope.get("paths") or []
     deduped = list(dict.fromkeys(_normalize_scope_path(p) for p in raw_paths))
-    paths = sorted(deduped, key=_utf16_sort_key)
+    paths = sorted(deduped, key=utf16_sort_key)
     project = scope.get("project")
     return {"project": project if project is not None else "", "paths": paths}
 

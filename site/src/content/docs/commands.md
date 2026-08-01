@@ -477,25 +477,36 @@ ozone verify request.json --governed --json --strict
 | `schema` | Exactly `vivary.ozone-verification-request/v0`. |
 | `workspace` | Exactly `{"fingerprint": "..."}`; must match the capsule. |
 | `verified_at` | Caller-supplied timezone-aware instant. |
-| `capsule` | Complete `vivary.task-capsule/v0`; its body fingerprint and deterministic ID are recomputed before core delegation. Optional `task.scope` must contain at least one nonempty string. Optional `task.filters` must use the compiler's list-shaped `{field, equals\|includes}` contract. Both rules apply whether or not the request includes a graph. |
+| `capsule` | Complete `vivary.task-capsule/v0`; its body fingerprint and deterministic ID are recomputed before core delegation. A declared `task.scope` is a bounded, nonempty list of absolute roots. Optional `task.filters` must use the compiler's list-shaped `{field, equals\|includes}` contract with a nonblank value. Both rules apply whether or not the request includes a graph. |
 | `receipt` | Complete Execution Receipt bound to the capsule. Its check records and claim lists are shape-validated; `claims_verified` and `claims_unverified` must be disjoint and together equal both `claims_in_scope` and the capsule's claim IDs. All claims are verified only when the check list is nonempty and every check passed. Otherwise, all claims remain unverified. Omission or malformed/tampered evidence cannot produce a sufficient aggregate result. |
 | `gate` | Named gate with core-owned `required_checks`, `require_claims_verified`, `max_unresolved_conflicts`, and `max_unresolved_unknowns` constraints. |
-| `graph` | Optional matching `vivary.workspace-graph/v0`. Core reprojects the graph from checkout paths and facts. Every derived node, edge, conflict, unknown, omission, deterministic ID, and evidence field must match that projection. The optional graph `allowlist` may be absent. The recomputed `workspace_fingerprint` must match the request, and `observed_at` must match the capsule. The capsule's graph-derived claims and unknowns must equal compiler selection for the same graph, task, filters, scope, and budget. Ozone returns a bounded `vivary.context-repair-proposal/v0`; every proposal has `requires_gate: true` and `writes_performed: 0`. Ozone accepts at most 1,000 scope roots, graph nodes, graph edges, and graph unknowns, plus 300 graph conflicts. Core matches claims from at most 300 checkout subjects. Ozone limits scope-path checks to 100,000 comparisons and bounds checkout-pair scans, route evidence, and scope-to-conflict comparisons before repair construction. |
+| `graph` | Optional matching `vivary.workspace-graph/v0`. Core reprojects the graph from checkout paths and facts. Every derived node, edge, conflict, unknown, omission, deterministic ID, evidence field, and canonical allowlist must match that projection. The recomputed `workspace_fingerprint` must match the request, and `observed_at` must match the capsule. The capsule's graph-derived claims and unknowns must equal compiler selection for the same graph, task, filters, scope, and budget. Ozone returns a bounded `vivary.context-repair-proposal/v0`; every proposal has `requires_gate: true` and `writes_performed: 0`. |
 
-Unknown top-level graph fields are invalid. The optional graph `allowlist` may be
-absent. When present, it must already match core's normalized path projection.
+Before recursive canonical validation or Core loading, Ozone applies an iterative
+JSON-work ceiling to the complete request. Excess input returns
+`request_work_unbounded`. Core owns the exact top-level capsule and receipt field sets.
+Unknown additions return sorted `unknown_capsule_field:<name>` or
+`unknown_receipt_field:<name>` reasons without a second generic shape reason.
+For graph-backed repair, Ozone accepts at most 1,000 scope roots, graph nodes, graph
+edges, and graph unknowns, plus 300 graph conflicts. It limits scope-path work to
+100,000 comparisons and bounds checkout-pair scans, route evidence, repair products,
+and canonical re-projection before proposal construction.
 
-The capsule task question must be a nonblank string. A declared task scope bounds every
-narrated claim, conflict side, unknown, and omission path to at least one declared root.
+The capsule task question must be a nonblank string. A declared task scope contains
+absolute roots and bounds every narrated claim, conflict side, unknown, and omission
+path. Core accepts at most 1,000 scope roots and bounds checkout/content candidate work
+for direct compiler callers.
 Optional `task.required_checks` must be a nonempty list of nonblank `name`, `command`,
 and normalized `cwd` records with unique names. Each `cwd` must name an observed Git
 checkout execution root related to `task.scope`; a package-scoped task may name its
 nearest enclosing checkout root. Declarations add checks, never remove or rewrite
 commands derived from workspace evidence, and resolve `required_check_undetermined`
 unknowns only for their checkout. The capsule retains each declaration unchanged in its
-top-level required-check list, even when verification has no graph. Without a
-declaration, Ozone re-derives required checks and undetermined-check unknowns from the
-supplied graph.
+top-level required-check list. Without a graph, that effective list must equal the task
+declaration exactly, or be empty when no declaration exists. Otherwise Ozone returns
+`graph_required_for_effective_checks`; resubmit with the matching graph so Core can
+reconstruct derived checks. With a graph, Ozone derives checks and
+undetermined-check unknowns from graph evidence.
 Every capsule claim must retain its compiler-owned nonempty identity, subject, path,
 fact, text, status, and selection reason plus list-shaped evidence and selection
 signals. Core recomputes each claim ID from its subject, fact, and claim text. With task
@@ -508,10 +519,11 @@ reconstruction. `filtered_out` and `claims_over_budget` omissions cannot underst
 graph-reconstructable minimum and must match exactly when their counts equal that
 minimum. Opaque content candidates may only raise the totals because Ozone does not
 re-read files. Their bounded over-budget entries remain capsule-attested rather than
-graph-bound, but each entry must name an in-scope checkout path and a graph fact or
-`content_match`. Observation refusals must retain exactly matching `refused_root`
-omissions. Omission variants have fixed field shapes; unknown or reshaped variants are
-invalid capsule data. These checks bind graph coverage and ranking.
+graph-bound, but each entry must name an in-scope checkout and a normalized,
+checkout-relative content path with no traversal segment. Observation refusals and
+scope-crossing conflicts must retain exactly matching compiler-owned omissions.
+Omission variants have fixed field shapes; unknown or reshaped variants are invalid
+capsule data. These checks bind graph coverage and ranking.
 Each graph-derived claim must reproduce the graph fact's
 compiler-generated path, fact, text, status, and evidence. Every claim subject must name
 a checkout in that graph, and the claim path must equal the checkout path. Label,
@@ -558,7 +570,8 @@ from the committed facts. Checkout, repository, revision, branch, remote, and
 dirty-artifact nodes must retain their exact generated fields and deterministic IDs.
 Edges must retain their generated endpoints, evidence, and IDs. Conflicts, unknowns,
 omissions, and refusals must match the projection exactly. A copied fingerprint cannot
-validate forged graph contents. Invalid fact statuses fail closed before projection.
+validate forged graph contents. Known fact values must match their fact-specific type;
+unknown facts require a nonblank reason. Invalid records fail closed before projection.
 
 `neighbor_of` is symmetric but its stored direction follows observation order. Core
 normalizes only that direction during comparison and still validates the original edge

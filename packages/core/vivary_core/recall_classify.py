@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from vivary_core.canonical import _utf16_sort_key, canonicalize, fingerprint
+from vivary_core.canonical import utf16_sort_key, canonicalize, fingerprint
 from vivary_core.recall_outcomes import (
     ACCEPTED,
     ACTIVE_TRUTH_UNCHANGED,
@@ -251,8 +251,8 @@ def _decision(
 ) -> Dict[str, Any]:
     return {
         "outcome": outcome,
-        "reason_codes": sorted(set(reason_codes), key=_utf16_sort_key),
-        "related_assertion_ids": sorted(set(related_assertion_ids or []), key=_utf16_sort_key),
+        "reason_codes": sorted(set(reason_codes), key=utf16_sort_key),
+        "related_assertion_ids": sorted(set(related_assertion_ids or []), key=utf16_sort_key),
         "active_truth": ACTIVE_TRUTH_UNCHANGED,
         "subject": subject,
         "evidence": evidence,

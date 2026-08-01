@@ -51,7 +51,6 @@ from vivary_core.workspace_observe import (  # noqa: E402
     observe_checkouts,
 )
 
-FIXTURE_BASE = os.path.join(HERE, ".fixtures", "topology")
 
 
 def NOW():
@@ -146,8 +145,6 @@ def _try_link_file(target, link_path):
 
 def build_topology_fixtures(base_dir):
     """Port of tests/helpers/fixtures.mjs's buildTopologyFixtures."""
-    _rmtree_force(base_dir)
-    os.makedirs(base_dir, exist_ok=True)
     with open(os.path.join(base_dir, "empty-gitconfig"), "w", encoding="utf-8") as handle:
         handle.write("")
 
@@ -307,9 +304,11 @@ def hash_tree(root):
 
 @pytest.fixture(scope="module")
 def fx():
-    result = build_topology_fixtures(FIXTURE_BASE)
-    yield result
-    _rmtree_force(FIXTURE_BASE)
+    fixture_base = tempfile.mkdtemp(prefix="vivary-topology-fixtures-")
+    try:
+        yield build_topology_fixtures(fixture_base)
+    finally:
+        _rmtree_force(fixture_base)
 
 
 # --- Read-only proof across every shape -------------------------------------

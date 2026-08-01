@@ -119,8 +119,9 @@ What it owns:
 - **Projection** — observations into a typed evidence graph, where divergent
   checkouts become explicit unresolved conflicts with both sides preserved, never
   auto-resolved.
-- **Capsules** — bounded task context, every claim carrying its evidence and its
-  selection reason, every omission recorded.
+- **Capsules** — bounded task context with absolute declared scope roots, every claim
+  carrying its evidence and selection reason, and every compiler-owned omission
+  reconstructed. Core owns the exact top-level capsule and receipt field sets.
 - **Receipts and evidence** — what actually ran, bound to the exact capsule and
   workspace fingerprint it ran against, in an append-only store.
 - **Role-policy surfaces** — reference implementations of the governed loop inside
@@ -136,9 +137,11 @@ What it owns:
   - **Ozone (`verify_*`)** recomputes receipt fingerprints for tamper detection,
     evaluates gate sufficiency without allowing duplicate check names to erase
     worse evidence, and emits bounded repair proposals as gated dry-run data. The
-    `vivary-ozone` `verify --governed` facade adds capsule identity checks, workspace
-    binding, a caller-supplied clock, freshness, repair-input bounds, and typed request
-    refusals. Its raw fingerprinted gate verdict passes to Strato unchanged.
+    `vivary-ozone` `verify --governed` facade applies an iterative whole-request work
+    ceiling before recursive validation, preserves Core's exact artifact-field
+    ownership and typed unknown-field refusals, binds graphless checks to task
+    declarations, and requires canonical repair-graph allowlists. Its raw fingerprinted
+    gate verdict passes to Strato unchanged.
   - **Exo (`control_*`)** governs claims and leases, handoffs, dependencies,
     execution evidence, and task views over caller-owned state. Equivalent
     Win32 drive, UNC, and device-namespace spellings share one scope identity.
@@ -157,10 +160,11 @@ transitively and does not declare it. One owner per edge avoids version-pinning 
 `vivary-tropo` is the first importer: its experimental `find --governed` adapter depends
 on `vivary-core>=0.2.1`, the first source version that exposes the adapter's required
 API. `vivary-strato` is the second: its experimental `decide --governed` facade requires
-`vivary-core>=0.2.3`, which includes complete compiler-owned capsule validation.
-`vivary-ozone` is the third: `verify --governed` requires the same 0.2.3 boundary,
-including the repair-topology commitment API. Remaining role packages add their own
-floors only when their first real imports land — never ahead of the code that needs them.
+`vivary-core>=0.2.4`, which includes exact policy-artifact schemas and semantic capsule
+validation. `vivary-ozone` is the third: `verify --governed` requires the same 0.2.4
+boundary, including the shared artifact field sets, public UTF-16 ordering key, and
+bounded compiler contract. Remaining role packages add their own floors only when their
+first real imports land — never ahead of the code that needs them.
 
 **Status:** merged Tropo/core, Strato/core, and Ozone/core integrations are on `dev`.
 All are unpublished at their development versions and reachable only through explicit

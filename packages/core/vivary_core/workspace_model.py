@@ -15,7 +15,7 @@ Language-mapping notes (python/README.md):
   ``vivary_core.collation.locale_sort_key`` on the same key.
 - The one *plain* ``.sort()`` with no comparator in this module (the
   ``[...byRepository.entries()].sort()`` walk) is JS UTF-16 code-unit order,
-  not locale order - reproduced with ``vivary_core.canonical._utf16_sort_key``
+  not locale order - reproduced with ``vivary_core.canonical.utf16_sort_key``
   on the repository id (the unique map key that alone determines the JS
   default array-of-pairs sort order here; see the inline comment at its call
   site for why that reduction is exact, not an approximation).
@@ -28,7 +28,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from vivary_core.canonical import (
-    _utf16_sort_key,
+    utf16_sort_key,
     deterministic_id,
     fingerprint,
     normalize_path,
@@ -55,14 +55,88 @@ MAX_NEIGHBOR_OF_GROUP = 300
 VALID_FACT_STATUSES = frozenset(("known", "unknown"))
 
 
+def _is_boolean(value: Any) -> bool:
+    return isinstance(value, bool)
+
+
+def _is_nonblank_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _is_string_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _is_head_ref(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if value.get("kind") == "detached":
+        return set(value) == {"kind"}
+    return (
+        value.get("kind") == "branch"
+        and set(value) == {"kind", "name"}
+        and _is_nonblank_string(value.get("name"))
+    )
+
+
+def _is_dirty_entries(value: Any) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(entry, dict)
+        and set(entry) == {"state", "path"}
+        and isinstance(entry["state"], str)
+        and isinstance(entry["path"], str)
+        for entry in value
+    )
+
+
+def _is_remotes(value: Any) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(remote, dict)
+        and _is_nonblank_string(remote.get("name"))
+        and all(
+            field not in remote or isinstance(remote[field], str)
+            for field in ("fetch_url", "push_url")
+        )
+        for remote in value
+    )
+
+
+_KNOWN_FACT_VALUE_VALIDATORS = {
+    "is_git_repository": _is_boolean,
+    "is_dirty": _is_boolean,
+    "worktree_root": _is_nonblank_string,
+    "git_common_dir": _is_nonblank_string,
+    "head_revision": _is_nonblank_string,
+    "upstream": _is_nonblank_string,
+    "last_fetch": _is_nonblank_string,
+    "npm_test_script": _is_nonblank_string,
+    "head_ref": _is_head_ref,
+    "workspace_markers": _is_string_list,
+    "dirty_entries": _is_dirty_entries,
+    "remotes": _is_remotes,
+}
+
+
+def _fact_record_is_valid(name: str, detail: Any) -> bool:
+    if detail is None:
+        return True
+    if not isinstance(detail, dict):
+        return False
+    status = detail.get("status")
+    if not isinstance(status, str) or status not in VALID_FACT_STATUSES:
+        return False
+    if status == "known":
+        if "value" not in detail:
+            return False
+        validator = _KNOWN_FACT_VALUE_VALIDATORS.get(name)
+        return validator is None or validator(detail["value"])
+    return _is_nonblank_string(detail.get("reason"))
+
+
 def workspace_facts_are_valid(facts: Any) -> bool:
     return isinstance(facts, dict) and all(
-        detail is None
-        or (
-            isinstance(detail, dict)
-            and detail.get("status") in VALID_FACT_STATUSES
-        )
-        for detail in facts.values()
+        _fact_record_is_valid(name, detail)
+        for name, detail in facts.items()
     )
 
 
@@ -76,12 +150,12 @@ def _fact_commitment(facts: Dict[str, Any], name: str) -> Any:
         if name == "dirty_entries" and isinstance(value, list):
             value = sorted(
                 value,
-                key=lambda item: _utf16_sort_key(
+                key=lambda item: utf16_sort_key(
                     f"{item.get('path')}:{item.get('state')}"
                 ),
             )
         elif name == "workspace_markers" and isinstance(value, list):
-            value = sorted(value, key=_utf16_sort_key)
+            value = sorted(value, key=utf16_sort_key)
         commitment["value"] = value
     elif "reason" in detail:
         commitment["reason"] = detail.get("reason")
@@ -135,7 +209,7 @@ def _checkout_core_facts(checkout: Dict[str, Any]) -> Dict[str, Any]:
     if dirty_entries is None:
         dirty_entries = []
     # `.map((e) => e.path).sort()` - plain sort, UTF-16 code-unit order.
-    dirty_paths = sorted((e["path"] for e in dirty_entries), key=_utf16_sort_key)
+    dirty_paths = sorted((e["path"] for e in dirty_entries), key=utf16_sort_key)
     remotes = _fact_field(f, "remotes", "value")
     if remotes is None:
         remotes = []
@@ -151,7 +225,7 @@ def _checkout_core_facts(checkout: Dict[str, Any]) -> Dict[str, Any]:
         "remotes": remotes,
         "facts": {
             name: _fact_commitment(f, name)
-            for name in sorted(f, key=_utf16_sort_key)
+            for name in sorted(f, key=utf16_sort_key)
         },
     }
 
@@ -197,7 +271,7 @@ def _path_sort_key(value: str):
     try:
         return (0, locale_sort_key(value))
     except CollationDomainError:
-        return (1, _utf16_sort_key(value))
+        return (1, utf16_sort_key(value))
 
 
 def workspace_fingerprint_from_graph(graph: Dict[str, Any]) -> str:
@@ -338,7 +412,7 @@ def repair_graph_is_canonical(graph: Dict[str, Any]) -> bool:
         normalized = dict(edge)
         if kind == "neighbor_of":
             normalized_from, normalized_to = sorted(
-                (from_, to), key=_utf16_sort_key
+                (from_, to), key=utf16_sort_key
             )
             normalized["from"] = normalized_from
             normalized["to"] = normalized_to
@@ -353,10 +427,10 @@ def repair_graph_is_canonical(graph: Dict[str, Any]) -> bool:
         return normalized
 
     def _sorted_by_id(items):
-        return sorted(items, key=lambda item: _utf16_sort_key(item["id"]))
+        return sorted(items, key=lambda item: utf16_sort_key(item["id"]))
 
     def _sorted_values(items):
-        return sorted(items, key=lambda item: _utf16_sort_key(fingerprint(item)))
+        return sorted(items, key=lambda item: utf16_sort_key(fingerprint(item)))
 
     try:
         normalized_refusals = _normalized_refusals(graph.get("refusals"))
@@ -369,8 +443,8 @@ def repair_graph_is_canonical(graph: Dict[str, Any]) -> bool:
             }
         )
         if (
-            "allowlist" in graph
-            and graph["allowlist"] != recomputed["allowlist"]
+            "allowlist" not in graph
+            or graph["allowlist"] != recomputed["allowlist"]
         ):
             return False
         if _sorted_by_id(graph["nodes"]) != _sorted_by_id(recomputed["nodes"]):
@@ -553,7 +627,7 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
     # prefix of another and the "[object Object]" suffix never needs to be
     # consulted to break a tie - the whole comparison reduces exactly to
     # UTF-16 code-unit order over repositoryId alone.
-    for repository_id, group in sorted(by_repository.items(), key=lambda kv: _utf16_sort_key(kv[0])):
+    for repository_id, group in sorted(by_repository.items(), key=lambda kv: utf16_sort_key(kv[0])):
         if len(group) < 2:
             continue
         # heads/sides always see the full group - the cap below only bounds

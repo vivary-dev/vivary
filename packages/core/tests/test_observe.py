@@ -33,7 +33,6 @@ from vivary_core.workspace_observe import (  # noqa: E402
     observe_checkouts,
 )
 
-FIXTURE_BASE = os.path.join(HERE, ".fixtures", "observe")
 
 
 def NOW():
@@ -93,8 +92,6 @@ def _commit_file(base_dir, repo, file_name, content, message):
 
 def build_fixtures(base_dir):
     """Port of tests/helpers/fixtures.mjs's buildFixtures."""
-    _rmtree_force(base_dir)
-    os.makedirs(base_dir, exist_ok=True)
     with open(os.path.join(base_dir, "empty-gitconfig"), "w", encoding="utf-8") as handle:
         handle.write("")
 
@@ -199,10 +196,11 @@ def hash_tree(root):
 
 @pytest.fixture(scope="module")
 def fx():
-    base_dir = FIXTURE_BASE
-    result = build_fixtures(base_dir)
-    yield result
-    _rmtree_force(base_dir)
+    base_dir = tempfile.mkdtemp(prefix="vivary-observe-fixtures-")
+    try:
+        yield build_fixtures(base_dir)
+    finally:
+        _rmtree_force(base_dir)
 
 
 @pytest.fixture(scope="module")
@@ -900,12 +898,12 @@ def test_remote_url_credentials_are_redacted(fx, allowlist):
     """
     repo = fx["paths"]["no_origin"]
     secret = "secret-token-do-not-leak"
-    _git(FIXTURE_BASE, repo, ["remote", "add", "leaky",
+    _git(fx["paths"]["base"], repo, ["remote", "add", "leaky",
                               f"https://user:{secret}@example.com/repo.git"])
     try:
         result = observe_checkouts([repo], allowlist=allowlist, now=NOW)
     finally:
-        _git(FIXTURE_BASE, repo, ["remote", "remove", "leaky"])
+        _git(fx["paths"]["base"], repo, ["remote", "remove", "leaky"])
 
     serialized = json.dumps(result)
     assert secret not in serialized, "remote credentials leaked into the observation"

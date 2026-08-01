@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from vivary_core.canonical import (
-    _utf16_sort_key,
+    utf16_sort_key,
     is_absolute_root,
     is_within,
     is_within_allowlist,
@@ -682,7 +682,7 @@ def _parse_remotes(stdout: str) -> List[Dict[str, str]]:
         try:
             return (0, locale_sort_key(name))
         except CollationDomainError:
-            return (1, _utf16_sort_key(name))
+            return (1, utf16_sort_key(name))
 
     return sorted(values, key=sort_key)
 
@@ -1010,7 +1010,7 @@ def observe_checkouts(
     return {
         "schema": OBSERVATION_SCHEMA,
         "observed_at": clock(),
-        "allowlist": sorted((normalize_path(root) for root in allowlist), key=_utf16_sort_key),
+        "allowlist": sorted((normalize_path(root) for root in allowlist), key=utf16_sort_key),
         "checkouts": checkouts,
         "refusals": refusals,
     }
