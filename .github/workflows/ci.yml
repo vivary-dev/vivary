@@ -112,25 +112,27 @@ jobs:
             -c user.name="Vivary CI" \
             -c user.email="ci@vivary.invalid" \
             commit -qm "smoke fixture"
-          tropo find "authentication module" \
-            --root "$smoke/ws" \
-            --governed \
-            --max-claims 2 \
-            --json > "$smoke/governed.json"
-          python - "$smoke/governed.json" "$smoke/ozone-request.json" <<'PY'
+          python - "$smoke/ws" "$smoke/governed.json" "$smoke/ozone-request.json" <<'PY'
           import json
+          import os
           import sys
-          from vivary_core import observe_checkouts, project_workspace_graph
+          from vivary_core import (
+              compile_task_capsule,
+              normalize_path,
+              observe_checkouts,
+              project_workspace_graph,
+          )
           from vivary_core.receipt import create_integrity_receipt
 
-          capsule = json.loads(open(sys.argv[1], encoding="utf-8").read())
-          scope = capsule["task"]["scope"]
+          root = normalize_path(os.path.realpath(os.path.abspath(sys.argv[1])))
+          scope = [root]
           graph = project_workspace_graph(
               observe_checkouts(scope, allowlist=scope)
           )
-          assert (
-              graph["workspace_fingerprint"]
-              == capsule["workspace"]["fingerprint"]
+          capsule = compile_task_capsule(
+              task={"question": "authentication module", "scope": scope},
+              graph=graph,
+              budget={"max_claims": 2},
           )
           observed_at = capsule["workspace"]["observed_at"]
           receipt = create_integrity_receipt(
@@ -158,6 +160,8 @@ jobs:
               },
           }
           with open(sys.argv[2], "w", encoding="utf-8") as target:
+              json.dump(capsule, target)
+          with open(sys.argv[3], "w", encoding="utf-8") as target:
               json.dump(request, target)
           PY
           ozone verify "$smoke/ozone-request.json" --governed --json --strict > "$smoke/ozone.json"
@@ -272,7 +276,16 @@ jobs:
           assert ozone_result["receipt_verdict"]["outcome"] == "verified"
           assert ozone_result["gate_verdict"]["schema"] == "vivary.gate-verdict/v0"
           assert ozone_result["gate_verdict"]["outcome"] == "sufficient"
-          assert ozone_result["repair_proposal"] is None
+          repair_proposal = ozone_result["repair_proposal"]
+          assert repair_proposal["schema"] == "vivary.context-repair-proposal/v0"
+          assert repair_proposal["capsule"] == {
+              "id": governed["capsule_id"],
+              "fingerprint": governed["fingerprint"],
+          }
+          assert repair_proposal["writes_performed"] == 0
+          assert repair_proposal["requires_gate"] is bool(
+              repair_proposal["proposals"]
+          )
           assert strato_decision["decision"] == "request_gate"
           assert strato_decision["reason_codes"] == ["gate_required"]
           assert strato_decision["gate"]["reason_codes"] == [
