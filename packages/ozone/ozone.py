@@ -212,9 +212,16 @@ def _bounded_repair_identifier(value):
 def _bounded_json_work_units(value, limit):
     """Count canonical-JSON work without allocating the serialized value."""
     work = 0
-    stack = [value]
+    stack = [(value, False)]
+    active_containers = set()
+    pending_values = 1
     while stack:
-        item = stack.pop()
+        item, exiting = stack.pop()
+        if exiting:
+            active_containers.remove(id(item))
+            continue
+
+        pending_values -= 1
         work += 1
         if work > limit:
             return None
@@ -234,18 +241,33 @@ def _bounded_json_work_units(value, limit):
                 if work > limit:
                     return None
         elif isinstance(item, dict):
-            if 2 * len(item) > limit - work:
+            identity = id(item)
+            if identity in active_containers:
                 return None
+            child_count = 2 * len(item)
+            if child_count > limit - work:
+                return None
+            active_containers.add(identity)
+            stack.append((item, True))
             for key, nested in item.items():
-                stack.append(key)
-                stack.append(nested)
-            if work + len(stack) > limit:
+                stack.append((key, False))
+                stack.append((nested, False))
+            pending_values += child_count
+            if work + pending_values > limit:
                 return None
         elif isinstance(item, list):
-            if len(item) > limit - work:
+            identity = id(item)
+            if identity in active_containers:
                 return None
-            stack.extend(item)
-            if work + len(stack) > limit:
+            child_count = len(item)
+            if child_count > limit - work:
+                return None
+            active_containers.add(identity)
+            stack.append((item, True))
+            for nested in item:
+                stack.append((nested, False))
+            pending_values += child_count
+            if work + pending_values > limit:
                 return None
     return work
 

@@ -3453,6 +3453,32 @@ def test_governed_verification_refuses_oversized_flat_request_before_evaluation(
     assert result["gate_verdict"] is None
 
 
+def test_governed_verification_refuses_cycles_before_reexpanding_them():
+    class SinglePassCyclicList(list):
+        def __init__(self):
+            super().__init__()
+            self.iterations = 0
+
+        def __iter__(self):
+            self.iterations += 1
+            if self.iterations > 1:
+                raise AssertionError("cyclic request container was expanded twice")
+            return super().__iter__()
+
+    cycle = SinglePassCyclicList()
+    cycle.append(cycle)
+    cycle.append(cycle)
+    request = _governed_request()
+    request["receipt"]["runtime"]["cycle"] = cycle
+
+    result = ozone.verify_governed(request)
+
+    assert result["schema"] == ozone.REFUSAL_SCHEMA
+    assert result["outcome"] == "refused"
+    assert result["reason_codes"] == ["request_work_unbounded"]
+    assert cycle.iterations == 1
+
+
 
 def test_governed_verification_refuses_unbounded_repair_products():
     group_size = 20

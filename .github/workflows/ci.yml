@@ -112,6 +112,11 @@ jobs:
             -c user.name="Vivary CI" \
             -c user.email="ci@vivary.invalid" \
             commit -qm "smoke fixture"
+          tropo find "authentication module" \
+            --root "$smoke/ws" \
+            --governed \
+            --max-claims 2 \
+            --json > "$smoke/tropo-governed.json"
           python - "$smoke/ws" "$smoke/governed.json" "$smoke/ozone-request.json" <<'PY'
           import json
           import os
@@ -196,7 +201,7 @@ jobs:
           tropo query "auth" --root "$smoke/ws" --mode semantic --json > "$smoke/out.json"
           rc=$?
           set -e
-          python - "$smoke/out.json" "$smoke/governed.json" "$smoke/ozone.json" "$smoke/strato.json" "$rc" <<'PY'
+          python - "$smoke/out.json" "$smoke/governed.json" "$smoke/tropo-governed.json" "$smoke/ozone.json" "$smoke/strato.json" "$rc" <<'PY'
           import json
           import sys
           from packaging.requirements import Requirement
@@ -205,8 +210,9 @@ jobs:
 
           data = json.loads(open(sys.argv[1], encoding="utf-8").read())
           governed = json.loads(open(sys.argv[2], encoding="utf-8").read())
-          ozone_result = json.loads(open(sys.argv[3], encoding="utf-8").read())
-          strato_decision = json.loads(open(sys.argv[4], encoding="utf-8").read())
+          tropo_governed = json.loads(open(sys.argv[3], encoding="utf-8").read())
+          ozone_result = json.loads(open(sys.argv[4], encoding="utf-8").read())
+          strato_decision = json.loads(open(sys.argv[5], encoding="utf-8").read())
           with open("packages/vivary/pyproject.toml", "rb") as stream:
               meta_project = tomllib.load(stream)["project"]
               meta_version = meta_project["version"]
@@ -238,7 +244,7 @@ jobs:
               for dependency in ozone_dependencies
               if dependency.startswith("vivary-core")
           )
-          rc = int(sys.argv[5])
+          rc = int(sys.argv[6])
           assert rc == 1, rc
           assert data["mode"] == "semantic"
           assert data["semantic"]["provider"] == "cognee"
@@ -293,11 +299,11 @@ jobs:
               "capsule_over_budget",
           ]
           assert "verdict_integrity_mismatch" not in strato_decision["gate"]["reason_codes"]
-          assert governed["schema"] == "vivary.task-capsule/v0"
-          assert governed["budget"] == {"max_claims": 2}
-          assert governed["claims"]
+          assert tropo_governed["schema"] == "vivary.task-capsule/v0"
+          assert tropo_governed["budget"] == {"max_claims": 2}
+          assert tropo_governed["claims"]
           assert {
-              check["command"] for check in governed["required_checks"]
+              check["command"] for check in tropo_governed["required_checks"]
           } == {
               "create-vivary doctor . --json",
               "tropo check --root . --json",

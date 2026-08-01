@@ -42,8 +42,8 @@ remains part of the final coordinated release train and requires a separate huma
   flags including `--budget 0`.
 - The packaged integration smoke builds every coordinated local wheel, installs the
   `vivary` meta-package with dependency resolution enabled from an isolated wheelhouse,
-  installs Strato through the same resolver, and then exercises the installed governed
-  Tropo → Ozone → Strato path.
+  installs Strato through the same resolver, exercises the installed governed Tropo
+  producer, and separately proves the installed Core → Ozone → Strato bridge.
 - The cross-platform orientation matrix now runs the full Tropo suite on
   `windows-latest`, including the governed root-casing contract.
 - Session-scoped test harnesses isolate the core and Tropo suites from host user Git
@@ -340,7 +340,7 @@ remains part of the final coordinated release train and requires a separate huma
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **89/89**, Exo **17/17**,
+- Repository verification also passed: Ozone **90/90**, Exo **17/17**,
   create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**
