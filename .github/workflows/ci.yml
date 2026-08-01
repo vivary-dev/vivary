@@ -120,9 +120,18 @@ jobs:
           python - "$smoke/governed.json" "$smoke/ozone-request.json" <<'PY'
           import json
           import sys
+          from vivary_core import observe_checkouts, project_workspace_graph
           from vivary_core.receipt import create_integrity_receipt
 
           capsule = json.loads(open(sys.argv[1], encoding="utf-8").read())
+          scope = capsule["task"]["scope"]
+          graph = project_workspace_graph(
+              observe_checkouts(scope, allowlist=scope)
+          )
+          assert (
+              graph["workspace_fingerprint"]
+              == capsule["workspace"]["fingerprint"]
+          )
           observed_at = capsule["workspace"]["observed_at"]
           receipt = create_integrity_receipt(
               capsule=capsule,
@@ -138,6 +147,7 @@ jobs:
               "workspace": {"fingerprint": capsule["workspace"]["fingerprint"]},
               "verified_at": observed_at,
               "capsule": capsule,
+              "graph": graph,
               "receipt": receipt,
               "gate": {
                   "name": "ci",
