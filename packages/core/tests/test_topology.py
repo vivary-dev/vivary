@@ -304,7 +304,7 @@ def hash_tree(root):
 
 @pytest.fixture(scope="module")
 def fx():
-    fixture_base = tempfile.mkdtemp(prefix="vivary-topology-fixtures-")
+    fixture_base = os.path.realpath(tempfile.mkdtemp(prefix="vivary-topology-fixtures-"))
     try:
         yield build_topology_fixtures(fixture_base)
     finally:
@@ -471,7 +471,7 @@ def test_git_dir_guard_real_git_real_ambient_env_var_plain_non_repo_dir_not_misc
 
 
 def test_primary_path_git_dir_guard_injectable_seam_real_git_non_repo_not_misattributed(fx):
-    non_repo_dir = tempfile.mkdtemp(prefix="lattice-non-repo-")
+    non_repo_dir = os.path.realpath(tempfile.mkdtemp(prefix="lattice-non-repo-"))
     try:
         # Mirrors _default_run_git's own env-sanitization so the seam
         # exercises the identical technique against real git, independent of
@@ -515,7 +515,7 @@ def test_primary_path_git_dir_guard_real_default_run_git_real_ambient_env_non_re
     # reported ("the calling process happens to have GIT_DIR set"), and
     # restores it unconditionally so no later test in this module is
     # affected.
-    non_repo_dir = tempfile.mkdtemp(prefix="lattice-non-repo-")
+    non_repo_dir = os.path.realpath(tempfile.mkdtemp(prefix="lattice-non-repo-"))
     previous_git_dir = os.environ.get("GIT_DIR")
     os.environ["GIT_DIR"] = os.path.join(fx["paths"]["crlf_repo"], ".git")
     try:

@@ -195,7 +195,7 @@ def build_fixtures(base_dir):
 
 @pytest.fixture(scope="module")
 def fx():
-    base_dir = tempfile.mkdtemp(prefix="vivary-model-fixtures-")
+    base_dir = os.path.realpath(tempfile.mkdtemp(prefix="vivary-model-fixtures-"))
     try:
         yield build_fixtures(base_dir)
     finally:
@@ -817,7 +817,7 @@ def test_linked_worktrees_of_a_no_remote_repo_share_one_repository_and_conflict(
     """
     from vivary_core.workspace_observe import observe_checkouts
 
-    base = tempfile.mkdtemp(prefix="vivary-worktree-")
+    base = os.path.realpath(tempfile.mkdtemp(prefix="vivary-worktree-"))
     try:
         main_wt = os.path.join(base, "main-wt")
         os.makedirs(main_wt)

@@ -196,7 +196,7 @@ def hash_tree(root):
 
 @pytest.fixture(scope="module")
 def fx():
-    base_dir = tempfile.mkdtemp(prefix="vivary-observe-fixtures-")
+    base_dir = os.path.realpath(tempfile.mkdtemp(prefix="vivary-observe-fixtures-"))
     try:
         yield build_fixtures(base_dir)
     finally:

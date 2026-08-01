@@ -68,7 +68,7 @@ DATE_B = "2026-07-21T01:00:00Z"
 
 @pytest.fixture
 def fixture_dir():
-    d = tempfile.mkdtemp(prefix="vivary-evidence-fixtures-")
+    d = os.path.realpath(tempfile.mkdtemp(prefix="vivary-evidence-fixtures-"))
     try:
         with open(os.path.join(d, "empty-gitconfig"), "w", encoding="utf-8") as handle:
             handle.write("")

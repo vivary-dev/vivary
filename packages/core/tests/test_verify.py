@@ -173,7 +173,7 @@ def build_fixtures(base_dir):
 
 @pytest.fixture(scope="module")
 def fx():
-    base_dir = tempfile.mkdtemp(prefix="vivary-verify-fixtures-")
+    base_dir = os.path.realpath(tempfile.mkdtemp(prefix="vivary-verify-fixtures-"))
     try:
         yield build_fixtures(base_dir)
     finally:
