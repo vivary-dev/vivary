@@ -22,42 +22,86 @@ decision 0008).
 
 from __future__ import annotations
 
-from vivary_core.control_reason_codes import GATE_REFERENCE_REASON
+from vivary_core.canonical import is_canonical_body_value
+from vivary_core.control_execution import _validated_identity_map
+from vivary_core.control_reason_codes import (
+    EXECUTION_REASON,
+    GATE_REFERENCE_REASON,
+    TASK_REASON,
+)
 
 __all__ = [
     "GATE_REFERENCE_REASON",
+    "TASK_REASON",
     "mark_task_done",
     "task_integrity_view",
     "with_gate_reference",
 ]
 
 
+def _is_nonblank_string(value):
+    return isinstance(value, str) and bool(value) and value == value.strip()
+
+
+def _is_task_shape(task, *, require_capsule):
+    return (
+        type(task) is dict
+        and _is_nonblank_string(task.get("task_id"))
+        and _is_nonblank_string(task.get("status"))
+        and (
+            not require_capsule
+            or _is_nonblank_string(task.get("capsule_id"))
+        )
+        and is_canonical_body_value(task)
+    )
+
+
 def mark_task_done(*, task):
-    """@param task  {task_id, status}
-    @returns a new task dict with status "done"; every other field passes
-        through unchanged
-    """
-    return {**task, "status": "done"}
+    """Return a typed, pure transition to ``done`` for a valid task."""
+    if not _is_task_shape(task, require_capsule=False):
+        return {
+            "task": None,
+            "reason_codes": [TASK_REASON["UNKNOWN_TASK_SHAPE"]],
+        }
+    return {"task": {**task, "status": "done"}, "reason_codes": []}
+
+
+def _empty_integrity_view(task, reason_code):
+    return {
+        "task_id": task.get("task_id") if type(task) is dict else None,
+        "status": task.get("status") if type(task) is dict else None,
+        "execution_edges": [],
+        "has_failed_verification": False,
+        "failed_edges": [],
+        "reason_codes": [reason_code],
+    }
 
 
 def task_integrity_view(*, task, execution_log):
-    """Combine a task's control status with the execution evidence recorded
-    against its capsule. Failed edges are always surfaced here, independent
-    of `task["status"]` - there is no code path in this module that filters
-    a failed edge out because the task says done.
+    """Combine valid task control state with its immutable execution evidence."""
+    if not _is_task_shape(task, require_capsule=True):
+        return _empty_integrity_view(task, TASK_REASON["UNKNOWN_TASK_SHAPE"])
 
-    @param task  {task_id, capsule_id, status}
-    @param execution_log  append-only log from vivary_core.control_execution
-    @returns {task_id, status, execution_edges, has_failed_verification, failed_edges}
-    """
-    edges = [edge for edge in execution_log if edge["capsule_id"] == task["capsule_id"]]
+    _, log_error = _validated_identity_map(
+        execution_log,
+        EXECUTION_REASON["UNKNOWN_EXECUTION_LOG_SHAPE"],
+    )
+    if log_error is not None:
+        return _empty_integrity_view(task, log_error)
+
+    edges = [
+        edge
+        for edge in execution_log
+        if edge["capsule_id"] == task["capsule_id"]
+    ]
     failed_edges = [edge for edge in edges if edge["outcome"] == "failed"]
     return {
         "task_id": task["task_id"],
         "status": task["status"],
         "execution_edges": edges,
-        "has_failed_verification": len(failed_edges) > 0,
+        "has_failed_verification": bool(failed_edges),
         "failed_edges": failed_edges,
+        "reason_codes": [],
     }
 
 

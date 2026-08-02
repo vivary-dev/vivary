@@ -31,7 +31,7 @@ import sys
 import tempfile
 import time
 
-__version__ = "0.2.2"
+__version__ = "0.3.0"
 RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
 RECEIPT_SCHEMA = "vivary.run_receipt.v1"
 COMMANDS = ("conflicts", "board", "claim", "roles")
@@ -39,6 +39,68 @@ RECEIPT_VALUE_FLAGS = {"--agent", "--receipt", "--root"}
 RECEIPT_KNOWN_FLAGS = RECEIPT_VALUE_FLAGS | {
     "--help", "--json", "--version", "-h",
 }
+
+CONTROL_REQUEST_SCHEMA = "vivary.exo-control-request/v0"
+CONTROL_RESULT_SCHEMA = "vivary.exo-control-result/v0"
+CONTROL_REFUSAL_SCHEMA = "vivary.exo-control-refusal/v0"
+CONTROL_REQUEST_FIELDS = frozenset({"schema", "operation", "state", "input"})
+CONTROL_OPERATION_STATE_FIELDS = {
+    "claim": frozenset({"claims"}),
+    "release": frozenset({"claims"}),
+    "expire_leases": frozenset({"claims"}),
+    "dependencies": frozenset({"tasks"}),
+    "handoff": frozenset({"claims"}),
+    "record_execution": frozenset({"execution_log"}),
+    "complete": frozenset({"task", "execution_log"}),
+    "task_view": frozenset({"task", "execution_log"}),
+}
+CONTROL_OPERATION_INPUT_FIELDS = {
+    "claim": frozenset({"scope", "actor", "now", "authority_class", "lease"}),
+    "release": frozenset({"claim_id", "actor"}),
+    "expire_leases": frozenset({"now"}),
+    "dependencies": frozenset({"task_id"}),
+    "handoff": frozenset({
+        "claim_id",
+        "receipt",
+        "capsule",
+        "from_actor",
+        "to_actor",
+        "workspace_revision",
+        "created_at",
+        "to_authority_class",
+    }),
+    "record_execution": frozenset({"receipt", "capsule"}),
+    "complete": frozenset(),
+    "task_view": frozenset(),
+}
+CONTROL_OPERATION_REQUIRED_INPUT_FIELDS = {
+    "claim": frozenset({"scope", "actor", "now"}),
+    "release": frozenset({"claim_id", "actor"}),
+    "expire_leases": frozenset({"now"}),
+    "dependencies": frozenset({"task_id"}),
+    "handoff": frozenset({
+        "claim_id",
+        "receipt",
+        "capsule",
+        "from_actor",
+        "to_actor",
+        "workspace_revision",
+        "created_at",
+    }),
+    "record_execution": frozenset({"receipt", "capsule"}),
+    "complete": frozenset(),
+    "task_view": frozenset(),
+}
+CONTROL_MAX_REQUEST_BYTES = 1024 * 1024
+CONTROL_MAX_DEPTH = 64
+CONTROL_MAX_COLLECTION_LENGTH = 10_000
+CONTROL_MAX_STRING_BYTES = 1024 * 1024
+CONTROL_MAX_VALUES_VISITED = 100_000
+CONTROL_REASON_INVALID_DOCUMENT = "invalid_request_document"
+CONTROL_REASON_INVALID_VALUE = "invalid_json_value"
+CONTROL_REASON_TOO_DEEP = "request_too_deeply_nested"
+CONTROL_REASON_TOO_LARGE = "request_too_large"
+CONTROL_REASON_UNBOUNDED = "request_work_unbounded"
 RECEIPT_RESERVED_WINDOWS_NAMES = {
     "CON",
     "PRN",
@@ -351,6 +413,48 @@ def _extract_receipt_path(argv):
         return env_path, "env"
     return None, None
 
+def _control_request_path(argv):
+    if not argv or argv[0] != "control":
+        return None
+    options_ended = False
+    skip_value = False
+    for token in argv[1:]:
+        if skip_value:
+            skip_value = False
+            continue
+        if not options_ended:
+            if token == "--":
+                options_ended = True
+                continue
+            if token == "--receipt":
+                skip_value = True
+                continue
+            if token.startswith("--receipt="):
+                continue
+            if token != "-" and token.startswith("-"):
+                continue
+        return token
+    return None
+
+
+def _receipt_targets_control_request(request_path, receipt_path):
+    if request_path is None or not receipt_path:
+        return False
+    if request_path == "-":
+        return True
+    try:
+        request_target = os.path.realpath(
+            os.path.abspath(os.path.expanduser(request_path))
+        )
+        receipt_target = os.path.realpath(
+            os.path.abspath(os.path.expanduser(receipt_path))
+        )
+        if os.path.normcase(request_target) == os.path.normcase(receipt_target):
+            return True
+        return os.path.samefile(request_target, receipt_target)
+    except (OSError, ValueError, AttributeError):
+        return False
+
 
 def _receipt_flags(argv):
     flags = set()
@@ -389,7 +493,7 @@ def _receipt_command(argv):
             if name in RECEIPT_VALUE_FLAGS and "=" not in token:
                 skip_value = True
             continue
-        if token in COMMANDS:
+        if token == "control" or token in COMMANDS:
             return token
     return "conflicts"
 
@@ -495,8 +599,364 @@ def _append_run_receipt(
         return False
     return True
 
+def _control_refusal(reason_codes):
+    return {
+        "schema": CONTROL_REFUSAL_SCHEMA,
+        "reason_codes": list(dict.fromkeys(reason_codes)),
+    }
+
+
+def _control_string_within_limit(value):
+    if len(value) > CONTROL_MAX_STRING_BYTES:
+        return False
+    encoded_length = 0
+    for character in value:
+        codepoint = ord(character)
+        if codepoint <= 0x7F:
+            encoded_length += 1
+        elif codepoint <= 0x7FF:
+            encoded_length += 2
+        elif codepoint <= 0xFFFF:
+            encoded_length += 3
+        else:
+            encoded_length += 4
+        if encoded_length > CONTROL_MAX_STRING_BYTES:
+            return False
+    return True
+
+
+def _control_preflight_reason(request):
+    """Bound a direct JSON-like request without recursively walking it."""
+    values_visited = 0
+    active_containers = set()
+    stack = [("value", request, 0)]
+
+    while stack:
+        frame = stack.pop()
+        frame_kind = frame[0]
+        if frame_kind == "exit":
+            active_containers.discard(frame[1])
+            continue
+        if frame_kind == "list_items":
+            try:
+                item = next(frame[1])
+            except StopIteration:
+                continue
+            stack.append(frame)
+            stack.append(("value", item, frame[2]))
+            continue
+        if frame_kind == "dict_items":
+            try:
+                key, item = next(frame[1])
+            except StopIteration:
+                continue
+            stack.append(frame)
+            stack.append(("value", item, frame[2]))
+            stack.append(("value", key, frame[2]))
+            continue
+
+        item = frame[1]
+        depth = frame[2]
+        values_visited += 1
+        if values_visited > CONTROL_MAX_VALUES_VISITED:
+            return CONTROL_REASON_UNBOUNDED
+
+        item_type = type(item)
+        if item_type is str:
+            if not _control_string_within_limit(item):
+                return CONTROL_REASON_UNBOUNDED
+            continue
+        if item_type in (type(None), bool, int, float):
+            continue
+        if item_type not in (list, dict):
+            return CONTROL_REASON_INVALID_VALUE
+
+        identity = id(item)
+        if identity in active_containers:
+            return CONTROL_REASON_UNBOUNDED
+        next_depth = depth + 1
+        if next_depth > CONTROL_MAX_DEPTH:
+            return CONTROL_REASON_TOO_DEEP
+        if len(item) > CONTROL_MAX_COLLECTION_LENGTH:
+            return CONTROL_REASON_UNBOUNDED
+
+        active_containers.add(identity)
+        stack.append(("exit", identity))
+        if item_type is list:
+            stack.append(("list_items", iter(item), next_depth))
+        else:
+            stack.append(("dict_items", iter(item.items()), next_depth))
+
+    return None
+
+
+def _load_control_core():
+    """Load Core only for the opt-in governed surface."""
+    package_root = os.path.dirname(os.path.abspath(__file__))
+    sibling_core = os.path.join(os.path.dirname(package_root), "core")
+    if (
+        os.path.isdir(os.path.join(sibling_core, "vivary_core"))
+        and sibling_core not in sys.path
+    ):
+        sys.path.insert(0, sibling_core)
+    from vivary_core import control
+    from vivary_core.canonical import is_canonical_body_value
+
+    return control, is_canonical_body_value
+
+
+def _control_field_errors(value, allowed_fields, required_fields, section):
+    if type(value) is not dict:
+        return [f"invalid_{section}"]
+    fields = set(value)
+    errors = []
+    errors.extend(
+        f"missing_{section}_field:{field}"
+        for field in sorted(required_fields - fields)
+    )
+    errors.extend(
+        f"unknown_{section}_field:{field}"
+        for field in sorted(fields - allowed_fields)
+    )
+    return errors
+
+
+def _validate_control_envelope(request):
+    if type(request) is not dict:
+        return ["unknown_request_shape"]
+
+    fields = set(request)
+    errors = []
+    errors.extend(f"missing_field:{field}" for field in sorted(CONTROL_REQUEST_FIELDS - fields))
+    errors.extend(f"unknown_field:{field}" for field in sorted(fields - CONTROL_REQUEST_FIELDS))
+    if request.get("schema") != CONTROL_REQUEST_SCHEMA:
+        errors.append("invalid_schema")
+
+    operation = request.get("operation")
+    if type(operation) is not str or operation not in CONTROL_OPERATION_STATE_FIELDS:
+        errors.append("invalid_operation")
+    if errors:
+        return errors
+
+    errors.extend(
+        _control_field_errors(
+            request["state"],
+            CONTROL_OPERATION_STATE_FIELDS[operation],
+            CONTROL_OPERATION_STATE_FIELDS[operation],
+            "state",
+        )
+    )
+    errors.extend(
+        _control_field_errors(
+            request["input"],
+            CONTROL_OPERATION_INPUT_FIELDS[operation],
+            CONTROL_OPERATION_REQUIRED_INPUT_FIELDS[operation],
+            "input",
+        )
+    )
+    return errors
+
+
+def _dispatch_governed_control(core, operation, state, input_value):
+    if operation == "claim":
+        return core.request_claim(active_claims=state["claims"], request=input_value)
+    if operation == "release":
+        return core.release_claim(
+            active_claims=state["claims"],
+            claim_id=input_value["claim_id"],
+            actor=input_value["actor"],
+        )
+    if operation == "expire_leases":
+        return core.expire_leases(active_claims=state["claims"], now=input_value["now"])
+    if operation == "dependencies":
+        return core.evaluate_dependencies(tasks=state["tasks"], task_id=input_value["task_id"])
+    if operation == "handoff":
+        return core.create_handoff(
+            active_claims=state["claims"],
+            claim_id=input_value["claim_id"],
+            receipt=input_value["receipt"],
+            capsule=input_value["capsule"],
+            from_actor=input_value["from_actor"],
+            to_actor=input_value["to_actor"],
+            workspace_revision=input_value["workspace_revision"],
+            created_at=input_value["created_at"],
+            to_authority_class=input_value.get("to_authority_class"),
+        )
+    if operation == "record_execution":
+        return core.record_execution(
+            log=state["execution_log"],
+            receipt=input_value["receipt"],
+            capsule=input_value["capsule"],
+        )
+    if operation == "complete":
+        current_view = core.task_integrity_view(
+            task=state["task"],
+            execution_log=state["execution_log"],
+        )
+        if current_view["reason_codes"]:
+            return {
+                "task": None,
+                "view": current_view,
+                "reason_codes": current_view["reason_codes"],
+            }
+        transition = core.mark_task_done(task=state["task"])
+        if transition["reason_codes"]:
+            return {
+                "task": None,
+                "view": current_view,
+                "reason_codes": transition["reason_codes"],
+            }
+        task = transition["task"]
+        view = core.task_integrity_view(
+            task=task,
+            execution_log=state["execution_log"],
+        )
+        return {"task": task, "view": view, "reason_codes": view["reason_codes"]}
+    if operation == "task_view":
+        return core.task_integrity_view(
+            task=state["task"],
+            execution_log=state["execution_log"],
+        )
+    raise AssertionError(f"unrecognized governed operation {operation!r}")
+
+
+def governed_control(request):
+    """Dispatch one bounded, caller-owned Core control request."""
+    preflight_reason = _control_preflight_reason(request)
+    if preflight_reason is not None:
+        return _control_refusal([preflight_reason])
+
+    core, is_canonical_body_value = _load_control_core()
+    if not is_canonical_body_value(request):
+        return _control_refusal([CONTROL_REASON_INVALID_VALUE])
+
+    errors = _validate_control_envelope(request)
+    if errors:
+        return _control_refusal(errors)
+
+    operation = request["operation"]
+    return {
+        "schema": CONTROL_RESULT_SCHEMA,
+        "operation": operation,
+        "result": _dispatch_governed_control(
+            core,
+            operation,
+            request["state"],
+            request["input"],
+        ),
+    }
+
+
+class _ControlRequestDocumentError(Exception):
+    def __init__(self, reason_code):
+        super().__init__(reason_code)
+        self.reason_code = reason_code
+
+
+def _reject_control_json_constant(_value):
+    raise ValueError("non-JSON numeric constant")
+
+
+def _control_object_from_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate object field")
+        result[key] = value
+    return result
+
+
+def _read_control_request(path):
+    try:
+        if path == "-":
+            source = getattr(sys.stdin, "buffer", sys.stdin)
+            document = source.read(CONTROL_MAX_REQUEST_BYTES + 1)
+        else:
+            with open(path, "rb") as source:
+                document = source.read(CONTROL_MAX_REQUEST_BYTES + 1)
+    except (OSError, UnicodeError) as error:
+        raise _ControlRequestDocumentError(CONTROL_REASON_INVALID_DOCUMENT) from error
+
+    if type(document) is str:
+        try:
+            document = document.encode("utf-8")
+        except UnicodeError as error:
+            raise _ControlRequestDocumentError(CONTROL_REASON_INVALID_DOCUMENT) from error
+    if type(document) is not bytes:
+        raise _ControlRequestDocumentError(CONTROL_REASON_INVALID_DOCUMENT)
+    if len(document) > CONTROL_MAX_REQUEST_BYTES:
+        raise _ControlRequestDocumentError(CONTROL_REASON_TOO_LARGE)
+
+    try:
+        return json.loads(
+            document.decode("utf-8"),
+            parse_constant=_reject_control_json_constant,
+            object_pairs_hook=_control_object_from_pairs,
+        )
+    except RecursionError as error:
+        raise _ControlRequestDocumentError(CONTROL_REASON_TOO_DEEP) from error
+    except (UnicodeError, ValueError) as error:
+        raise _ControlRequestDocumentError(CONTROL_REASON_INVALID_DOCUMENT) from error
+
+
+def _emit_control(result, json_output):
+    if json_output:
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+        return
+
+    if result["schema"] == CONTROL_REFUSAL_SCHEMA:
+        reasons = result["reason_codes"]
+        suffix = f": {', '.join(reasons)}" if reasons else ""
+        print(f"exo control: refused{suffix}")
+        return
+
+    core_result = result["result"]
+    reasons = core_result.get("reason_codes", [])
+    decision = core_result.get("decision")
+    status = decision if type(decision) is str else ("refused" if reasons else "ok")
+    print(f"exo control: {result['operation']} {status}")
+    if reasons:
+        print(f"reasons: {', '.join(reasons)}")
+
+
+def _control_strict_failure(result):
+    if result["schema"] == CONTROL_REFUSAL_SCHEMA:
+        return True
+    core_result = result["result"]
+    return core_result.get("decision") == "refused" or bool(core_result.get("reason_codes"))
+
+
+def cmd_control(args):
+    try:
+        request = _read_control_request(args.request)
+    except _ControlRequestDocumentError as error:
+        result = _control_refusal([error.reason_code])
+    else:
+        result = governed_control(request)
+    _emit_control(result, args.json)
+    return 1 if args.strict and _control_strict_failure(result) else 0
+
+
+def _main_control(argv):
+    parser = argparse.ArgumentParser(
+        prog="exo control",
+        description="Dispatch one governed Core control request.",
+        allow_abbrev=False,
+    )
+    parser.add_argument("request", metavar="REQUEST", help="JSON request path, or - for stdin")
+    parser.add_argument("--governed", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--json", action="store_true", help="emit canonical compact JSON")
+    parser.add_argument("--strict", action="store_true", help="fail on a refusal or reason code")
+    parser.add_argument("--receipt", default=None, metavar="PATH", help=argparse.SUPPRESS)
+    args = parser.parse_args(argv)
+    if not args.governed:
+        parser.error("control requires --governed")
+    return cmd_control(args)
+
 
 def _main(argv=None):
+    if argv and argv[0] == "control":
+        return _main_control(argv[1:])
     p = argparse.ArgumentParser(prog="exo",
                                 description="The coordination layer over the tropo graph.")
     p.add_argument("--version", action="version", version=f"exo {__version__}")
@@ -525,8 +985,18 @@ def _main(argv=None):
 
 def main(argv=None):
     raw_argv = list(sys.argv[1:] if argv is None else argv)
-    started_at = time.monotonic()
     receipt_path, receipt_source = _extract_receipt_path(raw_argv)
+    request_path = _control_request_path(raw_argv)
+    if _receipt_targets_control_request(request_path, receipt_path):
+        if _receipt_command(raw_argv) in {"help", "version"}:
+            receipt_path, receipt_source = None, None
+        else:
+            print(
+                "exo: receipt: receipt path must not identify the governed control request",
+                file=sys.stderr,
+            )
+            return 2
+    started_at = time.monotonic() if receipt_path else None
     try:
         rc = _main(raw_argv)
     except SystemExit as e:

@@ -14,6 +14,55 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: governed Exo control (#204)] — 2026-08-01
+
+Implements [#204](https://github.com/vivary-dev/vivary/issues/204). The
+[release-status section](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) owns current published and
+development version truth.
+
+This slice advances the unpublished source versions to `vivary-core` **0.2.5**,
+`vivary-exo` **0.3.0**, and the `vivary` meta-package **0.1.4**. Published versions
+remain unchanged.
+
+### Added
+
+- Added the Core-owned governed control lifecycle for exact actors, claims, leases,
+  dependencies, handoffs, execution evidence, and task integrity over caller-owned
+  values.
+- Added the unreleased `exo control REQUEST --governed [--json] [--strict]` adapter.
+  The [command reference](https://github.com/vivary-dev/vivary/blob/dev/docs/COMMANDS.md#governed-control-development-source) owns
+  its request envelope and operation list.
+
+### Changed
+
+- Preserved legacy `exo claim` graph coordination. The governed adapter does not
+  persist caller state or change the legacy claim path.
+- No package was published, deployed, or enabled by default.
+
+### Verification
+
+- `python -m pytest packages/core/tests/ -q` — **739 passed** on Windows;
+  **738 passed, 1 skipped** under WSL Linux.
+- `python packages/exo/tests/test_exo.py` — **29/29 passed** on Windows and WSL
+  Linux.
+- `python -m pip wheel --no-deps --wheel-dir <wheelhouse> ...` built all eight
+  coordinated local wheels. A fresh environment resolved `vivary` and
+  `vivary-strato` only from that wheelhouse, passed `pip check`, exercised installed
+  `exo control ... --governed --json --strict`, and verified Core **0.2.5**, Exo
+  **0.3.0**, meta **0.1.4**, dependency floors, the public `record_execution` import,
+  and test-free wheel contents.
+- `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**
+  site tests passed, **23** pages built, and **1,708** local references plus **1,082**
+  anchors had zero failures.
+- `npm audit --audit-level=high` — no known vulnerabilities.
+- `python scripts/tests/test_package_docs_parity.py` — **10/10 passed**;
+  `python scripts/check_package_docs_parity.py` matched **6** published manifests and
+  **2** unpublished allowlist entries.
+- `python scripts/check_line_endings.py` checked **265** tracked text files with
+  **8** legacy allowlist entries; `git diff --check` was clean.
+
+Publishing remains a manual human gate.
+
 ## [Unreleased: governed Tropo, Strato, and Ozone adapters] — 2026-07-26
 
 Affects the source checkout's unreleased `vivary-core` **0.2.4**, `vivary-tropo`

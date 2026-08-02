@@ -29,7 +29,6 @@ from vivary_core.control_claims import (  # noqa: F401
 from vivary_core.control_dependencies import (  # noqa: F401
     DEPENDENCY_DECISION,
     DEPENDENCY_REASON,
-    detect_dependency_cycle,
     evaluate_dependencies,
 )
 from vivary_core.control_handoffs import (  # noqa: F401
@@ -39,11 +38,12 @@ from vivary_core.control_handoffs import (  # noqa: F401
 )
 from vivary_core.control_execution import (  # noqa: F401
     EXECUTION_REASON,
-    append_execution_edges,
     derive_execution_edges,
+    record_execution,
 )
 from vivary_core.control_tasks import (  # noqa: F401
     GATE_REFERENCE_REASON,
+    TASK_REASON,
     mark_task_done,
     task_integrity_view,
     with_gate_reference,
@@ -64,15 +64,15 @@ __all__ = [
     "request_claim",
     "DEPENDENCY_DECISION",
     "DEPENDENCY_REASON",
-    "detect_dependency_cycle",
     "evaluate_dependencies",
     "HANDOFF_DECISION",
     "HANDOFF_REASON",
     "create_handoff",
     "EXECUTION_REASON",
-    "append_execution_edges",
     "derive_execution_edges",
+    "record_execution",
     "GATE_REFERENCE_REASON",
+    "TASK_REASON",
     "mark_task_done",
     "task_integrity_view",
     "with_gate_reference",

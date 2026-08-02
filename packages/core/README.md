@@ -1,6 +1,6 @@
 # vivary-core
 
-The governed-context shared seam every Vivary role package will speak through:
+The governed-context shared seam Vivary role packages use:
 
 - **`canonical`** — canonical JSON serialization, sha256 fingerprints, deterministic
   IDs, and the public UTF-16 ordering key used by role adapters. Same input, same bytes,
@@ -109,33 +109,61 @@ The governed-context shared seam every Vivary role package will speak through:
   replace evidence-derived checks and resolve undetermined-check unknowns only for that
   checkout. Graphless verification requires the capsule's effective check list to equal
   the task declaration exactly.
-- **`control_*`** (Exo) — claims, leases, handoffs, dependency cycles,
-  execution evidence, and task views over caller-owned state; one active claim
-  per scope, including equivalent Win32 device-path spellings. Malformed leases
-  cannot hold a scope forever, receipt integrity is rechecked before handoffs
-  or execution edges are created, and completing a task cannot erase a failed
-  verification edge.
+- **`control_*`** (Exo) — Core-owned lifecycle decisions over caller-owned values.
+  Claims, leases, dependency cycles, handoffs, execution evidence, and task views use
+  typed projections that do not mutate the supplied ledger or log. See
+  [Governed Exo control](#governed-exo-control).
 - **`recall_*`** (Bellamente) — an evaluation-only candidate-recall firewall.
   [SPEC §6.2](https://github.com/vivary-dev/vivary/blob/dev/docs/bellamente-memory/SPEC-bellamente-memory.md#62-required-distinct-results)
   owns its decisions, conditions, and truth/mutation rules; it never rewrites
   authored truth.
 
+## Governed Exo control
+
+`vivary_core.control` is the public Core lifecycle surface. Its clean-cutover
+interfaces and typed projections replace earlier standalone control signatures. Exo
+adapts this surface. It does not define a second lifecycle model.
+
+- An actor is exactly `{kind, id}`. Core validates both the actor kind and authority
+  class. Only a human actor can hold owner-class authority.
+- A claim request is exactly `{scope, actor, now, authority_class?, lease?}`. `now`
+  is required. A lease is live only when `granted_at <= now < expires_at`, and a
+  persisted claim must have been created within that interval. The claim ID binds the
+  normalized scope, exact actor, authority class, lease, and creation time. Caller
+  ledgers must contain unique, recomputable active claims with pairwise-disjoint scopes.
+  Malformed, duplicate, or overlapping entries fail closed. A projection beyond
+  10,000 active claims or 10,000 total scope paths returns `claim_work_unbounded`.
+  Expired entries remain until the caller explicitly projects them through
+  `expire_leases`.
+- Dependency evaluation returns one decision with unmet dependencies or an integrated
+  cycle result. It does not leave cycle detection to an adapter.
+- A handoff reads a live caller ledger and records evidence. It never transfers or
+  changes a claim. It binds the exact holder, sender, recipient, scope, timestamps,
+  workspace revision, complete capsule, and authorized receipt. The receipt runtime
+  actor must be the holder. Its creation time cannot predate the claim or lease or
+  follow the handoff.
+- `record_execution` derives edges only from an exact capsule and its authorized
+  receipt, then returns `{edges, added, reason_codes}`. Exact replays add nothing.
+  The same edge ID with different evidence refuses without changing the log. Logs or
+  receipts exceeding 10,000 evidence edges fail closed before derivation.
+- Completion changes only a task's control status. `task_integrity_view` always returns
+  failed execution evidence for the task's capsule.
+
+The [Exo command reference](../../docs/COMMANDS.md#governed-control-development-source)
+owns the request-file envelope and CLI exit behavior.
+
 Zero runtime dependencies. Python 3.11+.
 
-This package remains unpublished until the coordinated release train. See the
-[release workflow](https://github.com/vivary-dev/vivary/blob/dev/docs/RELEASE-WORKFLOW.md#2-set-release-truth-first) for
-version ownership.
+This package is unpublished development source. [The root release status](../../README.md#release-status)
+owns version and publication truth.
 
 ## Provenance and proof
 
-This package is a **reference-guided port** of a proven Node.js
-implementation developed and hardened in The Little AI Company's
-governed-context research program (adversarially reviewed, benchmarked on real
-workspaces). Frozen JSON contracts remain byte-identical
-where their owning authority is unchanged: the ContextIntegrityEvent v0
-conformance and replay fixtures (including the pinned projection fingerprint),
-evidence-store JSONL bytes and git object SHAs, and capsule digest and receipt
-bytes over captured real-pipeline capsules.
+Core uses reference fixtures to test named frozen contracts. Byte-exact assertions
+apply to the ContextIntegrityEvent v0 conformance and replay fixtures, evidence-store
+JSONL bytes and Git object SHAs, and captured capsule-digest and receipt bytes.
+`control_*` is a Vivary-owned contract. It makes no Agent Relay compatibility or
+byte-parity claim.
 
 **ADAPTATION — CandidateRecallProvider:** [the Bellamente memory SPEC](../../docs/bellamente-memory/SPEC-bellamente-memory.md#62-required-distinct-results)
 owns firewall-result truth and intentionally supersedes the frozen Node
@@ -153,8 +181,8 @@ pip install pytest
 python -m pytest packages/core/tests/ -q
 ```
 
-The current platform-specific proof is **767 tests on Windows**. On Linux, it is
-**766 passed plus 1 skip**. The suite translates the reference contracts across
+The current platform-specific proof is **739 tests on Windows**. On Linux, it is
+**738 passed plus 1 skip**. The suite translates the reference contracts across
 observation, capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces,
 corruption handling, real-git evidence-store round trips, and byte-exact cross-runtime
 fixtures.

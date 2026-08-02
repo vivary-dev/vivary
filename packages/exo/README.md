@@ -1,77 +1,64 @@
 # vivary-exo
 
-> Status: **working** (coordination + graph-native claims). The optional, outermost layer.
-> Current release: **0.2.2**, including claim-write hardening for symlinked,
-> out-of-workspace, and hard-linked work item files.
+> Release status: [root release status](../../README.md#release-status).
+> `exo control` is unpublished development source.
 
-**The coordination layer** — the exosphere. Engaged only when one agent becomes
-many. exo does **not run agents** (that's the harness / the loops skill) — it reasons
-about coordination over the shared tropo graph and hands workers their role
-contracts. It reads the graph in-process (one graph, no fork) and has one narrow writer:
-`exo claim`, which only updates an opt-in `assignee` field on work items under
-`changes/`.
+`exo` is the optional outer coordination layer. It has two separate surfaces:
 
-Most workspaces never need this. Single-agent workspaces stop at **tropo + strato**.
+- **Legacy graph coordination** reads the Tropo graph. `exo claim` remains the only
+  legacy graph write. It updates an opted-in work item's `assignee`.
+- **Governed control** dispatches one bounded Core lifecycle request over
+  caller-supplied state. The caller persists the returned projection.
 
-## Commands
+Most workspaces do not need Exo. Single-agent workspaces stop at `tropo + strato`.
+
+## Legacy graph coordination
 
 ```bash
-python exo.py conflicts --root <workspace>   # who would collide
-python exo.py board     --root <workspace>   # what's in flight
-python exo.py claim local-ci-baseline --agent connie --root <workspace>
-python exo.py roles                          # the bounded worker contracts
-python exo.py board --root <workspace> --receipt .vivary/receipts.jsonl
+exo conflicts --root <workspace>
+exo board --root <workspace>
+exo claim local-ci-baseline --agent connie --root <workspace>
+exo roles
 ```
 
-- **`conflicts`** — among `active` work items (changes with `status: active`), flags
-  pairs that **share an outbound target** (two in-flight changes touching the same
-  module / verification / gate). The graph's collision signal — the coordination
-  hazard a task list can't show.
-- **`board`** — work items grouped by `status` (and `@assignee` if the workspace
-  declares one). The "what's in flight" surface.
-- **`claim <id> --agent <handle>`** — claim a work item under `changes/` by setting
-  top-level `assignee`. Agent handles may have an optional leading `@` and then
-  letters, digits, `.`, `_`, or `-`; the stored value omits the leading `@`.
-  BOM-prefixed frontmatter is updated in place, and malformed frontmatter is rejected
-  instead of guessed through. Claim writes refuse symlinked or out-of-workspace work
-  item files and replace the workspace file instead of truncating hard-linked targets.
-- **`roles`** — strato's role grammar as bounded contracts: Orchestrator · Scout ·
-  Researcher · Builder · Verifier · Reviewer · Archivist. Workers get a bounded
-  contract; they never become product owners.
+`conflicts` reports active work items that share an outbound target. `board` groups
+work items by `status` and declared `@assignee`. `roles` prints the bounded worker
+contracts.
 
-For local debugging, pass `--receipt PATH` or set `VIVARY_RECEIPT_LOG=PATH` to append
-a dependency-free JSONL run receipt. Receipts stay local and record only command
-envelope data such as tool version, command, flag names, exit code, duration, Python,
-and platform; they do not capture stdout, stderr, file contents, agent handles,
-target ids, local paths, or graph content.
-
-To enable claims, opt into the coordination field:
+To enable the legacy claim field, declare it in the workspace:
 
 ```toml
 packs = ["repo-graph", "coordination"]
 ```
 
-Then:
+`exo claim` accepts an optional leading `@` in an agent handle. It refuses malformed
+frontmatter, undeclared fields, and symlinked or out-of-workspace work item targets. For
+a hard-linked work item, it safely replaces the workspace path without mutating the
+other linked file.
+
+## Governed control
 
 ```bash
-exo claim local-ci-baseline --agent connie
-exo board
-exo conflicts
-tropo check
+exo control REQUEST --governed [--json] [--strict]
 ```
 
-## Design
+This command sends one complete request to Core. It does not persist the request,
+result, claim ledger, task list, or execution log. The
+[command reference](../../docs/COMMANDS.md#governed-control-development-source) owns
+the exact request envelope, operation list, runnable examples, and strict exits. The
+[Core control contract](../core/README.md#governed-exo-control) owns lifecycle
+semantics.
 
-- Reuses tropo in-process (like ozone) — no second state store, no new schema.
-- Coordination state is **graph-native**: `status` marks in-flight work and
-  `assignee` records ownership when the workspace opts into `packs = ["coordination"]`.
-  Because `tropo check` is strict, exo refuses to write undeclared fields.
+The adapter adds no scheduler, state store, agent runner, network or provider call,
+MCP server, repair write, or publishing path. It makes no Agent Relay compatibility or
+byte-parity claim.
+
+Local `--receipt` records are separate from governed state and are not telemetry. See
+the [receipt policy](../../docs/COMMANDS.md#local-run-receipts-are-not-telemetry).
 
 ## Requirements
 
-Python 3.11+. Loads the sibling `packages/tropo/tropo.py` engine in-process (no pip
-install needed in the repo); packaged builds depend on the `tropo` package.
+Python 3.11+. Packaged builds declare the Tropo and Core dependency floors in
+[pyproject.toml](pyproject.toml).
 
----
-
-Website & docs: <https://vivary.vercel.app/>
+Website and canonical docs: <https://vivary.vercel.app/>

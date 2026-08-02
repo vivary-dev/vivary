@@ -1,28 +1,8 @@
-"""Pytest translation of tests/control.test.mjs (graduation slice 5,
-ticket #8, decision 0008).
-
-Contract tests for the Exo control-graph slice. Agent Relay's durable
-coordination concepts (src/migration/relay-views.mjs "Exo" view: owner,
-next actor, claim, dependencies, blocked_reason, handoff) are the migration
-source for the vocabulary here, projected into a typed, pure, in-memory
-module family that mirrors vivary_core.policy_*'s purity: no I/O, no
-persistence, caller-owned state threaded in and out, pinned reason codes,
-fail closed on any unrecognized shape.
-
-Three laws pinned end-to-end in this file:
-  1. claim stays the one narrow writer - exactly one active claim per
-     scope, overlapping-scope claims are refused as conflicts before any
-     edit collides (PRD user story 6).
-  2. control and execution stay distinguishable - execution edges derived
-     from receipts are append-only evidence; a task marked done can never
-     erase or mask a failed verification edge (docs/ARCHITECTURE.md, "Exo
-     execution graph").
-  3. workers never become product owners - an actor of kind worker/agent
-     cannot acquire ownership-class authority via a claim or a handoff.
-"""
+"""Contract tests for Core-owned governed control semantics (#204)."""
 
 from __future__ import annotations
 
+import copy
 import inspect
 import os
 import sys
@@ -33,1381 +13,662 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PY_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, PY_ROOT)
 
-from vivary_core.control_scope import normalize_scope, scopes_overlap  # noqa: E402
-from vivary_core.control_actors import (  # noqa: E402
+from vivary_core.capsule_compile import compile_task_capsule, verify_task_capsule_integrity  # noqa: E402
+from vivary_core.canonical import deterministic_id  # noqa: E402
+from vivary_core.control import (  # noqa: E402
     ACTOR_KIND,
     AUTHORITY_CLASS,
-    can_hold_authority,
-)
-from vivary_core.control_claims import (  # noqa: E402
-    CLAIM_DECISION,
-    expire_leases,
-    release_claim,
-    request_claim,
-)
-from vivary_core.control_reason_codes import (  # noqa: E402
     AUTHORITY_REASON,
+    CLAIM_DECISION,
     CLAIM_REASON,
     DEPENDENCY_DECISION,
     DEPENDENCY_REASON,
     EXECUTION_REASON,
+    GATE_REFERENCE_REASON,
     HANDOFF_DECISION,
     HANDOFF_REASON,
     LEASE_REASON,
-)
-from vivary_core.control_dependencies import detect_dependency_cycle, evaluate_dependencies  # noqa: E402
-from vivary_core.control_handoffs import create_handoff  # noqa: E402
-from vivary_core.control_execution import append_execution_edges, derive_execution_edges  # noqa: E402
-from vivary_core.control_tasks import mark_task_done, task_integrity_view, with_gate_reference  # noqa: E402
-from vivary_core.canonical import deterministic_id, fingerprint  # noqa: E402
-from vivary_core.receipt import RECEIPT_SCHEMA  # noqa: E402
-from vivary_core.capsule_compile import CAPSULE_SCHEMA  # noqa: E402
+    TASK_REASON,
+    can_hold_authority,
+    create_handoff,
+    derive_execution_edges,
+    evaluate_dependencies,
+    expire_leases,
+    mark_task_done,
+    record_execution,
+    release_claim,
+    request_claim,
+    task_integrity_view,
+    with_gate_reference,
+)  # noqa: E402
+from vivary_core.control_scope import normalize_scope, scopes_overlap  # noqa: E402
+from vivary_core.receipt import create_integrity_receipt  # noqa: E402
+from vivary_core.verify_receipt import verify_receipt_integrity  # noqa: E402
+from vivary_core.workspace_model import project_workspace_graph  # noqa: E402
 
-CONTROL_DIR = os.path.join(PY_ROOT, "vivary_core")
-CONTROL_MODULE_NAMES = [
-    "control_actors.py",
-    "control_claims.py",
-    "control_dependencies.py",
-    "control_execution.py",
-    "control_handoffs.py",
-    "control_reason_codes.py",
-    "control_scope.py",
-    "control_tasks.py",
-    "control.py",
-]
-
-# -- fixtures shared across groups ---------------------------------------------------
-
+NOW = "2026-08-01T12:00:00Z"
+RUN_AT = "2026-08-01T12:10:00Z"
+HANDOFF_AT = "2026-08-01T12:15:00Z"
+EXPIRES_AT = "2026-08-01T13:00:00Z"
 HUMAN = {"kind": ACTOR_KIND["HUMAN"], "id": "jeff"}
-AGENT = {"kind": ACTOR_KIND["AGENT"], "id": "codex:task-1"}
-WORKER = {"kind": ACTOR_KIND["WORKER"], "id": "worker:runner-1"}
+AGENT = {"kind": ACTOR_KIND["AGENT"], "id": "agent:runner"}
+OTHER_AGENT = {"kind": ACTOR_KIND["AGENT"], "id": "agent:reviewer"}
+WORKER = {"kind": ACTOR_KIND["WORKER"], "id": "worker:runner"}
+_MISSING = object()
 
 
-def scope(project, paths):
-    return {"project": project, "paths": paths}
+def scope(project="vivary", paths=None):
+    return {"project": project, "paths": ["packages/exo"] if paths is None else paths}
 
 
-def capsule_like(overrides=None):
-    base = {
-        "schema": CAPSULE_SCHEMA,
-        "capsule_id": "capsule_abc",
-        "fingerprint": "sha256:capsule-fp",
-        "workspace": {"fingerprint": "sha256:workspace-fp", "observed_at": "2026-07-20T15:00:00.000Z"},
-    }
-    return {**base, **(overrides or {})}
+def lease(granted_at=NOW, expires_at=EXPIRES_AT):
+    return {"granted_at": granted_at, "expires_at": expires_at}
 
 
-def receipt_like(overrides=None):
-    overrides = overrides or {}
-    body = {
-        "schema": RECEIPT_SCHEMA,
-        "capsule": {"id": "capsule_abc", "fingerprint": "sha256:capsule-fp"},
-        "workspace": {"fingerprint": "sha256:workspace-fp", "observed_at": "2026-07-20T15:00:00.000Z"},
-        "runtime": {"harness": "claude-code", "actor": "codex:task-1"},
-        "checks": [{"name": "unit-and-contract-tests", "command": "npm test", "outcome": "passed"}],
-        "claims_in_scope": [],
-        "claims_verified": [],
-        "claims_unverified": [],
-        "unresolved_conflicts": [],
-        "unresolved_unknowns": [],
-        "provenance": [],
-        "created_at": "2026-07-20T15:05:00.000Z",
-        **{key: value for key, value in overrides.items() if key not in ("receipt_id", "fingerprint")},
-    }
-    receipt = {
-        "receipt_id": deterministic_id(
-            "receipt",
-            {
-                "capsule": body["capsule"].get("fingerprint", "sha256:capsule-fp")
-                if isinstance(body["capsule"], dict)
-                else "sha256:capsule-fp",
-                "created_at": body["created_at"],
-                "actor": body["runtime"]["actor"],
-            },
-        ),
-        **body,
-        "fingerprint": fingerprint(body),
-    }
-    return {**receipt, **{key: overrides[key] for key in ("receipt_id", "fingerprint") if key in overrides}}
+def claim_request(*, paths=None, actor=AGENT, now=NOW, lease_value=_MISSING, authority_class=None):
+    request = {"scope": scope(paths=paths), "actor": actor, "now": now}
+    if lease_value is not _MISSING:
+        request["lease"] = lease_value
+    if authority_class is not None:
+        request["authority_class"] = authority_class
+    return request
 
 
-# -- control_scope.py -------------------------------------------------------------------
-
-
-def test_normalize_scope_sorts_and_de_duplicates_paths_and_leaves_project_untouched():
-    normalized = normalize_scope(scope("vivary", ["b/two", "a/one", "a/one", "b\\two"]))
-    assert normalized["project"] == "vivary"
-    assert normalized["paths"] == ["a/one", "b/two"]
-
-
-def test_normalize_scope_returns_an_empty_typed_scope_for_a_truthy_non_dict_input():
-    assert normalize_scope("not a scope mapping") == {"project": "", "paths": []}
-
-
-def test_scopes_overlap_is_false_across_different_projects_even_with_identical_paths():
-    assert scopes_overlap(scope("vivary", ["src/a"]), scope("bellamente", ["src/a"])) is False
-
-
-def test_scopes_overlap_is_true_when_one_scopes_path_nests_inside_the_others():
-    assert scopes_overlap(scope("vivary", ["src/control"]), scope("vivary", ["src/control/claims.mjs"])) is True
-
-
-def test_scopes_overlap_is_false_for_disjoint_sibling_paths_in_the_same_project():
-    assert scopes_overlap(scope("vivary", ["src/control"]), scope("vivary", ["src/policy"])) is False
-
-
-def test_normalize_scope_lexically_collapses_paths_without_escaping_their_anchors_and_is_idempotent():
-    cases = {
-        "src//control/../policy/.": "src/policy",
-        "\N{ZERO WIDTH NO-BREAK SPACE}src/control": "src/control",
-        "/src//control/../../": "/",
-        r"\\Server\Share\folder\..\..": "//server/share",
-        r"C:\Repo\src\..\Tests": "c:/repo/tests",
-        r"C:Repo\src\..\Tests": "c:repo/tests",
-    }
-
-    for raw_path, expected_path in cases.items():
-        normalized = normalize_scope(scope("vivary", [raw_path]))
-        assert normalized["paths"] == [expected_path]
-        assert normalize_scope(normalized) == normalized
-
-
-def test_scopes_overlap_preserves_posix_and_unc_anchors_as_containing_their_descendants():
-    assert scopes_overlap(scope("vivary", ["/"]), scope("vivary", ["/etc/vivary/config.json"])) is True
-    assert scopes_overlap(
-        scope("vivary", [r"\\Server\Share"]),
-        scope("vivary", [r"\\server\share\src\control.py"]),
-    ) is True
-
-
-def test_scopes_overlap_folds_win32_device_namespace_paths_to_their_drive_or_unc_anchor():
-    assert scopes_overlap(
-        scope("vivary", [r"C:\Repo"]),
-        scope("vivary", [r"\\?\C:\Repo\src\control.py"]),
-    ) is True
-    assert scopes_overlap(
-        scope("vivary", [r"C:\Repo"]),
-        scope("vivary", [r"\\.\C:\Repo\src\control.py"]),
-    ) is True
-    assert scopes_overlap(
-        scope("vivary", [r"\\Server\Share"]),
-        scope("vivary", [r"\\?\UNC\server\share\src\control.py"]),
-    ) is True
-    for device_root in ["\\\\?\\C:\\", r"\\?\C:", "\\\\.\\C:\\"]:
-        normalized = normalize_scope(scope("vivary", [device_root]))
-        assert normalized["paths"] == ["c:/"]
-        assert normalize_scope(normalized) == normalized
-        assert scopes_overlap(scope("vivary", [device_root]), scope("vivary", [r"C:\Repo"])) is True
-        assert scopes_overlap(scope("vivary", [device_root]), scope("vivary", [r"C:Repo"])) is False
-
-# -- control_actors.py -------------------------------------------------------------------
-
-
-def test_a_human_actor_can_hold_owner_class_authority():
-    assert can_hold_authority(HUMAN, AUTHORITY_CLASS["OWNER"])["allowed"] is True
-
-
-def test_an_agent_actor_cannot_hold_owner_class_authority():
-    result = can_hold_authority(AGENT, AUTHORITY_CLASS["OWNER"])
-    assert result["allowed"] is False
-    assert result["reason_codes"] == [AUTHORITY_REASON["WORKERS_CANNOT_OWN"]]
-
-
-def test_a_worker_actor_cannot_hold_owner_class_authority():
-    result = can_hold_authority(WORKER, AUTHORITY_CLASS["OWNER"])
-    assert result["allowed"] is False
-    assert result["reason_codes"] == [AUTHORITY_REASON["WORKERS_CANNOT_OWN"]]
-
-
-def test_any_actor_kind_can_hold_contributor_class_authority():
-    for actor in [HUMAN, AGENT, WORKER]:
-        assert can_hold_authority(actor, AUTHORITY_CLASS["CONTRIBUTOR"])["allowed"] is True
-
-
-def test_can_hold_authority_fails_closed_on_an_unrecognized_actor_kind():
-    result = can_hold_authority({"kind": "ghost", "id": "x"}, AUTHORITY_CLASS["CONTRIBUTOR"])
-    assert result["allowed"] is False
-    assert result["reason_codes"] == [AUTHORITY_REASON["UNKNOWN_ACTOR_KIND"]]
-
-def test_can_hold_authority_fails_closed_on_an_unrecognized_authority_class():
-    for authority_class in ("root", {}, []):
-        result = can_hold_authority(HUMAN, authority_class)
-
-        assert result["allowed"] is False
-        assert result["reason_codes"] == [AUTHORITY_REASON["UNKNOWN_AUTHORITY_CLASS"]]
-
-
-# -- control_claims.py: narrow-writer law -------------------------------------------------
-
-
-def test_request_claim_grants_a_claim_when_no_active_claim_overlaps_its_scope():
-    result = request_claim(active_claims=[], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
+def grant(**fields):
+    result = request_claim([], claim_request(**fields))
     assert result["decision"] == CLAIM_DECISION["GRANTED"]
-    assert result["reason_codes"] == []
-    assert result["claim"]["actor"]["id"] == AGENT["id"]
-    assert len(result["claims"]) == 1
+    return result
 
 
-def test_request_claim_refuses_an_overlapping_scope_claim_from_a_different_actor_as_a_conflict_before_any_edit():
-    first = request_claim(active_claims=[], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
-    second = request_claim(
-        active_claims=first["claims"],
-        request={"scope": scope("vivary", ["src/control/claims.mjs"]), "actor": HUMAN},
+def _known(value, command):
+    return {"status": "known", "value": value, "evidence": {"command": command}}
+
+
+@pytest.fixture(scope="module")
+def capsule():
+    root = "/synthetic-governed/repo"
+    checkout = {
+        "raw_path": root,
+        "path": root,
+        "status": "observed",
+        "facts": {
+            "is_git_repository": _known(True, "git rev-parse --show-toplevel"),
+            "worktree_root": _known(root, "git rev-parse --show-toplevel"),
+            "head_revision": _known("0" * 40, "git rev-parse HEAD"),
+            "head_ref": _known({"kind": "branch", "name": "main"}, "git symbolic-ref --short -q HEAD"),
+            "dirty_entries": _known([], "git status --porcelain"),
+            "is_dirty": _known(False, "git status --porcelain"),
+            "remotes": _known([{"name": "origin", "fetch_url": "https://example.test/governed.git"}], "git remote -v"),
+            "upstream": _known("origin/main", "git rev-parse --abbrev-ref --symbolic-full-name @{upstream}"),
+            "last_fetch": _known("2026-07-31T00:00:00Z", "fs.stat FETCH_HEAD"),
+            "workspace_markers": _known(["tropo.toml", "AGENTS.md"], "fs.stat workspace markers"),
+        },
+    }
+    observation = {
+        "schema": "vivary.workspace-observation/v0",
+        "observed_at": NOW,
+        "allowlist": [root],
+        "checkouts": [checkout],
+        "refusals": [],
+    }
+    compiled = compile_task_capsule(
+        task={"question": "Does governed execution retain failed evidence?"},
+        graph=project_workspace_graph(observation),
     )
-    assert second["decision"] == CLAIM_DECISION["REFUSED"]
-    assert second["reason_codes"] == [CLAIM_REASON["SCOPE_CONFLICT"]]
-    assert len(second["conflicts"]) == 1
-    assert second["conflicts"][0]["claim_id"] == first["claim"]["claim_id"]
-    # the ledger is unchanged - no partial write occurred
-    assert len(second["claims"]) == 1
-
-def test_request_claim_treats_drive_qualified_windows_path_casing_as_the_same_scope():
-    first = request_claim(
-        active_claims=[],
-        request={"scope": scope("vivary", [r"C:\Repo\src"]), "actor": AGENT},
-    )
-    second = request_claim(
-        active_claims=first["claims"],
-        request={"scope": scope("vivary", [r"c:\repo\src\file.py"]), "actor": HUMAN},
-    )
-
-    assert second["decision"] == CLAIM_DECISION["REFUSED"]
-    assert second["reason_codes"] == [CLAIM_REASON["SCOPE_CONFLICT"]]
-    assert second["claims"] == first["claims"]
+    assert verify_task_capsule_integrity(compiled)
+    return compiled
 
 
-
-def test_request_claim_refuses_equivalent_lexical_scope_spellings_for_relative_and_absolute_anchors():
-    path_pairs = [
-        ("src//control/./", "src/control/claims.py"),
-        ("/workspace//src/../control", "/workspace/control/claims.py"),
-        (r"\\Server\Share\Repo\src\..", r"\\server\share\repo\file.py"),
-        (r"C:\Repo\Src\..\Control", r"c:\repo\control\file.py"),
-        (r"C:Repo\Src\..\Control", r"c:repo\control\file.py"),
+def receipt_for(capsule, *, actor=AGENT["id"], created_at=RUN_AT, failed=True):
+    checks = [
+        {
+            "name": check["name"],
+            "command": check["command"],
+            "outcome": "failed" if failed and index == 0 else "passed",
+        }
+        for index, check in enumerate(capsule["required_checks"])
     ]
+    receipt = create_integrity_receipt(
+        capsule=capsule,
+        runtime={"harness": "core-control-test", "actor": actor},
+        checks=checks,
+        now=lambda: created_at,
+    )
+    assert verify_receipt_integrity(receipt=receipt, capsule=capsule)["outcome"] == "verified"
+    return receipt
 
-    for claimed_path, requested_path in path_pairs:
-        first = request_claim(
-            active_claims=[],
-            request={"scope": scope("vivary", [claimed_path]), "actor": AGENT},
-        )
-        second = request_claim(
-            active_claims=first["claims"],
-            request={"scope": scope("vivary", [requested_path]), "actor": HUMAN},
-        )
 
-        assert second["decision"] == CLAIM_DECISION["REFUSED"]
-        assert second["reason_codes"] == [CLAIM_REASON["SCOPE_CONFLICT"]]
-        assert second["claims"] == first["claims"]
+@pytest.fixture(scope="module")
+def receipt(capsule):
+    return receipt_for(capsule)
 
-def test_request_claim_refuses_a_second_overlapping_claim_even_from_the_same_actor_exactly_one_active_claim_per_scope():
-    first = request_claim(active_claims=[], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
-    second = request_claim(active_claims=first["claims"], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
+
+# Scope identity
+
+def test_normalize_scope_is_deterministic_and_idempotent():
+    normalized = normalize_scope(scope(paths=["b/two", "a/one", "a/one", "b\\two"]))
+    assert normalized == {"project": "vivary", "paths": ["a/one", "b/two"]}
+    assert normalize_scope(normalized) == normalized
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "overlap"),
+    [
+        (["src/control"], ["src/control/claims.py"], True),
+        (["src/control"], ["src/policy"], False),
+        (["/"], ["/etc/vivary"], True),
+        ([r"C:\\Repo"], [r"c:\\repo\\src"], True),
+        ([r"C:Repo"], [r"C:/Repo"], False),
+    ],
+)
+def test_scopes_overlap_uses_canonical_segment_anchors(left, right, overlap):
+    assert scopes_overlap(scope(paths=left), scope(paths=right)) is overlap
+
+
+def test_scopes_never_overlap_across_projects():
+    assert not scopes_overlap(scope("vivary", ["src"]), scope("other", ["src/x"]))
+
+
+@pytest.mark.parametrize(
+    ("raw_path", "expected_path"),
+    [
+        ("src//control/../policy/.", "src/policy"),
+        ("\N{ZERO WIDTH NO-BREAK SPACE}src/control", "src/control"),
+        ("/src//control/../../", "/"),
+        (r"\\Server\Share\folder\..\..", "//server/share"),
+        (r"C:\Repo\src\..\Tests", "c:/repo/tests"),
+        (r"C:Repo\src\..\Tests", "c:repo/tests"),
+    ],
+)
+def test_normalize_scope_collapses_paths_without_escaping_anchors(raw_path, expected_path):
+    normalized = normalize_scope(scope(paths=[raw_path]))
+    assert normalized["paths"] == [expected_path]
+    assert normalize_scope(normalized) == normalized
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [
+        ([r"C:\Repo"], [r"\\?\C:\Repo\src\control.py"]),
+        ([r"C:\Repo"], [r"\\.\C:\Repo\src\control.py"]),
+        ([r"\\Server\Share"], [r"\\?\UNC\server\share\src\control.py"]),
+    ],
+)
+def test_scopes_overlap_folds_device_namespaces_to_drive_or_unc_anchors(left, right):
+    assert scopes_overlap(scope(paths=left), scope(paths=right))
+
+
+@pytest.mark.parametrize("device_root", ["\\\\?\\C:\\", r"\\?\C:", "\\\\.\\C:\\"])
+def test_win32_device_roots_preserve_drive_anchor_semantics(device_root):
+    normalized = normalize_scope(scope(paths=[device_root]))
+    assert normalized["paths"] == ["c:/"]
+    assert normalize_scope(normalized) == normalized
+    assert scopes_overlap(scope(paths=[device_root]), scope(paths=[r"C:\Repo"]))
+    assert not scopes_overlap(scope(paths=[device_root]), scope(paths=[r"C:Repo"]))
+
+
+def test_windows_scope_casefold_remains_nfc_and_reusable_in_a_claim_ledger():
+    path = "C:/\u0390"
+    normalized = normalize_scope(scope(paths=[path]))
+    assert normalized["paths"] == ["c:/\u0390"]
+    claimed = grant(paths=[path])
+    result = request_claim(
+        claimed["claims"],
+        claim_request(paths=["packages/core"], actor=OTHER_AGENT),
+    )
+    assert result["decision"] == CLAIM_DECISION["GRANTED"]
+
+# Exact actor authority
+
+def test_only_humans_can_hold_owner_authority():
+    assert can_hold_authority(HUMAN, AUTHORITY_CLASS["OWNER"])["allowed"]
+    for actor in (AGENT, WORKER):
+        assert can_hold_authority(actor, AUTHORITY_CLASS["OWNER"]) == {
+            "allowed": False,
+            "reason_codes": [AUTHORITY_REASON["WORKERS_CANNOT_OWN"]],
+        }
+
+
+def test_contributors_may_be_human_agent_or_worker():
+    assert all(can_hold_authority(actor, AUTHORITY_CLASS["CONTRIBUTOR"])["allowed"] for actor in (HUMAN, AGENT, WORKER))
+
+
+@pytest.mark.parametrize(
+    "actor",
+    [
+        {"kind": "agent", "id": ""},
+        {"kind": "agent", "id": " padded "},
+        {"kind": "agent", "id": "agent", "metadata": {}},
+        {"kind": "agent"},
+        {"kind": "agent", "id": "a" * 257},
+        {"kind": "agent", "id": "e\u0301"},
+    ],
+)
+def test_actor_identity_is_exact_canonical_and_bounded(actor):
+    result = can_hold_authority(actor, AUTHORITY_CLASS["CONTRIBUTOR"])
+    assert result["reason_codes"] == [AUTHORITY_REASON["UNKNOWN_ACTOR_SHAPE"]]
+
+
+def test_unknown_actor_kind_and_authority_class_remain_distinct():
+    assert can_hold_authority({"kind": "ghost", "id": "x"}, "contributor")["reason_codes"] == [AUTHORITY_REASON["UNKNOWN_ACTOR_KIND"]]
+    assert can_hold_authority(AGENT, "root")["reason_codes"] == [AUTHORITY_REASON["UNKNOWN_AUTHORITY_CLASS"]]
+
+
+# Claims, leases, and narrow-writer behavior
+
+def test_claim_requires_explicit_now_and_returns_an_exact_identity():
+    missing_now = request_claim([], {"scope": scope(), "actor": AGENT})
+    assert missing_now["reason_codes"] == [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]]
+
+    result = grant(lease_value=lease())
+    claim = result["claim"]
+    assert set(claim) == {"claim_id", "scope", "actor", "authority_class", "lease", "status", "created_at"}
+    assert claim["created_at"] == NOW
+    assert claim["lease"] == lease()
+
+
+def test_claim_id_binds_created_at_and_lease_not_ledger_position():
+    first = grant(lease_value=lease())
+    later = grant(now="2026-08-01T12:00:01Z", lease_value=lease("2026-08-01T12:00:01Z"))
+    unleased = grant()
+    assert len({first["claim"]["claim_id"], later["claim"]["claim_id"], unleased["claim"]["claim_id"]}) == 3
+
+
+def test_claim_normalizes_scope_and_refuses_overlap_before_writing():
+    first = grant(paths=["packages/exo/./src"])
+    before = copy.deepcopy(first["claims"])
+    second = request_claim(first["claims"], claim_request(paths=["packages/exo/src/commands"], actor=OTHER_AGENT))
     assert second["decision"] == CLAIM_DECISION["REFUSED"]
     assert second["reason_codes"] == [CLAIM_REASON["SCOPE_CONFLICT"]]
+    assert second["claims"] == before == first["claims"]
 
 
-def test_request_claim_grants_disjoint_scope_claims_from_different_actors_concurrently():
-    first = request_claim(active_claims=[], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
-    second = request_claim(active_claims=first["claims"], request={"scope": scope("vivary", ["src/policy"]), "actor": HUMAN})
+def test_disjoint_claims_can_coexist():
+    first = grant(paths=["packages/exo"])
+    second = request_claim(first["claims"], claim_request(paths=["packages/core"], actor=OTHER_AGENT))
     assert second["decision"] == CLAIM_DECISION["GRANTED"]
     assert len(second["claims"]) == 2
 
 
-def test_request_claim_fails_closed_on_a_malformed_request_shape():
-    result = request_claim(active_claims=[], request={"scope": None, "actor": AGENT})
-    assert result["decision"] == CLAIM_DECISION["REFUSED"]
-    assert result["reason_codes"] == [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]]
-
-
-def test_request_claim_fails_closed_on_a_truthy_non_dict_request():
-    assert request_claim(active_claims=[], request="not a claim request") == {
-        "decision": CLAIM_DECISION["REFUSED"],
-        "reason_codes": [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]],
-        "claim": None,
-        "claims": [],
-        "conflicts": [],
-    }
-
-
-def test_claim_ledger_entry_points_fail_closed_on_a_non_list_ledger():
-    request_result = request_claim(
-        active_claims=None,
-        request={"scope": scope("vivary", ["src/control"]), "actor": AGENT},
-    )
-    release_result = release_claim(active_claims=None, claim_id="claim_missing", actor=AGENT)
-    expire_result = expire_leases(active_claims=None, now="2026-07-20T15:10:00.000Z")
-
-    assert request_result["reason_codes"] == [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]]
-    assert release_result["reason_codes"] == [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]]
-    assert expire_result["reason_codes"] == [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]]
-
-
-def test_request_claim_fails_closed_when_caller_owned_claim_state_has_a_malformed_scope():
-    malformed_claim = {"claim_id": "claim_bad_scope", "scope": "not a scope mapping"}
-
-    assert request_claim(
-        active_claims=[malformed_claim],
-        request={"scope": scope("vivary", ["src/control"]), "actor": AGENT},
-    ) == {
-        "decision": CLAIM_DECISION["REFUSED"],
-        "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]],
-        "claim": None,
-        "claims": [malformed_claim],
-        "conflicts": [],
-    }
-
-
-def test_request_claim_fails_closed_when_a_persisted_claim_has_an_impossible_actor_authority_pair():
-    impossible_claim = {
-        "claim_id": "claim_agent_owner",
-        "scope": scope("vivary", ["src/control"]),
-        "actor": AGENT,
-        "authority_class": AUTHORITY_CLASS["OWNER"],
-        "lease": None,
-        "status": "active",
-    }
-
-    assert request_claim(
-        active_claims=[impossible_claim],
-        request={"scope": scope("vivary", ["src/control"]), "actor": HUMAN},
-    ) == {
-        "decision": CLAIM_DECISION["REFUSED"],
-        "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]],
-        "claim": None,
-        "claims": [impossible_claim],
-        "conflicts": [],
-    }
-
-
-# -- control_claims.py: workers never become owners ---------------------------------------
-
-
-def test_request_claim_refuses_owner_class_authority_for_a_worker_actor_workers_never_become_product_owners():
+def test_large_disjoint_claim_projection_avoids_a_claim_by_request_path_join():
+    active_claims = [
+        grant(paths=[f"claims/{index}"])["claim"]
+        for index in range(2_000)
+    ]
+    deep_paths = [
+        "/".join([*(["d"] * 255), f"target-{index}"])
+        for index in range(1_000)
+    ]
     result = request_claim(
-        active_claims=[],
-        request={"scope": scope("vivary", ["src/control"]), "actor": WORKER, "authority_class": AUTHORITY_CLASS["OWNER"]},
-    )
-    assert result["decision"] == CLAIM_DECISION["REFUSED"]
-    assert result["reason_codes"] == [CLAIM_REASON["WORKERS_CANNOT_OWN"]]
-    assert len(result["claims"]) == 0
-
-
-def test_request_claim_refuses_owner_class_authority_for_an_agent_actor_workers_never_become_product_owners():
-    result = request_claim(
-        active_claims=[],
-        request={"scope": scope("vivary", ["src/control"]), "actor": AGENT, "authority_class": AUTHORITY_CLASS["OWNER"]},
-    )
-    assert result["decision"] == CLAIM_DECISION["REFUSED"]
-    assert result["reason_codes"] == [CLAIM_REASON["WORKERS_CANNOT_OWN"]]
-
-
-def test_request_claim_grants_owner_class_authority_for_a_human_actor():
-    result = request_claim(
-        active_claims=[],
-        request={"scope": scope("vivary", ["src/control"]), "actor": HUMAN, "authority_class": AUTHORITY_CLASS["OWNER"]},
+        active_claims,
+        claim_request(paths=deep_paths, actor=OTHER_AGENT),
     )
     assert result["decision"] == CLAIM_DECISION["GRANTED"]
-    assert result["claim"]["authority_class"] == AUTHORITY_CLASS["OWNER"]
 
 
-# -- control_claims.py: release ------------------------------------------------------------
-
-
-def test_release_claim_releases_a_claim_for_its_holder():
-    granted = request_claim(active_claims=[], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
-    result = release_claim(active_claims=granted["claims"], claim_id=granted["claim"]["claim_id"], actor=AGENT)
-    assert result["decision"] == CLAIM_DECISION["RELEASED"]
-    assert len(result["claims"]) == 0
-
-
-def test_release_claim_fails_closed_for_an_actor_that_does_not_hold_the_claim():
-    granted = request_claim(active_claims=[], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
-    result = release_claim(active_claims=granted["claims"], claim_id=granted["claim"]["claim_id"], actor=HUMAN)
-    assert result["decision"] == CLAIM_DECISION["REFUSED"]
-    assert result["reason_codes"] == [CLAIM_REASON["NOT_CLAIM_HOLDER"]]
-    assert len(result["claims"]) == 1
-
-
-def test_release_claim_validates_actor_shape_before_releasing_a_claim():
-    granted = request_claim(active_claims=[], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
-
-    for malformed_actor in (None, {}, {"kind": AGENT["kind"]}, {"id": AGENT["id"]}, {"kind": AGENT["kind"], "id": 1}):
-        result = release_claim(
-            active_claims=granted["claims"],
-            claim_id=granted["claim"]["claim_id"],
-            actor=malformed_actor,
-        )
-
-        assert result["decision"] == CLAIM_DECISION["REFUSED"]
-        assert result["reason_codes"] == [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]]
-        assert result["claims"] == granted["claims"]
-
-
-def test_release_claim_fails_closed_when_caller_owned_claim_state_is_malformed():
-    malformed_claim = "not a claim mapping"
-
-    assert release_claim(active_claims=[malformed_claim], claim_id="claim_missing", actor=AGENT) == {
-        "decision": CLAIM_DECISION["REFUSED"],
-        "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]],
-        "claims": [malformed_claim],
-    }
-
-
-def test_release_claim_requires_the_holder_kind_and_id_to_match():
-    granted = request_claim(active_claims=[], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
-    same_id_wrong_kind = {"kind": HUMAN["kind"], "id": AGENT["id"]}
-
-    result = release_claim(
-        active_claims=granted["claims"],
-        claim_id=granted["claim"]["claim_id"],
-        actor=same_id_wrong_kind,
-    )
-
-    assert result["decision"] == CLAIM_DECISION["REFUSED"]
-    assert result["reason_codes"] == [CLAIM_REASON["NOT_CLAIM_HOLDER"]]
-    assert result["claims"] == granted["claims"]
-
-
-def test_release_claim_fails_closed_on_an_unknown_claim_id():
-    result = release_claim(active_claims=[], claim_id="claim_missing", actor=AGENT)
-    assert result["decision"] == CLAIM_DECISION["REFUSED"]
-    assert result["reason_codes"] == [CLAIM_REASON["CLAIM_NOT_FOUND"]]
-
-
-def test_once_a_claim_releases_the_freed_scope_can_be_claimed_again():
-    granted = request_claim(active_claims=[], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
-    released = release_claim(active_claims=granted["claims"], claim_id=granted["claim"]["claim_id"], actor=AGENT)
-    regranted = request_claim(active_claims=released["claims"], request={"scope": scope("vivary", ["src/control"]), "actor": HUMAN})
-    assert regranted["decision"] == CLAIM_DECISION["GRANTED"]
-
-
-def test_request_claim_refuses_unparseable_lease_timestamps():
-    valid = "2026-07-20T15:00:00.000Z"
-    for lease in (
-        {"granted_at": "bad", "expires_at": valid},
-        {"granted_at": valid, "expires_at": "bad"},
-    ):
-        result = request_claim(
-            active_claims=[],
-            request={"scope": scope("vivary", ["src/control"]), "actor": AGENT, "lease": lease},
-        )
-
-        assert result["decision"] == CLAIM_DECISION["REFUSED"]
-        assert result["reason_codes"] == [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]]
-        assert result["claims"] == []
-
-
-def test_request_claim_refuses_timezone_naive_lease_timestamps():
+def test_claim_refuses_a_projection_beyond_the_ledger_ceiling_atomically():
+    at_limit = [
+        grant(paths=[f"claims/{index}"])["claim"]
+        for index in range(10_000)
+    ]
     result = request_claim(
-        active_claims=[],
-        request={
-            "scope": scope("vivary", ["src/control"]),
-            "actor": AGENT,
-            "lease": {
-                "granted_at": "2026-07-20T15:00:00",
-                "expires_at": "2026-07-20T15:10:00",
-            },
+        at_limit,
+        claim_request(paths=["next-claim"], actor=OTHER_AGENT),
+    )
+    assert result["decision"] == CLAIM_DECISION["REFUSED"]
+    assert result["reason_codes"] == [CLAIM_REASON["WORK_UNBOUNDED"]]
+    assert result["claim"] is None
+    assert result["claims"] == at_limit
+
+
+def test_caller_supplied_overlapping_ledger_is_refused():
+    first = grant(paths=["packages/exo"])["claim"]
+    second = grant(paths=["packages/exo/src"], actor=OTHER_AGENT, now="2026-08-01T12:00:01Z")["claim"]
+    result = request_claim([first, second], claim_request(paths=["packages/core"]))
+    assert result["reason_codes"] == [CLAIM_REASON["LEDGER_SCOPE_CONFLICT"]]
+    assert result["claims"] == [first, second]
+
+
+def test_duplicate_or_tampered_claim_identity_is_refused():
+    claim = grant()["claim"]
+    duplicate = request_claim([claim, claim], claim_request(paths=["packages/core"]))
+    assert duplicate["reason_codes"] == [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]]
+    tampered = {**claim, "created_at": "2026-08-01T12:00:01Z"}
+    assert request_claim([tampered], claim_request(paths=["packages/core"]))["reason_codes"] == [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]]
+
+
+@pytest.mark.parametrize(
+    ("lease_value", "reason"),
+    [
+        (lease("bad", EXPIRES_AT), LEASE_REASON["UNKNOWN_LEASE_SHAPE"]),
+        (lease(NOW, "2026-08-01T11:59:59Z"), LEASE_REASON["UNKNOWN_LEASE_SHAPE"]),
+        (lease("2026-08-01T11:00:00Z", NOW), LEASE_REASON["LEASE_EXPIRED"]),
+        (lease("2026-08-01T13:00:00Z", "2026-08-01T14:00:00Z"), LEASE_REASON["LEASE_NOT_LIVE"]),
+    ],
+)
+def test_requested_lease_must_be_well_formed_and_live_at_now(lease_value, reason):
+    result = request_claim([], claim_request(lease_value=lease_value))
+    assert result["decision"] == CLAIM_DECISION["REFUSED"]
+    assert result["reason_codes"] == [reason]
+
+
+def test_stale_ledger_requires_explicit_expiry_before_reclaim():
+    old = grant(now="2026-08-01T10:00:00Z", lease_value=lease("2026-08-01T10:00:00Z", "2026-08-01T11:00:00Z"))
+    refused = request_claim(old["claims"], claim_request(paths=["packages/core"]))
+    assert refused["reason_codes"] == [LEASE_REASON["LEASE_EXPIRED"]]
+    projection = expire_leases(old["claims"], NOW)
+    assert projection["claims"] == []
+    assert len(projection["expired"]) == 1
+    assert request_claim(projection["claims"], claim_request(paths=["packages/core"]))["decision"] == CLAIM_DECISION["GRANTED"]
+
+
+def test_future_active_ledger_is_not_live_at_an_earlier_now():
+    future = grant(now="2026-08-01T13:00:00Z", lease_value=lease("2026-08-01T13:00:00Z", "2026-08-01T14:00:00Z"))
+    result = request_claim(future["claims"], claim_request(paths=["packages/core"]))
+    assert result["reason_codes"] == [LEASE_REASON["LEASE_NOT_LIVE"]]
+
+
+def test_persisted_claim_must_have_been_created_during_its_lease():
+    claim = grant(lease_value=lease())["claim"]
+    future_lease = lease("2026-08-01T13:00:00Z", "2026-08-01T14:00:00Z")
+    impossible = {**claim, "lease": future_lease}
+    impossible["claim_id"] = deterministic_id(
+        "claim",
+        {
+            "scope": impossible["scope"],
+            "actor": impossible["actor"],
+            "authority_class": impossible["authority_class"],
+            "lease": impossible["lease"],
+            "created_at": impossible["created_at"],
         },
     )
-
-    assert result["decision"] == CLAIM_DECISION["REFUSED"]
-    assert result["reason_codes"] == [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]]
-    assert result["claims"] == []
-
-
-def test_request_claim_refuses_a_lease_that_expires_before_it_is_granted():
     result = request_claim(
-        active_claims=[],
-        request={
-            "scope": scope("vivary", ["src/control"]),
-            "actor": AGENT,
-            "lease": {
-                "granted_at": "2026-07-20T15:00:00.000Z",
-                "expires_at": "2026-07-20T14:59:59.999Z",
-            },
-        },
+        [impossible],
+        claim_request(paths=["packages/core"]),
     )
-
-    assert result["decision"] == CLAIM_DECISION["REFUSED"]
-    assert result["reason_codes"] == [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]]
-    assert result["claims"] == []
+    assert result["reason_codes"] == [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]]
 
 
-# -- control_claims.py: leases, time as input only ------------------------------------------
-
-
-def test_expire_leases_releases_a_claim_whose_lease_has_expired_as_of_the_given_now_deterministic_on_input_time_alone():
-    granted = request_claim(
-        active_claims=[],
-        request={
-            "scope": scope("vivary", ["src/control"]),
-            "actor": AGENT,
-            "lease": {"granted_at": "2026-07-20T15:00:00.000Z", "expires_at": "2026-07-20T15:10:00.000Z"},
-        },
-    )
-    still_live = expire_leases(active_claims=granted["claims"], now="2026-07-20T15:05:00.000Z")
-    assert len(still_live["claims"]) == 1
-    assert len(still_live["expired"]) == 0
-
-    expired = expire_leases(active_claims=granted["claims"], now="2026-07-20T15:10:00.000Z")
-    assert len(expired["claims"]) == 0
-    assert len(expired["expired"]) == 1
+def test_lease_expiry_boundary_is_exclusive():
+    active = grant(lease_value=lease())
+    expired = expire_leases(active["claims"], EXPIRES_AT)
+    assert expired["claims"] == []
     assert expired["expired"][0]["reason_codes"] == [LEASE_REASON["LEASE_EXPIRED"]]
 
 
-def test_expire_leases_leaves_lease_less_claims_untouched_regardless_of_now():
-    granted = request_claim(active_claims=[], request={"scope": scope("vivary", ["src/control"]), "actor": AGENT})
-    result = expire_leases(active_claims=granted["claims"], now="2099-01-01T00:00:00.000Z")
-    assert len(result["claims"]) == 1
-    assert len(result["expired"]) == 0
+def test_release_requires_exact_holder_and_preserves_input():
+    granted = grant()
+    before = copy.deepcopy(granted["claims"])
+    refused = release_claim(granted["claims"], granted["claim"]["claim_id"], OTHER_AGENT)
+    assert refused["reason_codes"] == [CLAIM_REASON["NOT_CLAIM_HOLDER"]]
+    assert granted["claims"] == before
+    released = release_claim(granted["claims"], granted["claim"]["claim_id"], AGENT)
+    assert released == {"decision": CLAIM_DECISION["RELEASED"], "reason_codes": [], "claims": []}
 
 
-def test_an_expired_leases_scope_is_claimable_again_once_expire_leases_has_run():
-    granted = request_claim(
-        active_claims=[],
-        request={
-            "scope": scope("vivary", ["src/control"]),
-            "actor": AGENT,
-            "lease": {"granted_at": "2026-07-20T15:00:00.000Z", "expires_at": "2026-07-20T15:10:00.000Z"},
-        },
-    )
-    swept = expire_leases(active_claims=granted["claims"], now="2026-07-20T15:11:00.000Z")
-    regranted = request_claim(active_claims=swept["claims"], request={"scope": scope("vivary", ["src/control"]), "actor": HUMAN})
-    assert regranted["decision"] == CLAIM_DECISION["GRANTED"]
+def test_released_scope_can_be_regranted_with_a_new_identity():
+    first = grant()
+    released = release_claim(first["claims"], first["claim"]["claim_id"], AGENT)
+    second = request_claim(released["claims"], claim_request(now="2026-08-01T12:00:01Z"))
+    assert second["decision"] == CLAIM_DECISION["GRANTED"]
+    assert second["claim"]["claim_id"] != first["claim"]["claim_id"]
 
 
-def test_expire_leases_quarantines_an_impossible_persisted_authority_pair_and_frees_its_scope_for_a_follow_on_request():
-    impossible_claim = {
-        "claim_id": "claim_agent_owner",
-        "scope": scope("vivary", ["src/control"]),
-        "actor": AGENT,
-        "authority_class": AUTHORITY_CLASS["OWNER"],
-        "lease": {"granted_at": "2026-07-20T15:00:00.000Z", "expires_at": "2026-07-20T15:10:00.000Z"},
-        "status": "active",
-    }
-
-    swept = expire_leases(active_claims=[impossible_claim], now="2026-07-20T15:05:00.000Z")
-    follow_on = request_claim(
-        active_claims=swept["claims"],
-        request={"scope": scope("vivary", ["src/control"]), "actor": HUMAN},
-    )
-
-    assert swept == {
-        "claims": [],
-        "expired": [{"claim": impossible_claim, "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]]}],
-        "reason_codes": [],
-    }
-    assert follow_on["decision"] == CLAIM_DECISION["GRANTED"]
-    assert follow_on["reason_codes"] == []
-    assert follow_on["conflicts"] == []
+def test_owner_authority_is_granted_only_to_humans():
+    assert grant(actor=HUMAN, authority_class=AUTHORITY_CLASS["OWNER"])["claim"]["authority_class"] == "owner"
+    refused = request_claim([], claim_request(actor=AGENT, authority_class=AUTHORITY_CLASS["OWNER"]))
+    assert refused["reason_codes"] == [CLAIM_REASON["WORKERS_CANNOT_OWN"]]
 
 
-def test_expire_leases_retains_a_persisted_claim_with_a_valid_human_owner_authority_pair():
-    valid_claim = {
-        "claim_id": "claim_human_owner",
-        "scope": scope("vivary", ["src/control"]),
-        "actor": HUMAN,
-        "authority_class": AUTHORITY_CLASS["OWNER"],
-        "lease": {"granted_at": "2026-07-20T15:00:00.000Z", "expires_at": "2026-07-20T15:10:00.000Z"},
-        "status": "active",
-    }
-
-    assert expire_leases(active_claims=[valid_claim], now="2026-07-20T15:05:00.000Z") == {
-        "claims": [valid_claim],
-        "expired": [],
-        "reason_codes": [],
-    }
+def test_claim_scope_and_actor_bounds_fail_closed():
+    oversized_scope = request_claim([], claim_request(paths=["x" * 4097]))
+    assert oversized_scope["reason_codes"] == [CLAIM_REASON["UNKNOWN_REQUEST_SHAPE"]]
+    unknown_actor_field = request_claim([], claim_request(actor={**AGENT, "role": "owner"}))
+    assert unknown_actor_field["reason_codes"] == [CLAIM_REASON["UNKNOWN_ACTOR_SHAPE"]]
 
 
-def test_expire_leases_rejects_unparseable_and_timezone_naive_now_without_releasing_claims():
-    granted = request_claim(
-        active_claims=[],
-        request={
-            "scope": scope("vivary", ["src/control"]),
-            "actor": AGENT,
-            "lease": {
-                "granted_at": "2026-07-20T15:00:00.000Z",
-                "expires_at": "2026-07-20T15:10:00.000Z",
-            },
-        },
-    )
+# Dependency projection
 
-    for now in ("not-an-instant", "2026-07-20T15:11:00"):
-        result = expire_leases(active_claims=granted["claims"], now=now)
-
-        assert result["claims"] == granted["claims"]
-        assert result["expired"] == []
-        assert result["reason_codes"] == [LEASE_REASON["UNKNOWN_NOW_SHAPE"]]
+def test_dependencies_report_ready_blocked_and_missing_without_adapter_policy():
+    blocked_tasks = [{"id": "a", "status": "open"}, {"id": "b", "status": "open", "depends_on": ["a"]}]
+    blocked = evaluate_dependencies(blocked_tasks, "b")
+    assert blocked == {"decision": "blocked", "reason_codes": [DEPENDENCY_REASON["DEPENDENCY_NOT_SATISFIED"]], "unmet": ["a"], "cycle": []}
+    ready_tasks = [{"id": "a", "status": "done"}, {"id": "b", "status": "open", "depends_on": ["a"]}]
+    assert evaluate_dependencies(ready_tasks, "b") == {"decision": "ready", "reason_codes": [], "unmet": [], "cycle": []}
+    assert evaluate_dependencies(ready_tasks, "missing")["reason_codes"] == [DEPENDENCY_REASON["UNKNOWN_TASK"]]
 
 
-def test_expire_leases_quarantines_a_claim_with_a_missing_expiry_in_caller_owned_state():
-    malformed_claim = {
-        "claim_id": "claim_missing_expiry",
-        "scope": scope("vivary", ["src/control"]),
-        "actor": AGENT,
-        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
-        "lease": {"granted_at": "2026-07-20T15:00:00.000Z"},
-        "status": "active",
-    }
-
-    result = expire_leases(active_claims=[malformed_claim], now="2026-07-20T15:10:00.000Z")
-
-    assert result["claims"] == []
-    assert result["expired"] == [{"claim": malformed_claim, "reason_codes": [LEASE_REASON["UNKNOWN_LEASE_SHAPE"]]}]
-    assert result["reason_codes"] == []
-
-
-def test_expire_leases_quarantines_a_claim_with_an_unparseable_expiry_in_caller_owned_state():
-    malformed_claim = {
-        "claim_id": "claim_unparseable_expiry",
-        "scope": scope("vivary", ["src/control"]),
-        "actor": AGENT,
-        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
-        "lease": {
-            "granted_at": "2026-07-20T15:00:00.000Z",
-            "expires_at": "not an instant",
-        },
-        "status": "active",
-    }
-
-    result = expire_leases(active_claims=[malformed_claim], now="2026-07-20T15:10:00.000Z")
-
-    assert result["claims"] == []
-    assert result["expired"] == [{"claim": malformed_claim, "reason_codes": [LEASE_REASON["UNKNOWN_LEASE_SHAPE"]]}]
-    assert result["reason_codes"] == []
-
-
-def test_expire_leases_quarantines_a_malformed_claim_entry_in_caller_owned_state():
-    malformed_claim = "not a claim mapping"
-
-    assert expire_leases(active_claims=[malformed_claim], now="2026-07-20T15:10:00.000Z") == {
-        "claims": [],
-        "expired": [{"claim": malformed_claim, "reason_codes": [CLAIM_REASON["UNKNOWN_CLAIM_SHAPE"]]}],
-        "reason_codes": [],
-    }
-
-
-def test_expire_leases_expires_a_zero_duration_lease_at_the_caller_supplied_grant_time():
-    instant = "2026-07-20T15:00:00.000Z"
-    granted = request_claim(
-        active_claims=[],
-        request={
-            "scope": scope("vivary", ["src/control"]),
-            "actor": AGENT,
-            "lease": {"granted_at": instant, "expires_at": instant},
-        },
-    )
-
-    result = expire_leases(active_claims=granted["claims"], now=instant)
-
-    assert granted["decision"] == CLAIM_DECISION["GRANTED"]
-    assert result["claims"] == []
-    assert result["expired"] == [{"claim": granted["claim"], "reason_codes": [LEASE_REASON["LEASE_EXPIRED"]]}]
-    assert result["reason_codes"] == []
-
-
-def test_control_never_reads_the_wall_clock_no_datetime_now_or_time_time_in_any_module():
-    # Node equivalent: no `Date.now(` / bare `new Date()` in src/control/*.mjs.
-    # Python equivalent: no wall-clock read in vivary_core/control*.py -
-    # `now` is always a caller-supplied argument (see expire_leases).
-    forbidden = ["datetime.now(", "time.time(", "time.time_ns(", ".utcnow("]
-    for name in CONTROL_MODULE_NAMES:
-        with open(os.path.join(CONTROL_DIR, name), encoding="utf-8") as f:
-            source = f.read()
-        for pattern in forbidden:
-            assert pattern not in source, f"{name} must not read the wall clock ({pattern})"
-
-
-# -- control_dependencies.py --------------------------------------------------------------
-
-
-def test_evaluate_dependencies_is_ready_when_every_dependency_task_is_done():
-    tasks = [
-        {"id": "t1", "status": "done", "depends_on": []},
-        {"id": "t2", "status": "open", "depends_on": ["t1"]},
-    ]
-    result = evaluate_dependencies(tasks=tasks, task_id="t2")
-    assert result["decision"] == DEPENDENCY_DECISION["READY"]
-    assert result["reason_codes"] == []
-
-
-def test_evaluate_dependencies_blocks_when_a_dependency_task_is_not_done():
-    tasks = [
-        {"id": "t1", "status": "open", "depends_on": []},
-        {"id": "t2", "status": "open", "depends_on": ["t1"]},
-    ]
-    result = evaluate_dependencies(tasks=tasks, task_id="t2")
+def test_dependency_cycle_is_a_typed_core_blocked_decision():
+    tasks = [{"id": "a", "status": "open", "depends_on": ["b"]}, {"id": "b", "status": "open", "depends_on": ["a"]}]
+    result = evaluate_dependencies(tasks, "a")
     assert result["decision"] == DEPENDENCY_DECISION["BLOCKED"]
-    assert result["reason_codes"] == [DEPENDENCY_REASON["DEPENDENCY_NOT_SATISFIED"]]
-    assert result["unmet"] == ["t1"]
+    assert result["reason_codes"] == [DEPENDENCY_REASON["DEPENDENCY_CYCLE"]]
+    assert result["cycle"] == ["a", "b", "a"]
 
 
-def test_evaluate_dependencies_fails_closed_when_a_dependency_task_id_does_not_exist_in_the_graph():
-    tasks = [{"id": "t2", "status": "open", "depends_on": ["ghost"]}]
-    result = evaluate_dependencies(tasks=tasks, task_id="t2")
-    assert result["decision"] == DEPENDENCY_DECISION["BLOCKED"]
-    assert result["reason_codes"] == [DEPENDENCY_REASON["DEPENDENCY_NOT_SATISFIED"]]
-    assert result["unmet"] == ["ghost"]
+@pytest.mark.parametrize("tasks", [None, {}, [{"id": "a", "status": "open"}, {"id": "a", "status": "done"}], [{"id": "a", "status": "open", "depends_on": "b"}]])
+def test_malformed_dependency_graph_fails_closed(tasks):
+    assert evaluate_dependencies(tasks, "a")["reason_codes"] == [DEPENDENCY_REASON["UNKNOWN_TASK"]]
 
 
-def test_evaluate_dependencies_fails_closed_when_the_task_itself_is_unknown():
-    result = evaluate_dependencies(tasks=[], task_id="ghost")
-    assert result["decision"] == DEPENDENCY_DECISION["BLOCKED"]
-    assert result["reason_codes"] == [DEPENDENCY_REASON["UNKNOWN_TASK"]]
+def test_dependency_task_count_is_bounded():
+    tasks = [{"id": f"t{index}", "status": "open"} for index in range(10_001)]
+    assert evaluate_dependencies(tasks, "t0")["reason_codes"] == [DEPENDENCY_REASON["WORK_UNBOUNDED"]]
 
 
-MALFORMED_DEPENDENCY_GRAPHS = [
-    ["not a task mapping"],
-    [{"id": "t1", "depends_on": "t0"}],
-    [{"id": "t1", "depends_on": [""]}],
-    [{"id": "t1", "depends_on": [1]}],
-    [{"id": "", "depends_on": []}],
-]
-
-
-@pytest.mark.parametrize("tasks", MALFORMED_DEPENDENCY_GRAPHS)
-def test_evaluate_dependencies_fails_closed_on_a_malformed_task_graph(tasks):
-    assert evaluate_dependencies(tasks=tasks, task_id="t1") == {
-        "decision": DEPENDENCY_DECISION["BLOCKED"],
-        "reason_codes": [DEPENDENCY_REASON["UNKNOWN_TASK"]],
-        "unmet": [],
-    }
-
-
-def test_evaluate_dependencies_rejects_duplicate_task_ids_as_an_invalid_graph_shape():
+def test_dependency_edge_count_is_bounded_before_edge_validation():
     tasks = [
-        {"id": "duplicate", "status": "done", "depends_on": []},
-        {"id": "duplicate", "status": "open", "depends_on": []},
-    ]
-
-    assert evaluate_dependencies(tasks=tasks, task_id="duplicate") == {
-        "decision": DEPENDENCY_DECISION["BLOCKED"],
-        "reason_codes": [DEPENDENCY_REASON["UNKNOWN_TASK"]],
-        "unmet": [],
-    }
-
-
-def test_detect_dependency_cycle_rejects_duplicate_task_ids_as_an_invalid_graph_shape():
-    tasks = [
-        {"id": "duplicate", "depends_on": []},
-        {"id": "duplicate", "depends_on": []},
-    ]
-
-    with pytest.raises(ValueError):
-        detect_dependency_cycle(tasks=tasks)
-
-
-@pytest.mark.parametrize("tasks", MALFORMED_DEPENDENCY_GRAPHS)
-def test_detect_dependency_cycle_rejects_a_malformed_task_graph(tasks):
-    with pytest.raises(ValueError):
-        detect_dependency_cycle(tasks=tasks)
-
-
-def test_detect_dependency_cycle_finds_a_direct_cycle_and_fails_closed():
-    tasks = [
-        {"id": "a", "depends_on": ["b"]},
-        {"id": "b", "depends_on": ["a"]},
-    ]
-    result = detect_dependency_cycle(tasks=tasks)
-    assert result["has_cycle"] is True
-    assert "a" in result["cycle"] and "b" in result["cycle"]
-
-
-def test_detect_dependency_cycle_reports_no_cycle_for_a_dag():
-    tasks = [
-        {"id": "a", "depends_on": []},
-        {"id": "b", "depends_on": ["a"]},
-        {"id": "c", "depends_on": ["a", "b"]},
-    ]
-    result = detect_dependency_cycle(tasks=tasks)
-    assert result["has_cycle"] is False
-    assert result["cycle"] == []
-
-
-# -- control_handoffs.py: bind claim + receipt to capsule fingerprint + workspace revision ---
-
-
-def test_create_handoff_binds_a_claim_and_receipt_to_the_capsule_fingerprint_and_workspace_revision():
-    capsule = capsule_like()
-    receipt = receipt_like()
-    claim = {"claim_id": "claim_1", "actor": AGENT, "scope": scope("vivary", ["src/control"]), "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"]}
-    result = create_handoff(
-        claim=claim,
-        receipt=receipt,
-        capsule=capsule,
-        from_actor=AGENT,
-        to_actor=HUMAN,
-        workspace_revision=capsule["workspace"]["fingerprint"],
-        created_at="2026-07-20T15:06:00.000Z",
-    )
-    assert result["decision"] == HANDOFF_DECISION["BOUND"]
-    assert result["reason_codes"] == []
-    assert result["handoff"]["claim_id"] == claim["claim_id"]
-    assert result["handoff"]["capsule"]["fingerprint"] == capsule["fingerprint"]
-    assert result["handoff"]["receipt"]["fingerprint"] == receipt["fingerprint"]
-    assert result["handoff"]["workspace_revision"] == capsule["workspace"]["fingerprint"]
-
-def test_create_handoff_refuses_when_the_initiator_is_not_the_claim_holder():
-    capsule = capsule_like()
-    receipt = receipt_like()
-    claim = {
-        "claim_id": "claim_1",
-        "actor": AGENT,
-        "scope": scope("vivary", ["src/control"]),
-        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
-    }
-    impostors = (
-        HUMAN,
-        {"kind": ACTOR_KIND["AGENT"], "id": "agent:other"},
-    )
-
-    for impostor in impostors:
-        result = create_handoff(
-            claim=claim,
-            receipt=receipt,
-            capsule=capsule,
-            from_actor=impostor,
-            to_actor=HUMAN,
-            workspace_revision=capsule["workspace"]["fingerprint"],
-            created_at="2026-07-20T15:06:00.000Z",
-        )
-
-        assert result["decision"] == HANDOFF_DECISION["REFUSED"]
-        assert result["reason_codes"] == [HANDOFF_REASON["NOT_CLAIM_HOLDER"]]
-        assert result["handoff"] is None
-
-
-def test_create_handoff_fails_closed_when_the_receipt_was_not_run_against_the_given_capsule():
-    capsule = capsule_like()
-    receipt = receipt_like(overrides={"capsule": {"id": "capsule_other", "fingerprint": "sha256:different"}})
-    claim = {"claim_id": "claim_1", "actor": AGENT, "scope": scope("vivary", ["src/control"]), "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"]}
-    result = create_handoff(
-        claim=claim,
-        receipt=receipt,
-        capsule=capsule,
-        from_actor=AGENT,
-        to_actor=HUMAN,
-        workspace_revision=capsule["workspace"]["fingerprint"],
-        created_at="2026-07-20T15:06:00.000Z",
-    )
-    assert result["decision"] == HANDOFF_DECISION["REFUSED"]
-    assert result["reason_codes"] == [HANDOFF_REASON["RECEIPT_CAPSULE_MISMATCH"]]
-
-def test_create_handoff_fails_closed_when_receipt_capsule_id_does_not_match():
-    capsule = capsule_like()
-    receipt = receipt_like(
-        overrides={
-            "capsule": {
-                "id": "capsule_other",
-                "fingerprint": capsule["fingerprint"],
-            }
+        {
+            "id": "a",
+            "status": "open",
+            "depends_on": ["missing"] * 100_001,
         }
-    )
-    claim = {
-        "claim_id": "claim_1",
-        "actor": AGENT,
-        "scope": scope("vivary", ["src/control"]),
-        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
-    }
-
-    result = create_handoff(
-        claim=claim,
-        receipt=receipt,
-        capsule=capsule,
-        from_actor=AGENT,
-        to_actor=HUMAN,
-        workspace_revision=capsule["workspace"]["fingerprint"],
-        created_at="2026-07-20T15:06:00.000Z",
-    )
-
-    assert result["decision"] == HANDOFF_DECISION["REFUSED"]
-    assert result["reason_codes"] == [HANDOFF_REASON["RECEIPT_CAPSULE_MISMATCH"]]
+    ]
+    assert evaluate_dependencies(tasks, "a")["reason_codes"] == [
+        DEPENDENCY_REASON["WORK_UNBOUNDED"]
+    ]
 
 
-def test_create_handoff_fails_closed_when_receipt_and_requested_revision_disagree_with_capsule_workspace():
-    capsule = capsule_like()
-    different_workspace = "sha256:different-workspace"
-    receipt = receipt_like(
-        overrides={
-            "workspace": {
-                "fingerprint": different_workspace,
-                "observed_at": "2026-07-20T15:00:00.000Z",
-            }
-        }
-    )
-    claim = {
-        "claim_id": "claim_1",
-        "actor": AGENT,
-        "scope": scope("vivary", ["src/control"]),
-        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
-    }
+# Handoffs bind live authority and exact evidence
 
-    result = create_handoff(
-        claim=claim,
-        receipt=receipt,
-        capsule=capsule,
-        from_actor=AGENT,
-        to_actor=HUMAN,
-        workspace_revision=different_workspace,
-        created_at="2026-07-20T15:06:00.000Z",
-    )
-
-    assert result["decision"] == HANDOFF_DECISION["REFUSED"]
-    assert result["reason_codes"] == [HANDOFF_REASON["WORKSPACE_REVISION_MISMATCH"]]
-
-
-def test_create_handoff_fails_closed_when_the_workspace_revision_does_not_match_the_receipts():
-    capsule = capsule_like()
-    receipt = receipt_like()
-    claim = {"claim_id": "claim_1", "actor": AGENT, "scope": scope("vivary", ["src/control"]), "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"]}
-    result = create_handoff(
-        claim=claim,
-        receipt=receipt,
-        capsule=capsule,
-        from_actor=AGENT,
-        to_actor=HUMAN,
-        workspace_revision="sha256:stale-revision",
-        created_at="2026-07-20T15:06:00.000Z",
-    )
-    assert result["decision"] == HANDOFF_DECISION["REFUSED"]
-    assert result["reason_codes"] == [HANDOFF_REASON["WORKSPACE_REVISION_MISMATCH"]]
-
-
-def test_create_handoff_fails_closed_on_a_malformed_capsule_or_receipt_shape():
-    claim = {"claim_id": "claim_1", "actor": AGENT, "scope": scope("vivary", ["src/control"]), "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"]}
-    result = create_handoff(
-        claim=claim,
-        receipt={"not": "a receipt"},
-        capsule=capsule_like(),
-        from_actor=AGENT,
-        to_actor=HUMAN,
-        workspace_revision="sha256:workspace-fp",
-        created_at="2026-07-20T15:06:00.000Z",
-    )
-    assert result["decision"] == HANDOFF_DECISION["REFUSED"]
-    assert result["reason_codes"] == [HANDOFF_REASON["UNKNOWN_RECEIPT_SHAPE"]]
-
-
-def test_create_handoff_rejects_unknown_capsule_and_receipt_fields():
-    claim = {
-        "claim_id": "claim_1",
-        "actor": AGENT,
-        "scope": scope("vivary", ["src/control"]),
-        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
-    }
-    common = {
-        "claim": claim,
+def handoff_args(capsule, receipt, claim_result, **overrides):
+    values = {
+        "active_claims": claim_result["claims"],
+        "claim_id": claim_result["claim"]["claim_id"],
+        "receipt": receipt,
+        "capsule": capsule,
         "from_actor": AGENT,
-        "to_actor": AGENT,
-        "workspace_revision": "sha256:workspace-fp",
-        "created_at": "2026-07-20T15:06:00.000Z",
+        "to_actor": OTHER_AGENT,
+        "workspace_revision": capsule["workspace"]["fingerprint"],
+        "created_at": HANDOFF_AT,
     }
-
-    unknown_capsule = create_handoff(
-        capsule=capsule_like({"unexpected": "smuggled"}),
-        receipt=receipt_like(),
-        **common,
-    )
-    unknown_receipt = create_handoff(
-        capsule=capsule_like(),
-        receipt=receipt_like({"unexpected": "smuggled"}),
-        **common,
-    )
-
-    assert unknown_capsule["reason_codes"] == [
-        HANDOFF_REASON["UNKNOWN_CAPSULE_SHAPE"]
-    ]
-    assert unknown_receipt["reason_codes"] == [
-        HANDOFF_REASON["UNKNOWN_RECEIPT_SHAPE"]
-    ]
+    values.update(overrides)
+    return values
 
 
-def test_create_handoff_fails_closed_when_a_capsule_workspace_is_a_truthy_non_dict():
-    claim = {
-        "claim_id": "claim_1",
-        "actor": AGENT,
-        "scope": scope("vivary", ["src/control"]),
-        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
-    }
-    result = create_handoff(
-        claim=claim,
-        receipt=receipt_like(),
-        capsule=capsule_like(overrides={"workspace": "not a workspace mapping"}),
-        from_actor=AGENT,
-        to_actor=HUMAN,
-        workspace_revision="sha256:workspace-fp",
-        created_at="2026-07-20T15:06:00.000Z",
-    )
-
-    assert result["decision"] == HANDOFF_DECISION["REFUSED"]
-    assert result["reason_codes"] == [HANDOFF_REASON["UNKNOWN_CAPSULE_SHAPE"]]
-    assert result["handoff"] is None
+def test_handoff_binds_live_claim_scope_actors_lease_and_evidence_without_transferring(capsule, receipt):
+    claimed = grant(lease_value=lease())
+    before = copy.deepcopy(claimed["claims"])
+    result = create_handoff(**handoff_args(capsule, receipt, claimed))
+    assert result["decision"] == HANDOFF_DECISION["BOUND"]
+    handoff = result["handoff"]
+    assert handoff["claim_id"] == claimed["claim"]["claim_id"]
+    assert handoff["claim_created_at"] == NOW
+    assert handoff["scope"] == claimed["claim"]["scope"]
+    assert handoff["holder"] == handoff["from_actor"] == AGENT
+    assert handoff["to_actor"] == OTHER_AGENT
+    assert handoff["lease"] == lease()
+    assert handoff["capsule"] == {"id": capsule["capsule_id"], "fingerprint": capsule["fingerprint"]}
+    assert handoff["receipt"]["id"] == receipt["receipt_id"]
+    assert "claims" not in result
+    assert claimed["claims"] == before
 
 
-@pytest.mark.parametrize("nested_field", ["capsule", "workspace"])
-def test_create_handoff_fails_closed_when_a_receipt_binding_is_a_truthy_non_dict(nested_field):
-    claim = {
-        "claim_id": "claim_1",
-        "actor": AGENT,
-        "scope": scope("vivary", ["src/control"]),
-        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
-    }
-    result = create_handoff(
-        claim=claim,
-        receipt=receipt_like(overrides={nested_field: "not a receipt binding mapping"}),
-        capsule=capsule_like(),
-        from_actor=AGENT,
-        to_actor=HUMAN,
-        workspace_revision="sha256:workspace-fp",
-        created_at="2026-07-20T15:06:00.000Z",
-    )
-
-    assert result["decision"] == HANDOFF_DECISION["REFUSED"]
-    assert result["reason_codes"] == [HANDOFF_REASON["UNKNOWN_RECEIPT_SHAPE"]]
-    assert result["handoff"] is None
+def test_handoff_requires_existing_exact_holder_and_valid_ledger(capsule, receipt):
+    claimed = grant(lease_value=lease())
+    missing = create_handoff(**handoff_args(capsule, receipt, claimed, claim_id="claim_missing"))
+    assert missing["reason_codes"] == [HANDOFF_REASON["CLAIM_NOT_FOUND"]]
+    wrong_holder = create_handoff(**handoff_args(capsule, receipt, claimed, from_actor=OTHER_AGENT))
+    assert wrong_holder["reason_codes"] == [HANDOFF_REASON["NOT_CLAIM_HOLDER"]]
 
 
-@pytest.mark.parametrize("empty_binding", ["capsule_id", "capsule_fingerprint", "workspace_fingerprint"])
-def test_create_handoff_rejects_empty_capsule_or_workspace_bindings(empty_binding):
-    capsule = capsule_like()
-    receipt_overrides = {}
-    workspace_revision = capsule["workspace"]["fingerprint"]
-    if empty_binding == "capsule_id":
-        capsule["capsule_id"] = ""
-        receipt_overrides["capsule"] = {"id": "", "fingerprint": capsule["fingerprint"]}
-    elif empty_binding == "capsule_fingerprint":
-        capsule["fingerprint"] = ""
-        receipt_overrides["capsule"] = {"id": capsule["capsule_id"], "fingerprint": ""}
-    else:
-        capsule["workspace"] = {**capsule["workspace"], "fingerprint": ""}
-        receipt_overrides["workspace"] = {**capsule["workspace"]}
-        workspace_revision = ""
-    receipt = receipt_like(overrides=receipt_overrides)
-    claim = {
-        "claim_id": "claim_1",
-        "actor": AGENT,
-        "scope": scope("vivary", ["src/control"]),
-        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
-    }
-
-    result = create_handoff(
-        claim=claim,
-        receipt=receipt,
-        capsule=capsule,
-        from_actor=AGENT,
-        to_actor=HUMAN,
-        workspace_revision=workspace_revision,
-        created_at="2026-07-20T15:06:00.000Z",
-    )
-
-    assert result["decision"] == HANDOFF_DECISION["REFUSED"]
-    assert result["reason_codes"] == [HANDOFF_REASON["UNKNOWN_CAPSULE_SHAPE"]]
-    assert result["handoff"] is None
+def test_handoff_refuses_expired_or_not_yet_live_claim(capsule, receipt):
+    claimed = grant(lease_value=lease())
+    expired = create_handoff(**handoff_args(capsule, receipt, claimed, created_at=EXPIRES_AT))
+    assert expired["reason_codes"] == [HANDOFF_REASON["LEASE_EXPIRED"]]
+    future = grant(now="2026-08-01T12:20:00Z")
+    not_live = create_handoff(**handoff_args(capsule, receipt, future, created_at=HANDOFF_AT))
+    assert not_live["reason_codes"] == [HANDOFF_REASON["LEASE_NOT_LIVE"]]
 
 
-def test_create_handoff_rejects_a_receipt_tampered_after_fingerprinting():
-    capsule = capsule_like()
-    receipt = receipt_like(
-        overrides={"checks": [{"name": "unit-and-contract-tests", "command": "npm test", "outcome": "failed"}]}
-    )
-    tampered = {**receipt, "checks": [{**receipt["checks"][0], "outcome": "passed"}]}
-    claim = {
-        "claim_id": "claim_1",
-        "actor": AGENT,
-        "scope": scope("vivary", ["src/control"]),
-        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
-    }
-
-    result = create_handoff(
-        claim=claim,
-        receipt=tampered,
-        capsule=capsule,
-        from_actor=AGENT,
-        to_actor=HUMAN,
-        workspace_revision=capsule["workspace"]["fingerprint"],
-        created_at="2026-07-20T15:06:00.000Z",
-    )
-
-    assert result["decision"] == HANDOFF_DECISION["REFUSED"]
-    assert result["reason_codes"] == [HANDOFF_REASON["UNKNOWN_RECEIPT_SHAPE"]]
+def test_handoff_receipt_must_be_causally_within_claim_and_handoff(capsule):
+    claimed = grant(lease_value=lease())
+    earlier_receipt = receipt_for(capsule, created_at="2026-08-01T11:59:59Z")
+    predates = create_handoff(**handoff_args(capsule, earlier_receipt, claimed))
+    assert predates["reason_codes"] == [HANDOFF_REASON["RECEIPT_PREDATES_CLAIM"]]
+    later_receipt = receipt_for(capsule, created_at="2026-08-01T12:20:00Z")
+    later = create_handoff(**handoff_args(capsule, later_receipt, claimed))
+    assert later["reason_codes"] == [HANDOFF_REASON["RECEIPT_CREATED_AFTER_HANDOFF"]]
 
 
-def test_create_handoff_refuses_to_hand_ownership_authority_to_a_worker_or_agent_actor_workers_never_become_product_owners():
-    capsule = capsule_like()
-    receipt = receipt_like()
-    claim = {"claim_id": "claim_1", "actor": HUMAN, "scope": scope("vivary", ["src/control"]), "authority_class": AUTHORITY_CLASS["OWNER"]}
-    result = create_handoff(
-        claim=claim,
-        receipt=receipt,
-        capsule=capsule,
-        from_actor=HUMAN,
-        to_actor=WORKER,
-        to_authority_class=AUTHORITY_CLASS["OWNER"],
-        workspace_revision=capsule["workspace"]["fingerprint"],
-        created_at="2026-07-20T15:06:00.000Z",
-    )
-    assert result["decision"] == HANDOFF_DECISION["REFUSED"]
+def test_handoff_receipt_runtime_actor_must_be_claim_holder(capsule):
+    claimed = grant(lease_value=lease())
+    other_receipt = receipt_for(capsule, actor=OTHER_AGENT["id"])
+    result = create_handoff(**handoff_args(capsule, other_receipt, claimed))
+    assert result["reason_codes"] == [HANDOFF_REASON["RECEIPT_ACTOR_MISMATCH"]]
+
+
+def test_handoff_requires_complete_capsule_authorized_receipt_and_workspace(capsule, receipt):
+    claimed = grant(lease_value=lease())
+    malformed_args = handoff_args(capsule, receipt, claimed)
+    malformed_args["capsule"] = {"schema": "vivary.task-capsule/v0"}
+    malformed = create_handoff(**malformed_args)
+    assert malformed["reason_codes"] == [HANDOFF_REASON["UNKNOWN_CAPSULE_SHAPE"]]
+    tampered_receipt = {**receipt, "receipt_id": "receipt_forged"}
+    invalid_receipt = create_handoff(**handoff_args(capsule, tampered_receipt, claimed))
+    assert invalid_receipt["reason_codes"] == [HANDOFF_REASON["UNKNOWN_RECEIPT_SHAPE"]]
+    wrong_workspace = create_handoff(**handoff_args(capsule, receipt, claimed, workspace_revision="sha256:other"))
+    assert wrong_workspace["reason_codes"] == [HANDOFF_REASON["WORKSPACE_REVISION_MISMATCH"]]
+
+
+def test_handoff_cannot_transfer_owner_authority_to_nonhuman(capsule, receipt):
+    claimed = grant(lease_value=lease())
+    result = create_handoff(**handoff_args(capsule, receipt, claimed, to_authority_class=AUTHORITY_CLASS["OWNER"]))
     assert result["reason_codes"] == [HANDOFF_REASON["WORKERS_CANNOT_OWN"]]
 
 
-def test_create_handoff_allows_handing_contributor_class_authority_to_an_agent_actor():
-    capsule = capsule_like()
-    receipt = receipt_like()
-    claim = {"claim_id": "claim_1", "actor": HUMAN, "scope": scope("vivary", ["src/control"]), "authority_class": AUTHORITY_CLASS["OWNER"]}
-    result = create_handoff(
-        claim=claim,
-        receipt=receipt,
+# Execution evidence is exact, append-only, and conflict-visible
+
+def test_execution_derivation_requires_exact_capsule_and_authorized_receipt(capsule, receipt):
+    result = derive_execution_edges(receipt, capsule)
+    assert result["reason_codes"] == []
+    assert len(result["edges"]) == len(receipt["checks"])
+    assert all(edge["capsule_id"] == capsule["capsule_id"] and edge["receipt_id"] == receipt["receipt_id"] for edge in result["edges"])
+    assert derive_execution_edges(receipt, {"schema": "vivary.task-capsule/v0"})["reason_codes"] == [EXECUTION_REASON["UNKNOWN_CAPSULE_SHAPE"]]
+    assert derive_execution_edges({**receipt, "receipt_id": "receipt_forged"}, capsule)["reason_codes"] == [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]
+
+
+def test_record_execution_is_idempotent_and_does_not_mutate_input(capsule, receipt):
+    original_log = []
+    first = record_execution(original_log, receipt, capsule)
+    assert original_log == []
+    assert first["edges"] == first["added"]
+    replay = record_execution(first["edges"], receipt, capsule)
+    assert replay == {"edges": first["edges"], "added": [], "reason_codes": []}
+
+
+def test_record_execution_refuses_same_id_conflicting_evidence_atomically(capsule, receipt):
+    first = record_execution([], receipt, capsule)
+    conflicting = {**first["edges"][0], "outcome": "passed" if first["edges"][0]["outcome"] == "failed" else "failed"}
+    before = [conflicting]
+    result = record_execution(before, receipt, capsule)
+    assert result == {"edges": before, "added": [], "reason_codes": [EXECUTION_REASON["EDGE_IDENTITY_CONFLICT"]]}
+    assert before == [conflicting]
+
+
+def test_execution_replay_uses_canonical_equality_not_python_bool_number_equality(capsule):
+    checks = [
+        {
+            "name": check["name"],
+            "command": check["command"],
+            "outcome": "passed",
+            "detail": 1,
+        }
+        for check in capsule["required_checks"]
+    ]
+    numeric_receipt = create_integrity_receipt(
         capsule=capsule,
-        from_actor=HUMAN,
-        to_actor=AGENT,
-        to_authority_class=AUTHORITY_CLASS["CONTRIBUTOR"],
-        workspace_revision=capsule["workspace"]["fingerprint"],
-        created_at="2026-07-20T15:06:00.000Z",
+        runtime={"harness": "core-control-test", "actor": AGENT["id"]},
+        checks=checks,
+        now=lambda: RUN_AT,
     )
-    assert result["decision"] == HANDOFF_DECISION["BOUND"]
-
-
-# -- control_execution.py: append-only evidence derived from receipts -----------------------
-
-
-def test_derive_execution_edges_produces_one_edge_per_check_carrying_the_receipts_fingerprint_and_outcome():
-    receipt = receipt_like(
-        overrides={
-            "checks": [
-                {"name": "unit-and-contract-tests", "command": "npm test", "outcome": "passed"},
-                {"name": "vivary-graph-doctor", "command": "npx create-vivary doctor . --json", "outcome": "failed", "detail": "2 errors"},
-            ]
-        }
-    )
-    result = derive_execution_edges(receipt=receipt)
-    assert result["reason_codes"] == []
-    assert len(result["edges"]) == 2
-    assert result["edges"][0]["outcome"] == "passed"
-    assert result["edges"][1]["outcome"] == "failed"
-    assert result["edges"][1]["detail"] == "2 errors"
-    for edge in result["edges"]:
-        assert edge["receipt_fingerprint"] == receipt["fingerprint"]
-        assert edge["capsule_id"] == receipt["capsule"]["id"]
-        assert edge["kind"] == "check"
-
-
-
-def test_derive_execution_edges_uses_check_position_for_stable_distinct_duplicate_check_ids():
-    receipt = receipt_like(
-        overrides={
-            "checks": [
-                {"name": "unit-and-contract-tests", "command": "npm test", "outcome": "passed"},
-                {"name": "unit-and-contract-tests", "command": "npm test --retry", "outcome": "failed"},
-            ]
-        }
-    )
-
-    first = derive_execution_edges(receipt=receipt)["edges"]
-    second = derive_execution_edges(receipt=receipt)["edges"]
-
-    assert first[0]["edge_id"] != first[1]["edge_id"]
-    assert [edge["edge_id"] for edge in second] == [edge["edge_id"] for edge in first]
-
-def test_derive_execution_edges_fails_closed_on_a_malformed_receipt_shape():
-    result = derive_execution_edges(receipt={"not": "a receipt"})
-    assert result["edges"] == []
-    assert result["reason_codes"] == [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]
-
-
-def test_derive_execution_edges_rejects_unknown_receipt_fields():
-    result = derive_execution_edges(
-        receipt=receipt_like({"unexpected": "smuggled"})
-    )
-
-    assert result["edges"] == []
+    first = record_execution([], numeric_receipt, capsule)
+    conflicting = {**first["edges"][0], "detail": True}
+    result = record_execution([conflicting], numeric_receipt, capsule)
     assert result["reason_codes"] == [
-        EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]
+        EXECUTION_REASON["EDGE_IDENTITY_CONFLICT"]
     ]
+    assert result["edges"] == [conflicting]
 
 
-def test_derive_execution_edges_fails_closed_when_receipt_capsule_is_a_truthy_non_dict():
-    result = derive_execution_edges(receipt=receipt_like(overrides={"capsule": "not a capsule mapping"}))
+def test_record_execution_validates_existing_log_before_evidence(capsule, receipt):
+    malformed = record_execution([{}], receipt, capsule)
+    assert malformed["reason_codes"] == [EXECUTION_REASON["UNKNOWN_EXECUTION_LOG_SHAPE"]]
+    recorded = record_execution([], receipt, capsule)
+    invalid_receipt = record_execution(recorded["edges"], {**receipt, "receipt_id": "forged"}, capsule)
+    assert invalid_receipt == {"edges": recorded["edges"], "added": [], "reason_codes": [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]}
 
-    assert result["edges"] == []
-    assert result["reason_codes"] == [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]
+
+def test_execution_log_size_is_bounded(capsule, receipt):
+    edge = record_execution([], receipt, capsule)["edges"][0]
+    result = record_execution([edge] * 10_001, receipt, capsule)
+    assert result["reason_codes"] == [EXECUTION_REASON["WORK_UNBOUNDED"]]
 
 
-def test_derive_execution_edges_fails_closed_when_any_receipt_check_is_malformed():
-    receipt = receipt_like(
-        overrides={
-            "checks": [
-                {"name": "unit-and-contract-tests", "command": "npm test", "outcome": "passed"},
-                {"name": "missing-outcome"},
-            ]
-        }
+def test_execution_receipt_check_count_is_bounded_before_verification(capsule, receipt):
+    oversized_receipt = create_integrity_receipt(
+        capsule=capsule,
+        runtime={"harness": "core-control-test", "actor": AGENT["id"]},
+        checks=[receipt["checks"][0]] * 10_001,
+        now=lambda: RUN_AT,
     )
-
-    result = derive_execution_edges(receipt=receipt)
-
-    assert result["edges"] == []
-    assert result["reason_codes"] == [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]
-
-
-def test_derive_execution_edges_rejects_a_receipt_tampered_after_fingerprinting():
-    receipt = receipt_like(
-        overrides={"checks": [{"name": "unit-and-contract-tests", "command": "npm test", "outcome": "failed"}]}
-    )
-    tampered = {**receipt, "checks": [{**receipt["checks"][0], "outcome": "passed"}]}
-
-    result = derive_execution_edges(receipt=tampered)
-
-    assert result["edges"] == []
-    assert result["reason_codes"] == [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]
+    assert verify_receipt_integrity(
+        receipt=oversized_receipt,
+        capsule=capsule,
+    )["outcome"] == "verified"
+    result = derive_execution_edges(oversized_receipt, capsule)
+    assert result["reason_codes"] == [EXECUTION_REASON["WORK_UNBOUNDED"]]
 
 
-def test_derive_execution_edges_rejects_an_empty_capsule_identity():
-    receipt = receipt_like(
-        overrides={"capsule": {"id": "", "fingerprint": "sha256:capsule-fp"}}
-    )
+# Task completion cannot erase failure evidence
 
-    result = derive_execution_edges(receipt=receipt)
-
-    assert result["edges"] == []
-    assert result["reason_codes"] == [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]
-
-
-def test_derive_execution_edges_accepts_only_the_closed_check_outcome_vocabulary():
-    for outcome in ("passed", "failed", "skipped"):
-        result = derive_execution_edges(
-            receipt=receipt_like(
-                overrides={"checks": [{"name": "check", "command": "run check", "outcome": outcome}]}
-            )
-        )
-        assert result["reason_codes"] == []
-        assert result["edges"][0]["outcome"] == outcome
-
-    invalid = derive_execution_edges(
-        receipt=receipt_like(
-            overrides={"checks": [{"name": "check", "command": "run check", "outcome": "pending"}]}
-        )
-    )
-    assert invalid["edges"] == []
-    assert invalid["reason_codes"] == [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]
+def test_mark_done_and_integrity_view_are_typed(capsule, receipt):
+    task = {"task_id": "task-204", "capsule_id": capsule["capsule_id"], "status": "in_progress"}
+    execution = record_execution([], receipt, capsule)
+    transition = mark_task_done(task=task)
+    assert transition == {"task": {**task, "status": "done"}, "reason_codes": []}
+    view = task_integrity_view(task=transition["task"], execution_log=execution["edges"])
+    assert view["status"] == "done"
+    assert view["has_failed_verification"] is True
+    assert view["failed_edges"]
+    assert view["reason_codes"] == []
 
 
-def test_append_execution_edges_is_append_only_it_returns_a_new_list_and_never_mutates_the_log_passed_in():
-    receipt = receipt_like()
-    edges = derive_execution_edges(receipt=receipt)["edges"]
-    original_log = ()  # an immutable tuple, the Python stand-in for Node's Object.freeze([])
-    result = append_execution_edges(log=original_log, edges=edges)
-    assert len(original_log) == 0, "the caller's original log must be untouched"
-    assert len(result) == 1
+def test_task_functions_fail_closed_on_malformed_task_or_log(capsule):
+    assert mark_task_done(task={}) == {"task": None, "reason_codes": [TASK_REASON["UNKNOWN_TASK_SHAPE"]]}
+    task = {"task_id": "task-204", "capsule_id": capsule["capsule_id"], "status": "open"}
+    view = task_integrity_view(task=task, execution_log=[{}])
+    assert view["reason_codes"] == [EXECUTION_REASON["UNKNOWN_EXECUTION_LOG_SHAPE"]]
+    assert view["execution_edges"] == []
 
 
-def test_append_execution_edges_is_idempotent_for_the_same_derived_edges_appending_them_twice_does_not_duplicate_them():
-    receipt = receipt_like()
-    edges = derive_execution_edges(receipt=receipt)["edges"]
-    once = append_execution_edges(log=[], edges=edges)
-    twice = append_execution_edges(log=once, edges=edges)
-    assert len(twice) == len(once)
-
-def test_append_execution_edges_skips_only_identical_payloads_and_preserves_conflicting_edge_id_evidence():
-    edge = derive_execution_edges(receipt=receipt_like())["edges"][0]
-    conflicting_duplicate = {**edge, "outcome": "failed"}
-
-    result = append_execution_edges(log=[edge], edges=[edge, conflicting_duplicate])
-
-    assert result == [edge, conflicting_duplicate]
+def test_mark_task_done_has_no_execution_log_parameter():
+    assert list(inspect.signature(mark_task_done).parameters) == ["task"]
 
 
-# -- control_tasks.py: adversarial law - done cannot erase or mask a failed verification edge ---
-
-
-def test_a_task_marked_done_cannot_erase_or_mask_a_failed_verification_edge_it_stays_reachable_and_reported():
-    receipt = receipt_like(
-        overrides={
-            "checks": [
-                {"name": "unit-and-contract-tests", "command": "npm test", "outcome": "passed"},
-                {"name": "vivary-graph-doctor", "command": "npx create-vivary doctor . --json", "outcome": "failed", "detail": "2 errors"},
-            ]
-        }
-    )
-    edges = derive_execution_edges(receipt=receipt)["edges"]
-    execution_log = append_execution_edges(log=[], edges=edges)
-
-    task = {"task_id": "t1", "capsule_id": receipt["capsule"]["id"], "status": "open", "depends_on": []}
-    before = task_integrity_view(task=task, execution_log=execution_log)
-    assert before["has_failed_verification"] is True
-    assert len(before["failed_edges"]) == 1
-
-    done = mark_task_done(task=task)
-    assert done["status"] == "done"
-
-    after = task_integrity_view(task=done, execution_log=execution_log)
-    assert after["status"] == "done"
-    assert after["has_failed_verification"] is True, "marking done must not mask the failed edge"
-    assert len(after["failed_edges"]) == 1, "the failed edge must remain reachable after completion"
-    assert after["failed_edges"][0]["outcome"] == "failed"
-
-
-def test_mark_task_dones_signature_carries_no_execution_log_completion_is_architecturally_unable_to_touch_execution_evidence():
-    # mark_task_done only ever receives {task}; it has no parameter through
-    # which an execution log (or any edge array) could be passed in and
-    # mutated.
-    params = inspect.signature(mark_task_done).parameters
-    assert list(params.keys()) == ["task"]
-
-
-def test_task_integrity_view_reports_no_failed_edges_once_every_check_for_the_tasks_capsule_passed():
-    receipt = receipt_like(overrides={"checks": [{"name": "unit-and-contract-tests", "command": "npm test", "outcome": "passed"}]})
-    edges = derive_execution_edges(receipt=receipt)["edges"]
-    execution_log = append_execution_edges(log=[], edges=edges)
-    task = mark_task_done(task={"task_id": "t1", "capsule_id": receipt["capsule"]["id"], "status": "open", "depends_on": []})
-    view = task_integrity_view(task=task, execution_log=execution_log)
-    assert view["has_failed_verification"] is False
-    assert view["failed_edges"] == []
-
-
-def test_control_tasks_and_execution_never_remove_entries_from_an_execution_log_no_pop_del_or_remove_on_lists():
-    for name in ["control_tasks.py", "control_execution.py"]:
-        with open(os.path.join(CONTROL_DIR, name), encoding="utf-8") as f:
-            source = f.read()
-        assert ".pop(" not in source, f"{name} must not pop"
-        assert ".remove(" not in source, f"{name} must not remove"
-        assert ".clear(" not in source, f"{name} must not clear"
-        assert "del " not in source, f"{name} must not delete entries"
-
-
-# -- control_tasks.py: gates-as-references -----------------------------------------------
-
-
-def test_with_gate_reference_attaches_a_well_formed_gate_reference_read_only_without_re_evaluating_it():
-    task = {"task_id": "t1", "capsule_id": "capsule_abc", "status": "open", "depends_on": []}
-    gate_result = {"decision": "gate_required", "reason_codes": ["unresolved_conflict"]}
-    result = with_gate_reference(task=task, gate_result=gate_result)
-    assert result["task"]["gate_ref"] == gate_result
-    assert result["reason_codes"] == []
-
-
-def test_with_gate_reference_fails_closed_on_a_malformed_gate_shape():
-    task = {"task_id": "t1", "capsule_id": "capsule_abc", "status": "open", "depends_on": []}
-    result = with_gate_reference(task=task, gate_result={"decision": "clear"})
-    assert result["task"] == task
-    assert result["reason_codes"] == ["unknown_gate_shape"]
-
-
-# -- source scan: no persistence, no process, no network, by construction ------------------
-
-
-def test_control_performs_no_filesystem_process_or_network_io_by_source_scan_of_every_module():
-    forbidden = [
-        "import os",
-        "import subprocess",
-        "import socket",
-        "import shutil",
-        "urllib",
-        "requests",
-        "open(",
-        "input(",
-    ]
-    for name in CONTROL_MODULE_NAMES:
-        with open(os.path.join(CONTROL_DIR, name), encoding="utf-8") as f:
-            source = f.read()
-        for pattern in forbidden:
-            assert pattern not in source, f"{name} must not reference {pattern}"
+def test_gate_reference_is_recorded_without_re_evaluation():
+    task = {"task_id": "task-204", "capsule_id": "capsule", "status": "open"}
+    gate = {"decision": "clear", "reason_codes": []}
+    assert with_gate_reference(task=task, gate_result=gate) == {"task": {**task, "gate_ref": gate}, "reason_codes": []}
+    refused = with_gate_reference(task=task, gate_result={})
+    assert refused == {"task": task, "reason_codes": [GATE_REFERENCE_REASON["UNKNOWN_GATE_SHAPE"]]}
