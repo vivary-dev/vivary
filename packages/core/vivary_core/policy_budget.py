@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import math
 
-from vivary_core.capsule_compile import CAPSULE_SCHEMA
+from vivary_core.capsule_compile import is_task_capsule_shape
 from vivary_core.policy_reason_codes import BUDGET_DECISION, BUDGET_REASON
 
 __all__ = ["BUDGET_DECISION", "BUDGET_REASON", "evaluate_budget"]
@@ -49,18 +49,6 @@ def _is_finite_number(value) -> bool:
     return _is_number(value) and (not isinstance(value, float) or math.isfinite(value))
 
 
-def _is_capsule_shape(capsule) -> bool:
-    return (
-        isinstance(capsule, dict)
-        and capsule.get("schema") == CAPSULE_SCHEMA
-        and isinstance(capsule.get("capsule_id"), str)
-        and len(capsule["capsule_id"]) > 0
-        and isinstance(capsule.get("fingerprint"), str)
-        and len(capsule["fingerprint"]) > 0
-        and isinstance(capsule.get("workspace"), dict)
-        and isinstance(capsule["workspace"].get("fingerprint"), str)
-        and len(capsule["workspace"]["fingerprint"]) > 0
-    )
 
 
 def evaluate_budget(*, capsule, state=None, limits=None):
@@ -79,7 +67,7 @@ def evaluate_budget(*, capsule, state=None, limits=None):
 
     Returns {"decision": str, "reason_codes": [str], "details": dict}.
     """
-    if not _is_capsule_shape(capsule):
+    if not is_task_capsule_shape(capsule):
         return {
             "decision": BUDGET_DECISION["REFUSED"],
             "reason_codes": [BUDGET_REASON["UNKNOWN_CAPSULE_SHAPE"]],

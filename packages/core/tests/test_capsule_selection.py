@@ -181,7 +181,7 @@ def build_fixtures(base_dir):
 
 @pytest.fixture(scope="module")
 def fx():
-    base_dir = tempfile.mkdtemp(prefix="vivary-capsule-selection-fixtures-")
+    base_dir = os.path.realpath(tempfile.mkdtemp(prefix="vivary-capsule-selection-fixtures-"))
     try:
         yield build_fixtures(base_dir)
     finally:
@@ -307,13 +307,13 @@ def test_structured_includes_filter_matches_on_label(graph, checkout_id_by_label
 
 
 def test_unknown_filter_fields_and_malformed_operators_fail_closed(graph):
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError, match="task.filters is invalid"):
         compile_task_capsule(task={**TASK, "filters": [{"field": "frontmatter", "equals": "x"}]}, graph=graph)
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError, match="task.filters is invalid"):
         compile_task_capsule(
             task={**TASK, "filters": [{"field": "fact", "equals": "a", "includes": "b"}]}, graph=graph
         )
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError, match="task.filters is invalid"):
         compile_task_capsule(task={**TASK, "filters": [{"field": "fact"}]}, graph=graph)
 
 
@@ -492,7 +492,7 @@ def test_retroactive_red_green_this_exact_scenario_fails_against_the_pre_59_flat
     # new one. select.mjs's `surviving.sort` comparator used plain JS `<`/`>`
     # on the sortKey tuple, which for strings is UTF-16-code-unit order (see
     # capsule_select.py's module docstring) - reproduced here the same way.
-    from vivary_core.canonical import _utf16_sort_key
+    from vivary_core.canonical import utf16_sort_key
 
     old_fact_weights = {
         "head_revision": 0,
@@ -516,7 +516,7 @@ def test_retroactive_red_green_this_exact_scenario_fails_against_the_pre_59_flat
             "sort_key": (
                 old_rank_tier(c["subject"]),
                 old_fact_weights.get(c["fact"], 9),
-                _utf16_sort_key(f"{c['subject']}:{c['fact']}:{c['claim']}"),
+                utf16_sort_key(f"{c['subject']}:{c['fact']}:{c['claim']}"),
             ),
         }
         for c in candidates

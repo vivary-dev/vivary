@@ -989,6 +989,40 @@ def test_create_handoff_fails_closed_on_a_malformed_capsule_or_receipt_shape():
     assert result["reason_codes"] == [HANDOFF_REASON["UNKNOWN_RECEIPT_SHAPE"]]
 
 
+def test_create_handoff_rejects_unknown_capsule_and_receipt_fields():
+    claim = {
+        "claim_id": "claim_1",
+        "actor": AGENT,
+        "scope": scope("vivary", ["src/control"]),
+        "authority_class": AUTHORITY_CLASS["CONTRIBUTOR"],
+    }
+    common = {
+        "claim": claim,
+        "from_actor": AGENT,
+        "to_actor": AGENT,
+        "workspace_revision": "sha256:workspace-fp",
+        "created_at": "2026-07-20T15:06:00.000Z",
+    }
+
+    unknown_capsule = create_handoff(
+        capsule=capsule_like({"unexpected": "smuggled"}),
+        receipt=receipt_like(),
+        **common,
+    )
+    unknown_receipt = create_handoff(
+        capsule=capsule_like(),
+        receipt=receipt_like({"unexpected": "smuggled"}),
+        **common,
+    )
+
+    assert unknown_capsule["reason_codes"] == [
+        HANDOFF_REASON["UNKNOWN_CAPSULE_SHAPE"]
+    ]
+    assert unknown_receipt["reason_codes"] == [
+        HANDOFF_REASON["UNKNOWN_RECEIPT_SHAPE"]
+    ]
+
+
 def test_create_handoff_fails_closed_when_a_capsule_workspace_is_a_truthy_non_dict():
     claim = {
         "claim_id": "claim_1",
@@ -1179,6 +1213,17 @@ def test_derive_execution_edges_fails_closed_on_a_malformed_receipt_shape():
     result = derive_execution_edges(receipt={"not": "a receipt"})
     assert result["edges"] == []
     assert result["reason_codes"] == [EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]]
+
+
+def test_derive_execution_edges_rejects_unknown_receipt_fields():
+    result = derive_execution_edges(
+        receipt=receipt_like({"unexpected": "smuggled"})
+    )
+
+    assert result["edges"] == []
+    assert result["reason_codes"] == [
+        EXECUTION_REASON["UNKNOWN_RECEIPT_SHAPE"]
+    ]
 
 
 def test_derive_execution_edges_fails_closed_when_receipt_capsule_is_a_truthy_non_dict():

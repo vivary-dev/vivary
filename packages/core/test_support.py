@@ -18,6 +18,14 @@ def content_git_runner(grep_stdout: str) -> Callable[[str, List[str]], Dict[str,
                 "code": 1,
                 "command": command,
             }
+        if args and args[0] == "ls-tree":
+            return {
+                "ok": True,
+                "stdout": "",
+                "stderr": "",
+                "code": 0,
+                "command": command,
+            }
         if "rev-parse" in args:
             return {
                 "ok": True,

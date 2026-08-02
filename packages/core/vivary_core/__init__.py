@@ -18,11 +18,21 @@ from vivary_core.canonical import (
     fingerprint,
     is_absolute_root,
     is_within,
+    is_canonical_absolute_path,
     js_stringify,
     normalize_path,
     sha256_hex,
+    path_identity_key,
+    utf16_sort_key,
 )
-from vivary_core.capsule_compile import compile_task_capsule
+from vivary_core.capsule_compile import (
+    TASK_CAPSULE_FIELDS,
+    CapsuleContentWorkLimitError,
+    capsule_compiler_omissions_require_graph,
+    compile_task_capsule,
+    content_context_work_is_bounded,
+)
+from vivary_core.receipt import EXECUTION_RECEIPT_FIELDS
 from vivary_core.workspace_content import observe_content
 from vivary_core.workspace_model import project_workspace_graph
 from vivary_core.workspace_observe import observe_checkouts
@@ -34,8 +44,16 @@ __all__ = [
     "is_absolute_root",
     "is_within",
     "js_stringify",
+    "is_canonical_absolute_path",
     "normalize_path",
     "sha256_hex",
+    "path_identity_key",
+    "utf16_sort_key",
+    "CapsuleContentWorkLimitError",
+    "TASK_CAPSULE_FIELDS",
+    "EXECUTION_RECEIPT_FIELDS",
+    "capsule_compiler_omissions_require_graph",
+    "content_context_work_is_bounded",
     "compile_task_capsule",
     "observe_checkouts",
     "observe_content",

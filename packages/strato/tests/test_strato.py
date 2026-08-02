@@ -32,7 +32,7 @@ def test_runtime_version_matches_the_package_manifest():
     project = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
 
     assert strato.__version__ == project["version"]
-    assert "vivary-core>=0.2.2" in project["dependencies"]
+    assert "vivary-core>=0.2.4" in project["dependencies"]
 
 
 def capsule(**overrides):
@@ -290,7 +290,13 @@ def test_governed_facade_rejects_non_string_request_keys_without_raising():
 
 def test_governed_facade_refuses_non_string_capsule_keys_without_raising():
     governed_capsule = capsule()
-    governed_capsule["unknowns"] = [{1: "not a canonical object key"}]
+    governed_capsule["required_checks"] = [
+        {
+            "name": "unit",
+            "command": "python -m pytest",
+            1: "not a canonical object key",
+        }
+    ]
 
     result = strato.decide_governed(request(capsule=governed_capsule))
 
@@ -324,7 +330,15 @@ def test_governed_facade_refuses_a_self_fingerprinted_capsule_missing_its_budget
     ],
 )
 def test_governed_facade_refuses_lossy_capsule_values(lossy_value):
-    lossy_capsule = capsule(unknowns=[{"value": lossy_value}])
+    lossy_capsule = capsule(
+        required_checks=[
+            {
+                "name": "unit",
+                "command": "python -m pytest",
+                "value": lossy_value,
+            }
+        ]
+    )
 
     result = strato.decide_governed(request(capsule=lossy_capsule))
 
@@ -355,7 +369,35 @@ def test_governed_facade_rejects_a_fabricated_capsule_identifier():
 
 def test_human_owner_authority_alone_cannot_clear_a_capsule_gate():
     gated_capsule = capsule(
-        conflicts=[{"id": "conflict:review", "decision": "review_required"}]
+        conflicts=[
+            {
+                "id": "conflict:review",
+                "kind": "divergent_checkouts",
+                "repository": "repository:test",
+                "question": "Which checkout is current?",
+                "sides": [
+                    {
+                        "checkout": "checkout:a",
+                        "path": "/repo/a",
+                        "head_revision": "a" * 40,
+                        "head_ref": {"kind": "branch", "name": "main"},
+                        "last_fetch": None,
+                        "evidence": [],
+                    },
+                    {
+                        "checkout": "checkout:b",
+                        "path": "/repo/b",
+                        "head_revision": "b" * 40,
+                        "head_ref": {"kind": "branch", "name": "main"},
+                        "last_fetch": None,
+                        "evidence": [],
+                    },
+                ],
+                "status": "unresolved",
+                "reason_codes": ["value_conflict", "identity_unresolved"],
+                "decision": "review_required",
+            }
+        ]
     )
 
     result = strato.decide_governed(
@@ -381,7 +423,7 @@ def test_scope_binding_uses_core_path_equivalence_and_rejects_an_unscoped_capsul
         )
     )
     unscoped = strato.decide_governed(
-        request(capsule=capsule(task={"question": "Unscoped", "scope": None}))
+        request(capsule=capsule(task={"question": "Unscoped"}))
     )
 
     assert equivalent["decision"] == LOOP_DECISION["ACT"]
@@ -458,7 +500,7 @@ def test_python_facade_rejects_recursive_evidence():
     for _ in range(sys.getrecursionlimit() * 2):
         nested = [nested]
     governed = request(receipt=receipt())
-    governed["receipt"]["untrusted"] = nested
+    governed["receipt"]["checks"][0]["evidence"] = nested
 
     result = strato.decide_governed(governed)
 
@@ -471,7 +513,7 @@ def test_cli_rejects_recursive_evidence_without_a_traceback(tmp_path):
     for _ in range(600):
         nested = [nested]
     governed = request(receipt=receipt())
-    governed["receipt"]["untrusted"] = nested
+    governed["receipt"]["checks"][0]["evidence"] = nested
     request_path = tmp_path / "recursive-receipt.json"
     request_path.write_text(json.dumps(governed), encoding="utf-8")
 

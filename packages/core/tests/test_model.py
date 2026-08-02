@@ -45,7 +45,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 from vivary_core.canonical import deterministic_id, normalize_path  # noqa: E402
-from vivary_core.workspace_model import project_workspace_graph  # noqa: E402
+from vivary_core.workspace_model import (  # noqa: E402
+    project_workspace_graph,
+    repair_graph_is_canonical,
+    workspace_facts_are_valid,
+    workspace_fingerprint_from_graph,
+)
 
 try:
     from vivary_core.workspace_observe import observe_checkouts
@@ -190,7 +195,7 @@ def build_fixtures(base_dir):
 
 @pytest.fixture(scope="module")
 def fx():
-    base_dir = tempfile.mkdtemp(prefix="vivary-model-fixtures-")
+    base_dir = os.path.realpath(tempfile.mkdtemp(prefix="vivary-model-fixtures-"))
     try:
         yield build_fixtures(base_dir)
     finally:
@@ -210,12 +215,339 @@ def observation(fx):
 
 # --- tests --------------------------------------------------------------------
 
+def _known_workspace_facts():
+    return {
+        "is_git_repository": {"status": "known", "value": True},
+        "worktree_root": {"status": "known", "value": "/repo"},
+        "git_common_dir": {"status": "known", "value": "/repo/.git"},
+        "head_revision": {"status": "known", "value": "a" * 40},
+        "head_ref": {
+            "status": "known",
+            "value": {"kind": "branch", "name": "main"},
+        },
+        "dirty_entries": {
+            "status": "known",
+            "value": [{"path": "README.md", "state": " M"}],
+        },
+        "is_dirty": {"status": "known", "value": True},
+        "remotes": {
+            "status": "known",
+            "value": [
+                {
+                    "name": "origin",
+                    "fetch_url": "https://example.test/repo.git",
+                }
+            ],
+        },
+        "upstream": {"status": "known", "value": "origin/main"},
+        "last_fetch": {"status": "known", "value": "2026-07-02T00:00:00.000Z"},
+        "workspace_markers": {"status": "known", "value": ["package.json"]},
+        "npm_test_script": {"status": "known", "value": "pytest -q"},
+    }
+
+
+def _workspace_observation(facts):
+    return {
+        "observed_at": NOW(),
+        "allowlist": ["/repo"],
+        "refusals": [],
+        "checkouts": [{"path": "/repo", "facts": facts}],
+    }
+
 
 def test_projection_is_deterministic_same_observation_byte_identical_graph(observation):
     a = project_workspace_graph(observation)
     b = project_workspace_graph(observation)
     assert a == b
     assert json.dumps(a) == json.dumps(b)
+
+def test_projection_rejects_duplicate_checkout_identities(observation):
+    duplicated = json.loads(json.dumps(observation))
+    duplicated["checkouts"].append(
+        json.loads(json.dumps(duplicated["checkouts"][0]))
+    )
+
+    with pytest.raises(
+        ValueError, match="duplicate checkout identities"
+    ):
+        project_workspace_graph(duplicated)
+
+
+def test_workspace_fingerprint_commits_to_worktree_root(observation):
+    honest = project_workspace_graph(observation)
+    forged_observation = json.loads(json.dumps(observation))
+    checkout = next(
+        item
+        for item in forged_observation["checkouts"]
+        if (item["facts"].get("worktree_root") or {}).get("status") == "known"
+    )
+    checkout["facts"]["worktree_root"]["value"] = "/forged/worktree"
+    forged = project_workspace_graph(forged_observation)
+
+    assert forged["workspace_fingerprint"] != honest["workspace_fingerprint"]
+
+    retained_fingerprint = json.loads(json.dumps(honest))
+    graph_checkout = next(
+        node
+        for node in retained_fingerprint["nodes"]
+        if node.get("kind") == "checkout"
+        and (node.get("facts", {}).get("worktree_root") or {}).get("status") == "known"
+    )
+    graph_checkout["facts"]["worktree_root"]["value"] = "/forged/worktree"
+    assert (
+        workspace_fingerprint_from_graph(retained_fingerprint)
+        != retained_fingerprint["workspace_fingerprint"]
+    )
+    assert not repair_graph_is_canonical(retained_fingerprint)
+
+
+@pytest.mark.parametrize(
+    "fact_name",
+    [
+        "is_git_repository",
+        "git_common_dir",
+        "workspace_markers",
+        "npm_test_script",
+    ],
+)
+def test_workspace_fingerprint_commits_gate_driving_fact_records(fact_name):
+    graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": ["/repo"],
+            "refusals": [],
+            "checkouts": [
+                {
+                    "path": "/repo",
+                    "facts": {
+                        "is_git_repository": {
+                            "status": "known",
+                            "value": True,
+                            "evidence": [],
+                        },
+                        "git_common_dir": {
+                            "status": "known",
+                            "value": "/repo/.git",
+                            "evidence": [],
+                        },
+                        "workspace_markers": {
+                            "status": "known",
+                            "value": ["tropo.toml"],
+                            "evidence": [],
+                        },
+                        "npm_test_script": {
+                            "status": "known",
+                            "value": "vitest run",
+                            "evidence": [],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+    forged = json.loads(json.dumps(graph))
+    checkout = next(
+        node for node in forged["nodes"] if node["kind"] == "checkout"
+    )
+    checkout["facts"][fact_name] = {
+        "status": "unknown",
+        "reason": "forged",
+        "evidence": [],
+    }
+
+    assert (
+        workspace_fingerprint_from_graph(forged)
+        != graph["workspace_fingerprint"]
+    )
+
+
+def test_projection_rejects_invalid_fact_status():
+    with pytest.raises(ValueError, match="fact status"):
+        project_workspace_graph(
+            {
+                "observed_at": NOW(),
+                "allowlist": ["/repo"],
+                "refusals": [],
+                "checkouts": [
+                    {
+                        "path": "/repo",
+                        "facts": {
+                            "is_git_repository": {
+                                "status": "bogus",
+                                "value": True,
+                                "evidence": [],
+                            }
+                        },
+                    }
+                ],
+            }
+        )
+
+@pytest.mark.parametrize(
+    "fact_name",
+    (
+        "is_git_repository",
+        "worktree_root",
+        "git_common_dir",
+        "head_revision",
+        "head_ref",
+        "dirty_entries",
+        "is_dirty",
+        "remotes",
+        "upstream",
+        "last_fetch",
+        "workspace_markers",
+        "npm_test_script",
+    ),
+)
+def test_workspace_facts_reject_known_gate_facts_without_value(fact_name):
+    facts = _known_workspace_facts()
+    facts[fact_name] = {"status": "known"}
+
+    assert not workspace_facts_are_valid(facts)
+
+
+@pytest.mark.parametrize(
+    ("fact_name", "invalid_value"),
+    (
+        pytest.param(
+            "is_git_repository",
+            "yes",
+            id="is_git_repository-requires-bool",
+        ),
+        pytest.param("is_dirty", "yes", id="is_dirty-requires-bool"),
+        pytest.param("worktree_root", 1, id="worktree_root-requires-string"),
+        pytest.param(
+            "npm_test_script",
+            "",
+            id="npm_test_script-requires-nonblank-string",
+        ),
+        pytest.param(
+            "workspace_markers",
+            [1],
+            id="workspace_markers-requires-list-of-strings",
+        ),
+        pytest.param(
+            "head_ref",
+            {"kind": "branch"},
+            id="head_ref-requires-complete-ref-shape",
+        ),
+        pytest.param("head_ref", "main", id="head_ref-requires-mapping"),
+        pytest.param(
+            "dirty_entries",
+            [{"path": "README.md", "state": 1}],
+            id="dirty_entries-requires-string-state",
+        ),
+        pytest.param(
+            "dirty_entries",
+            "M README.md",
+            id="dirty_entries-requires-list",
+        ),
+        pytest.param(
+            "remotes",
+            [{"name": "origin", "fetch_url": 1}],
+            id="remotes-requires-string-urls",
+        ),
+    ),
+)
+def test_workspace_facts_reject_wrong_semantic_values_for_gate_categories(
+    fact_name, invalid_value
+):
+    facts = _known_workspace_facts()
+    facts[fact_name]["value"] = invalid_value
+
+    assert not workspace_facts_are_valid(facts)
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/outside/private.txt",
+        "../secret",
+        "c:secret",
+        "c:/outside/private.txt",
+        "",
+        r"dir\secret",
+        "dir/secret/",
+        " secret",
+    ),
+)
+def test_workspace_facts_reject_unsafe_dirty_entry_paths(path):
+    facts = _known_workspace_facts()
+    facts["dirty_entries"]["value"] = [{"path": path, "state": "M"}]
+
+    assert not workspace_facts_are_valid(facts)
+    with pytest.raises(ValueError, match="invalid fact"):
+        project_workspace_graph(_workspace_observation(facts))
+
+
+@pytest.mark.parametrize("path", ("tracked.md", "dir/tracked.md"))
+def test_workspace_facts_accept_safe_checkout_relative_dirty_entry_paths(path):
+    facts = _known_workspace_facts()
+    facts["dirty_entries"]["value"] = [{"path": path, "state": "M"}]
+
+    assert workspace_facts_are_valid(facts)
+
+
+def test_projection_rejects_known_is_dirty_without_value():
+    facts = _known_workspace_facts()
+    facts["is_dirty"] = {"status": "known"}
+
+    with pytest.raises(ValueError, match="invalid fact"):
+        project_workspace_graph(_workspace_observation(facts))
+
+
+def test_workspace_fact_validation_and_projection_preserve_valid_unknowns():
+    facts = _known_workspace_facts()
+    facts["is_dirty"] = {
+        "status": "unknown",
+        "reason": "status_unavailable",
+    }
+
+    assert workspace_facts_are_valid(facts)
+    graph = project_workspace_graph(_workspace_observation(facts))
+    assert graph["unknowns"] == [
+        {
+            "checkout": deterministic_id("checkout", {"path": "/repo"}),
+            "path": "/repo",
+            "fact": "is_dirty",
+            "reason": "status_unavailable",
+        }
+    ]
+    assert repair_graph_is_canonical(graph)
+
+
+def test_repair_graph_canonicality_requires_allowlist_field():
+    graph = project_workspace_graph(_workspace_observation(_known_workspace_facts()))
+    del graph["allowlist"]
+
+    assert not repair_graph_is_canonical(graph)
+
+
+def test_workspace_fingerprint_and_canonicality_preserve_refusals():
+    graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": ["/repo"],
+            "refusals": [
+                {
+                    "path": "/outside",
+                    "status": "refused",
+                    "reason": "outside_allowlist",
+                }
+            ],
+            "checkouts": [],
+        }
+    )
+    assert repair_graph_is_canonical(graph)
+
+    removed = json.loads(json.dumps(graph))
+    removed["refusals"] = []
+    assert (
+        workspace_fingerprint_from_graph(removed)
+        != graph["workspace_fingerprint"]
+    )
+    assert not repair_graph_is_canonical(removed)
 
 
 def test_node_ids_derive_only_from_stable_identity_not_observation_order(fx, observation):
@@ -233,6 +565,7 @@ def test_node_ids_derive_only_from_stable_identity_not_observation_order(fx, obs
 
 def test_canonical_and_stale_neighbor_share_one_repository_node_and_a_preserved_conflict(fx, observation):
     graph = project_workspace_graph(observation)
+
     repositories = [n for n in graph["nodes"] if n["kind"] == "repository" and n["identity_status"] == "known"]
     assert len(repositories) == 1, "both clones must resolve to one known repository identity"
 
@@ -247,6 +580,53 @@ def test_canonical_and_stale_neighbor_share_one_repository_node_and_a_preserved_
     assert "winner" not in conflict, "a conflict must never elect a winner"
     for side in conflict["sides"]:
         assert side["evidence"], "each side carries its evidence"
+def test_windows_common_dir_identity_groups_remote_less_worktrees():
+    def checkout(path, common_dir, head):
+        return {
+            "path": path,
+            "facts": {
+                "is_git_repository": {
+                    "status": "known",
+                    "value": True,
+                    "evidence": [],
+                },
+                "git_common_dir": {
+                    "status": "known",
+                    "value": common_dir,
+                    "evidence": [],
+                },
+                "head_revision": {
+                    "status": "known",
+                    "value": head,
+                    "evidence": [],
+                },
+                "remotes": {
+                    "status": "known",
+                    "value": [],
+                    "evidence": [],
+                },
+            },
+        }
+
+    graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": [],
+            "refusals": [],
+            "checkouts": [
+                checkout("c:/Worktree-A", "c:/Repo/.git", "a" * 40),
+                checkout("c:/Worktree-B", "c:/repo/.git", "b" * 40),
+            ],
+        }
+    )
+
+    repositories = [
+        node for node in graph["nodes"] if node["kind"] == "repository"
+    ]
+    assert len(repositories) == 1
+    assert repositories[0]["identity"] == "local:c:/repo/.git"
+    assert len(graph["conflicts"]) == 1
+
 
 
 def test_unknowns_survive_projection_as_first_class_entries(fx, observation):
@@ -255,6 +635,230 @@ def test_unknowns_survive_projection_as_first_class_entries(fx, observation):
     facts = [u["fact"] for u in graph["unknowns"] if u["path"] == no_origin_path]
     assert "upstream" in facts
     assert "last_fetch" in facts
+
+
+def test_repair_graph_canonicality_binds_recomputable_derived_content():
+    graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": [],
+            "refusals": [],
+            "checkouts": [
+                {
+                    "path": "/repo/checkout",
+                    "facts": {
+                        "is_git_repository": {
+                            "status": "known",
+                            "value": True,
+                            "evidence": [],
+                        },
+                        "git_common_dir": {
+                            "status": "known",
+                            "value": "/repo/shared/.git",
+                            "evidence": ["common-dir"],
+                        },
+                        "last_fetch": {
+                            "status": "unknown",
+                            "reason": "not_observed",
+                            "evidence": [],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+    assert repair_graph_is_canonical(graph)
+    forged_field = json.loads(json.dumps(graph))
+    forged_field["forged"] = True
+    assert not repair_graph_is_canonical(forged_field)
+
+    unnormalized_allowlist = json.loads(json.dumps(graph))
+    unnormalized_allowlist["allowlist"] = ["/repo/"]
+    assert not repair_graph_is_canonical(unnormalized_allowlist)
+
+    missing_unknown = json.loads(json.dumps(graph))
+    missing_unknown["unknowns"] = []
+    assert not repair_graph_is_canonical(missing_unknown)
+
+    forged_unknown = json.loads(json.dumps(graph))
+    checkout = next(
+        node for node in forged_unknown["nodes"] if node["kind"] == "checkout"
+    )
+    forged_unknown["unknowns"].append(
+        {
+            "checkout": checkout["id"],
+            "path": checkout["path"],
+            "fact": "totally_made_up",
+            "reason": "forged",
+        }
+    )
+    assert not repair_graph_is_canonical(forged_unknown)
+
+    forged_status = json.loads(json.dumps(graph))
+    repository = next(
+        node for node in forged_status["nodes"] if node["kind"] == "repository"
+    )
+    repository["identity_status"] = "known"
+    assert not repair_graph_is_canonical(forged_status)
+
+    forged_label = json.loads(json.dumps(graph))
+    checkout = next(
+        node for node in forged_label["nodes"] if node["kind"] == "checkout"
+    )
+    checkout["label"] = "forged"
+    assert not repair_graph_is_canonical(forged_label)
+
+    forged_evidence = json.loads(json.dumps(graph))
+    checkout_of = next(
+        edge for edge in forged_evidence["edges"] if edge["kind"] == "checkout_of"
+    )
+    checkout_of["evidence"] = ["forged"]
+    assert not repair_graph_is_canonical(forged_evidence)
+
+
+def test_repair_graph_canonicality_binds_non_git_unknown_projection():
+    graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": [],
+            "refusals": [],
+            "checkouts": [
+                {
+                    "path": "/repo/not-git",
+                    "facts": {
+                        "is_git_repository": {
+                            "status": "unknown",
+                            "reason": "not_a_git_repository_or_git_failed",
+                            "evidence": [],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert graph["unknowns"] == [
+        {
+            "checkout": deterministic_id(
+                "checkout", {"path": "/repo/not-git"}
+            ),
+            "path": "/repo/not-git",
+            "fact": "is_git_repository",
+            "reason": "not_a_git_repository_or_git_failed",
+        }
+    ]
+    assert repair_graph_is_canonical(graph)
+    discarded_unknown_graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": [],
+            "refusals": [],
+            "checkouts": [
+                {
+                    "path": "/repo/known-not-git",
+                    "facts": {
+                        "is_git_repository": {
+                            "status": "known",
+                            "value": False,
+                            "evidence": [],
+                        },
+                        "head_revision": {
+                            "status": "unknown",
+                            "reason": "not_observed",
+                            "evidence": [],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+    assert discarded_unknown_graph["unknowns"] == []
+    assert repair_graph_is_canonical(discarded_unknown_graph)
+
+    empty_facts_graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": [],
+            "refusals": [],
+            "checkouts": [{"path": "/repo/no-facts", "facts": {}}],
+        }
+    )
+    assert repair_graph_is_canonical(empty_facts_graph)
+
+    forged_unknown = json.loads(json.dumps(graph))
+    forged_unknown["unknowns"].append(
+        {
+            "checkout": deterministic_id(
+                "checkout", {"path": "/repo/not-git"}
+            ),
+            "path": "/repo/not-git",
+            "fact": "last_fetch",
+            "reason": "forged",
+        }
+    )
+    assert not repair_graph_is_canonical(forged_unknown)
+
+
+def test_repair_graph_canonicality_normalizes_neighbors_and_binds_omissions():
+    def checkout(index):
+        return {
+            "path": f"/repo/checkout-{index}",
+            "facts": {
+                "is_git_repository": {
+                    "status": "known",
+                    "value": True,
+                    "evidence": [],
+                },
+                "git_common_dir": {
+                    "status": "known",
+                    "value": "/repo/shared/.git",
+                    "evidence": [],
+                },
+            },
+        }
+
+    neighbor_graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": [],
+            "refusals": [],
+            "checkouts": [checkout(0), checkout(1)],
+        }
+    )
+    neighbor = next(
+        edge
+        for edge in neighbor_graph["edges"]
+        if edge["kind"] == "neighbor_of"
+    )
+    neighbor["from"], neighbor["to"] = neighbor["to"], neighbor["from"]
+    neighbor["id"] = deterministic_id(
+        "edge",
+        {
+            "kind": neighbor["kind"],
+            "from": neighbor["from"],
+            "to": neighbor["to"],
+        },
+    )
+    assert repair_graph_is_canonical(neighbor_graph)
+    neighbor["id"] = "edge:forged"
+    assert not repair_graph_is_canonical(neighbor_graph)
+
+    capped_graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": [],
+            "refusals": [],
+            "checkouts": [checkout(index) for index in range(301)],
+        }
+    )
+    assert capped_graph["omissions"]
+    assert repair_graph_is_canonical(capped_graph)
+
+    omission = capped_graph["omissions"].pop()
+    assert not repair_graph_is_canonical(capped_graph)
+    capped_graph["omissions"].append(omission)
+    omission["reason"] = "forged"
+    assert not repair_graph_is_canonical(capped_graph)
 
 
 def test_detached_checkout_produces_no_branch_node_dirty_artifacts_become_nodes(fx, observation):
@@ -289,7 +893,7 @@ def test_linked_worktrees_of_a_no_remote_repo_share_one_repository_and_conflict(
     """
     from vivary_core.workspace_observe import observe_checkouts
 
-    base = tempfile.mkdtemp(prefix="vivary-worktree-")
+    base = os.path.realpath(tempfile.mkdtemp(prefix="vivary-worktree-"))
     try:
         main_wt = os.path.join(base, "main-wt")
         os.makedirs(main_wt)

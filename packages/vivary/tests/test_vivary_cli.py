@@ -14,7 +14,7 @@ import vivary_cli
 
 
 class VivaryReleaseMetadataTests(unittest.TestCase):
-    def test_runtime_version_matches_manifest_and_tropo_floor(self):
+    def test_runtime_version_matches_manifest_and_component_floors(self):
         import tomllib
 
         manifest = tomllib.loads(
@@ -22,6 +22,7 @@ class VivaryReleaseMetadataTests(unittest.TestCase):
         )["project"]
         self.assertEqual(vivary_cli.__version__, manifest["version"])
         self.assertIn("vivary-tropo>=0.5.0", manifest["dependencies"])
+        self.assertIn("vivary-ozone>=0.3.1", manifest["dependencies"])
 
 
 class VivaryLogsTests(unittest.TestCase):

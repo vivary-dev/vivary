@@ -46,15 +46,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 from test_support import content_git_runner  # noqa: E402
+from vivary_core.canonical import fingerprint  # noqa: E402
 
 from vivary_core.workspace_content import (  # noqa: E402
     CONTENT_SCHEMA,
     MAX_EXCERPT_LENGTH,
     MAX_FILES_PER_CHECKOUT,
     MAX_MATCHES_PER_FILE,
+    _bound_matches,
     _parse_grep_lines,
     observe_content,
 )
+from vivary_core.capsule_compile import content_context_is_valid  # noqa: E402
 
 FIXED_DATE = "2026-07-01T12:00:00Z"
 FETCH_STAMP = datetime(2026, 7, 2, 0, 0, 0, tzinfo=timezone.utc)
@@ -217,7 +220,7 @@ def hash_tree(root):
 
 @pytest.fixture(scope="module")
 def fx():
-    base_dir = tempfile.mkdtemp(prefix="vivary-content-fixtures-")
+    base_dir = os.path.realpath(tempfile.mkdtemp(prefix="vivary-content-fixtures-"))
     data = build_fixtures(base_dir)
     yield data
     _rmtree_force(base_dir)
@@ -275,7 +278,37 @@ def test_tracked_files_only_git_ignored_and_untracked_content_never_appears_in_a
     assert "private-note" not in serialized
     assert "private_fixture_marker" not in serialized.lower()
 
-def test_tracked_path_added_to_ignore_policy_never_enters_content(fx, allowlist):
+def test_named_commit_search_ignores_replace_refs(tmp_path):
+    base = str(tmp_path)
+    repo = os.path.join(base, "repo")
+    _git(base, base, ["init", "-q", "-b", "main", repo])
+    _commit_file(base, repo, "tracked.txt", "original\n", "base")
+    original_blob = _git(
+        base, repo, ["rev-parse", "HEAD:tracked.txt"]
+    )
+    replacement_file = os.path.join(repo, "replacement.txt")
+    _write(replacement_file, "replacement marker\n")
+    replacement_blob = _git(
+        base, repo, ["hash-object", "-w", "replacement.txt"]
+    )
+    _git(base, repo, ["replace", original_blob, replacement_blob])
+    assert "replacement marker" in _git(
+        base, repo, ["grep", "replacement marker", "HEAD"]
+    )
+
+    result = observe_content(
+        [repo],
+        allowlist=[repo],
+        terms=["replacement marker"],
+        now=NOW,
+    )
+
+    checkout = result["checkouts"][0]
+    assert checkout["status"] == "observed"
+    assert checkout["matches"] == []
+
+
+def test_dirty_ignore_policy_and_file_edit_do_not_change_commit_tree_search(fx, allowlist):
     repo = fx["paths"]["dirty"]
     gitignore = os.path.join(repo, ".gitignore")
     original = open(gitignore, encoding="utf-8").read()
@@ -293,12 +326,87 @@ def test_tracked_path_added_to_ignore_policy_never_enters_content(fx, allowlist)
     assert result["checkouts"][0]["matches"] == []
     serialized = json.dumps(result)
     assert "tracked.md" not in serialized
-    assert any(
-        omission.get("kind") == "privacy_matches_excluded"
-        for omission in result["checkouts"][0]["omissions"]
+
+
+
+
+def test_unsafe_git_legal_match_paths_are_counted_without_disclosure():
+    evidence = {"command": "git grep"}
+    by_file = {
+        "C:note.md": [
+            {
+                "path": "C:note.md",
+                "line": 1,
+                "rawContent": "needle",
+                "term": "needle",
+            }
+        ]
+    }
+
+    bounded = _bound_matches(by_file, evidence)
+
+    assert bounded["matches"] == []
+    assert bounded["omissions"] == [
+        {
+            "kind": "content_files_truncated",
+            "omitted_count": 1,
+            "total_files_matched": 1,
+            "reason": (
+                "unsafe matched paths excluded and matched-file listing "
+                f"capped at {MAX_FILES_PER_CHECKOUT} files per checkout"
+            ),
+        }
+    ]
+    assert content_context_is_valid(
+        {
+            "schema": CONTENT_SCHEMA,
+            "observed_at": NOW(),
+            "terms": ["needle"],
+            "allowlist": ["/repo"],
+            "checkouts": [
+                {
+                    "raw_path": "/repo",
+                    "privacy_fingerprint": fingerprint(
+                        {
+                            "revision": "a" * 40,
+                            "ignored_tracked_paths": [],
+                        }
+                    ),
+                    "path": "/repo",
+                    "status": "observed",
+                    "head_revision": "a" * 40,
+                    **bounded,
+                }
+            ],
+            "refusals": [],
+        }
     )
 
 
+def test_ignore_filter_uses_one_nul_framed_stdin_query():
+    from vivary_core.workspace_observe import _ignored_paths
+
+    calls = []
+
+    def run_git(_path, args, *, stdin_data=None):
+        calls.append((args, stdin_data))
+        return {
+            "ok": True,
+            "stdout": "./secret.md\0",
+            "command": "git check-ignore --stdin -z",
+            "code": 0,
+        }
+
+    ignored, _command = _ignored_paths(
+        "/repo",
+        ["README.md", "secret.md", "notes.md"],
+        run_git,
+    )
+
+    assert ignored == {"secret.md"}
+    assert len(calls) == 1
+    assert "--stdin" in calls[0][0]
+    assert calls[0][1] == b"./README.md\0./secret.md\0./notes.md\0"
 
 
 def test_ignore_filter_literalizes_git_pathspec_magic():
@@ -310,6 +418,13 @@ def test_ignore_filter_literalizes_git_pathspec_magic():
             return {
                 "ok": True,
                 "stdout": "a" * 40 + "\n",
+                "code": 0,
+                "command": command,
+            }
+        if args and args[0] == "ls-tree":
+            return {
+                "ok": True,
+                "stdout": f"{magic_path}\0",
                 "code": 0,
                 "command": command,
             }
@@ -465,11 +580,16 @@ def test_capped_runner_returns_when_inherited_stderr_handle_stays_open(
     child.stderr.release.set()
 
 
-def test_tracked_uncommitted_working_tree_edit_is_still_searched(fx, allowlist):
-    result = observe_content([fx["paths"]["dirty"]], allowlist=allowlist, terms=["modified"], now=NOW)
+def test_tracked_uncommitted_working_tree_edit_is_not_searched(fx, allowlist):
+    result = observe_content(
+        [fx["paths"]["dirty"]],
+        allowlist=allowlist,
+        terms=["modified"],
+        now=NOW,
+    )
     checkout = result["checkouts"][0]
-    assert len(checkout["matches"]) == 1
-    assert checkout["matches"][0]["path"] == "tracked.md"
+    assert checkout["matches"] == []
+    assert len(checkout["head_revision"]) == 40
 
 
 def test_no_question_terms_configured_no_git_command_runs_every_checkout_reports_no_question_terms(fx, allowlist):
@@ -529,6 +649,56 @@ def test_a_normal_absolute_allowlist_is_unaffected_by_the_71_validation(fx):
     )
     assert len(result["checkouts"]) == 1
     assert len(result["refusals"]) == 0
+
+
+def test_duplicate_checkout_roots_are_observed_once(fx):
+    path = fx["paths"]["canonical"]
+    result = observe_content(
+        [path, path],
+        allowlist=[path],
+        terms=["content"],
+        now=NOW,
+    )
+    assert len(result["checkouts"]) == 1
+
+
+def test_equivalent_windows_case_preserves_content_exact_root_trust():
+    calls = []
+
+    def run_git(path, args):
+        calls.append(args)
+        if args == ["rev-parse", "HEAD"]:
+            return {
+                "ok": True,
+                "stdout": "a" * 40 + "\n",
+                "command": "git rev-parse HEAD",
+                "code": 0,
+            }
+        if args and args[0] == "ls-tree":
+            return {
+                "ok": True,
+                "stdout": "",
+                "command": "git ls-tree",
+                "code": 0,
+            }
+        if args[0] == "grep":
+            return {
+                "ok": True,
+                "stdout": "",
+                "command": "git " + " ".join(args),
+                "code": 1,
+            }
+        raise AssertionError(f"unexpected git command: {args}")
+
+    result = observe_content(
+        ["C:/Allowlisted-Link"],
+        allowlist=["c:/allowlisted-link"],
+        terms=["needle"],
+        now=NOW,
+        run_git=run_git,
+    )
+    assert result["checkouts"][0]["status"] == "observed"
+    assert ["rev-parse", "--show-toplevel"] not in calls
 
 
 def test_git_grep_failure_not_merely_no_matches_is_reported_as_structured_unknown_never_thrown(fx, allowlist):

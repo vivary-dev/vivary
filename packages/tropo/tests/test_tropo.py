@@ -1703,6 +1703,20 @@ def test_cmd_find_returns_context_packet(tmp_path):
     assert out["results"][0]["reason"]
 
 
+def test_cmd_find_rejects_a_blank_query_before_governed_compilation(tmp_path):
+    args = _query_args("placeholder", governed=True)
+    args.paths = [""]
+
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        rc = tropo.cmd_find(args, types.SimpleNamespace(root=str(tmp_path)))
+
+    assert rc == 2
+    assert stderr.getvalue() == (
+        "tropo find: provide a task or question — e.g. tropo find \"auth module\"\n"
+    )
+
+
 def test_cmd_find_budget_trims_context(tmp_path):
     _search_vault(tmp_path)
     rc, out = _capture_rc(
@@ -2003,7 +2017,10 @@ def test_governed_find_labels_unknown_dirty_state_without_claiming_a_race():
 def test_governed_find_retries_when_content_mutates_after_facts(tmp_path):
     _search_vault(tmp_path)
     state_path = tmp_path / "state.md"
-    state_path.write_text("before mutation\n", encoding="utf-8")
+    state_path.write_text(
+        "RETRIED_GOVERNED_CONTENT_MARKER committed\n",
+        encoding="utf-8",
+    )
     _init_git_repo(tmp_path)
     original_observe_content = vivary_core.observe_content
     content_calls = []
@@ -2011,7 +2028,7 @@ def test_governed_find_retries_when_content_mutates_after_facts(tmp_path):
     def mutate_before_first_content(*args, **kwargs):
         if not content_calls:
             state_path.write_text(
-                "RETRIED_GOVERNED_CONTENT_MARKER\n",
+                "RETRIED_GOVERNED_CONTENT_MARKER uncommitted\n",
                 encoding="utf-8",
             )
         content_calls.append(None)
@@ -2045,10 +2062,13 @@ def test_governed_find_retries_when_content_mutates_after_facts(tmp_path):
     )
 
 
-def test_governed_find_retries_when_already_dirty_content_changes(tmp_path):
+def test_governed_find_ignores_dirty_byte_churn_outside_named_snapshot(tmp_path):
     _search_vault(tmp_path)
     state_path = tmp_path / "state.md"
-    state_path.write_text("committed content\n", encoding="utf-8")
+    state_path.write_text(
+        "DIRTY_CHURN_MARKER committed content\n",
+        encoding="utf-8",
+    )
     _init_git_repo(tmp_path)
     state_path.write_text(
         "DIRTY_CHURN_MARKER first read\n",
@@ -2078,14 +2098,15 @@ def test_governed_find_retries_when_already_dirty_content_changes(tmp_path):
             max_claims=24,
         )
 
-    assert len(content_calls) == 4
+    assert len(content_calls) == 2
     content_claims = [
         claim["claim"]
         for claim in capsule["claims"]
         if claim["fact"] == "content_match"
     ]
-    assert any("DIRTY_CHURN_MARKER stable read" in claim for claim in content_claims)
+    assert any("DIRTY_CHURN_MARKER committed content" in claim for claim in content_claims)
     assert all("DIRTY_CHURN_MARKER first read" not in claim for claim in content_claims)
+    assert all("DIRTY_CHURN_MARKER stable read" not in claim for claim in content_claims)
     assert any(
         claim["fact"] == "is_dirty"
         and claim["claim"] == "worktree has uncommitted changes"

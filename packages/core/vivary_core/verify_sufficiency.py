@@ -244,10 +244,15 @@ def evaluate_gate_sufficiency(*, gate=None, capsule=None, receipt=_NO_RECEIPT_PA
             claims_verified = effective_receipt.get("claims_verified")
             if not isinstance(claims_verified, list):
                 claims_verified = []
+            claims_verified_ids = {
+                claim_id
+                for claim_id in claims_verified
+                if isinstance(claim_id, str)
+            }
             claims_verified_count = sum(
                 isinstance(claim, dict)
                 and isinstance(claim.get("id"), str)
-                and claim["id"] in claims_verified
+                and claim["id"] in claims_verified_ids
                 for claim in capsule["claims"]
             )
             if claims_verified_count < len(capsule["claims"]):

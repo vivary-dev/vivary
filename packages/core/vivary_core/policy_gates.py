@@ -311,13 +311,24 @@ def evaluate_receipt_gate(*, capsule, receipt, verdict=None):
     reason_codes = []
     gate_requests = []
 
-    if (
-        receipt["capsule"]["id"] != capsule["capsule_id"]
-        or receipt["capsule"]["fingerprint"] != capsule["fingerprint"]
-        or receipt["workspace"]["fingerprint"] != capsule["workspace"]["fingerprint"]
-    ):
+    receipt_matches_capsule = (
+        receipt["capsule"]["id"] == capsule["capsule_id"]
+        and receipt["capsule"]["fingerprint"] == capsule["fingerprint"]
+        and receipt["workspace"]["fingerprint"]
+        == capsule["workspace"]["fingerprint"]
+    )
+    if not receipt_matches_capsule:
         reason_codes.append(GATE_REASON["RECEIPT_CAPSULE_MISMATCH"])
         gate_requests.append({"reason_code": GATE_REASON["RECEIPT_CAPSULE_MISMATCH"]})
+    elif (
+        verify_receipt_integrity(receipt=receipt, capsule=capsule)["outcome"]
+        != "verified"
+    ):
+        return {
+            "decision": GATE_DECISION["BLOCKED"],
+            "reason_codes": [GATE_REASON["UNKNOWN_RECEIPT_SHAPE"]],
+            "gate_requests": [],
+        }
 
     # The receipt remains an independent source of required-check evidence.
     # A matching name is not enough: every matching name-and-command entry

@@ -27,10 +27,10 @@ only capsule fingerprint and the receipt-to-requested workspace pair.
 from __future__ import annotations
 
 from vivary_core.canonical import deterministic_id
-from vivary_core.capsule_compile import CAPSULE_SCHEMA
+from vivary_core.capsule_compile import CAPSULE_SCHEMA, TASK_CAPSULE_FIELDS
 from vivary_core.control_actors import AUTHORITY_CLASS, can_hold_authority
 from vivary_core.control_reason_codes import HANDOFF_DECISION, HANDOFF_REASON
-from vivary_core.receipt import RECEIPT_SCHEMA
+from vivary_core.receipt import EXECUTION_RECEIPT_FIELDS, RECEIPT_SCHEMA
 from vivary_core.verify_receipt import verify_receipt_integrity
 
 __all__ = [
@@ -44,6 +44,7 @@ def _is_capsule_shape(capsule):
     return (
         bool(capsule)
         and isinstance(capsule, dict)
+        and set(capsule) <= TASK_CAPSULE_FIELDS
         and capsule.get("schema") == CAPSULE_SCHEMA
         and isinstance(capsule.get("capsule_id"), str)
         and len(capsule["capsule_id"]) > 0
@@ -59,6 +60,7 @@ def _is_receipt_shape(receipt):
     return (
         bool(receipt)
         and isinstance(receipt, dict)
+        and set(receipt) <= EXECUTION_RECEIPT_FIELDS
         and receipt.get("schema") == RECEIPT_SCHEMA
         and isinstance(receipt.get("receipt_id"), str)
         and isinstance(receipt.get("fingerprint"), str)

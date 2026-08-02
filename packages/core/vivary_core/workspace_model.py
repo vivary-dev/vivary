@@ -15,7 +15,7 @@ Language-mapping notes (python/README.md):
   ``vivary_core.collation.locale_sort_key`` on the same key.
 - The one *plain* ``.sort()`` with no comparator in this module (the
   ``[...byRepository.entries()].sort()`` walk) is JS UTF-16 code-unit order,
-  not locale order - reproduced with ``vivary_core.canonical._utf16_sort_key``
+  not locale order - reproduced with ``vivary_core.canonical.utf16_sort_key``
   on the repository id (the unique map key that alone determines the JS
   default array-of-pairs sort order here; see the inline comment at its call
   site for why that reduction is exact, not an approximation).
@@ -28,9 +28,12 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from vivary_core.canonical import (
-    _utf16_sort_key,
+    utf16_sort_key,
     deterministic_id,
     fingerprint,
+    is_canonical_absolute_path,
+    is_safe_checkout_relative_path,
+    path_identity_key,
     normalize_path,
 )
 from vivary_core.collation import CollationDomainError, locale_sort_key
@@ -52,6 +55,154 @@ GRAPH_SCHEMA = "vivary.workspace-graph/v0"
 MAX_NEIGHBOR_OF_GROUP = 300
 
 
+VALID_FACT_STATUSES = frozenset(("known", "unknown"))
+
+
+def _is_boolean(value: Any) -> bool:
+    return isinstance(value, bool)
+
+
+def _is_nonblank_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _is_string_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _is_head_ref(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if value.get("kind") == "detached":
+        return set(value) == {"kind"}
+    return (
+        value.get("kind") == "branch"
+        and set(value) == {"kind", "name"}
+        and _is_nonblank_string(value.get("name"))
+    )
+
+
+def _is_dirty_entries(value: Any) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(entry, dict)
+        and set(entry) == {"state", "path"}
+        and isinstance(entry["state"], str)
+        and is_safe_checkout_relative_path(entry["path"])
+        for entry in value
+    )
+
+
+def _is_remotes(value: Any) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(remote, dict)
+        and _is_nonblank_string(remote.get("name"))
+        and all(
+            field not in remote or isinstance(remote[field], str)
+            for field in ("fetch_url", "push_url")
+        )
+        for remote in value
+    )
+
+
+_KNOWN_FACT_VALUE_VALIDATORS = {
+    "is_git_repository": _is_boolean,
+    "is_dirty": _is_boolean,
+    "worktree_root": is_canonical_absolute_path,
+    "git_common_dir": is_canonical_absolute_path,
+    "head_revision": _is_nonblank_string,
+    "content_privacy_fingerprint": _is_nonblank_string,
+    "upstream": _is_nonblank_string,
+    "last_fetch": _is_nonblank_string,
+    "npm_test_script": _is_nonblank_string,
+    "head_ref": _is_head_ref,
+    "workspace_markers": _is_string_list,
+    "dirty_entries": _is_dirty_entries,
+    "remotes": _is_remotes,
+}
+
+
+def _fact_record_is_valid(name: str, detail: Any) -> bool:
+    if detail is None:
+        return True
+    if not isinstance(detail, dict):
+        return False
+    status = detail.get("status")
+    if not isinstance(status, str) or status not in VALID_FACT_STATUSES:
+        return False
+    if status == "known":
+        if "value" not in detail:
+            return False
+        validator = _KNOWN_FACT_VALUE_VALIDATORS.get(name)
+        return validator is None or validator(detail["value"])
+    return _is_nonblank_string(detail.get("reason"))
+
+
+def workspace_facts_are_valid(facts: Any) -> bool:
+    return isinstance(facts, dict) and all(
+        _fact_record_is_valid(name, detail)
+        for name, detail in facts.items()
+    )
+
+
+def _fact_commitment(facts: Dict[str, Any], name: str) -> Any:
+    detail = facts.get(name)
+    if detail is None:
+        return None
+    commitment = {"status": detail.get("status")}
+    if detail.get("status") == "known":
+        value = detail.get("value")
+        if name == "dirty_entries" and isinstance(value, list):
+            value = sorted(
+                value,
+                key=lambda item: utf16_sort_key(
+                    f"{item.get('path')}:{item.get('state')}"
+                ),
+            )
+        elif name == "workspace_markers" and isinstance(value, list):
+            value = sorted(value, key=utf16_sort_key)
+        commitment["value"] = value
+    elif "reason" in detail:
+        commitment["reason"] = detail.get("reason")
+    return commitment
+
+
+def _normalized_refusals(refusals: Any) -> List[Dict[str, str]]:
+    if refusals is None:
+        return []
+    if not isinstance(refusals, list):
+        raise ValueError("workspace graph refusals must be a list")
+    normalized = []
+    for refusal in refusals:
+        if (
+            not isinstance(refusal, dict)
+            or not isinstance(refusal.get("path"), str)
+            or not refusal["path"]
+            or normalize_path(refusal["path"]) != refusal["path"]
+            or refusal.get("status") != "refused"
+            or not isinstance(refusal.get("reason"), str)
+            or not refusal["reason"]
+        ):
+            raise ValueError("workspace graph contains an invalid refusal")
+        if (
+            refusal["reason"] == "resolved_outside_allowlist"
+            and not is_canonical_absolute_path(refusal["path"])
+        ):
+            raise ValueError("workspace graph contains an invalid refusal")
+        normalized.append(
+            {
+                "path": refusal["path"],
+                "status": refusal["status"],
+                "reason": refusal["reason"],
+            }
+        )
+    return sorted(
+        normalized,
+        key=lambda refusal: _path_sort_key(
+            f"{refusal['path']}:{refusal['reason']}"
+        ),
+    )
+
+
 def _fact_field(facts: Dict[str, Any], name: str, field: str) -> Any:
     # Replicates `facts.name?.field ?? null`: an absent fact, or a present
     # fact missing that field, both yield None - never a KeyError/AttributeError.
@@ -67,17 +218,24 @@ def _checkout_core_facts(checkout: Dict[str, Any]) -> Dict[str, Any]:
     if dirty_entries is None:
         dirty_entries = []
     # `.map((e) => e.path).sort()` - plain sort, UTF-16 code-unit order.
-    dirty_paths = sorted((e["path"] for e in dirty_entries), key=_utf16_sort_key)
+    dirty_paths = sorted((e["path"] for e in dirty_entries), key=utf16_sort_key)
     remotes = _fact_field(f, "remotes", "value")
     if remotes is None:
         remotes = []
     return {
         "path": checkout["path"],
+        "worktree_root": (
+            _fact_field(f, "worktree_root", "value") or checkout["path"]
+        ),
         "head_revision": _fact_field(f, "head_revision", "value"),
         "head_ref": _fact_field(f, "head_ref", "value"),
         "is_dirty": _fact_field(f, "is_dirty", "value"),
         "dirty_paths": dirty_paths,
         "remotes": remotes,
+        "facts": {
+            name: _fact_commitment(f, name)
+            for name in sorted(f, key=utf16_sort_key)
+        },
     }
 
 
@@ -106,12 +264,12 @@ def _repository_identity(checkout: Dict[str, Any]) -> Dict[str, Any]:
     common_dir = checkout["facts"].get("git_common_dir")
     if common_dir is not None and common_dir.get("status") == "known" and common_dir.get("value"):
         return {
-            "identity": f"local:{common_dir['value']}",
+            "identity": f"local:{path_identity_key(common_dir['value'])}",
             "identity_status": "inferred",
             "evidence": common_dir.get("evidence"),
         }
     return {
-        "identity": f"local:{checkout['path']}",
+        "identity": f"local:{path_identity_key(checkout['path'])}",
         "identity_status": "inferred" if (remotes is not None and remotes.get("status") == "known") else "unknown",
         "evidence": remotes.get("evidence") if remotes is not None else None,
     }
@@ -122,7 +280,227 @@ def _path_sort_key(value: str):
     try:
         return (0, locale_sort_key(value))
     except CollationDomainError:
-        return (1, _utf16_sort_key(value))
+        return (1, utf16_sort_key(value))
+
+
+def _checkout_paths_are_unique(checkouts) -> bool:
+    seen = set()
+    for checkout in checkouts:
+        key = path_identity_key(checkout["path"])
+        if key in seen:
+            return False
+        seen.add(key)
+    return True
+
+
+def workspace_fingerprint_from_graph(graph: Dict[str, Any]) -> str:
+    """Recompute the workspace commitment from projected checkout facts."""
+    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+        raise ValueError("workspace graph nodes must be a list")
+    checkouts = []
+    for node in graph["nodes"]:
+        if not isinstance(node, dict):
+            raise ValueError("workspace graph nodes must be mappings")
+        if node.get("kind") != "checkout":
+            continue
+        if (
+            not is_canonical_absolute_path(node.get("path"))
+            or not workspace_facts_are_valid(node.get("facts"))
+        ):
+            raise ValueError("workspace graph checkouts require valid path and facts")
+        checkouts.append(node)
+    if not _checkout_paths_are_unique(checkouts):
+        raise ValueError("workspace graph contains duplicate checkout identities")
+    core_facts = sorted(
+        (_checkout_core_facts(checkout) for checkout in checkouts),
+        key=lambda checkout: _path_sort_key(checkout["path"]),
+    )
+    return fingerprint(
+        {
+            "checkouts": core_facts,
+            "refusals": _normalized_refusals(graph.get("refusals")),
+        }
+    )
+
+
+def projected_neighbor_pair_count(graph: Dict[str, Any]) -> Optional[int]:
+    """Count pairwise neighbor edges a checkout-seeded projection would emit."""
+    groups: Dict[str, int] = {}
+    try:
+        for node in graph["nodes"]:
+            if node.get("kind") != "checkout":
+                continue
+            checkout = {"path": node["path"], "facts": node["facts"]}
+            if (
+                _fact_field(
+                    checkout["facts"], "is_git_repository", "value"
+                )
+                is not True
+            ):
+                continue
+            repository = _repository_identity(checkout)
+            repository_id = deterministic_id(
+                "repository", {"identity": repository["identity"]}
+            )
+            groups[repository_id] = groups.get(repository_id, 0) + 1
+    except (AttributeError, KeyError, TypeError):
+        return None
+    return sum(
+        min(size, MAX_NEIGHBOR_OF_GROUP)
+        * (min(size, MAX_NEIGHBOR_OF_GROUP) - 1)
+        // 2
+        for size in groups.values()
+    )
+
+
+def repair_graph_is_canonical(graph: Dict[str, Any]) -> bool:
+    """Validate every graph field derivable from checkout paths and facts.
+
+    Checkout nodes are the only re-projection seed. Repository, revision,
+    branch, remote, artifact, edge, conflict, unknown, omission, and workspace
+    fingerprint data must match the compiler's projection.
+
+    ``neighbor_of`` direction follows observation order, which the sorted graph
+    does not retain. Normalize that symmetric edge while still validating its
+    original deterministic ID. Refusals remain observation-policy records, but
+    their normalized paths and reasons are committed and compared.
+    """
+    if not (
+        isinstance(graph, dict)
+        and graph.get("schema") == GRAPH_SCHEMA
+        and isinstance(graph.get("nodes"), list)
+        and isinstance(graph.get("edges"), list)
+        and isinstance(graph.get("conflicts"), list)
+        and isinstance(graph.get("unknowns"), list)
+    ):
+        return False
+    allowed_fields = {
+        "schema",
+        "observed_at",
+        "allowlist",
+        "workspace_fingerprint",
+        "nodes",
+        "edges",
+        "conflicts",
+        "unknowns",
+        "refusals",
+        "omissions",
+    }
+    if any(field not in allowed_fields for field in graph):
+        return False
+
+    checkouts = []
+    for node in graph["nodes"]:
+        if not isinstance(node, dict):
+            return False
+        if node.get("kind") != "checkout":
+            continue
+        checkout_id = node.get("id")
+        path = node.get("path")
+        facts = node.get("facts")
+        if (
+            not isinstance(checkout_id, str)
+            or not checkout_id
+            or not isinstance(path, str)
+            or not path
+            or not isinstance(facts, dict)
+        ):
+            return False
+        checkouts.append(
+            {
+                "path": path,
+                "facts": {
+                    name: detail
+                    for name, detail in facts.items()
+                    if detail is not None
+                },
+            }
+        )
+
+    def _normalized_edge(edge):
+        if not isinstance(edge, dict):
+            raise ValueError("workspace graph edges must be mappings")
+        kind = edge.get("kind")
+        from_ = edge.get("from")
+        to = edge.get("to")
+        if not all(isinstance(value, str) and value for value in (kind, from_, to)):
+            raise ValueError("workspace graph edges require kind and endpoints")
+        if edge.get("id") != deterministic_id(
+            "edge", {"kind": kind, "from": from_, "to": to}
+        ):
+            raise ValueError("workspace graph edge id is not canonical")
+        normalized = dict(edge)
+        if kind == "neighbor_of":
+            normalized_from, normalized_to = sorted(
+                (from_, to), key=utf16_sort_key
+            )
+            normalized["from"] = normalized_from
+            normalized["to"] = normalized_to
+            normalized["id"] = deterministic_id(
+                "edge",
+                {
+                    "kind": kind,
+                    "from": normalized_from,
+                    "to": normalized_to,
+                },
+            )
+        return normalized
+
+    def _sorted_by_id(items):
+        return sorted(items, key=lambda item: utf16_sort_key(item["id"]))
+
+    def _sorted_values(items):
+        return sorted(items, key=lambda item: utf16_sort_key(fingerprint(item)))
+
+    try:
+        normalized_refusals = _normalized_refusals(graph.get("refusals"))
+        recomputed = project_workspace_graph(
+            {
+                "observed_at": graph.get("observed_at"),
+                "allowlist": graph.get("allowlist") or [],
+                "checkouts": checkouts,
+                "refusals": normalized_refusals,
+            }
+        )
+        if (
+            "allowlist" not in graph
+            or graph["allowlist"] != recomputed["allowlist"]
+        ):
+            return False
+        if _sorted_by_id(graph["nodes"]) != _sorted_by_id(recomputed["nodes"]):
+            return False
+        if _sorted_by_id(
+            [_normalized_edge(edge) for edge in graph["edges"]]
+        ) != _sorted_by_id(
+            [_normalized_edge(edge) for edge in recomputed["edges"]]
+        ):
+            return False
+        if _sorted_by_id(graph["conflicts"]) != _sorted_by_id(
+            recomputed["conflicts"]
+        ):
+            return False
+        if _sorted_values(graph["unknowns"]) != _sorted_values(
+            recomputed["unknowns"]
+        ):
+            return False
+        if _sorted_values(graph.get("omissions", [])) != _sorted_values(
+            recomputed.get("omissions", [])
+        ):
+            return False
+        if graph.get("refusals", []) != recomputed["refusals"]:
+            return False
+    except (
+        AttributeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        CollationDomainError,
+    ):
+        return False
+    return (
+        graph.get("workspace_fingerprint")
+        == recomputed["workspace_fingerprint"]
+    )
 
 
 def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
@@ -130,6 +508,12 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
     edges: Dict[str, Any] = {}
     unknowns: List[Dict[str, Any]] = []
     by_repository: Dict[str, List[Dict[str, Any]]] = {}
+    allowlist = [
+        normalize_path(path)
+        for path in observation.get("allowlist", [])
+    ]
+    if not all(is_canonical_absolute_path(path) for path in allowlist):
+        raise ValueError("workspace observation contains an invalid allowlist")
 
     def add_node(node: Dict[str, Any]) -> Dict[str, Any]:
         if node["id"] not in nodes:
@@ -140,18 +524,38 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
         edge_id = deterministic_id("edge", {"kind": kind, "from": from_, "to": to})
         if edge_id not in edges:
             edges[edge_id] = {"id": edge_id, "kind": kind, "from": from_, "to": to, "evidence": evidence}
+    seen_checkout_paths = set()
 
     for checkout in observation["checkouts"]:
+        if (
+            not isinstance(checkout, dict)
+            or not is_canonical_absolute_path(checkout.get("path"))
+            or not workspace_facts_are_valid(checkout.get("facts"))
+        ):
+            raise ValueError("workspace graph contains an invalid fact status")
+        checkout_path_key = path_identity_key(checkout["path"])
+        if checkout_path_key in seen_checkout_paths:
+            raise ValueError(
+                "workspace observation contains duplicate checkout identities"
+            )
+        seen_checkout_paths.add(checkout_path_key)
         checkout_id = deterministic_id("checkout", {"path": checkout["path"]})
 
-        for fact, detail in checkout["facts"].items():
-            if detail.get("status") == "unknown":
-                unknowns.append(
-                    {"checkout": checkout_id, "path": checkout["path"], "fact": fact, "reason": detail.get("reason")}
-                )
 
         if _fact_field(checkout["facts"], "is_git_repository", "value") is not True:
             is_git_repository = checkout["facts"].get("is_git_repository")
+            if (
+                isinstance(is_git_repository, dict)
+                and is_git_repository.get("status") == "unknown"
+            ):
+                unknowns.append(
+                    {
+                        "checkout": checkout_id,
+                        "path": checkout["path"],
+                        "fact": "is_git_repository",
+                        "reason": is_git_repository.get("reason"),
+                    }
+                )
             add_node(
                 {
                     "id": checkout_id,
@@ -162,6 +566,16 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
                 }
             )
             continue
+        for fact, detail in checkout["facts"].items():
+            if detail.get("status") == "unknown":
+                unknowns.append(
+                    {
+                        "checkout": checkout_id,
+                        "path": checkout["path"],
+                        "fact": fact,
+                        "reason": detail.get("reason"),
+                    }
+                )
 
         add_node(
             {
@@ -245,7 +659,7 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
     # prefix of another and the "[object Object]" suffix never needs to be
     # consulted to break a tie - the whole comparison reduces exactly to
     # UTF-16 code-unit order over repositoryId alone.
-    for repository_id, group in sorted(by_repository.items(), key=lambda kv: _utf16_sort_key(kv[0])):
+    for repository_id, group in sorted(by_repository.items(), key=lambda kv: utf16_sort_key(kv[0])):
         if len(group) < 2:
             continue
         # heads/sides always see the full group - the cap below only bounds
@@ -326,20 +740,15 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
 
     sorted_nodes = sorted(nodes.values(), key=lambda n: locale_sort_key(n["id"]))
     sorted_edges = sorted(edges.values(), key=lambda e: locale_sort_key(e["id"]))
-    core_facts = sorted(
-        (_checkout_core_facts(c) for c in observation["checkouts"]),
-        key=lambda c: _path_sort_key(c["path"]),
+    normalized_refusals = _normalized_refusals(observation.get("refusals"))
+    workspace_fingerprint = workspace_fingerprint_from_graph(
+        {"nodes": sorted_nodes, "refusals": normalized_refusals}
     )
-    workspace_fingerprint = fingerprint(core_facts)
-
-    refusals = observation.get("refusals")
-    if refusals is None:
-        refusals = []
 
     result: Dict[str, Any] = {
         "schema": GRAPH_SCHEMA,
         "observed_at": observation["observed_at"],
-        "allowlist": [normalize_path(p) for p in observation["allowlist"]],
+        "allowlist": allowlist,
         "workspace_fingerprint": workspace_fingerprint,
         "nodes": sorted_nodes,
         "edges": sorted_edges,
@@ -348,9 +757,7 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
             unknowns,
             key=lambda u: _path_sort_key(f"{u['path']}:{u['fact']}"),
         ),
-        # Only the normalized path crosses into the graph; the caller's raw
-        # input string stays in the observation layer.
-        "refusals": [{"path": r["path"], "status": r["status"], "reason": r["reason"]} for r in refusals],
+        "refusals": normalized_refusals,
     }
     # Only present when the neighbor_of cardinality cap actually engaged, so
     # an ordinary (uncapped) graph stays byte-identical to before #68 - no

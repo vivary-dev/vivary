@@ -98,8 +98,8 @@ Baseline = **tropo + strato** (knowledge + the self-improving loop over it).
 The four layers above are the *vertical* column. `vivary-core` is the horizontal
 seam beneath them — the governed-context primitives every role package is *meant* to
 speak through, so that "what is true, and how do we know" ends up with exactly one
-implementation rather than four that drift. Tropo and Strato now speak through it;
-the remaining role packages adopt the seam in their integration slices.
+implementation rather than four that drift. Tropo, Strato, and Ozone now speak
+through it; the remaining role packages adopt the seam in their integration slices.
 
 It is a library, not a layer and not a CLI. Nothing about the baseline changes
 because it exists: you still install and run `tropo`, `strato`, `ozone`, `exo`.
@@ -119,10 +119,19 @@ What it owns:
 - **Projection** — observations into a typed evidence graph, where divergent
   checkouts become explicit unresolved conflicts with both sides preserved, never
   auto-resolved.
-- **Capsules** — bounded task context, every claim carrying its evidence and its
-  selection reason, every omission recorded.
+- **Capsules** — bounded task context with traversal-free absolute declared scope roots,
+  every claim carrying its evidence and selection reason, and every compiler-owned
+  omission reconstructed. Candidate-by-question-term-and-filter ranking and content
+  containment have Core-owned work ceilings. Capsules compiled from complete content
+  observations fingerprint that exact source. Content searches resolve and search a
+  named HEAD commit tree; duplicate checkout or match identities fail closed.
+  Graph-context verification requires the fingerprinted source, rejects stripped
+  bindings, and recompiles the complete capsule. Core owns the exact top-level capsule
+  and receipt field sets.
 - **Receipts and evidence** — what actually ran, bound to the exact capsule and
-  workspace fingerprint it ran against, in an append-only store.
+  workspace fingerprint it ran against, in an append-only store. Core rejects receipt
+  checks that have no exact name-and-command authority in the capsule, including for
+  direct Core and Strato callers.
 - **Role-policy surfaces** — reference implementations of the governed loop inside
   `vivary-core`, exposed incrementally through explicit experimental role adapters:
   - **Strato (`policy_*`)** evaluates budgets, capsule and receipt gates, and the
@@ -135,7 +144,15 @@ What it owns:
     non-negative integer before delegation.
   - **Ozone (`verify_*`)** recomputes receipt fingerprints for tamper detection,
     evaluates gate sufficiency without allowing duplicate check names to erase
-    worse evidence, and emits bounded repair proposals as gated dry-run data.
+    worse evidence, and emits bounded repair proposals as gated dry-run data. The
+    `vivary-ozone` `verify --governed` facade applies iterative whole-request and
+    multiplicative scalar-work ceilings before recursive validation, preserves Core's
+    exact artifact-field ownership and typed unknown-field refusals, binds graphless
+    check working directories to task scope, rejects receipt-only check authority,
+    requires canonical repair-graph allowlists, and transports content observations
+    bound to both the named commit tree and the graph's effective ignore-policy
+    fingerprint for Core reconstruction. Its raw fingerprinted gate verdict passes to
+    Strato unchanged.
   - **Exo (`control_*`)** governs claims and leases, handoffs, dependencies,
     execution evidence, and task views over caller-owned state. Equivalent
     Win32 drive, UNC, and device-namespace spellings share one scope identity.
@@ -154,14 +171,16 @@ transitively and does not declare it. One owner per edge avoids version-pinning 
 `vivary-tropo` is the first importer: its experimental `find --governed` adapter depends
 on `vivary-core>=0.2.1`, the first source version that exposes the adapter's required
 API. `vivary-strato` is the second: its experimental `decide --governed` facade requires
-`vivary-core>=0.2.2`, which adds the compiler/verifier integrity boundary. Remaining
-role packages add their own floors only when their first real imports land — never
-ahead of the code that needs them.
+`vivary-core>=0.2.4`, which includes exact policy-artifact schemas and semantic capsule
+validation. `vivary-ozone` is the third: `verify --governed` requires the same 0.2.4
+boundary, including the shared artifact field sets, public UTF-16 ordering key, and
+bounded compiler contract. Remaining role packages add their own floors only when their
+first real imports land — never ahead of the code that needs them.
 
-**Status:** merged Tropo/core and Strato/core integrations are on `dev`. Both are
-unpublished and reachable only through explicit experimental `--governed` flags.
-Plain Tropo retrieval and the existing role CLIs remain unchanged.
-The remaining package/role integration is tracked in
+**Status:** merged Tropo/core, Strato/core, and Ozone/core integrations are on `dev`.
+All are unpublished at their development versions and reachable only through explicit
+experimental `--governed` flags. Plain Tropo retrieval and Ozone review/impact remain
+unchanged. The remaining package/role integration is tracked in
 [#207](https://github.com/vivary-dev/vivary/issues/207); publication waits for the final
 comprehensive release train and its separate human gate.
 

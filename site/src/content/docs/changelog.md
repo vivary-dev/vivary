@@ -14,15 +14,15 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
-## [Unreleased: governed Tropo and Strato adapters] — 2026-07-26
+## [Unreleased: governed Tropo, Strato, and Ozone adapters] — 2026-07-26
 
-Affects the source checkout's unreleased `vivary-core` **0.2.2**, `vivary-tropo`
-**0.5.0**, `vivary-strato` **0.1.1**, and `vivary` meta-package **0.1.1**, the first
-two role-to-core dependency edges, package documentation, and CI packaging proof.
-The published releases remain Tropo **0.4.1** and `vivary` **0.1.0**; Strato and core
-remain unpublished during development. No package was published, deployed, or enabled
-by default; publication remains part of the final coordinated release train and
-requires a separate human gate.
+Affects the source checkout's unreleased `vivary-core` **0.2.4**, `vivary-tropo`
+**0.5.0**, `vivary-strato` **0.1.2**, `vivary-ozone` **0.3.1**, and `vivary`
+meta-package **0.1.3**, the first three role-to-core dependency edges, package
+documentation, and CI packaging proof. The published releases remain Tropo **0.4.1**,
+Ozone **0.2.0**, and `vivary` **0.1.0**; Strato and core remain unpublished during
+development. No package was published, deployed, or enabled by default; publication
+remains part of the final coordinated release train and requires a separate human gate.
 
 ### Added
 
@@ -34,16 +34,20 @@ requires a separate human gate.
   capsule fingerprint. Unicode question terms preserve order and deduplicate; one-letter
   ASCII contraction fragments are discarded before the first **16** meaningful terms
   enter the bounded core content search.
+  Content matches bind to those Unicode question terms; matches outside them become an
+  explicit `content_matches_outside_task` omission instead of disappearing silently.
 - Top-level `vivary_core` exports for the four deep-module entry points used by the
   adapter: `observe_checkouts`, `observe_content`, `project_workspace_graph`, and
   `compile_task_capsule`.
 - Direct regressions for the real Git-backed pipeline, equivalent Windows root casing,
   symlink aliases of the worktree root, Unicode workspace paths and question terms,
-  observed check derivation, non-negative capsule budgets, missing-core installation
-  errors, and rejection of incompatible
-  plain-find/query flags including `--budget 0`.
-- The packaged integration smoke now installs core beside Tropo, proves the wheel's
-  declared dependency metadata, and exercises the installed governed command.
+  observed check derivation, non-negative capsule budgets, blank-task rejection,
+  missing-core installation errors, and rejection of incompatible plain-find/query
+  flags including `--budget 0`.
+- The packaged integration smoke builds every coordinated local wheel, installs the
+  `vivary` meta-package with dependency resolution enabled from an isolated wheelhouse,
+  installs Strato through the same resolver, exercises the installed governed Tropo
+  producer, and separately proves the installed Core → Ozone → Strato bridge.
 - The cross-platform orientation matrix now runs the full Tropo suite on
   `windows-latest`, including the governed root-casing contract.
 - Session-scoped test harnesses isolate the core and Tropo suites from host user Git
@@ -59,11 +63,13 @@ requires a separate human gate.
   capsule body fingerprint and deterministic identifier are recomputed before
   delegation, so changing either the capsule contents or its identity after compilation
   is refused before policy. Receipt integrity is checked separately against the capsule
-  and workspace fingerprints. The compiler and verifier
-  share the JavaScript-lossless `max_claims` bound; malformed task scopes, missing
-  compiler-owned fields, and non-canonical values that would be lossy in JavaScript are
-  refused before policy. Requests, capsule observations, and receipts have a
-  deterministic 300-second
+  and workspace fingerprints. The compiler and verifier share the JavaScript-lossless
+  `max_claims` bound. Complete claims retain their compiler-owned subject, path, fact,
+  text, status, evidence, and selection explanation; malformed repository IDs and
+  `checkout_of` endpoints are rejected before topology sorting. Malformed task scopes
+  or filters, incomplete conflict-side evidence, missing compiler-owned fields, and
+  non-canonical values that would be lossy in JavaScript are refused before policy.
+  Requests, capsule observations, and receipts have a deterministic 300-second
   freshness window; a verdict without its receipt is rejected. Unknown fields and
   non-string Python mapping keys fail closed, so free-form status text cannot
   impersonate a human gate. Incomplete capsule envelopes and inputs whose JSON or
@@ -78,22 +84,178 @@ requires a separate human gate.
   advisory/strict exit semantics,
   and default text output. Isolated package smokes exercise the installed console
   script on Windows and WSL Linux.
+- `vivary-ozone` **0.3.0** adds `ozone verify REQUEST --governed`, an explicit
+  experimental facade over core's receipt-integrity, gate-sufficiency, and dry-run
+  repair contracts. It recomputes Task Capsule identity, binds the workspace and
+  caller-supplied clock, applies a deterministic 300-second evidence window, and
+  rejects malformed gate constraints, scalar receipt identities, supplied non-mapping
+  receipts, contradictory receipt fields, incomplete capsule claims, conflicts, or
+  compiler-owned unknown records, duplicate conflict sides, blank task questions,
+  malformed task scopes or filters, forged claim IDs, graph-derived claims that do not
+  reproduce their source fact semantics, omitted in-scope graph unknowns, claims that
+  violate declared filters, claims that do not map to the supplied graph's subject paths
+  or graph-profile filters, forged question or content signals, mismatched selection
+  tiers, narrated paths outside the declared scope, invalid typed graph relationships,
+  and malformed or deeply nested repair inputs before calling core.
+  Receipt claim lists must be unique and disjoint. Together,
+  they must equal both `claims_in_scope` and the capsule's claim IDs. All claims are
+  verified only when the check list is nonempty and every check passed. Otherwise, all
+  claims remain unverified. Every receipt check must name a capsule effective required
+  check and carry its exact command. Receipt-only self-authored checks cannot create
+  gate authority.
+  It refuses unknown capsule/receipt fields even when the artifact is re-fingerprinted,
+  validates each compiler-owned unknown-record variant, and enforces core's 16-entry
+  omission-list/count contract and exact `truncated` marker
+  semantics even when no repair graph is requested, applies a 128-byte JSON-encoded
+  ceiling on repair identifiers, rejects semantically duplicate selection signals in
+  linear time, and rejects duplicate `(subject, fact, claim)` entries before they can
+  duplicate deterministic repair IDs. Parser-only help and version actions suppress a
+  run receipt that could alias the unread request instead of refusing the requested
+  output. Repair graphs are reprojected from checkout paths and facts before repair
+  use. Every derived node, edge, conflict, unknown, omission, deterministic ID,
+  evidence field, canonical allowlist, and workspace fingerprint must match. Missing
+  allowlists, unknown graph fields, invalid semantic fact values, and non-string
+  question/content signal terms, fields, and paths fail closed.
+  The workspace fingerprint commits each checkout's effective worktree root, semantic
+  fact statuses and values, and normalized observation refusals. It excludes evidence
+  command text. Known dirty-entry paths must be normalized and checkout-relative;
+  unsafe absolute, traversal, drive-relative, or noncanonical paths fail closed.
+  Persisted drive and UNC path containment is case-insensitive on every verifier host.
+  Ozone refuses retained-fingerprint changes to gate-driving `workspace_markers` and
+  `npm_test_script` facts as `invalid_repair_graph`. Invalid fact statuses fail closed
+  before projection.
+  Capsules retain nonempty explicit `task.required_checks` with unique nonblank names.
+  Each check binds to an observed Git checkout execution root related to task scope. A
+  package-scoped task may run its check at the nearest enclosing checkout root.
+  Validation uses the observed execution root for ancestor scopes, so a checkout path
+  cannot authorize an unrelated relocated root or a more distant enclosing checkout.
+  Explicit checks remain unchanged in the capsule even without a graph, add to
+  evidence-derived checks, cannot rewrite their commands, and resolve
+  undetermined-check unknowns only for their checkout. Without a declaration, Ozone
+  re-derives required checks and `required_check_undetermined` unknowns from the graph.
+  Re-fingerprinted deletion or replacement fails closed.
+  Graph-backed verification reconstructs the complete claim list. Complete claims must
+  retain the compiler's `known` status. `filtered_out`, `claims_over_budget`, and
+  collation omissions must exactly match graph-only reconstruction when no content
+  source is bound. Capsules compiled from complete meaningful content observations
+  commit their source fingerprint. Governed verification requires a timezone-aware
+  observation instant, a nonempty absolute canonical allowlist, contained checkouts,
+  reason-consistent refusals, and exact top-level and nested shapes. It recompiles the
+  complete capsule from that source and the matching graph. Deleted or rewritten
+  content-derived claims, unknowns, omissions, and stripped source bindings fail
+  closed. Unknown or reshaped omission variants fail closed. Complete observations
+  with no checkouts or refusals preserve absent-content capsule bytes.
+  It requires the repair graph to preserve every capsule conflict and in-scope
+  graph unknown while allowing a full graph to retain out-of-scope conflicts for repair
+  withholding. It recomputes the capsule's normalized repair-topology commitment over
+  checkout IDs and paths, repository nodes, and `checkout_of` relationships. A conflict
+  that crosses a declared task scope becomes an omission naming only its in-scope subject
+  and opaque conflict ID; no out-of-scope side or path enters the capsule.
+  Claims on preserved conflict sides must keep the compiler's `conflict_side` tier and
+  exact matching conflict-signal set. Claims without a preserved conflict cannot assert
+  that tier or signal, so re-labeling cannot change their repair eligibility.
+  This authenticates remote-backed and inferred no-remote linked-worktree groups without
+  trusting a copied workspace fingerprint label. Ozone requires each divergent conflict
+  to cover every checkout related to its repository. Ozone caps scope roots, graph
+  nodes, graph edges, and graph unknowns at 1,000 each, graph conflicts at 300, and
+  graph claim subjects at 300. It also caps scope-path checks at 100,000 comparisons,
+  total checkout-pair scans across all repositories, scope-to-conflict comparisons,
+  candidate-by-question-term ranking work, and canonical re-projection work before
+  repair construction. Projected `neighbor_of` pairs must also fit the 1,000-edge
+  repair-graph ceiling. Remaining re-projection work counts graph JSON and repeated
+  checkout-path expansion, with a cap of 10,000,000 canonical-JSON work units.
+  Route-proposal evidence stays within core's checkout cap. Derived repair estimates
+  stay within JavaScript's lossless integer range.
+  It returns typed verification or refusal envelopes. Core's fingerprinted receipt/gate
+  verdicts and repair proposal pass through unchanged; Strato consumes the raw
+  `gate_verdict` without a second verification implementation. The CLI rejects
+  `--governed` on `review`, `impact`, and `packs` rather than silently running an
+  ordinary command. It refuses run-receipt output whenever `REQUEST` is `-`, because a
+  pipe or redirection does not expose enough source identity to prove the target is
+  distinct. Plain-text refusal output JSON-escapes reason fragments before writing
+  them, including unpaired Unicode surrogates. Advisory mode exits `0`, `--strict`
+  exits `1` for a valid insufficient result, and malformed request documents or
+  refused request envelopes exit `2`.
+- Ozone regressions cover sufficient, wrong-claim-ID, contradictory-claim-list,
+  duplicate-claim-ID, duplicate-claim-semantics, duplicate-check, receipt-extension,
+  core-unknown, command-presence, flag-scope, non-mapping-receipt, incomplete-claim,
+  topology-identifier, missing, tampered, stale, workspace-mismatched, budget-limited,
+  request/receipt-alias, piped-stdin-receipt, unknown-artifact, bounded-repair,
+  pair-scan-bound, route-evidence-bound, repair-product-bound, identifier-bound,
+  omission-bound, estimate-bound, gate-shape, graph-relationship, full canonical graph,
+  every derived node kind, forged edge/conflict identity, exact unknown/omission
+  projection, required allowlist, non-string signals, scoped-full-graph,
+  forged-in-scope-conflict, filter-binding, conflict-binding, selection-binding,
+  topology-commitment, output-escaping, malformed, recursive, repair, CLI, and real
+  Ozone-to-Strato cases.
+  The installed-package CI smoke
+  resolves the complete local meta-package dependency graph, proves Ozone's core floor,
+  runs the packaged Ozone verdict path, and hands its unchanged verdict to Strato.
 
 ### Changed
 
-- `vivary-core` advances from 0.2.0 to 0.2.2. Version 0.2.1 introduced the governed
-  adapter API; 0.2.2 hardens the compiler/verifier integrity boundary.
+- `vivary-core` advances from 0.2.0 to 0.2.4. Version 0.2.1 introduced the governed
+  adapter API; 0.2.2 hardened the compiler/verifier integrity boundary; 0.2.3 added the
+  repair-topology commitment API and complete compiler-owned capsule validation; 0.2.4
+  centralizes exact Task Capsule and Execution Receipt field ownership, exports the
+  shared UTF-16 ordering key, and hardens capsule/graph reconstruction.
   `vivary-tropo` advances from 0.4.1 to 0.5.0 because the governed flags are a
   user-visible minor feature and keeps `vivary-core>=0.2.1`, the first source version
   exposing the adapter API. This is the first real package-to-core dependency promised
-  by [#207](https://github.com/vivary-dev/vivary/issues/207). The `vivary` meta-package
-  advances from 0.1.0 to 0.1.1 and raises its floor to `vivary-tropo>=0.5.0`, so it
-  receives core transitively. All three source versions remain unpublished in this
-  development train until the coordinated release.
-- `vivary-strato` advances from 0.1.0 to 0.1.1 for the capsule-integrity hardening and
-  declares `vivary-core>=0.2.2`. The `vivary` meta-package does not add Strato yet;
-  completing the one-install role surface remains owned by #207. Both Strato and core
-  stay explicitly allowlisted as unpublished until the final coordinated release gate.
+  by [#207](https://github.com/vivary-dev/vivary/issues/207).
+- The `vivary` meta-package advances from 0.1.0 to 0.1.3: 0.1.1 raised its floor to
+  `vivary-tropo>=0.5.0`, 0.1.2 raised its floor to `vivary-ozone>=0.3.0`, and 0.1.3
+  raises that floor to `vivary-ozone>=0.3.1`. A fresh suite install cannot resolve the
+  pre-hardening Ozone CLI. All development versions remain unpublished until the
+  coordinated release.
+- `vivary-strato` advances from 0.1.0 to 0.1.2 and declares
+  `vivary-core>=0.2.4`. Version 0.1.1 introduced the governed runtime and capsule
+  integrity boundary; 0.1.2 consumes Core's exact artifact schemas. The `vivary` meta
+  package does not add Strato yet; completing the one-install role surface remains
+  owned by #207. Both Strato and core stay explicitly allowlisted as unpublished until
+  the final coordinated release gate.
+- `vivary-ozone` advances from 0.2.0 to 0.3.1. Version 0.3.0 introduced the user-visible
+  `verify --governed` command; 0.3.1 declares `vivary-core>=0.2.4` and hardens that
+  request boundary. Plain `review`, `impact`, and `packs` behavior remains unchanged.
+  Ozone 0.3.1 stays unpublished until the final coordinated release gate.
+- Core rejects blank, relative, or traversal-bearing declared scope roots and check
+  working directories; blank filter values; duplicate checkout identities; excessive
+  checkout/content-containment, combined candidate-aggregation, or
+  candidate-by-question-term-and-filter ranking work; unsafe dirty-entry or
+  content-match paths; malformed semantic fact
+  values; non-`known` compiled claim statuses; missing canonical allowlists; altered
+  compiler-owned omissions; and top-level capsule or receipt field smuggling. Accepted
+  checkout, worktree-root, Git-common-dir, content, and scope paths are traversal-free
+  canonical absolute paths. Windows drive and UNC containment and identity joins are
+  host-independent. Graphless check working directories must lie within task scope;
+  graph-backed package scopes may use their nearest observed enclosing checkout root.
+  Capsules compiled from complete meaningful content observations commit that exact
+  source fingerprint. Core rejects malformed, field-smuggled, duplicate,
+  traversal-bearing, uncontained, impossible-revision, or work-unbounded content and
+  content-derived records whose binding was stripped, then recompiles the complete
+  capsule during graph-context matching. Graph-only selection, collation,
+  scoped-conflict, and explicit full-workspace refusal omissions match compilation
+  exactly. `compile_task_capsule` normalizes malformed filter-contract
+  errors to `ValueError`; direct `validate_filters` callers retain its lower-level
+  `TypeError`.
+- Core receipt verification rejects every check whose name or command is absent from
+  the capsule's effective authority. Direct Core and Strato gate callers cannot accept
+  self-authored receipt checks.
+- Ozone preflights whole-request JSON, content-containment, and repair work before
+  recursive validation. It maps Core's receipt-authority, source-shape, and typed work
+  decisions to typed facade refusals. Graphless effective checks must equal the task
+  declaration exactly. Capsules carrying derived checks return
+  `graph_required_for_effective_checks` until the matching graph is supplied. Compiler
+  selection and collation omissions also require the graph because their provenance is
+  ambiguous without reconstruction. Content-bound capsules require both the matching
+  graph and exact source observation. Unbounded content validation, combined
+  graph-plus-content candidate aggregation, or ranking reconstruction returns
+  `repair_work_unbounded`. Unknown artifact fields retain their specific sorted refusal
+  reasons without an added generic shape reason.
+- Core's observe, evidence, and topology tests use process-unique OS temporary fixture
+  roots, preventing concurrent Windows/WSL sessions from deleting each other's data.
+  CI adds an explicit Windows/Python 3.11 governed-verification job across Core, Ozone,
+  and Strato.
 - Plain `tropo find` keeps its existing typed-context packet and default token budget.
   Governed-only flags, malformed core inputs, and broken core installs fail with the
   documented usage exit code `2`; the command reference owns the exact flag contract.
@@ -101,17 +263,36 @@ requires a separate human gate.
   Git child that fills stderr first cannot deadlock observation. Cleanup kills stalled
   children, closes completed pipes, and returns a structured timeout rather than
   blocking on an inherited stderr handle.
+- Core gate-sufficiency evaluation indexes validated receipt claim IDs once before
+  matching capsule coverage, keeping the evidence check linear in request size.
+- Core context-repair generation indexes conflicts by repository once before expansion,
+  avoiding a repository-by-conflict cross-product.
+- Ozone refuses a run-receipt target that identifies a file-backed verification
+  request, including through a hard-link alias. It refuses all run-receipt output when
+  `REQUEST` is `-`, because stdin cannot prove that the target is distinct.
 - Derived required checks now carry checkout-scoped names, the normalized checkout
   `cwd`, and the observation that actually proves each command. This prevents one
   checkout's receipt from clearing another checkout's check. An observed npm test
   script also no longer suppresses an undetermined Python test-system warning in a
   polyglot checkout.
-- Governed content now uses NUL-framed Git output, literalizes every path before
-  `git check-ignore`, and excludes tracked files covered by repository ignore policy
-  without naming them in evidence. Unexpected ignore output and incomplete
-  injected-runner failures fail closed. Unicode workspace paths
-  use a deterministic graph-ordering fallback; unrankable non-content capsule facts
-  become explicit omissions instead of aborting Unicode queries.
+- Governed content now resolves and records each checkout's HEAD before searching that
+  named commit tree with replacement objects disabled, so mutable worktree bytes or
+  replace refs cannot masquerade as the named revision. Workspace graphs and content
+  sources also share a fingerprint of effective ignore decisions over that tracked
+  tree; changing `.gitignore`, repository excludes, or effective excludes policy
+  invalidates prior excerpts even when HEAD and dirty path/state facts are unchanged.
+  Zero-match searches retain both bindings; nonempty-term observations without them are
+  invalid source artifacts. Duplicate checkout and match identities fail closed, using
+  the same host-independent drive/UNC identity as graph joins. Equivalent root casing
+  preserves exact-root trust; noncanonical accepted aliases are refused before Git
+  access. Git-legal but unsafe relative match and dirty paths become nondisclosing
+  omissions or unknowns. NUL-framed Git output and one bounded NUL-framed
+  `check-ignore --stdin` privacy query avoid naming excluded tracked files in
+  evidence. Unexpected ignore output and incomplete injected-runner failures fail
+  closed.
+  Unicode workspace paths use a deterministic graph-ordering fallback; unrankable
+  non-content capsule facts become explicit omissions instead of aborting Unicode
+  queries.
 - Governed mode refuses a Tropo root nested inside a larger Git worktree rather than
   labeling repository-wide checkout facts as scoped to the nested directory.
 - Standalone Tropo graphs now derive only `tropo check`; `create-vivary doctor` requires
@@ -136,6 +317,14 @@ requires a separate human gate.
   `GIT_*` injection or overriding repository-scoped ignore policy. Host ignore
   policy can therefore legitimately change dirty facts, workspace fingerprints, and
   capsule IDs between machines, matching the host's own `git status`.
+- Governed graph verification recomputes the workspace fingerprint from emitted
+  checkout nodes, including their effective worktree roots, and requires the graph
+  timestamp to match the capsule observation.
+  It reconstructs compiler selection from graph candidates and retained content-match
+  candidates under the capsule's task, filters, scope, and budget. At a fixed budget
+  and retained content set, added, removed, moved, or rewritten graph claims fail closed
+  without rejecting content-ranked capsules.
+  Global graph and repair-work caps run before claim reconstruction.
 - Derived checks execute from the observed Git worktree root even when the requested
   checkout path is nested. Excessively nested `package.json` input now degrades to no
   npm check instead of escaping the structured observation contract.
@@ -157,47 +346,51 @@ requires a separate human gate.
 
 ### Verification
 
-- `python packages/tropo/tests/test_tropo.py` — **169/169** passed on Windows.
-- `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **169/169**
+- `python packages/tropo/tests/test_tropo.py` — **170/170** passed on Windows.
+- `wsl.exe -e bash -lc "python3 packages/tropo/tests/test_tropo.py"` — **170/170**
   passed on WSL Linux.
-- `python -m pytest packages/core/tests/ -q` — **626 passed** on Windows;
-  `UV_CACHE_DIR=/tmp/vivary-uv-cache TMPDIR=/tmp uv run --no-cache --with pytest
-  python3 -m pytest packages/core/tests/ -q -p no:cacheprovider` — **624 passed,
-  2 platform-specific skips** on WSL Linux.
+- `python -m pytest packages/core/tests/ -q` — **767 passed** on Windows;
+  the same Core suite on WSL Linux — **766 passed, 1 platform-specific skip**.
+  The combined WSL Core + Strato run passed **814** tests with that one skip.
 - `python -m pytest packages/strato/tests -q` — **48 passed** on Windows and
   **48 passed** on WSL Linux.
-- `python -m pytest packages/core/tests/test_policy.py -q` — **91 passed**;
-  `python -m pytest packages/core/tests/test_control.py -q` — **101 passed**.
-- Isolated Windows and WSL `uv run --no-cache --with ./packages/core --with
-  ./packages/strato` smokes built core **0.2.2** and Strato **0.1.1**; installed
-  metadata matched Strato's runtime version and `strato decide --help` exposed the
-  governed JSON/strict command surface.
+- `python -m pytest packages/core/tests/test_policy.py -q` — **93 passed**;
+  `python -m pytest packages/core/tests/test_control.py -q` — **103 passed**.
+- Local `uv run --no-cache --with ./packages/core --with ./packages/strato` smoke built
+  core **0.2.4** and Strato **0.1.2**; installed metadata matched Strato's runtime
+  version.
 - `python -m pytest packages/tropo/tests/test_tropo.py -q -k "governed or
-  cmd_find_returns_context_packet"` — **17 passed**.
-- Isolated `uv run --no-cache --with ./packages/core --with ./packages/tropo`
-  metadata smoke reported core **0.2.2** and Tropo **0.5.0**.
+  cmd_find_returns_context_packet"` — **18 passed**.
+- Local `uv run --no-cache --with ./packages/core --with ./packages/tropo` metadata
+  smoke reported core **0.2.4** and Tropo **0.5.0**.
+  The installed Core version also satisfied Tropo's declared `vivary-core>=0.2.1`
+  requirement specifier.
 - Coordinated local `uv run --no-cache --with` smoke across core, Tropo,
-  create-vivary, Ozone, Exo, and the meta package reported `vivary` **0.1.1**,
-  Tropo **0.5.0**, and core **0.2.2**.
-  The packaged smoke also verified that the installed core version satisfies Tropo's
-  declared requirement specifier, not merely that the metadata names it.
+  create-vivary, Ozone, Exo, and the meta package reported `vivary` **0.1.3**,
+  Tropo **0.5.0**, Ozone **0.3.1**, and core **0.2.4**.
+- A fresh local wheelhouse built core, Tropo, Strato, Ozone, Exo, create-vivary, the
+  `vivary` meta-package, and memory-cognee. `pip install --no-index --find-links
+  <wheelhouse> vivary vivary-strato` installed the coordinated graph entirely from
+  those wheels, selecting core **0.2.4** through the role-package floors.
+  `pip check` found no broken requirements; installed runtimes imported Core's governed
+  entry points and reported Tropo **0.5.0**, Ozone **0.3.1**, and Strato **0.1.2**.
 - `python -m pytest packages/vivary/tests/ -q` — **9 passed**; the manifest/runtime
-  version and `vivary-tropo>=0.5.0` floor matched.
+  version and `vivary-tropo>=0.5.0` / `vivary-ozone>=0.3.1` floors matched.
 - `python packages/create-vivary/tests/test_privacy_differential.py` — **2/2
   passed** with global Git config, excludes, templates, and fsmonitor isolated from
   the real-Git oracle.
 - `python scripts/tests/test_package_docs_parity.py` — **10/10 passed**;
   `python scripts/check_package_docs_parity.py` — **6** published manifests and
   **2** unpublished allowlist entries matched the architecture page.
-- `python scripts/check_line_endings.py --verbose` — **261** tracked text files
+- `python scripts/check_line_endings.py --verbose` — **265** tracked text files
   checked; **8** legacy files remain explicitly allowlisted.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
   **4** documents, zero errors or warnings.
-- Repository verification also passed: Ozone **21/21**, Exo **17/17**,
-  create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
+- Repository verification also passed: Ozone **110/110** on Windows and WSL Linux, Exo
+  **17/17**, create-vivary **143 tests with 1 platform skip**, asset parity **3/3**, and
   Strato integrity **7/7**.
 - `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**
-  site tests passed; **23** pages built; **1,683** local references and **1,057**
+  site tests passed; **23** pages built; **1,686** local references and **1,060**
   anchors checked with zero failures.
 
 ## [Unreleased: cross-platform orientation proof] — 2026-07-26

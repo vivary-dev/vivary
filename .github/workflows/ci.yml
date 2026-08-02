@@ -51,11 +51,26 @@ jobs:
           python -m pytest packages/core/tests/ -q
       - name: strato governed policy facade
         run: python -m pytest packages/strato/tests/ -q
-      - name: packaged core and optional semantic bridge smoke
+      - name: packaged core and governed role bridges smoke
         shell: bash
         run: |
-          python -m pip install --no-deps ./packages/core ./packages/tropo ./packages/strato ./packages/memory-cognee
           smoke="$(mktemp -d)"
+          wheelhouse="$smoke/wheels"
+          mkdir -p "$wheelhouse"
+          python -m pip wheel --no-deps --wheel-dir "$wheelhouse" \
+            ./packages/core \
+            ./packages/tropo \
+            ./packages/strato \
+            ./packages/ozone \
+            ./packages/exo \
+            ./packages/create-vivary \
+            ./packages/vivary \
+            ./packages/memory-cognee
+          python -m pip install --no-index --find-links "$wheelhouse" \
+            vivary vivary-strato
+          python -m pip check
+          python -m pip install --no-index --find-links "$wheelhouse" --no-deps \
+            vivary-memory-cognee
           mkdir -p "$smoke/ws/.vivary" "$smoke/ws/modules/auth"
           cat > "$smoke/ws/tropo.toml" <<'EOF'
           packs = ["repo-graph"]
@@ -101,27 +116,84 @@ jobs:
             --root "$smoke/ws" \
             --governed \
             --max-claims 2 \
-            --json > "$smoke/governed.json"
-          python - "$smoke/governed.json" "$smoke/strato-request.json" <<'PY'
+            --json > "$smoke/tropo-governed.json"
+          python - "$smoke/ws" "$smoke/governed.json" "$smoke/ozone-request.json" <<'PY'
+          import json
+          import os
+          import sys
+          from vivary_core import (
+              compile_task_capsule,
+              normalize_path,
+              observe_checkouts,
+              project_workspace_graph,
+          )
+          from vivary_core.receipt import create_integrity_receipt
+
+          root = normalize_path(os.path.realpath(os.path.abspath(sys.argv[1])))
+          scope = [root]
+          graph = project_workspace_graph(
+              observe_checkouts(scope, allowlist=scope)
+          )
+          capsule = compile_task_capsule(
+              task={"question": "authentication module", "scope": scope},
+              graph=graph,
+              budget={"max_claims": 2},
+          )
+          observed_at = capsule["workspace"]["observed_at"]
+          receipt = create_integrity_receipt(
+              capsule=capsule,
+              runtime={"harness": "ci", "actor": "agent:ci"},
+              checks=[
+                  {**check, "outcome": "passed"}
+                  for check in capsule["required_checks"]
+              ],
+              now=lambda: observed_at,
+          )
+          request = {
+              "schema": "vivary.ozone-verification-request/v0",
+              "workspace": {"fingerprint": capsule["workspace"]["fingerprint"]},
+              "verified_at": observed_at,
+              "capsule": capsule,
+              "graph": graph,
+              "receipt": receipt,
+              "gate": {
+                  "name": "ci",
+                  "required_checks": [
+                      check["name"] for check in capsule["required_checks"]
+                  ],
+                  "require_claims_verified": True,
+              },
+          }
+          with open(sys.argv[2], "w", encoding="utf-8") as target:
+              json.dump(capsule, target)
+          with open(sys.argv[3], "w", encoding="utf-8") as target:
+              json.dump(request, target)
+          PY
+          ozone verify "$smoke/ozone-request.json" --governed --json --strict > "$smoke/ozone.json"
+          python - "$smoke/ozone-request.json" "$smoke/ozone.json" "$smoke/strato-request.json" <<'PY'
           import json
           import sys
 
-          capsule = json.loads(open(sys.argv[1], encoding="utf-8").read())
+          ozone_request = json.loads(open(sys.argv[1], encoding="utf-8").read())
+          ozone_result = json.loads(open(sys.argv[2], encoding="utf-8").read())
+          capsule = ozone_request["capsule"]
           observed_at = capsule["workspace"]["observed_at"]
           request = {
               "schema": "vivary.strato-decision-request/v0",
               "policy_version": "vivary.strato-policy/v0",
               "actor": {"kind": "agent", "id": "agent:ci"},
               "authority_class": "contributor",
-              "workspace": {"fingerprint": capsule["workspace"]["fingerprint"]},
+              "workspace": ozone_request["workspace"],
               "scope": {"project": "smoke", "paths": capsule["task"]["scope"]},
               "requested_at": observed_at,
               "decision_at": observed_at,
               "capsule": capsule,
+              "receipt": ozone_request["receipt"],
+              "verdict": ozone_result["gate_verdict"],
               "state": {"turns_used": 0, "actions_used": 0},
               "limits": {"max_turns": 3, "max_actions": 3},
           }
-          with open(sys.argv[2], "w", encoding="utf-8") as target:
+          with open(sys.argv[3], "w", encoding="utf-8") as target:
               json.dump(request, target)
           PY
           strato decide --governed --json "$smoke/strato-request.json" > "$smoke/strato.json"
@@ -129,7 +201,7 @@ jobs:
           tropo query "auth" --root "$smoke/ws" --mode semantic --json > "$smoke/out.json"
           rc=$?
           set -e
-          python - "$smoke/out.json" "$smoke/governed.json" "$smoke/strato.json" "$rc" <<'PY'
+          python - "$smoke/out.json" "$smoke/governed.json" "$smoke/tropo-governed.json" "$smoke/ozone.json" "$smoke/strato.json" "$rc" <<'PY'
           import json
           import sys
           from packaging.requirements import Requirement
@@ -138,7 +210,13 @@ jobs:
 
           data = json.loads(open(sys.argv[1], encoding="utf-8").read())
           governed = json.loads(open(sys.argv[2], encoding="utf-8").read())
-          strato_decision = json.loads(open(sys.argv[3], encoding="utf-8").read())
+          tropo_governed = json.loads(open(sys.argv[3], encoding="utf-8").read())
+          ozone_result = json.loads(open(sys.argv[4], encoding="utf-8").read())
+          strato_decision = json.loads(open(sys.argv[5], encoding="utf-8").read())
+          with open("packages/vivary/pyproject.toml", "rb") as stream:
+              meta_project = tomllib.load(stream)["project"]
+              meta_version = meta_project["version"]
+              meta_dependencies = meta_project["dependencies"]
           with open("packages/core/pyproject.toml", "rb") as stream:
               core_version = tomllib.load(stream)["project"]["version"]
           with open("packages/tropo/pyproject.toml", "rb") as stream:
@@ -147,6 +225,10 @@ jobs:
               strato_project = tomllib.load(stream)["project"]
               strato_version = strato_project["version"]
               strato_dependencies = strato_project["dependencies"]
+          with open("packages/ozone/pyproject.toml", "rb") as stream:
+              ozone_project = tomllib.load(stream)["project"]
+              ozone_version = ozone_project["version"]
+              ozone_dependencies = ozone_project["dependencies"]
           core_requirement = next(
               dependency
               for dependency in tropo_dependencies
@@ -157,13 +239,26 @@ jobs:
               for dependency in strato_dependencies
               if dependency.startswith("vivary-core")
           )
-          rc = int(sys.argv[4])
+          ozone_core_requirement = next(
+              dependency
+              for dependency in ozone_dependencies
+              if dependency.startswith("vivary-core")
+          )
+          rc = int(sys.argv[6])
           assert rc == 1, rc
           assert data["mode"] == "semantic"
           assert data["semantic"]["provider"] == "cognee"
           assert data["semantic"]["status"] == "unavailable"
           assert "allow_network" in data["semantic"]["detail"]
           assert data["results"] == []
+          assert version("vivary") == meta_version
+          assert set(meta_dependencies) <= set(requires("vivary") or [])
+          for dependency in meta_dependencies:
+              requirement = Requirement(dependency)
+              assert requirement.specifier.contains(version(requirement.name)), (
+                  requirement,
+                  version(requirement.name),
+              )
           assert version("vivary-core") == core_version
           assert core_requirement in (requires("vivary-tropo") or [])
           assert Requirement(core_requirement).specifier.contains(core_version), (
@@ -176,14 +271,39 @@ jobs:
               strato_core_requirement,
               core_version,
           )
-          assert strato_decision["schema"] == "vivary.strato-decision/v0"
-          assert strato_decision["decision"] in {"act", "request_gate"}
-          assert isinstance(strato_decision["reason_codes"], list)
-          assert governed["schema"] == "vivary.task-capsule/v0"
-          assert governed["budget"] == {"max_claims": 2}
-          assert governed["claims"]
+          assert version("vivary-ozone") == ozone_version
+          assert ozone_core_requirement in (requires("vivary-ozone") or [])
+          assert Requirement(ozone_core_requirement).specifier.contains(core_version), (
+              ozone_core_requirement,
+              core_version,
+          )
+          assert ozone_result["schema"] == "vivary.ozone-verification/v0"
+          assert ozone_result["outcome"] == "sufficient"
+          assert ozone_result["receipt_verdict"]["outcome"] == "verified"
+          assert ozone_result["gate_verdict"]["schema"] == "vivary.gate-verdict/v0"
+          assert ozone_result["gate_verdict"]["outcome"] == "sufficient"
+          repair_proposal = ozone_result["repair_proposal"]
+          assert repair_proposal["schema"] == "vivary.context-repair-proposal/v0"
+          assert repair_proposal["capsule"] == {
+              "id": governed["capsule_id"],
+              "fingerprint": governed["fingerprint"],
+          }
+          assert repair_proposal["writes_performed"] == 0
+          assert repair_proposal["requires_gate"] is bool(
+              repair_proposal["proposals"]
+          )
+          assert strato_decision["decision"] == "request_gate"
+          assert strato_decision["reason_codes"] == ["gate_required"]
+          assert strato_decision["gate"]["reason_codes"] == [
+              "unresolved_unknown",
+              "capsule_over_budget",
+          ]
+          assert "verdict_integrity_mismatch" not in strato_decision["gate"]["reason_codes"]
+          assert tropo_governed["schema"] == "vivary.task-capsule/v0"
+          assert tropo_governed["budget"] == {"max_claims": 2}
+          assert tropo_governed["claims"]
           assert {
-              check["command"] for check in governed["required_checks"]
+              check["command"] for check in tropo_governed["required_checks"]
           } == {
               "create-vivary doctor . --json",
               "tropo check --root . --json",
@@ -207,6 +327,24 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: git diff --check "$BASE_SHA...HEAD"
+
+  governed-platform-proof:
+    name: governed verification (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: install test runner
+        run: python -m pip install pytest packaging
+      - name: core governed-context contract
+        run: python -m pytest packages/core/tests/ -q
+      - name: ozone governed-verification facade
+        run: python packages/ozone/tests/test_ozone.py
+      - name: strato governed-policy consumer
+        run: python -m pytest packages/strato/tests/ -q
 
   orientation-proof:
     name: orientation proof (${{ matrix.os }})

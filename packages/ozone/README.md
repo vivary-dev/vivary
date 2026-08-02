@@ -1,6 +1,6 @@
 # vivary-ozone
 
-> Current release: **0.2.0**. The optional review layer.
+> Current published release: **0.2.0**. Development source: **0.3.1**, held for the final coordinated release train.
 
 **The review layer** — the protective filter. Where `tropo` answers *"is each
 document valid?"*, `ozone` reviews the **whole graph**: the relationship-level gaps a
@@ -10,9 +10,9 @@ typed graph in-process (one graph implementation, never a fork).
 
 The defining idea: **code review and editorial review are the same layer with
 different rule packs.** Ozone ships deterministic packs over the Vivary workspace
-vocabulary, zero dependencies, no LLM. Medium-specific and semantic ("organize by
-meaning") review layer on top later; semantic relatedness is graphify's job, not
-ozone's core.
+vocabulary with no LLM or network calls. Medium-specific and semantic ("organize by
+meaning") review layers can sit on top; semantic relatedness is graphify's job, not
+Ozone's core.
 
 ## Try it locally
 
@@ -25,6 +25,7 @@ python ozone.py review --root <workspace> --strict   # gate mode: exit 1 on warn
 python ozone.py impact <id> --root <workspace> # what depends on <id> (blast radius)
 python ozone.py packs                          # list rule packs
 python ozone.py review --root <workspace> --receipt .vivary/receipts.jsonl
+python ozone.py verify request.json --governed --json --strict
 ```
 
 `review` is **advisory by default** (exit 0) — a work-in-progress change legitimately
@@ -36,11 +37,88 @@ ozone is the relationship/impact review layered on top.
 `--pack context-budget` to review context bloat surfaces, `--pack editorial` to review
 writing-workspace coverage, or `--pack all` to run every deterministic pack.
 
+### Governed evidence verification
+
+`ozone verify REQUEST --governed` is the explicit experimental facade over
+`vivary-core` receipt integrity, gate sufficiency, and dry-run context-repair
+contracts. It preserves core's fingerprinted receipt and gate verdicts unchanged, so
+Strato can consume the returned `gate_verdict` directly. A supplied workspace graph
+adds a typed repair proposal; every proposal requires a gate and reports
+`writes_performed: 0`.
+The request is preflighted with an iterative JSON-work ceiling before recursive
+canonical validation or Core loading. Oversized input returns the typed
+`request_work_unbounded` refusal. Core owns the exact top-level capsule and receipt
+field sets; Ozone reports deterministic `unknown_capsule_field:*` and
+`unknown_receipt_field:*` reasons without adding a generic artifact-shape reason.
+The capsule commits checkout IDs and paths, normalized repository nodes, and
+`checkout_of` relationships that can drive repair proposals. Ozone recomputes that
+topology commitment from the supplied graph, including inferred no-remote
+linked-worktree groups.
+Core also reprojects the complete graph from checkout paths, facts, and normalized
+observation refusals. Every derived node, edge, conflict, unknown, omission,
+deterministic ID, evidence field, effective worktree root, canonical allowlist, and
+semantic fact commitment must match. Known fact values must match their fact-specific
+type; unknown facts require a reason. The workspace fingerprint and graph timestamp
+must match the request and capsule.
+Ozone validates the complete receipt shape and requires its verified and unverified
+claim lists to be disjoint. Together, the lists must contain exactly the capsule's claim
+IDs. Every receipt check must name a capsule effective check and carry that check's
+exact command. The claim lists must also match the check outcomes. `claims_verified`
+contains every claim only when the check list is nonempty and every check passed.
+Otherwise, `claims_unverified` contains every claim.
+Each capsule conflict must retain its compiler-owned kind, repository, question, sides,
+status, reason codes, and `review_required` decision. It must preserve at least two
+checkout/path sides with head revision, head reference, last fetch, and evidence fields.
+
+Receipt checks must name a capsule required check and carry its exact command. Declared
+`task.scope` roots must be absolute, nonblank, and bounded in count. Optional
+`task.filters` entries must carry a nonblank `equals` or `includes` value, whether or
+not the request supplies a graph. Complete capsule claims must retain the compiler's
+`known` status. With a graph, claim identities, graph-derived semantics, subjects,
+paths, profile filters, question signals, in-scope graph unknowns, selection omissions,
+and observation refusals must match or verification fails closed. Signal terms, fields,
+and paths must be strings.
+Selection omissions cannot understate the graph-reconstructable minimum and match
+exactly when their counts equal it. Unknown or reshaped omission variants are invalid.
+Explicit task-required checks have unique nonblank names, remain visible in the capsule
+without a graph, bind to an observed Git checkout execution root related to task scope,
+and cannot rewrite evidence-derived commands. Without a graph, the capsule's effective
+check list must equal that declaration exactly; without a declaration, it must be empty.
+Otherwise Ozone returns `graph_required_for_effective_checks`, and the caller must
+resubmit with the matching graph so Core can reconstruct derived checks. With a graph,
+Ozone derives required checks and undetermined-check unknowns from graph evidence.
+Graphless capsules with compiler selection or collation omissions return
+`graph_required_for_compiler_omissions`; only graph reconstruction can distinguish
+graph-only omissions from stripped content provenance.
+A capsule compiled from a complete, meaningful `vivary.workspace-content/v0`
+observation carries `workspace.content_fingerprint`. Its request must include both the
+matching `graph` and exact `content`. Core validates the timestamp, canonical absolute
+allowlist, checkout/refusal containment, and complete record shapes, then recompiles
+the capsule. Deleting content-derived claims, unknowns, omissions, or their source
+binding returns `repair_graph_context_mismatch`. Missing source artifacts return
+`content_context_required` or `graph_required_for_content_context`; malformed or
+field-smuggled content and meaningful content supplied to an unbound capsule return
+`invalid_content_context`. Complete observations with no checkouts or refusals are
+semantically empty and preserve absent-content capsule bytes.
+Ozone bounds graph collections, claim-subject checkouts, scope paths, checkout-pair
+scans, route evidence, scope-to-conflict comparisons, content validation, combined
+graph-plus-content candidate aggregation, candidate-by-question-term ranking, and
+canonical re-projection work before it creates a repair proposal. Projected
+`neighbor_of` pairs must fit the 1,000-edge repair-graph ceiling. Remaining
+re-projection work counts graph JSON and repeated checkout-path expansion, with a cap
+of 10,000,000 canonical-JSON work units. Excess returns `repair_work_unbounded`.
+
+The exact request, result, freshness, and exit-code contract lives in the
+[command reference](https://vivary.vercel.app/commands/#governed-evidence-verification).
+
 For local debugging, pass `--receipt PATH` or set `VIVARY_RECEIPT_LOG=PATH` to append
-a dependency-free JSONL run receipt. Receipts stay local and record only command
-envelope data such as tool version, command, flag names, exit code, duration, Python,
-and platform; they do not capture stdout, stderr, file contents, target ids, local
-paths, or graph content.
+a dependency-free JSONL run receipt. The receipt target must not identify a file-backed
+verification request, including through a hard-link alias. Ozone refuses run-receipt
+output when `REQUEST` is `-`, because stdin does not expose enough source identity to
+prove the target is distinct. Receipts stay local and record only command envelope data
+such as tool version, command, flag names, exit code, duration, Python, and platform.
+They do not capture stdout, stderr, file contents, target ids, local paths, or graph
+content.
 
 ## The `structure` pack
 
@@ -94,8 +172,9 @@ python ../tropo/tropo.py view blast <id> --root <workspace> --out impact.html
 
 ## Requirements
 
-Python 3.11+. Loads the sibling `packages/tropo/tropo.py` engine in-process (no pip
-install needed in the repo); packaged builds depend on the `tropo` package.
+Python 3.11+. In a repo checkout, Ozone loads the sibling Tropo and core packages
+in-process. Packaged builds depend on `vivary-tropo>=0.3.0` and
+`vivary-core>=0.2.4`.
 
 ---
 

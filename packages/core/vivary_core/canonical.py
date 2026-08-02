@@ -120,7 +120,7 @@ def _js_number_to_string(value) -> str:
     return _js_float_to_string(value)
 
 
-def _utf16_sort_key(key: str) -> bytes:
+def utf16_sort_key(key: str) -> bytes:
     # JS Array.prototype.sort compares strings by UTF-16 code units;
     # big-endian UTF-16 bytes compare identically (surrogatepass keeps lone
     # surrogates comparable too).
@@ -160,7 +160,7 @@ def _serialize(value, sort_keys: bool) -> str:
             if not isinstance(key, str):
                 raise TypeError(f"object keys must be str, got {type(key).__name__}")
         if sort_keys:
-            keys.sort(key=_utf16_sort_key)
+            keys.sort(key=utf16_sort_key)
         else:
             keys = _js_object_key_order(keys)
         body = ",".join(
@@ -294,6 +294,28 @@ def is_absolute_root(raw_path) -> bool:
     return _DRIVE_ABSOLUTE.match(p) is not None
 
 
+def is_canonical_absolute_path(path) -> bool:
+    """Whether a persisted absolute path is normalized and traversal-free."""
+    return (
+        isinstance(path, str)
+        and normalize_path(path) == path
+        and is_absolute_root(path)
+        and not any(segment in {".", ".."} for segment in path.split("/"))
+    )
+
+
+def is_safe_checkout_relative_path(path) -> bool:
+    """Return whether `path` is normalized and confined to one checkout."""
+    return (
+        isinstance(path, str)
+        and bool(path.strip())
+        and normalize_path(path) == path
+        and not is_absolute_root(path)
+        and re.match(r"^[A-Za-z]:", path) is None
+        and not any(segment in {".", ".."} for segment in path.split("/"))
+    )
+
+
 def is_within(root, child) -> bool:
     """True when `child` equals `root` or sits beneath it (separator-boundary
     safe). STRICTLY NARROWING by construction (ticket #61): starts from the
@@ -316,14 +338,19 @@ def is_within(root, child) -> bool:
     return collapsed_child == collapsed_root or collapsed_child.startswith(collapsed_root + "/")
 
 
-def _fold_path_case(path) -> str:
-    """Lowercase a path where the platform's filesystem is case-insensitive.
+def path_identity_key(path) -> str:
+    """Canonical cross-artifact key for persisted POSIX, drive, and UNC paths."""
+    normalized = normalize_path(path)
+    if _DRIVE_ABSOLUTE.match(normalized) or normalized.startswith("//"):
+        return normalized.lower()
+    return normalized
 
-    Kept separate from `normalize_path`, which lowercases only the drive letter and
-    whose output is used for reporting — a refusal record should still echo the
-    path the caller actually passed.
-    """
-    return path.lower() if os.name == "nt" and isinstance(path, str) else path
+
+def _fold_path_case(path) -> str:
+    """Fold persisted Windows path identities independently of verifier host."""
+    if not isinstance(path, str):
+        return path
+    return path_identity_key(path)
 
 
 def is_within_allowlist(root, child) -> bool:

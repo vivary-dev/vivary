@@ -33,6 +33,7 @@ import pytest
 HERE = os.path.dirname(os.path.abspath(__file__))
 PY_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, PY_ROOT)
+import vivary_core.verify_sufficiency as verify_sufficiency  # noqa: E402
 
 from vivary_core.canonical import deterministic_id, fingerprint  # noqa: E402
 from vivary_core.capsule_compile import compile_task_capsule  # noqa: E402
@@ -172,7 +173,7 @@ def build_fixtures(base_dir):
 
 @pytest.fixture(scope="module")
 def fx():
-    base_dir = tempfile.mkdtemp(prefix="vivary-verify-fixtures-")
+    base_dir = os.path.realpath(tempfile.mkdtemp(prefix="vivary-verify-fixtures-"))
     try:
         yield build_fixtures(base_dir)
     finally:
@@ -185,7 +186,22 @@ def capsule(fx):
     allowlist = [p["canonical"], p["staleNeighbor"]]
     observation = observe_checkouts([p["canonical"], p["staleNeighbor"]], allowlist=allowlist, now=NOW)
     graph = project_workspace_graph(observation)
-    return compile_task_capsule(task=TASK, graph=graph)
+    compiled = compile_task_capsule(task=TASK, graph=graph)
+    authorized = {
+        **compiled,
+        "required_checks": [
+            {"name": check["name"], "command": check["command"]}
+            for check in PASSING_CHECKS
+        ],
+    }
+    authorized["fingerprint"] = fingerprint(
+        {
+            key: value
+            for key, value in authorized.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    return authorized
 
 
 @pytest.fixture(scope="module")
@@ -250,6 +266,71 @@ def test_a_tampered_receipt_fails_fingerprint_verification_and_is_marked_insuffi
     verdict = verify_receipt_integrity(receipt=tampered)
     assert verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
     assert verdict["reason_codes"] == [REASON_CODES["FINGERPRINT_MISMATCH"]]
+
+
+def test_a_refingerprinted_self_authored_check_cannot_verify_or_satisfy_a_gate(capsule, receipt):
+    self_authored = {
+        **receipt,
+        "checks": [
+            {"name": "self-authored-check", "command": "true", "outcome": "passed"}
+        ],
+    }
+    self_authored["fingerprint"] = fingerprint(
+        {
+            key: value
+            for key, value in self_authored.items()
+            if key not in {"receipt_id", "fingerprint"}
+        }
+    )
+    assert verify_receipt_integrity(receipt=self_authored)["outcome"] == OUTCOMES["VERIFIED"]
+
+
+    receipt_verdict = verify_receipt_integrity(receipt=self_authored, capsule=capsule)
+    gate_verdict = evaluate_gate_sufficiency(
+        gate={"name": "self-authored", "required_checks": ["self-authored-check"]},
+        capsule=capsule,
+        receipt=self_authored,
+    )
+
+    assert receipt_verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
+    assert receipt_verdict["reason_codes"] == [REASON_CODES["RECEIPT_INVALID"]]
+    assert gate_verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
+    assert REASON_CODES["RECEIPT_INVALID"] in gate_verdict["reason_codes"]
+    assert REASON_CODES["RECEIPT_MISSING_FOR_REQUIRED_CHECKS"] in gate_verdict["reason_codes"]
+
+
+@pytest.mark.parametrize(
+    "required_checks",
+    [
+        [
+            {"name": "unit-and-contract-tests", "command": "npm test"},
+            {"name": "unit-and-contract-tests", "command": "true"},
+        ],
+        [{"name": "unit-and-contract-tests"}],
+    ],
+)
+def test_malformed_or_ambiguous_capsule_check_authority_is_receipt_invalid(capsule, required_checks):
+    authority_capsule = {**capsule, "required_checks": required_checks}
+    authority_capsule["fingerprint"] = fingerprint(
+        {
+            key: value
+            for key, value in authority_capsule.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    authority_receipt = create_integrity_receipt(
+        capsule=authority_capsule,
+        runtime=RUNTIME,
+        checks=PASSING_CHECKS,
+        now=NOW,
+    )
+
+    verdict = verify_receipt_integrity(
+        receipt=authority_receipt, capsule=authority_capsule
+    )
+
+    assert verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
+    assert verdict["reason_codes"] == [REASON_CODES["RECEIPT_INVALID"]]
 
 
 def test_a_noncanonical_receipt_body_is_insufficient_without_raising(receipt):
@@ -385,6 +466,38 @@ def test_a_receipt_with_unrelated_verified_claim_ids_is_insufficient(capsule, re
     assert REASON_CODES["CLAIMS_NOT_FULLY_VERIFIED"] in verdict["reason_codes"]
 
 
+def test_claim_coverage_indexes_receipt_ids_before_matching(
+    monkeypatch, capsule, receipt
+):
+    class LinearMembershipTrap(list):
+        def __contains__(self, item):
+            raise AssertionError("claim coverage performed a linear membership scan")
+
+    instrumented_receipt = {
+        **receipt,
+        "claims_verified": LinearMembershipTrap(["claim:unrelated"]),
+    }
+    monkeypatch.setattr(
+        verify_sufficiency,
+        "verify_receipt_integrity",
+        lambda **_kwargs: {
+            "outcome": OUTCOMES["VERIFIED"],
+            "receipt_id": receipt["receipt_id"],
+        },
+    )
+
+    verdict = verify_sufficiency.evaluate_gate_sufficiency(
+        gate={"name": "ci", "require_claims_verified": True},
+        capsule=capsule,
+        receipt=instrumented_receipt,
+    )
+
+    assert verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
+    assert verdict["claims_verified"] == 0
+    assert REASON_CODES["CLAIMS_NOT_FULLY_VERIFIED"] in verdict["reason_codes"]
+
+
+
 def test_a_missing_required_check_is_insufficient_with_a_named_failing_check(capsule, receipt):
     gate = {"name": "ci", "required_checks": ["unit-and-contract-tests", "some-check-never-run"]}
     verdict = evaluate_gate_sufficiency(gate=gate, capsule=capsule, receipt=receipt)
@@ -394,7 +507,7 @@ def test_a_missing_required_check_is_insufficient_with_a_named_failing_check(cap
     assert found == {"name": "some-check-never-run", "expected": "passed", "actual": "missing"}
 
 
-def test_a_malformed_receipt_check_name_is_missing_not_an_evaluator_error(capsule):
+def test_a_malformed_receipt_check_name_is_receipt_invalid(capsule):
     malformed_name_receipt = create_integrity_receipt(
         capsule=capsule,
         runtime=RUNTIME,
@@ -409,12 +522,11 @@ def test_a_malformed_receipt_check_name_is_missing_not_an_evaluator_error(capsul
         receipt=malformed_name_receipt,
     )
 
-    assert receipt_verdict["outcome"] == OUTCOMES["VERIFIED"]
+    assert receipt_verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
+    assert receipt_verdict["reason_codes"] == [REASON_CODES["RECEIPT_INVALID"]]
     assert verdict["outcome"] == OUTCOMES["INSUFFICIENT"]
-    assert verdict["reason_codes"] == [REASON_CODES["REQUIRED_CHECK_MISSING"]]
-    assert verdict["failing_checks"] == [
-        {"name": "unit-and-contract-tests", "expected": "passed", "actual": "missing"}
-    ]
+    assert REASON_CODES["RECEIPT_INVALID"] in verdict["reason_codes"]
+    assert REASON_CODES["RECEIPT_MISSING_FOR_REQUIRED_CHECKS"] in verdict["reason_codes"]
 
 
 def test_a_failed_required_check_is_insufficient_with_its_actual_outcome_named(capsule):
@@ -448,7 +560,7 @@ def test_duplicate_required_check_names_preserve_the_worst_recorded_outcome(caps
             capsule=capsule,
             runtime=RUNTIME,
             checks=[
-                {"name": "unit-and-contract-tests", "command": "pytest", "outcome": outcome}
+                {"name": "unit-and-contract-tests", "command": "npm test", "outcome": outcome}
                 for outcome in outcomes
             ],
             now=NOW,
@@ -790,6 +902,114 @@ def test_deduplicate_is_withheld_not_proposed_when_the_pair_is_a_side_of_an_unre
     assert result["withheld"] == [
         {"kind": REPAIR_KINDS["DEDUPLICATE"], "repository": "repository_xxxx", "sides": ["checkout_aaaa", "checkout_bbbb"], "reason": "conflict_unresolved"}
     ]
+
+
+def test_deduplicate_indexes_conflicts_once_without_changing_multi_repository_output():
+    class CountingConflicts(list):
+        def __init__(self, values):
+            super().__init__(values)
+            self.scan_count = 0
+
+        def __iter__(self):
+            self.scan_count += 1
+            return super().__iter__()
+
+    edges = []
+    claims = []
+    conflicts = []
+    expected_withheld = []
+    expected_proposals = []
+    for index in range(50):
+        repository = f"repository_{index:03d}"
+        checkout_a = f"checkout_{index:03d}_aaaa"
+        checkout_b = f"checkout_{index:03d}_bbbb"
+        edges.extend(
+            [
+                {"id": f"edge_{index:03d}_a", "kind": "checkout_of", "from": checkout_a, "to": repository, "evidence": None},
+                {"id": f"edge_{index:03d}_b", "kind": "checkout_of", "from": checkout_b, "to": repository, "evidence": None},
+            ]
+        )
+        claim_a = synthetic_claim(subject=checkout_a, fact="head_revision")
+        claim_b = synthetic_claim(subject=checkout_b, fact="head_revision")
+        claims.extend([claim_a, claim_b])
+        if index % 2 == 0:
+            conflicts.append(
+                {
+                    "id": f"conflict_{index:03d}",
+                    "kind": "divergent_checkouts",
+                    "repository": repository,
+                    "sides": [{"checkout": checkout_a}, {"checkout": checkout_b}],
+                    "status": "unresolved",
+                }
+            )
+            expected_withheld.append(
+                {
+                    "kind": REPAIR_KINDS["DEDUPLICATE"],
+                    "repository": repository,
+                    "sides": [checkout_a, checkout_b],
+                    "reason": "conflict_unresolved",
+                }
+            )
+        else:
+            expected_proposals.append(
+                {
+                    "id": deterministic_id(
+                        "repair",
+                        {
+                            "kind": REPAIR_KINDS["DEDUPLICATE"],
+                            "repository": repository,
+                            "sides": [checkout_a, checkout_b],
+                            "fact": "head_revision",
+                        },
+                    ),
+                    "kind": REPAIR_KINDS["DEDUPLICATE"],
+                    "status": "proposed",
+                    "target": repository,
+                    "purpose": (
+                        f"checkouts {checkout_a} and {checkout_b} of the same repository both carry a claim for "
+                        "'head_revision'; route the fact through one owning checkout instead of duplicating it in the capsule"
+                    ),
+                    "evidence": [claim_a["id"], claim_b["id"]],
+                    "cites": [checkout_a, checkout_b],
+                    "ownership": {"subject": None, "basis": "tie_no_preference"},
+                    "requires_gate": True,
+                    "estimate": {"token_savings": 7, "estimate_quality": "approximate"},
+                }
+            )
+    # This pair belongs to another repository. A flat conflict-pair index
+    # would incorrectly withhold repository_001's otherwise valid proposal.
+    conflicts.append(
+        {
+            "id": "conflict_miskeyed",
+            "kind": "divergent_checkouts",
+            "repository": "repository_000",
+            "sides": [{"checkout": "checkout_001_aaaa"}, {"checkout": "checkout_001_bbbb"}],
+            "status": "unresolved",
+        }
+    )
+
+    counting_conflicts = CountingConflicts(conflicts)
+    graph = {
+        "schema": "vivary.workspace-graph/v0",
+        "workspace_fingerprint": "sha256:" + "0" * 64,
+        "nodes": [],
+        "edges": edges,
+        "conflicts": counting_conflicts,
+    }
+    capsule_fx = synthetic_capsule(claims=claims)
+
+    result = propose_context_repairs(capsule=capsule_fx, graph=graph)
+
+    expected_body = {
+        "schema": REPAIR_PROPOSAL_SCHEMA,
+        "capsule": {"id": capsule_fx["capsule_id"], "fingerprint": capsule_fx["fingerprint"]},
+        "proposals": expected_proposals,
+        "withheld": expected_withheld,
+        "writes_performed": 0,
+        "requires_gate": True,
+    }
+    assert result == {**expected_body, "fingerprint": fingerprint(expected_body)}
+    assert counting_conflicts.scan_count <= 1
 
 
 def test_deduplicate_does_not_fire_when_the_fact_name_matches_but_the_asserted_value_differs():

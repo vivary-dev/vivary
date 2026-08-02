@@ -28,7 +28,7 @@ Language mapping notes (decision 0008 / documented rules for this slice):
     plain JS relational operators `<`/`>`. For strings, plain `<`/`>` is
     UTF-16 code-unit order (NOT ICU/localeCompare collation) - so the
     tie-break string in `sortKey[1]` is ordered here via
-    `vivary_core.canonical._utf16_sort_key`, not `collation.locale_sort_key`.
+    `vivary_core.canonical.utf16_sort_key`, not `collation.locale_sort_key`.
     (compile.mjs's own candidate sort, by contrast, calls
     `.localeCompare(...)` explicitly and so uses `locale_sort_key` - see
     capsule_compile.py.)
@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import re
 
-from vivary_core.canonical import _utf16_sort_key
+from vivary_core.canonical import utf16_sort_key
 
 TIER_NAMES = ["conflict_side", "question_match", "allowlisted"]
 
@@ -89,6 +89,11 @@ STOPWORDS = frozenset(
 # How many cut claims the over-budget omission may list; the exact count is
 # always reported, the listing itself stays bounded.
 OMITTED_LIST_CAP = 16
+MAX_CAPSULE_RANKING_WORK = 1_000_000
+
+
+class CapsuleRankingWorkLimitError(ValueError):
+    """Raised before candidate-by-question ranking can exceed Core's bound."""
 
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 _REGEXP_SPECIAL = re.compile(r"[.*+?^${}()|\[\]\\]")
@@ -102,10 +107,12 @@ def question_terms(question) -> list[str]:
     text = "" if question is None else str(question)
     tokens = _TOKEN_RE.findall(text.lower())
     terms: list[str] = []
+    seen = set()
     for token in tokens:
-        if len(token) < 3 or token in STOPWORDS or token in terms:
+        if len(token) < 3 or token in STOPWORDS or token in seen:
             continue
         terms.append(token)
+        seen.add(token)
     return terms
 
 
@@ -171,6 +178,18 @@ def _filter_field_value(profile, claim, field):
     return None
 
 
+def _question_match_value(profile, field):
+    if field == "repository":
+        repository = profile.get("repository") if profile else None
+        if (
+            not isinstance(repository, dict)
+            or repository.get("identity_status") != "known"
+        ):
+            return None
+        return repository.get("identity")
+    return _filter_field_value(profile, {}, field)
+
+
 def validate_filters(filters):
     if filters is None:
         return []
@@ -193,9 +212,12 @@ def validate_filters(filters):
                 f"filter on '{filt.get('field')}' must carry exactly one of equals|includes"
             )
         operator = "equals" if has_equals else "includes"
-        if not isinstance(filt.get(operator), str):
+        if (
+            not isinstance(filt.get(operator), str)
+            or not filt[operator].strip()
+        ):
             raise TypeError(
-                f"filter {operator} value on '{filt.get('field')}' must be a string"
+                f"filter {operator} value on '{filt.get('field')}' must be a non-blank string"
             )
         result.append({"field": filt["field"], "operator": operator, "value": filt[operator]})
     return result
@@ -226,14 +248,12 @@ def rank_claim(profile, terms, intrinsic_signals=None):
     signals = []
     for conflict in (profile.get("conflicts") if profile else None) or []:
         signals.append({"signal": "conflict_side", "conflict": conflict.get("id")})
-    repository = profile.get("repository") if profile else None
-    repository_identity = None
-    if isinstance(repository, dict) and repository.get("identity_status") == "known":
-        repository_identity = repository.get("identity")
     match_surfaces = [
-        ("label", profile.get("label") if profile else None),
-        ("repository", repository_identity),
-        ("branch", profile.get("branch") if profile else None),
+        (
+            field,
+            _question_match_value(profile, field),
+        )
+        for field in ("label", "repository", "branch")
     ]
     for term in terms:
         for field, value in match_surfaces:
@@ -275,6 +295,31 @@ def rank_claim(profile, terms, intrinsic_signals=None):
     }
 
 
+def _scalar_ranking_work_is_bounded(candidates, profiles, terms, filters):
+    term_units = sum(len(term) for term in terms)
+    work = 0
+    for candidate in candidates:
+        profile = profiles.get(candidate.get("subject"))
+        for filt in filters:
+            value = _filter_field_value(profile, candidate, filt["field"])
+            value_units = (
+                len(value)
+                if isinstance(value, str)
+                else len(str(value)) if value is not None else 0
+            )
+            work += len(filt["value"]) + value_units
+            if work > MAX_CAPSULE_RANKING_WORK:
+                return False
+        for field in ("label", "repository", "branch"):
+            value = _question_match_value(profile, field)
+            if not isinstance(value, str) or not value:
+                continue
+            work += len(terms) * len(value) + term_units
+            if work > MAX_CAPSULE_RANKING_WORK:
+                return False
+    return True
+
+
 def select_claims(*, task, graph, candidates, max_claims):
     """Select claims for a capsule: apply structured filters, rank what
     survives, cut at the budget, and explain all of it.
@@ -286,6 +331,20 @@ def select_claims(*, task, graph, candidates, max_claims):
     filters = validate_filters(task.get("filters"))
     profiles = subject_profiles(graph)
     terms = question_terms(task.get("question"))
+    if len(candidates) * len(terms) > MAX_CAPSULE_RANKING_WORK:
+        raise CapsuleRankingWorkLimitError(
+            "question ranking work exceeds compiler limit"
+        )
+    if len(candidates) * (len(terms) + len(filters)) > MAX_CAPSULE_RANKING_WORK:
+        raise CapsuleRankingWorkLimitError(
+            "filter ranking work exceeds compiler limit"
+        )
+    if not _scalar_ranking_work_is_bounded(
+        candidates, profiles, terms, filters
+    ):
+        raise CapsuleRankingWorkLimitError(
+            "scalar ranking work exceeds compiler limit"
+        )
 
     surviving = []
     filtered_count = 0
@@ -321,7 +380,7 @@ def select_claims(*, task, graph, candidates, max_claims):
         claim["selection_reason"] = rank["reason"]
         claim["selection"] = selection
         tiebreak = f"{candidate.get('subject')}:{candidate.get('fact')}:{candidate.get('claim')}"
-        surviving.append({"claim": claim, "sort_key": (budget_rank, _utf16_sort_key(tiebreak))})
+        surviving.append({"claim": claim, "sort_key": (budget_rank, utf16_sort_key(tiebreak))})
 
     # select.mjs compares sortKey entries with plain `<`/`>`: numeric compare
     # for budget_rank, UTF-16-code-unit compare for the tiebreak string (NOT

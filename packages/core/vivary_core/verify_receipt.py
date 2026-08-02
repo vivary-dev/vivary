@@ -35,7 +35,7 @@ from vivary_core.canonical import (
     fingerprint as compute_fingerprint,
     is_canonical_body_value,
 )
-from vivary_core.receipt import RECEIPT_SCHEMA
+from vivary_core.receipt import EXECUTION_RECEIPT_FIELDS, RECEIPT_SCHEMA
 from vivary_core.verify_reasons import OUTCOMES, REASON_CODES
 
 RECEIPT_VERDICT_SCHEMA = "vivary.receipt-verdict/v0"
@@ -61,12 +61,60 @@ def _valid_receipt_id(value):
     return value if isinstance(value, str) and len(value) > 0 else None
 
 
+def receipt_checks_are_authorized(*, receipt=None, capsule=None):
+    """Return whether every receipt check is authorized by this capsule.
+
+    This is deliberately independent of receipt fingerprint validation so
+    callers that already own transport validation can retain their typed
+    facade while sharing the authority rule with Core verification.
+    """
+    if not _is_plain_object(receipt) or not _is_plain_object(capsule):
+        return False
+
+    checks = receipt.get("checks")
+    required_checks = capsule.get("required_checks")
+    if not isinstance(checks, list) or not isinstance(required_checks, list):
+        return False
+
+    required_commands = {}
+    for required_check in required_checks:
+        if not _is_plain_object(required_check):
+            return False
+        name = required_check.get("name")
+        command = required_check.get("command")
+        if not (
+            isinstance(name, str)
+            and bool(name.strip())
+            and isinstance(command, str)
+            and bool(command.strip())
+        ):
+            return False
+        previous_command = required_commands.get(name)
+        if previous_command is not None and previous_command != command:
+            return False
+        required_commands[name] = command
+
+    for check in checks:
+        if not _is_plain_object(check):
+            return False
+        name = check.get("name")
+        command = check.get("command")
+        if (
+            not isinstance(name, str)
+            or not isinstance(command, str)
+            or required_commands.get(name) != command
+        ):
+            return False
+
+    return True
+
+
 
 
 def verify_receipt_integrity(*, receipt=None, capsule=None):
     """Verify a receipt's own integrity and, when a capsule is supplied, its
-    binding to that exact capsule and workspace. Never raises: a malformed
-    or absent receipt is a typed refusal, not an exception.
+    binding to that exact capsule/workspace and its check authority. Never
+    raises: a malformed or absent receipt is a typed refusal, not an exception.
 
     receipt  an Execution Receipt (vivary.execution-receipt/v0)
     capsule  compiled Task Capsule to check binding against
@@ -113,6 +161,13 @@ def verify_receipt_integrity(*, receipt=None, capsule=None):
             reason_codes=shape_reasons,
             receipt_id=receipt_id,
         )
+    if set(receipt) != EXECUTION_RECEIPT_FIELDS:
+        return _verdict(
+            outcome=OUTCOMES["INSUFFICIENT"],
+            reason_codes=[REASON_CODES["RECEIPT_INVALID"]],
+            receipt_id=receipt_id,
+        )
+
 
     # Recompute exactly as receipt.py's own module derived it: strip id and
     # fingerprint, fingerprint what remains, compare.
@@ -187,6 +242,12 @@ def verify_receipt_integrity(*, receipt=None, capsule=None):
             return _verdict(
                 outcome=OUTCOMES["INSUFFICIENT"],
                 reason_codes=[REASON_CODES["CAPSULE_BINDING_MISMATCH"]],
+                receipt_id=receipt_id,
+            )
+        if not receipt_checks_are_authorized(receipt=receipt, capsule=capsule):
+            return _verdict(
+                outcome=OUTCOMES["INSUFFICIENT"],
+                reason_codes=[REASON_CODES["RECEIPT_INVALID"]],
                 receipt_id=receipt_id,
             )
 

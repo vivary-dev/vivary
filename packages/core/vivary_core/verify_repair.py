@@ -21,7 +21,7 @@ Language mapping notes specific to this module:
   comparator).
 - Every OTHER `.sort()` in this module (conflict sides, tiers-cut, the
   per-repository checkout list) is a plain, comparator-less JS string sort -
-  UTF-16 code-unit order - mapped to ``vivary_core.canonical._utf16_sort_key``,
+  UTF-16 code-unit order - mapped to ``vivary_core.canonical.utf16_sort_key``,
   the same rule python/README.md documents for the rest of this port.
 - Every dict this module returns is fingerprinted via
   ``vivary_core.canonical.fingerprint``, which canonicalizes with sorted
@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import math
 
-from vivary_core.canonical import _utf16_sort_key, deterministic_id, fingerprint as compute_fingerprint
+from vivary_core.canonical import utf16_sort_key, deterministic_id, fingerprint as compute_fingerprint
 from vivary_core.collation import locale_sort_key
 
 REPAIR_PROPOSAL_SCHEMA = "vivary.context-repair-proposal/v0"
@@ -84,25 +84,30 @@ def _checkouts_by_repository(graph):
     return grouped
 
 
-def _conflict_side_pairs(graph, repository_id):
-    """Which unordered checkout pairs are sides of the same unresolved
-    divergent_checkouts conflict for this repository - deduping those would
-    silently pick a winner where the graph has deliberately preserved both.
+def _conflict_side_pairs_by_repository(graph):
+    """Index unordered checkout pairs by their conflict repository.
+
+    Dedupe must not choose a winner for either side of a divergent checkout
+    conflict. Build this index once so each repository's pair scan can use
+    its own conflict set without repeatedly traversing the complete graph.
     """
-    pairs = set()
+    pairs_by_repository = {}
     conflicts = graph.get("conflicts")
     for conflict in conflicts if conflicts is not None else []:
-        if conflict.get("repository") != repository_id:
-            continue
+        repository_id = conflict.get("repository")
+        pairs = pairs_by_repository.get(repository_id)
+        if pairs is None:
+            pairs = set()
+            pairs_by_repository[repository_id] = pairs
         raw_sides = conflict.get("sides")
         sides = sorted(
             (side.get("checkout") for side in (raw_sides if raw_sides is not None else [])),
-            key=_utf16_sort_key,
+            key=utf16_sort_key,
         )
         for i in range(len(sides)):
             for j in range(i + 1, len(sides)):
                 pairs.add(f"{sides[i]}|{sides[j]}")
-    return pairs
+    return pairs_by_repository
 
 
 def _claims_by_subject(capsule):
@@ -177,7 +182,7 @@ def propose_context_repairs(*, capsule, graph):
             deterministic_id("omitted-claim", {"subject_path": entry.get("subject_path"), "fact": entry.get("fact")})
             for entry in omitted_entries
         ]
-        tiers_cut = sorted(dict.fromkeys(entry.get("tier") for entry in omitted_entries), key=_utf16_sort_key)
+        tiers_cut = sorted(dict.fromkeys(entry.get("tier") for entry in omitted_entries), key=utf16_sort_key)
         proposals.append(
             {
                 "id": deterministic_id("repair", {"kind": REPAIR_KINDS["SPLIT"], "capsule": capsule.get("capsule_id")}),
@@ -202,12 +207,13 @@ def propose_context_repairs(*, capsule, graph):
     # checkout contributing claims to this capsule.
     by_repository = _checkouts_by_repository(graph)
     by_subject = _claims_by_subject(capsule)
+    conflict_pairs_by_repository = _conflict_side_pairs_by_repository(graph)
 
     for repository_id, checkouts in sorted(by_repository.items(), key=lambda kv: locale_sort_key(kv[0])):
         if len(checkouts) < 2:
             continue
-        conflict_pairs = _conflict_side_pairs(graph, repository_id)
-        sorted_checkouts = sorted(checkouts, key=_utf16_sort_key)
+        conflict_pairs = conflict_pairs_by_repository.get(repository_id)
+        sorted_checkouts = sorted(checkouts, key=utf16_sort_key)
 
         repository_claim_count = 0
         for checkout_id in sorted_checkouts:
@@ -261,7 +267,7 @@ def propose_context_repairs(*, capsule, graph):
                 if len(duplicate_pairs) == 0:
                     continue
 
-                if f"{a}|{b}" in conflict_pairs:
+                if conflict_pairs and f"{a}|{b}" in conflict_pairs:
                     withheld.append(
                         {"kind": REPAIR_KINDS["DEDUPLICATE"], "repository": repository_id, "sides": [a, b], "reason": "conflict_unresolved"}
                     )

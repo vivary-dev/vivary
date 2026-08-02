@@ -46,7 +46,7 @@ from vivary_core.capsule_compile import (  # noqa: E402
     CAPSULE_SCHEMA,
     compile_task_capsule,
 )
-from vivary_core.canonical import fingerprint  # noqa: E402
+from vivary_core.canonical import deterministic_id, fingerprint  # noqa: E402
 from vivary_core.receipt import RECEIPT_SCHEMA, create_integrity_receipt  # noqa: E402
 from vivary_core.workspace_model import project_workspace_graph  # noqa: E402
 from vivary_core.workspace_observe import observe_checkouts  # noqa: E402
@@ -181,7 +181,7 @@ def build_fixtures(base_dir):
 
 @pytest.fixture(scope="module")
 def fx():
-    base_dir = tempfile.mkdtemp(prefix="vivary-policy-fixtures-")
+    base_dir = os.path.realpath(tempfile.mkdtemp(prefix="vivary-policy-fixtures-"))
     try:
         yield build_fixtures(base_dir)
     finally:
@@ -209,7 +209,7 @@ def real_capsule(real_graph, budget=None):
 # Hand-built (not from git) so it is guaranteed conflict-free and unknown-free: every
 # fact is marked "known". This still runs through the real workspace_model.py/
 # capsule_compile.py seam; only the observation layer (normally the sole impure module)
-# is faked here, and the path is a synthetic label, never a real machine path.
+# is faked here, and the path is a synthetic absolute path, never a real checkout.
 
 
 def _known(value, command):
@@ -218,12 +218,12 @@ def _known(value, command):
 
 def build_clean_capsule():
     checkout = {
-        "raw_path": "synthetic-clean/repo",
-        "path": "synthetic-clean/repo",
+        "raw_path": "/synthetic-clean/repo",
+        "path": "/synthetic-clean/repo",
         "status": "observed",
         "facts": {
             "is_git_repository": _known(True, "git rev-parse --show-toplevel"),
-            "worktree_root": _known("synthetic-clean/repo", "git rev-parse --show-toplevel"),
+            "worktree_root": _known("/synthetic-clean/repo", "git rev-parse --show-toplevel"),
             "head_revision": _known("0" * 40, "git rev-parse HEAD"),
             "head_ref": _known({"kind": "branch", "name": "main"}, "git symbolic-ref --short -q HEAD"),
             "dirty_entries": _known([], "git status --porcelain"),
@@ -242,7 +242,7 @@ def build_clean_capsule():
     observation = {
         "schema": "vivary.workspace-observation/v0",
         "observed_at": NOW(),
-        "allowlist": ["synthetic-clean/repo"],
+        "allowlist": ["/synthetic-clean/repo"],
         "checkouts": [checkout],
         "refusals": [],
     }
@@ -269,6 +269,34 @@ def base_capsule_like(overrides=None):
     }
     capsule.update(overrides or {})
     return capsule
+
+
+def complete_claim_like(overrides=None):
+    claim = {
+        "id": None,
+        "subject": "checkout:test",
+        "subject_path": "/repo/test",
+        "fact": "test_fact",
+        "claim": "test claim",
+        "status": "known",
+        "evidence": [{"kind": "test"}],
+        "selection_reason": "test fixture",
+        "selection": {
+            "tier": "allowlisted",
+            "signals": [{"signal": "allowlisted"}],
+        },
+    }
+    claim.update(overrides or {})
+    if claim["id"] is None:
+        claim["id"] = deterministic_id(
+            "claim",
+            {
+                "subject": claim["subject"],
+                "fact": claim["fact"],
+                "claim": claim["claim"],
+            },
+        )
+    return claim
 
 
 def base_receipt_like(capsule, overrides=None):
@@ -554,13 +582,20 @@ def test_evaluate_capsule_gate_gate_required_when_the_capsule_blew_its_claim_bud
 
 def test_evaluate_capsule_gate_gate_required_when_a_claim_carries_no_evidence():
     capsule = base_capsule_like(
-        {"claims": [{"id": "claim_no_evidence", "subject": "s", "fact": "f", "claim": "c", "status": "known", "evidence": []}]}
+        {"claims": [complete_claim_like(
+            {
+                "subject": "s",
+                "fact": "f",
+                "claim": "c",
+                "evidence": [],
+            }
+        )]}
     )
     outcome = evaluate_capsule_gate(capsule=capsule)
     assert outcome == {
         "decision": GATE_DECISION["GATE_REQUIRED"],
         "reason_codes": [GATE_REASON["CLAIM_MISSING_EVIDENCE"]],
-        "gate_requests": [{"reason_code": GATE_REASON["CLAIM_MISSING_EVIDENCE"], "target": "claim_no_evidence"}],
+        "gate_requests": [{"reason_code": GATE_REASON["CLAIM_MISSING_EVIDENCE"], "target": capsule["claims"][0]["id"]}],
     }
 
 
@@ -572,6 +607,22 @@ def test_evaluate_capsule_gate_fails_closed_on_an_unrecognized_capsule_shape():
             "reason_codes": [GATE_REASON["UNKNOWN_CAPSULE_SHAPE"]],
             "gate_requests": [],
         }
+
+
+def test_policy_surfaces_reject_self_consistent_capsules_with_unknown_fields():
+    capsule = base_capsule_like({"unexpected": "smuggled"})
+
+    assert evaluate_budget(capsule=capsule) == {
+        "decision": BUDGET_DECISION["REFUSED"],
+        "reason_codes": [BUDGET_REASON["UNKNOWN_CAPSULE_SHAPE"]],
+        "details": {},
+    }
+    assert evaluate_capsule_gate(capsule=capsule) == {
+        "decision": GATE_DECISION["BLOCKED"],
+        "reason_codes": [GATE_REASON["UNKNOWN_CAPSULE_SHAPE"]],
+        "gate_requests": [],
+    }
+    assert next_loop_step(capsule=capsule)["decision"] == LOOP_DECISION["BLOCKED"]
 
 
 @pytest.mark.parametrize(
@@ -671,6 +722,28 @@ def test_evaluate_receipt_gate_does_not_clear_a_receipt_ozone_marks_as_forged():
     outcome = evaluate_receipt_gate(capsule=capsule, receipt=forged)
     assert outcome["decision"] != GATE_DECISION["CLEAR"]
     assert outcome["reason_codes"]
+
+
+def test_evaluate_receipt_gate_rejects_self_authored_receipt_checks():
+    capsule = base_capsule_like({"required_checks": []})
+    receipt = base_receipt_like(
+        capsule,
+        {
+            "checks": [
+                {
+                    "name": "self-authored",
+                    "command": "echo untrusted",
+                    "outcome": "passed",
+                }
+            ]
+        },
+    )
+
+    assert evaluate_receipt_gate(capsule=capsule, receipt=receipt) == {
+        "decision": GATE_DECISION["BLOCKED"],
+        "reason_codes": [GATE_REASON["UNKNOWN_RECEIPT_SHAPE"]],
+        "gate_requests": [],
+    }
 
 def test_evaluate_receipt_gate_clear_when_all_required_checks_passed_and_nothing_is_unresolved():
     capsule = build_clean_capsule()
@@ -816,10 +889,12 @@ def test_evaluate_receipt_gate_a_sufficient_ozone_verdict_clears_the_required_ch
     ],
 )
 def test_evaluate_receipt_gate_rejects_recomputed_sufficient_claim_projections(projection):
-    capsule = base_capsule_like({"claims": [{"id": "claim-one"}]})
+    capsule = base_capsule_like(
+        {"claims": [complete_claim_like()]}
+    )
     receipt = base_receipt_like(
         capsule,
-        {"claims_verified": [], "claims_unverified": ["claim-one"]},
+        {"claims_verified": [], "claims_unverified": [capsule["claims"][0]["id"]]},
     )
     insufficient = evaluate_gate_sufficiency(
         gate={"name": "ci", "require_claims_verified": True},
@@ -847,7 +922,9 @@ def test_evaluate_receipt_gate_rejects_recomputed_sufficient_claim_projections(p
 
 
 def test_evaluate_receipt_gate_clears_a_legitimate_sufficient_claim_projection():
-    capsule = base_capsule_like({"claims": [{"id": "claim-one"}]})
+    capsule = base_capsule_like(
+        {"claims": [complete_claim_like()]}
+    )
     receipt = base_receipt_like(capsule)
     verdict = evaluate_gate_sufficiency(
         gate={"name": "ci", "require_claims_verified": True},
@@ -1207,7 +1284,7 @@ def test_evaluate_receipt_gate_duplicate_matching_checks_cannot_mask_a_failure()
     )
 
 
-def test_evaluate_receipt_gate_requires_a_matching_check_command():
+def test_evaluate_receipt_gate_rejects_a_mismatched_check_command():
     capsule = build_clean_capsule()
     required = capsule["required_checks"][0]
     checks = [
@@ -1223,10 +1300,13 @@ def test_evaluate_receipt_gate_requires_a_matching_check_command():
 
     outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt)
 
-    assert any(
-        request["reason_code"] == GATE_REASON["REQUIRED_CHECK_MISSING"] and request["check"] == required["name"]
-        for request in outcome["gate_requests"]
-    )
+    assert outcome == {
+        "decision": GATE_DECISION["BLOCKED"],
+        "reason_codes": [GATE_REASON["UNKNOWN_RECEIPT_SHAPE"]],
+        "gate_requests": [],
+    }
+
+
 def test_evaluate_receipt_gate_gate_required_when_the_receipt_binds_to_a_different_capsule_fingerprint():
     capsule = build_clean_capsule()
     other_capsule = base_capsule_like(
@@ -1302,6 +1382,17 @@ def test_evaluate_receipt_gate_blocks_malformed_collection_entries_and_required_
             "reason_codes": [GATE_REASON["UNKNOWN_RECEIPT_SHAPE"]],
             "gate_requests": [],
         }
+
+
+def test_receipt_gate_rejects_self_consistent_receipts_with_unknown_fields():
+    capsule = base_capsule_like()
+    receipt = base_receipt_like(capsule, {"unexpected": "smuggled"})
+
+    assert evaluate_receipt_gate(capsule=capsule, receipt=receipt) == {
+        "decision": GATE_DECISION["BLOCKED"],
+        "reason_codes": [GATE_REASON["UNKNOWN_RECEIPT_SHAPE"]],
+        "gate_requests": [],
+    }
 def test_evaluate_receipt_gate_fails_closed_on_an_unrecognized_receipt_or_capsule_shape():
     capsule = build_clean_capsule()
     good_receipt = base_receipt_like(capsule)
@@ -1363,8 +1454,28 @@ def test_next_loop_step_stop_with_all_checks_clear_once_a_receipt_clears_every_g
 def test_next_loop_step_retains_capsule_evidence_and_budget_gates_after_a_clean_receipt():
     capsule = base_capsule_like(
         {
-            "claims": [{"id": "claim_missing_evidence", "evidence": []}],
-            "omissions": [{"kind": "claims_over_budget", "omitted_count": 2}],
+            "claims": [
+                complete_claim_like({"evidence": []})
+            ],
+            "omissions": [
+                {
+                    "kind": "claims_over_budget",
+                    "reason": "claim budget 1 reached",
+                    "omitted_count": 2,
+                    "omitted": [
+                        {
+                            "subject_path": "/workspace",
+                            "fact": "head_revision",
+                            "tier": "allowlisted",
+                        },
+                        {
+                            "subject_path": "/workspace",
+                            "fact": "head_ref",
+                            "tier": "allowlisted",
+                        },
+                    ],
+                }
+            ],
         }
     )
     receipt = base_receipt_like(capsule)
@@ -1375,7 +1486,7 @@ def test_next_loop_step_retains_capsule_evidence_and_budget_gates_after_a_clean_
     assert outcome["reason_codes"] == [LOOP_REASON["GATE_REQUIRED"]]
     assert GATE_REASON["CLAIM_MISSING_EVIDENCE"] in outcome["gate"]["reason_codes"]
     assert GATE_REASON["CAPSULE_OVER_BUDGET"] in outcome["gate"]["reason_codes"]
-    assert {"reason_code": GATE_REASON["CLAIM_MISSING_EVIDENCE"], "target": "claim_missing_evidence"} in outcome["gate"]["gate_requests"]
+    assert {"reason_code": GATE_REASON["CLAIM_MISSING_EVIDENCE"], "target": capsule["claims"][0]["id"]} in outcome["gate"]["gate_requests"]
     assert {"reason_code": GATE_REASON["CAPSULE_OVER_BUDGET"], "omitted_count": 2} in outcome["gate"]["gate_requests"]
 
 
