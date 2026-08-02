@@ -10,6 +10,55 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: governed recall firewall (#205)] — 2026-08-02
+
+Implements [#205](https://github.com/vivary-dev/vivary/issues/205). The
+[release-status section](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status)
+owns current published and development version truth.
+
+This slice advances the unpublished `vivary-core` source to **0.2.6**. Published
+versions remain unchanged.
+
+### Added
+
+- Added `vivary_core.recall` as the stable Core import surface for the
+  [SPEC-owned candidate-recall firewall](https://github.com/vivary-dev/vivary/blob/dev/docs/bellamente-memory/SPEC-bellamente-memory.md#6-candidaterecallprovider-contract).
+- Added pure caller-owned `preserve`, `create`, and `supersede` projections.
+  Create and supersede require an exact proposal-bound human approval. Applied
+  records are learned assertions with immutable transition provenance.
+
+### Changed
+
+- Bounded the candidate graph, candidate, provider neighbors, and assertion ledger
+  before classification or projection. Cycles, unknown neighbor node IDs, malformed
+  values, and over-budget inputs degrade or refuse without mutation.
+- Preserved authored and learned assertion history. Exact transition replay is
+  idempotent. Assertion identity or approval-provenance conflicts refuse atomically.
+- Kept providers, stores, network calls, workspace policy, and memory activation out of
+  Core. Bellamente remains optional and disabled by default.
+
+### Verification
+
+- `python -m pytest packages/core/tests/test_recall.py -q` — **88 passed** on Windows.
+- `python -m pytest packages/core/tests/ -q` — **766 passed** on Windows;
+  **765 passed, 1 skipped** under WSL Linux.
+- Tropo **170/170**, Ozone **110/110**, Exo **29/29**, Strato **48/48**,
+  create-vivary **143 run with 1 skipped**, and the meta CLI **9/9** passed on
+  Windows. The canonical Tropo example vault reported four documents with no errors
+  or warnings.
+- Built all eight coordinated local wheels. A fresh environment installed `vivary`
+  and `vivary-strato` only from the wheelhouse, passed `pip check`, verified Core
+  **0.2.6** and the existing dependency floors, exercised an approved recall
+  transition through the installed public seam, and found no packaged tests.
+- Package documentation parity passed **10/10** tests and matched **6** published
+  manifests plus **2** unpublished allowlist entries.
+- `cd site && npm run test:site && npm run build && npm run test:links` — **8/8**
+  site tests passed, **23** pages built, and **1,720** local references plus **1,094**
+  anchors had zero failures.
+- `npm audit --audit-level=high` — no known vulnerabilities.
+
+Publishing remains a manual human gate.
+
 ## [Unreleased: governed Exo control (#204)] — 2026-08-01
 
 Implements [#204](https://github.com/vivary-dev/vivary/issues/204). The

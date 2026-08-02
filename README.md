@@ -36,7 +36,7 @@ versions declared in this checkout. Development versions are not published.
 | `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
 | `vivary-memory-cognee` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-memory-cognee/) |
 
-**Unpublished development source:** `vivary-core` **0.2.5**, `vivary-tropo`
+**Unpublished development source:** `vivary-core` **0.2.6**, `vivary-tropo`
 **0.5.0**, `vivary-strato` **0.1.2**, `vivary-ozone` **0.3.1**, `vivary-exo`
 **0.3.0**, and the `vivary` meta-package **0.1.4**. The package manifests own
 dependency floors, including [Exo's Core floor](packages/exo/pyproject.toml) and
@@ -144,6 +144,11 @@ For workspaces that explicitly choose Cognee semantic memory, the optional
 hits that map back to known Vivary node ids. It is not part of the default install and
 provider writes require explicit approval. `tropo query --mode semantic --json` uses
 that same optional provider bridge after the workspace has been configured and indexed.
+The unreleased `vivary_core.recall` API is a separate provider-neutral firewall. It
+classifies normalized candidates and projects caller-persisted recall transitions.
+Create and supersede require a proposal-bound human approval. Core adds no provider,
+store, network call, or default memory capability.
+
 For users who only want local typed vector ranking, `--mode vector` stays inside the
 typed graph, reports whether results came from stored or computed vectors, and falls
 back to text search when no trustworthy local vector index is present.
