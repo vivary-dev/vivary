@@ -22,6 +22,8 @@ Exit codes are uniform: **`0`** success · **`1`** findings/errors · **`2`** us
 error. Gate CI on the exit code; don't parse text. Every command takes `--json` for
 machine-readable output.
 
+### Local run receipts are not telemetry
+
 Every core CLI also accepts `--receipt PATH`, or the equivalent
 `VIVARY_RECEIPT_LOG=PATH`, to append one local JSONL run receipt after the command
 finishes. This is **not telemetry**: Vivary does not send receipts anywhere, does not
@@ -31,6 +33,9 @@ debug envelope: schema version, tool/version, command, flag names, argument coun
 exit code, duration, Python version, and platform. Receipt targets must be regular
 files; symlink targets, symlink/junction directory ancestors, directory targets, and
 Windows device names are refused.
+For governed Exo control, the receipt target must be provably distinct from the request
+document. Exact-path and hard-link aliases are refused. A stdin request cannot be
+combined with a receipt because file identity cannot be established.
 
 Install the `vivary` meta package when you want a human-readable pull surface over
 those receipts:
@@ -696,32 +701,145 @@ ozone impact human-gates --root . --json
 
 ## exo — the coordination layer
 
+### Legacy graph coordination
+
 ```
 exo [conflicts | board | claim <id> --agent <handle> | roles] [--root DIR] [--json]
     [--receipt PATH]
 ```
 
-The outermost, thinnest layer — engaged only when one agent becomes many. Graph-native
-and deterministic; it doesn't run agents, it coordinates them. `claim` is the only
-writer, and it refuses to write unless the workspace declares `assignee` through
-`packs = ["coordination"]`.
-
 | Command | What it does |
 |---|---|
-| `conflicts` | Among **active** work items (changes with `status: active`), flags pairs that share an outbound target — two in-flight changes touching the same node. |
-| `board` | Work items grouped by `status` (and `@assignee` if the workspace declares one). |
-| `claim <id> --agent <handle>` | Claim a work item under `changes/` by setting top-level `assignee`; optional leading `@` is accepted and stripped before storage. Refuses symlinked or out-of-workspace work item files and replaces the workspace file instead of truncating hard-linked targets. |
-| `roles` | The bounded worker contracts: Orchestrator · Scout · Researcher · Builder · Verifier · Reviewer · Archivist. |
+| `conflicts` | Among active work items, report pairs that share an outbound target. |
+| `board` | Group work items by `status` and, when declared, `@assignee`. |
+| `claim <id> --agent <handle>` | Update an opted-in work item's top-level `assignee`. |
+| `roles` | Print the bounded worker contracts. |
 
 ```bash
-exo conflicts --root .    # who would collide
-exo board --root .        # what's in flight
+exo conflicts --root .
+exo board --root .
 exo claim local-ci-baseline --agent connie --root .
-exo roles                 # the role grammar
+exo roles
 ```
 
-JSON output for `claim` includes `id`, `path`, `assignee`, `previous_assignee`, and
-`changed`.
+`exo claim` is the legacy graph write. It remains separate from governed control. It
+accepts an optional leading `@` in an agent handle, writes no undeclared field, and
+refuses symlinked or out-of-workspace work item targets. For a hard-linked work item,
+it replaces the workspace link without changing the other linked file.
+
+### Governed control (development source)
+
+```
+exo control REQUEST --governed [--json] [--strict]
+```
+
+`control` dispatches one bounded Core transition. `REQUEST` names a UTF-8 JSON file, or
+`-` for standard input. The caller supplies every state value and persists every returned
+projection. Exo creates no control store.
+
+Each request has exactly these top-level fields:
+
+```json
+{
+  "schema": "vivary.exo-control-request/v0",
+  "operation": "claim",
+  "state": {},
+  "input": {}
+}
+```
+
+A successful transport response has this outer shape:
+
+```json
+{"schema":"vivary.exo-control-result/v0","operation":"claim","result":{}}
+```
+
+A transport refusal has this outer shape:
+
+```json
+{"schema":"vivary.exo-control-refusal/v0","reason_codes":[]}
+```
+
+Unknown or missing fields refuse. A Core refusal remains a result with its own typed
+reason codes.
+
+Before Core dispatch, Exo rejects request files larger than 1 MiB, values nested more
+than 64 levels, collections larger than 10,000 entries, strings larger than 1 MiB, and
+documents requiring more than 100,000 value visits. Direct API values receive the same
+iterative, cycle-safe value preflight; the file-size bound applies at CLI read.
+
+| Operation | Required `state` | Required `input` |
+|---|---|---|
+| `claim` | `claims` | `scope`, `actor`, `now` |
+| `release` | `claims` | `claim_id`, `actor` |
+| `expire_leases` | `claims` | `now` |
+| `dependencies` | `tasks` | `task_id` |
+| `handoff` | `claims` | `claim_id`, `receipt`, `capsule`, `from_actor`, `to_actor`, `workspace_revision`, `created_at` |
+| `record_execution` | `execution_log` | `receipt`, `capsule` |
+| `complete` | `task`, `execution_log` | none |
+| `task_view` | `task`, `execution_log` | none |
+
+`claim` may also carry `authority_class` and `lease`. `handoff` may carry
+`to_authority_class`. An actor is exactly `{ "kind": ..., "id": ... }`. `now` and
+handoff timestamps are explicit. Core reads no wall clock. A lease is live only when
+`granted_at <= now < expires_at`.
+
+Claim IDs bind the normalized scope, exact actor, authority class, lease, and creation
+time. Caller ledgers must contain unique, recomputable, pairwise-disjoint active claims.
+A projection beyond 10,000 active claims or 10,000 total scope paths returns
+`claim_work_unbounded`. Expired claims remain until an explicit `expire_leases`
+projection. A handoff receipt's runtime actor must be the claim holder, and its creation
+time cannot predate the claim or lease or follow the handoff.
+
+Save this request as `claim-request.json`, then dispatch it:
+
+```json
+{
+  "schema": "vivary.exo-control-request/v0",
+  "operation": "claim",
+  "state": {"claims": []},
+  "input": {
+    "scope": {"project": "example", "paths": ["src"]},
+    "actor": {"kind": "agent", "id": "docs-worker"},
+    "now": "2026-08-01T12:00:00Z",
+    "lease": {
+      "granted_at": "2026-08-01T12:00:00Z",
+      "expires_at": "2026-08-01T13:00:00Z"
+    }
+  }
+}
+```
+
+```bash
+exo control claim-request.json --governed --json --strict
+```
+
+Save this request as `expire-leases.json` to derive a new caller ledger at an explicit
+time:
+
+```json
+{
+  "schema": "vivary.exo-control-request/v0",
+  "operation": "expire_leases",
+  "state": {"claims": []},
+  "input": {"now": "2026-08-01T13:00:00Z"}
+}
+```
+
+```bash
+exo control expire-leases.json --governed --json --strict
+```
+
+Use `--strict` for automation. It exits `1` for a transport refusal, a Core
+`decision: "refused"`, or any returned reason code. Without `--strict`, a typed
+refusal exits `0`. Usage and configuration errors exit `2`.
+
+Core owns the lifecycle semantics, including record-only handoffs, complete
+capsule-and-authorized-receipt evidence, replay suppression, conflict refusal, and
+failed-evidence preservation. See the [Core control contract](https://github.com/vivary-dev/vivary/blob/dev/packages/core/README.md#governed-exo-control).
+`control` does not add a scheduler, runner, network call, MCP server, repair write, or
+publishing path. Requests and results are not telemetry. Local `--receipt` records
+remain local under the [receipt policy](#local-run-receipts-are-not-telemetry).
 
 ---
 

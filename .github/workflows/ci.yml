@@ -69,6 +69,26 @@ jobs:
           python -m pip install --no-index --find-links "$wheelhouse" \
             vivary vivary-strato
           python -m pip check
+          cat > "$smoke/exo-control-request.json" <<'EOF'
+          {"schema":"vivary.exo-control-request/v0","operation":"dependencies","state":{"tasks":[{"id":"task-ci","status":"open","depends_on":[]}]},"input":{"task_id":"task-ci"}}
+          EOF
+          exo control "$smoke/exo-control-request.json" \
+            --governed --json --strict > "$smoke/exo-control.json"
+          python - "$smoke/exo-control.json" <<'PY'
+          import json
+          import sys
+          from importlib.metadata import requires, version
+
+          result = json.loads(open(sys.argv[1], encoding="utf-8").read())
+          assert result["schema"] == "vivary.exo-control-result/v0"
+          assert result["operation"] == "dependencies"
+          assert result["result"]["decision"] == "ready"
+          assert version("vivary-core") == "0.2.5"
+          assert version("vivary-exo") == "0.3.0"
+          assert version("vivary") == "0.1.4"
+          assert "vivary-core>=0.2.5" in requires("vivary-exo")
+          assert "vivary-exo>=0.3.0" in requires("vivary")
+          PY
           python -m pip install --no-index --find-links "$wheelhouse" --no-deps \
             vivary-memory-cognee
           mkdir -p "$smoke/ws/.vivary" "$smoke/ws/modules/auth"

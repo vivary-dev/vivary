@@ -19,16 +19,14 @@ A *vivary* is an archaic word for a vivarium: a self-contained world where livin
 things are kept, in stacked layers. That's the metaphor — your project lives
 inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
-> Release status: package versions are independent; there is no single "Vivary
-> 0.4.1" release. Use **0.3.1** for the scaffolder (`create-vivary` /
-> `@vivary/create`), **0.4.1** for `vivary-tropo`, **0.2.2** for `vivary-exo`,
-> **0.2.0** for `vivary-ozone`, and **0.1.0** for the optional
-> `vivary-memory-cognee` adapter.
-> This line adds `tropo map` (read-only filesystem inventory), brownfield
-> `create-vivary adopt`, `doctor --trend` drift tracking, and strato integrity
-> gates in CI.
+## Release status
 
-| Surface | Current | Link |
+Packages are independently versioned. There is no single "Vivary 0.4.1" release.
+
+The registry versions below are published truth. The development source line names
+versions declared in this checkout. Development versions are not published.
+
+| Surface | Published version | Link |
 |---|---:|---|
 | `vivary` (PyPI, installs the suite) | 0.1.0 | [PyPI](https://pypi.org/project/vivary/) |
 | `create-vivary` (PyPI) | 0.3.1 | [PyPI](https://pypi.org/project/create-vivary/) |
@@ -37,23 +35,16 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 | `vivary-ozone` | 0.2.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
 | `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
 | `vivary-memory-cognee` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-memory-cognee/) |
-| `vivary-core` (not published) | unreleased (source 0.2.4) | in-repo: `packages/core/` |
-| `vivary-strato` (not published) | unreleased (source 0.1.2) | in-repo: `packages/strato/` |
-| Docs site | live | [vivary.vercel.app](https://vivary.vercel.app/) |
-| CI | `ci` workflow | [GitHub Actions](https://github.com/vivary-dev/vivary/actions/workflows/ci.yml) |
 
-Development source is ahead but remains unpublished until the coordinated release
-gate: `vivary-core` **0.2.4**, `vivary-tropo` **0.5.0**, `vivary-strato` **0.1.2**,
-`vivary-ozone` **0.3.1**, and the `vivary` meta-package **0.1.3**.
+**Unpublished development source:** `vivary-core` **0.2.5**, `vivary-tropo`
+**0.5.0**, `vivary-strato` **0.1.2**, `vivary-ozone` **0.3.1**, `vivary-exo`
+**0.3.0**, and the `vivary` meta-package **0.1.4**. The package manifests own
+dependency floors, including [Exo's Core floor](packages/exo/pyproject.toml) and
+the [meta package's Exo floor](packages/vivary/pyproject.toml).
 
-Versions are intentionally independent across the layers and optional adapters: `tropo`
-moved to 0.4.1 for the read-only `map` filesystem inventory command, `create-vivary` /
-`@vivary/create` move to 0.3.1 for brownfield `adopt` and `doctor --trend` drift
-tracking, `ozone` and `exo` are unchanged in this line, and `vivary-memory-cognee`
-stays at 0.1.0.
-
-Unreleased entries documented on the `dev` branch are not included in those published
-package versions until the release-train PR bumps, publishes, and verifies them.
+No development source version above was published, deployed, or enabled by default.
+Publication remains a later coordinated release-train decision with a separate human
+gate. [CHANGELOG.md](CHANGELOG.md) records the changes in each development line.
 
 ## Public Signals
 
@@ -65,9 +56,10 @@ snapshots. The chart is generated from [`stats/latest.json`](stats/latest.json) 
 sources and caveats.
 
 `tropo` (typed knowledge graph + search + storage), `strato` (agent OS), `ozone`
-(graph-aware review), and `exo` (coordination) are composed by `create-vivary`. See
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full model and
-[docs/WHITE-PAPER.md](docs/WHITE-PAPER.md) for the technical argument.
+(graph-aware review), and `exo` (coordination plus a bounded governed-control adapter)
+are composed by `create-vivary`. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for
+ownership and boundaries. [docs/COMMANDS.md](docs/COMMANDS.md) owns the exact CLI
+envelopes. [docs/WHITE-PAPER.md](docs/WHITE-PAPER.md) holds the technical argument.
 [docs/PORTFOLIO.md](docs/PORTFOLIO.md) holds proof and case-study material. The
 high-leverage backlog lives in [docs/PRODUCT-ROADMAP.md](docs/PRODUCT-ROADMAP.md).
 
@@ -78,7 +70,8 @@ Current command surface:
 - `tropo check` / `graph` / `find` / `query` / `migrate` / `map` / `init --packs`
 - `strato decide --governed`
 - `ozone review` / `impact` / `verify --governed`
-- `exo board` / `conflicts` / `claim` / `roles`
+- `exo board` / `conflicts` / `claim` / `roles`, plus the unreleased
+  `exo control REQUEST --governed`
 - `vivary-cognee doctor` / `index` / `recall` / `forget` from the optional
   `vivary-memory-cognee` package
 
@@ -221,7 +214,7 @@ Standalone Python packages (`vivary-*` on PyPI), plus the npm scaffolder
 | **tropo** | troposphere — the living foundation | typed knowledge graph: what the workspace *knows* | loam ✓ |
 | **strato** | stratosphere — the stable layer | agent OS: state surface, memory, the loop, gates, self-improvement | throughline + flywheel |
 | **ozone** | the protective filter | review — graph-aware, code *and* editorial | new ✓ |
-| **exo** | the outermost layer | coordination — conflict detection, work claiming, role contracts | new ✓ |
+| **exo** | the outermost layer | coordination, plus a bounded caller-persisted control adapter | new ✓ |
 
 `create vivary` → pick a preset (**coding · second brain · knowledge work · writing**) → it lays
 down `tropo` + `strato` and whichever optional layers fit. See

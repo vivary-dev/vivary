@@ -90,36 +90,33 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
   the `ozone review --strict` review gate + a cross-platform (Ubuntu/Windows)
   orientation proof + a site build on every PR/push. Verify locally too; the local
   suite is fast.
-- **Docs stay in sync.** Update the affected docs in the *same* change as any
-  behavior / command / flag / structure change — never leave them stale (stale docs
-  are a bug). Source of truth is `docs/`; the website under `site/` is generated from
-  it (`cd site && npm run sync-docs`, also auto-run on build). Touch the package
-  READMEs when relevant. Private handoffs and agent-to-Jeff continuity notes stay in
-  ignored local storage or the Second Brain, never in the public repo. Every merge's
-  verification includes it.
-- **Every update ends with release truth.** For any behavior, packaging, version, or
-  public-copy change, run [docs/RELEASE-WORKFLOW.md](docs/RELEASE-WORKFLOW.md):
-  update changelog/docs/site/package copy, sync generated site docs, verify install
-  surfaces after publish, and keep launch/social posts in ignored local storage or the
-  Second Brain, not the public repo.
+- **Docs stay in sync.** Update the affected canonical docs in the same change as a
+  behavior, command, flag, or structure change. Long-form behavior docs live in
+  `docs/`. [README release status](README.md#release-status) owns current version and
+  publication truth. Package READMEs should link to that status rather than copy it.
+  The website under `site/` is generated from canonical docs. Do not edit mirrors
+  directly. The approved release step runs the canonical sync. Private handoffs and
+  agent-to-Jeff continuity notes stay in ignored local storage or the Second Brain,
+  never in the public repo.
+- **Every update ends with release truth.** Follow
+  [docs/RELEASE-WORKFLOW.md](docs/RELEASE-WORKFLOW.md) for release-gated work. Update
+  the changelog and canonical docs before the approved site sync. Verify install
+  surfaces only after publication. Keep launch and social posts in ignored local
+  storage or the Second Brain, not the public repo.
 
 ## Verify
 
 ```bash
 python packages/tropo/tests/test_tropo.py                  # 170/170
 python packages/ozone/tests/test_ozone.py                  # 110/110
-python packages/exo/tests/test_exo.py                      # 17/17
+python packages/exo/tests/test_exo.py                      # 29/29
 python packages/create-vivary/tests/test_create_vivary.py  # 143 run, 1 skipped
-python -m pytest packages/core/tests/ -q                   # 767 Windows; 766 + 1 skip Linux
+python -m pytest packages/core/tests/ -q                   # 739 Windows; 738 + 1 skip Linux
 python -m pytest packages/strato/tests/ -q                 # 48/48
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # clean
 ```
 
-Current release truth lives in [README.md](README.md) and [CHANGELOG.md](CHANGELOG.md):
-`create-vivary` / `@vivary/create` 0.3.1, `vivary-memory-cognee` 0.1.0,
-`vivary-tropo` 0.4.1, `vivary-exo` 0.2.2, and `vivary-ozone` 0.2.0 are the
-published versions. Development source is `vivary-core` 0.2.4, `vivary-tropo` 0.5.0,
-`vivary-strato` 0.1.2, `vivary-ozone` 0.3.1, and the `vivary` meta-package 0.1.3.
-Versions are independent; there is no single "Vivary 0.4.1" release. This line adds
-`tropo map`, brownfield `create-vivary adopt`, `doctor --trend` drift tracking, Strato
-integrity gates, and governed-verification hardening. Full guides live in [docs/](docs/).
+Current release and publication status lives in [README.md's release-status
+section](README.md#release-status). [CHANGELOG.md](CHANGELOG.md) records the scope of
+each development line. Do not infer publication from a source version. Full guides
+live in [docs/](docs/).

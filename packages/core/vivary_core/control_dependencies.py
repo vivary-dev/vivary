@@ -1,14 +1,11 @@
-"""Task dependency evaluation for Exo (ticket #8).
+"""Pure dependency decisions for governed control.
 
-Reference-guided Python port of src/control/dependencies.mjs (graduation
-slice 5, decision 0008). Pure graph traversal over a caller-supplied task
-list (`{id, status, depends_on}`); this module never stores the graph
-itself. Fails closed: an unknown task, an unknown dependency, or a
-dependency that has not reached "done" all block rather than silently
-reporting ready.
+Dependency evaluation owns graph-cycle detection so adapters cannot compose a
+policy result around an inconsistent task graph.
 """
 
 from __future__ import annotations
+import unicodedata
 
 from vivary_core.control_reason_codes import DEPENDENCY_DECISION, DEPENDENCY_REASON
 
@@ -16,128 +13,174 @@ __all__ = [
     "DEPENDENCY_DECISION",
     "DEPENDENCY_REASON",
     "evaluate_dependencies",
-    "detect_dependency_cycle",
 ]
 
 
-def _has_valid_task_entries(tasks):
-    return (
-        isinstance(tasks, list)
-        and all(
-            isinstance(task, dict)
-            and isinstance(task.get("id"), str)
-            and len(task["id"]) > 0
-            and (
-                task.get("depends_on") is None
-                or (
-                    isinstance(task["depends_on"], list)
-                    and all(isinstance(dep_id, str) and len(dep_id) > 0 for dep_id in task["depends_on"])
-                )
+_MAX_TASKS = 10_000
+_MAX_DEPENDENCY_EDGES = 100_000
+_MAX_TASK_ID_UTF8_BYTES = 256
+_MAX_STATUS_UTF8_BYTES = 64
+
+
+def _is_bounded_text(value, max_utf8_bytes):
+    if (
+        type(value) is not str
+        or not value
+        or value != value.strip()
+        or unicodedata.normalize("NFC", value) != value
+    ):
+        return False
+    try:
+        return len(value.encode("utf-8")) <= max_utf8_bytes
+    except UnicodeEncodeError:
+        return False
+
+
+def _task_graph_reason(tasks):
+    if type(tasks) is not list:
+        return DEPENDENCY_REASON["UNKNOWN_TASK"]
+    if len(tasks) > _MAX_TASKS:
+        return DEPENDENCY_REASON["WORK_UNBOUNDED"]
+
+    task_ids = set()
+    dependency_edges = 0
+    for task in tasks:
+        if (
+            type(task) is not dict
+            or not _is_bounded_text(
+                task.get("id"),
+                _MAX_TASK_ID_UTF8_BYTES,
             )
-            for task in tasks
-        )
-        and len({task["id"] for task in tasks}) == len(tasks)
-    )
+            or not _is_bounded_text(
+                task.get("status"),
+                _MAX_STATUS_UTF8_BYTES,
+            )
+            or (
+                task.get("depends_on") is not None
+                and type(task["depends_on"]) is not list
+            )
+        ):
+            return DEPENDENCY_REASON["UNKNOWN_TASK"]
+        dependencies = task.get("depends_on") or []
+        if len(dependencies) > _MAX_DEPENDENCY_EDGES - dependency_edges:
+            return DEPENDENCY_REASON["WORK_UNBOUNDED"]
+        if not all(
+            _is_bounded_text(
+                dependency_id,
+                _MAX_TASK_ID_UTF8_BYTES,
+            )
+            for dependency_id in dependencies
+        ):
+            return DEPENDENCY_REASON["UNKNOWN_TASK"]
+        dependency_edges += len(dependencies)
+        if task["id"] in task_ids:
+            return DEPENDENCY_REASON["UNKNOWN_TASK"]
+        task_ids.add(task["id"])
+    return None
 
 
-def evaluate_dependencies(*, tasks, task_id):
-    """@param tasks  [{id, status, depends_on?}]
-    @param task_id
-    @returns {decision, reason_codes, unmet}
-    """
-    if not _has_valid_task_entries(tasks):
-        return {
-            "decision": DEPENDENCY_DECISION["BLOCKED"],
-            "reason_codes": [DEPENDENCY_REASON["UNKNOWN_TASK"]],
-            "unmet": [],
-        }
-    by_id = {t["id"]: t for t in tasks}
-    task = by_id.get(task_id)
-    if task is None:
-        return {"decision": DEPENDENCY_DECISION["BLOCKED"], "reason_codes": [DEPENDENCY_REASON["UNKNOWN_TASK"]], "unmet": []}
-
-    depends_on = task.get("depends_on") or []
-
-    def _unmet(dep_id):
-        dep = by_id.get(dep_id)
-        return dep is None or dep.get("status") != "done"
-
-    unmet = [dep_id for dep_id in depends_on if _unmet(dep_id)]
-
-    if len(unmet) > 0:
-        return {
-            "decision": DEPENDENCY_DECISION["BLOCKED"],
-            "reason_codes": [DEPENDENCY_REASON["DEPENDENCY_NOT_SATISFIED"]],
-            "unmet": unmet,
-        }
-    return {"decision": DEPENDENCY_DECISION["READY"], "reason_codes": [], "unmet": []}
+def _has_valid_task_entries(tasks):
+    return _task_graph_reason(tasks) is None
 
 
-def detect_dependency_cycle(*, tasks):
-    """Detect a dependency cycle across the whole task list, so a cycle can
-    be refused before it silently deadlocks every task inside it. Pure DFS,
-    no mutation of the input.
-
-    Iterative (explicit-stack), not recursive: mirrors the Node reference's
-    #68/#63 fix, where a deep-but-acyclic chain used to spend one JS
-    call-stack frame per dependency hop and overflow at roughly
-    7,000-10,000 hops instead of returning the documented
-    {has_cycle, cycle} shape. `frames` carries one entry per node on the
-    current root-to-node path, each resuming its own depends_on iteration
-    exactly where it left off (`frame["i"]`); `path` mirrors the Node
-    reference's `stack` (used only for cycle extraction). Same white/gray/
-    black coloring, same depends_on traversal order, same cycle array shape
-    (`path[cycle_start:] + [dep_id]`) as the Node reference - preserved
-    exactly per the ticket's #68 bounded-algorithm pin.
-
-    @param tasks  [{id, depends_on?}]
-    @returns {has_cycle, cycle}
-    """
-    if not _has_valid_task_entries(tasks):
-        raise ValueError("task dependency graph contains an invalid task entry")
-    by_id = {t["id"]: t for t in tasks}
+def _detect_dependency_cycle(tasks, by_id):
+    """Return the first DFS-ordered cycle, or an empty list when acyclic."""
     white, gray, black = 0, 1, 2
-    color = {t["id"]: white for t in tasks}
+    color = {task["id"]: white for task in tasks}
 
     for start_task in tasks:
-        if color[start_task["id"]] != white:
+        start_id = start_task["id"]
+        if color[start_id] != white:
             continue
 
         path = []
-        frames = [{"id": start_task["id"], "i": 0}]
-        color[start_task["id"]] = gray
-        path.append(start_task["id"])
+        path_positions = {}
+        frames = [{"id": start_id, "index": 0}]
+        color[start_id] = gray
+        path_positions[start_id] = 0
+        path.append(start_id)
 
-        while len(frames) > 0:
+        while frames:
             frame = frames[-1]
-            deps = (by_id.get(frame["id"]) or {}).get("depends_on") or []
-
-            if frame["i"] >= len(deps):
-                # Equivalent to the recursive version's post-loop stack.pop()
-                # + color BLACK + return null: this node and every
-                # descendant is fully explored with no cycle found through
-                # it.
+            dependencies = by_id[frame["id"]].get("depends_on") or []
+            if frame["index"] >= len(dependencies):
+                completed_id = frame["id"]
                 path.pop()
-                color[frame["id"]] = black
+                path_positions.pop(completed_id)
+                color[completed_id] = black
                 frames.pop()
                 continue
 
-            dep_id = deps[frame["i"]]
-            frame["i"] += 1
-            if dep_id not in by_id:
+            dependency_id = dependencies[frame["index"]]
+            frame["index"] += 1
+            if dependency_id not in by_id:
                 continue
 
-            dep_color = color.get(dep_id)
-            if dep_color == gray:
-                cycle_start = path.index(dep_id)
-                return {"has_cycle": True, "cycle": path[cycle_start:] + [dep_id]}
-            if dep_color == white:
-                # Equivalent to the recursive version's immediate
-                # `visit(depId)` call: push a new frame so the next loop
-                # iteration dives into it depth-first, before resuming this
-                # frame's remaining deps.
-                color[dep_id] = gray
-                path.append(dep_id)
-                frames.append({"id": dep_id, "i": 0})
+            dependency_color = color[dependency_id]
+            if dependency_color == gray:
+                return path[path_positions[dependency_id] :] + [dependency_id]
+            if dependency_color == white:
+                color[dependency_id] = gray
+                path_positions[dependency_id] = len(path)
+                path.append(dependency_id)
+                frames.append({"id": dependency_id, "index": 0})
 
-    return {"has_cycle": False, "cycle": []}
+    return []
+
+
+def _dependency_result(decision, reason_codes, unmet=None, cycle=None):
+    return {
+        "decision": decision,
+        "reason_codes": reason_codes,
+        "unmet": [] if unmet is None else unmet,
+        "cycle": [] if cycle is None else cycle,
+    }
+
+
+def evaluate_dependencies(tasks, task_id):
+    """Return a deterministic dependency decision for one task.
+
+    Result shape is always ``{decision, reason_codes, unmet, cycle}``.  A
+    cycle anywhere in a valid caller graph is typed evidence of a blocked
+    graph rather than an adapter-level policy decision.
+    """
+    graph_reason = _task_graph_reason(tasks)
+    if graph_reason is not None:
+        return _dependency_result(
+            DEPENDENCY_DECISION["BLOCKED"],
+            [graph_reason],
+        )
+    if not _is_bounded_text(task_id, _MAX_TASK_ID_UTF8_BYTES):
+        return _dependency_result(
+            DEPENDENCY_DECISION["BLOCKED"],
+            [DEPENDENCY_REASON["UNKNOWN_TASK"]],
+        )
+
+    by_id = {task["id"]: task for task in tasks}
+    task = by_id.get(task_id)
+    if task is None:
+        return _dependency_result(
+            DEPENDENCY_DECISION["BLOCKED"],
+            [DEPENDENCY_REASON["UNKNOWN_TASK"]],
+        )
+
+    cycle = _detect_dependency_cycle(tasks, by_id)
+    if cycle:
+        return _dependency_result(
+            DEPENDENCY_DECISION["BLOCKED"],
+            [DEPENDENCY_REASON["DEPENDENCY_CYCLE"]],
+            cycle=cycle,
+        )
+
+    unmet = [
+        dependency_id
+        for dependency_id in task.get("depends_on") or []
+        if dependency_id not in by_id or by_id[dependency_id].get("status") != "done"
+    ]
+    if unmet:
+        return _dependency_result(
+            DEPENDENCY_DECISION["BLOCKED"],
+            [DEPENDENCY_REASON["DEPENDENCY_NOT_SATISFIED"]],
+            unmet=unmet,
+        )
+    return _dependency_result(DEPENDENCY_DECISION["READY"], [])

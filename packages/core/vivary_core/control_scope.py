@@ -30,11 +30,15 @@ second lexical identity.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from vivary_core.canonical import _JS_TRIM_CHARS, utf16_sort_key
 
 
 _DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
+
+def _fold_windows(value):
+    return unicodedata.normalize("NFC", value.casefold())
 
 
 def _collapse_segments(segments):
@@ -53,12 +57,18 @@ def _collapse_segments(segments):
 def _normalize_scope_path(path):
     raw_path = str(path).strip(_JS_TRIM_CHARS).replace("\\", "/")
     if _DRIVE_PREFIX.match(raw_path):
-        drive = raw_path[:2].casefold()
+        drive = _fold_windows(raw_path[:2])
         remainder = raw_path[2:]
         if remainder.startswith("/"):
-            segments = [segment.casefold() for segment in _collapse_segments(remainder.split("/"))]
+            segments = [
+                _fold_windows(segment)
+                for segment in _collapse_segments(remainder.split("/"))
+            ]
             return drive + ("/" + "/".join(segments) if segments else "/")
-        return drive + "/".join(segment.casefold() for segment in _collapse_segments(remainder.split("/")))
+        return drive + "/".join(
+            _fold_windows(segment)
+            for segment in _collapse_segments(remainder.split("/"))
+        )
 
     if raw_path.startswith("//"):
         unc_parts = [segment for segment in raw_path.split("/") if segment]
@@ -67,11 +77,17 @@ def _normalize_scope_path(path):
             if _DRIVE_PREFIX.match(device_parts[0]):
                 device_path = "/".join(device_parts)
                 return _normalize_scope_path(device_path + "/" if len(device_path) == 2 else device_path)
-            if device_parts[0].casefold() == "unc" and len(device_parts) >= 3:
+            if _fold_windows(device_parts[0]) == "unc" and len(device_parts) >= 3:
                 return _normalize_scope_path("//" + "/".join(device_parts[1:]))
         if len(unc_parts) >= 2:
-            anchor = [unc_parts[0].casefold(), unc_parts[1].casefold()]
-            segments = [segment.casefold() for segment in _collapse_segments(unc_parts[2:])]
+            anchor = [
+                _fold_windows(unc_parts[0]),
+                _fold_windows(unc_parts[1]),
+            ]
+            segments = [
+                _fold_windows(segment)
+                for segment in _collapse_segments(unc_parts[2:])
+            ]
             return "//" + "/".join([*anchor, *segments])
 
     if raw_path.startswith("/"):
@@ -127,21 +143,90 @@ def normalize_scope(scope):
     return {"project": project if project is not None else "", "paths": paths}
 
 
-def scopes_overlap(a, b):
-    """True when two scopes could collide: same project, and at least one
-    path in either scope equals or nests inside a path in the other. Scopes
-    in different projects never overlap - project isolation is absolute.
+def _scope_path_key(path):
+    kind, anchor, segments = _scope_path_parts(path)
+    return kind, anchor, segments
 
-    @param a {project, paths}
-    @param b {project, paths}
-    """
+def _scope_path_entries(scopes):
+    entries = []
+    for scope_index, scope in enumerate(scopes):
+        normalized = normalize_scope(scope)
+        for path in normalized["paths"]:
+            path_key = _scope_path_key(path)
+            entries.append(
+                (
+                    len(path_key[2]),
+                    normalized["project"],
+                    path_key,
+                    scope_index,
+                )
+            )
+    entries.sort(key=lambda entry: entry[0])
+    return entries
+
+
+def _scope_conflict_indices(scopes, target_index):
+    """Return scopes overlapping one target in total path-depth work."""
+    owners_by_path = {}
+    conflicts = set()
+    for _, project, path_key, scope_index in _scope_path_entries(scopes):
+        kind, anchor, segments = path_key
+        for prefix_length in range(len(segments) + 1):
+            owners = owners_by_path.get(
+                (project, kind, anchor, segments[:prefix_length])
+            )
+            if owners is None:
+                continue
+            if scope_index == target_index:
+                conflicts.update(
+                    owner for owner in owners if owner != target_index
+                )
+            elif target_index in owners:
+                conflicts.add(scope_index)
+        owners_by_path.setdefault(
+            (project, kind, anchor, segments),
+            set(),
+        ).add(scope_index)
+    return conflicts
+
+
+def _path_key_has_prefix(path_key, candidates):
+    kind, anchor, segments = path_key
+    return any(
+        (kind, anchor, segments[:prefix_length]) in candidates
+        for prefix_length in range(len(segments) + 1)
+    )
+
+
+def scopes_overlap(a, b):
+    """Return whether two normalized project scopes contain intersecting paths."""
     scope_a = normalize_scope(a)
     scope_b = normalize_scope(b)
     if scope_a["project"] != scope_b["project"]:
         return False
 
-    for path_a in scope_a["paths"]:
-        for path_b in scope_b["paths"]:
-            if _path_contains(path_a, path_b) or _path_contains(path_b, path_a):
-                return True
-    return False
+    paths_a = {_scope_path_key(path) for path in scope_a["paths"]}
+    paths_b = {_scope_path_key(path) for path in scope_b["paths"]}
+    return any(_path_key_has_prefix(path, paths_a) for path in paths_b) or any(
+        _path_key_has_prefix(path, paths_b) for path in paths_a
+    )
+
+
+def _scopes_are_pairwise_disjoint(scopes):
+    """Check cross-scope overlap in total path-depth work, not a Cartesian join."""
+    owners_by_path = {}
+    for _, project, path_key, scope_index in _scope_path_entries(scopes):
+        kind, anchor, segments = path_key
+        for prefix_length in range(len(segments) + 1):
+            owners = owners_by_path.get(
+                (project, kind, anchor, segments[:prefix_length])
+            )
+            if owners is not None and any(
+                owner != scope_index for owner in owners
+            ):
+                return False
+        owners_by_path.setdefault(
+            (project, kind, anchor, segments),
+            set(),
+        ).add(scope_index)
+    return True

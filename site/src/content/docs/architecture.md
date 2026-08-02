@@ -87,8 +87,8 @@ unpublished `vivary-strato` source package during development.
   fused)*
 - **ozone** — the protective filter. Review for code *and* prose; a specialized
   verify/gate step. *(optional)*
-- **exo** — the outermost layer. Coordination when one agent becomes many.
-  *(optional)*
+- **exo** — the outermost layer. Coordination and a bounded governed-control adapter
+  when one agent becomes many. *(optional)*
 
 Baseline = **tropo + strato** (knowledge + the self-improving loop over it).
 `ozone` and `exo` snap on as needed.
@@ -132,6 +132,11 @@ What it owns:
   workspace fingerprint it ran against, in an append-only store. Core rejects receipt
   checks that have no exact name-and-command authority in the capsule, including for
   direct Core and Strato callers.
+- **Control lifecycle** — Core owns exact actor and authority validation, claim and
+  lease decisions, dependency-cycle decisions, record-only handoffs, exact execution
+  evidence derivation, replay-safe append projections, and task-integrity views. The
+  [Core control contract](https://github.com/vivary-dev/vivary/blob/dev/packages/core/README.md#governed-exo-control) owns the
+  lifecycle details.
 - **Role-policy surfaces** — reference implementations of the governed loop inside
   `vivary-core`, exposed incrementally through explicit experimental role adapters:
   - **Strato (`policy_*`)** evaluates budgets, capsule and receipt gates, and the
@@ -153,36 +158,34 @@ What it owns:
     bound to both the named commit tree and the graph's effective ignore-policy
     fingerprint for Core reconstruction. Its raw fingerprinted gate verdict passes to
     Strato unchanged.
-  - **Exo (`control_*`)** governs claims and leases, handoffs, dependencies,
-    execution evidence, and task views over caller-owned state. Equivalent
-    Win32 drive, UNC, and device-namespace spellings share one scope identity.
+  - **Exo (`control_*`)** exposes Core's
+    [control lifecycle](https://github.com/vivary-dev/vivary/blob/dev/packages/core/README.md#governed-exo-control) through one
+    bounded request/response adapter. The caller owns and persists every state value.
+    [The command reference](https://github.com/vivary-dev/vivary/blob/dev/docs/COMMANDS.md#governed-control-development-source) owns the
+    transport envelope.
   - **Bellamente (`recall_*`)** applies the
     [SPEC-owned candidate-recall firewall](https://github.com/vivary-dev/vivary/blob/dev/docs/bellamente-memory/SPEC-bellamente-memory.md#6-candidaterecallprovider-contract).
     SPEC §6 owns its normalized inputs, decisions, reason codes, and truth/mutation
     rules; the package evaluates candidates but never mutates authored truth.
 
+The governed Exo adapter adds no scheduler, state store, agent runner, network or
+provider call, MCP server, repair write, or publishing path. It makes no Agent Relay
+compatibility or byte-parity claim.
 The governing rule is the same one the rest of Vivary follows: it never resolves an
 ambiguity it merely observed. Conflicts are handed to review, not to confidence, and
 anything unproven is reported `unknown` rather than guessed.
 
 **Selected dependency direction:** a shipping package that imports `vivary-core`
-declares its own floor in the same commit; the `vivary` meta package receives core
-transitively and does not declare it. One owner per edge avoids version-pinning fights.
-`vivary-tropo` is the first importer: its experimental `find --governed` adapter depends
-on `vivary-core>=0.2.1`, the first source version that exposes the adapter's required
-API. `vivary-strato` is the second: its experimental `decide --governed` facade requires
-`vivary-core>=0.2.4`, which includes exact policy-artifact schemas and semantic capsule
-validation. `vivary-ozone` is the third: `verify --governed` requires the same 0.2.4
-boundary, including the shared artifact field sets, public UTF-16 ordering key, and
-bounded compiler contract. Remaining role packages add their own floors only when their
-first real imports land — never ahead of the code that needs them.
+declares its own floor in the same commit. The `vivary` meta package receives Core
+transitively and declares the Exo floor instead. One owner per edge avoids
+version-pinning fights. Tropo, Strato, and Ozone keep their declared floors. Exo
+declares its Core floor in [its package manifest](https://github.com/vivary-dev/vivary/blob/dev/packages/exo/pyproject.toml), and
+the meta package declares Exo's floor in [its manifest](https://github.com/vivary-dev/vivary/blob/dev/packages/vivary/pyproject.toml).
 
-**Status:** merged Tropo/core, Strato/core, and Ozone/core integrations are on `dev`.
-All are unpublished at their development versions and reachable only through explicit
-experimental `--governed` flags. Plain Tropo retrieval and Ozone review/impact remain
-unchanged. The remaining package/role integration is tracked in
-[#207](https://github.com/vivary-dev/vivary/issues/207); publication waits for the final
-comprehensive release train and its separate human gate.
+**Status:** Tropo, Strato, Ozone, and Exo Core adapters are present in the development
+source and remain unpublished behind explicit `--governed` flags. Plain Tropo retrieval,
+Ozone review and impact, and legacy Exo graph coordination remain unchanged. Current
+versions and publication status live in [the root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status).
 
 ## 4. The moat
 
