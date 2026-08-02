@@ -164,6 +164,8 @@ provider firewall, transition projector, and their pinned constants.
   10,000 values, and each UTF-8 string at 1 MiB. Aggregate caps are 16 MiB of UTF-8
   data and 100,000 values. Provider and classification failures remain visible as
   `provider_degraded`.
+- Integer inputs must stay within JavaScript's lossless canonical range before they can
+  participate in deterministic assertion or proposal identity.
 - `preserve` is read-only and ungated. `create` applies only to a novel accepted
   candidate. `supersede` applies only to an explicit correction of a named assertion.
 - A permitted write first returns a deterministic proposal. Core applies it only with
@@ -172,6 +174,9 @@ provider firewall, transition projector, and their pinned constants.
 - The caller owns and persists the assertion ledger. Core appends superseding records
   and references without rewriting history. Exact replay adds nothing. Identity or
   approval-provenance conflicts refuse without changing the ledger.
+- Core validates the full append-only ledger, including freshness. It then classifies
+  against only assertions relevant to the candidate or its named correction target.
+  Unrelated stale history remains preserved without blocking new transitions.
 - Ledgers and projections cap at 10,000 assertions. Invalid or over-budget state
   refuses atomically.
 
@@ -208,8 +213,8 @@ pip install pytest
 python -m pytest packages/core/tests/ -q
 ```
 
-The current platform-specific proof is **766 tests on Windows**. On Linux, it is
-**765 passed plus 1 skip**. The suite translates the reference contracts across
+The current platform-specific proof is **771 tests on Windows**. On Linux, it is
+**770 passed plus 1 skip**. The suite translates the reference contracts across
 observation, capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces,
 corruption handling, real-git evidence-store round trips, and byte-exact cross-runtime
 fixtures.

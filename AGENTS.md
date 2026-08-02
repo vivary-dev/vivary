@@ -111,7 +111,7 @@ python packages/tropo/tests/test_tropo.py                  # 170/170
 python packages/ozone/tests/test_ozone.py                  # 110/110
 python packages/exo/tests/test_exo.py                      # 29/29
 python packages/create-vivary/tests/test_create_vivary.py  # 143 run, 1 skipped
-python -m pytest packages/core/tests/ -q                   # 766 Windows; 765 + 1 skip Linux
+python -m pytest packages/core/tests/ -q                   # 771 Windows; 770 + 1 skip Linux
 python -m pytest packages/strato/tests/ -q                 # 48/48
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # clean
 ```

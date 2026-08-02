@@ -8,10 +8,12 @@ approval before creating or superseding a learned assertion.
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from vivary_core.canonical import canonicalize, deterministic_id
 from vivary_core.recall_classify import (
+    _INVALID_FRESHNESS,
+    _assertion_freshness,
     _copy_recall_value,
     _has_fingerprinted_evidence,
     _is_normalized_assertion,
@@ -184,6 +186,7 @@ def _validated_ledger(graph: Any, assertions: Any):
             and _nonempty_string(assertion.get("id"))
             and _is_normalized_assertion(assertion, candidate=False)
             and _has_fingerprinted_evidence(assertion)
+            and _assertion_freshness(assertion) != _INVALID_FRESHNESS
             and assertion.get("subject", {}).get("node_id") in known_node_ids
         ):
             return None, RECALL_TRANSITION_REASON["UNKNOWN_LEDGER"]
@@ -198,6 +201,36 @@ def _validated_ledger(graph: Any, assertions: Any):
     ):
         return None, RECALL_TRANSITION_REASON["UNKNOWN_LEDGER"]
     return assertions_by_id, None
+
+
+def _classification_neighbors(candidate: Any, assertions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Select only history that can affect this candidate's classification."""
+    if type(candidate) is not dict or not _preflight_recall_values(candidate):
+        return []
+
+    subject = candidate.get("subject")
+    scope = candidate.get("scope")
+    candidate_node_id = subject.get("node_id") if type(subject) is dict else None
+    candidate_project = scope.get("project") if type(scope) is dict else None
+    candidate_visibility = scope.get("visibility") if type(scope) is dict else None
+    candidate_predicate = candidate.get("predicate")
+    target_assertion_id = candidate.get("target_assertion_id")
+
+    selected = []
+    for assertion in assertions:
+        if assertion["id"] == target_assertion_id:
+            selected.append(assertion)
+            continue
+        assertion_subject = assertion["subject"]
+        assertion_scope = assertion["scope"]
+        if (
+            assertion_subject.get("node_id") == candidate_node_id
+            and assertion.get("predicate") == candidate_predicate
+            and assertion_scope.get("project") == candidate_project
+            and assertion_scope.get("visibility") == candidate_visibility
+        ):
+            selected.append(assertion)
+    return selected
 
 
 def _result(
@@ -260,7 +293,7 @@ def project_recall_transition(
     evaluation = classify_candidate(
         graph=graph,
         candidate=candidate,
-        neighbors=assertions,
+        neighbors=_classification_neighbors(candidate, assertions),
     )
 
     if operation == RECALL_OPERATION["PRESERVE"]:
