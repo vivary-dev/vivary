@@ -36,6 +36,11 @@ versions remain unchanged.
 - Bounded the candidate graph, candidate, provider neighbors, and assertion ledger
   before classification or projection. Cycles, unknown neighbor node IDs, malformed
   values, and over-budget inputs degrade or refuse without mutation.
+- Validated the complete append-only ledger, including freshness, while restricting
+  semantic classification to assertions relevant to the candidate or its named
+  correction target. Unrelated stale history no longer blocks new governed transitions.
+- Rejected integers outside JavaScript's lossless canonical range before deterministic
+  assertion or proposal identity is computed.
 - Preserved authored and learned assertion history. Exact transition replay is
   idempotent. Assertion identity or approval-provenance conflicts refuse atomically.
 - Kept providers, stores, network calls, workspace policy, and memory activation out of
@@ -43,9 +48,9 @@ versions remain unchanged.
 
 ### Verification
 
-- `python -m pytest packages/core/tests/test_recall.py -q` — **88 passed** on Windows.
-- `python -m pytest packages/core/tests/ -q` — **766 passed** on Windows;
-  **765 passed, 1 skipped** under WSL Linux.
+- `python -m pytest packages/core/tests/test_recall.py -q` — **93 passed** on Windows.
+- `python -m pytest packages/core/tests/ -q` — **771 passed** on Windows;
+  **770 passed, 1 skipped** under WSL Linux.
 - Tropo **170/170**, Ozone **110/110**, Exo **29/29**, Strato **48/48**,
   create-vivary **143 run with 1 skipped**, and the meta CLI **9/9** passed on
   Windows. The canonical Tropo example vault reported four documents with no errors

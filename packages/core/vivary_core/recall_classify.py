@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
-from vivary_core.canonical import utf16_sort_key, canonicalize, fingerprint
+from vivary_core.canonical import MAX_LOSSLESS_INTEGER, utf16_sort_key, canonicalize, fingerprint
 from vivary_core.recall_outcomes import (
     ACCEPTED,
     ACTIVE_TRUTH_UNCHANGED,
@@ -101,7 +101,11 @@ def _preflight_recall_values(*values: Any) -> bool:
             if not charge_string(value):
                 return False
             continue
-        if value_type in (type(None), bool, int):
+        if value_type in (type(None), bool):
+            continue
+        if value_type is int:
+            if not -MAX_LOSSLESS_INTEGER <= value <= MAX_LOSSLESS_INTEGER:
+                return False
             continue
         if value_type is float:
             if not math.isfinite(value):

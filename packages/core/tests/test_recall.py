@@ -786,6 +786,14 @@ def test_freshness_precedence_is_deterministic_for_any_neighbor_order():
         pytest.param(
             lambda: (
                 graph(),
+                candidate({"value": {"normalized": 2**53}}),
+                [],
+            ),
+            id="lossy-integer",
+        ),
+        pytest.param(
+            lambda: (
+                graph(),
                 candidate({"payload": ["x" * 1_048_576] * 17}),
                 [],
             ),
@@ -1027,6 +1035,104 @@ def test_novel_recall_create_is_proposed_human_bound_applied_and_idempotent():
     assert different_approver["assertions"] == applied["assertions"]
     assert different_approver["added"] == []
     assert (current_graph, proposed_candidate) == original
+
+
+def test_transition_ignores_unrelated_stale_history_and_keeps_the_append_only_ledger():
+    stale_unrelated = neighbor(
+        {
+            "id": "assertion_stale_license",
+            "predicate": "license",
+            "value": {"normalized": "apache-2.0"},
+            "freshness": "stale",
+        }
+    )
+    proposed_candidate = candidate()
+
+    proposed = project_recall_transition(
+        graph=graph(),
+        candidate=proposed_candidate,
+        assertions=[stale_unrelated],
+        operation=RECALL_OPERATION["CREATE"],
+    )
+
+    assert proposed["decision"] == RECALL_TRANSITION_DECISION["PROPOSED"]
+    assert_result(proposed["evaluation"], ACCEPTED, [])
+    assert proposed["assertions"] == [stale_unrelated]
+
+    applied = project_recall_transition(
+        graph=graph(),
+        candidate=proposed_candidate,
+        assertions=[stale_unrelated],
+        operation=RECALL_OPERATION["CREATE"],
+        approval=transition_approval(proposed["proposal"]),
+    )
+
+    assert applied["decision"] == RECALL_TRANSITION_DECISION["APPLIED"]
+    assert applied["assertions"][0] == stale_unrelated
+    assert len(applied["assertions"]) == 2
+
+
+def test_transition_rejects_invalid_freshness_in_unrelated_ledger_history():
+    malformed_unrelated = neighbor(
+        {
+            "id": "assertion_invalid_license",
+            "predicate": "license",
+            "value": {"normalized": "apache-2.0"},
+        }
+    )
+    malformed_unrelated["source"]["freshness"] = "bogus"
+
+    result = project_recall_transition(
+        graph=graph(),
+        candidate=candidate(),
+        assertions=[malformed_unrelated],
+        operation=RECALL_OPERATION["CREATE"],
+    )
+
+    assert result["decision"] == RECALL_TRANSITION_DECISION["REFUSED"]
+    assert result["reason_codes"] == [RECALL_TRANSITION_REASON["UNKNOWN_LEDGER"]]
+    assert result["evaluation"] is None
+    assert result["assertions"] == result["added"] == []
+
+
+def test_transition_rejects_lossy_integers_before_proposal_identity():
+    results = [
+        project_recall_transition(
+            graph=graph(),
+            candidate=candidate({"value": {"normalized": value}}),
+            assertions=[],
+            operation=RECALL_OPERATION["CREATE"],
+        )
+        for value in (2**53, 2**53 + 1)
+    ]
+
+    for result in results:
+        assert result["decision"] == RECALL_TRANSITION_DECISION["REFUSED"]
+        assert result["reason_codes"] == [RECALL_TRANSITION_REASON["NOT_PERMITTED"]]
+        assert_result(result["evaluation"], REJECTED, [REASON_PROVIDER_DEGRADED])
+        assert result["proposal"] is None
+        assert result["assertions"] == result["added"] == []
+
+
+def test_transition_preflights_candidate_before_filtering_history():
+    class HostileEquality:
+        def __eq__(self, other):
+            raise AssertionError("malformed candidate equality must not run")
+
+    malformed = candidate({"predicate": HostileEquality()})
+    result = project_recall_transition(
+        graph=graph(),
+        candidate=malformed,
+        assertions=[neighbor()],
+        operation=RECALL_OPERATION["CREATE"],
+    )
+
+    assert result["decision"] == RECALL_TRANSITION_DECISION["REFUSED"]
+    assert result["reason_codes"] == [RECALL_TRANSITION_REASON["NOT_PERMITTED"]]
+    assert_result(result["evaluation"], REJECTED, [REASON_PROVIDER_DEGRADED])
+    assert result["assertions"] == [neighbor()]
+    assert result["added"] == []
+    assert result["proposal"] is None
 
 
 def test_exact_duplicate_preserve_is_read_only_ungated_and_detached():
