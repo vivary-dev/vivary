@@ -107,13 +107,16 @@ approved source files. If provider state and source files disagree, source files
 - **AgentLTM** — an independent agent long-term-memory store, not a Tropo projection
   or semantic-adapter dataset. Bellamente is discussed only in the separate
   [AgentLTM documentation](https://github.com/vivary-dev/vivary/tree/dev/docs/bellamente-memory).
-- **CandidateRecallProvider** — the provider-neutral, optional source of normalized
-  prior assertions proposed for the `vivary-core` candidate-recall firewall in
-  [#205](https://github.com/vivary-dev/vivary/issues/205). It is not a shipped
-  protocol or a synonym for SemanticMemoryAdapter. Before `vivary-core` evaluates a
+- **CandidateRecallProvider** — a provider-neutral, optional source of normalized
+  prior assertions for the `vivary-core` candidate-recall firewall in
+  [#205](https://github.com/vivary-dev/vivary/issues/205). It is not a provider wire
+  protocol or a synonym for SemanticMemoryAdapter. Before Core evaluates a
   Bellamente candidate, normalization must supply typed evidence and either a known
   stable Tropo node ID or the explicit unresolved-identity marker defined by the
-  Bellamente contract. Learned memory never silently promotes to authored truth.
+  [Bellamente contract](https://github.com/vivary-dev/vivary/blob/dev/docs/bellamente-memory/SPEC-bellamente-memory.md#6-candidaterecallprovider-contract).
+  The unreleased `vivary_core.recall` surface then classifies the candidate and can
+  project a caller-persisted transition. Learned memory never silently becomes
+  authored truth.
 
 ## Minimal interface
 

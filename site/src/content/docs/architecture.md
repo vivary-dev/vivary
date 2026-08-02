@@ -165,8 +165,10 @@ What it owns:
     transport envelope.
   - **Bellamente (`recall_*`)** applies the
     [SPEC-owned candidate-recall firewall](https://github.com/vivary-dev/vivary/blob/dev/docs/bellamente-memory/SPEC-bellamente-memory.md#6-candidaterecallprovider-contract).
-    SPEC §6 owns its normalized inputs, decisions, reason codes, and truth/mutation
-    rules; the package evaluates candidates but never mutates authored truth.
+    The public Core seam classifies bounded normalized candidates and projects
+    caller-owned `preserve`, `create`, or `supersede` transitions. Create and
+    supersede require an exact proposal-bound human approval. Applied records append
+    learned assertions and never rewrite authored truth.
 
 The governed Exo adapter adds no scheduler, state store, agent runner, network or
 provider call, MCP server, repair write, or publishing path. It makes no Agent Relay

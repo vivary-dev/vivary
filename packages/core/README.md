@@ -113,9 +113,9 @@ The governed-context shared seam Vivary role packages use:
   Claims, leases, dependency cycles, handoffs, execution evidence, and task views use
   typed projections that do not mutate the supplied ledger or log. See
   [Governed Exo control](#governed-exo-control).
-- **`recall_*`** (Bellamente) — an evaluation-only candidate-recall firewall.
-  [SPEC §6.2](https://github.com/vivary-dev/vivary/blob/dev/docs/bellamente-memory/SPEC-bellamente-memory.md#62-required-distinct-results)
-  owns its decisions, conditions, and truth/mutation rules; it never rewrites
+- **`recall_*`** (Bellamente) — bounded candidate classification and caller-owned
+  recall transitions. [SPEC §6.2](https://github.com/vivary-dev/vivary/blob/dev/docs/bellamente-memory/SPEC-bellamente-memory.md#62-required-distinct-results)
+  owns the decisions, conditions, and truth/mutation rules. Core never rewrites
   authored truth.
 
 ## Governed Exo control
@@ -152,6 +152,33 @@ adapts this surface. It does not define a second lifecycle model.
 The [Exo command reference](../../docs/COMMANDS.md#governed-control-development-source)
 owns the request-file envelope and CLI exit behavior.
 
+## Governed recall firewall
+
+`vivary_core.recall` is the public Core surface. It exports the bounded classifier,
+provider firewall, transition projector, and their pinned constants.
+
+- Classification requires normalized fingerprinted evidence. Resolved candidates and
+  recalled assertions must reference known graph node IDs. Unresolved identity remains
+  explicit and review-required.
+- Preflight is iterative and cycle-safe. It caps depth at 64, each collection at
+  10,000 values, and each UTF-8 string at 1 MiB. Aggregate caps are 16 MiB of UTF-8
+  data and 100,000 values. Provider and classification failures remain visible as
+  `provider_degraded`.
+- `preserve` is read-only and ungated. `create` applies only to a novel accepted
+  candidate. `supersede` applies only to an explicit correction of a named assertion.
+- A permitted write first returns a deterministic proposal. Core applies it only with
+  an exact proposal-bound human approval. Applied records use learned authority and
+  retain the proposal, operation, and approving actor as transition provenance.
+- The caller owns and persists the assertion ledger. Core appends superseding records
+  and references without rewriting history. Exact replay adds nothing. Identity or
+  approval-provenance conflicts refuse without changing the ledger.
+- Ledgers and projections cap at 10,000 assertions. Invalid or over-budget state
+  refuses atomically.
+
+Core adds no provider, network call, store, workspace policy, or clock. Bellamente
+remains independently installable and disabled by default.
+
+
 Zero runtime dependencies. Python 3.11+.
 
 This package is unpublished development source. [The root release status](../../README.md#release-status)
@@ -181,8 +208,8 @@ pip install pytest
 python -m pytest packages/core/tests/ -q
 ```
 
-The current platform-specific proof is **739 tests on Windows**. On Linux, it is
-**738 passed plus 1 skip**. The suite translates the reference contracts across
+The current platform-specific proof is **766 tests on Windows**. On Linux, it is
+**765 passed plus 1 skip**. The suite translates the reference contracts across
 observation, capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces,
 corruption handling, real-git evidence-store round trips, and byte-exact cross-runtime
 fixtures.

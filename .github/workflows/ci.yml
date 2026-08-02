@@ -83,7 +83,7 @@ jobs:
           assert result["schema"] == "vivary.exo-control-result/v0"
           assert result["operation"] == "dependencies"
           assert result["result"]["decision"] == "ready"
-          assert version("vivary-core") == "0.2.5"
+          assert version("vivary-core") == "0.2.6"
           assert version("vivary-exo") == "0.3.0"
           assert version("vivary") == "0.1.4"
           assert "vivary-core>=0.2.5" in requires("vivary-exo")

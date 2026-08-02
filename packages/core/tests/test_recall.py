@@ -41,6 +41,13 @@ from vivary_core.recall_outcomes import (  # noqa: E402
     STATUS_EVALUATED,
     STATUS_PROVIDER_DEGRADED,
 )
+from vivary_core.recall import (  # noqa: E402
+    RECALL_OPERATION,
+    RECALL_TRANSITION_DECISION,
+    RECALL_TRANSITION_REASON,
+    RECALL_TRANSITION_SCHEMA,
+    project_recall_transition,
+)
 
 KNOWN_NODE = {
     "id": "repository_aaaa",
@@ -328,6 +335,34 @@ def test_unknown_or_ambiguous_identity_is_review_required_without_entering_compa
     assert result["subject"] == {"node_id": "repository_missing", "resolved": False}
 
 
+def test_duplicate_recalled_assertion_ids_degrade_independent_of_provider_order():
+    correction = candidate({"target_assertion_id": "assertion_target"})
+    matching = neighbor({"id": "assertion_target"})
+    mismatched = neighbor(
+        {"id": "assertion_target", "predicate": "different_predicate"}
+    )
+
+    for current_neighbors in ([matching, mismatched], [mismatched, matching]):
+        direct = classify_candidate(
+            graph=graph(),
+            candidate=correction,
+            neighbors=current_neighbors,
+        )
+        through_firewall = evaluate_candidate(
+            graph=graph(),
+            candidate=correction,
+            provider={"recall": lambda **_: current_neighbors},
+        )
+
+        assert_result(direct, REJECTED, [REASON_PROVIDER_DEGRADED])
+        assert through_firewall["status"] == STATUS_PROVIDER_DEGRADED
+        assert_result(
+            through_firewall,
+            REJECTED,
+            [REASON_PROVIDER_DEGRADED],
+        )
+
+
 @pytest.mark.parametrize(
     "subject",
     [
@@ -441,10 +476,37 @@ def test_recalled_neighbors_cannot_carry_unresolved_identity_markers():
 
 def test_ambiguous_identity_status_is_review_required_not_a_resolved_subject():
     ambiguous = candidate({"subject": {"node_id": INFERRED_NODE["id"]}})
-    result = classify_candidate(graph=graph([INFERRED_NODE]), candidate=ambiguous, neighbors=[neighbor()])
+    result = classify_candidate(
+        graph=graph([KNOWN_NODE, INFERRED_NODE]),
+        candidate=ambiguous,
+        neighbors=[neighbor()],
+    )
 
     assert_result(result, REVIEW_REQUIRED, [REASON_IDENTITY_UNRESOLVED])
     assert result["subject"] == {"node_id": INFERRED_NODE["id"], "resolved": False}
+
+
+def test_duplicate_graph_node_ids_are_not_treated_as_stable_identity():
+    duplicate = {**KNOWN_NODE, "identity": "https://example.test/other.git"}
+    ambiguous_graph = graph([KNOWN_NODE, duplicate])
+
+    candidate_only = classify_candidate(
+        graph=ambiguous_graph,
+        candidate=candidate(),
+        neighbors=[],
+    )
+    with_recalled_assertion = classify_candidate(
+        graph=ambiguous_graph,
+        candidate=candidate(),
+        neighbors=[neighbor()],
+    )
+
+    assert_result(candidate_only, REVIEW_REQUIRED, [REASON_IDENTITY_UNRESOLVED])
+    assert_result(
+        with_recalled_assertion,
+        REJECTED,
+        [REASON_PROVIDER_DEGRADED],
+    )
 
 
 def test_incompatible_value_for_the_same_identity_is_review_required_and_preserves_both_sides():
@@ -582,9 +644,10 @@ def test_unknown_correction_target_is_a_fail_closed_review_subcase():
 
 
 def test_cross_subject_correction_target_is_a_fail_closed_review_subcase():
-    prior = neighbor({"id": "assertion_other", "subject": {"node_id": "repository_other"}})
+    other_node = {**KNOWN_NODE, "id": "repository_other", "identity": "https://github.com/vivary-dev/other.git"}
+    prior = neighbor({"id": "assertion_other", "subject": {"node_id": other_node["id"]}})
     result = classify_candidate(
-        graph=graph(),
+        graph=graph([KNOWN_NODE, other_node]),
         candidate=candidate({"target_assertion_id": prior["id"]}),
         neighbors=[prior],
     )
@@ -690,7 +753,160 @@ def test_freshness_precedence_is_deterministic_for_any_neighbor_order():
     assert reverse == forward
 
 
+# -- bounded hostile-input and result-ownership boundary ----------------------
+
+
+@pytest.mark.parametrize(
+    "prepared",
+    [
+        pytest.param(
+            lambda: (graph([KNOWN_NODE] * 10_001), candidate(), []),
+            id="graph-node-limit",
+        ),
+        pytest.param(
+            lambda: (graph(), candidate(), [neighbor()] * 10_001),
+            id="provider-neighbor-limit",
+        ),
+        pytest.param(
+            lambda: (graph(), candidate({"predicate": "x" * 1_048_577}), []),
+            id="utf8-string-limit",
+        ),
+        pytest.param(
+            lambda: (
+                graph(),
+                candidate({"payload": [[0] * 10_000 for _ in range(10)]}),
+                [],
+            ),
+            id="aggregate-value-limit",
+        ),
+        pytest.param(
+            lambda: (graph(), candidate({"payload": float("nan")}), []),
+            id="non-finite-json-number",
+        ),
+        pytest.param(
+            lambda: (
+                graph(),
+                candidate({"payload": ["x" * 1_048_576] * 17}),
+                [],
+            ),
+            id="aggregate-utf8-byte-limit",
+        ),
+    ],
+)
+def test_bounded_input_limits_degrade_at_direct_and_provider_boundaries(prepared):
+    current_graph, current_candidate, current_neighbors = prepared()
+
+    direct = classify_candidate(
+        graph=current_graph,
+        candidate=current_candidate,
+        neighbors=current_neighbors,
+    )
+    through_firewall = evaluate_candidate(
+        graph=current_graph,
+        candidate=current_candidate,
+        provider={"recall": lambda **_: current_neighbors},
+    )
+
+    assert_result(direct, REJECTED, [REASON_PROVIDER_DEGRADED])
+    assert through_firewall["status"] == STATUS_PROVIDER_DEGRADED
+    assert_result(through_firewall, REJECTED, [REASON_PROVIDER_DEGRADED])
+
+
+def test_cyclic_input_is_contained_before_a_provider_can_receive_it():
+    cyclic = candidate()
+    cyclic["value"]["normalized"] = cyclic
+    provider_calls = []
+
+    direct = classify_candidate(graph=graph(), candidate=cyclic, neighbors=[])
+    through_firewall = evaluate_candidate(
+        graph=graph(),
+        candidate=cyclic,
+        provider={"recall": lambda **_: provider_calls.append("called") or []},
+    )
+
+    assert_result(direct, REJECTED, [REASON_PROVIDER_DEGRADED])
+    assert through_firewall["status"] == STATUS_PROVIDER_DEGRADED
+    assert_result(through_firewall, REJECTED, [REASON_PROVIDER_DEGRADED])
+    assert provider_calls == []
+
+
+def test_excessive_json_depth_degrades_at_direct_and_provider_boundaries():
+    nested = []
+    cursor = nested
+    for _ in range(65):
+        child = []
+        cursor.append(child)
+        cursor = child
+    current_candidate = candidate({"payload": nested})
+
+    direct = classify_candidate(graph=graph(), candidate=current_candidate, neighbors=[])
+    through_firewall = evaluate_candidate(
+        graph=graph(),
+        candidate=current_candidate,
+        provider={"recall": lambda **_: []},
+    )
+
+    assert_result(direct, REJECTED, [REASON_PROVIDER_DEGRADED])
+    assert through_firewall["status"] == STATUS_PROVIDER_DEGRADED
+    assert_result(through_firewall, REJECTED, [REASON_PROVIDER_DEGRADED])
+
+
+def test_recalled_neighbor_must_resolve_to_a_known_graph_node_at_both_boundaries():
+    unknown_subject = neighbor({"subject": {"node_id": "repository_missing"}})
+
+    direct = classify_candidate(graph=graph(), candidate=candidate(), neighbors=[unknown_subject])
+    through_firewall = evaluate_candidate(
+        graph=graph(),
+        candidate=candidate(),
+        provider={"recall": lambda **_: [unknown_subject]},
+    )
+
+    assert_result(direct, REJECTED, [REASON_PROVIDER_DEGRADED])
+    assert through_firewall["status"] == STATUS_PROVIDER_DEGRADED
+    assert_result(through_firewall, REJECTED, [REASON_PROVIDER_DEGRADED])
+
+
+def test_classifier_result_values_are_detached_from_subject_evidence_and_proposal_inputs():
+    unresolved = candidate(
+        {
+            "subject": {"unresolved_identity": {"provider_ref": "bellamente:assertion-42"}},
+        }
+    )
+    unresolved_result = classify_candidate(graph=graph(), candidate=unresolved, neighbors=[])
+    unresolved_result["subject"]["unresolved_identity"]["provider_ref"] = "mutated"
+    unresolved_result["evidence"][0]["ref"] = "mutated.md"
+
+    prior = neighbor({"id": "assertion_authored", "authority": {"class": "authored"}})
+    proposed = candidate({"target_assertion_id": prior["id"]})
+    proposal_result = classify_candidate(graph=graph(), candidate=proposed, neighbors=[prior])
+    proposal_result["proposal"]["target_assertion_id"] = "mutated"
+
+    assert unresolved["subject"]["unresolved_identity"]["provider_ref"] == "bellamente:assertion-42"
+    assert unresolved["source"]["evidence"][0]["ref"] == "docs/note.md"
+    assert proposed["target_assertion_id"] == prior["id"] == "assertion_authored"
+
 # -- pure deterministic boundary ------------------------------------------------
+
+
+def test_provider_receives_detached_graph_and_candidate_values():
+    current_graph = graph()
+    current_candidate = candidate()
+    original = deepcopy((current_graph, current_candidate))
+
+    def mutating_provider(*, graph, candidate):
+        graph["nodes"].clear()
+        candidate["value"]["normalized"] = "mutated"
+        return []
+
+    result = evaluate_candidate(
+        graph=current_graph,
+        candidate=current_candidate,
+        provider={"recall": mutating_provider},
+    )
+
+    assert result["status"] == STATUS_EVALUATED
+    assert_result(result, ACCEPTED, [])
+    assert (current_graph, current_candidate) == original
 
 
 def test_classification_is_deterministic_and_leaves_caller_owned_inputs_unchanged():
@@ -717,3 +933,369 @@ def test_recall_modules_have_no_filesystem_process_network_or_embedding_io_surfa
 def test_public_classifier_and_firewall_are_callables():
     assert callable(classify_candidate)
     assert callable(evaluate_candidate)
+
+
+# -- caller-owned governed transitions ----------------------------------------
+
+
+def transition_approval(proposal, actor_id="jeff"):
+    return {
+        "proposal_id": proposal["proposal_id"],
+        "approved_by": {"kind": "human", "id": actor_id},
+    }
+
+
+def test_novel_recall_create_is_proposed_human_bound_applied_and_idempotent():
+    current_graph = graph()
+    proposed_candidate = candidate()
+    original = deepcopy((current_graph, proposed_candidate))
+
+    proposed = project_recall_transition(
+        graph=current_graph,
+        candidate=proposed_candidate,
+        assertions=[],
+        operation=RECALL_OPERATION["CREATE"],
+    )
+
+    assert proposed["schema"] == RECALL_TRANSITION_SCHEMA
+    assert proposed["decision"] == RECALL_TRANSITION_DECISION["PROPOSED"]
+    assert proposed["reason_codes"] == []
+    assert proposed["assertions"] == proposed["added"] == []
+    assert proposed["proposal"] == {
+        "proposal_id": proposed["proposal"]["proposal_id"],
+        "operation": "create",
+        "assertion_id": proposed["proposal"]["assertion_id"],
+        "target_assertion_id": None,
+        "requires_human_approval": True,
+    }
+
+    approval = transition_approval(proposed["proposal"])
+    applied = project_recall_transition(
+        graph=current_graph,
+        candidate=proposed_candidate,
+        assertions=[],
+        operation=RECALL_OPERATION["CREATE"],
+        approval=approval,
+    )
+
+    assert applied["decision"] == RECALL_TRANSITION_DECISION["APPLIED"]
+    assert len(applied["assertions"]) == len(applied["added"]) == 1
+    created = applied["added"][0]
+    assert created["id"] == proposed["proposal"]["assertion_id"]
+    assert created["authority"]["class"] == "learned"
+    assert "authorized" not in created["authority"]
+    assert created["transition_provenance"] == {
+        "proposal_id": proposed["proposal"]["proposal_id"],
+        "operation": "create",
+        "approved_by": {"kind": "human", "id": "jeff"},
+    }
+
+    replay = project_recall_transition(
+        graph=current_graph,
+        candidate=proposed_candidate,
+        assertions=applied["assertions"],
+        operation=RECALL_OPERATION["CREATE"],
+        approval=approval,
+    )
+    assert replay["decision"] == RECALL_TRANSITION_DECISION["APPLIED"]
+    assert replay["assertions"] == applied["assertions"]
+    assert replay["added"] == []
+    unapproved_replay = project_recall_transition(
+        graph=current_graph,
+        candidate=proposed_candidate,
+        assertions=applied["assertions"],
+        operation=RECALL_OPERATION["CREATE"],
+    )
+    assert unapproved_replay["decision"] == RECALL_TRANSITION_DECISION["REFUSED"]
+    assert unapproved_replay["reason_codes"] == [
+        RECALL_TRANSITION_REASON["NOT_PERMITTED"]
+    ]
+    assert unapproved_replay["assertions"] == applied["assertions"]
+    assert unapproved_replay["added"] == []
+
+    different_approver = project_recall_transition(
+        graph=current_graph,
+        candidate=proposed_candidate,
+        assertions=applied["assertions"],
+        operation=RECALL_OPERATION["CREATE"],
+        approval=transition_approval(proposed["proposal"], actor_id="other"),
+    )
+    assert different_approver["decision"] == RECALL_TRANSITION_DECISION["REFUSED"]
+    assert different_approver["reason_codes"] == [
+        RECALL_TRANSITION_REASON["ASSERTION_IDENTITY_CONFLICT"]
+    ]
+    assert different_approver["assertions"] == applied["assertions"]
+    assert different_approver["added"] == []
+    assert (current_graph, proposed_candidate) == original
+
+
+def test_exact_duplicate_preserve_is_read_only_ungated_and_detached():
+    proposed_candidate = candidate()
+    prior = neighbor({"source": deepcopy(proposed_candidate["source"])})
+    original = deepcopy((proposed_candidate, prior))
+
+    result = project_recall_transition(
+        graph=graph(),
+        candidate=proposed_candidate,
+        assertions=[prior],
+        operation=RECALL_OPERATION["PRESERVE"],
+    )
+
+    assert result["decision"] == RECALL_TRANSITION_DECISION["PRESERVED"]
+    assert result["reason_codes"] == []
+    assert_result(result["evaluation"], ACCEPTED, [REASON_EXACT_DUPLICATE])
+    assert result["assertions"] == [prior]
+    assert result["added"] == []
+    assert result["proposal"] is None
+    result["assertions"][0]["value"]["normalized"] = "mutated"
+    result["evaluation"]["evidence"][0]["ref"] = "mutated.md"
+    assert (proposed_candidate, prior) == original
+
+
+def test_explicit_correction_supersedes_by_append_and_preserves_both_records():
+    prior = neighbor(
+        {
+            "id": "assertion_authored",
+            "authority": {"class": "authored"},
+            "value": {"normalized": "ruby"},
+        }
+    )
+    correction = candidate({"target_assertion_id": prior["id"]})
+
+    proposed = project_recall_transition(
+        graph=graph(),
+        candidate=correction,
+        assertions=[prior],
+        operation=RECALL_OPERATION["SUPERSEDE"],
+    )
+    assert proposed["decision"] == RECALL_TRANSITION_DECISION["PROPOSED"]
+    assert_result(proposed["evaluation"], REVIEW_REQUIRED, [REASON_EXPLICIT_CORRECTION])
+    assert proposed["proposal"]["operation"] == "supersede"
+    assert proposed["proposal"]["target_assertion_id"] == prior["id"]
+
+    approval = transition_approval(proposed["proposal"])
+    applied = project_recall_transition(
+        graph=graph(),
+        candidate=correction,
+        assertions=[prior],
+        operation=RECALL_OPERATION["SUPERSEDE"],
+        approval=approval,
+    )
+
+    assert applied["decision"] == RECALL_TRANSITION_DECISION["APPLIED"]
+    assert applied["assertions"][0] == prior
+    assert len(applied["assertions"]) == 2
+    assert applied["added"][0]["supersedes_assertion_id"] == prior["id"]
+    assert applied["added"][0]["authority"]["class"] == "learned"
+    assert applied["superseded_assertion_ids"] == [prior["id"]]
+
+    replay = project_recall_transition(
+        graph=graph(),
+        candidate=correction,
+        assertions=applied["assertions"],
+        operation=RECALL_OPERATION["SUPERSEDE"],
+        approval=approval,
+    )
+    assert replay["decision"] == RECALL_TRANSITION_DECISION["APPLIED"]
+    assert replay["assertions"] == applied["assertions"]
+    assert replay["added"] == []
+
+
+@pytest.mark.parametrize(
+    "proposed_candidate, assertions, operation",
+    [
+        (candidate({"freshness": "stale"}), [], RECALL_OPERATION["CREATE"]),
+        (
+            candidate(
+                {
+                    "subject": {
+                        "unresolved_identity": {
+                            "provider_ref": "bellamente:assertion-42"
+                        }
+                    }
+                }
+            ),
+            [],
+            RECALL_OPERATION["CREATE"],
+        ),
+        (
+            candidate(),
+            [neighbor({"value": {"normalized": "ruby"}})],
+            RECALL_OPERATION["CREATE"],
+        ),
+        (
+            candidate(
+                {
+                    "source": {
+                        "evidence": [evidence(digest="not-a-fingerprint")],
+                        "fingerprint": "sha256:candidate-fingerprint",
+                    }
+                }
+            ),
+            [],
+            RECALL_OPERATION["CREATE"],
+        ),
+        (
+            candidate(),
+            [neighbor()],
+            RECALL_OPERATION["CREATE"],
+        ),
+        (
+            candidate({"target_assertion_id": "assertion_missing"}),
+            [],
+            RECALL_OPERATION["SUPERSEDE"],
+        ),
+    ],
+    ids=[
+        "stale",
+        "unresolved",
+        "value-conflict",
+        "degraded",
+        "corroboration",
+        "missing-correction-target",
+    ],
+)
+def test_non_writable_recall_outcomes_cannot_fall_through_to_state_changes(
+    proposed_candidate, assertions, operation
+):
+    original = deepcopy(assertions)
+
+    result = project_recall_transition(
+        graph=graph(),
+        candidate=proposed_candidate,
+        assertions=assertions,
+        operation=operation,
+    )
+
+    assert result["decision"] == RECALL_TRANSITION_DECISION["REFUSED"]
+    assert result["reason_codes"] == [
+        RECALL_TRANSITION_REASON["NOT_PERMITTED"]
+    ]
+    assert result["assertions"] == assertions == original
+    assert result["added"] == []
+
+
+@pytest.mark.parametrize(
+    "approval",
+    [
+        {"proposal_id": "wrong", "approved_by": {"kind": "human", "id": "jeff"}},
+        {"proposal_id": None, "approved_by": {"kind": "agent", "id": "agent:1"}},
+        {
+            "proposal_id": None,
+            "approved_by": {"kind": "human", "id": "jeff"},
+            "extra": True,
+        },
+    ],
+)
+def test_state_change_requires_an_exact_proposal_bound_human_approval(approval):
+    proposed = project_recall_transition(
+        graph=graph(),
+        candidate=candidate(),
+        assertions=[],
+        operation=RECALL_OPERATION["CREATE"],
+    )
+    if approval["proposal_id"] is None:
+        approval["proposal_id"] = proposed["proposal"]["proposal_id"]
+
+    result = project_recall_transition(
+        graph=graph(),
+        candidate=candidate(),
+        assertions=[],
+        operation=RECALL_OPERATION["CREATE"],
+        approval=approval,
+    )
+
+    assert result["decision"] == RECALL_TRANSITION_DECISION["REFUSED"]
+    assert result["reason_codes"] == [
+        RECALL_TRANSITION_REASON["NOT_APPROVED"]
+    ]
+    assert result["assertions"] == result["added"] == []
+
+
+def test_transition_refuses_invalid_unbounded_and_identity_conflicting_ledgers():
+    not_a_ledger = project_recall_transition(
+        graph=graph(),
+        candidate=candidate(),
+        assertions={},
+        operation=RECALL_OPERATION["PRESERVE"],
+    )
+    assert not_a_ledger["reason_codes"] == [
+        RECALL_TRANSITION_REASON["UNKNOWN_LEDGER"]
+    ]
+
+    cyclic = []
+    cyclic.append(cyclic)
+    unbounded = project_recall_transition(
+        graph=graph(),
+        candidate=candidate(),
+        assertions=cyclic,
+        operation=RECALL_OPERATION["PRESERVE"],
+    )
+    assert unbounded["reason_codes"] == [
+        RECALL_TRANSITION_REASON["WORK_UNBOUNDED"]
+    ]
+
+    too_many = project_recall_transition(
+        graph=graph(),
+        candidate=candidate(),
+        assertions=[neighbor()] * 10_001,
+        operation=RECALL_OPERATION["PRESERVE"],
+    )
+    assert too_many["reason_codes"] == [
+        RECALL_TRANSITION_REASON["WORK_UNBOUNDED"]
+    ]
+
+    unknown = project_recall_transition(
+        graph=graph(),
+        candidate=candidate(),
+        assertions=[neighbor({"subject": {"node_id": "repository_missing"}})],
+        operation=RECALL_OPERATION["PRESERVE"],
+    )
+    assert unknown["reason_codes"] == [
+        RECALL_TRANSITION_REASON["UNKNOWN_LEDGER"]
+    ]
+
+    proposed = project_recall_transition(
+        graph=graph(),
+        candidate=candidate(),
+        assertions=[],
+        operation=RECALL_OPERATION["CREATE"],
+    )
+    occupied = neighbor(
+        {
+            "id": proposed["proposal"]["assertion_id"],
+            "predicate": "different_predicate",
+        }
+    )
+    conflict = project_recall_transition(
+        graph=graph(),
+        candidate=candidate(),
+        assertions=[occupied],
+        operation=RECALL_OPERATION["CREATE"],
+    )
+    assert conflict["reason_codes"] == [
+        RECALL_TRANSITION_REASON["ASSERTION_IDENTITY_CONFLICT"]
+    ]
+    assert conflict["assertions"] == [occupied]
+
+
+def test_public_recall_seam_and_unknown_operation_are_stable():
+    result = project_recall_transition(
+        graph=graph(),
+        candidate=candidate(),
+        assertions=[],
+        operation="write",
+    )
+
+    assert callable(project_recall_transition)
+    assert result == {
+        "schema": RECALL_TRANSITION_SCHEMA,
+        "decision": RECALL_TRANSITION_DECISION["REFUSED"],
+        "operation": "write",
+        "reason_codes": [RECALL_TRANSITION_REASON["UNKNOWN_OPERATION"]],
+        "evaluation": None,
+        "assertions": [],
+        "added": [],
+        "superseded_assertion_ids": [],
+        "proposal": None,
+    }

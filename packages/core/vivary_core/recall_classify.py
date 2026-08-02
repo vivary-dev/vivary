@@ -12,6 +12,7 @@ this classifier never activates or rewrites truth.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 from vivary_core.canonical import utf16_sort_key, canonicalize, fingerprint
@@ -42,6 +43,137 @@ _CURRENT_FRESHNESS = "current"
 _STALE_FRESHNESS = "stale"
 _INVALID_FRESHNESS = "invalid"
 
+# Bound every untrusted JSON-like input before handing any part of it to the
+# recursive canonicalizer or to an output copy. These limits are shared by
+# recall evaluation and the caller-persisted transition seam.
+_RECALL_MAX_DEPTH = 64
+_RECALL_MAX_COLLECTION_ITEMS = 10_000
+_RECALL_MAX_UTF8_STRING_BYTES = 1_048_576
+_RECALL_MAX_TOTAL_UTF8_BYTES = 16 * 1_048_576
+_RECALL_MAX_VALUES = 100_000
+
+
+def _utf8_string_size(value: str) -> Optional[int]:
+    try:
+        return len(value.encode("utf-8"))
+    except UnicodeError:
+        return None
+
+
+def _preflight_recall_values(*values: Any) -> bool:
+    """Iteratively validate bounded, acyclic JSON-like values.
+
+    Exit frames deliberately do not consume the aggregate value budget: a
+    shared acyclic alias is charged once per value occurrence, while only an
+    active-path back edge is a cycle.
+    """
+    pending: List[Tuple[bool, Any, int]] = [(False, value, 0) for value in values]
+    active_containers = set()
+    utf8_sizes: Dict[int, int] = {}
+    total_utf8_bytes = 0
+
+    def charge_string(value: str) -> bool:
+        nonlocal total_utf8_bytes
+        identity = id(value)
+        size = utf8_sizes.get(identity)
+        if size is None:
+            measured = _utf8_string_size(value)
+            if measured is None or measured > _RECALL_MAX_UTF8_STRING_BYTES:
+                return False
+            size = measured
+            utf8_sizes[identity] = size
+        total_utf8_bytes += size
+        return total_utf8_bytes <= _RECALL_MAX_TOTAL_UTF8_BYTES
+    value_count = 0
+
+    while pending:
+        is_exit, value, depth = pending.pop()
+        if is_exit:
+            active_containers.discard(id(value))
+            continue
+
+        value_count += 1
+        if value_count > _RECALL_MAX_VALUES or depth > _RECALL_MAX_DEPTH:
+            return False
+
+        value_type = type(value)
+        if value_type is str:
+            if not charge_string(value):
+                return False
+            continue
+        if value_type in (type(None), bool, int):
+            continue
+        if value_type is float:
+            if not math.isfinite(value):
+                return False
+            continue
+        if value_type not in (list, dict):
+            return False
+        if len(value) > _RECALL_MAX_COLLECTION_ITEMS:
+            return False
+
+        identity = id(value)
+        if identity in active_containers:
+            return False
+        active_containers.add(identity)
+        pending.append((True, value, depth))
+
+        if value_type is list:
+            for item in value:
+                pending.append((False, item, depth + 1))
+            continue
+
+        for key in value:
+            if type(key) is not str or not charge_string(key):
+                return False
+        for item in value.values():
+            pending.append((False, item, depth + 1))
+
+    return True
+
+
+def _copy_recall_value(value: Any) -> Any:
+    """Return an iterative detached copy of an already bounded JSON-like value."""
+    if not _preflight_recall_values(value):
+        raise ValueError("recall value must be bounded JSON-like data")
+
+    value_type = type(value)
+    if value_type not in (list, dict):
+        return value
+
+    root: Any = [] if value_type is list else {}
+    pending: List[Tuple[Any, Any]] = [(value, root)]
+    while pending:
+        source, target = pending.pop()
+        if type(source) is list:
+            for item in source:
+                item_type = type(item)
+                if item_type is list:
+                    copied: Any = []
+                    target.append(copied)
+                    pending.append((item, copied))
+                elif item_type is dict:
+                    copied = {}
+                    target.append(copied)
+                    pending.append((item, copied))
+                else:
+                    target.append(item)
+            continue
+
+        for key, item in source.items():
+            item_type = type(item)
+            if item_type is list:
+                copied = []
+                target[key] = copied
+                pending.append((item, copied))
+            elif item_type is dict:
+                copied = {}
+                target[key] = copied
+                pending.append((item, copied))
+            else:
+                target[key] = item
+    return root
+
 
 def _get_path(value: Any, *keys: str) -> Any:
     cur = value
@@ -65,7 +197,6 @@ def _safe_evidence(candidate: Any) -> Any:
     source = _get_path(candidate, "source")
     evidence = source.get("evidence") if isinstance(source, dict) else None
     return evidence if isinstance(evidence, list) else []
-
 
 def _has_fingerprinted_evidence(assertion: Any) -> bool:
     """Require typed, self-bound provenance before any comparison."""
@@ -191,12 +322,38 @@ def _resolve_subject(graph: Any, candidate: Any) -> Tuple[Optional[Dict[str, Any
     nodes = graph.get("nodes") if isinstance(graph, dict) else None
     if not isinstance(nodes, list):
         return None, False
-    node = next((item for item in nodes if isinstance(item, dict) and item.get("id") == node_id), None)
+    node = None
+    for item in nodes:
+        if isinstance(item, dict) and item.get("id") == node_id:
+            if node is not None:
+                return None, False
+            node = item
     if node is None:
         return None, False
     if "identity_status" in node and node.get("identity_status") != "known":
         return node, False
     return node, True
+
+def _known_graph_node_ids(graph: Any) -> frozenset:
+    """Return unambiguous stable IDs in a bounded caller-owned workspace graph."""
+    if type(graph) is not dict:
+        return frozenset()
+    nodes = graph.get("nodes")
+    if type(nodes) is not list or len(nodes) > _RECALL_MAX_COLLECTION_ITEMS:
+        return frozenset()
+    known = set()
+    seen = set()
+    duplicates = set()
+    for node in nodes:
+        if type(node) is not dict or not _nonempty_string(node.get("id")):
+            continue
+        node_id = node["id"]
+        if node_id in seen:
+            duplicates.add(node_id)
+        seen.add(node_id)
+        if node.get("identity_status", "known") == "known":
+            known.add(node_id)
+    return frozenset(known - duplicates)
 
 
 def _subject_info(graph: Any, candidate: Any) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]], bool]:
@@ -254,20 +411,40 @@ def _decision(
         "reason_codes": sorted(set(reason_codes), key=utf16_sort_key),
         "related_assertion_ids": sorted(set(related_assertion_ids or []), key=utf16_sort_key),
         "active_truth": ACTIVE_TRUTH_UNCHANGED,
-        "subject": subject,
-        "evidence": evidence,
-        "proposal": proposal,
+        "subject": _copy_recall_value(subject),
+        "evidence": _copy_recall_value(evidence),
+        "proposal": _copy_recall_value(proposal) if proposal is not None else None,
     }
 
 
-def _provider_degraded_decision(graph: Any, candidate: Any) -> Dict[str, Any]:
-    subject, _, _ = _subject_info(graph, candidate)
-    return _decision(
-        REJECTED,
-        [REASON_PROVIDER_DEGRADED],
-        subject,
-        _safe_evidence(candidate),
-    )
+def _empty_provider_degraded_decision() -> Dict[str, Any]:
+    return {
+        "outcome": REJECTED,
+        "reason_codes": [REASON_PROVIDER_DEGRADED],
+        "related_assertion_ids": [],
+        "active_truth": ACTIVE_TRUTH_UNCHANGED,
+        "subject": {"node_id": None, "resolved": False},
+        "evidence": [],
+        "proposal": None,
+    }
+
+
+def _provider_degraded_decision(
+    graph: Any, candidate: Any, *, project_input: bool = True
+) -> Dict[str, Any]:
+    """Contain malformed inputs without copying a value that failed preflight."""
+    if not project_input or not _preflight_recall_values(graph, candidate):
+        return _empty_provider_degraded_decision()
+    try:
+        subject, _, _ = _subject_info(graph, candidate)
+        return _decision(
+            REJECTED,
+            [REASON_PROVIDER_DEGRADED],
+            subject,
+            _safe_evidence(candidate),
+        )
+    except Exception:
+        return _empty_provider_degraded_decision()
 
 
 def _classify_candidate(graph: Any, candidate: Any, neighbors: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
@@ -297,6 +474,16 @@ def _classify_candidate(graph: Any, candidate: Any, neighbors: Optional[List[Dic
         for neighbor in neighbors
     ):
         return _provider_degraded_decision(graph, candidate)
+
+    neighbor_ids = [neighbor["id"] for neighbor in neighbors]
+    if len(neighbor_ids) != len(set(neighbor_ids)):
+        return _provider_degraded_decision(graph, candidate)
+    # Recalled records may only name nodes already represented by the caller's
+    # graph. A provider cannot manufacture a stable-looking node identifier.
+    known_node_ids = _known_graph_node_ids(graph)
+    if any(_get_path(neighbor, "subject", "node_id") not in known_node_ids for neighbor in neighbors):
+        return _provider_degraded_decision(graph, candidate)
+
 
     freshness_states = [
         _assertion_freshness(candidate),
@@ -432,7 +619,11 @@ def classify_candidate(
     malformed provider-shaped data rather than an exception. The firewall repeats
     that containment around its provider callback boundary.
     """
+    preflighted = False
     try:
+        preflighted = _preflight_recall_values(graph, candidate, neighbors)
+        if not preflighted:
+            return _provider_degraded_decision(graph, candidate, project_input=False)
         return _classify_candidate(graph, candidate, neighbors)
     except Exception:
-        return _provider_degraded_decision(graph, candidate)
+        return _provider_degraded_decision(graph, candidate, project_input=preflighted)
