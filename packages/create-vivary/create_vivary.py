@@ -4201,7 +4201,6 @@ _CAPABILITY_SYS_PATH_ENTRY_LIMIT = 256
 _CAPABILITY_ROOT_ENTRY_LIMIT = 10_000
 _CAPABILITY_METADATA_BYTE_LIMIT = 256 * 1024
 _CAPABILITY_RECORD_BYTE_LIMIT = 2 * 1024 * 1024
-_CAPABILITY_METADATA_FIELD_LIMIT = 64
 _CAPABILITY_REQUIREMENT_LIMIT = 64
 _CAPABILITY_RECORD_ROW_LIMIT = 20_000
 
@@ -4444,19 +4443,41 @@ def _dist_info_identity(value: str) -> tuple[str, str] | None:
 
 def _capability_install_roots() -> tuple[Path, ...]:
     candidates: list[Path] = []
-    paths = sysconfig.get_paths()
-    for key in ("purelib", "platlib"):
-        value = paths.get(key)
-        if value:
-            candidates.append(Path(value))
-    if site.ENABLE_USER_SITE:
-        user_site = site.getusersitepackages()
-        if isinstance(user_site, str):
-            candidates.append(Path(user_site))
-        else:
-            candidates.extend(Path(value) for value in user_site)
-    if len(candidates) > _CAPABILITY_ROOT_LIMIT:
-        raise _CapabilityProbeFailure
+    try:
+        paths = sysconfig.get_paths()
+        for key in ("purelib", "platlib"):
+            value = paths.get(key)
+            if value:
+                candidates.append(Path(value))
+
+        system_sites = site.getsitepackages()
+        if type(system_sites) not in (list, tuple):
+            raise _CapabilityProbeFailure
+        system_sites = tuple(system_sites[: _CAPABILITY_ROOT_LIMIT + 1])
+        if len(system_sites) > _CAPABILITY_ROOT_LIMIT or not all(
+            isinstance(value, str) and value for value in system_sites
+        ):
+            raise _CapabilityProbeFailure
+        candidates.extend(Path(value) for value in system_sites)
+
+        if site.ENABLE_USER_SITE:
+            user_site = site.getusersitepackages()
+            if type(user_site) is str:
+                user_sites = (user_site,)
+            elif type(user_site) in (list, tuple):
+                user_sites = tuple(user_site[: _CAPABILITY_ROOT_LIMIT + 1])
+            else:
+                raise _CapabilityProbeFailure
+            if (
+                len(user_sites) > _CAPABILITY_ROOT_LIMIT
+                or not all(isinstance(value, str) and value for value in user_sites)
+            ):
+                raise _CapabilityProbeFailure
+            candidates.extend(Path(value) for value in user_sites)
+    except _CapabilityProbeFailure:
+        raise
+    except Exception as exc:
+        raise _CapabilityProbeFailure from exc
 
     canonical: dict[str, Path] = {}
     for candidate in candidates:
@@ -4466,11 +4487,14 @@ def _capability_install_roots() -> tuple[Path, ...]:
             raise _CapabilityProbeFailure from exc
         canonical[os.path.normcase(str(resolved))] = resolved
 
-    if len(sys.path) > _CAPABILITY_SYS_PATH_ENTRY_LIMIT:
+    if type(sys.path) not in (list, tuple):
+        raise _CapabilityProbeFailure
+    active_paths = tuple(sys.path[: _CAPABILITY_SYS_PATH_ENTRY_LIMIT + 1])
+    if len(active_paths) > _CAPABILITY_SYS_PATH_ENTRY_LIMIT:
         raise _CapabilityProbeFailure
     ordered: list[Path] = []
-    for entry in sys.path:
-        if not entry:
+    for entry in active_paths:
+        if not isinstance(entry, str) or not entry:
             continue
         try:
             key = os.path.normcase(str(Path(entry).resolve()))
@@ -4478,6 +4502,8 @@ def _capability_install_roots() -> tuple[Path, ...]:
             continue
         candidate = canonical.pop(key, None)
         if candidate is not None:
+            if len(ordered) >= _CAPABILITY_ROOT_LIMIT:
+                break
             ordered.append(candidate)
         if not canonical:
             break
@@ -4642,8 +4668,8 @@ def _parse_capability_metadata(content: bytes) -> tuple[dict[str, str], tuple[st
         raise _CapabilityProbeFailure from exc
     if message.defects:
         raise _CapabilityProbeFailure
-    if len(message.items()) > _CAPABILITY_METADATA_FIELD_LIMIT:
-        raise _CapabilityProbeFailure
+    # The input byte ceiling bounds unrelated headers. Repeated fields consumed by
+    # the probe have their own semantic limits below.
     fields: dict[str, str] = {}
     for field in ("Metadata-Version", "Name", "Version", "Requires-Python"):
         values = message.get_all(field) or ()
@@ -4817,10 +4843,9 @@ def _read_capability_distribution(
         spec["distribution"]
     ):
         raise _CapabilityContractIncompatible
-    if spec.get("vivary") and (
-        fields["requires_python"] != ">=3.11"
-        or fields["version"] != distribution_version
-    ):
+    if fields["version"] != distribution_version:
+        raise _CapabilityContractIncompatible
+    if spec.get("vivary") and fields["requires_python"] != ">=3.11":
         raise _CapabilityContractIncompatible
 
     module = spec["module"]

@@ -911,15 +911,19 @@ contract reports `capability_contract_incompatible`. A bounded read or parse fai
 reports `capability_probe_failed`. Only `not-installed` rows include ordered install
 hints.
 
-The status reader intersects the active interpreter path with its canonical package
-roots. It inspects at most 256 `sys.path` entries, eight selected roots, and 10,000
-entries across those roots. It admits singleton `Metadata-Version`, `Name`, `Version`,
-and `Requires-Python` fields,
-with at most 64 metadata fields and 64 dependency records. It binds modules, control
-metadata, and console scripts to the exact distribution's `RECORD`. It caps combined
-metadata and entrypoint data at 256 KiB per distribution, plus `RECORD` at 20,000 rows
-and 2 MiB. The reader does not import role or provider packages, dispatch ambient import
-or distribution hooks, invoke entrypoints, spawn commands, or use the network.
+The status reader considers the interpreter's canonical `purelib` and `platlib` roots,
+at most eight system-site candidates, and at most eight user-site candidates. It then
+selects at most eight unique roots that appear on the active interpreter path. It
+inspects up to 256 `sys.path` entries and 10,000 entries across the selected roots. Each
+distribution must include exactly one non-empty `Metadata-Version`, `Name`, `Version`,
+and `Requires-Python` field and at most 64 dependency records. The combined 256 KiB
+metadata-and-entrypoint byte cap bounds unrelated metadata headers.
+
+The reader binds modules, control metadata, and console scripts to the exact
+distribution's `RECORD`.
+It accepts at most 20,000 `RECORD` rows and 2 MiB. The reader does not import role or
+provider packages, dispatch ambient import or distribution hooks, invoke entrypoints,
+spawn commands, or use the network.
 
 Optional absence, incompatibility, and probe failure remain visible but do not make
 `capabilities` or Doctor unhealthy. Doctor derives its preset from the workspace

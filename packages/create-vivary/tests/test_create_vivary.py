@@ -4035,6 +4035,40 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         )
         self.assertEqual(incompatible_tropo["missing_install"], [])
 
+    def test_optional_metadata_version_must_match_dist_info(self):
+        with temp_workspace() as root:
+            self._write_distribution(
+                root,
+                "lancedb",
+                "9.9.9",
+                "lancedb",
+                package=True,
+            )
+            metadata = root / "lancedb-9.9.9.dist-info" / "METADATA"
+            metadata.write_text(
+                metadata.read_text(encoding="utf-8").replace(
+                    "Version: 9.9.9\n",
+                    "Version: 0.0.1\n",
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        embedded = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "storage:embedded"
+        )
+        self.assertFalse(embedded["installed"])
+        self.assertEqual(embedded["install_status"], "incompatible")
+        self.assertEqual(
+            embedded["reason_codes"],
+            ["capability_contract_incompatible"],
+        )
+
     def test_role_dependency_and_console_contracts_are_required(self):
         cases = (
             ("vivary-ozone", "governed-verification:ozone", "vivary-tropo>=0.3.0"),
@@ -4213,14 +4247,36 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         )
         self.assertEqual(core["install_status"], "probe-failed")
 
+    def test_irrelevant_metadata_fields_do_not_hide_valid_install(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            metadata = next(root.glob("vivary_core-*.dist-info/METADATA"))
+            metadata.write_text(
+                metadata.read_text(encoding="utf-8")
+                + ("Classifier: bounded-probe\n" * 128),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        core = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:core"
+        )
+        self.assertEqual(core["install_status"], "installed")
+
+    def test_excessive_dependency_metadata_fields_fail_the_probe(self):
         with temp_workspace() as root:
             self._write_governed_install(root)
             metadata = next(root.glob("vivary_core-*.dist-info/METADATA"))
             metadata.write_text(
                 metadata.read_text(encoding="utf-8")
                 + (
-                    "Classifier: bounded-probe\n"
-                    * (create_vivary._CAPABILITY_METADATA_FIELD_LIMIT - 3)
+                    "Requires-Dist: unrelated>=1.0.0\n"
+                    * (create_vivary._CAPABILITY_REQUIREMENT_LIMIT + 1)
                 ),
                 encoding="utf-8",
             )
@@ -4507,8 +4563,16 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         with (
             temp_workspace() as purelib,
             temp_workspace() as platlib,
+            temp_workspace() as system_site,
             temp_workspace() as user_site,
         ):
+            self._write_distribution(
+                system_site,
+                "lancedb",
+                "0.36.0",
+                "lancedb",
+                package=True,
+            )
             with (
                 mock.patch.object(
                     create_vivary.sysconfig,
@@ -4518,7 +4582,17 @@ class GovernedContextCapabilityTests(unittest.TestCase):
                         "platlib": str(platlib),
                     },
                 ),
+                mock.patch.object(
+                    create_vivary.site,
+                    "getsitepackages",
+                    return_value=[str(purelib), str(system_site)],
+                ),
                 mock.patch.object(create_vivary.site, "ENABLE_USER_SITE", True),
+                mock.patch.object(
+                    create_vivary,
+                    "_CAPABILITY_ROOT_LIMIT",
+                    3,
+                ),
                 mock.patch.object(
                     create_vivary.site,
                     "getusersitepackages",
@@ -4527,12 +4601,109 @@ class GovernedContextCapabilityTests(unittest.TestCase):
                 mock.patch.object(
                     create_vivary.sys,
                     "path",
-                    [str(user_site), str(purelib)],
+                    [
+                        7,
+                        str(system_site),
+                        str(user_site),
+                        str(purelib),
+                        str(platlib),
+                    ],
                 ),
             ):
                 roots = create_vivary._capability_install_roots()
+                report = create_vivary.capability_report("coding")
 
-        self.assertEqual(roots, (user_site.resolve(), purelib.resolve()))
+        self.assertEqual(
+            roots,
+            (
+                system_site.resolve(),
+                user_site.resolve(),
+                purelib.resolve(),
+            ),
+        )
+        embedded = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "storage:embedded"
+        )
+        self.assertEqual(embedded["install_status"], "installed")
+
+    def test_site_root_provider_failures_are_contained_without_details(self):
+        class ExplodingSites(list):
+            def __len__(self):
+                raise LookupError("sensitive provider detail")
+
+        class LyingSites(list):
+            def __len__(self):
+                return 0
+
+            def __iter__(self):
+                return iter(("sensitive provider detail",) * 9)
+
+        class ExplodingSysPath(list):
+            def __len__(self):
+                raise LookupError("sensitive provider detail")
+
+        reports = []
+        with (
+            mock.patch.object(
+                create_vivary.site,
+                "getsitepackages",
+                return_value=ExplodingSites(),
+            ),
+            mock.patch.object(create_vivary.site, "ENABLE_USER_SITE", False),
+        ):
+            reports.append(create_vivary.capability_report("coding"))
+
+        with (
+            mock.patch.object(
+                create_vivary.site,
+                "getsitepackages",
+                return_value=LyingSites(),
+            ),
+            mock.patch.object(create_vivary.site, "ENABLE_USER_SITE", False),
+        ):
+            reports.append(create_vivary.capability_report("coding"))
+
+        with (
+            mock.patch.object(
+                create_vivary.site,
+                "getsitepackages",
+                return_value=[],
+            ),
+            mock.patch.object(create_vivary.site, "ENABLE_USER_SITE", True),
+            mock.patch.object(
+                create_vivary.site,
+                "getusersitepackages",
+                side_effect=LookupError("sensitive provider detail"),
+            ),
+        ):
+            reports.append(create_vivary.capability_report("coding"))
+
+        with (
+            mock.patch.object(
+                create_vivary.site,
+                "getsitepackages",
+                return_value=[],
+            ),
+            mock.patch.object(create_vivary.site, "ENABLE_USER_SITE", False),
+            mock.patch.object(
+                create_vivary.sys,
+                "path",
+                ExplodingSysPath(),
+            ),
+        ):
+            reports.append(create_vivary.capability_report("coding"))
+
+        for report in reports:
+            core = next(
+                item
+                for item in report["available_capabilities"]
+                if item["id"] == "governed-context:core"
+            )
+            self.assertEqual(core["install_status"], "probe-failed")
+            self.assertEqual(core["reason_codes"], ["capability_probe_failed"])
+            self.assertNotIn("sensitive provider detail", json.dumps(report))
 
     def test_incomplete_metadata_and_out_of_root_dist_info_are_not_credited(self):
         with temp_workspace() as root:

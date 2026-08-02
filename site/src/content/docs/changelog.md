@@ -53,10 +53,14 @@ versions stay unchanged. Published versions stay unchanged.
 
 ### Security
 
-- The passive capability reader inspects up to 256 `sys.path` entries, eight package
-  roots, and 10,000 entries across those roots. It caps metadata fields and dependency
-  records at 64 each. Combined metadata and entrypoint data is capped at 256 KiB per
-  distribution, plus `RECORD` at 20,000 rows and 2 MiB.
+- The passive capability reader inspects up to 256 `sys.path` entries and 10,000
+  entries across the selected roots. It considers the interpreter's `purelib` and
+  `platlib` roots, at most eight system-site candidates, and at most eight user-site
+  candidates. It then selects at most eight unique active package roots. Each
+  distribution must include exactly one non-empty `Metadata-Version`, `Name`, `Version`,
+  and `Requires-Python` field and at most 64 dependency records. The combined 256 KiB
+  metadata-and-entrypoint byte cap bounds unrelated metadata headers. The reader also
+  accepts at most 20,000 `RECORD` rows and 2 MiB.
 - Only canonical roots active on the interpreter path are eligible. Linked metadata
   aliases and mismatched distribution-directory versions are incompatible.
 - Capability probing does not import role or provider modules, dispatch ambient import
