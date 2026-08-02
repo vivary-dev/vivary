@@ -10,6 +10,67 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: governed installation and capability truth (#207)] (2026-08-02)
+
+Implements [#207](https://github.com/vivary-dev/vivary/issues/207). The
+[release-status section](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status)
+owns current published and development version truth.
+
+This slice advances unpublished `create-vivary` and `@vivary/create` source to
+**0.3.2** and the unpublished `vivary` meta-package to **0.1.5**. Role and Core
+versions stay unchanged. Published versions stay unchanged.
+
+### Added
+
+- Added a fixed public capability inventory for `vivary-core`, Tropo, Strato, Ozone,
+  and Exo. Each row names its governed command, authority ceiling, install hint,
+  Boolean installed state, deterministic status, reason codes, and missing
+  dependencies.
+- Added the same capability envelope to successful and repair-error Doctor reports.
+  Doctor derives the preset from the workspace declaration. Missing, unsupported, or
+  unreadable declarations remain `null`. Doctor does not guess.
+- Added package-manifest, installed-metadata, console-target, direct-Core-edge, and
+  capability-hint parity tests.
+
+### Changed
+
+- The `vivary` meta-package now installs `vivary-strato>=0.1.2` and requires
+  `create-vivary>=0.3.2`. It still receives `vivary-core` transitively through role
+  packages and does not declare a duplicate Core edge.
+- Capability installation truth is distribution-backed instead of importability-based.
+  The probe accepts only active-interpreter canonical package roots and verifies that
+  each credited module or console script belongs to the exact distribution `RECORD`.
+- The npm package remains a launcher for the Python product. Its 0.3.2 source forwards
+  `capabilities` and Doctor unchanged instead of adding a JavaScript implementation.
+- CI installs only `vivary` from the eight-wheel local wheelhouse before `pip check`,
+  verifies the five passive governed capability rows, and executes Tropo, Strato,
+  Ozone, and Exo governed CLI smokes. An explicit Strato install cannot mask a missing
+  meta-package edge. CI also refuses generated documentation drift after site build.
+
+### Security
+
+- The passive capability reader inspects up to 256 `sys.path` entries, eight package
+  roots, and 10,000 entries across those roots. It caps metadata fields and dependency
+  records at 64 each. Combined metadata and entrypoint data is capped at 256 KiB per
+  distribution, plus `RECORD` at 20,000 rows and 2 MiB.
+- Only canonical roots active on the interpreter path are eligible. Linked metadata
+  aliases and mismatched distribution-directory versions are incompatible.
+- Capability probing does not import role or provider modules, dispatch ambient import
+  or distribution hooks, invoke entrypoints, spawn commands, or use the network.
+  Probe failures remain explicit and nonfatal to baseline workspace health.
+
+### Verification
+
+- `python packages/create-vivary/tests/test_create_vivary.py`
+- `python packages/create-vivary/tests/test_orientation_proof.py`
+- `python packages/vivary/tests/test_vivary_cli.py`
+- `node packages/create-vivary/tests/test_npm_launcher.js`
+- The proof built eight local wheels. A clean environment installed `vivary` alone,
+  passed `pip check`, reported all five governed capabilities installed, ran six
+  entrypoint help smokes, passed Doctor, and contained no test packages.
+
+Publishing remains a manual human gate.
+
 ## [Unreleased: governed recall firewall (#205)] — 2026-08-02
 
 Implements [#205](https://github.com/vivary-dev/vivary/issues/205). The

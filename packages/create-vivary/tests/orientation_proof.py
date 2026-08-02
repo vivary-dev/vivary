@@ -48,6 +48,150 @@ MAP_DEPTH = 3
 MAP_MAX_ENTRIES = 200
 FIND_BUDGET = 400
 FIND_LIMIT = 5
+CAPABILITY_STATUSES = {
+    "installed",
+    "not-installed",
+    "incompatible",
+    "probe-failed",
+}
+GOVERNED_CAPABILITY_IDS = {
+    "governed-context:core",
+    "governed-context:tropo",
+    "governed-policy:strato",
+    "governed-verification:ozone",
+    "governed-control:exo",
+}
+EXPECTED_FIXTURE_PRESETS = {
+    "current": "coding",
+    "legacy": "coding",
+    "brownfield": None,
+    "adopted": None,
+    "divergent-checkout": None,
+    "corrupt": "coding",
+}
+
+
+def _workspace_doctor_payload(report: dict) -> dict:
+    """Fields that describe the workspace rather than the invoking environment."""
+    return {key: value for key, value in report.items() if key != "capabilities"}
+
+
+def _require_capability_truth(
+    report: dict,
+    *,
+    transport: str,
+    kind: str,
+) -> dict:
+    capabilities = report.get("capabilities")
+    _require(isinstance(capabilities, dict), f"{kind}: {transport} omitted capabilities")
+    _require(
+        set(capabilities)
+        == {"ok", "preset", "default_capabilities", "available_capabilities"},
+        f"{kind}: {transport} capability envelope fields are invalid",
+    )
+    _require(capabilities.get("ok") is True, f"{kind}: {transport} capability report failed")
+    _require(
+        capabilities.get("default_capabilities") == ["storage:file", "memory:none"],
+        f"{kind}: {transport} default capabilities are invalid",
+    )
+    preset = capabilities.get("preset")
+    _require(
+        preset is None or preset in create_vivary.PRESETS,
+        f"{kind}: {transport} capability preset is invalid",
+    )
+    expected_available = create_vivary._capability_declarations(preset)
+    available = capabilities.get("available_capabilities")
+    _require(isinstance(available, list), f"{kind}: {transport} capability rows are invalid")
+    _require(
+        len(available) == len(expected_available),
+        f"{kind}: {transport} capability rows are incomplete",
+    )
+    dynamic_fields = {
+        "installed",
+        "install_status",
+        "reason_codes",
+        "missing_install",
+    }
+    for row, expected in zip(available, expected_available):
+        _require(
+            isinstance(row, dict)
+            and set(row) == set(expected) | dynamic_fields
+            and all(row.get(field) == value for field, value in expected.items()),
+            f"{kind}: {transport} capability declaration is invalid",
+        )
+    rows_by_id = {
+        row.get("id"): row
+        for row in available
+        if isinstance(row, dict) and isinstance(row.get("id"), str)
+    }
+    _require(
+        len(rows_by_id) == len(available),
+        f"{kind}: {transport} capability ids are missing or duplicated",
+    )
+    governed_ids = {
+        capability_id
+        for capability_id in rows_by_id
+        if capability_id.startswith("governed-")
+    }
+    _require(
+        governed_ids == GOVERNED_CAPABILITY_IDS,
+        f"{kind}: {transport} governed rows are incomplete",
+    )
+    expected_reasons = {
+        "installed": [],
+        "not-installed": ["capability_dependency_missing"],
+        "incompatible": ["capability_contract_incompatible"],
+        "probe-failed": ["capability_probe_failed"],
+    }
+    for row in available:
+        status = row.get("install_status")
+        _require(
+            status in CAPABILITY_STATUSES,
+            f"{kind}: {transport} emitted an unknown capability status",
+        )
+        _require(
+            row.get("installed") is (status == "installed"),
+            f"{kind}: {transport} capability status disagrees with installed",
+        )
+        reasons = row.get("reason_codes")
+        missing = row.get("missing_install")
+        requirements = row.get("requires_install")
+        _require(
+            reasons == expected_reasons[status],
+            f"{kind}: {transport} capability reasons disagree with status",
+        )
+        _require(
+            isinstance(missing, list) and isinstance(requirements, list),
+            f"{kind}: {transport} capability requirements are invalid",
+        )
+        if status == "not-installed":
+            _require(
+                bool(missing)
+                and len(missing) == len(set(missing))
+                and missing == [
+                    requirement
+                    for requirement in requirements
+                    if requirement in missing
+                ],
+                f"{kind}: {transport} missing capabilities are invalid",
+            )
+        else:
+            _require(
+                missing == [],
+                f"{kind}: {transport} capability status cannot list missing installs",
+            )
+    return {
+        "preset": preset,
+        "governed": {
+            capability_id: {
+                "install_status": rows_by_id[capability_id]["install_status"],
+                "reason_codes": rows_by_id[capability_id]["reason_codes"],
+                "missing_install": rows_by_id[capability_id]["missing_install"],
+            }
+            for capability_id in sorted(GOVERNED_CAPABILITY_IDS)
+        },
+    }
+
 
 
 class ProofFailure(RuntimeError):
@@ -342,6 +486,9 @@ def _version(argv: Sequence[str]) -> str:
 def _create_args(command: str, fixture: Path, *extra: str) -> list[str]:
     return [command, str(fixture), *extra, "--json", "--repo-root", str(ROOT)]
 
+def _capability_args(preset: str) -> list[str]:
+    return ["capabilities", "--preset", preset, "--json"]
+
 
 def _proof_fixture(
     kind: str,
@@ -499,9 +646,97 @@ def _proof_fixture(
     doctor_read_only = doctor_before == doctor_after
     _require(doctor_read_only, f"{kind}: Doctor mutated the fixture")
     doctor_exit_equal = py_doctor_rc == npm_doctor_rc
-    doctor_payload_equal = py_doctor == npm_doctor
+    doctor_payload_equal = (
+        _workspace_doctor_payload(py_doctor)
+        == _workspace_doctor_payload(npm_doctor)
+    )
     _require(doctor_exit_equal, f"{kind}: npm/Python Doctor exits differ")
-    _require(doctor_payload_equal, f"{kind}: npm/Python Doctor JSON differs")
+    _require(
+        doctor_payload_equal,
+        f"{kind}: npm/Python Doctor workspace JSON differs",
+    )
+    py_capability_summary = _require_capability_truth(
+        py_doctor,
+        transport="Python Doctor",
+        kind=kind,
+    )
+    npm_capability_summary = _require_capability_truth(
+        npm_doctor,
+        transport="npm Doctor",
+        kind=kind,
+    )
+    preset = py_capability_summary["preset"]
+    expected_preset = EXPECTED_FIXTURE_PRESETS[kind]
+    _require(
+        preset == expected_preset
+        and npm_capability_summary["preset"] == expected_preset,
+        f"{kind}: Doctor capability preset disagrees with the fixture",
+    )
+    command_preset = preset or "coding"
+    capability_before = snapshot_tree(fixture)
+    py_capability_rc, py_capability_report = _run_json(
+        python_transport.prefix,
+        _capability_args(command_preset),
+        transport=python_transport.name,
+        fixture=fixture,
+        commands=commands,
+        env=python_transport.env,
+    )
+    npm_capability_rc, npm_capability_report = _run_json(
+        npm_transport.prefix,
+        _capability_args(command_preset),
+        transport=npm_transport.name,
+        fixture=fixture,
+        commands=commands,
+        env=npm_transport.env,
+    )
+    capability_after = snapshot_tree(fixture)
+    _require(
+        py_capability_rc == npm_capability_rc == 0,
+        f"{kind}: capability command failed",
+    )
+    _require(
+        capability_before == capability_after,
+        f"{kind}: capability command mutated the fixture",
+    )
+    _require_capability_truth(
+        {"capabilities": py_capability_report},
+        transport="Python capability command",
+        kind=kind,
+    )
+    _require_capability_truth(
+        {"capabilities": npm_capability_report},
+        transport="npm capability command",
+        kind=kind,
+    )
+    if preset is not None:
+        _require(
+            py_capability_report == py_doctor["capabilities"],
+            f"{kind}: Python Doctor capability envelope is stale",
+        )
+        _require(
+            npm_capability_report == npm_doctor["capabilities"],
+            f"{kind}: npm Doctor capability envelope is stale",
+        )
+    else:
+        for transport, direct, doctor in (
+            ("Python", py_capability_report, py_doctor["capabilities"]),
+            ("npm", npm_capability_report, npm_doctor["capabilities"]),
+        ):
+            direct_rows = {
+                row["id"]: row for row in direct["available_capabilities"]
+            }
+            doctor_rows = {
+                row["id"]: row for row in doctor["available_capabilities"]
+            }
+            _require(
+                all(
+                    direct_rows.get(capability_id) == row
+                    for capability_id, row in doctor_rows.items()
+                ),
+                f"{kind}: {transport} Doctor capability statuses are stale",
+            )
+    capability_reports_match_doctor = True
     compatibility = py_doctor["compatibility"]
     expected_workspace_contract = "legacy-v0.1" if kind == "legacy" else "indexed-v0.2+"
     _require(compatibility["schema_version"] == 1, f"{kind}: Doctor compatibility schema changed")
@@ -602,6 +837,11 @@ def _proof_fixture(
             "compatibility_schema": compatibility["schema_version"],
             "workspace_contract": compatibility["workspace_contract"],
             "upgrade_guidance_present": upgrade_guidance_present,
+            "capabilities": {
+                "python": py_capability_summary,
+                "npm": npm_capability_summary,
+                "reports_match_doctor": capability_reports_match_doctor,
+            },
         },
         "find": {
             "contained_in_fixture": find_contained,

@@ -66,28 +66,173 @@ jobs:
             ./packages/create-vivary \
             ./packages/vivary \
             ./packages/memory-cognee
-          python -m pip install --no-index --find-links "$wheelhouse" \
-            vivary vivary-strato
+          python -m pip install --no-index --find-links "$wheelhouse" vivary
           python -m pip check
+          create-vivary capabilities --preset coding --json \
+            > "$smoke/capabilities.json"
+          mkdir -p "$smoke/tropo-workspace/decisions" "$smoke/tropo-workspace/modules"
+          cat > "$smoke/tropo-workspace/tropo.toml" <<'EOF'
+          [base]
+          derive = ["id", "title"]
+          allow_untyped = true
+          [types.decision]
+          folder = "decisions"
+          optional = { status = "string", affects = "ref" }
+          [types.module]
+          folder = "modules"
+          optional = { owner = "string" }
+          EOF
+          cat > "$smoke/tropo-workspace/decisions/release-workflow.md" <<'EOF'
+          ---
+          status: accepted
+          affects: agent-workspace
+          ---
+          # Release Workflow
+
+          Owns release truth and changelog site sync verification.
+          EOF
+          cat > "$smoke/tropo-workspace/modules/agent-workspace.md" <<'EOF'
+          ---
+          owner: vivary
+          ---
+          # Agent Workspace
+          EOF
+          git -C "$smoke/tropo-workspace" init -q
+          git -C "$smoke/tropo-workspace" add .
+          git -C "$smoke/tropo-workspace" \
+            -c user.name=Vivary \
+            -c user.email=ci@vivary.invalid \
+            commit -qm fixture
+          tropo find "release workflow" \
+            --root "$smoke/tropo-workspace" \
+            --governed --max-claims 2 --json > "$smoke/tropo-find.json"
+          python - "$smoke" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          from vivary_core.capsule_compile import compile_task_capsule
+          from vivary_core.receipt import create_integrity_receipt
+          from vivary_core.workspace_model import workspace_fingerprint_from_graph
+
+          destination = Path(sys.argv[1])
+          tropo_capsule = json.loads(
+              (destination / "tropo-find.json").read_text(encoding="utf-8")
+          )
+          observed_at = tropo_capsule["workspace"]["observed_at"]
+          workspace_fingerprint = tropo_capsule["workspace"]["fingerprint"]
+          strato_request = {
+              "schema": "vivary.strato-decision-request/v0",
+              "policy_version": "vivary.strato-policy/v0",
+              "actor": {"kind": "agent", "id": "agent:ci"},
+              "authority_class": "contributor",
+              "workspace": {"fingerprint": workspace_fingerprint},
+              "scope": {"project": "vivary", "paths": tropo_capsule["task"]["scope"]},
+              "requested_at": observed_at,
+              "decision_at": observed_at,
+              "capsule": tropo_capsule,
+              "state": {"turns_used": 0, "actions_used": 0},
+              "limits": {"max_turns": 3, "max_actions": 3},
+          }
+          graph = {
+              "schema": "vivary.workspace-graph/v0",
+              "observed_at": observed_at,
+              "nodes": [],
+              "edges": [],
+              "conflicts": [],
+              "unknowns": [],
+          }
+          graph["workspace_fingerprint"] = workspace_fingerprint_from_graph(graph)
+          ozone_capsule = compile_task_capsule(
+              task={
+                  "question": "Can this task pass the release gate?",
+                  "scope": ["/repo/packages/ozone"],
+              },
+              graph=graph,
+          )
+          ozone_request = {
+              "schema": "vivary.ozone-verification-request/v0",
+              "workspace": {
+                  "fingerprint": ozone_capsule["workspace"]["fingerprint"]
+              },
+              "verified_at": observed_at,
+              "capsule": ozone_capsule,
+              "gate": {
+                  "name": "release",
+                  "required_checks": [],
+                  "require_claims_verified": True,
+              },
+              "receipt": create_integrity_receipt(
+                  capsule=ozone_capsule,
+                  runtime={"harness": "ci", "actor": "agent:ci"},
+                  checks=[],
+                  now=lambda: observed_at,
+              ),
+          }
+          (destination / "strato-request.json").write_text(
+              json.dumps(strato_request), encoding="utf-8"
+          )
+          (destination / "ozone-request.json").write_text(
+              json.dumps(ozone_request), encoding="utf-8"
+          )
+          PY
+          strato decide --governed --json "$smoke/strato-request.json" \
+            > "$smoke/strato-decision.json"
+          ozone verify "$smoke/ozone-request.json" --governed --json --strict \
+            > "$smoke/ozone-verification.json"
           cat > "$smoke/exo-control-request.json" <<'EOF'
           {"schema":"vivary.exo-control-request/v0","operation":"dependencies","state":{"tasks":[{"id":"task-ci","status":"open","depends_on":[]}]},"input":{"task_id":"task-ci"}}
           EOF
           exo control "$smoke/exo-control-request.json" \
             --governed --json --strict > "$smoke/exo-control.json"
-          python - "$smoke/exo-control.json" <<'PY'
+          python - \
+            "$smoke/exo-control.json" \
+            "$smoke/capabilities.json" \
+            "$smoke/tropo-find.json" \
+            "$smoke/strato-decision.json" \
+            "$smoke/ozone-verification.json" <<'PY'
           import json
           import sys
           from importlib.metadata import requires, version
 
           result = json.loads(open(sys.argv[1], encoding="utf-8").read())
+          capabilities = json.loads(open(sys.argv[2], encoding="utf-8").read())
+          tropo_result = json.loads(open(sys.argv[3], encoding="utf-8").read())
+          strato_result = json.loads(open(sys.argv[4], encoding="utf-8").read())
+          ozone_result = json.loads(open(sys.argv[5], encoding="utf-8").read())
           assert result["schema"] == "vivary.exo-control-result/v0"
           assert result["operation"] == "dependencies"
           assert result["result"]["decision"] == "ready"
+          assert tropo_result["schema"] == "vivary.task-capsule/v0"
+          assert strato_result["schema"] == "vivary.strato-decision/v0"
+          assert strato_result["decision"] == "request_gate"
+          assert strato_result["reason_codes"] == ["gate_required"]
+          assert ozone_result["schema"] == "vivary.ozone-verification/v0"
+          assert ozone_result["outcome"] == "sufficient"
           assert version("vivary-core") == "0.2.6"
           assert version("vivary-exo") == "0.3.0"
-          assert version("vivary") == "0.1.4"
+          assert version("create-vivary") == "0.3.2"
+          assert version("vivary") == "0.1.5"
           assert "vivary-core>=0.2.5" in requires("vivary-exo")
-          assert "vivary-exo>=0.3.0" in requires("vivary")
+          vivary_requirements = requires("vivary") or []
+          assert "create-vivary>=0.3.2" in vivary_requirements
+          assert "vivary-strato>=0.1.2" in vivary_requirements
+          assert "vivary-exo>=0.3.0" in vivary_requirements
+          assert not any(
+              requirement.startswith("vivary-core")
+              for requirement in vivary_requirements
+          )
+          governed = [
+              capability
+              for capability in capabilities["available_capabilities"]
+              if capability["id"].startswith("governed-")
+          ]
+          assert len(governed) == 5
+          assert all(capability["installed"] for capability in governed)
+          assert all(
+              capability["install_status"] == "installed"
+              for capability in governed
+          )
           PY
           python -m pip install --no-index --find-links "$wheelhouse" --no-deps \
             vivary-memory-cognee
@@ -365,6 +510,55 @@ jobs:
         run: python packages/ozone/tests/test_ozone.py
       - name: strato governed-policy consumer
         run: python -m pytest packages/strato/tests/ -q
+      - name: installed-wheel capability surface
+        shell: pwsh
+        run: |
+          $smoke = Join-Path $env:RUNNER_TEMP "vivary-wheel-$([guid]::NewGuid())"
+          $wheelhouse = Join-Path $smoke "wheels"
+          New-Item -ItemType Directory -Path $wheelhouse -Force | Out-Null
+          python -m pip wheel --no-deps --wheel-dir $wheelhouse `
+            ./packages/core `
+            ./packages/tropo `
+            ./packages/strato `
+            ./packages/ozone `
+            ./packages/exo `
+            ./packages/create-vivary `
+            ./packages/vivary `
+            ./packages/memory-cognee
+          if ($LASTEXITCODE -ne 0) { throw "wheel build failed" }
+          python -m venv (Join-Path $smoke "venv")
+          if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
+          $scripts = Join-Path $smoke "venv\Scripts"
+          $python = Join-Path $scripts "python.exe"
+          & $python -m pip install --no-index --find-links $wheelhouse vivary
+          if ($LASTEXITCODE -ne 0) { throw "vivary install failed" }
+          & $python -m pip check
+          if ($LASTEXITCODE -ne 0) { throw "pip check failed" }
+          $capabilityJson = & (Join-Path $scripts "create-vivary.exe") `
+            capabilities --preset coding --json
+          if ($LASTEXITCODE -ne 0) { throw "capability report failed" }
+          $report = $capabilityJson | ConvertFrom-Json
+          $governed = @(
+            $report.available_capabilities |
+              Where-Object { $_.id.StartsWith("governed-") }
+          )
+          $invalid = @(
+            $governed |
+              Where-Object {
+                -not $_.installed -or $_.install_status -ne "installed"
+              }
+          )
+          if ($governed.Count -ne 5 -or $invalid.Count -ne 0) {
+            throw "governed capability surface is incomplete"
+          }
+          & $python -c "import vivary_core, tropo, strato, ozone, exo"
+          if ($LASTEXITCODE -ne 0) { throw "governed package import failed" }
+          foreach ($command in @(
+            "create-vivary", "vivary", "tropo", "strato", "ozone", "exo"
+          )) {
+            & (Join-Path $scripts "$command.exe") --help | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "$command entrypoint failed" }
+          }
 
   orientation-proof:
     name: orientation proof (${{ matrix.os }})
@@ -436,6 +630,12 @@ jobs:
       - name: build (re-syncs docs, then astro build)
         run: npm run build
         working-directory: site
+      - name: verify generated docs are committed
+        run: >-
+          git diff --exit-code --
+          site/src/content/docs
+          site/public/llms.txt
+          site/public/llms-full.txt
       - name: check built links and anchors
         run: npm run test:links
         working-directory: site

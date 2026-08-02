@@ -5,13 +5,14 @@ with a typed knowledge graph (tropo), agent OS (strato), starter graph, visible 
 and human gates in one command. Generated modules use `modules/<id>/index.md` routers
 so agents load context progressively.
 
-**Current release:** 0.3.1. Use 0.3.1 for new installs; no migration is expected
-from 0.2.1, 0.2.2, 0.2.3, 0.2.5, 0.2.6, 0.2.7, or 0.2.8.
+**Current published release:** 0.3.1. Use 0.3.1 for registry installs. Users of
+0.2.1, 0.2.2, 0.2.3, 0.2.5, 0.2.6, 0.2.7, or 0.2.8 need no migration.
 
-**Release focus:** 0.3.1 is the adoption line: brownfield `create-vivary adopt <path>`
-brings Vivary into an existing repo or vault without touching existing files
-(dry-run by default, `--yes` to write), and `doctor --trend` tracks graph and
-routing drift across runs in `.vivary/doctor-state.json`.
+**Development source:** Version 0.3.2 has not reached registries and remains in
+lockstep with the Python package. It forwards the new governed capability and Doctor
+reports without adding a JavaScript implementation. Published 0.3.1 remains the
+adoption line. `create-vivary adopt <path>` uses dry-run by default, and
+`doctor --trend` tracks graph and routing drift in `.vivary/doctor-state.json`.
 
 **Security hardening:** The 0.2.5 line validates active `.gitignore` rules for `USER.md`,
 `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`; scaffolds private heartbeat report

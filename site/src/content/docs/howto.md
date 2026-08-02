@@ -7,9 +7,9 @@ editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/HOWTO.md"
 Short, copy-paste recipes for common tasks. New to Vivary? Do the [getting started
 guide](/getting-started/) first, then use these when you hit a specific job.
 
-Each recipe assumes the CLIs are installed (`pip install vivary-tropo
-vivary-ozone vivary-exo create-vivary==0.3.0`) or run via `uvx`. Run commands from
-inside a workspace unless `--root` is given.
+Install the CLIs before you run a recipe: `pip install vivary-tropo vivary-ozone
+vivary-exo create-vivary==0.3.1`. You can also run each CLI through `uvx`. Run
+commands inside a workspace unless you use `--root`.
 
 ## Scaffold a new workspace
 

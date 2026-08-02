@@ -1,0 +1,71 @@
+# Vivary
+
+Vivary is a standard and scaffolder for agent-native workspaces. It gives AI agents a
+small, inspectable workspace they can navigate and verify: typed project memory,
+visible state, reusable skills, private boundaries, and human gates.
+
+Website: https://vivary.vercel.app/
+Repository: https://github.com/vivary-dev/vivary
+License: MIT
+Full Documentation: https://vivary.vercel.app/llms-full.txt
+
+## Current package surfaces
+
+- PyPI meta-package (installs the suite): `vivary`, via `pip install vivary`
+- npm scaffolder: `@vivary/create` 0.3.1
+- PyPI scaffolder: `create-vivary` 0.3.1
+- PyPI knowledge graph CLI: `vivary-tropo` 0.4.1, command `tropo`
+- PyPI review CLI: `vivary-ozone` 0.2.0, command `ozone`
+- PyPI coordination CLI: `vivary-exo` 0.2.2, command `exo`
+- Strato templates and skills remain bundled; the unpublished source package `vivary-strato` exposes experimental command `strato decide --governed`.
+- Optional Cognee adapter: `vivary-memory-cognee` 0.1.0, command `vivary-cognee`
+- Versions are independent; do not call the whole project "Vivary 0.3.1".
+
+## Install
+
+```bash
+npm create @vivary@latest my-workspace
+pip install vivary
+```
+
+## Core docs
+
+- What is Vivary?: https://vivary.vercel.app/concepts/
+- Getting started: https://vivary.vercel.app/getting-started/
+- Getting started proof: https://vivary.vercel.app/walkthrough/
+- Command reference: https://vivary.vercel.app/commands/
+- Agent skills: https://vivary.vercel.app/skills/
+- Active context: https://vivary.vercel.app/active-context/
+- LLM active-context guide: https://vivary.vercel.app/llm-active-context/
+- Optional semantic memory: https://vivary.vercel.app/semantic-memory/
+- White paper: https://vivary.vercel.app/white-paper/
+- How-to recipes: https://vivary.vercel.app/howto/
+- Public signals: https://vivary.vercel.app/signals/
+- Release workflow: https://vivary.vercel.app/release-workflow/
+- Architecture: https://vivary.vercel.app/architecture/
+- Obsidian (optional): https://vivary.vercel.app/obsidian/
+- Product roadmap: https://vivary.vercel.app/roadmap/
+- FAQ: https://vivary.vercel.app/#faq
+- Changelog: https://vivary.vercel.app/changelog/
+
+## Agent retrieval
+
+Start with graph-first context:
+
+```bash
+tropo find "<task or question>" --root . --budget 1200 --json
+tropo query "<text>" --root . --type decision --explain --json
+ozone review --root . --pack context-budget
+```
+
+Optional active context:
+
+- CocoIndex-code is an optional coding sidecar, not default behavior.
+- LanceDB is explicit embedded storage, not semantic retrieval.
+- The published scaffolder can write Cognee policy without installing or indexing.
+- The optional Cognee adapter indexes privacy-filtered typed Tropo node packets only
+  after explicit install and index approval.
+- Vivary core does not install embeddings, start daemons, enable MCP, or send data
+  anywhere by default.
+
+LLM active-context guide: https://vivary.vercel.app/llm-active-context/

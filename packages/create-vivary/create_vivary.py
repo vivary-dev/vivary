@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import configparser
+import csv
 import importlib
+import importlib.machinery
 import importlib.metadata as importlib_metadata
 import importlib.util
 import json
@@ -11,16 +14,19 @@ import os
 import platform
 import re
 import shutil
+import site
 import stat
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 from datetime import date, datetime, timezone
+from email.parser import BytesParser
 from pathlib import Path
 
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 PRESETS = ("coding", "second-brain", "knowledge-work", "writing")
 
@@ -789,6 +795,10 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
     memory_report, memory_privacy_requirements = _memory_report(target)
     compatibility = _empty_workspace_compatibility()
     backend_name = "file"
+    declared_preset = _workspace_declared_preset(target) if target.is_dir() else None
+    capability_summary = _build_capability_report(
+        declared_preset if declared_preset in PRESETS else None
+    )
 
     if not target.exists():
         errors.append(f"workspace does not exist: {target}")
@@ -880,6 +890,7 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         "backend": backend_name,
         "memory": memory_report,
         "compatibility": compatibility,
+        "capabilities": capability_summary,
     }
 
 
@@ -944,6 +955,7 @@ def _doctor_repair_error_report(target: str | Path, *, yes: bool, error: Excepti
             "detail": "doctor repair refused to inspect target",
         },
         "compatibility": _empty_workspace_compatibility(),
+        "capabilities": _build_capability_report(None),
         "repair": {
             "mode": "applied" if yes else "dry-run",
             "actions": [],
@@ -4148,136 +4160,801 @@ def _print_adopt_report(result: dict, *, mode: str) -> None:
             print(f"  warning: {warning}")
 
 
-# Import name for each installable requirement, keyed by the exact string used in a
-# capability's `requires_install`. An extra maps to what the extra actually provides
-# (`vivary-tropo[embedded]` is only useful once lancedb is importable), and a
-# distribution whose import name differs from its package name is spelled out. A
-# requirement absent from this map falls back to the usual `-` → `_` normalization.
-REQUIREMENT_IMPORTS = {
-    "vivary-tropo[embedded]": "lancedb",
-    "vivary-tropo": "tropo",
-    "vivary-memory-cognee": "vivary_cognee",
-    "cocoindex-code[full]": "cocoindex_code",
-    "vivary-core": "vivary_core",
+_CAPABILITY_ROOT_LIMIT = 8
+_CAPABILITY_SYS_PATH_ENTRY_LIMIT = 256
+_CAPABILITY_ROOT_ENTRY_LIMIT = 10_000
+_CAPABILITY_METADATA_BYTE_LIMIT = 256 * 1024
+_CAPABILITY_RECORD_BYTE_LIMIT = 2 * 1024 * 1024
+_CAPABILITY_METADATA_FIELD_LIMIT = 64
+_CAPABILITY_REQUIREMENT_LIMIT = 64
+_CAPABILITY_RECORD_ROW_LIMIT = 20_000
+
+_STABLE_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+_REQUIREMENT_FLOOR_RE = re.compile(
+    r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)\s*>=\s*"
+    r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)\s*$"
+)
+_REQUIREMENT_NAME_RE = re.compile(
+    r"^\s*(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$|[\[<>=!~;@])"
+)
+
+# This fixed inventory is the one owner for every public capability row and passive
+# probe fact. Dependency floors and console targets remain package-manifest facts:
+# the probe accepts only supported declared floors and records its public script name.
+_CAPABILITY_DECLARATIONS = {
+    "storage:file": {
+        "label": "File-backed typed graph",
+        "default": True,
+        "requires_approval": False,
+        "network": False,
+        "requirements": (),
+    },
+    "storage:embedded": {
+        "label": "Local embedded storage",
+        "default": False,
+        "requires_approval": True,
+        "network": False,
+        "requirements": (
+            {
+                "hint": "vivary-tropo[embedded]",
+                "distribution": "lancedb",
+                "module": "lancedb",
+            },
+        ),
+    },
+    "memory:none": {
+        "label": "No semantic memory",
+        "default": True,
+        "requires_approval": False,
+        "network": False,
+        "requirements": (),
+    },
+    "memory:local": {
+        "label": "Local semantic memory policy",
+        "default": False,
+        "requires_approval": True,
+        "requires_explicit_index": True,
+        "network": False,
+        "requirements": (),
+    },
+    "memory:cognee": {
+        "label": "Cognee semantic memory",
+        "default": False,
+        "requires_approval": True,
+        "requires_explicit_index": True,
+        "network": "configurable, default false",
+        "adapter_status": "optional-package",
+        "requirements": (
+            {
+                "hint": "vivary-memory-cognee",
+                "distribution": "vivary-memory-cognee",
+                "module": "vivary_cognee",
+                "vivary": True,
+            },
+        ),
+    },
+    "active-context:cocoindex-code": {
+        "label": "CocoIndex-code active context",
+        "default": False,
+        "requires_approval": True,
+        "requires_explicit_index": True,
+        "network": "provider-dependent, default local guidance",
+        "presets": ("coding",),
+        "requirements": (
+            {
+                "hint": "cocoindex-code[full]",
+                "distribution": "cocoindex-code",
+                "module": "cocoindex_code",
+            },
+        ),
+    },
+    "governed-context:core": {
+        "label": "Governed contracts (vivary-core)",
+        "default": False,
+        "requires_approval": False,
+        "network": False,
+        "command": None,
+        "authority": "library-only",
+        "requirements": (
+            {
+                "hint": "vivary-core",
+                "distribution": "vivary-core",
+                "module": "vivary_core",
+                "vivary": True,
+            },
+        ),
+    },
+    "governed-context:tropo": {
+        "label": "Governed context compilation (Tropo)",
+        "default": False,
+        "requires_approval": False,
+        "network": False,
+        "command": "tropo find --governed",
+        "authority": "read-only-context",
+        "governed_role": "vivary-tropo",
+        "requirements": (
+            {
+                "hint": "vivary-tropo",
+                "distribution": "vivary-tropo",
+                "module": "tropo",
+                "script": "tropo",
+                "callable": "main",
+                "vivary": True,
+            },
+            {
+                "hint": "vivary-core",
+                "distribution": "vivary-core",
+                "module": "vivary_core",
+                "vivary": True,
+            },
+        ),
+    },
+    "governed-policy:strato": {
+        "label": "Governed policy decisions (Strato)",
+        "default": False,
+        "requires_approval": False,
+        "network": False,
+        "command": "strato decide --governed",
+        "authority": "decision-only",
+        "governed_role": "vivary-strato",
+        "requirements": (
+            {
+                "hint": "vivary-strato",
+                "distribution": "vivary-strato",
+                "module": "strato",
+                "script": "strato",
+                "callable": "main",
+                "vivary": True,
+            },
+            {
+                "hint": "vivary-core",
+                "distribution": "vivary-core",
+                "module": "vivary_core",
+                "vivary": True,
+            },
+        ),
+    },
+    "governed-verification:ozone": {
+        "label": "Governed verification (Ozone)",
+        "default": False,
+        "requires_approval": False,
+        "network": False,
+        "command": "ozone verify --governed",
+        "authority": "verification-and-proposal-only",
+        "governed_role": "vivary-ozone",
+        "requirements": (
+            {
+                "hint": "vivary-ozone",
+                "distribution": "vivary-ozone",
+                "module": "ozone",
+                "script": "ozone",
+                "callable": "main",
+                "vivary": True,
+            },
+            {
+                "hint": "vivary-tropo",
+                "distribution": "vivary-tropo",
+                "module": "tropo",
+                "script": "tropo",
+                "callable": "main",
+                "vivary": True,
+            },
+            {
+                "hint": "vivary-core",
+                "distribution": "vivary-core",
+                "module": "vivary_core",
+                "vivary": True,
+            },
+        ),
+    },
+    "governed-control:exo": {
+        "label": "Governed execution control (Exo)",
+        "default": False,
+        "requires_approval": False,
+        "network": False,
+        "command": "exo control --governed",
+        "authority": "projection-only",
+        "governed_role": "vivary-exo",
+        "requirements": (
+            {
+                "hint": "vivary-exo",
+                "distribution": "vivary-exo",
+                "module": "exo",
+                "script": "exo",
+                "callable": "main",
+                "vivary": True,
+            },
+            {
+                "hint": "vivary-tropo",
+                "distribution": "vivary-tropo",
+                "module": "tropo",
+                "script": "tropo",
+                "callable": "main",
+                "vivary": True,
+            },
+            {
+                "hint": "vivary-core",
+                "distribution": "vivary-core",
+                "module": "vivary_core",
+                "vivary": True,
+            },
+        ),
+    },
 }
 
 
-def _requirement_importable(requirement: str) -> bool:
-    module = REQUIREMENT_IMPORTS.get(requirement)
-    if module is None:
-        module = requirement.split("[", 1)[0].replace("-", "_")
+class _CapabilityProbeFailure(Exception):
+    pass
+
+
+class _CapabilityContractIncompatible(Exception):
+    pass
+
+
+def _normalize_distribution_name(value: str) -> str:
+    return re.sub(r"[-_.]+", "-", value).lower()
+
+
+def _dist_info_identity(value: str) -> tuple[str, str] | None:
+    suffix = ".dist-info"
+    if not value.lower().endswith(suffix):
+        return None
+    stem = value[: -len(suffix)]
+    name, separator, version = stem.rpartition("-")
+    if not separator or not name or not version:
+        return None
+    return _normalize_distribution_name(name), version
+
+
+def _capability_install_roots() -> tuple[Path, ...]:
+    candidates: list[Path] = []
+    paths = sysconfig.get_paths()
+    for key in ("purelib", "platlib"):
+        value = paths.get(key)
+        if value:
+            candidates.append(Path(value))
+    if site.ENABLE_USER_SITE:
+        user_site = site.getusersitepackages()
+        if isinstance(user_site, str):
+            candidates.append(Path(user_site))
+        else:
+            candidates.extend(Path(value) for value in user_site)
+    if len(candidates) > _CAPABILITY_ROOT_LIMIT:
+        raise _CapabilityProbeFailure
+
+    canonical: dict[str, Path] = {}
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise _CapabilityProbeFailure from exc
+        canonical[os.path.normcase(str(resolved))] = resolved
+
+    if len(sys.path) > _CAPABILITY_SYS_PATH_ENTRY_LIMIT:
+        raise _CapabilityProbeFailure
+    ordered: list[Path] = []
+    for entry in sys.path:
+        if not entry:
+            continue
+        try:
+            key = os.path.normcase(str(Path(entry).resolve()))
+        except (OSError, RuntimeError, ValueError):
+            continue
+        candidate = canonical.pop(key, None)
+        if candidate is not None:
+            ordered.append(candidate)
+        if not canonical:
+            break
+    return tuple(ordered)
+
+
+def _read_capability_file(path: Path, root: Path, limit: int) -> bytes:
     try:
-        return importlib.util.find_spec(module) is not None
-    except (ImportError, ValueError, AttributeError):
-        return False
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise _CapabilityContractIncompatible from exc
+    if not _path_within(root, resolved) or not resolved.is_file():
+        raise _CapabilityContractIncompatible
+    try:
+        with resolved.open("rb") as handle:
+            content = handle.read(limit + 1)
+    except OSError as exc:
+        raise _CapabilityProbeFailure from exc
+    if len(content) > limit:
+        raise _CapabilityProbeFailure
+    return content
 
 
-def _capability_installed(capability: dict) -> bool:
-    """Whether everything a capability declares it needs is actually importable.
+def _capability_distribution_index(
+    roots: tuple[Path, ...],
+    requirements: dict[str, dict],
+) -> dict[str, list[tuple[int, Path, Path, str]]]:
+    if len(roots) > _CAPABILITY_ROOT_LIMIT:
+        raise _CapabilityProbeFailure
+    expected = {
+        requirement: _normalize_distribution_name(spec["distribution"])
+        for requirement, spec in requirements.items()
+    }
+    index: dict[str, list[tuple[int, Path, Path, str]]] = {
+        requirement: [] for requirement in expected
+    }
+    entries_seen = 0
+    for root_index, root in enumerate(roots):
+        try:
+            resolved_root = root.resolve(strict=True)
+        except FileNotFoundError:
+            continue
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise _CapabilityProbeFailure from exc
+        if not resolved_root.is_dir():
+            raise _CapabilityProbeFailure
+        try:
+            with os.scandir(resolved_root) as entries:
+                for entry in entries:
+                    entries_seen += 1
+                    if entries_seen > _CAPABILITY_ROOT_ENTRY_LIMIT:
+                        raise _CapabilityProbeFailure
+                    try:
+                        is_dist_info_directory = entry.is_dir(follow_symlinks=False)
+                        is_link = entry.is_symlink()
+                        if not is_dist_info_directory and os.name == "nt":
+                            attributes = entry.stat(
+                                follow_symlinks=False
+                            ).st_file_attributes
+                            is_link = is_link or bool(
+                                attributes
+                                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+                            )
+                    except OSError as exc:
+                        raise _CapabilityProbeFailure from exc
+                    if not is_dist_info_directory and not is_link:
+                        continue
+                    identity = _dist_info_identity(entry.name)
+                    if identity is None:
+                        continue
+                    distribution_name, distribution_version = identity
+                    for distribution, normalized_name in expected.items():
+                        if distribution_name == normalized_name:
+                            index[distribution].append(
+                                (
+                                    root_index,
+                                    resolved_root,
+                                    Path(entry.path),
+                                    distribution_version,
+                                )
+                            )
+        except _CapabilityProbeFailure:
+            raise
+        except (OSError, ValueError) as exc:
+            raise _CapabilityProbeFailure from exc
+    return index
 
-    Derived from the capability's own `requires_install` rather than a parallel map,
-    which is what keeps the answer honest: a second hand-maintained list can disagree
-    with the declaration it is supposed to describe, and the first version of this did
-    exactly that — reporting a capability needing `vivary-memory-cognee` as installed
-    while reporting one needing nothing as absent.
 
-    A capability requiring nothing is always present. Declared intent is not install
-    truth: the report is only actionable if it says what is present *here*. Absence is
-    never an error — these are optional by construction, and calling an optional
-    package's absence "broken" is precisely what this report exists to avoid.
-    """
-    return all(
-        _requirement_importable(requirement)
-        for requirement in capability.get("requires_install") or []
-    )
+def _selected_dist_info(
+    index: dict[str, list[tuple[int, Path, Path, str]]], distribution: str
+) -> tuple[int, Path, Path, str] | None:
+    matches = index[distribution]
+    if not matches:
+        return None
+    first_root = min(match[0] for match in matches)
+    selected = [match for match in matches if match[0] == first_root]
+    if len(selected) != 1:
+        raise _CapabilityContractIncompatible
+    root_index, root, dist_info, distribution_version = selected[0]
+    try:
+        resolved = dist_info.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise _CapabilityContractIncompatible from exc
+    lexical = os.path.normcase(os.path.abspath(dist_info))
+    if (
+        not _path_within(root, resolved)
+        or lexical != os.path.normcase(str(resolved))
+    ):
+        raise _CapabilityContractIncompatible
+    return root_index, root, resolved, distribution_version
 
 
-def capability_report(preset: str = "coding") -> dict:
-    if preset not in PRESETS:
-        raise ScaffoldError(f"unknown preset {preset!r}; expected one of {', '.join(PRESETS)}")
-
-    capabilities = [
-        {
-            "id": "storage:file",
-            "label": "File-backed typed graph",
-            "default": True,
-            "requires_install": [],
-            "requires_approval": False,
-            "network": False,
-        },
-        {
-            "id": "storage:embedded",
-            "label": "Local embedded storage",
-            "default": False,
-            "requires_install": ["vivary-tropo[embedded]"],
-            "requires_approval": True,
-            "network": False,
-        },
-        {
-            "id": "memory:none",
-            "label": "No semantic memory",
-            "default": True,
-            "requires_install": [],
-            "requires_approval": False,
-            "network": False,
-        },
-        {
-            "id": "memory:local",
-            "label": "Local semantic memory policy",
-            "default": False,
-            "requires_install": [],
-            "requires_approval": True,
-            "requires_explicit_index": True,
-            "network": False,
-        },
-        {
-            "id": "memory:cognee",
-            "label": "Cognee semantic memory",
-            "default": False,
-            "requires_install": ["vivary-memory-cognee"],
-            "requires_approval": True,
-            "requires_explicit_index": True,
-            "network": "configurable, default false",
-            "adapter_status": "optional-package",
-        },
-    ]
-
-    if preset == "coding":
-        capabilities.append(
-            {
-                "id": "active-context:cocoindex-code",
-                "label": "CocoIndex-code active context",
-                "default": False,
-                "requires_install": ["cocoindex-code[full]"],
-                "requires_approval": True,
-                "requires_explicit_index": True,
-                "network": "provider-dependent, default local guidance",
-            }
+def _module_artifact_candidates(module: str) -> tuple[Path, ...]:
+    relative = Path(*module.split("."))
+    return tuple(
+        path
+        for suffix in importlib.machinery.all_suffixes()
+        for path in (
+            relative.with_suffix(suffix),
+            relative / f"__init__{suffix}",
         )
-
-    # The governed-context seam. Local-only and approval-free: it reads a workspace
-    # and never writes, fetches, or reaches a provider. Not a default — it is not
-    # published yet, and nothing in the baseline install requires it (#207).
-    capabilities.append(
-        {
-            "id": "governed-context:core",
-            "label": "Governed context seam (vivary-core)",
-            "default": False,
-            "requires_install": ["vivary-core"],
-            "requires_approval": False,
-            "network": False,
-        }
     )
 
-    for capability in capabilities:
-        capability["installed"] = _capability_installed(capability)
 
+def _has_earlier_module_artifact(
+    roots: tuple[Path, ...],
+    selected_root_index: int,
+    module: str,
+) -> bool:
+    for root in roots[:selected_root_index]:
+        for candidate in _module_artifact_candidates(module):
+            try:
+                os.lstat(root / candidate)
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                raise _CapabilityProbeFailure from exc
+            return True
+    return False
+
+
+def _has_competing_module_artifact(
+    root: Path,
+    module: str,
+    recorded_artifact: str,
+) -> bool:
+    for candidate in _module_artifact_candidates(module):
+        try:
+            os.lstat(root / candidate)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise _CapabilityProbeFailure from exc
+        if candidate.as_posix() != recorded_artifact:
+            return True
+    return False
+
+def _parse_capability_metadata(content: bytes) -> tuple[dict[str, str], tuple[str, ...]]:
+    try:
+        message = BytesParser().parsebytes(content)
+    except Exception as exc:
+        raise _CapabilityProbeFailure from exc
+    if message.defects:
+        raise _CapabilityProbeFailure
+    if len(message.items()) > _CAPABILITY_METADATA_FIELD_LIMIT:
+        raise _CapabilityProbeFailure
+    fields: dict[str, str] = {}
+    for field in ("Metadata-Version", "Name", "Version", "Requires-Python"):
+        values = message.get_all(field) or ()
+        if (
+            len(values) != 1
+            or not isinstance(values[0], str)
+            or not values[0].strip()
+        ):
+            raise _CapabilityProbeFailure
+        fields[field.lower().replace("-", "_")] = values[0]
+    requirements = tuple(message.get_all("Requires-Dist") or ())
+    if (
+        len(requirements) > _CAPABILITY_REQUIREMENT_LIMIT
+        or not all(isinstance(requirement, str) for requirement in requirements)
+    ):
+        raise _CapabilityProbeFailure
+    return fields, requirements
+
+
+def _parse_console_target(content: bytes, script: str) -> tuple[str, str]:
+    parser = configparser.ConfigParser(interpolation=None, strict=True)
+    parser.optionxform = str
+    try:
+        parser.read_string(content.decode("utf-8"))
+        value = parser["console_scripts"][script]
+    except (UnicodeDecodeError, configparser.Error, KeyError) as exc:
+        raise _CapabilityContractIncompatible from exc
+    target = value.split(":")
+    if len(target) != 2:
+        raise _CapabilityContractIncompatible
+    module, callable_name = (part.strip() for part in target)
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", module) or not re.fullmatch(
+        r"[A-Za-z_][A-Za-z0-9_.]*",
+        callable_name,
+    ):
+        raise _CapabilityContractIncompatible
+    return module, callable_name
+
+
+def _recorded_module_path(
+    content: bytes,
+    module: str,
+    *,
+    owned_paths: tuple[str, ...] = (),
+) -> str:
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _CapabilityProbeFailure from exc
+    reader = csv.reader(text.splitlines())
+    candidates = {
+        f"{module.replace('.', '/')}.py",
+        f"{module.replace('.', '/')}/__init__.py",
+    }
+    module_path: str | None = None
+    found_owned_paths: set[str] = set()
+    rows = 0
+    try:
+        for row in reader:
+            rows += 1
+            if rows > _CAPABILITY_RECORD_ROW_LIMIT:
+                raise _CapabilityProbeFailure
+            if not row:
+                continue
+            path = row[0].replace("\\", "/")
+            if path in candidates:
+                if module_path is not None and module_path != path:
+                    raise _CapabilityContractIncompatible
+                module_path = path
+            if path in owned_paths:
+                found_owned_paths.add(path)
+    except csv.Error as exc:
+        raise _CapabilityProbeFailure from exc
+    if module_path is None or found_owned_paths != set(owned_paths):
+        raise _CapabilityContractIncompatible
+    return module_path
+
+
+def _stable_version(value: str) -> tuple[int, int, int]:
+    match = _STABLE_VERSION_RE.fullmatch(value)
+    if match is None:
+        raise _CapabilityContractIncompatible
+    try:
+        return tuple(int(part) for part in match.groups())
+    except ValueError as exc:
+        raise _CapabilityContractIncompatible from exc
+
+
+def _required_dependency_floors(
+    requirements: tuple[str, ...],
+    expected_dependencies: tuple[str, ...],
+) -> dict[str, tuple[int, int, int]]:
+    expected = {
+        _normalize_distribution_name(dependency): dependency
+        for dependency in expected_dependencies
+    }
+    floors: dict[str, tuple[int, int, int]] = {}
+    for declared in requirements:
+        name_match = _REQUIREMENT_NAME_RE.match(declared)
+        if name_match is None:
+            continue
+        dependency = expected.get(
+            _normalize_distribution_name(name_match.group("name"))
+        )
+        if dependency is None:
+            continue
+        match = _REQUIREMENT_FLOOR_RE.fullmatch(declared)
+        if match is None:
+            raise _CapabilityContractIncompatible
+        if dependency in floors:
+            raise _CapabilityContractIncompatible
+        try:
+            floors[dependency] = tuple(
+                int(match.group(part)) for part in ("major", "minor", "patch")
+            )
+        except ValueError as exc:
+            raise _CapabilityContractIncompatible from exc
+    if set(floors) != set(expected_dependencies):
+        raise _CapabilityContractIncompatible
+    return floors
+
+
+def _capability_requirement_specs(
+    capabilities: list[dict],
+) -> tuple[dict[str, dict], dict[str, tuple[str, ...]]]:
+    specs: dict[str, dict] = {}
+    role_dependencies: dict[str, tuple[str, ...]] = {}
+    for capability in capabilities:
+        declaration = _CAPABILITY_DECLARATIONS.get(capability["id"])
+        if declaration is None:
+            raise _CapabilityProbeFailure
+        requirements = declaration["requirements"]
+        role = declaration.get("governed_role")
+        if role is not None and not any(
+            requirement["hint"] == role for requirement in requirements
+        ):
+            raise _CapabilityProbeFailure
+        for requirement in requirements:
+            hint = requirement["hint"]
+            existing = specs.setdefault(hint, requirement)
+            if existing != requirement:
+                raise _CapabilityProbeFailure
+        if role is not None:
+            dependencies = tuple(
+                requirement["hint"]
+                for requirement in requirements
+                if requirement["hint"] != role
+            )
+            existing = role_dependencies.setdefault(role, dependencies)
+            if existing != dependencies:
+                raise _CapabilityProbeFailure
+    return specs, role_dependencies
+
+
+def _read_capability_distribution(
+    requirement: str,
+    spec: dict,
+    roots: tuple[Path, ...],
+    index: dict[str, list[tuple[int, Path, Path, str]]],
+    expected_dependencies: tuple[str, ...],
+) -> dict:
+    selected = _selected_dist_info(index, requirement)
+    if selected is None:
+        return {"status": "missing"}
+    root_index, root, dist_info, distribution_version = selected
+    metadata = _read_capability_file(
+        dist_info / "METADATA", root, _CAPABILITY_METADATA_BYTE_LIMIT
+    )
+    fields, requirements = _parse_capability_metadata(metadata)
+    if _normalize_distribution_name(fields["name"]) != _normalize_distribution_name(
+        spec["distribution"]
+    ):
+        raise _CapabilityContractIncompatible
+    if spec.get("vivary") and (
+        fields["requires_python"] != ">=3.11"
+        or fields["version"] != distribution_version
+    ):
+        raise _CapabilityContractIncompatible
+
+    module = spec["module"]
+    if _has_earlier_module_artifact(roots, root_index, module):
+        raise _CapabilityContractIncompatible
+    owned_paths = [f"{dist_info.name}/METADATA"]
+    if script := spec.get("script"):
+        entrypoints = _read_capability_file(
+            dist_info / "entry_points.txt",
+            root,
+            _CAPABILITY_METADATA_BYTE_LIMIT - len(metadata),
+        )
+        if _parse_console_target(entrypoints, script) != (
+            module,
+            spec["callable"],
+        ):
+            raise _CapabilityContractIncompatible
+        owned_paths.append(f"{dist_info.name}/entry_points.txt")
+    record = _read_capability_file(
+        dist_info / "RECORD", root, _CAPABILITY_RECORD_BYTE_LIMIT
+    )
+    artifact = _recorded_module_path(
+        record,
+        module,
+        owned_paths=tuple(owned_paths),
+    )
+    if _has_competing_module_artifact(root, module, artifact):
+        raise _CapabilityContractIncompatible
+    try:
+        artifact_path = (root / Path(*artifact.split("/"))).resolve(strict=True)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise _CapabilityContractIncompatible from exc
+    if not _path_within(root, artifact_path) or not artifact_path.is_file():
+        raise _CapabilityContractIncompatible
+
+    return {
+        "status": "installed",
+        "version": _stable_version(fields["version"]) if spec.get("vivary") else None,
+        "dependency_floors": (
+            _required_dependency_floors(requirements, expected_dependencies)
+            if expected_dependencies
+            else {}
+        ),
+    }
+
+
+def _capability_probe_results(capabilities: list[dict]) -> dict[str, dict]:
+    try:
+        specs, role_dependencies = _capability_requirement_specs(capabilities)
+        requirements = tuple(specs)
+        roots = _capability_install_roots()
+        index = _capability_distribution_index(roots, specs)
+    except (OSError, RuntimeError, ValueError, _CapabilityProbeFailure):
+        return {
+            requirement: {"status": "probe-failed"}
+            for requirement in (
+                requirement
+                for capability in capabilities
+                for requirement in capability.get("requires_install", ())
+            )
+        }
+
+    results: dict[str, dict] = {}
+    for requirement in requirements:
+        try:
+            results[requirement] = _read_capability_distribution(
+                requirement,
+                specs[requirement],
+                roots,
+                index,
+                role_dependencies.get(requirement, ()),
+            )
+        except _CapabilityContractIncompatible:
+            results[requirement] = {"status": "incompatible"}
+        except (
+            OSError,
+            RuntimeError,
+            UnicodeError,
+            ValueError,
+            _CapabilityProbeFailure,
+        ):
+            results[requirement] = {"status": "probe-failed"}
+
+    for role in role_dependencies:
+        result = results.get(role)
+        if result is None or result["status"] != "installed":
+            continue
+        for dependency, floor in result["dependency_floors"].items():
+            dependency_result = results.get(dependency)
+            if dependency_result is None:
+                results[role] = {"status": "incompatible"}
+                break
+            if (
+                dependency_result["status"] == "installed"
+                and dependency_result["version"] < floor
+            ):
+                results[role] = {"status": "incompatible"}
+                break
+    return results
+
+
+def _annotate_capability(capability: dict, results: dict[str, dict]) -> None:
+    requirements = capability.get("requires_install", ())
+    statuses = [results[requirement]["status"] for requirement in requirements]
+    if "probe-failed" in statuses:
+        status = "probe-failed"
+        reasons = ["capability_probe_failed"]
+        missing: list[str] = []
+    elif "incompatible" in statuses:
+        status = "incompatible"
+        reasons = ["capability_contract_incompatible"]
+        missing = []
+    elif "missing" in statuses:
+        status = "not-installed"
+        reasons = ["capability_dependency_missing"]
+        missing = [
+            requirement
+            for requirement in requirements
+            if results[requirement]["status"] == "missing"
+        ]
+    else:
+        status = "installed"
+        reasons = []
+        missing = []
+    capability["installed"] = status == "installed"
+    capability["install_status"] = status
+    capability["reason_codes"] = reasons
+    capability["missing_install"] = missing
+
+
+def _capability_declarations(preset: str | None) -> list[dict]:
+    capabilities: list[dict] = []
+    for capability_id, declaration in _CAPABILITY_DECLARATIONS.items():
+        presets = declaration.get("presets")
+        if presets is not None and preset not in presets:
+            continue
+        capability = {
+            "id": capability_id,
+            **{
+                field: value
+                for field, value in declaration.items()
+                if field not in {"governed_role", "presets", "requirements"}
+            },
+            "requires_install": [
+                requirement["hint"] for requirement in declaration["requirements"]
+            ],
+        }
+        capabilities.append(capability)
+    return capabilities
+
+
+def _build_capability_report(preset: str | None) -> dict:
+    capabilities = _capability_declarations(preset)
+    results = _capability_probe_results(capabilities)
+    for capability in capabilities:
+        _annotate_capability(capability, results)
     return {
         "ok": True,
         "preset": preset,
         "default_capabilities": ["storage:file", "memory:none"],
         "available_capabilities": capabilities,
     }
+
+
+def capability_report(preset: str = "coding") -> dict:
+    if preset not in PRESETS:
+        raise ScaffoldError(
+            f"unknown preset {preset!r}; expected one of {', '.join(PRESETS)}"
+        )
+    return _build_capability_report(preset)
 
 
 def _add_receipt_argument(parser: argparse.ArgumentParser) -> None:
@@ -4616,8 +5293,12 @@ def _main(argv: list[str] | None = None) -> int:
         else:
             print(f"create-vivary capabilities for {report['preset']}:")
             for cap in report["available_capabilities"]:
-                marker = " (default)" if cap["default"] else ""
-                print(f"- {cap['id']}: {cap['label']}{marker}")
+                markers = [
+                    "default" if cap["default"] else None,
+                    cap["install_status"],
+                ]
+                marker = ", ".join(value for value in markers if value)
+                print(f"- {cap['id']}: {cap['label']} ({marker})")
         return 0
 
     if args.command == "doctor":
@@ -4908,6 +5589,13 @@ def _print_doctor_report(report: dict) -> None:
             f"memory: {memory.get('status', 'unknown')} "
             f"({memory.get('provider', 'none')})"
         )
+    capabilities = report.get("capabilities", {}).get("available_capabilities", ())
+    for capability in capabilities:
+        if capability["id"].startswith("governed-"):
+            print(
+                f"capability: {capability['id']} "
+                f"({capability['install_status']})"
+            )
     for warning in report["warnings"]:
         print(f"warning: {warning}")
     for error in report["errors"]:

@@ -4,13 +4,16 @@ Scaffold a complete Vivary agent workspace: tropo config, strato workspace files
 runtime skills, private-memory boundaries, progressive module indexes, and a starter
 typed graph.
 
-**Current release:** 0.3.1. Use 0.3.1 for new installs; no migration is expected
-from 0.2.1, 0.2.2, 0.2.3, 0.2.5, 0.2.6, 0.2.7, or 0.2.8.
+**Current published release:** 0.3.1. Use 0.3.1 for registry installs. Users of
+0.2.1, 0.2.2, 0.2.3, 0.2.5, 0.2.6, 0.2.7, or 0.2.8 need no migration.
 
-**Release focus:** 0.3.1 is the adoption line: brownfield `create-vivary adopt <path>`
-brings Vivary into an existing repo or vault without touching existing files
-(dry-run by default, `--yes` to write), and `doctor --trend` tracks graph and
-routing drift across runs in `.vivary/doctor-state.json`.
+**Development source:** Version 0.3.2 has not reached registries. It adds
+distribution-bound governed capability reporting to `capabilities` and Doctor. The
+published 0.3.1 release remains the adoption line. Brownfield
+`create-vivary adopt <path>` brings Vivary into an
+existing repo or vault without touching existing files (dry-run by default, `--yes`
+to write), and `doctor --trend` tracks graph and routing drift across runs in
+`.vivary/doctor-state.json`.
 
 **Security hardening:** The 0.2.5 line validates active `.gitignore` rules for `USER.md`,
 `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`; scaffolds private heartbeat report
@@ -71,11 +74,16 @@ target paths, or environment variables.
 
 Semantic memory is a separate optional capability. `--memory local` writes local-only
 policy and graph nodes; `--memory cognee` writes Cognee policy and verification docs.
-Neither option indexes content or sends data anywhere during scaffold, and Cognee is
-not installed by default. The optional `vivary-memory-cognee` adapter package can run
+Neither option indexes content or sends data during scaffold, and Cognee is not
+installed by default. The optional `vivary-memory-cognee` adapter can run
 `vivary-cognee doctor`, `index`, `recall`, and `forget` after an explicit install and
-index approval. Use `create-vivary capabilities --preset <name> --json` to show agents
-the available optional pieces before setup.
+index approval.
+
+In development source, `create-vivary capabilities --preset <name> --json` reports
+storage, memory, active-context, Core, and all four governed role surfaces. Each row
+includes `installed`, `install_status`, deterministic `reason_codes`, and
+`missing_install`. A missing optional package is nonfatal. A pre-governed or
+incompatible role is explicit rather than treated as installed.
 
 For coding workspaces, `--active-context cocoindex-code` adds an optional
 CocoIndex-code sidecar profile: active-context skills for Claude/Codex-style agents,
@@ -91,6 +99,12 @@ indexes, semantic-memory status, and typed graph:
 python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo --json
 python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo --repair --json
 ```
+
+Development-source Doctor embeds the same capability envelope as `capabilities`.
+Installed-state probes read bounded distribution records from the active interpreter's
+canonical package roots. They do not import role or provider modules, execute commands,
+or consult ambient import hooks. Optional absence and probe failure do not change
+workspace health.
 
 In source builds and the next package release, `doctor --repair --json` previews a
 guided repair plan without writing. After approval, `doctor --repair --yes`

@@ -865,8 +865,8 @@ create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writin
 |---|---|
 | `init <target>` | Lay down a complete workspace: the agent contract, the strato shell (SOUL/USER/STATE/MEMORY), runtime skills, a `tropo.toml`, a starter typed graph, and optional storage or semantic-memory config based on flags/wizard answers. |
 | `wizard <target>` | Re-run the setup wizard on an existing workspace to reconfigure storage and optional semantic-memory policy. |
-| `capabilities` | List optional capabilities for a preset: storage, semantic memory, and preset-specific sidecars. |
-| `doctor <target>` | Validate the strict common workspace shell, the inferred published module contract, active privacy ignore rules, module directory indexes, tropo graph health, declared capability config, backend reachability, and semantic-memory status. |
+| `capabilities` | Report optional capabilities plus Core and all four governed role surfaces for the selected preset. |
+| `doctor <target>` | Validate the strict common workspace shell, the inferred published module contract, active privacy ignore rules, module directory indexes, tropo graph health, declared capability config, backend reachability, semantic-memory status, and the same governed capability envelope. |
 | `adopt <target>` | Bring Vivary to an existing repo or vault. Only adds files that don't already exist; never moves, renames, edits, or overwrites anything. Dry-run by default. |
 
 | Flag | Effect |
@@ -886,6 +886,46 @@ create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writin
 | `--privacy local\|cloud` | Hint for `--auto` storage decisions. |
 | `--repair` | Doctor-only. Include a conservative guided repair plan. Dry-run by default; writes nothing without `--yes`. |
 | `--yes` | With `doctor --repair`, apply deterministic safe repairs, rerun doctor, and keep a nonzero exit if the workspace is still invalid. |
+
+### Capability status (development source)
+
+The 0.3.2 development source reports a fixed Core-and-role inventory alongside the
+existing storage, semantic-memory, and preset sidecar rows:
+
+| Capability | Command | Authority |
+|---|---|---|
+| `governed-context:core` | Library only | `library-only` |
+| `governed-context:tropo` | `tropo find --governed` | `read-only-context` |
+| `governed-policy:strato` | `strato decide --governed` | `decision-only` |
+| `governed-verification:ozone` | `ozone verify --governed` | `verification-and-proposal-only` |
+| `governed-control:exo` | `exo control --governed` | `projection-only` |
+
+Each capability row has `installed`, `install_status`, `reason_codes`, and
+`missing_install`. Status is `installed`, `not-installed`, `incompatible`, or
+`probe-failed`. Resolution checks `probe-failed` first, then `incompatible`,
+`not-installed`, and `installed`.
+Missing role or Core artifacts report `capability_dependency_missing`.
+A role whose installed manifest, Core floor, normalized distribution identity, module
+record, exact console-script target, or competing import artifact violates the public
+contract reports `capability_contract_incompatible`. A bounded read or parse failure
+reports `capability_probe_failed`. Only `not-installed` rows include ordered install
+hints.
+
+The status reader intersects the active interpreter path with its canonical package
+roots. It inspects at most 256 `sys.path` entries, eight selected roots, and 10,000
+entries across those roots. It admits singleton `Metadata-Version`, `Name`, `Version`,
+and `Requires-Python` fields,
+with at most 64 metadata fields and 64 dependency records. It binds modules, control
+metadata, and console scripts to the exact distribution's `RECORD`. It caps combined
+metadata and entrypoint data at 256 KiB per distribution, plus `RECORD` at 20,000 rows
+and 2 MiB. The reader does not import role or provider packages, dispatch ambient import
+or distribution hooks, invoke entrypoints, spawn commands, or use the network.
+
+Optional absence, incompatibility, and probe failure remain visible but do not make
+`capabilities` or Doctor unhealthy. Doctor derives its preset from the workspace
+`README.md`. A missing, unsupported, or unreadable `Preset:` declaration yields
+`"preset": null` and omits only preset-specific active-context rows. Existing
+configured-Cognee health checks remain separate from this passive capability subreport.
 
 `doctor` always requires active ignore rules for `USER.md`, `MEMORY.md`, `memory/*`,
 and `.strato/private/`. Published workspaces can predate `heartbeat-reports/*` or
