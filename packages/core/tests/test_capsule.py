@@ -49,7 +49,9 @@ sys.path.insert(0, PY_ROOT)
 
 from vivary_core.canonical import MAX_LOSSLESS_INTEGER, fingerprint, normalize_path  # noqa: E402
 from vivary_core.capsule_compile import (  # noqa: E402
+    CapsuleContentWorkLimitError,
     capsule_context_matches_graph,
+    content_context_is_valid,
     compile_task_capsule,
     MAX_TASK_SCOPE_ROOTS,
     MAX_CAPSULE_CANDIDATE_WORK,
@@ -58,7 +60,7 @@ from vivary_core.capsule_compile import (  # noqa: E402
     is_task_capsule_shape,
     verify_task_capsule_integrity,
 )
-from vivary_core.workspace_content import observe_content  # noqa: E402
+from vivary_core.workspace_content import CONTENT_SCHEMA, observe_content  # noqa: E402
 from vivary_core.workspace_model import project_workspace_graph  # noqa: E402
 from vivary_core.workspace_observe import observe_checkouts  # noqa: E402
 
@@ -69,6 +71,77 @@ FETCH_STAMP_EPOCH = 1782000000.0  # 2026-07-02T00:00:00Z
 def NOW():
     return "2026-07-20T15:00:00.000Z"
 
+
+def _content_artifact(*, checkouts, refusals=None, terms=None, allowlist=None):
+    checkouts = list(checkouts)
+    refusals = [] if refusals is None else list(refusals)
+    if terms is None:
+        terms = [
+            match["term"]
+            for checkout in checkouts
+            for match in checkout["matches"]
+        ] or ["content"]
+    if allowlist is None:
+        allowlist = [checkout["path"] for checkout in checkouts]
+    return {
+        "schema": CONTENT_SCHEMA,
+        "observed_at": NOW(),
+        "terms": terms,
+        "allowlist": allowlist,
+        "checkouts": checkouts,
+        "refusals": refusals,
+    }
+
+
+def _observed_content_checkout(
+    path,
+    *,
+    head_revision="a" * 40,
+    privacy_fingerprint=None,
+    matches=None,
+    omissions=None,
+    reason=None,
+):
+    checkout = {
+        "raw_path": path,
+        "path": normalize_path(path),
+        "status": "observed",
+        "head_revision": head_revision,
+        "privacy_fingerprint": privacy_fingerprint
+        or fingerprint(
+            {
+                "revision": head_revision,
+                "ignored_tracked_paths": [],
+            }
+        ),
+        "matches": [] if matches is None else matches,
+        "omissions": [] if omissions is None else omissions,
+    }
+    if reason is not None:
+        checkout.pop("privacy_fingerprint")
+        checkout["reason"] = reason
+    return checkout
+
+
+def _unknown_content_checkout(path, *, reason, evidence):
+    return {
+        "raw_path": path,
+        "path": normalize_path(path),
+        "status": "unknown",
+        "reason": reason,
+        "matches": [],
+        "omissions": [],
+        "evidence": evidence,
+    }
+
+
+def _content_refusal(path, *, reason):
+    return {
+        "raw_path": path,
+        "path": normalize_path(path),
+        "status": "refused",
+        "reason": reason,
+    }
 
 TASK = {"question": "Which local checkout of the shared origin reflects current repository truth?"}
 
@@ -228,7 +301,7 @@ def test_every_included_claim_carries_a_selection_reason_and_evidence(graph):
         assert isinstance(claim.get("evidence"), list) and len(claim["evidence"]) > 0, (
             f"claim {claim['id']} lacks evidence"
         )
-        assert claim["status"] in ("known", "inferred")
+        assert claim["status"] == "known"
 
 
 def test_selection_is_bounded_by_budget_and_the_overflow_is_recorded_as_an_omission(graph):
@@ -259,8 +332,9 @@ def test_graph_matcher_preserves_compiler_selection_omissions(graph):
     assert not capsule_context_matches_graph(stripped, graph)
 
 
-def test_graph_matcher_allows_opaque_content_to_raise_selection_omission_totals(
-    graph,
+@pytest.mark.parametrize("artifact_kind", ["claim", "unknown", "omission"])
+def test_graph_matcher_rejects_refingerprinted_content_downgrades(
+    graph, artifact_kind
 ):
     checkout = next(
         node
@@ -273,50 +347,206 @@ def test_graph_matcher_allows_opaque_content_to_raise_selection_omission_totals(
         "question": "What modified content exists?",
         "scope": [checkout["path"]],
     }
-    content = {
-        "checkouts": [
-            {
-                "path": checkout["path"],
-                "head_revision": checkout["facts"]["head_revision"]["value"],
-                "matches": [
-                    {
-                        "path": f"notes-{index}.md",
-                        "line": index,
-                        "term": "modified",
-                        "excerpt": "modified content",
-                        "evidence": {"command": "git grep modified"},
-                    }
-                    for index in range(1, 4)
-                ],
-                "omissions": [],
-            }
-        ]
-    }
-    over_budget = compile_task_capsule(
-        task=task,
-        graph=graph,
-        content=content,
-        budget={"max_claims": 1},
-    )
-    assert any(
-        omission["kind"] == "claims_over_budget"
-        for omission in over_budget["omissions"]
-    )
-    assert capsule_context_matches_graph(over_budget, graph)
+    if artifact_kind == "claim":
+        task["filters"] = [{"field": "fact", "equals": "content_match"}]
+        content = _content_artifact(
+            checkouts=[
+                _observed_content_checkout(
+                    checkout["path"],
+                    head_revision=checkout["facts"]["head_revision"]["value"],
+                    matches=[
+                        {
+                            "path": "notes.md",
+                            "line": 1,
+                            "term": "modified",
+                            "excerpt": "modified content",
+                            "evidence": {"command": "git grep modified"},
+                        }
+                    ],
+                )
+            ]
+        )
+    elif artifact_kind == "unknown":
+        content = _content_artifact(
+            checkouts=[
+                _unknown_content_checkout(
+                    checkout["path"],
+                    reason="grep_unavailable",
+                    evidence={"command": "git grep modified"},
+                )
+            ]
+        )
+    else:
+        content = _content_artifact(
+            checkouts=[
+                _observed_content_checkout(
+                    checkout["path"],
+                    head_revision=checkout["facts"]["head_revision"]["value"],
+                    omissions=[
+                        {
+                            "kind": "content_files_truncated",
+                            "omitted_count": 2,
+                            "total_files_matched": 10,
+                            "reason": "matched-file listing capped at 8 files per checkout",
+                        }
+                    ],
+                )
+            ]
+        )
 
-    filtered = compile_task_capsule(
-        task={
-            **task,
-            "filters": [{"field": "fact", "equals": "head_revision"}],
-        },
+    capsule = compile_task_capsule(task=task, graph=graph, content=content)
+    assert capsule_context_matches_graph(capsule, graph, content)
+    assert "content_fingerprint" in capsule["workspace"]
+
+    downgraded = json.loads(json.dumps(capsule))
+    del downgraded["workspace"]["content_fingerprint"]
+    downgraded["fingerprint"] = fingerprint(
+        {
+            key: value
+            for key, value in downgraded.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+
+    assert not is_task_capsule_shape(downgraded)
+    assert not verify_task_capsule_integrity(downgraded)
+    assert not capsule_context_matches_graph(downgraded, graph)
+
+
+
+
+def test_graph_matcher_rejects_stripped_content_selection_omissions(graph):
+    conflict_checkout_ids = {
+        side["checkout"]
+        for conflict in graph["conflicts"]
+        for side in conflict["sides"]
+    }
+    checkout = next(
+        node
+        for node in graph["nodes"]
+        if node.get("id") in conflict_checkout_ids
+        and (node.get("facts", {}).get("head_revision") or {}).get("status")
+        == "known"
+    )
+    match_term = re.findall(r"[^\W_]+", checkout["label"].lower())[0]
+    content = _content_artifact(
+        checkouts=[
+            _observed_content_checkout(
+                checkout["path"],
+                head_revision=checkout["facts"]["head_revision"]["value"],
+                matches=[
+                    {
+                        "path": "notes.md",
+                        "line": 1,
+                        "term": match_term,
+                        "excerpt": f"{match_term} content",
+                        "evidence": {"command": f"git grep {match_term}"},
+                    }
+                ],
+            )
+        ]
+    )
+    cases = [
+        (
+            "filtered_out",
+            {
+                "question": f"Which {match_term} revision is current?",
+                "scope": [checkout["path"]],
+                "filters": [{"field": "fact", "equals": "head_revision"}],
+            },
+            {"max_claims": 100},
+            content,
+        ),
+        (
+            "claims_over_budget",
+            {
+                "question": f"Which {match_term} revision is current?",
+                "scope": [checkout["path"]],
+                "filters": [{"field": "path", "includes": checkout["path"]}],
+            },
+            {"max_claims": 1},
+            content,
+        ),
+    ]
+
+    for omission_kind, task, budget, source in cases:
+        capsule = compile_task_capsule(
+            task=task, graph=graph, budget=budget, content=source
+        )
+        graph_only = compile_task_capsule(
+            task=task, graph=graph, budget=budget
+        )
+        if omission_kind in {"filtered_out", "claims_over_budget"}:
+            assert next(
+                record
+                for record in capsule["omissions"]
+                if record["kind"] == omission_kind
+            ) != next(
+                record
+                for record in graph_only["omissions"]
+                if record["kind"] == omission_kind
+            )
+        assert not any(
+            record.get("kind") == "content_snapshot_stale"
+            for record in capsule["unknowns"]
+        ), (
+            checkout["facts"]["head_revision"]["value"],
+            source["checkouts"][0]["head_revision"],
+        )
+        assert any(
+            omission["kind"] == omission_kind
+            for omission in capsule["omissions"]
+        ), omission_kind
+        assert not any(
+            claim["fact"] == "content_match" for claim in capsule["claims"]
+        ), omission_kind
+
+        downgraded = json.loads(json.dumps(capsule))
+        del downgraded["workspace"]["content_fingerprint"]
+        downgraded["unknowns"] = [
+            record
+            for record in downgraded["unknowns"]
+            if not str(record.get("kind", "")).startswith("content_")
+        ]
+        downgraded["omissions"] = [
+            record
+            for record in downgraded["omissions"]
+            if not record["kind"].startswith("content_")
+        ]
+        downgraded["fingerprint"] = fingerprint(
+            {
+                key: value
+                for key, value in downgraded.items()
+                if key not in {"capsule_id", "fingerprint"}
+            }
+        )
+
+        assert is_task_capsule_shape(downgraded), omission_kind
+        assert not capsule_context_matches_graph(
+            downgraded, graph
+        ), omission_kind
+
+    forged_collation = compile_task_capsule(
+        task={"question": "Which revision is current?", "scope": [checkout["path"]]},
         graph=graph,
-        content=content,
     )
-    assert any(
-        omission["kind"] == "filtered_out"
-        for omission in filtered["omissions"]
+    forged_collation["omissions"].append(
+        {
+            "kind": "collation_domain_excluded",
+            "subject": checkout["id"],
+            "fact": "content_match",
+            "reason": "forged content collation omission",
+        }
     )
-    assert capsule_context_matches_graph(filtered, graph)
+    forged_collation["fingerprint"] = fingerprint(
+        {
+            key: value
+            for key, value in forged_collation.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    assert is_task_capsule_shape(forged_collation)
+    assert not capsule_context_matches_graph(forged_collation, graph)
 
 
 @pytest.mark.parametrize(
@@ -346,6 +576,30 @@ def test_conflicts_survive_compilation_with_both_sides_and_review_required(graph
     assert conflict["decision"] == "review_required"
     assert len(conflict["sides"]) == 2
     assert conflict["status"] == "unresolved"
+
+    no_claims = compile_task_capsule(
+        task=TASK, graph=graph, budget={"max_claims": 0}
+    )
+    assert no_claims["claims"] == []
+    forged = json.loads(json.dumps(no_claims))
+    forged["conflicts"] = []
+    forged["fingerprint"] = fingerprint(
+        {
+            key: value
+            for key, value in forged.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+    assert is_task_capsule_shape(forged)
+    assert not capsule_context_matches_graph(forged, graph)
+
+    for field, value in (
+        ("workspace_fingerprint", "sha256:different-workspace"),
+        ("observed_at", "2026-07-20T16:00:00.000Z"),
+    ):
+        altered_graph = json.loads(json.dumps(graph))
+        altered_graph[field] = value
+        assert not capsule_context_matches_graph(no_claims, altered_graph)
 
 
 def test_unknowns_pass_through_unreduced(graph):
@@ -384,7 +638,7 @@ def test_graph_matcher_preserves_refused_root_omissions(graph):
 
 def test_graph_matcher_rejects_missing_conflict_outside_scope_omission(graph, fx):
     capsule = compile_task_capsule(
-        task={**TASK, "scope": [fx["paths"]["canonical"]]},
+        task={**TASK, "scope": [normalize_path(fx["paths"]["canonical"])]},
         graph=graph,
     )
     assert capsule_context_matches_graph(capsule, graph)
@@ -542,9 +796,58 @@ def test_git_ignored_paths_never_appear_in_a_dirty_entries_claim(graph):
 def test_absent_content_is_byte_identical_to_today(graph):
     omitted = compile_task_capsule(task=TASK, graph=graph)
     explicit_none = compile_task_capsule(task=TASK, graph=graph, content=None)
-    assert omitted["fingerprint"] == explicit_none["fingerprint"]
-    empty_content = compile_task_capsule(task=TASK, graph=graph, content={"checkouts": []})
-    assert omitted["fingerprint"] == empty_content["fingerprint"]
+    empty_mapping = compile_task_capsule(task=TASK, graph=graph, content={})
+    empty_content = compile_task_capsule(
+        task=TASK,
+        graph=graph,
+        content={"checkouts": []},
+    )
+    full_empty_content = observe_content(
+        [],
+        allowlist=[
+            next(
+                node["path"]
+                for node in graph["nodes"]
+                if node.get("kind") == "checkout"
+            )
+        ],
+        now=NOW,
+    )
+    assert (
+        omitted
+        == explicit_none
+        == empty_mapping
+        == empty_content
+        == compile_task_capsule(
+            task=TASK, graph=graph, content=full_empty_content
+        )
+    )
+    checkout_path = next(
+        node["path"]
+        for node in graph["nodes"]
+        if node.get("kind") == "checkout"
+    )
+    scoped_task = {**TASK, "scope": [checkout_path]}
+    assert compile_task_capsule(
+        task=scoped_task, graph=graph
+    ) == compile_task_capsule(
+        task=scoped_task, graph=graph, content={"checkouts": []}
+    )
+
+
+def test_scoped_compilation_rejects_non_mapping_content_without_attribute_error(graph):
+    checkout_path = next(
+        node["path"]
+        for node in graph["nodes"]
+        if node.get("kind") == "checkout"
+    )
+
+    with pytest.raises(ValueError, match="workspace-content"):
+        compile_task_capsule(
+            task={**TASK, "scope": [checkout_path]},
+            graph=graph,
+            content=1,
+        )
 
 
 def test_content_matches_become_bounded_content_match_candidate_claims_intrinsically_question_matched(fx):
@@ -554,18 +857,18 @@ def test_content_matches_become_bounded_content_match_candidate_claims_intrinsic
         [p["canonical"], p["staleNeighbor"], p["dirty"], p["noOrigin"]], allowlist=allowlist, now=NOW
     )
     content_graph = project_workspace_graph(observation)
-    # "modified" only appears in the dirty checkout's tracked.md working-tree
-    # edit; the dirty checkout is not a conflict side (only canonical/
-    # stale-neighbor share an origin), so this isolates the intrinsic
-    # content_term_match signal from conflict_side's higher-priority tier.
+    # "tracked" appears in the dirty checkout's committed tracked.md. The dirty
+    # checkout is not a conflict side (only canonical/stale-neighbor share an
+    # origin), so this isolates the intrinsic content_term_match signal from
+    # conflict_side's higher-priority tier.
     content = observe_content(
         [p["canonical"], p["staleNeighbor"], p["dirty"], p["noOrigin"]],
         allowlist=allowlist,
-        terms=["modified"],
+        terms=["original"],
         now=NOW,
     )
 
-    task = {"question": "What modified files exist?"}
+    task = {"question": "What original files exist?"}
     without_content = compile_task_capsule(task=task, graph=content_graph)
     with_content = compile_task_capsule(task=task, graph=content_graph, content=content)
 
@@ -573,12 +876,12 @@ def test_content_matches_become_bounded_content_match_candidate_claims_intrinsic
     content_claim = next((c for c in with_content["claims"] if c["fact"] == "content_match"), None)
     assert content_claim is not None, "expected a content_match claim once content is supplied"
     assert re.search(r"tracked\.md", content_claim["claim"])
-    assert re.search(r"modified", content_claim["claim"], re.IGNORECASE)
+    assert re.search(r"original", content_claim["claim"], re.IGNORECASE)
     assert content_claim["subject_path"].endswith("dirty")
     assert content_claim["selection"]["tier"] == "question_match"
     signal = next(s for s in content_claim["selection"]["signals"] if s["signal"] == "content_term_match")
     assert signal is not None, "expected an intrinsic content_term_match signal"
-    assert signal["term"] == "modified"
+    assert signal["term"] == "original"
     assert isinstance(content_claim["evidence"], list) and len(content_claim["evidence"]) > 0
     # The intrinsic ranking hint never leaks into the public claim shape.
     assert "intrinsic_signals" not in content_claim
@@ -601,52 +904,200 @@ def test_a_content_match_on_a_conflict_side_checkout_still_ranks_conflict_side(f
 
 
 def test_content_match_candidates_outside_the_graphs_checkouts_are_ignored_never_guessed_at(graph):
-    content = {
-        "checkouts": [
-            {
-                "path": "not/a/graph/checkout",
-                "matches": [
-                    {"path": "x.md", "line": 1, "excerpt": "x", "term": "x", "evidence": {"command": "git grep"}}
+    content = _content_artifact(
+        checkouts=[
+            _observed_content_checkout(
+                "/not/a/graph/checkout",
+                matches=[
+                    {
+                        "path": "x.md",
+                        "line": 1,
+                        "excerpt": "x",
+                        "term": "x",
+                        "evidence": {"command": "git grep"},
+                    }
                 ],
-                "omissions": [],
-            },
+            )
         ]
-    }
+    )
     capsule = compile_task_capsule(task=TASK, graph=graph, content=content)
     assert not any(c["fact"] == "content_match" for c in capsule["claims"])
 
 
 def test_content_omissions_surface_into_capsule_omissions(graph):
     dirty_node = next(n for n in graph["nodes"] if n["kind"] == "checkout" and n["path"].endswith("dirty"))
-    content = {
-        "checkouts": [
-            {
-                "path": dirty_node["path"],
-                "matches": [],
-                "omissions": [
+    content = _content_artifact(
+        checkouts=[
+            _observed_content_checkout(
+                dirty_node["path"],
+                head_revision=dirty_node["facts"]["head_revision"]["value"],
+                privacy_fingerprint=dirty_node["facts"][
+                    "content_privacy_fingerprint"
+                ]["value"],
+                omissions=[
                     {
-                        "kind": "content_files_truncated",
+                        "kind": "content_lines_truncated",
+                        "path": "tracked.md",
                         "omitted_count": 2,
-                        "total_files_matched": 10,
-                        "reason": "matched-file listing capped at 8 files per checkout",
+                        "reason": "matched-line listing capped at 20 per file",
                     }
                 ],
-            },
+            )
         ]
-    }
-    capsule = compile_task_capsule(task=TASK, graph=graph, content=content)
-    surfaced = next(o for o in capsule["omissions"] if o["kind"] == "content_files_truncated")
+    )
+    capsule = compile_task_capsule(
+        task={**TASK, "scope": [dirty_node["path"]]},
+        graph=graph,
+        content=content,
+    )
+    surfaced = next(
+        omission
+        for omission in capsule["omissions"]
+        if omission["kind"] == "content_lines_truncated"
+    )
     assert surfaced["omitted_count"] == 2
-    assert surfaced["total_files_matched"] == 10
     assert surfaced["subject"] == dirty_node["id"]
 
     malformed = json.loads(json.dumps(content))
     del malformed["checkouts"][0]["omissions"][0]["reason"]
-    with pytest.raises(ValueError, match="malformed omission"):
+    with pytest.raises(ValueError, match="workspace-content"):
         compile_task_capsule(task=TASK, graph=graph, content=malformed)
 
 
+def test_content_source_rejects_malformed_and_field_smuggled_records(graph):
+    checkout = next(
+        node
+        for node in graph["nodes"]
+        if node.get("kind") == "checkout"
+        and (node.get("facts", {}).get("head_revision") or {}).get("status")
+        == "known"
+    )
+    task = {
+        "question": "What modified content exists?",
+        "scope": [checkout["path"]],
+        "filters": [{"field": "fact", "equals": "content_match"}],
+    }
+    content = _content_artifact(
+        checkouts=[
+            _observed_content_checkout(
+                checkout["path"],
+                head_revision=checkout["facts"]["head_revision"]["value"],
+                matches=[
+                    {
+                        "path": "notes.md",
+                        "line": 1,
+                        "term": "modified",
+                        "excerpt": "modified content",
+                        "evidence": {"command": "git grep modified"},
+                    }
+                ],
+            )
+        ]
+    )
+    capsule = compile_task_capsule(task=task, graph=graph, content=content)
+
+    malformed_sources = []
+    for path, value in (
+        (("smuggled",), True),
+        (("checkouts", 0, "smuggled"), True),
+        (("checkouts", 0, "matches"), {"not": "a list"}),
+        (("observed_at",), "not-a-date"),
+        (("allowlist",), ["relative/root"]),
+        (("checkouts", 0, "path"), "/outside/content/allowlist"),
+    ):
+        malformed = json.loads(json.dumps(content))
+        target = malformed
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+        malformed_sources.append(malformed)
+    duplicate_checkout = json.loads(json.dumps(content))
+    duplicate_checkout["checkouts"].append(
+        json.loads(json.dumps(duplicate_checkout["checkouts"][0]))
+    )
+    malformed_sources.append(duplicate_checkout)
+
+    duplicate_match = json.loads(json.dumps(content))
+    conflicting_match = json.loads(
+        json.dumps(duplicate_match["checkouts"][0]["matches"][0])
+    )
+    conflicting_match["excerpt"] = "different content at the same source location"
+    duplicate_match["checkouts"][0]["matches"].append(conflicting_match)
+    missing_revision = json.loads(json.dumps(content))
+    missing_revision["checkouts"][0]["head_revision"] = None
+    malformed_sources.append(missing_revision)
+    malformed_sources.append(duplicate_match)
+
+    windows_case_duplicate = json.loads(json.dumps(content))
+    windows_case_duplicate["allowlist"] = ["c:/Repo"]
+    windows_checkout = windows_case_duplicate["checkouts"][0]
+    windows_checkout["raw_path"] = "C:/Repo"
+    windows_checkout["path"] = "c:/Repo"
+    windows_checkout["matches"][0]["path"] = "NOTES.md"
+    windows_conflict = json.loads(
+        json.dumps(windows_checkout["matches"][0])
+    )
+    windows_conflict["path"] = "notes.md"
+    windows_conflict["excerpt"] = "conflicting Windows-case record"
+    windows_checkout["matches"].append(windows_conflict)
+    malformed_sources.append(windows_case_duplicate)
+
+    unc_traversal = json.loads(json.dumps(content))
+    unc_traversal["allowlist"] = ["//server/share/safe"]
+    unc_checkout = unc_traversal["checkouts"][0]
+    unc_checkout["raw_path"] = "//server/share/safe/../outside"
+    unc_checkout["path"] = "//server/share/safe/../outside"
+    malformed_sources.append(unc_traversal)
+
+    posix_root_distinct = json.loads(json.dumps(content))
+    posix_root_distinct["allowlist"] = ["/"]
+    posix_checkout = posix_root_distinct["checkouts"][0]
+    posix_checkout["raw_path"] = "/"
+    posix_checkout["path"] = "/"
+    posix_checkout["matches"][0]["path"] = "Foo.txt"
+    posix_lower = json.loads(json.dumps(posix_checkout["matches"][0]))
+    posix_lower["path"] = "foo.txt"
+    posix_checkout["matches"].append(posix_lower)
+    assert content_context_is_valid(posix_root_distinct)
+
+    for malformed in malformed_sources:
+        with pytest.raises(ValueError, match="workspace-content"):
+            compile_task_capsule(task=task, graph=graph, content=malformed)
+        assert not capsule_context_matches_graph(capsule, graph, malformed)
+
+
 # -- dirty_entries claims (#44 gap 1), continued -----------------------------
+def test_outside_allowlist_relative_content_refusal_remains_valid_source(graph):
+    content = {
+        "schema": CONTENT_SCHEMA,
+        "observed_at": NOW(),
+        "terms": ["needle"],
+        "allowlist": ["/repo"],
+        "checkouts": [],
+        "refusals": [
+            {
+                "raw_path": "relative/repo",
+                "path": "relative/repo",
+                "status": "refused",
+                "reason": "outside_allowlist",
+            },
+            {
+                "raw_path": "/repo/sub/../other",
+                "path": "/repo/sub/../other",
+                "status": "refused",
+                "reason": "outside_allowlist",
+            },
+        ],
+    }
+
+    capsule = compile_task_capsule(task=TASK, graph=graph, content=content)
+    assert {
+        omission["path"]
+        for omission in capsule["omissions"]
+        if omission["kind"] == "content_root_refused"
+    } >= {"relative/repo", "/repo/sub/../other"}
+
+
 # observe.mjs already carries the individual dirty paths as `dirty_entries`
 # (a list of {state, path}); this is compile.mjs's own bounded-listing
 # behavior over an inline synthetic graph, independent of the fixture
@@ -722,6 +1173,23 @@ def test_dirty_path_listing_is_capped_overflow_is_recorded_as_a_dirty_paths_trun
     assert truncated is not None, "expected a dirty_paths_truncated omission when the cap is exceeded"
     assert truncated["omitted_count"] == 5
 
+    for omission_kind in ("dirty_paths_truncated", "ignored_paths_excluded"):
+        stripped = json.loads(json.dumps(capsule))
+        stripped["omissions"] = [
+            omission
+            for omission in stripped["omissions"]
+            if omission["kind"] != omission_kind
+        ]
+        stripped["fingerprint"] = fingerprint(
+            {
+                key: value
+                for key, value in stripped.items()
+                if key not in {"capsule_id", "fingerprint"}
+            }
+        )
+        assert is_task_capsule_shape(stripped)
+        assert not capsule_context_matches_graph(stripped, big_dirty_graph)
+
 
 # -- compile_task_capsule stays pure ------------------------------------------
 # Node's version asserts src/capsule/*.mjs never imports node:fs or
@@ -767,6 +1235,15 @@ def _tiered_graph():
                         "status": "known",
                         "value": "a" * 40,
                         "evidence": {"command": "git rev-parse HEAD"},
+                    },
+                    "content_privacy_fingerprint": {
+                        "status": "known",
+                        "value": fingerprint(
+                            {
+                                "revision": "a" * 40,
+                                "ignored_tracked_paths": [],
+                            }
+                        ),
                     },
                 },
             },
@@ -836,14 +1313,12 @@ def test_allowlisted_tier_is_the_baseline_with_no_task_specific_signal():
 
 def test_content_match_candidate_is_bounded_intrinsically_question_matched_and_surfaces_omissions():
     graph = _tiered_graph()
-    content = {
-        "checkouts": [
-            {
-                "path": "/w/gadget",
-                # Bound to the revision the graph reports for this checkout;
-                # content that cannot be placed in the snapshot is not evidence.
-                "head_revision": "a" * 40,
-                "matches": [
+    content = _content_artifact(
+        checkouts=[
+            _observed_content_checkout(
+                "/w/gadget",
+                head_revision="a" * 40,
+                matches=[
                     {
                         "path": "notes.md",
                         "line": 3,
@@ -857,9 +1332,9 @@ def test_content_match_candidate_is_bounded_intrinsically_question_matched_and_s
                         "term": "UNRELATED",
                         "excerpt": "not part of the task question",
                         "evidence": {"command": "git grep unrelated"},
-                    }
+                    },
                 ],
-                "omissions": [
+                omissions=[
                     {
                         "kind": "content_files_truncated",
                         "omitted_count": 2,
@@ -867,12 +1342,10 @@ def test_content_match_candidate_is_bounded_intrinsically_question_matched_and_s
                         "reason": "matched-file listing capped at 8 files per checkout",
                     }
                 ],
-            },
-            # A match against a checkout outside the graph is ignored, never
-            # guessed at.
-            {
-                "path": "/not/a/graph/checkout",
-                "matches": [
+            ),
+            _observed_content_checkout(
+                "/not/a/graph/checkout",
+                matches=[
                     {
                         "path": "x.md",
                         "line": 1,
@@ -881,10 +1354,9 @@ def test_content_match_candidate_is_bounded_intrinsically_question_matched_and_s
                         "evidence": {"command": "git grep"},
                     }
                 ],
-                "omissions": [],
-            },
+            ),
         ]
-    }
+    )
 
     without_content = compile_task_capsule(task=TIERED_TASK, graph=graph)
     with_content = compile_task_capsule(task=TIERED_TASK, graph=graph, content=content)
@@ -928,12 +1400,13 @@ def test_content_match_candidate_is_bounded_intrinsically_question_matched_and_s
 )
 def test_unsafe_content_match_paths_never_become_claims(unsafe_path):
     graph = _tiered_graph()
-    content = {
-        "checkouts": [
-            {
-                "path": "/w/gadget",
-                "head_revision": "a" * 40,
-                "matches": [
+
+    content = _content_artifact(
+        checkouts=[
+            _observed_content_checkout(
+                "/w/gadget",
+                head_revision="a" * 40,
+                matches=[
                     {
                         "path": unsafe_path,
                         "line": 1,
@@ -942,24 +1415,57 @@ def test_unsafe_content_match_paths_never_become_claims(unsafe_path):
                         "evidence": {"command": "git grep modified"},
                     }
                 ],
-            }
+            )
         ]
-    }
+    )
 
-    try:
-        capsule = compile_task_capsule(
+    with pytest.raises(ValueError, match="workspace-content"):
+        compile_task_capsule(
             task=TIERED_TASK,
             graph=graph,
             content=content,
             budget={"max_claims": 100},
         )
-    except ValueError:
-        return
 
-    assert not [
-        claim for claim in capsule["claims"] if claim["fact"] == "content_match"
-    ], f"unsafe content path became a claim: {unsafe_path}"
 
+def test_content_match_occurrence_ranking_uses_canonical_source_order():
+    graph = _tiered_graph()
+    matches = [
+        {
+            "path": path,
+            "line": 1,
+            "term": "needle",
+            "excerpt": f"needle in {path}",
+            "evidence": {"command": "git grep needle"},
+        }
+        for path in ("b.txt", "a.txt")
+    ]
+
+    def compile_with(source_matches):
+        return compile_task_capsule(
+            task={
+                "question": "Find needle.",
+                "filters": [{"field": "fact", "equals": "content_match"}],
+            },
+            graph=graph,
+            content=_content_artifact(
+                terms=["needle"],
+                checkouts=[
+                    _observed_content_checkout(
+                        "/w/gadget",
+                        head_revision="a" * 40,
+                        matches=source_matches,
+                    )
+                ],
+            ),
+            budget={"max_claims": 1},
+        )
+
+    forward = compile_with(matches)
+    reversed_source = compile_with(list(reversed(matches)))
+
+    assert forward["claims"][0]["claim"] == reversed_source["claims"][0]["claim"]
+    assert forward["claims"][0]["claim"].startswith("a.txt:")
 
 def test_absent_content_is_byte_identical_to_explicit_none_and_empty_checkouts():
     graph = _tiered_graph()
@@ -977,8 +1483,7 @@ def test_scope_narrower_than_the_graph_excludes_out_of_scope_checkouts(graph, fx
     capsule could declare scope ['/a'] while including claims from '/b' — and a
     downstream agent may act on context the capsule itself says is out of scope.
     """
-    in_scope = fx["paths"]["canonical"]
-
+    in_scope = normalize_path(fx["paths"]["canonical"])
     capsule = compile_task_capsule(
         task={**TASK, "scope": [in_scope]}, graph=graph
     )
@@ -996,18 +1501,18 @@ def test_scope_narrower_than_the_graph_excludes_out_of_scope_checkouts(graph, fx
     # The finding names conflicts, unknowns and omissions too, not just claims.
     # A capsule that declares scope ['/a'] must not narrate /b anywhere.
     # Exclude ancestors of the in-scope path: the fixture set includes the
-    # shared base directory, whose string is a substring of every path under it,
-    # so a substring probe would flag it whenever an in-scope path is named.
     others = [
-        p for p in fx["paths"].values()
-        if p != in_scope and not in_scope.startswith(p)
+        normalize_path(path)
+        for path in fx["paths"].values()
+        if normalize_path(path) != in_scope
+        and not in_scope.startswith(normalize_path(path))
     ]
     rest = json.dumps({
         "conflicts": capsule["conflicts"],
         "unknowns": capsule["unknowns"],
         "omissions": capsule["omissions"],
     }).lower()
-    leaked = [p for p in others if p.replace("\\", "/").lower() in rest]
+    leaked = [path for path in others if path.lower() in rest]
     assert leaked == [], (
         f"out-of-scope paths named in conflicts/unknowns/omissions: {leaked}"
     )
@@ -1016,27 +1521,27 @@ def test_scope_narrower_than_the_graph_excludes_out_of_scope_checkouts(graph, fx
     capsule_with_content_omissions = compile_task_capsule(
         task={**TASK, "scope": [in_scope]},
         graph=graph,
-        content={
-            "checkouts": [
-                {
-                    "path": outside_scope,
-                    "omissions": [
+        content=_content_artifact(
+            checkouts=[
+                _observed_content_checkout(
+                    outside_scope,
+                    omissions=[
                         {
                             "kind": "content_lines_truncated",
-                            "path": outside_scope,
+                            "path": "tracked.md",
                             "omitted_count": 1,
                             "reason": "matched-line listing capped at 20 per file",
                         }
                     ],
-                }
+                )
             ],
-            "refusals": [
-                {
-                    "path": outside_scope,
-                    "reason": "outside_allowlist",
-                }
+            refusals=[
+                _content_refusal(
+                    fx["paths"]["disallowed"],
+                    reason="outside_allowlist",
+                )
             ],
-        },
+        ),
     )
     scoped_content = json.dumps(
         capsule_with_content_omissions["omissions"]
@@ -1121,6 +1626,9 @@ def test_claim_budget_cannot_exceed_the_lossless_contract_range(graph):
         ({"question": "What changed?", "scope": "/workspace"}, "task.scope"),
         ({"question": "What changed?", "scope": []}, "task.scope"),
         ({"question": "What changed?", "scope": [1]}, "task.scope"),
+        ({"question": "What changed?", "scope": [" /workspace "]}, "task.scope"),
+        ({"question": "What changed?", "scope": ["/workspace/"]}, "task.scope"),
+        ({"question": "What changed?", "scope": [r"C:\Repo"]}, "task.scope"),
         ({"question": "What changed?", "required_checks": []}, "task.required_checks"),
         ({"question": "What changed?", "required_checks": "npm test"}, "task.required_checks"),
         ({"question": "What changed?", "required_checks": 5}, "task.required_checks"),
@@ -1150,6 +1658,9 @@ def test_claim_budget_cannot_exceed_the_lossless_contract_range(graph):
         "scope-container",
         "scope-empty",
         "scope-entry",
+        "scope-whitespace",
+        "scope-trailing-slash",
+        "scope-backslash",
         "checks-empty",
         "checks-container-string",
         "checks-container-number",
@@ -1181,8 +1692,8 @@ def test_empty_filter_values_are_rejected_at_task_boundary(graph, filter_rule):
 
 @pytest.mark.parametrize(
     "scope_root",
-    ["   ", ".", "packages/core", "c:relative"],
-    ids=["whitespace", "dot", "relative", "drive-relative"],
+    ["   ", ".", "packages/core", "c:relative", "//server/share/safe/../outside"],
+    ids=["whitespace", "dot", "relative", "drive-relative", "unc-traversal"],
 )
 def test_non_absolute_scope_roots_are_rejected(graph, scope_root):
     with pytest.raises(ValueError, match=r"task\.scope"):
@@ -1210,9 +1721,20 @@ def test_task_scope_root_count_is_bounded_before_context_matching(graph):
     "scope",
     [
         ["packages/core"],
+        ["//server/share/safe/../outside"],
+        [" /workspace "],
+        ["/workspace/"],
+        [r"C:\Repo"],
         [f"/scope/{index}" for index in range(MAX_TASK_SCOPE_ROOTS + 1)],
     ],
-    ids=["relative", "too-many-roots"],
+    ids=[
+        "relative",
+        "unc-traversal",
+        "whitespace",
+        "trailing-slash",
+        "backslash",
+        "too-many-roots",
+    ],
 )
 def test_capsule_shape_rejects_self_fingerprinted_unsafe_scope(scope, graph):
     capsule = compile_task_capsule(task=TASK, graph=graph)
@@ -1242,18 +1764,149 @@ def test_direct_compilation_bounds_checkout_and_content_candidate_work(graph):
     with pytest.raises(ValueError, match="too many Git checkouts"):
         compile_task_capsule(task=TASK, graph=oversized_graph)
 
-    oversized_content = {
-        "checkouts": [
-            {"path": "/not/a/checkout", "matches": []}
-            for _ in range(MAX_CAPSULE_CANDIDATE_WORK + 1)
+    oversized_content = _content_artifact(
+        checkouts=[
+            _observed_content_checkout(f"/not/a/checkout-{index}")
+            for index in range(MAX_CAPSULE_CANDIDATE_WORK + 1)
         ]
-    }
+    )
     with pytest.raises(ValueError, match="candidate work"):
         compile_task_capsule(
             task=TASK,
             graph=graph,
             content=oversized_content,
         )
+
+
+def test_direct_compilation_types_combined_graph_content_candidate_work(graph):
+    irrelevant_root = normalize_path(tempfile.gettempdir())
+    content = _content_artifact(
+        allowlist=[irrelevant_root],
+        checkouts=[
+            _observed_content_checkout(
+                f"{irrelevant_root}/irrelevant-{index}"
+            )
+            for index in range(MAX_CAPSULE_CANDIDATE_WORK)
+        ],
+    )
+
+    with pytest.raises(
+        CapsuleContentWorkLimitError,
+        match="content candidate work exceeds the compiler limit",
+    ):
+        compile_task_capsule(task=TASK, graph=graph, content=content)
+
+
+def test_direct_compilation_counts_only_scoped_context_checkouts(graph):
+    checkout = next(
+        node for node in graph["nodes"] if node.get("kind") == "checkout"
+    )
+    scoped_graph = json.loads(json.dumps(graph))
+    scoped_graph["conflicts"] = []
+    scoped_graph["unknowns"] = []
+    outside = []
+    for index in range(MAX_GRAPH_CONTEXT_CHECKOUTS):
+        node = json.loads(json.dumps(checkout))
+        node["id"] = f"checkout_outside_{index}"
+        node["path"] = f"/outside/{index}"
+        outside.append(node)
+    scoped_graph["nodes"] = [json.loads(json.dumps(checkout)), *outside]
+
+    capsule = compile_task_capsule(
+        task={**TASK, "scope": [checkout["path"]]},
+        graph=scoped_graph,
+    )
+
+    assert all(
+        claim.get("subject_path") == checkout["path"]
+        for claim in capsule["claims"]
+    )
+
+
+def test_direct_compilation_bounds_checkout_prefix_match_work(graph):
+    matches = [
+        {
+            "path": "match.txt",
+            "line": index,
+            "term": "needle",
+            "excerpt": "needle",
+            "evidence": {"command": "git grep needle"},
+        }
+        for index in range(1, 1_001)
+    ]
+    content = _content_artifact(
+        allowlist=["/"],
+        terms=["needle"],
+        checkouts=[
+            _observed_content_checkout(
+                "/" + "a" * 997 + str(index),
+                matches=matches,
+            )
+            for index in range(2)
+        ],
+    )
+
+    with pytest.raises(
+        ValueError, match="content candidate work exceeds the compiler limit"
+    ):
+        compile_task_capsule(task=TASK, graph=graph, content=content)
+
+
+def test_direct_compilation_bounds_checkout_prefix_omission_work(graph):
+    omissions = [
+        {
+            "kind": "content_lines_truncated",
+            "path": f"match-{index}.txt",
+            "omitted_count": 1,
+            "reason": "matched-line listing capped at 20 per file",
+        }
+        for index in range(6)
+    ]
+    content = _content_artifact(
+        allowlist=["/"],
+        checkouts=[
+            _observed_content_checkout(
+                "/" + "a" * 200_000,
+                omissions=omissions,
+            )
+        ],
+    )
+
+    with pytest.raises(
+        ValueError, match="content candidate work exceeds the compiler limit"
+    ):
+        compile_task_capsule(task=TASK, graph=graph, content=content)
+
+
+def test_direct_compilation_bounds_content_scope_projection_work(graph):
+    omissions = [
+        {
+            "kind": "content_lines_truncated",
+            "path": f"match-{index}.txt",
+            "omitted_count": 1,
+            "reason": "matched-line listing capped at 20 per file",
+        }
+        for index in range(1_000)
+    ]
+    content = _content_artifact(
+        checkouts=[
+            _observed_content_checkout("/w/gadget", omissions=omissions)
+        ],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="content scope work exceeds the compiler limit",
+    ):
+        compile_task_capsule(
+            task={
+                "question": "Summarize content.",
+                "scope": [f"/scope/{index}" for index in range(1_000)],
+            },
+            graph=graph,
+            content=content,
+        )
+
 
 def test_capsule_shape_binds_graphless_declared_checks(graph):
     checkout = next(
@@ -1287,6 +1940,66 @@ def test_capsule_shape_binds_graphless_declared_checks(graph):
         {"name": "declared-unit", "command": "true", "cwd": cwd}
     ]
     assert not is_task_capsule_shape(replaced)
+
+
+def test_graph_backed_package_scope_allows_enclosing_observed_checkout_cwd(graph):
+    checkout = next(
+        node
+        for node in graph["nodes"]
+        if node.get("kind") == "checkout"
+        and (node.get("facts", {}).get("is_git_repository") or {}).get("value")
+        is True
+    )
+    cwd = (
+        (checkout["facts"].get("worktree_root") or {}).get("value")
+        or checkout["path"]
+    )
+    declared = {
+        "name": "package-unit",
+        "command": "python -m pytest",
+        "cwd": cwd,
+    }
+    capsule = compile_task_capsule(
+        task={
+            **TASK,
+            "scope": [f"{cwd}/pkg"],
+            "required_checks": [declared],
+        },
+        graph=graph,
+    )
+
+    assert is_task_capsule_shape(capsule)
+    assert verify_task_capsule_integrity(capsule)
+    assert capsule_context_matches_graph(capsule, graph)
+
+
+@pytest.mark.parametrize(
+    ("scope", "cwd"),
+    [
+        ("/repo/pkg", "/repo/pkg/."),
+        ("/repo/pkg", "/repo/pkg/../outside"),
+        ("//server/share/pkg", "//server/share/pkg/../outside"),
+    ],
+    ids=["dot", "parent", "unc-parent"],
+)
+def test_compile_rejects_declared_check_cwd_dot_segments_before_graph_authorization(
+    graph, scope, cwd
+):
+    with pytest.raises(ValueError, match="normalized"):
+        compile_task_capsule(
+            task={
+                **TASK,
+                "scope": [scope],
+                "required_checks": [
+                    {
+                        "name": "unit",
+                        "command": "python -m pytest",
+                        "cwd": cwd,
+                    }
+                ],
+            },
+            graph=graph,
+        )
 
 
 @pytest.mark.parametrize(
@@ -1388,15 +2101,26 @@ def test_content_search_failure_becomes_a_capsule_unknown(graph, fx):
     from the capsule entirely.
     """
     path = fx["paths"]["canonical"]
-    content = {
-        "checkouts": [
-            {"path": path, "status": "unknown", "reason": "grep_unavailable",
-             "matches": [], "omissions": []},
-            {"status": "unknown", "reason": "unbound_content_search",
-             "matches": [], "omissions": []},
+    content = _content_artifact(
+        checkouts=[
+            _unknown_content_checkout(
+                path,
+                reason="grep_unavailable",
+                evidence={"command": "git grep modified"},
+            ),
+            _unknown_content_checkout(
+                "/not/a/graph/checkout",
+                reason="unbound_content_search",
+                evidence={"command": "git grep modified"},
+            ),
         ],
-        "refusals": [{"path": fx["paths"]["disallowed"], "reason": "outside_allowlist"}],
-    }
+        refusals=[
+            _content_refusal(
+                fx["paths"]["disallowed"],
+                reason="outside_allowlist",
+            )
+        ],
+    )
 
     capsule = compile_task_capsule(task=TASK, graph=graph, content=content)
 
@@ -1409,6 +2133,52 @@ def test_content_search_failure_becomes_a_capsule_unknown(graph, fx):
     )
     assert "unbound_content_search" in recorded
     assert verify_task_capsule_integrity(capsule)
+
+
+def test_direct_compilation_bounds_question_ranking_work(graph):
+    question = " ".join(f"term{index}" for index in range(100_000))
+
+    with pytest.raises(ValueError, match="question ranking work exceeds compiler limit"):
+        compile_task_capsule(task={"question": question}, graph=graph)
+
+def test_direct_compilation_bounds_filter_ranking_work(graph):
+    filters = [
+        {"field": "fact", "equals": f"fact-{index}"}
+        for index in range(100_000)
+    ]
+
+    with pytest.raises(ValueError, match="filter ranking work exceeds compiler limit"):
+        compile_task_capsule(
+            task={"question": "status", "filters": filters},
+            graph=graph,
+        )
+
+
+
+def test_direct_compilation_bounds_scalar_ranking_work(graph):
+    huge_value = "x" * 500_000
+
+    with pytest.raises(ValueError, match="scalar ranking work exceeds compiler limit"):
+        compile_task_capsule(
+            task={
+                "question": huge_value,
+                "filters": [{"field": "fact", "includes": huge_value}],
+            },
+            graph=graph,
+        )
+    large_surface_graph = json.loads(json.dumps(graph))
+    next(
+        node
+        for node in large_surface_graph["nodes"]
+        if node["kind"] == "checkout"
+    )["label"] = huge_value
+    with pytest.raises(
+        ValueError, match="scalar ranking work exceeds compiler limit"
+    ):
+        compile_task_capsule(
+            task={"question": "alpha beta gamma"},
+            graph=large_surface_graph,
+        )
 
 
 def test_content_from_a_different_revision_is_not_used_as_evidence(fx):
@@ -1429,8 +2199,8 @@ def test_content_from_a_different_revision_is_not_used_as_evidence(fx):
     graph_now = project_workspace_graph(
         observe_checkouts(targets, allowlist=allowlist, now=NOW)
     )
-    content = observe_content(targets, allowlist=allowlist, terms=["modified"], now=NOW)
-    task = {"question": "What modified files exist?"}
+    content = observe_content(targets, allowlist=allowlist, terms=["content"], now=NOW)
+    task = {"question": "What content exists?"}
 
     # Positive control: bound to the same revision, content is still evidence.
     fresh = compile_task_capsule(task=task, graph=graph_now, content=content)
@@ -1456,6 +2226,147 @@ def test_content_from_a_different_revision_is_not_used_as_evidence(fx):
         "dropping stale content silently is its own dishonesty; it must be reported"
     )
     assert verify_task_capsule_integrity(capsule)
+
+
+def test_zero_match_content_from_a_different_revision_is_reported_stale(fx):
+    p = fx["paths"]
+    allowlist = [p["canonical"], p["staleNeighbor"], p["dirty"], p["noOrigin"]]
+    targets = [p["canonical"], p["staleNeighbor"], p["dirty"], p["noOrigin"]]
+    graph_now = project_workspace_graph(
+        observe_checkouts(targets, allowlist=allowlist, now=NOW)
+    )
+    content = observe_content(
+        targets,
+        allowlist=allowlist,
+        terms=["term-that-does-not-exist"],
+        now=NOW,
+    )
+    for checkout in content["checkouts"]:
+        assert checkout["matches"] == []
+        checkout["head_revision"] = "0" * 40
+
+    capsule = compile_task_capsule(
+        task={"question": "Where is term-that-does-not-exist?"},
+        graph=graph_now,
+        content=content,
+    )
+    assert any(
+        unknown.get("kind") == "content_snapshot_stale"
+        for unknown in capsule["unknowns"]
+    )
+def test_content_binding_commits_effective_ignore_policy(fx):
+    repo = fx["paths"]["canonical"]
+    gitignore = os.path.join(repo, ".gitignore")
+    assert not os.path.exists(gitignore)
+    try:
+        _write(gitignore, "# governed\n")
+        before_observation = observe_checkouts(
+            [repo], allowlist=[repo], now=NOW
+        )
+        before_graph = project_workspace_graph(before_observation)
+        content = observe_content(
+            [repo],
+            allowlist=[repo],
+            terms=["canonical"],
+            now=NOW,
+        )
+        assert content["checkouts"][0]["matches"]
+        content["checkouts"][0]["omissions"] = [
+            {
+                "kind": "content_lines_truncated",
+                "path": "README.md",
+                "omitted_count": 1,
+                "reason": "matched-line listing capped at 20 per file",
+            }
+        ]
+        capsule = compile_task_capsule(
+            task={"question": "What canonical content exists?"},
+            graph=before_graph,
+            content=content,
+        )
+
+        _write(gitignore, "README.md\n")
+        after_observation = observe_checkouts(
+            [repo], allowlist=[repo], now=NOW
+        )
+        after_graph = project_workspace_graph(after_observation)
+
+        before_checkout = next(
+            node for node in before_graph["nodes"] if node["kind"] == "checkout"
+        )
+        after_checkout = next(
+            node for node in after_graph["nodes"] if node["kind"] == "checkout"
+        )
+        assert (
+            before_checkout["facts"]["head_revision"]
+            == after_checkout["facts"]["head_revision"]
+        )
+        assert (
+            before_checkout["facts"]["dirty_entries"]["value"]
+            == after_checkout["facts"]["dirty_entries"]["value"]
+        )
+        assert (
+            before_checkout["facts"]["content_privacy_fingerprint"]["value"]
+            != after_checkout["facts"]["content_privacy_fingerprint"]["value"]
+        )
+        assert not capsule_context_matches_graph(
+            capsule, after_graph, content
+        )
+        stale_capsule = compile_task_capsule(
+            task={"question": "What canonical content exists?"},
+            graph=after_graph,
+            content=content,
+        )
+        stale_unknown = next(
+            unknown
+            for unknown in stale_capsule["unknowns"]
+            if unknown.get("kind") == "content_snapshot_stale"
+        )
+        assert "effective privacy policy" in stale_unknown["reason"]
+        assert not any(
+            omission.get("kind") == "content_lines_truncated"
+            for omission in stale_capsule["omissions"]
+        )
+    finally:
+        if os.path.exists(gitignore):
+            os.remove(gitignore)
+
+
+
+
+def test_graph_context_rejects_deleted_content_snapshot_unknown(fx):
+    p = fx["paths"]
+    allowlist = [p["canonical"], p["staleNeighbor"], p["dirty"], p["noOrigin"]]
+    targets = [p["canonical"], p["staleNeighbor"], p["dirty"], p["noOrigin"]]
+    graph_now = project_workspace_graph(
+        observe_checkouts(targets, allowlist=allowlist, now=NOW)
+    )
+    content = observe_content(targets, allowlist=allowlist, terms=["modified"], now=NOW)
+    for checkout in content["checkouts"]:
+        checkout["head_revision"] = "0" * 40
+    capsule = compile_task_capsule(
+        task={"question": "What modified files exist?"},
+        graph=graph_now,
+        content=content,
+    )
+    forged = json.loads(json.dumps(capsule))
+    forged["unknowns"] = [
+        unknown
+        for unknown in forged["unknowns"]
+        if unknown.get("kind") != "content_snapshot_stale"
+    ]
+    forged["fingerprint"] = fingerprint(
+        {
+            key: value
+            for key, value in forged.items()
+            if key not in {"capsule_id", "fingerprint"}
+        }
+    )
+
+    assert verify_task_capsule_integrity(forged)
+    assert capsule_context_matches_graph(capsule, graph_now, content)
+    assert not capsule_context_matches_graph(forged, graph_now, content)
+    assert not capsule_context_matches_graph(capsule, graph_now)
 
 
 def test_required_checks_are_derived_from_the_observed_workspace(fx):

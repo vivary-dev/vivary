@@ -125,13 +125,18 @@ where the command must run and the exact observation that justified it. A standa
 `tropo.toml` derives `tropo check`; `create-vivary doctor` is derived only when the
 observed root also carries the scaffold identity markers `AGENTS.md` and `STRATO.md`.
 Governed search drops one-letter ASCII contraction fragments, uses NUL-framed Git
-output, treats every path passed to `git check-ignore` as literal, excludes tracked
+output, treats every path passed to `git check-ignore` as literal, and excludes tracked
 paths covered by repository ignore policy or an explicit readable global/system
-`core.excludesFile`, and refuses a Tropo root nested inside a larger Git worktree
-rather than leaking sibling checkout facts.
-Every default Git command used by checkout observation or content retrieval disables
-repository-configured filesystem monitors. Workspace markers and package scripts pass
-through the same fail-closed ignore-policy filter as content and dirty paths.
+`core.excludesFile`. Effective ignore decisions over the named commit tree are checked
+in one bounded NUL-framed stdin operation and committed as a nondisclosing privacy
+fingerprint shared by the workspace graph and content source. Content reads name the
+resolved commit with replacement objects disabled. Revision or privacy-policy drift
+therefore invalidates old content even when dirty path/state facts are unchanged.
+Governed search also refuses a Tropo root nested inside a larger Git worktree rather
+than leaking sibling checkout facts. Every default Git command used by checkout
+observation or content retrieval disables repository-configured filesystem monitors.
+Workspace markers and package scripts pass through the same fail-closed ignore-policy
+filter as content and dirty paths.
 Reparse-point and multiply linked markers are rejected; a bounded package manifest is
 read only through a descriptor whose identity is verified around the open. Ignored or
 externally linked manifests cannot leak facts or derive commands. Core brackets content
@@ -474,9 +479,10 @@ ozone verify request.json --governed --json --strict
 | `workspace` | Exactly `{"fingerprint": "..."}`; must match the capsule. |
 | `verified_at` | Caller-supplied timezone-aware instant. |
 | `capsule` | Complete `vivary.task-capsule/v0`; its body fingerprint and deterministic ID are recomputed before core delegation. A declared `task.scope` is a bounded, nonempty list of absolute roots. Optional `task.filters` must use the compiler's list-shaped `{field, equals\|includes}` contract with a nonblank value. Both rules apply whether or not the request includes a graph. |
-| `receipt` | Complete Execution Receipt bound to the capsule. Its check records and claim lists are shape-validated; `claims_verified` and `claims_unverified` must be disjoint and together equal both `claims_in_scope` and the capsule's claim IDs. All claims are verified only when the check list is nonempty and every check passed. Otherwise, all claims remain unverified. Omission or malformed/tampered evidence cannot produce a sufficient aggregate result. |
+| `receipt` | Complete Execution Receipt bound to the capsule. Its check records and claim lists are shape-validated; every check must name a capsule effective required check and carry its exact command. `claims_verified` and `claims_unverified` must be disjoint and together equal both `claims_in_scope` and the capsule's claim IDs. All claims are verified only when the check list is nonempty and every check passed. Otherwise, all claims remain unverified. Omission or malformed/tampered evidence cannot produce a sufficient aggregate result. |
 | `gate` | Named gate with core-owned `required_checks`, `require_claims_verified`, `max_unresolved_conflicts`, and `max_unresolved_unknowns` constraints. |
 | `graph` | Optional matching `vivary.workspace-graph/v0`. Core reprojects the graph from checkout paths and facts. Every derived node, edge, conflict, unknown, omission, deterministic ID, evidence field, and canonical allowlist must match that projection. The recomputed `workspace_fingerprint` must match the request, and `observed_at` must match the capsule. The capsule's graph-derived claims and unknowns must equal compiler selection for the same graph, task, filters, scope, and budget. Ozone returns a bounded `vivary.context-repair-proposal/v0`; every proposal has `requires_gate: true` and `writes_performed: 0`. |
+| `content` | Optional complete `vivary.workspace-content/v0` source artifact with exact top-level and nested record shapes, a timezone-aware `observed_at`, a nonempty absolute canonical allowlist, contained checkouts, and reason-consistent refusals. It is required with `graph` when the capsule carries `workspace.content_fingerprint`. Core verifies that fingerprint and recompiles the complete capsule, including content-derived claims, unknowns, and omissions. `None`, `{}`, `{"checkouts": []}`, and a valid complete artifact with empty `checkouts` and `refusals` are semantically empty and do not change capsule bytes. |
 
 Before recursive canonical validation or Core loading, Ozone applies an iterative
 JSON-work ceiling to the complete request. Excess input returns
@@ -490,36 +496,51 @@ and canonical re-projection before proposal construction.
 
 The capsule task question must be a nonblank string. A declared task scope contains
 absolute roots and bounds every narrated claim, conflict side, unknown, and omission
-path. Core accepts at most 1,000 scope roots and bounds checkout/content candidate work
-for direct compiler callers.
+path. Known dirty-entry and content-match paths must be normalized, safe
+checkout-relative paths. Persisted drive and UNC path identities compare
+case-insensitively on Windows and non-Windows verifier hosts. Core accepts at most 1,000
+scope roots and bounds checkout/content candidate counts, source-path containment and
+prefix construction, plus candidate-by-question-term-and-filter scalar work for direct
+compiler callers. Ozone also bounds the scalar work of scope joins against checkout,
+execution-root, refusal, unknown, and declared-check paths.
 Optional `task.required_checks` must be a nonempty list of nonblank `name`, `command`,
-and normalized `cwd` records with unique names. Each `cwd` must name an observed Git
-checkout execution root related to `task.scope`; a package-scoped task may name its
-nearest enclosing checkout root. Declarations add checks, never remove or rewrite
-commands derived from workspace evidence, and resolve `required_check_undetermined`
-unknowns only for their checkout. The capsule retains each declaration unchanged in its
-top-level required-check list. Without a graph, that effective list must equal the task
-declaration exactly, or be empty when no declaration exists. Otherwise Ozone returns
+and traversal-free canonical absolute `cwd` records with unique names. With a graph,
+each `cwd` must name an observed Git checkout execution root related to `task.scope`; a
+package-scoped task may name its nearest enclosing checkout root. Without a graph,
+every `cwd` must lie within the declared task scope.
+Declarations add checks, never remove or rewrite commands derived from workspace
+evidence, and resolve `required_check_undetermined` unknowns only for their checkout.
+The capsule retains each declaration unchanged in its top-level required-check list.
+Without a graph, that effective list must equal the task declaration exactly, or be
+empty when no declaration exists. Otherwise Ozone returns
 `graph_required_for_effective_checks`; resubmit with the matching graph so Core can
 reconstruct derived checks. With a graph, Ozone derives checks and
 undetermined-check unknowns from graph evidence.
+Graphless capsules with `filtered_out`, `claims_over_budget`, or
+`collation_domain_excluded` omissions return
+`graph_required_for_compiler_omissions`. The matching graph is required because the
+omission alone cannot prove whether stripped content affected compilation.
+Content containment work, combined graph-plus-content candidate aggregation, and claim
+ranking across question terms and structured filters have fixed Core ceilings. Requests
+beyond any ceiling return `repair_work_unbounded` before the nested comparisons run.
+Accepted scope, checkout, worktree, Git-common-dir, and content roots are
+traversal-free canonical absolute paths; rejected outside-allowlist source paths remain
+checkout authority.
 Every capsule claim must retain its compiler-owned nonempty identity, subject, path,
 fact, text, status, and selection reason plus list-shaped evidence and selection
 signals. Core recomputes each claim ID from its subject, fact, and claim text. With task
 filters, every claim must retain the exact normalized `matched_filters` record.
 Claim-owned fact and path values must satisfy that record.
-When the request includes a graph, core reconstructs compiler selection from graph
-candidates and the capsule's retained `content_match` candidates. It uses the capsule's
-task, filters, scope, and budget. The complete capsule claim list must match that
-reconstruction. `filtered_out` and `claims_over_budget` omissions cannot understate the
-graph-reconstructable minimum and must match exactly when their counts equal that
-minimum. Opaque content candidates may only raise the totals because Ozone does not
-re-read files. Their bounded over-budget entries remain capsule-attested rather than
-graph-bound, but each entry must name an in-scope checkout and a normalized,
-checkout-relative content path with no traversal segment. Observation refusals and
-scope-crossing conflicts must retain exactly matching compiler-owned omissions.
-Omission variants have fixed field shapes; unknown or reshaped variants are invalid
-capsule data. These checks bind graph coverage and ranking.
+When the request includes a graph, Core recompiles the complete capsule from the
+capsule's task and budget plus the supplied source artifacts. A capsule carrying
+`workspace.content_fingerprint` requires the exact fingerprinted `content` artifact;
+Core never substitutes retained claims for that source. Without a content binding,
+Core recompiles from the graph alone. The supplied capsule must canonically equal the
+result, including workspace identity and freshness, claims, conflicts, unknowns,
+required checks, and every omission. Graph-only `filtered_out`, `claims_over_budget`,
+collation, dirty-path, ignored-path, refusal, and scoped-conflict omissions therefore
+match compilation exactly. Omission variants have fixed field shapes; unknown or
+reshaped variants are invalid capsule data.
 Each graph-derived claim must reproduce the graph fact's
 compiler-generated path, fact, text, status, and evidence. Every claim subject must name
 a checkout in that graph, and the claim path must equal the checkout path. Label,
@@ -555,10 +576,11 @@ The `receipt` field may be omitted, producing core's valid missing-evidence resu
 the field is present, it must be a complete mapping whose `schema` is exactly
 `vivary.execution-receipt/v0`; `receipt_id` and `fingerprint` must be nonempty strings.
 Malformed receipt values are refused before core delegation.
-Every receipt check must carry a nonempty name and command plus a valid outcome. A check
-that shares a capsule `required_checks` name must carry that exact required command;
-duplicate records for the same name and command remain valid evidence for core's
-worst-outcome aggregation.
+Every receipt check must carry a nonempty name and command plus a valid outcome. Core
+requires its name to exist in the capsule's effective `required_checks` and its command
+to equal that required command, including for direct Core and Strato callers. Duplicate
+records for the same name and command remain valid evidence for core's worst-outcome
+aggregation.
 The graph `workspace_fingerprint` commits its emitted checkout paths, effective worktree
 roots, fact statuses and semantic values, and normalized observation refusals. Evidence
 command text does not enter that identity. Core reprojects the complete derived graph
@@ -587,11 +609,11 @@ A `claims_over_budget` omission must list exactly
 count exceeds `16`, `truncated` must be `true`; at or below the cap, that field must be
 absent. This matches core's compiler contract.
 Requests whose total checkout-pair scan count, potential repair count, route-proposal
-evidence count, derived estimate, or canonical re-projection work exceeds its ceiling
-are refused with `repair_work_unbounded` before canonical re-projection. Projected
-`neighbor_of` pairs must fit the 1,000-edge repair-graph ceiling. Remaining
-re-projection work counts graph JSON and repeated checkout-path expansion, with a cap
-of 10,000,000 canonical-JSON work units.
+evidence count, derived estimate, candidate-by-question-term ranking work, or canonical
+re-projection work exceeds its ceiling are refused with `repair_work_unbounded` before
+canonical re-projection. Projected `neighbor_of` pairs must fit the 1,000-edge
+repair-graph ceiling. Remaining re-projection work counts graph JSON and repeated
+checkout-path expansion, with a cap of 10,000,000 canonical-JSON work units.
 
 Envelope-level validation requires the capsule's workspace `observed_at` and the
 receipt's `created_at` to be at or before the request's `verified_at` and no more than

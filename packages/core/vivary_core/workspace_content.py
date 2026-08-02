@@ -1,13 +1,14 @@
 """Read-only tracked-file content search. The second impure workspace module
-(alongside workspace_observe.py): it may run one read-only `git grep` per
-checkout and nothing else. It never touches the index, never writes, and
-only ever searches the explicit allowlisted roots it is handed - same
-discipline as workspace_observe.py, mirrored deliberately.
+(alongside workspace_observe.py): it resolves each checkout's HEAD, searches that
+named commit with replacement objects disabled, fingerprints effective ignore
+decisions over the tracked tree, and applies those decisions to matches. It never
+touches the index, never writes, and only searches explicit allowlisted roots.
 
-`git grep` (no --no-index, no --untracked) searches tracked files in the
-working tree only: untracked and git-ignored paths are structurally
-invisible to it, so this module can never surface either, by construction -
-not by a filter applied after the fact. See python/tests/test_content.py.
+The named revision and shared privacy fingerprint bind content to the workspace graph:
+later working-tree edits, replace refs, or ignore-policy changes cannot leave captured
+evidence looking current. Untracked paths are structurally invisible. Tracked paths
+excluded by repository policy are removed without exposing their names in the artifact.
+See python/tests/test_content.py.
 
 Reference-guided Python port of src/workspace/content.mjs (slice 2, ticket
 #84, decision 0008). The Node module is the frozen executable oracle.
@@ -41,8 +42,11 @@ from vivary_core.canonical import (
     _JS_TRIM_CHARS,
     utf16_sort_key,
     is_absolute_root,
+    is_canonical_absolute_path,
+    is_safe_checkout_relative_path,
     is_within,
     is_within_allowlist,
+    path_identity_key,
     normalize_path,
 )
 
@@ -68,7 +72,7 @@ RunGit = Callable[[str, List[str]], Dict[str, Any]]
 # a security control drift.
 from vivary_core.workspace_observe import (  # noqa: E402
     _capped_run,
-    _ignored_paths,
+    _content_privacy_policy,
     _sanitized_git_env,
     _worktree_semantic_config,
 )
@@ -81,6 +85,7 @@ def _default_run_git(
     args: List[str],
     *,
     worktree_config: Optional[Dict[str, str]] = None,
+    stdin_data: Optional[bytes] = None,
 ) -> Dict[str, Any]:
     semantic_config = (
         _worktree_semantic_config(checkout_path)
@@ -100,6 +105,7 @@ def _default_run_git(
         ["git", *full_args],
         _sanitized_git_env(semantic_config),
         _MAX_GIT_OUTPUT_BYTES,
+        stdin_data,
     )
     if outcome["error"] is not None:
         return {
@@ -238,7 +244,9 @@ def _trim_excerpt(content: str) -> str:
 
 # `git grep -z -n` emits `path\0line\0content\n`. NUL framing makes the filename
 # unambiguous even when it contains colon-number segments or newlines.
-def _parse_grep_lines(stdout: str, terms: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+def _parse_grep_lines(
+    stdout: str, terms: List[str], revision: Optional[str] = None
+) -> Dict[str, List[Dict[str, Any]]]:
     by_file: Dict[str, List[Dict[str, Any]]] = {}
     cursor = 0
     while cursor < len(stdout):
@@ -253,6 +261,8 @@ def _parse_grep_lines(stdout: str, terms: List[str]) -> Dict[str, List[Dict[str,
             record_end = len(stdout)
 
         file_path = stdout[cursor:path_end]
+        if revision is not None and file_path.startswith(f"{revision}:"):
+            file_path = file_path[len(revision) + 1 :]
         line_no_str = stdout[path_end + 1 : line_end]
         content = stdout[line_end + 1 : record_end]
         cursor = record_end + 1
@@ -275,20 +285,24 @@ def _parse_grep_lines(stdout: str, terms: List[str]) -> Dict[str, List[Dict[str,
     return by_file
 
 
-def _bound_matches(by_file: Dict[str, List[Dict[str, Any]]], evidence: Dict[str, Any]) -> Dict[str, Any]:
-    # Bound the parsed matches: at most MAX_FILES_PER_CHECKOUT files (sorted
-    # by path for determinism), at most MAX_MATCHES_PER_FILE lines per
-    # included file (sorted by line number), excerpts capped to
-    # MAX_EXCERPT_LENGTH. Everything a cap removes is recorded as a
-    # structured omission - never silently dropped.
-    sorted_files = sorted(by_file.keys(), key=utf16_sort_key)
+def _bound_matches(
+    by_file: Dict[str, List[Dict[str, Any]]],
+    evidence: Dict[str, Any],
+) -> Dict[str, Any]:
+    # Bound and validate parsed matches before they enter the governed source.
+    # Unsafe Git-legal names are counted without being disclosed.
+    safe_files = [
+        path for path in by_file if is_safe_checkout_relative_path(path)
+    ]
+    unsafe_file_count = len(by_file) - len(safe_files)
+    sorted_files = sorted(safe_files, key=utf16_sort_key)
     included_files = sorted_files[:MAX_FILES_PER_CHECKOUT]
     omitted_files = sorted_files[MAX_FILES_PER_CHECKOUT:]
 
     matches: List[Dict[str, Any]] = []
     omissions: List[Dict[str, Any]] = []
     for file_path in included_files:
-        lines = sorted(by_file[file_path], key=lambda e: e["line"])
+        lines = sorted(by_file[file_path], key=lambda entry: entry["line"])
         included_lines = lines[:MAX_MATCHES_PER_FILE]
         for entry in included_lines:
             matches.append(
@@ -306,32 +320,33 @@ def _bound_matches(by_file: Dict[str, List[Dict[str, Any]]], evidence: Dict[str,
                     "kind": "content_lines_truncated",
                     "path": file_path,
                     "omitted_count": len(lines) - MAX_MATCHES_PER_FILE,
-                    "reason": f"matched-line listing capped at {MAX_MATCHES_PER_FILE} per file",
+                    "reason": (
+                        "matched-line listing capped at "
+                        f"{MAX_MATCHES_PER_FILE} per file"
+                    ),
                 }
             )
-    if omitted_files:
+    omitted_file_count = len(omitted_files) + unsafe_file_count
+    if omitted_file_count:
         omissions.append(
             {
                 "kind": "content_files_truncated",
-                "omitted_count": len(omitted_files),
-                "total_files_matched": len(sorted_files),
-                "reason": f"matched-file listing capped at {MAX_FILES_PER_CHECKOUT} files per checkout",
+                "omitted_count": omitted_file_count,
+                "total_files_matched": len(by_file),
+                "reason": (
+                    "unsafe matched paths excluded and matched-file listing "
+                    f"capped at {MAX_FILES_PER_CHECKOUT} files per checkout"
+                    if unsafe_file_count
+                    else (
+                        "matched-file listing capped at "
+                        f"{MAX_FILES_PER_CHECKOUT} files per checkout"
+                    )
+                ),
             }
         )
     return {"matches": matches, "omissions": omissions}
 
 
-def _observed_revision(path: str, run_git: RunGit) -> Any:
-    """The revision this search actually ran against.
-
-    Content is evidence about a checkout *at a moment*. Without recording which
-    moment, a result from an earlier scan can be matched to a later graph by path
-    alone and presented as evidence for a snapshot it never described. `None` when
-    the revision cannot be read — unbindable content is then treated as stale rather
-    than quietly trusted.
-    """
-    head = run_git(path, ["rev-parse", "HEAD"])
-    return head["stdout"].strip() if head.get("ok") and head["stdout"].strip() else None
 
 
 def _observe_one_content(raw_path: str, terms: List[str], run_git: RunGit) -> Dict[str, Any]:
@@ -350,6 +365,38 @@ def _observe_one_content(raw_path: str, terms: List[str], run_git: RunGit) -> Di
             "omissions": [],
             "reason": "no_question_terms",
         }
+    revision_result = run_git(path, ["rev-parse", "HEAD"])
+    revision = (
+        revision_result["stdout"].strip()
+        if revision_result.get("ok") and revision_result["stdout"].strip()
+        else None
+    )
+    if revision is None:
+        return {
+            "raw_path": raw_path,
+            "path": path,
+            "status": "unknown",
+            "reason": "grep_unavailable",
+            "matches": [],
+            "omissions": [],
+            "evidence": {"command": revision_result["command"]},
+        }
+    privacy_fingerprint, ignored, privacy_command = _content_privacy_policy(
+        path,
+        revision,
+        run_git,
+    )
+    if privacy_fingerprint is None or ignored is None:
+        return {
+            "raw_path": raw_path,
+            "path": path,
+            "status": "unknown",
+            "reason": "ignore_policy_unavailable",
+            "matches": [],
+            "omissions": [],
+            "evidence": {"command": privacy_command},
+        }
+
 
     # `-F`: question terms are literal text, not patterns. `git grep -h` documents
     # `-G` (basic regular expressions) as the default, so without this a term like
@@ -359,6 +406,7 @@ def _observe_one_content(raw_path: str, terms: List[str], run_git: RunGit) -> Di
     args = ["grep", "-z", "-n", "-I", "-i", "-F"]
     for term in terms:
         args += ["-e", term]
+    args += [revision, "--"]
     result = run_git(path, args)
 
     if not result["ok"]:
@@ -372,22 +420,7 @@ def _observe_one_content(raw_path: str, terms: List[str], run_git: RunGit) -> Di
             "evidence": {"command": result["command"]},
         }
 
-    by_file = _parse_grep_lines(result["stdout"], terms)
-    ignored, ignore_command = _ignored_paths(
-        path,
-        list(by_file),
-        run_git,
-    )
-    if ignored is None:
-        return {
-            "raw_path": raw_path,
-            "path": path,
-            "status": "unknown",
-            "reason": "ignore_policy_unavailable",
-            "matches": [],
-            "omissions": [],
-            "evidence": {"command": ignore_command},
-        }
+    by_file = _parse_grep_lines(result["stdout"], terms, revision)
 
     ignored_count = 0
     for file_path in list(by_file):
@@ -401,14 +434,15 @@ def _observe_one_content(raw_path: str, terms: List[str], run_git: RunGit) -> Di
                 "kind": "privacy_matches_excluded",
                 "omitted_count": ignored_count,
                 "reason": "repository ignore policy excluded tracked content",
-                "evidence": {"command": ignore_command},
+                "evidence": {"command": privacy_command},
             }
         )
     return {
         "raw_path": raw_path,
         "path": path,
         "status": "observed",
-        "head_revision": _observed_revision(path, run_git),
+        "head_revision": revision,
+        "privacy_fingerprint": privacy_fingerprint,
         "matches": bounded["matches"],
         "omissions": bounded["omissions"],
     }
@@ -446,7 +480,12 @@ def observe_content(
     if run_git is None:
         worktree_config: Dict[str, Dict[str, str]] = {}
 
-        def run_default(path: str, args: List[str]) -> Dict[str, Any]:
+        def run_default(
+            path: str,
+            args: List[str],
+            *,
+            stdin_data: Optional[bytes] = None,
+        ) -> Dict[str, Any]:
             key = normalize_path(path)
             if key not in worktree_config:
                 worktree_config[key] = _worktree_semantic_config(path)
@@ -454,6 +493,7 @@ def observe_content(
                 path,
                 args,
                 worktree_config=worktree_config[key],
+                stdin_data=stdin_data,
             )
 
         run_git = run_default
@@ -463,7 +503,14 @@ def observe_content(
     # absolute path) at construction time - see workspace_observe.py's
     # identical guard for the full rationale. An empty-string entry would
     # otherwise act as a silent wildcard inside is_within.
-    bad_entry_index = next((i for i, root in enumerate(allowlist) if not is_absolute_root(root)), None)
+    bad_entry_index = next(
+        (
+            i
+            for i, root in enumerate(allowlist)
+            if not is_canonical_absolute_path(normalize_path(root))
+        ),
+        None,
+    )
     if bad_entry_index is not None:
         raise ValueError(
             "observeContent requires every allowlist entry to be a non-empty absolute path "
@@ -474,11 +521,27 @@ def observe_content(
     search_terms = _dedupe_terms(terms)
     checkouts: List[Dict[str, Any]] = []
     refusals: List[Dict[str, Any]] = []
+    seen_paths = set()
 
     for raw_path in paths:
-        if not any(is_within_allowlist(root, raw_path) for root in allowlist):
+        path_key = path_identity_key(raw_path)
+        if path_key in seen_paths:
+            continue
+        seen_paths.add(path_key)
+        if (
+            not is_canonical_absolute_path(normalize_path(raw_path))
+            or not any(
+                is_within_allowlist(root, raw_path)
+                for root in allowlist
+            )
+        ):
             refusals.append(
-                {"raw_path": raw_path, "path": normalize_path(raw_path), "status": "refused", "reason": "outside_allowlist"}
+                {
+                    "raw_path": raw_path,
+                    "path": normalize_path(raw_path),
+                    "status": "refused",
+                    "reason": "outside_allowlist",
+                }
             )
             continue
 
@@ -494,7 +557,10 @@ def observe_content(
         # EXACT allowlist entry is exempt (operator's own trust decision),
         # identical to workspace_observe.py.
         path = normalize_path(raw_path)
-        trusted_exactly = any(normalize_path(root) == path for root in allowlist)
+        trusted_exactly = any(
+            path_identity_key(root) == path_identity_key(path)
+            for root in allowlist
+        )
         if not trusted_exactly:
             toplevel = run_git(raw_path, ["rev-parse", "--show-toplevel"])
             if toplevel["ok"]:

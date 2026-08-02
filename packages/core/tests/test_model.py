@@ -261,18 +261,16 @@ def test_projection_is_deterministic_same_observation_byte_identical_graph(obser
     assert a == b
     assert json.dumps(a) == json.dumps(b)
 
-def test_workspace_fingerprint_commits_to_emitted_checkout_nodes(observation):
+def test_projection_rejects_duplicate_checkout_identities(observation):
     duplicated = json.loads(json.dumps(observation))
     duplicated["checkouts"].append(
         json.loads(json.dumps(duplicated["checkouts"][0]))
     )
 
-    graph = project_workspace_graph(duplicated)
-
-    assert graph["workspace_fingerprint"] == workspace_fingerprint_from_graph(graph)
-    assert len([node for node in graph["nodes"] if node["kind"] == "checkout"]) == len(
-        {checkout["path"] for checkout in duplicated["checkouts"]}
-    )
+    with pytest.raises(
+        ValueError, match="duplicate checkout identities"
+    ):
+        project_workspace_graph(duplicated)
 
 
 def test_workspace_fingerprint_commits_to_worktree_root(observation):
@@ -461,6 +459,36 @@ def test_workspace_facts_reject_wrong_semantic_values_for_gate_categories(
     assert not workspace_facts_are_valid(facts)
 
 
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/outside/private.txt",
+        "../secret",
+        "c:secret",
+        "c:/outside/private.txt",
+        "",
+        r"dir\secret",
+        "dir/secret/",
+        " secret",
+    ),
+)
+def test_workspace_facts_reject_unsafe_dirty_entry_paths(path):
+    facts = _known_workspace_facts()
+    facts["dirty_entries"]["value"] = [{"path": path, "state": "M"}]
+
+    assert not workspace_facts_are_valid(facts)
+    with pytest.raises(ValueError, match="invalid fact"):
+        project_workspace_graph(_workspace_observation(facts))
+
+
+@pytest.mark.parametrize("path", ("tracked.md", "dir/tracked.md"))
+def test_workspace_facts_accept_safe_checkout_relative_dirty_entry_paths(path):
+    facts = _known_workspace_facts()
+    facts["dirty_entries"]["value"] = [{"path": path, "state": "M"}]
+
+    assert workspace_facts_are_valid(facts)
+
+
 def test_projection_rejects_known_is_dirty_without_value():
     facts = _known_workspace_facts()
     facts["is_dirty"] = {"status": "known"}
@@ -537,6 +565,7 @@ def test_node_ids_derive_only_from_stable_identity_not_observation_order(fx, obs
 
 def test_canonical_and_stale_neighbor_share_one_repository_node_and_a_preserved_conflict(fx, observation):
     graph = project_workspace_graph(observation)
+
     repositories = [n for n in graph["nodes"] if n["kind"] == "repository" and n["identity_status"] == "known"]
     assert len(repositories) == 1, "both clones must resolve to one known repository identity"
 
@@ -551,6 +580,53 @@ def test_canonical_and_stale_neighbor_share_one_repository_node_and_a_preserved_
     assert "winner" not in conflict, "a conflict must never elect a winner"
     for side in conflict["sides"]:
         assert side["evidence"], "each side carries its evidence"
+def test_windows_common_dir_identity_groups_remote_less_worktrees():
+    def checkout(path, common_dir, head):
+        return {
+            "path": path,
+            "facts": {
+                "is_git_repository": {
+                    "status": "known",
+                    "value": True,
+                    "evidence": [],
+                },
+                "git_common_dir": {
+                    "status": "known",
+                    "value": common_dir,
+                    "evidence": [],
+                },
+                "head_revision": {
+                    "status": "known",
+                    "value": head,
+                    "evidence": [],
+                },
+                "remotes": {
+                    "status": "known",
+                    "value": [],
+                    "evidence": [],
+                },
+            },
+        }
+
+    graph = project_workspace_graph(
+        {
+            "observed_at": NOW(),
+            "allowlist": [],
+            "refusals": [],
+            "checkouts": [
+                checkout("c:/Worktree-A", "c:/Repo/.git", "a" * 40),
+                checkout("c:/Worktree-B", "c:/repo/.git", "b" * 40),
+            ],
+        }
+    )
+
+    repositories = [
+        node for node in graph["nodes"] if node["kind"] == "repository"
+    ]
+    assert len(repositories) == 1
+    assert repositories[0]["identity"] == "local:c:/repo/.git"
+    assert len(graph["conflicts"]) == 1
+
 
 
 def test_unknowns_survive_projection_as_first_class_entries(fx, observation):

@@ -15,14 +15,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PY_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, PY_ROOT)
 import vivary_core  # noqa: E402
+import vivary_core.canonical as canonical_module  # noqa: E402
 
 from vivary_core.canonical import (  # noqa: E402
     canonicalize,
     deterministic_id,
     fingerprint,
+    is_canonical_absolute_path,
     is_absolute_root,
+    is_within_allowlist,
     is_within,
     normalize_path,
+    path_identity_key,
     sha256_hex,
     utf16_sort_key,
 )
@@ -34,6 +38,7 @@ def test_public_core_exports_own_artifact_fields_and_utf16_ordering():
     assert vivary_core.TASK_CAPSULE_FIELDS is TASK_CAPSULE_FIELDS
     assert vivary_core.EXECUTION_RECEIPT_FIELDS is EXECUTION_RECEIPT_FIELDS
     assert vivary_core.utf16_sort_key is utf16_sort_key
+    assert vivary_core.path_identity_key is path_identity_key
 
 # ---------------------------------------------------------------------------
 # normalize_path
@@ -138,6 +143,22 @@ def test_is_within_unc_paths_compare_as_ordinary_normalized_strings():
     assert is_within("\\\\server\\share", "\\\\server\\share\\sub") is True
     assert is_within("\\\\server\\share", "\\\\server\\shareX") is False
 
+
+
+def test_windows_path_identity_is_case_insensitive_on_every_host(monkeypatch):
+    monkeypatch.setattr(canonical_module.os, "name", "posix")
+
+    assert is_within_allowlist("C:/Repo", "c:/repo/sub") is True
+    assert is_within_allowlist("//SERVER/Share", "//server/share/sub") is True
+    assert path_identity_key("C:/Repo") == path_identity_key("c:\\repo")
+    assert path_identity_key("//SERVER/Share/Repo") == path_identity_key(
+        "//server/share/repo"
+    )
+    assert is_canonical_absolute_path("//server/share/safe") is True
+    assert (
+        is_canonical_absolute_path("//server/share/safe/../outside")
+        is False
+    )
 
 def test_is_within_unicode_path_segments():
     assert is_within("/wörkspace", "/wörkspace/child") is True

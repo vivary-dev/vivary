@@ -209,7 +209,7 @@ def real_capsule(real_graph, budget=None):
 # Hand-built (not from git) so it is guaranteed conflict-free and unknown-free: every
 # fact is marked "known". This still runs through the real workspace_model.py/
 # capsule_compile.py seam; only the observation layer (normally the sole impure module)
-# is faked here, and the path is a synthetic label, never a real machine path.
+# is faked here, and the path is a synthetic absolute path, never a real checkout.
 
 
 def _known(value, command):
@@ -218,12 +218,12 @@ def _known(value, command):
 
 def build_clean_capsule():
     checkout = {
-        "raw_path": "synthetic-clean/repo",
-        "path": "synthetic-clean/repo",
+        "raw_path": "/synthetic-clean/repo",
+        "path": "/synthetic-clean/repo",
         "status": "observed",
         "facts": {
             "is_git_repository": _known(True, "git rev-parse --show-toplevel"),
-            "worktree_root": _known("synthetic-clean/repo", "git rev-parse --show-toplevel"),
+            "worktree_root": _known("/synthetic-clean/repo", "git rev-parse --show-toplevel"),
             "head_revision": _known("0" * 40, "git rev-parse HEAD"),
             "head_ref": _known({"kind": "branch", "name": "main"}, "git symbolic-ref --short -q HEAD"),
             "dirty_entries": _known([], "git status --porcelain"),
@@ -242,7 +242,7 @@ def build_clean_capsule():
     observation = {
         "schema": "vivary.workspace-observation/v0",
         "observed_at": NOW(),
-        "allowlist": ["synthetic-clean/repo"],
+        "allowlist": ["/synthetic-clean/repo"],
         "checkouts": [checkout],
         "refusals": [],
     }
@@ -722,6 +722,28 @@ def test_evaluate_receipt_gate_does_not_clear_a_receipt_ozone_marks_as_forged():
     outcome = evaluate_receipt_gate(capsule=capsule, receipt=forged)
     assert outcome["decision"] != GATE_DECISION["CLEAR"]
     assert outcome["reason_codes"]
+
+
+def test_evaluate_receipt_gate_rejects_self_authored_receipt_checks():
+    capsule = base_capsule_like({"required_checks": []})
+    receipt = base_receipt_like(
+        capsule,
+        {
+            "checks": [
+                {
+                    "name": "self-authored",
+                    "command": "echo untrusted",
+                    "outcome": "passed",
+                }
+            ]
+        },
+    )
+
+    assert evaluate_receipt_gate(capsule=capsule, receipt=receipt) == {
+        "decision": GATE_DECISION["BLOCKED"],
+        "reason_codes": [GATE_REASON["UNKNOWN_RECEIPT_SHAPE"]],
+        "gate_requests": [],
+    }
 
 def test_evaluate_receipt_gate_clear_when_all_required_checks_passed_and_nothing_is_unresolved():
     capsule = build_clean_capsule()
@@ -1262,7 +1284,7 @@ def test_evaluate_receipt_gate_duplicate_matching_checks_cannot_mask_a_failure()
     )
 
 
-def test_evaluate_receipt_gate_requires_a_matching_check_command():
+def test_evaluate_receipt_gate_rejects_a_mismatched_check_command():
     capsule = build_clean_capsule()
     required = capsule["required_checks"][0]
     checks = [
@@ -1278,10 +1300,13 @@ def test_evaluate_receipt_gate_requires_a_matching_check_command():
 
     outcome = evaluate_receipt_gate(capsule=capsule, receipt=receipt)
 
-    assert any(
-        request["reason_code"] == GATE_REASON["REQUIRED_CHECK_MISSING"] and request["check"] == required["name"]
-        for request in outcome["gate_requests"]
-    )
+    assert outcome == {
+        "decision": GATE_DECISION["BLOCKED"],
+        "reason_codes": [GATE_REASON["UNKNOWN_RECEIPT_SHAPE"]],
+        "gate_requests": [],
+    }
+
+
 def test_evaluate_receipt_gate_gate_required_when_the_receipt_binds_to_a_different_capsule_fingerprint():
     capsule = build_clean_capsule()
     other_capsule = base_capsule_like(

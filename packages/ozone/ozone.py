@@ -40,6 +40,7 @@ VERIFICATION_SCHEMA = "vivary.ozone-verification/v0"
 REFUSAL_SCHEMA = "vivary.ozone-verification-refusal/v0"
 MAX_EVIDENCE_AGE_SECONDS = 300
 MAX_REPAIR_IDENTIFIER_JSON_BYTES = 128
+MAX_SCOPE_PATH_SCALAR_WORK = 10_000_000
 MAX_SCOPE_PATH_COMPARISONS = 100_000
 MAX_SCOPE_ROOTS = 1_000
 MAX_REPAIR_GRAPH_NODES = 1_000
@@ -123,9 +124,15 @@ def _load_core_verification():
     ):
         sys.path.insert(0, sibling_core)
     from vivary_core.capsule_compile import (
+        CapsuleContentWorkLimitError,
         MAX_GRAPH_CONTEXT_CHECKOUTS,
         TASK_CAPSULE_FIELDS,
         capsule_context_matches_graph,
+        capsule_compiler_omissions_require_graph,
+        content_context_is_present,
+        content_context_work_is_bounded,
+        content_context_is_valid,
+        declared_check_cwds_are_within_task_scope,
         is_task_capsule_shape,
         is_git_checkout,
         repair_topology_fingerprint,
@@ -135,7 +142,10 @@ def _load_core_verification():
         repair_graph_is_canonical,
         projected_neighbor_pair_count,
     )
-    from vivary_core.capsule_select import OMITTED_LIST_CAP
+    from vivary_core.capsule_select import (
+        CapsuleRankingWorkLimitError,
+        OMITTED_LIST_CAP,
+    )
     from vivary_core.canonical import (
         MAX_LOSSLESS_INTEGER,
         utf16_sort_key,
@@ -144,7 +154,10 @@ def _load_core_verification():
         is_within_allowlist,
     )
     from vivary_core.collation import CollationDomainError, locale_sort_key
-    from vivary_core.verify_receipt import verify_receipt_integrity
+    from vivary_core.verify_receipt import (
+        receipt_checks_are_authorized,
+        verify_receipt_integrity,
+    )
     from vivary_core.receipt import (
         EXECUTION_RECEIPT_FIELDS,
         RECEIPT_SCHEMA as EXECUTION_RECEIPT_SCHEMA,
@@ -158,12 +171,20 @@ def _load_core_verification():
 
     return {
         "capsule_context_matches_graph": capsule_context_matches_graph,
+        "capsule_compiler_omissions_require_graph": capsule_compiler_omissions_require_graph,
+        "declared_check_cwds_are_within_task_scope": declared_check_cwds_are_within_task_scope,
         "is_task_capsule_shape": is_task_capsule_shape,
+        "CapsuleContentWorkLimitError": CapsuleContentWorkLimitError,
+        "content_context_is_present": content_context_is_present,
+        "content_context_is_valid": content_context_is_valid,
+        "content_context_work_is_bounded": content_context_work_is_bounded,
         "TASK_CAPSULE_FIELDS": TASK_CAPSULE_FIELDS,
         "is_git_checkout": is_git_checkout,
         "verify_task_capsule_integrity": verify_task_capsule_integrity,
+        "CapsuleRankingWorkLimitError": CapsuleRankingWorkLimitError,
         "OMITTED_LIST_CAP": OMITTED_LIST_CAP,
         "verify_receipt_integrity": verify_receipt_integrity,
+        "receipt_checks_are_authorized": receipt_checks_are_authorized,
         "EXECUTION_RECEIPT_SCHEMA": EXECUTION_RECEIPT_SCHEMA,
         "EXECUTION_RECEIPT_FIELDS": EXECUTION_RECEIPT_FIELDS,
         "propose_context_repairs": propose_context_repairs,
@@ -210,15 +231,21 @@ def _bounded_repair_identifier(value):
 
 
 def _bounded_json_work_units(value, limit):
-    """Count canonical-JSON work without allocating the serialized value."""
+    """Count canonical-JSON work with auxiliary memory bounded by depth."""
     work = 0
-    stack = [(value, False)]
+    stack = [("value", value, None)]
     active_containers = set()
     pending_values = 1
     while stack:
-        item, exiting = stack.pop()
-        if exiting:
-            active_containers.remove(id(item))
+        frame_kind, item, children = stack.pop()
+        if frame_kind == "children":
+            try:
+                nested = next(children)
+            except StopIteration:
+                active_containers.remove(id(item))
+                continue
+            stack.append((frame_kind, item, children))
+            stack.append(("value", nested, None))
             continue
 
         pending_values -= 1
@@ -240,21 +267,20 @@ def _bounded_json_work_units(value, limit):
                     work += 12
                 if work > limit:
                     return None
-        elif isinstance(item, dict):
+            continue
+
+        if isinstance(item, dict):
             identity = id(item)
             if identity in active_containers:
                 return None
             child_count = 2 * len(item)
             if child_count > limit - work:
                 return None
-            active_containers.add(identity)
-            stack.append((item, True))
-            for key, nested in item.items():
-                stack.append((key, False))
-                stack.append((nested, False))
-            pending_values += child_count
-            if work + pending_values > limit:
-                return None
+            children = (
+                child
+                for pair in item.items()
+                for child in pair
+            )
         elif isinstance(item, list):
             identity = id(item)
             if identity in active_containers:
@@ -262,13 +288,15 @@ def _bounded_json_work_units(value, limit):
             child_count = len(item)
             if child_count > limit - work:
                 return None
-            active_containers.add(identity)
-            stack.append((item, True))
-            for nested in item:
-                stack.append((nested, False))
-            pending_values += child_count
-            if work + pending_values > limit:
-                return None
+            children = iter(item)
+        else:
+            continue
+
+        active_containers.add(identity)
+        stack.append(("children", item, children))
+        pending_values += child_count
+        if work + pending_values > limit:
+            return None
     return work
 
 
@@ -411,21 +439,6 @@ def _receipt_shape_is_valid(
     ):
         return False
 
-    if not isinstance(capsule, dict):
-        return True
-    required_commands = {}
-    for required_check in capsule.get("required_checks", []):
-        name = required_check["name"]
-        command = required_check["command"]
-        if name in required_commands and required_commands[name] != command:
-            return False
-        required_commands[name] = command
-    if any(
-        check["name"] in required_commands
-        and check.get("command") != required_commands[check["name"]]
-        for check in checks
-    ):
-        return False
     capsule_claim_ids = [claim["id"] for claim in capsule.get("claims", [])]
     capsule_conflicts = [
         {"id": conflict["id"], "decision": conflict["decision"]}
@@ -446,6 +459,29 @@ def _receipt_shape_is_valid(
 
 
 
+def _capsule_narrated_paths(capsule):
+    paths = []
+    for entries in (
+        capsule.get("claims", []),
+        capsule.get("conflicts", []),
+        capsule.get("unknowns", []),
+        capsule.get("omissions", []),
+    ):
+        for entry in entries:
+            subject_path = entry.get("subject_path")
+            paths.append(subject_path)
+            if entry.get("kind") != "content_lines_truncated":
+                paths.append(entry.get("path"))
+            sides = entry.get("sides")
+            if isinstance(sides, list):
+                paths.extend(
+                    side.get("path")
+                    for side in sides
+                    if isinstance(side, dict)
+                )
+    return [path for path in paths if path is not None]
+
+
 def _capsule_scope_is_valid(capsule, core):
     task = capsule.get("task")
     if not isinstance(task, dict):
@@ -464,27 +500,8 @@ def _capsule_scope_is_valid(capsule, core):
     ):
         return False
 
-    narrated_paths = []
-    for entries in (
-        capsule.get("claims", []),
-        capsule.get("conflicts", []),
-        capsule.get("unknowns", []),
-        capsule.get("omissions", []),
-    ):
-        for entry in entries:
-            narrated_paths.extend((entry.get("path"), entry.get("subject_path")))
-            sides = entry.get("sides")
-            if isinstance(sides, list):
-                narrated_paths.extend(
-                    side.get("path")
-                    for side in sides
-                    if isinstance(side, dict)
-                )
-    narrated_paths = [path for path in narrated_paths if path is not None]
-    if (
-        len(narrated_paths) * len(declared_scope)
-        > MAX_SCOPE_PATH_COMPARISONS
-    ):
+    narrated_paths = _capsule_narrated_paths(capsule)
+    if not _scope_path_work_is_bounded(declared_scope, narrated_paths):
         return False
     return all(
         _nonempty_string(path)
@@ -773,6 +790,23 @@ def _repair_graph_is_safe(graph, core):
     return True
 
 
+def _scope_path_work_is_bounded(scope, paths):
+    if not (
+        isinstance(scope, list)
+        and isinstance(paths, list)
+        and all(isinstance(root, str) for root in scope)
+        and all(isinstance(path, str) for path in paths)
+    ):
+        return False
+    if len(scope) * len(paths) > MAX_SCOPE_PATH_COMPARISONS:
+        return False
+    scalar_work = (
+        len(paths) * sum(len(root) for root in scope)
+        + len(scope) * sum(len(path) for path in paths)
+    )
+    return scalar_work <= MAX_SCOPE_PATH_SCALAR_WORK
+
+
 def _graph_context_checkouts_bounded(capsule, graph, core):
     """Bound the scope-filtered checkout set the graph-context matcher reselects.
 
@@ -782,11 +816,16 @@ def _graph_context_checkouts_bounded(capsule, graph, core):
     context mismatch for an over-large but otherwise faithful graph.
     """
     scope = capsule["task"].get("scope") or []
+    checkout_nodes = [
+        node for node in graph["nodes"] if core["is_git_checkout"](node)
+    ]
+    checkout_paths = [node.get("path") for node in checkout_nodes]
+    if not _scope_path_work_is_bounded(scope, checkout_paths):
+        return False
     checkouts = [
         node
-        for node in graph["nodes"]
-        if core["is_git_checkout"](node)
-        and (
+        for node in checkout_nodes
+        if (
             not scope
             or any(
                 core["is_within_allowlist"](root, node.get("path"))
@@ -845,13 +884,13 @@ def _graph_context_work_is_bounded(capsule, graph):
     scope = capsule["task"].get("scope") or []
     if not scope:
         return True
-    checkout_count = sum(
-        1
+    paths = [
+        node.get("path")
         for node in graph["nodes"]
         if node.get("kind") == "checkout"
-    )
-    unknown_path_count = sum(
-        1
+    ]
+    paths.extend(
+        path
         for unknown in graph["unknowns"]
         for path in (
             unknown.get("path"),
@@ -859,9 +898,40 @@ def _graph_context_work_is_bounded(capsule, graph):
         )
         if path is not None
     )
-    return (
-        checkout_count + unknown_path_count
-    ) * len(scope) <= MAX_SCOPE_PATH_COMPARISONS
+    paths.extend(
+        worktree_root.get("value")
+        for node in graph["nodes"]
+        if node.get("kind") == "checkout"
+        for worktree_root in [
+            (node.get("facts") or {}).get("worktree_root")
+        ]
+        if isinstance(worktree_root, dict)
+        and worktree_root.get("status") == "known"
+        and worktree_root.get("value") is not None
+    )
+    paths.extend(
+        refusal.get("path")
+        for refusal in graph.get("refusals") or []
+        if isinstance(refusal, dict) and refusal.get("path") is not None
+    )
+    return _scope_path_work_is_bounded(scope, paths)
+
+
+def _capsule_graph_context_match_status(capsule, graph, content, core):
+    try:
+        return (
+            core["capsule_context_matches_graph"](
+                capsule,
+                graph,
+                content,
+            ),
+            True,
+        )
+    except (
+        core["CapsuleRankingWorkLimitError"],
+        core["CapsuleContentWorkLimitError"],
+    ):
+        return False, False
 
 
 def _repair_graph_topology_is_bound(capsule, graph, core):
@@ -955,6 +1025,7 @@ def _validate_governed_request(request, core):
         "receipt",
         "gate",
         "graph",
+        "content",
     }
     unknown_fields = sorted(field for field in request if field not in allowed_fields)
     errors.extend(f"unknown_field:{field}" for field in unknown_fields)
@@ -988,12 +1059,23 @@ def _validate_governed_request(request, core):
     capsule_is_valid_for_receipt = False
     capsule_shape_is_valid = False
     repair_capsule_is_safe = False
+    capsule_scope_work_is_bounded = False
     if not unknown_capsule_fields:
         capsule_shape_is_valid = core["is_task_capsule_shape"](capsule)
-        repair_capsule_is_safe = (
-            capsule_shape_is_valid and _repair_capsule_is_safe(capsule, core)
+        capsule_scope_work_is_bounded = (
+            capsule_shape_is_valid
+            and _scope_path_work_is_bounded(
+                capsule["task"].get("scope") or [],
+                _capsule_narrated_paths(capsule),
+            )
         )
-        if capsule_shape_is_valid and not repair_capsule_is_safe:
+        repair_capsule_is_safe = (
+            capsule_scope_work_is_bounded
+            and _repair_capsule_is_safe(capsule, core)
+        )
+        if capsule_shape_is_valid and not capsule_scope_work_is_bounded:
+            errors.append("repair_work_unbounded")
+        elif capsule_shape_is_valid and not repair_capsule_is_safe:
             errors.append("invalid_repair_capsule")
         if not capsule_shape_is_valid:
             errors.append("invalid_capsule")
@@ -1011,12 +1093,69 @@ def _validate_governed_request(request, core):
             errors.append("workspace_mismatch")
         elif (
             "graph" not in request
+            and not _scope_path_work_is_bounded(
+                capsule["task"].get("scope") or [],
+                [
+                    check["cwd"]
+                    for check in capsule["task"].get(
+                        "required_checks", []
+                    )
+                ],
+            )
+        ):
+            errors.append("repair_work_unbounded")
+        elif (
+            "graph" not in request
+            and not core["declared_check_cwds_are_within_task_scope"](
+                capsule["task"]
+            )
+        ):
+            errors.append("invalid_capsule")
+        elif (
+            "graph" not in request
+            and core["capsule_compiler_omissions_require_graph"](capsule)
+        ):
+            errors.append("graph_required_for_compiler_omissions")
+        elif (
+            "graph" not in request
             and capsule["required_checks"]
             != capsule["task"].get("required_checks", [])
         ):
             errors.append("graph_required_for_effective_checks")
         else:
             capsule_is_valid_for_receipt = repair_capsule_is_safe
+
+    content_context_is_valid = True
+    if isinstance(capsule, dict) and isinstance(capsule.get("workspace"), dict):
+        content_required = "content_fingerprint" in capsule["workspace"]
+        content_supplied = (
+            "content" in request
+            and core["content_context_is_present"](request["content"])
+        )
+        unbounded_content = (
+            "content" in request
+            and not core["content_context_work_is_bounded"](request["content"])
+        )
+        malformed_content = (
+            "content" in request
+            and not unbounded_content
+            and not core["content_context_is_valid"](request["content"])
+        )
+        if unbounded_content:
+            errors.append("repair_work_unbounded")
+            content_context_is_valid = False
+        elif malformed_content:
+            errors.append("invalid_content_context")
+            content_context_is_valid = False
+        elif content_required and not content_supplied:
+            errors.append("content_context_required")
+            content_context_is_valid = False
+        elif content_supplied and not content_required:
+            errors.append("invalid_content_context")
+            content_context_is_valid = False
+        if content_required and "graph" not in request:
+            errors.append("graph_required_for_content_context")
+            content_context_is_valid = False
 
     observed_at = _parse_instant(
         capsule.get("workspace", {}).get("observed_at")
@@ -1065,11 +1204,16 @@ def _validate_governed_request(request, core):
     if (
         "receipt" in request
         and capsule_is_valid_for_receipt
-        and not _receipt_shape_is_valid(
-            receipt,
-            capsule,
-            core["EXECUTION_RECEIPT_SCHEMA"],
-            core["EXECUTION_RECEIPT_FIELDS"],
+        and (
+            not _receipt_shape_is_valid(
+                receipt,
+                capsule,
+                core["EXECUTION_RECEIPT_SCHEMA"],
+                core["EXECUTION_RECEIPT_FIELDS"],
+            )
+            or not core["receipt_checks_are_authorized"](
+                receipt=receipt, capsule=capsule
+            )
         )
     ):
         errors.append("invalid_receipt")
@@ -1085,7 +1229,6 @@ def _validate_governed_request(request, core):
             seconds=MAX_EVIDENCE_AGE_SECONDS
         ):
             errors.append("stale_receipt")
-
     if "graph" in request:
         graph = request["graph"]
         graph_shape_is_safe = _repair_graph_is_safe(graph, core)
@@ -1099,6 +1242,8 @@ def _validate_governed_request(request, core):
             != capsule["workspace"].get("observed_at")
         ):
             errors.append("repair_graph_context_mismatch")
+        elif repair_capsule_is_safe and not content_context_is_valid:
+            pass
         elif repair_capsule_is_safe:
             if not _graph_context_checkouts_bounded(
                 capsule, graph, core
@@ -1128,10 +1273,19 @@ def _validate_governed_request(request, core):
                     capsule, graph, core
                 ):
                     errors.append("repair_graph_topology_unbound")
-                elif not core["capsule_context_matches_graph"](
-                    capsule, graph
-                ):
-                    errors.append("repair_graph_context_mismatch")
+                else:
+                    context_matches, ranking_work_is_bounded = (
+                        _capsule_graph_context_match_status(
+                            capsule,
+                            graph,
+                            request.get("content"),
+                            core,
+                        )
+                    )
+                    if not ranking_work_is_bounded:
+                        errors.append("repair_work_unbounded")
+                    elif not context_matches:
+                        errors.append("repair_graph_context_mismatch")
 
     return errors
 
@@ -1140,7 +1294,7 @@ def _verification_refusal(reason_codes):
     return {
         "schema": REFUSAL_SCHEMA,
         "outcome": "refused",
-        "reason_codes": reason_codes,
+        "reason_codes": list(dict.fromkeys(reason_codes)),
         "receipt_verdict": None,
         "gate_verdict": None,
         "repair_proposal": None,

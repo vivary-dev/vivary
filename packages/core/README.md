@@ -35,24 +35,44 @@ The governed-context shared seam every Vivary role package will speak through:
   evidence graph; divergent checkouts become explicit unresolved conflicts
   with both sides and their evidence preserved — never auto-resolved.
   Known fact values must match their fact-specific semantic type, and unknown facts
-  require a reason. Repair graphs must retain the canonical allowlist. The workspace
-  fingerprint commits each emitted checkout's path, effective worktree root, semantic
-  fact status and value, and normalized observation refusals. Evidence command text
-  does not enter that identity.
-- **`workspace_content`** — bounded, read-only `git grep` content search
-  over tracked files only, every truncation recorded.
+  require a reason. Known dirty-entry paths must be normalized, safe
+  checkout-relative paths. Repair graphs retain a nonempty traversal-free canonical
+  allowlist. Checkout, worktree-root, and Git-common-dir paths are canonical absolute;
+  duplicate persisted checkout identities fail closed. The workspace fingerprint
+  commits each emitted checkout's path, effective worktree root, semantic fact status
+  and value, and normalized observation refusals. Evidence command text does not enter
+  that identity. Persisted drive and UNC path identities compare case-insensitively on
+  every verifier host.
+- **`workspace_content`** — bounded, read-only `git grep` search over each checkout's
+  named HEAD commit tree, with every truncation recorded. Duplicate checkout identities
+  are observed once; noncanonical accepted roots are refused before Git access.
 - **`capsule_compile` / `capsule_select`** — the bounded Task Capsule:
   relevance-ranked, explainable claim selection with fail-closed structured filters.
-  Declared scope roots are absolute and cardinality-bounded; blank filter values fail
-  at the compiler boundary. Checkout and content-candidate work have fixed ceilings.
+  Declared scope roots are absolute, traversal-free, and cardinality-bounded; blank
+  filter values fail at the compiler boundary. Checkout/content-candidate counts,
+  source-path containment and prefix construction, and
+  candidate-by-question-term-and-filter scalar work have fixed ceilings.
   Complete claims retain their compiler-derived identity, subject path, fact, text,
-  status, evidence, and selection explanation. Complete conflicts retain their
-  repository, question, review decision, reason codes, and at least two checkout/path
-  sides. Scoped compilation reconstructs every compiler-owned omission, including
-  conflicts that cross the declared boundary. Content-match narration accepts only
-  normalized checkout-relative paths. Derived checks bind checkout-scoped identities,
-  execution workspaces, and exact observation evidence. A repair-topology fingerprint
-  commits checkout IDs and paths, repository nodes, and `checkout_of` relationships.
+  `known` status, evidence,
+  and selection explanation. Complete conflicts retain their repository, question,
+  review decision, reason codes, and at least two checkout/path sides. Scoped
+  compilation reconstructs every compiler-owned omission, including conflicts that
+  cross the declared boundary. Content-match narration accepts only normalized
+  checkout-relative paths and ranks source records in canonical path/line/term order.
+  Complete, meaningful `vivary.workspace-content/v0` observations require a
+  timezone-aware timestamp, a nonempty traversal-free absolute allowlist, uniquely
+  identified contained checkouts and matches, and reason-consistent refusals.
+  Nonempty-term searches require both the named revision actually searched and the
+  effective ignore-policy fingerprint shared with the workspace graph; the capsule
+  commits the source fingerprint. Malformed, field-smuggled, partial, or
+  work-unbounded sources fail closed.
+  A complete observation with no checkouts or refusals is semantically empty and keeps
+  absent-content capsule bytes. Graph-context verification requires the exact
+  meaningful observation and reconstructs the complete capsule from it.
+  Derived checks bind checkout-scoped identities, execution workspaces, and exact
+  observation evidence. A repair-topology
+  fingerprint commits checkout IDs and paths, repository nodes, and `checkout_of`
+  relationships.
   Malformed topology identifiers, graph nodes, or facts are rejected rather than
   partially compiled. Every budget cut is a recorded omission.
 - **`collation`** — JS `localeCompare` ordering (claim/node/edge ranking is
@@ -72,12 +92,14 @@ The governed-context shared seam every Vivary role package will speak through:
   gate constraints remain absent constraints. Every proposed write is named
   and carries `requires_gate`. Duplicate check names preserve their worst
   recorded outcome.
-  Graph-backed verification reconstructs compiler selection from the supplied graph
-  and retained content-match candidates. Added, removed, or rewritten graph claims fail
-  closed. Selection omissions cannot understate the graph-reconstructable minimum and
-  match exactly when their counts equal it. Opaque content can only raise totals; its
-  bounded over-budget entries remain capsule-attested but must name an in-scope checkout
-  path and known fact. Unknown or reshaped omission variants fail closed.
+  Graph-backed verification reconstructs compiler selection from the supplied graph.
+  Added, removed, or rewritten graph claims fail closed. Capsules with content-derived
+  claims, unknowns, or omissions require an exact fingerprinted content observation;
+  removing that binding cannot downgrade them to capsule-attested content. Core
+  recompiles the complete capsule, so content-derived records cannot be deleted or
+  rewritten. Selection omissions cannot understate the graph-reconstructable minimum
+  and match exactly when their counts equal it. Unknown or reshaped omission variants
+  fail closed.
   Repair graphs are reprojected from checkout paths, facts, and normalized refusals;
   every derived node, edge, conflict, unknown, omission, deterministic ID, evidence
   field, canonical allowlist, and workspace fingerprint must match. Invalid fact
@@ -131,8 +153,8 @@ pip install pytest
 python -m pytest packages/core/tests/ -q
 ```
 
-The current platform-specific proof is **713 tests on Windows**. On Linux, it is
-**712 passed plus 1 skip**. The suite translates the reference contracts across
+The current platform-specific proof is **767 tests on Windows**. On Linux, it is
+**766 passed plus 1 skip**. The suite translates the reference contracts across
 observation, capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces,
 corruption handling, real-git evidence-store round trips, and byte-exact cross-runtime
 fixtures.

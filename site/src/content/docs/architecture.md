@@ -119,11 +119,19 @@ What it owns:
 - **Projection** — observations into a typed evidence graph, where divergent
   checkouts become explicit unresolved conflicts with both sides preserved, never
   auto-resolved.
-- **Capsules** — bounded task context with absolute declared scope roots, every claim
-  carrying its evidence and selection reason, and every compiler-owned omission
-  reconstructed. Core owns the exact top-level capsule and receipt field sets.
+- **Capsules** — bounded task context with traversal-free absolute declared scope roots,
+  every claim carrying its evidence and selection reason, and every compiler-owned
+  omission reconstructed. Candidate-by-question-term-and-filter ranking and content
+  containment have Core-owned work ceilings. Capsules compiled from complete content
+  observations fingerprint that exact source. Content searches resolve and search a
+  named HEAD commit tree; duplicate checkout or match identities fail closed.
+  Graph-context verification requires the fingerprinted source, rejects stripped
+  bindings, and recompiles the complete capsule. Core owns the exact top-level capsule
+  and receipt field sets.
 - **Receipts and evidence** — what actually ran, bound to the exact capsule and
-  workspace fingerprint it ran against, in an append-only store.
+  workspace fingerprint it ran against, in an append-only store. Core rejects receipt
+  checks that have no exact name-and-command authority in the capsule, including for
+  direct Core and Strato callers.
 - **Role-policy surfaces** — reference implementations of the governed loop inside
   `vivary-core`, exposed incrementally through explicit experimental role adapters:
   - **Strato (`policy_*`)** evaluates budgets, capsule and receipt gates, and the
@@ -137,11 +145,14 @@ What it owns:
   - **Ozone (`verify_*`)** recomputes receipt fingerprints for tamper detection,
     evaluates gate sufficiency without allowing duplicate check names to erase
     worse evidence, and emits bounded repair proposals as gated dry-run data. The
-    `vivary-ozone` `verify --governed` facade applies an iterative whole-request work
-    ceiling before recursive validation, preserves Core's exact artifact-field
-    ownership and typed unknown-field refusals, binds graphless checks to task
-    declarations, and requires canonical repair-graph allowlists. Its raw fingerprinted
-    gate verdict passes to Strato unchanged.
+    `vivary-ozone` `verify --governed` facade applies iterative whole-request and
+    multiplicative scalar-work ceilings before recursive validation, preserves Core's
+    exact artifact-field ownership and typed unknown-field refusals, binds graphless
+    check working directories to task scope, rejects receipt-only check authority,
+    requires canonical repair-graph allowlists, and transports content observations
+    bound to both the named commit tree and the graph's effective ignore-policy
+    fingerprint for Core reconstruction. Its raw fingerprinted gate verdict passes to
+    Strato unchanged.
   - **Exo (`control_*`)** governs claims and leases, handoffs, dependencies,
     execution evidence, and task views over caller-owned state. Equivalent
     Win32 drive, UNC, and device-namespace spellings share one scope identity.

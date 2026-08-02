@@ -3984,6 +3984,9 @@ def _governed_content_unavailable(
                 "reason": reason,
                 "matches": [],
                 "omissions": [],
+                "evidence": {
+                    "command": "governed content observation bracket"
+                },
             }
         ],
         "refusals": [],

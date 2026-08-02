@@ -30,6 +30,7 @@ Language mapping notes (decision 0008 / documented rules for this slice):
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
 from vivary_core.canonical import (
     MAX_LOSSLESS_INTEGER,
@@ -37,25 +38,25 @@ from vivary_core.canonical import (
     canonicalize,
     deterministic_id,
     fingerprint,
-    is_absolute_root,
+    is_canonical_absolute_path,
     is_canonical_body_value,
+    is_safe_checkout_relative_path,
+    path_identity_key,
     normalize_path,
     is_within_allowlist,
 )
 from vivary_core.capsule_select import (
+    CapsuleRankingWorkLimitError,
     OMITTED_LIST_CAP,
     FILTER_FIELDS,
     TIER_NAMES,
-    _filter_field_value,
-    _match_filter,
     _question_match_value,
     question_terms,
-    word_match,
     select_claims,
-    subject_profiles,
     validate_filters,
 )
 from vivary_core.collation import CollationDomainError, locale_sort_key
+from vivary_core.workspace_content import CONTENT_SCHEMA
 from vivary_core.workspace_model import workspace_facts_are_valid
 
 CAPSULE_SCHEMA = "vivary.task-capsule/v0"
@@ -77,6 +78,7 @@ TASK_CAPSULE_FIELDS = frozenset(
 
 MAX_GRAPH_CONTEXT_CHECKOUTS = 300
 MAX_CAPSULE_CANDIDATE_WORK = 10_000
+MAX_CONTENT_VALIDATION_WORK = 1_000_000
 MAX_TASK_SCOPE_ROOTS = 1_000
 
 _OMISSION_EXACT_KEYS = {
@@ -133,6 +135,19 @@ _OMISSION_EXACT_KEYS = {
     "content_root_refused": frozenset({"kind", "reason", "path"}),
 }
 
+_CONTENT_SOURCE_FIELDS = frozenset(
+    {"schema", "observed_at", "terms", "allowlist", "checkouts", "refusals"}
+)
+_CONTENT_CAPSULE_OMISSION_KINDS = frozenset(
+    {
+        "content_matches_outside_task",
+        "content_lines_truncated",
+        "content_files_truncated",
+        "privacy_matches_excluded",
+        "content_root_refused",
+    }
+)
+
 
 def _nonempty_string(value) -> bool:
     return isinstance(value, str) and bool(value)
@@ -145,17 +160,434 @@ def _content_question_terms(question) -> set[str]:
     text = "" if question is None else str(question)
     return set(re.findall(r"[^\W_]+", text.lower(), flags=re.UNICODE))
 
+class CapsuleContentWorkLimitError(ValueError):
+    """Complete content validation would exceed its deterministic work ceiling."""
+
+
+
+def _content_source_is_empty(content) -> bool:
+    """Keep the three legacy semantic-empty forms outside content attestation."""
+    return content is None or (
+        type(content) is dict
+        and (
+            not content
+            or (
+                set(content) == {"checkouts"}
+                and type(content["checkouts"]) is list
+                and not content["checkouts"]
+            )
+        )
+    )
+
+
+def _is_timezone_aware_instant(value) -> bool:
+    if not _nonblank_string(value):
+        return False
+    try:
+        instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return instant.tzinfo is not None and instant.utcoffset() is not None
+
+
+def _is_normalized_content_path(value) -> bool:
+    return is_canonical_absolute_path(value)
+
+
+def _is_content_evidence(value) -> bool:
+    return (
+        type(value) is dict
+        and set(value) == {"command"}
+        and _nonempty_string(value.get("command"))
+    )
+
+
+def _is_content_match_record(match, terms) -> bool:
+    return (
+        type(match) is dict
+        and set(match) == {"path", "line", "excerpt", "term", "evidence"}
+        and is_safe_checkout_relative_path(match["path"])
+        and type(match["line"]) is int
+        and match["line"] > 0
+        and isinstance(match["excerpt"], str)
+        and _nonempty_string(match["term"])
+        and match["term"] in terms
+        and _is_content_evidence(match["evidence"])
+    )
+
+
+def _is_content_omission_record(omission) -> bool:
+    if type(omission) is not dict:
+        return False
+    kind = omission.get("kind")
+    if kind == "content_lines_truncated":
+        return (
+            set(omission) == {"kind", "path", "omitted_count", "reason"}
+            and is_safe_checkout_relative_path(omission["path"])
+            and type(omission["omitted_count"]) is int
+            and omission["omitted_count"] > 0
+            and _nonblank_string(omission["reason"])
+        )
+    if kind == "content_files_truncated":
+        return (
+            set(omission)
+            == {"kind", "omitted_count", "total_files_matched", "reason"}
+            and type(omission["omitted_count"]) is int
+            and omission["omitted_count"] > 0
+            and type(omission["total_files_matched"]) is int
+            and omission["total_files_matched"] >= omission["omitted_count"]
+            and _nonblank_string(omission["reason"])
+        )
+    if kind == "privacy_matches_excluded":
+        return (
+            set(omission)
+            == {"kind", "omitted_count", "reason", "evidence"}
+            and type(omission["omitted_count"]) is int
+            and omission["omitted_count"] > 0
+            and _nonblank_string(omission["reason"])
+            and _is_content_evidence(omission["evidence"])
+        )
+    return False
+
+
+def _is_content_checkout_record(checkout, terms) -> bool:
+    if (
+        type(checkout) is not dict
+        or not _nonempty_string(checkout.get("raw_path"))
+        or not _is_normalized_content_path(checkout.get("path"))
+        or normalize_path(checkout["raw_path"]) != checkout["path"]
+    ):
+        return False
+    status = checkout.get("status")
+    if status == "observed":
+        base_fields = {
+            "raw_path",
+            "path",
+            "status",
+            "head_revision",
+            "matches",
+            "omissions",
+        }
+        fields = set(checkout)
+        if fields not in (
+            base_fields | {"privacy_fingerprint"},
+            base_fields | {"reason"},
+        ):
+            return False
+        if (
+            (
+                checkout["head_revision"] is not None
+                and not _nonempty_string(checkout["head_revision"])
+            )
+            or type(checkout["matches"]) is not list
+            or type(checkout["omissions"]) is not list
+            or not all(
+                _is_content_match_record(match, terms)
+                for match in checkout["matches"]
+            )
+            or not all(
+                _is_content_omission_record(omission)
+                for omission in checkout["omissions"]
+            )
+        ):
+            return False
+        return (
+            fields == base_fields | {"privacy_fingerprint"}
+            and bool(terms)
+            and _nonempty_string(checkout["head_revision"])
+            and _nonempty_string(checkout["privacy_fingerprint"])
+        ) or (
+            fields == base_fields | {"reason"}
+            and checkout.get("reason") == "no_question_terms"
+            and not terms
+            and checkout["head_revision"] is None
+            and not checkout["matches"]
+            and not checkout["omissions"]
+        )
+    if status == "unknown":
+        return (
+            set(checkout)
+            == {
+                "raw_path",
+                "path",
+                "status",
+                "reason",
+                "matches",
+                "omissions",
+                "evidence",
+            }
+            and _nonblank_string(checkout["reason"])
+            and checkout["matches"] == []
+            and checkout["omissions"] == []
+            and _is_content_evidence(checkout["evidence"])
+        )
+    return False
+
+
+def _is_normalized_source_path(value) -> bool:
+    return _nonempty_string(value) and normalize_path(value) == value
+
+
+def _is_content_refusal_record(refusal, allowlist) -> bool:
+    if not (
+        type(refusal) is dict
+        and set(refusal) == {"raw_path", "path", "status", "reason"}
+        and _nonempty_string(refusal.get("raw_path"))
+        and _is_normalized_source_path(refusal.get("path"))
+        and normalize_path(refusal["raw_path"]) == refusal["path"]
+        and refusal["status"] == "refused"
+    ):
+        return False
+    within_allowlist = any(
+        is_within_allowlist(root, refusal["path"]) for root in allowlist
+    )
+    if refusal["reason"] == "outside_allowlist":
+        return (
+            not is_canonical_absolute_path(refusal["path"])
+            or not within_allowlist
+        )
+    return (
+        refusal["reason"] == "resolved_outside_allowlist"
+        and is_canonical_absolute_path(refusal["path"])
+        and within_allowlist
+    )
+
+
+def _content_records_are_unique(content) -> bool:
+    source_paths = set()
+    for record in [*content["checkouts"], *content["refusals"]]:
+        source_key = path_identity_key(record["path"])
+        if source_key in source_paths:
+            return False
+        source_paths.add(source_key)
+    for checkout in content["checkouts"]:
+        match_keys = set()
+        for match in checkout["matches"]:
+            match_key = (
+                path_identity_key(
+                    f"{checkout['path'].rstrip('/')}/{match['path']}"
+                ),
+                match["line"],
+                match["term"],
+            )
+            if match_key in match_keys:
+                return False
+            match_keys.add(match_key)
+    return True
+
+
+def content_context_work_is_bounded(content) -> bool:
+    if not isinstance(content, dict):
+        return True
+    checkouts = content.get("checkouts")
+    refusals = content.get("refusals")
+    allowlist = content.get("allowlist")
+    if not all(
+        isinstance(records, list)
+        for records in (checkouts, refusals, allowlist)
+    ):
+        return True
+    source_records = len(checkouts) + len(refusals)
+    if (
+        source_records > MAX_CAPSULE_CANDIDATE_WORK
+        or source_records * len(allowlist) > MAX_CONTENT_VALIDATION_WORK
+    ):
+        return False
+    root_units = sum(
+        len(root) for root in allowlist if isinstance(root, str)
+    )
+    source_path_units = sum(
+        len(record.get("path"))
+        for record in [*checkouts, *refusals]
+        if isinstance(record, dict) and isinstance(record.get("path"), str)
+    )
+    if (
+        source_records * root_units
+        + len(allowlist) * source_path_units
+        > MAX_CONTENT_VALIDATION_WORK
+    ):
+        return False
+    work = source_records
+    prefix_work = 0
+    for checkout in checkouts:
+        matches = checkout.get("matches") if isinstance(checkout, dict) else None
+        omissions = checkout.get("omissions") if isinstance(checkout, dict) else None
+        if isinstance(matches, list) and isinstance(omissions, list):
+            projected_records = len(matches) + len(omissions)
+            work += projected_records
+            checkout_path = checkout.get("path")
+            if isinstance(checkout_path, str):
+                prefix_work += len(checkout_path) * projected_records
+                if prefix_work > MAX_CONTENT_VALIDATION_WORK:
+                    return False
+            if work > MAX_CAPSULE_CANDIDATE_WORK:
+                return False
+    return True
+
+
+def _content_scope_work_is_bounded(content, scope) -> bool:
+    if scope is None or _content_source_is_empty(content):
+        return True
+    if not isinstance(content, dict):
+        return True
+    checkouts = content.get("checkouts")
+    refusals = content.get("refusals")
+    if (
+        not isinstance(scope, list)
+        or not isinstance(checkouts, list)
+        or not isinstance(refusals, list)
+    ):
+        return False
+
+    occurrences = 0
+    path_units = 0
+    for checkout in checkouts:
+        if not isinstance(checkout, dict):
+            return False
+        matches = checkout.get("matches")
+        omissions = checkout.get("omissions")
+        path = checkout.get("path")
+        if (
+            not isinstance(matches, list)
+            or not isinstance(omissions, list)
+            or not isinstance(path, str)
+        ):
+            return False
+        checkout_occurrences = len(matches) + len(omissions) + 1
+        occurrences += checkout_occurrences
+        path_units += len(path) * checkout_occurrences
+        path_units += sum(
+            len(match.get("path"))
+            for match in matches
+            if isinstance(match, dict) and isinstance(match.get("path"), str)
+        )
+
+    for refusal in refusals:
+        if not isinstance(refusal, dict) or not isinstance(refusal.get("path"), str):
+            return False
+        occurrences += 1
+        path_units += len(refusal["path"])
+
+    scope_units = sum(len(root) for root in scope if isinstance(root, str))
+    scalar_work = (
+        occurrences * len(scope)
+        + occurrences * scope_units
+        + path_units * len(scope)
+    )
+    return scalar_work <= MAX_CONTENT_VALIDATION_WORK
+
+def content_context_is_valid(content) -> bool:
+    """Validate a complete workspace-content/v0 source artifact."""
+    if _content_source_is_empty(content):
+        return True
+    if (
+        type(content) is not dict
+        or not is_canonical_body_value(content)
+        or set(content) != _CONTENT_SOURCE_FIELDS
+        or content.get("schema") != CONTENT_SCHEMA
+        or not _is_timezone_aware_instant(content.get("observed_at"))
+        or type(content.get("terms")) is not list
+        or not all(_nonempty_string(term) for term in content["terms"])
+        or type(content.get("allowlist")) is not list
+        or not content["allowlist"]
+        or not all(
+            _is_normalized_content_path(path)
+            for path in content["allowlist"]
+        )
+        or not content_context_work_is_bounded(content)
+        or type(content.get("checkouts")) is not list
+        or type(content.get("refusals")) is not list
+    ):
+        return False
+    terms = frozenset(content["terms"])
+    return (
+        all(
+            _is_content_checkout_record(checkout, terms)
+            and any(
+                is_within_allowlist(root, checkout["path"])
+                for root in content["allowlist"]
+            )
+            for checkout in content["checkouts"]
+        )
+        and all(
+            _is_content_refusal_record(refusal, content["allowlist"])
+            for refusal in content["refusals"]
+        )
+        and _content_records_are_unique(content)
+    )
+
+
+def content_context_is_present(content) -> bool:
+    if _content_source_is_empty(content):
+        return False
+    return not (
+        content_context_is_valid(content)
+        and content["checkouts"] == []
+        and content["refusals"] == []
+    )
+
+
+def _capsule_has_content_derived_artifacts(capsule) -> bool:
+    claims = capsule.get("claims") if isinstance(capsule, dict) else None
+    if isinstance(claims, list) and any(
+        isinstance(claim, dict) and claim.get("fact") == "content_match"
+        for claim in claims
+    ):
+        return True
+    for field in ("unknowns", "omissions"):
+        records = capsule.get(field) if isinstance(capsule, dict) else None
+        if isinstance(records, list) and any(
+            isinstance(record, dict)
+            and (
+                (
+                    isinstance(record.get("kind"), str)
+                    and record["kind"].startswith("content_")
+                )
+                or record.get("kind") in _CONTENT_CAPSULE_OMISSION_KINDS
+            )
+            for record in records
+        ):
+            return True
+    return False
+
+
+def capsule_compiler_omissions_require_graph(capsule) -> bool:
+    """Whether graphless verification cannot disambiguate omission provenance."""
+    omissions = capsule.get("omissions") if isinstance(capsule, dict) else None
+    return isinstance(omissions, list) and any(
+        isinstance(omission, dict)
+        and omission.get("kind")
+        in {
+            "filtered_out",
+            "claims_over_budget",
+            "collation_domain_excluded",
+        }
+        for omission in omissions
+    )
+
 
 def _path_is_in_scope(path, scope) -> bool:
     if not scope or not path:
         return True
     return any(is_within_allowlist(root, path) for root in scope)
 
+def declared_check_cwds_are_within_task_scope(task) -> bool:
+    """Return whether declared checks are authorized by task scope alone."""
+    return _is_task_shape(task) and all(
+        _path_is_in_scope(required_check["cwd"], task.get("scope"))
+        for required_check in task.get("required_checks", [])
+    )
+
 
 def _entry_is_in_scope(entry, scope) -> bool:
     if not scope or not isinstance(entry, dict):
         return True
-    for key in ("path", "subject_path"):
+    scoped_keys = (
+        ("subject_path",)
+        if entry.get("kind") == "content_lines_truncated"
+        else ("path", "subject_path")
+    )
+    for key in scoped_keys:
         if entry.get(key) and not _path_is_in_scope(entry[key], scope):
             return False
     for side in entry.get("sides") or []:
@@ -292,14 +724,17 @@ def _is_required_checks_shape(value) -> bool:
         for required_check in value
     )
 
+def _is_canonical_check_cwd(value) -> bool:
+    return is_canonical_absolute_path(value)
+
+
 
 def _is_declared_required_checks_shape(value) -> bool:
     if not (
         _is_required_checks_shape(value)
         and all(
             set(required_check) == {"name", "command", "cwd"}
-            and _nonblank_string(required_check["cwd"])
-            and normalize_path(required_check["cwd"]) == required_check["cwd"]
+            and _is_canonical_check_cwd(required_check["cwd"])
             for required_check in value
         )
     ):
@@ -333,7 +768,10 @@ def _is_task_shape(task) -> bool:
         isinstance(task["scope"], list)
         and bool(task["scope"])
         and len(task["scope"]) <= MAX_TASK_SCOPE_ROOTS
-        and all(is_absolute_root(root) for root in task["scope"])
+        and all(
+            is_canonical_absolute_path(root)
+            for root in task["scope"]
+        )
     ):
         return False
     if "filters" in task:
@@ -423,6 +861,8 @@ def _is_claim_shape(claim) -> bool:
             "selection_reason",
         )
     ):
+        return False
+    if claim.get("status") != "known":
         return False
     evidence = claim.get("evidence")
     selection = claim.get("selection")
@@ -632,7 +1072,7 @@ def _is_omission_shape(omission) -> bool:
             return False
     if kind == "content_files_truncated" and (
         type(omission["total_files_matched"]) is not int
-        or omission["total_files_matched"] <= omission["omitted_count"]
+        or omission["total_files_matched"] < omission["omitted_count"]
     ):
         return False
     if kind == "privacy_matches_excluded" and not isinstance(
@@ -765,297 +1205,50 @@ def _refusal_omissions(graph, task_scope):
     return omissions
 
 
-def _canonical_multiset(items):
-    return sorted(
-        (canonicalize(item) for item in items),
-        key=utf16_sort_key,
-    )
+def capsule_context_matches_graph(capsule, graph, content=None) -> bool:
+    """Bind compiler-owned capsule context to verifier-supplied source artifacts."""
 
-
-def _compiler_omissions_match(
-    observed, expected, task, max_claims, checkout_paths, fact_names
-) -> bool:
-    selection_kinds = {"filtered_out", "claims_over_budget"}
-    observed_selection = [
-        omission
-        for omission in observed
-        if omission["kind"] in selection_kinds
-    ]
-    expected_selection = {
-        omission["kind"]: omission
-        for omission in expected
-        if omission["kind"] in selection_kinds
-    }
-    if len({item["kind"] for item in observed_selection}) != len(
-        observed_selection
+    workspace = capsule.get("workspace")
+    if not isinstance(workspace, dict):
+        return False
+    if content_context_is_present(content) and not content_context_is_valid(
+        content
     ):
         return False
-    for omission in observed_selection:
-        if omission["kind"] != "claims_over_budget":
-            continue
-        if any(
-            entry["subject_path"] not in checkout_paths
-            or entry["fact"] not in fact_names
-            for entry in omission["omitted"]
-        ):
+    claimed_content_fingerprint = workspace.get("content_fingerprint")
+    if claimed_content_fingerprint is not None:
+        if not content_context_is_present(content):
             return False
-
-    observed_fixed = [
-        omission
-        for omission in observed
-        if omission["kind"] not in selection_kinds
-    ]
-    expected_fixed = [
-        omission
-        for omission in expected
-        if omission["kind"] not in selection_kinds
-    ]
-    if _canonical_multiset(observed_fixed) != _canonical_multiset(
-        expected_fixed
-    ):
-        return False
-
-    observed_by_kind = {
-        omission["kind"]: omission for omission in observed_selection
-    }
-    normalized_filters = [
-        {
-            "field": task_filter["field"],
-            task_filter["operator"]: task_filter["value"],
-        }
-        for task_filter in validate_filters(task.get("filters"))
-    ]
-    for kind in selection_kinds:
-        omission = observed_by_kind.get(kind)
-        minimum = expected_selection.get(kind)
-        if omission is None:
-            if minimum is not None:
+        try:
+            if fingerprint(content) != claimed_content_fingerprint:
                 return False
-            continue
-        if kind == "filtered_out":
-            if (
-                omission["reason"]
-                != "structured task filters excluded candidate claims"
-                or omission["filters"] != normalized_filters
-            ):
-                return False
-        elif omission["reason"] != (
-            f"claim budget {max_claims} reached; cuts ranked by relevance "
-            "tier, weakest evidence first"
-        ):
-            return False
-        if minimum is None:
-            continue
-        if omission["omitted_count"] < minimum["omitted_count"]:
-            return False
-        if (
-            omission["omitted_count"] == minimum["omitted_count"]
-            and omission != minimum
-        ):
-            return False
-    return True
-
-
-def capsule_context_matches_graph(capsule, graph) -> bool:
-    """Bind compiler-owned capsule context to the graph supplied to a verifier."""
-
-    profile_filters = [
-        task_filter
-        for task_filter in validate_filters(capsule["task"].get("filters"))
-        if task_filter["field"] in {"label", "repository", "branch"}
-    ]
-    profiles = subject_profiles(graph)
-    scope = capsule["task"].get("scope")
-    scoped_conflicts, conflict_scope_omissions = _scope_conflicts(
-        graph["conflicts"], scope
-    )
-    graph_checkouts = [
-        node for node in graph["nodes"] if is_git_checkout(node)
-    ]
-    checkouts = [
-        node
-        for node in graph_checkouts
-        if (
-            not scope
-            or any(
-                is_within_allowlist(root, node.get("path"))
-                for root in scope
+            expected = compile_task_capsule(
+                task=capsule["task"],
+                graph=graph,
+                budget=capsule["budget"],
+                content=content,
             )
-        )
-    ]
-    if len(checkouts) > MAX_GRAPH_CONTEXT_CHECKOUTS:
+            return canonicalize(capsule) == canonicalize(expected)
+        except (CapsuleRankingWorkLimitError, CapsuleContentWorkLimitError):
+            raise
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return False
+    if _capsule_has_content_derived_artifacts(capsule):
         return False
+    if content_context_is_present(content):
+        return False
+
     try:
-        content_candidates = [
-            {
-                "subject": claim["subject"],
-                "subject_path": claim["subject_path"],
-                "claim": claim["claim"],
-                "fact": claim["fact"],
-                "status": claim["status"],
-                "evidence": claim["evidence"],
-                "intrinsic_signals": [
-                    signal
-                    for signal in claim["selection"]["signals"]
-                    if signal.get("signal") == "content_term_match"
-                ],
-            }
-            for claim in capsule["claims"]
-            if claim["fact"] == "content_match"
-        ]
-        candidates, _ = _sort_candidates(
-            _graph_claim_candidates(checkouts, []) + content_candidates
-        )
-        capsule_conflict_ids = {
-            conflict["id"] for conflict in capsule["conflicts"]
-        }
-        selection = select_claims(
+        expected = compile_task_capsule(
             task=capsule["task"],
-            graph={**graph, "conflicts": scoped_conflicts},
-            candidates=candidates,
-            max_claims=capsule["budget"]["max_claims"],
+            graph=graph,
+            budget=capsule["budget"],
         )
-        expected_claims = [
-            {"id": _claim_id(claim), **claim}
-            for claim in selection["included"]
-        ]
-        graph_claims = {
-            (claim["subject"], claim["fact"]): claim
-            for claim in candidates
-            if claim["fact"] != "content_match"
-        }
-        expected_omissions = [
-            *_selection_omissions(
-                selection, capsule["budget"]["max_claims"]
-            ),
-            *_refusal_omissions(graph, scope),
-            *conflict_scope_omissions,
-        ]
+        return canonicalize(capsule) == canonicalize(expected)
+    except (CapsuleRankingWorkLimitError, CapsuleContentWorkLimitError):
+        raise
     except (AttributeError, KeyError, TypeError, ValueError):
         return False
-    compiler_omission_kinds = {
-        "filtered_out",
-        "claims_over_budget",
-        "refused_root",
-        "conflict_outside_scope",
-    }
-    observed_omissions = [
-        omission
-        for omission in capsule["omissions"]
-        if omission.get("kind") in compiler_omission_kinds
-    ]
-    checkout_paths = {checkout["path"] for checkout in checkouts}
-    fact_names = {"content_match"}
-    for checkout in checkouts:
-        fact_names.update(checkout["facts"])
-    if not _compiler_omissions_match(
-        observed_omissions,
-        expected_omissions,
-        capsule["task"],
-        capsule["budget"]["max_claims"],
-        checkout_paths,
-        fact_names,
-    ):
-        return False
-    declared_checks = capsule["task"].get("required_checks")
-    expected_checks, check_unknowns = _derive_required_checks(checkouts)
-    if declared_checks is not None:
-        if not _declared_check_cwds_match_checkouts(
-            declared_checks, graph_checkouts, scope
-        ):
-            return False
-        merged = _merge_declared_required_checks(expected_checks, declared_checks)
-        if merged is None:
-            return False
-        expected_checks, resolving_cwds = merged
-        check_unknowns = _unresolved_check_unknowns(
-            check_unknowns, checkouts, resolving_cwds
-        )
-    if capsule["required_checks"] != expected_checks:
-        return False
-
-    if (
-        len(capsule["claims"]) != len(expected_claims)
-        or sorted(canonicalize(claim) for claim in capsule["claims"])
-        != sorted(canonicalize(claim) for claim in expected_claims)
-    ):
-        return False
-    for claim in capsule["claims"]:
-        profile = profiles.get(claim["subject"])
-        expected = graph_claims.get((claim["subject"], claim["fact"]))
-        repository = profile.get("repository") if profile is not None else None
-        if (
-            profile is None
-            or claim["subject_path"] != profile.get("path")
-            or claim["subject"]
-            != deterministic_id("checkout", {"path": profile.get("path")})
-            or (
-                repository is not None
-                and (
-                    not _nonempty_string(repository.get("identity"))
-                    or repository.get("id")
-                    != deterministic_id(
-                        "repository",
-                        {"identity": repository.get("identity")},
-                    )
-                )
-            )
-            or (
-                claim["fact"] != "content_match"
-                and (
-                    expected is None
-                    or any(
-                        claim[field] != expected[field]
-                        for field in (
-                            "subject",
-                            "subject_path",
-                            "fact",
-                            "claim",
-                            "status",
-                            "evidence",
-                        )
-                    )
-                )
-            )
-            or any(
-                not _match_filter(
-                    task_filter,
-                    _filter_field_value(profile, claim, task_filter["field"]),
-                )
-                for task_filter in profile_filters
-            )
-        ):
-            return False
-        for signal in claim["selection"]["signals"]:
-            if (
-                signal["signal"] == "question_term_match"
-                and not word_match(
-                    signal["term"],
-                    _question_match_value(profile, signal["field"]),
-                )
-            ):
-                return False
-
-    scope = capsule["task"].get("scope")
-    expected_unknowns = []
-    for unknown in [*graph.get("unknowns", []), *check_unknowns]:
-        paths = [unknown.get("path"), unknown.get("subject_path")]
-        if scope and any(
-            path is not None
-            and not any(is_within_allowlist(root, path) for root in scope)
-            for path in paths
-        ):
-            continue
-        expected_unknowns.append(canonicalize(unknown))
-    available_unknowns = {}
-    for unknown in capsule["unknowns"]:
-        key = canonicalize(unknown)
-        available_unknowns[key] = available_unknowns.get(key, 0) + 1
-    for key in expected_unknowns:
-        if available_unknowns.get(key, 0) == 0:
-            return False
-        available_unknowns[key] -= 1
-    return True
 
 
 
@@ -1114,6 +1307,17 @@ def _claim_selections_are_valid(capsule) -> bool:
     return True
 
 
+def _is_capsule_workspace_shape(workspace) -> bool:
+    return (
+        isinstance(workspace, dict)
+        and _nonempty_string(workspace.get("fingerprint"))
+        and (
+            "content_fingerprint" not in workspace
+            or _nonempty_string(workspace["content_fingerprint"])
+        )
+    )
+
+
 def is_task_capsule_shape(capsule) -> bool:
     """Return whether a value has the complete policy-facing Task Capsule shape."""
 
@@ -1126,9 +1330,7 @@ def is_task_capsule_shape(capsule) -> bool:
         and bool(capsule["capsule_id"])
         and isinstance(capsule.get("fingerprint"), str)
         and bool(capsule["fingerprint"])
-        and isinstance(capsule.get("workspace"), dict)
-        and isinstance(capsule["workspace"].get("fingerprint"), str)
-        and bool(capsule["workspace"]["fingerprint"])
+        and _is_capsule_workspace_shape(capsule.get("workspace"))
         and isinstance(capsule.get("claims"), list)
         and isinstance(capsule.get("conflicts"), list)
         and isinstance(capsule.get("unknowns"), list)
@@ -1154,6 +1356,11 @@ def is_task_capsule_shape(capsule) -> bool:
     ):
         return False
 
+    if (
+        "content_fingerprint" not in capsule["workspace"]
+        and _capsule_has_content_derived_artifacts(capsule)
+    ):
+        return False
     return (
         all(_is_claim_shape(claim) for claim in capsule["claims"])
         and all(
@@ -1233,7 +1440,7 @@ def _derive_required_checks(checkouts):
     seen = set()
 
     def add(name, command, evidence, cwd):
-        key = (cwd, command)
+        key = (path_identity_key(cwd), command)
         if key in seen:
             return
         seen.add(key)
@@ -1301,7 +1508,7 @@ def _declared_check_cwds_match_checkouts(declared_checks, checkouts, scope):
         if _nonempty_string(node_path) and _nonempty_string(execution_root):
             observed_roots.append((node_path, execution_root))
     execution_roots = {
-        execution_root
+        path_identity_key(execution_root)
         for node_path, execution_root in observed_roots
         if not scope
         or any(
@@ -1322,8 +1529,11 @@ def _declared_check_cwds_match_checkouts(declared_checks, checkouts, scope):
                 ):
                     nearest_root = execution_root
             if nearest_root is not None:
-                execution_roots.add(nearest_root)
-    return all(check["cwd"] in execution_roots for check in declared_checks)
+                execution_roots.add(path_identity_key(nearest_root))
+    return all(
+        path_identity_key(check["cwd"]) in execution_roots
+        for check in declared_checks
+    )
 
 
 
@@ -1337,14 +1547,15 @@ def _merge_declared_required_checks(derived_checks, declared_checks):
         if existing is not None:
             if (
                 existing["command"] != declared["command"]
-                or existing.get("cwd") != declared["cwd"]
+                or path_identity_key(existing.get("cwd"))
+                != path_identity_key(declared["cwd"])
             ):
                 return None
             continue
         explicit = dict(declared)
         merged.append(explicit)
         by_name[explicit["name"]] = explicit
-        resolving_cwds.add(explicit["cwd"])
+        resolving_cwds.add(path_identity_key(explicit["cwd"]))
     return merged, resolving_cwds
 
 
@@ -1354,7 +1565,10 @@ def _unresolved_check_unknowns(unknowns, checkouts, resolving_cwds):
     resolved_subjects = {
         node.get("id")
         for node in checkouts
-        if (_fact_value(node, "worktree_root") or node.get("path")) in resolving_cwds
+        if path_identity_key(
+            _fact_value(node, "worktree_root") or node.get("path")
+        )
+        in resolving_cwds
     }
     return [
         unknown for unknown in unknowns
@@ -1499,29 +1713,32 @@ def _observed_head(node):
     return fact.get("value")
 
 
-def _content_is_bound_to(node, checkout_content):
-    """Whether this content was observed at the revision the graph describes.
+def _observed_content_privacy_fingerprint(node):
+    fact = (node.get("facts") or {}).get(
+        "content_privacy_fingerprint"
+    )
+    if fact is None or fact.get("status") != "known":
+        return None
+    return fact.get("value")
 
-    Matching by path alone accepted a result from an earlier scan as evidence for a
-    later snapshot, so a capsule could present an excerpt of a file as it used to be
-    as evidence about the checkout as it is now — a unified governed context that
-    never existed at any single moment. Unbindable content (either side missing a
-    revision) is treated as stale rather than quietly trusted: this is an integrity
-    check, and the whole point is not to accept evidence that cannot be placed.
-    """
+
+def _content_is_bound_to(node, checkout_content):
+    """Whether content and its privacy policy match the graph snapshot."""
     observed = _observed_head(node)
     searched = checkout_content.get("head_revision")
-    return bool(observed) and bool(searched) and observed == searched
+    observed_privacy = _observed_content_privacy_fingerprint(node)
+    searched_privacy = checkout_content.get("privacy_fingerprint")
+    return (
+        bool(observed)
+        and bool(searched)
+        and observed == searched
+        and bool(observed_privacy)
+        and observed_privacy == searched_privacy
+    )
 
 
 def _is_safe_content_match_path(path) -> bool:
-    return (
-        _nonblank_string(path)
-        and normalize_path(path) == path
-        and not is_absolute_root(path)
-        and re.match(r"^[A-Za-z]:", path) is None
-        and ".." not in path.split("/")
-    )
+    return is_safe_checkout_relative_path(path)
 
 
 def _content_match_candidates(
@@ -1535,16 +1752,27 @@ def _content_match_candidates(
     for checkout_content in content["checkouts"]:
         work += 1
         if work > work_limit:
-            raise ValueError("content candidate work exceeds the compiler limit")
-        node = checkouts_by_path.get(checkout_content.get("path"))
+            raise CapsuleContentWorkLimitError(
+                "content candidate work exceeds the compiler limit"
+            )
+        node = checkouts_by_path.get(path_identity_key(checkout_content.get("path")))
         if node is None:
             continue
         if not _content_is_bound_to(node, checkout_content):
             continue
-        for match in checkout_content.get("matches") or []:
+        for match in sorted(
+            checkout_content.get("matches") or [],
+            key=lambda item: (
+                utf16_sort_key(item["path"]),
+                item["line"],
+                utf16_sort_key(item["term"]),
+            ),
+        ):
             work += 1
             if work > work_limit:
-                raise ValueError("content candidate work exceeds the compiler limit")
+                raise CapsuleContentWorkLimitError(
+                    "content candidate work exceeds the compiler limit"
+                )
             if not _is_safe_content_match_path(match.get("path")):
                 excluded_count += 1
                 continue
@@ -1642,7 +1870,10 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
             not isinstance(declared_scope, list)
             or not declared_scope
             or len(declared_scope) > MAX_TASK_SCOPE_ROOTS
-            or any(not is_absolute_root(root) for root in declared_scope)
+            or any(
+                not is_canonical_absolute_path(root)
+                for root in declared_scope
+            )
         )
     ):
         raise ValueError(
@@ -1676,6 +1907,18 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
             "budget.max_claims must be an integer from 0 through "
             f"{MAX_LOSSLESS_INTEGER} (got {max_claims!r})"
         )
+    if not content_context_work_is_bounded(content):
+        raise CapsuleContentWorkLimitError(
+            "content candidate work exceeds the compiler limit"
+        )
+    if not content_context_is_valid(content):
+        raise ValueError(
+            "content must be a complete vivary.workspace-content/v0 artifact"
+        )
+    if not _content_scope_work_is_bounded(content, declared_scope):
+        raise CapsuleContentWorkLimitError(
+            "content scope work exceeds the compiler limit"
+        )
     nodes = graph.get("nodes") if isinstance(graph, dict) else None
     if not isinstance(nodes, list):
         raise ValueError("workspace graph must contain a node list")
@@ -1691,10 +1934,6 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
             raise ValueError("workspace graph contains an invalid fact status")
         if is_git_checkout(node):
             checkouts.append(node)
-            if len(checkouts) > MAX_GRAPH_CONTEXT_CHECKOUTS:
-                raise ValueError(
-                    "workspace graph contains too many Git checkouts"
-                )
     scoped_conflicts, scope_conflict_omissions = _scope_conflicts(
         graph["conflicts"], declared_scope
     )
@@ -1705,7 +1944,13 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
             for node in checkouts
             if _path_is_in_scope(node.get("path"), declared_scope)
         ]
-    checkouts_by_path = {n.get("path"): n for n in checkouts}
+    if len(checkouts) > MAX_GRAPH_CONTEXT_CHECKOUTS:
+        raise ValueError(
+            "workspace graph contains too many Git checkouts in task scope"
+        )
+    checkouts_by_path = {
+        path_identity_key(node.get("path")): node for node in checkouts
+    }
 
     truncation_omissions: list[dict] = []
     candidates = _graph_claim_candidates(checkouts, truncation_omissions)
@@ -1771,8 +2016,8 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
 
     content_unknowns: list[dict] = []
     for checkout_content in (content.get("checkouts") if content else None) or []:
-        node = checkouts_by_path.get(checkout_content.get("path"))
-        if node is not None:
+        node = checkouts_by_path.get(path_identity_key(checkout_content.get("path")))
+        if node is not None and _content_is_bound_to(node, checkout_content):
             for content_omission in checkout_content.get("omissions") or []:
                 try:
                     entry = dict(content_omission)
@@ -1794,7 +2039,8 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
         # capsule that looks like a clean search with no matches.
         if (
             node is not None
-            and checkout_content.get("matches")
+            and checkout_content.get("status") == "observed"
+            and content.get("terms")
             and not _content_is_bound_to(node, checkout_content)
         ):
             content_unknowns.append(
@@ -1802,7 +2048,10 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
                     "kind": "content_snapshot_stale",
                     "subject": node.get("id"),
                     "subject_path": checkout_content.get("path"),
-                    "reason": "content was observed at a different revision than the graph describes",
+                    "reason": (
+                        "content was observed at a different revision or under a "
+                        "different effective privacy policy than the graph describes"
+                    ),
                     "observed_revision": _observed_head(node),
                     "searched_revision": checkout_content.get("head_revision"),
                     "evidence": [],
@@ -1855,14 +2104,18 @@ def compile_task_capsule(*, task, graph, budget=None, content=None):
     ):
         raise ValueError("compiled capsule omission is malformed")
 
+    workspace = {
+        "fingerprint": graph.get("workspace_fingerprint"),
+        "observed_at": graph.get("observed_at"),
+        "repair_topology_fingerprint": repair_topology_fingerprint(graph),
+    }
+    if content_context_is_present(content):
+        workspace["content_fingerprint"] = fingerprint(content)
+
     body = {
         "schema": CAPSULE_SCHEMA,
         "task": task_out,
-        "workspace": {
-            "fingerprint": graph.get("workspace_fingerprint"),
-            "observed_at": graph.get("observed_at"),
-            "repair_topology_fingerprint": repair_topology_fingerprint(graph),
-        },
+        "workspace": workspace,
         "claims": included,
         "conflicts": conflicts,
         "unknowns": [

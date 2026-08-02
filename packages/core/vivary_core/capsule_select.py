@@ -89,6 +89,11 @@ STOPWORDS = frozenset(
 # How many cut claims the over-budget omission may list; the exact count is
 # always reported, the listing itself stays bounded.
 OMITTED_LIST_CAP = 16
+MAX_CAPSULE_RANKING_WORK = 1_000_000
+
+
+class CapsuleRankingWorkLimitError(ValueError):
+    """Raised before candidate-by-question ranking can exceed Core's bound."""
 
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 _REGEXP_SPECIAL = re.compile(r"[.*+?^${}()|\[\]\\]")
@@ -290,6 +295,31 @@ def rank_claim(profile, terms, intrinsic_signals=None):
     }
 
 
+def _scalar_ranking_work_is_bounded(candidates, profiles, terms, filters):
+    term_units = sum(len(term) for term in terms)
+    work = 0
+    for candidate in candidates:
+        profile = profiles.get(candidate.get("subject"))
+        for filt in filters:
+            value = _filter_field_value(profile, candidate, filt["field"])
+            value_units = (
+                len(value)
+                if isinstance(value, str)
+                else len(str(value)) if value is not None else 0
+            )
+            work += len(filt["value"]) + value_units
+            if work > MAX_CAPSULE_RANKING_WORK:
+                return False
+        for field in ("label", "repository", "branch"):
+            value = _question_match_value(profile, field)
+            if not isinstance(value, str) or not value:
+                continue
+            work += len(terms) * len(value) + term_units
+            if work > MAX_CAPSULE_RANKING_WORK:
+                return False
+    return True
+
+
 def select_claims(*, task, graph, candidates, max_claims):
     """Select claims for a capsule: apply structured filters, rank what
     survives, cut at the budget, and explain all of it.
@@ -301,6 +331,20 @@ def select_claims(*, task, graph, candidates, max_claims):
     filters = validate_filters(task.get("filters"))
     profiles = subject_profiles(graph)
     terms = question_terms(task.get("question"))
+    if len(candidates) * len(terms) > MAX_CAPSULE_RANKING_WORK:
+        raise CapsuleRankingWorkLimitError(
+            "question ranking work exceeds compiler limit"
+        )
+    if len(candidates) * (len(terms) + len(filters)) > MAX_CAPSULE_RANKING_WORK:
+        raise CapsuleRankingWorkLimitError(
+            "filter ranking work exceeds compiler limit"
+        )
+    if not _scalar_ranking_work_is_bounded(
+        candidates, profiles, terms, filters
+    ):
+        raise CapsuleRankingWorkLimitError(
+            "scalar ranking work exceeds compiler limit"
+        )
 
     surviving = []
     filtered_count = 0

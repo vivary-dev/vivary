@@ -44,6 +44,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 from test_support import content_git_runner  # noqa: E402
 
 from vivary_core.canonical import normalize_path  # noqa: E402
+import vivary_core.workspace_observe as workspace_observe_module  # noqa: E402
 from vivary_core.workspace_content import MAX_EXCERPT_LENGTH, observe_content  # noqa: E402
 from vivary_core.workspace_model import project_workspace_graph  # noqa: E402
 from vivary_core.workspace_observe import (  # noqa: E402
@@ -389,7 +390,7 @@ def test_content_mjs_content_search_in_a_bare_repository_is_structured_unknown(f
     result = observe_content([fx["paths"]["bare"]], allowlist=[fx["paths"]["bare"]], terms=["seed"], now=NOW)
     checkout = result["checkouts"][0]
     assert checkout["status"] == "unknown"
-    assert checkout["reason"] == "grep_unavailable"
+    assert checkout["reason"] == "ignore_policy_unavailable"
     assert checkout["matches"] == []
 
 
@@ -660,10 +661,40 @@ def test_unborn_branch_fresh_init_zero_commits(fx):
     assert f["dirty_entries"]["value"] == []
 
 
+def test_unsafe_git_legal_dirty_paths_become_nondisclosing_unknowns(fx):
+    checkout = fx["paths"]["unicode_repo"]
+
+    def run_git(path, args):
+        if args == ["status", "--porcelain=v1", "-z"]:
+            return {
+                "ok": True,
+                "stdout": " M C:note.md\0",
+                "stderr": "",
+                "command": "git status --porcelain=v1 -z",
+                "code": 0,
+            }
+        return workspace_observe_module._default_run_git(
+            path, args, worktree_config={}
+        )
+
+    observation = observe_checkouts(
+        [checkout],
+        allowlist=[checkout],
+        run_git=run_git,
+        now=NOW,
+    )
+    facts = observation["checkouts"][0]["facts"]
+    assert facts["dirty_entries"]["status"] == "unknown"
+    assert facts["dirty_entries"]["reason"] == "unsafe_dirty_entries_excluded"
+    assert facts["is_dirty"]["status"] == "unknown"
+    assert "C:note.md" not in json.dumps(observation)
+
+
 def test_content_mjs_content_search_on_an_unborn_branch(fx):
     result = observe_content([fx["paths"]["unborn"]], allowlist=[fx["paths"]["unborn"]], terms=["anything"], now=NOW)
     checkout = result["checkouts"][0]
-    assert checkout["status"] == "observed"
+    assert checkout["status"] == "unknown"
+    assert checkout["reason"] == "grep_unavailable"
     assert checkout["matches"] == []
 
 
@@ -702,6 +733,79 @@ def test_model_mjs_unicode_branch_remote_names_survive_projection(fx):
 
 
 # --- Symlinked root (checkout path itself is a symlink/junction) --------------
+
+
+def test_equivalent_windows_case_preserves_exact_allowlist_root_trust(monkeypatch):
+    observed_paths = []
+    def fake_observe_one(raw_path, run_git):
+        observed_paths.append(raw_path)
+        return {
+            "raw_path": raw_path,
+            "path": normalize_path(raw_path),
+            "status": "observed",
+            "facts": {
+                "worktree_root": {
+                    "status": "known",
+                    "value": "d:/outside-target",
+                    "evidence": [],
+                }
+            },
+        }
+
+    monkeypatch.setattr(
+        workspace_observe_module,
+        "_observe_one",
+        fake_observe_one,
+    )
+    result = workspace_observe_module.observe_checkouts(
+        ["C:/Allowlisted-Link", "c:/allowlisted-link"],
+        allowlist=["c:/allowlisted-link"],
+        now=NOW,
+        run_git=lambda path, args: {},
+    )
+    assert len(result["checkouts"]) == 1
+    assert result["refusals"] == []
+    assert observed_paths == ["C:/Allowlisted-Link"]
+
+    duplicate_observation = json.loads(json.dumps(result))
+    duplicate = json.loads(json.dumps(result["checkouts"][0]))
+    duplicate["raw_path"] = "c:/allowlisted-link"
+    duplicate["path"] = "c:/allowlisted-link"
+    duplicate_observation["checkouts"].append(duplicate)
+    with pytest.raises(ValueError, match="duplicate checkout identities"):
+        project_workspace_graph(duplicate_observation)
+
+    traversal_observation = json.loads(json.dumps(result))
+    traversal_observation["allowlist"] = ["//server/share/safe"]
+    traversal_checkout = traversal_observation["checkouts"][0]
+    traversal_checkout["raw_path"] = "//server/share/safe/../outside"
+    traversal_checkout["path"] = "//server/share/safe/../outside"
+    with pytest.raises(ValueError, match="invalid fact status"):
+        project_workspace_graph(traversal_observation)
+
+    worktree_traversal = json.loads(json.dumps(result))
+    worktree_traversal["checkouts"][0]["facts"]["worktree_root"][
+        "value"
+    ] = "//server/share/safe/../outside"
+    with pytest.raises(ValueError, match="invalid fact status"):
+        project_workspace_graph(worktree_traversal)
+
+
+def test_relative_observation_root_projects_as_structured_refusal(fx):
+    observation = observe_checkouts(
+        ["relative/repo"],
+        allowlist=[fx["paths"]["unicode_repo"]],
+        now=NOW,
+    )
+    graph = project_workspace_graph(observation)
+    assert graph["nodes"] == []
+    assert graph["refusals"] == [
+        {
+            "path": "relative/repo",
+            "status": "refused",
+            "reason": "outside_allowlist",
+        }
+    ]
 
 
 def test_an_allowlisted_symlinked_junctioned_root_resolves_through_to_its_real_target(fx):

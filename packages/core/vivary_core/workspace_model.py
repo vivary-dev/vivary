@@ -31,6 +31,9 @@ from vivary_core.canonical import (
     utf16_sort_key,
     deterministic_id,
     fingerprint,
+    is_canonical_absolute_path,
+    is_safe_checkout_relative_path,
+    path_identity_key,
     normalize_path,
 )
 from vivary_core.collation import CollationDomainError, locale_sort_key
@@ -84,7 +87,7 @@ def _is_dirty_entries(value: Any) -> bool:
         isinstance(entry, dict)
         and set(entry) == {"state", "path"}
         and isinstance(entry["state"], str)
-        and isinstance(entry["path"], str)
+        and is_safe_checkout_relative_path(entry["path"])
         for entry in value
     )
 
@@ -104,9 +107,10 @@ def _is_remotes(value: Any) -> bool:
 _KNOWN_FACT_VALUE_VALIDATORS = {
     "is_git_repository": _is_boolean,
     "is_dirty": _is_boolean,
-    "worktree_root": _is_nonblank_string,
-    "git_common_dir": _is_nonblank_string,
+    "worktree_root": is_canonical_absolute_path,
+    "git_common_dir": is_canonical_absolute_path,
     "head_revision": _is_nonblank_string,
+    "content_privacy_fingerprint": _is_nonblank_string,
     "upstream": _is_nonblank_string,
     "last_fetch": _is_nonblank_string,
     "npm_test_script": _is_nonblank_string,
@@ -177,6 +181,11 @@ def _normalized_refusals(refusals: Any) -> List[Dict[str, str]]:
             or refusal.get("status") != "refused"
             or not isinstance(refusal.get("reason"), str)
             or not refusal["reason"]
+        ):
+            raise ValueError("workspace graph contains an invalid refusal")
+        if (
+            refusal["reason"] == "resolved_outside_allowlist"
+            and not is_canonical_absolute_path(refusal["path"])
         ):
             raise ValueError("workspace graph contains an invalid refusal")
         normalized.append(
@@ -255,12 +264,12 @@ def _repository_identity(checkout: Dict[str, Any]) -> Dict[str, Any]:
     common_dir = checkout["facts"].get("git_common_dir")
     if common_dir is not None and common_dir.get("status") == "known" and common_dir.get("value"):
         return {
-            "identity": f"local:{common_dir['value']}",
+            "identity": f"local:{path_identity_key(common_dir['value'])}",
             "identity_status": "inferred",
             "evidence": common_dir.get("evidence"),
         }
     return {
-        "identity": f"local:{checkout['path']}",
+        "identity": f"local:{path_identity_key(checkout['path'])}",
         "identity_status": "inferred" if (remotes is not None and remotes.get("status") == "known") else "unknown",
         "evidence": remotes.get("evidence") if remotes is not None else None,
     }
@@ -274,6 +283,16 @@ def _path_sort_key(value: str):
         return (1, utf16_sort_key(value))
 
 
+def _checkout_paths_are_unique(checkouts) -> bool:
+    seen = set()
+    for checkout in checkouts:
+        key = path_identity_key(checkout["path"])
+        if key in seen:
+            return False
+        seen.add(key)
+    return True
+
+
 def workspace_fingerprint_from_graph(graph: Dict[str, Any]) -> str:
     """Recompute the workspace commitment from projected checkout facts."""
     if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
@@ -285,12 +304,13 @@ def workspace_fingerprint_from_graph(graph: Dict[str, Any]) -> str:
         if node.get("kind") != "checkout":
             continue
         if (
-            not isinstance(node.get("path"), str)
-            or not node["path"]
+            not is_canonical_absolute_path(node.get("path"))
             or not workspace_facts_are_valid(node.get("facts"))
         ):
             raise ValueError("workspace graph checkouts require valid path and facts")
         checkouts.append(node)
+    if not _checkout_paths_are_unique(checkouts):
+        raise ValueError("workspace graph contains duplicate checkout identities")
     core_facts = sorted(
         (_checkout_core_facts(checkout) for checkout in checkouts),
         key=lambda checkout: _path_sort_key(checkout["path"]),
@@ -488,6 +508,12 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
     edges: Dict[str, Any] = {}
     unknowns: List[Dict[str, Any]] = []
     by_repository: Dict[str, List[Dict[str, Any]]] = {}
+    allowlist = [
+        normalize_path(path)
+        for path in observation.get("allowlist", [])
+    ]
+    if not all(is_canonical_absolute_path(path) for path in allowlist):
+        raise ValueError("workspace observation contains an invalid allowlist")
 
     def add_node(node: Dict[str, Any]) -> Dict[str, Any]:
         if node["id"] not in nodes:
@@ -498,15 +524,21 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
         edge_id = deterministic_id("edge", {"kind": kind, "from": from_, "to": to})
         if edge_id not in edges:
             edges[edge_id] = {"id": edge_id, "kind": kind, "from": from_, "to": to, "evidence": evidence}
+    seen_checkout_paths = set()
 
     for checkout in observation["checkouts"]:
         if (
             not isinstance(checkout, dict)
-            or not isinstance(checkout.get("path"), str)
-            or not checkout["path"]
+            or not is_canonical_absolute_path(checkout.get("path"))
             or not workspace_facts_are_valid(checkout.get("facts"))
         ):
             raise ValueError("workspace graph contains an invalid fact status")
+        checkout_path_key = path_identity_key(checkout["path"])
+        if checkout_path_key in seen_checkout_paths:
+            raise ValueError(
+                "workspace observation contains duplicate checkout identities"
+            )
+        seen_checkout_paths.add(checkout_path_key)
         checkout_id = deterministic_id("checkout", {"path": checkout["path"]})
 
 
@@ -716,7 +748,7 @@ def project_workspace_graph(observation: Dict[str, Any]) -> Dict[str, Any]:
     result: Dict[str, Any] = {
         "schema": GRAPH_SCHEMA,
         "observed_at": observation["observed_at"],
-        "allowlist": [normalize_path(p) for p in observation["allowlist"]],
+        "allowlist": allowlist,
         "workspace_fingerprint": workspace_fingerprint,
         "nodes": sorted_nodes,
         "edges": sorted_edges,

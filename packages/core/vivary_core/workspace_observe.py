@@ -27,10 +27,14 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from vivary_core.canonical import (
+    fingerprint,
     utf16_sort_key,
     is_absolute_root,
+    is_canonical_absolute_path,
+    is_safe_checkout_relative_path,
     is_within,
     is_within_allowlist,
+    path_identity_key,
     normalize_path,
 )
 from vivary_core.collation import CollationDomainError, locale_sort_key
@@ -62,6 +66,8 @@ _PINNED_GIT_ENV = {
     "GIT_CONFIG_NOSYSTEM": "1",
     # Never block on a credential prompt: observation is read-only and unattended.
     "GIT_TERMINAL_PROMPT": "0",
+    # Object reads must resolve the named commit itself, never refs/replace.
+    "GIT_NO_REPLACE_OBJECTS": "1",
 }
 
 _MAX_BUFFER = 4 * 1024 * 1024
@@ -104,13 +110,19 @@ def _config_discovery_git_env() -> Dict[str, str]:
     return env
 
 
-def _capped_run(argv: List[str], env: Dict[str, str], limit: int) -> Dict[str, Any]:
+def _capped_run(
+    argv: List[str],
+    env: Dict[str, str],
+    limit: int,
+    stdin_data: Optional[bytes] = None,
+) -> Dict[str, Any]:
     """Run ``argv`` with bounded stdout while draining stderr concurrently."""
     try:
         proc = subprocess.Popen(
             argv,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE if stdin_data is not None else None,
             env=env,
         )
     except OSError as error:
@@ -143,6 +155,19 @@ def _capped_run(argv: List[str], env: Dict[str, str], limit: int) -> Dict[str, A
 
     stderr_reader = threading.Thread(target=drain_stderr, daemon=True)
     stderr_reader.start()
+    stdin_errors: List[Exception] = []
+    stdin_writer = None
+    if stdin_data is not None:
+        def write_stdin() -> None:
+            try:
+                assert proc.stdin is not None
+                proc.stdin.write(stdin_data)
+                proc.stdin.close()
+            except (BrokenPipeError, OSError, ValueError) as error:
+                stdin_errors.append(error)
+
+        stdin_writer = threading.Thread(target=write_stdin, daemon=True)
+        stdin_writer.start()
 
     stdout_chunks: List[bytes] = []
     total = 0
@@ -196,7 +221,11 @@ def _capped_run(argv: List[str], env: Dict[str, str], limit: int) -> Dict[str, A
             # and return rather than turning cleanup itself into an unbounded wait.
             stderr_errors.append(RuntimeError("stderr drain timed out"))
 
-        for pipe in (proc.stdout, proc.stderr):
+        if stdin_writer is not None:
+            stdin_writer.join(_SUBPROCESS_CLEANUP_TIMEOUT)
+            if stdin_writer.is_alive():
+                stdin_errors.append(RuntimeError("stdin write timed out"))
+        for pipe in (getattr(proc, "stdin", None), proc.stdout, proc.stderr):
             if pipe is None or (pipe is proc.stderr and stderr_drain_timed_out):
                 continue
             try:
@@ -204,7 +233,11 @@ def _capped_run(argv: List[str], env: Dict[str, str], limit: int) -> Dict[str, A
             except (OSError, ValueError):
                 pass
 
-    run_error = stdout_error or (stderr_errors[0] if stderr_errors else None)
+    run_error = (
+        stdout_error
+        or (stderr_errors[0] if stderr_errors else None)
+        or (stdin_errors[0] if stdin_errors else None)
+    )
     return {
         "error": str(run_error) if run_error is not None else None,
         "stdout": b"".join(stdout_chunks),
@@ -366,6 +399,7 @@ def _default_run_git(
     args: List[str],
     *,
     worktree_config: Optional[Dict[str, str]] = None,
+    stdin_data: Optional[bytes] = None,
 ) -> Dict[str, Any]:
     # `core.fsmonitor` is repository configuration and can name an executable.
     # Override it on every Git invocation rather than trusting an observed
@@ -393,6 +427,7 @@ def _default_run_git(
         ["git", *full_args],
         _sanitized_git_env(semantic_config),
         _MAX_BUFFER,
+        stdin_data,
     )
     if outcome["error"] is not None:
         return {
@@ -592,18 +627,17 @@ def _ignored_paths(
     paths: List[str],
     run_git: RunGit,
 ) -> tuple[Optional[set[str]], str]:
-    """Return tracked or untracked paths excluded by repository ignore policy.
+    """Return paths excluded by repository ignore policy.
 
-    `--no-index` is the security-critical part: Git normally stops considering an
-    ignored path once it is tracked, but governed observation must not disclose a
-    path merely because it was committed before the privacy rule was added.
-    Bounded argv chunks avoid one process per dirty path. Paths whose line-oriented
-    `check-ignore` output would be ambiguous, and output real Git cannot produce,
-    fail closed.
+    `--no-index` is security-critical: Git normally stops considering an ignored
+    path once it is tracked, but governed observation must not disclose a path
+    merely because it was committed before the privacy rule was added. Production
+    sends all bounded names through one NUL-framed stdin query. Narrow injected
+    runners retain the legacy bounded-argv fallback.
     """
     unique_paths = list(dict.fromkeys(path for path in paths if path))
     evidence_command = (
-        f"git -c core.quotePath=false check-ignore --no-index -- "
+        f"git -c core.quotePath=false check-ignore --no-index --stdin -z "
         f"<{len(unique_paths)} paths>"
     )
     if any(
@@ -611,6 +645,47 @@ def _ignored_paths(
         or (path.startswith('"') and path.endswith('"'))
         for path in unique_paths
     ):
+        return None, evidence_command
+
+    stdin_paths = b"".join(
+        (f"./{path}" if not path.startswith("./") else path).encode("utf-8")
+        + b"\0"
+        for path in unique_paths
+    )
+    try:
+        stdin_result = run_git(
+            checkout_path,
+            [
+                "-c",
+                "core.quotePath=false",
+                "check-ignore",
+                "--no-index",
+                "--stdin",
+                "-z",
+            ],
+            stdin_data=stdin_paths,
+        )
+    except TypeError:
+        stdin_result = None
+
+    normalized_inputs = {normalize_path(path) for path in unique_paths}
+    if stdin_result is not None:
+        if stdin_result.get("ok"):
+            stdout = stdin_result.get("stdout", "")
+            if not isinstance(stdout, str) or (stdout and not stdout.endswith("\0")):
+                return None, evidence_command
+            output_paths = stdout.split("\0")[:-1] if stdout else []
+            ignored: set[str] = set()
+            for ignored_path in output_paths:
+                normalized_ignored_path = normalize_path(ignored_path)
+                if normalized_ignored_path.startswith("./"):
+                    normalized_ignored_path = normalized_ignored_path[2:]
+                if normalized_ignored_path not in normalized_inputs:
+                    return None, evidence_command
+                ignored.add(normalized_ignored_path)
+            return ignored, evidence_command
+        if stdin_result.get("code") == 1:
+            return set(), evidence_command
         return None, evidence_command
 
     chunks: List[List[str]] = []
@@ -629,8 +704,7 @@ def _ignored_paths(
     if chunk:
         chunks.append(chunk)
 
-    normalized_inputs = {normalize_path(path) for path in unique_paths}
-    ignored: set[str] = set()
+    ignored = set()
     for paths_chunk in chunks:
         result = run_git(
             checkout_path,
@@ -655,6 +729,49 @@ def _ignored_paths(
         if result.get("code") != 1:
             return None, evidence_command
     return ignored, evidence_command
+def _content_privacy_policy(
+    checkout_path: str,
+    revision: str,
+    run_git: RunGit,
+) -> tuple[Optional[str], Optional[set[str]], str]:
+    """Commit the effective ignore decisions for the immutable tracked tree."""
+    tree = run_git(
+        checkout_path,
+        ["ls-tree", "-r", "-z", "--name-only", revision],
+    )
+    tree_command = tree["command"]
+    if not tree.get("ok"):
+        return None, None, tree_command
+    stdout = tree.get("stdout")
+    if not isinstance(stdout, str) or (stdout and not stdout.endswith("\0")):
+        return None, None, tree_command
+    tracked_paths = stdout.split("\0")[:-1] if stdout else []
+    if any(
+        not path or not is_safe_checkout_relative_path(path)
+        for path in tracked_paths
+    ):
+        return None, None, tree_command
+    ignored, ignore_command = _ignored_paths(
+        checkout_path,
+        tracked_paths,
+        run_git,
+    )
+    command = f"{tree_command}; {ignore_command}"
+    if ignored is None:
+        return None, None, command
+    ignored_paths = sorted(ignored, key=utf16_sort_key)
+    return (
+        fingerprint(
+            {
+                "revision": revision,
+                "ignored_tracked_paths": ignored_paths,
+            }
+        ),
+        ignored,
+        command,
+    )
+
+
 
 
 _REMOTE_RE = re.compile(r"^(\S+)\t(.+) \((fetch|push)\)$")
@@ -794,6 +911,21 @@ def _observe_one(raw_path: str, run_git: RunGit) -> Dict[str, Any]:
         if head["ok"]
         else _unknown("head_unresolvable_possibly_unborn_branch", head["command"])
     )
+    if toplevel["ok"] and head["ok"] and head["stdout"].strip():
+        privacy_fingerprint, _, privacy_command = _content_privacy_policy(
+            worktree_root,
+            head["stdout"].strip(),
+            run_git,
+        )
+        facts["content_privacy_fingerprint"] = (
+            _known(privacy_fingerprint, privacy_command)
+            if privacy_fingerprint is not None
+            else _unknown("content_privacy_policy_unavailable", privacy_command)
+        )
+    else:
+        facts["content_privacy_fingerprint"] = _unknown(
+            "content_privacy_policy_unavailable", head["command"]
+        )
 
     branch = run_git(path, ["symbolic-ref", "--short", "-q", "HEAD"])
     if branch["ok"] and branch["stdout"].strip():
@@ -823,50 +955,63 @@ def _observe_one(raw_path: str, run_git: RunGit) -> Dict[str, Any]:
             facts["dirty_entries"] = _unknown("status_malformed", status["command"])
             facts["is_dirty"] = _unknown("status_malformed", status["command"])
         else:
-            ignored, ignore_command = _ignored_paths(
-                worktree_root,
-                [entry.get("path", "") for entry in entries],
-                run_git,
-            )
-            if ignored is None:
+            unsafe_entries = [
+                entry
+                for entry in entries
+                if not is_safe_checkout_relative_path(entry.get("path", ""))
+            ]
+            if unsafe_entries:
                 facts["dirty_entries"] = _unknown(
-                    "ignore_policy_unavailable", ignore_command
+                    "unsafe_dirty_entries_excluded", status["command"]
                 )
                 facts["is_dirty"] = _unknown(
-                    "ignore_policy_unavailable", ignore_command
+                    "unsafe_dirty_entries_excluded", status["command"]
                 )
             else:
-                visible_entries = [
-                    entry
-                    for entry in entries
-                    if normalize_path(entry.get("path", "")) not in ignored
-                ]
-                evidence = {
-                    "command": status["command"],
-                    "privacy_command": ignore_command,
-                }
-                if len(visible_entries) != len(entries):
-                    facts["dirty_entries"] = {
-                        "status": "unknown",
-                        "reason": "ignored_dirty_entries_excluded",
-                        "evidence": evidence,
-                    }
-                    facts["is_dirty"] = {
-                        "status": "unknown",
-                        "reason": "ignored_dirty_entries_excluded",
-                        "evidence": evidence,
-                    }
+                ignored, ignore_command = _ignored_paths(
+                    worktree_root,
+                    [entry.get("path", "") for entry in entries],
+                    run_git,
+                )
+                if ignored is None:
+                    facts["dirty_entries"] = _unknown(
+                        "ignore_policy_unavailable", ignore_command
+                    )
+                    facts["is_dirty"] = _unknown(
+                        "ignore_policy_unavailable", ignore_command
+                    )
                 else:
-                    facts["dirty_entries"] = {
-                        "status": "known",
-                        "value": visible_entries,
-                        "evidence": evidence,
+                    visible_entries = [
+                        entry
+                        for entry in entries
+                        if normalize_path(entry.get("path", "")) not in ignored
+                    ]
+                    evidence = {
+                        "command": status["command"],
+                        "privacy_command": ignore_command,
                     }
-                    facts["is_dirty"] = {
-                        "status": "known",
-                        "value": len(entries) > 0,
-                        "evidence": evidence,
-                    }
+                    if len(visible_entries) != len(entries):
+                        facts["dirty_entries"] = {
+                            "status": "unknown",
+                            "reason": "ignored_dirty_entries_excluded",
+                            "evidence": evidence,
+                        }
+                        facts["is_dirty"] = {
+                            "status": "unknown",
+                            "reason": "ignored_dirty_entries_excluded",
+                            "evidence": evidence,
+                        }
+                    else:
+                        facts["dirty_entries"] = {
+                            "status": "known",
+                            "value": visible_entries,
+                            "evidence": evidence,
+                        }
+                        facts["is_dirty"] = {
+                            "status": "known",
+                            "value": len(entries) > 0,
+                            "evidence": evidence,
+                        }
 
     remote = run_git(path, ["remote", "-v"])
     facts["remotes"] = (
@@ -916,7 +1061,12 @@ def observe_checkouts(
     if run_git is None:
         worktree_config: Dict[str, Dict[str, str]] = {}
 
-        def run_default(path: str, args: List[str]) -> Dict[str, Any]:
+        def run_default(
+            path: str,
+            args: List[str],
+            *,
+            stdin_data: Optional[bytes] = None,
+        ) -> Dict[str, Any]:
             key = normalize_path(path)
             if key not in worktree_config:
                 worktree_config[key] = _worktree_semantic_config(path)
@@ -924,6 +1074,7 @@ def observe_checkouts(
                 path,
                 args,
                 worktree_config=worktree_config[key],
+                stdin_data=stdin_data,
             )
 
         run_git = run_default
@@ -940,7 +1091,7 @@ def observe_checkouts(
     # contract at all.
     bad_entry_index = None
     for index, root in enumerate(allowlist):
-        if not is_absolute_root(root):
+        if not is_canonical_absolute_path(normalize_path(root)):
             bad_entry_index = index
             break
     if bad_entry_index is not None:
@@ -952,9 +1103,20 @@ def observe_checkouts(
     clock = now if now is not None else _default_clock
     checkouts: List[Dict[str, Any]] = []
     refusals: List[Dict[str, Any]] = []
+    seen_paths = set()
 
     for raw_path in paths:
-        if not any(is_within_allowlist(root, raw_path) for root in allowlist):
+        path_key = path_identity_key(raw_path)
+        if path_key in seen_paths:
+            continue
+        seen_paths.add(path_key)
+        if (
+            not is_canonical_absolute_path(normalize_path(raw_path))
+            or not any(
+                is_within_allowlist(root, raw_path)
+                for root in allowlist
+            )
+        ):
             refusals.append(
                 {
                     "raw_path": raw_path,
@@ -986,7 +1148,10 @@ def observe_checkouts(
         # symlinked/junctioned root is itself the allowlisted path (see
         # test_topology.py's "symlink_root" case).
         path = normalize_path(raw_path)
-        trusted_exactly = any(normalize_path(root) == path for root in allowlist)
+        trusted_exactly = any(
+            path_identity_key(root) == path_identity_key(path)
+            for root in allowlist
+        )
         worktree_root_fact = result["facts"].get("worktree_root")
         if (
             not trusted_exactly
