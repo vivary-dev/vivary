@@ -4668,6 +4668,19 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             )
         )
 
+    def test_workspace_declared_preset_refuses_oversized_readme(self):
+        with temp_workspace() as target:
+            readme = target / "README.md"
+            readme.write_bytes(
+                b"Preset: coding\n"
+                + b"x" * create_vivary._WORKSPACE_PRESET_BYTE_LIMIT
+            )
+
+            self.assertEqual(
+                create_vivary._workspace_declared_preset(target), "<preset>"
+            )
+
+
 
 if __name__ == "__main__":
     unittest.main()

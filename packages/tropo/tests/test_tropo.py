@@ -176,6 +176,19 @@ def test_help_receipt_failure_exits_nonzero_without_raw_path():
         assert str(bad_receipt) not in message
 
 
+def test_help_is_encodable_on_default_windows_console():
+    output = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", write_through=True)
+    try:
+        with contextlib.redirect_stdout(output):
+            try:
+                tropo.main(["--help"])
+                assert False, "expected argparse SystemExit"
+            except SystemExit as exc:
+                assert exc.code == 0
+    finally:
+        output.close()
+
+
 def test_query_and_find_receipts_do_not_record_raw_search_text():
     with temp_workspace() as td:
         (td / "tropo.toml").write_text("[base]\nallow_untyped = true\n", encoding="utf-8")

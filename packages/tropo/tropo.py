@@ -4422,7 +4422,7 @@ def _main(argv=None):
     p.add_argument("--budget", type=int, default=None,
                    help=f"find: approximate token budget (default: {_DEFAULT_FIND_BUDGET})")
     p.add_argument("--governed", action="store_true",
-                   help="find: experimental read-only scan → graph → capsule pipeline")
+                   help="find: experimental read-only scan -> graph -> capsule pipeline")
     p.add_argument("--max-claims", type=int, default=None,
                    help="find --governed: maximum capsule claims (default: 24)")
     args = p.parse_args(argv)

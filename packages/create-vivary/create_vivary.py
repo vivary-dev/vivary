@@ -185,6 +185,7 @@ WORKSPACE_COMPATIBILITY_SCHEMA_VERSION = 1
 LEGACY_WORKSPACE_CONTRACT = "legacy-v0.1"
 INDEXED_WORKSPACE_CONTRACT = "indexed-v0.2+"
 LEGACY_RECOMMENDED_WORKSPACE_FILES = INDEXED_WORKSPACE_FILES
+_WORKSPACE_PRESET_BYTE_LIMIT = 64 * 1024
 
 PRESET_STARTERS = {
     "coding": {
@@ -532,10 +533,45 @@ def _empty_workspace_compatibility() -> dict:
 
 def _workspace_declared_preset(target: Path) -> str:
     """Return a supported `Preset:` declaration or an explicit safe placeholder."""
+    readme_path = target / "README.md"
+    descriptor = None
     try:
-        readme = (target / "README.md").read_text(encoding="utf-8-sig")
-    except Exception:
+        if _is_symlink_or_junction(readme_path):
+            return "<preset>"
+        before = os.stat(readme_path, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_size > _WORKSPACE_PRESET_BYTE_LIMIT
+        ):
+            return "<preset>"
+
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        descriptor = os.open(readme_path, flags)
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_size > _WORKSPACE_PRESET_BYTE_LIMIT
+            or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)
+        ):
+            return "<preset>"
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            payload = handle.read(_WORKSPACE_PRESET_BYTE_LIMIT + 1)
+        if len(payload) > _WORKSPACE_PRESET_BYTE_LIMIT:
+            return "<preset>"
+        readme = payload.decode("utf-8-sig")
+    except (OSError, UnicodeError, ValueError):
         return "<preset>"
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
     match = re.search(r"(?mi)^Preset:\s*([^\r\n]+?)\s*$", readme)
     preset = match.group(1).strip() if match else ""
