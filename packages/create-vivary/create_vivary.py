@@ -4205,6 +4205,19 @@ _CAPABILITY_REQUIREMENT_LIMIT = 64
 _CAPABILITY_RECORD_ROW_LIMIT = 20_000
 
 _STABLE_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+_SUPPORTED_PROVIDER_VERSION_RE = re.compile(
+    r"""
+    ^v?
+    (?:(?P<epoch>\d+)!)?
+    (?P<release>\d+(?:\.\d+)*)
+    (?P<pre>[-_.]?(?:a|b|c|rc|alpha|beta|pre|preview)[-_.]?\d*)?
+    (?P<post>-(?:\d+)|[-_.]?(?:post|rev|r)[-_.]?\d*)?
+    (?P<dev>[-_.]?dev[-_.]?\d*)?
+    (?:\+(?P<local>[A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)*))?
+    $
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
 _REQUIREMENT_FLOOR_RE = re.compile(
     r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)\s*>=\s*"
     r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)\s*$"
@@ -4212,6 +4225,21 @@ _REQUIREMENT_FLOOR_RE = re.compile(
 _REQUIREMENT_NAME_RE = re.compile(
     r"^\s*(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$|[\[<>=!~;@])"
 )
+_EXTRA_INSTALL_HINT_RE = re.compile(
+    r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"\[(?P<extra>[A-Za-z0-9][A-Za-z0-9._-]*)\]$"
+)
+_OPTIONAL_REQUIREMENT_FLOOR_RE = re.compile(
+    r"""^\s*(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)\s*>=\s*"""
+    r"""(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)\s*;\s*"""
+    r"""extra\s*==\s*(?P<quote>['"])(?P<extra>[A-Za-z0-9][A-Za-z0-9._-]*)"""
+    r"""(?P=quote)\s*$"""
+)
+_EXTRA_MARKER_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9_])extra(?![A-Za-z0-9_])",
+    re.IGNORECASE,
+)
+
 
 # This fixed inventory is the one owner for every public capability row and passive
 # probe fact. Dependency floors and console targets remain package-manifest facts:
@@ -4758,6 +4786,26 @@ def _stable_version(value: str) -> tuple[int, int, int]:
         raise _CapabilityContractIncompatible from exc
 
 
+def _provider_version_meets_floor(
+    value: str,
+    floor: tuple[int, int, int],
+) -> bool:
+    match = _SUPPORTED_PROVIDER_VERSION_RE.fullmatch(value)
+    if match is None or match.group("pre") is not None or match.group("dev") is not None:
+        raise _CapabilityContractIncompatible
+    try:
+        epoch = int(match.group("epoch") or "0")
+        release = tuple(int(part) for part in match.group("release").split("."))
+    except ValueError as exc:
+        raise _CapabilityContractIncompatible from exc
+    if epoch:
+        return True
+    width = max(len(release), len(floor))
+    return release + (0,) * (width - len(release)) >= floor + (0,) * (
+        width - len(floor)
+    )
+
+
 def _required_dependency_floors(
     requirements: tuple[str, ...],
     expected_dependencies: tuple[str, ...],
@@ -4792,9 +4840,52 @@ def _required_dependency_floors(
     return floors
 
 
+def _optional_dependency_floor(
+    requirements: tuple[str, ...],
+    dependency: str,
+    extra: str,
+) -> tuple[int, int, int]:
+    normalized_dependency = _normalize_distribution_name(dependency)
+    normalized_extra = _normalize_distribution_name(extra)
+    floor: tuple[int, int, int] | None = None
+    for declared in requirements:
+        name_match = _REQUIREMENT_NAME_RE.match(declared)
+        if (
+            name_match is None
+            or _normalize_distribution_name(name_match.group("name"))
+            != normalized_dependency
+        ):
+            continue
+        match = _OPTIONAL_REQUIREMENT_FLOOR_RE.fullmatch(declared)
+        if match is None:
+            if _EXTRA_MARKER_TOKEN_RE.search(declared) is not None:
+                raise _CapabilityContractIncompatible
+            continue
+        if (
+            _normalize_distribution_name(match.group("extra"))
+            != normalized_extra
+        ):
+            continue
+        if floor is not None:
+            raise _CapabilityContractIncompatible
+        try:
+            floor = tuple(
+                int(match.group(part)) for part in ("major", "minor", "patch")
+            )
+        except ValueError as exc:
+            raise _CapabilityContractIncompatible from exc
+    if floor is None:
+        raise _CapabilityContractIncompatible
+    return floor
+
+
 def _capability_requirement_specs(
     capabilities: list[dict],
-) -> tuple[dict[str, dict], dict[str, tuple[str, ...]]]:
+) -> tuple[
+    dict[str, dict],
+    dict[str, tuple[str, ...]],
+    dict[str, tuple[str, str]],
+]:
     specs: dict[str, dict] = {}
     role_dependencies: dict[str, tuple[str, ...]] = {}
     for capability in capabilities:
@@ -4821,7 +4912,31 @@ def _capability_requirement_specs(
             existing = role_dependencies.setdefault(role, dependencies)
             if existing != dependencies:
                 raise _CapabilityProbeFailure
-    return specs, role_dependencies
+
+    requirements_by_distribution: dict[str, str] = {}
+    for requirement, spec in specs.items():
+        distribution = _normalize_distribution_name(spec["distribution"])
+        existing = requirements_by_distribution.setdefault(distribution, requirement)
+        if existing != requirement:
+            raise _CapabilityProbeFailure
+
+    optional_floor_sources: dict[str, tuple[str, str]] = {}
+    for requirement, spec in specs.items():
+        match = _EXTRA_INSTALL_HINT_RE.fullmatch(requirement)
+        if match is None:
+            continue
+        dependency = _normalize_distribution_name(spec["distribution"])
+        owner = _normalize_distribution_name(match.group("name"))
+        if owner == dependency:
+            continue
+        owner_requirement = requirements_by_distribution.get(owner)
+        if owner_requirement is None:
+            raise _CapabilityProbeFailure
+        optional_floor_sources[requirement] = (
+            owner_requirement,
+            _normalize_distribution_name(match.group("extra")),
+        )
+    return specs, role_dependencies, optional_floor_sources
 
 
 def _read_capability_distribution(
@@ -4884,6 +4999,8 @@ def _read_capability_distribution(
     return {
         "status": "installed",
         "version": _stable_version(fields["version"]) if spec.get("vivary") else None,
+        "declared_version": fields["version"],
+        "declared_requirements": requirements,
         "dependency_floors": (
             _required_dependency_floors(requirements, expected_dependencies)
             if expected_dependencies
@@ -4894,7 +5011,9 @@ def _read_capability_distribution(
 
 def _capability_probe_results(capabilities: list[dict]) -> dict[str, dict]:
     try:
-        specs, role_dependencies = _capability_requirement_specs(capabilities)
+        specs, role_dependencies, optional_floor_sources = (
+            _capability_requirement_specs(capabilities)
+        )
         requirements = tuple(specs)
         roots = _capability_install_roots()
         index = _capability_distribution_index(roots, specs)
@@ -4944,6 +5063,48 @@ def _capability_probe_results(capabilities: list[dict]) -> dict[str, dict]:
             ):
                 results[role] = {"status": "incompatible"}
                 break
+    for dependency, (owner, extra) in optional_floor_sources.items():
+        dependency_result = results.get(dependency)
+        if dependency_result is None or dependency_result["status"] not in {
+            "installed",
+            "missing",
+        }:
+            continue
+        owner_result = results.get(owner)
+        if owner_result is None or owner_result["status"] == "missing":
+            if dependency_result["status"] == "installed":
+                results[dependency] = {"status": "incompatible"}
+            continue
+        if owner_result["status"] != "installed":
+            results[dependency] = {
+                "status": (
+                    "probe-failed"
+                    if owner_result["status"] == "probe-failed"
+                    else "incompatible"
+                )
+            }
+            continue
+        try:
+            floor = _optional_dependency_floor(
+                owner_result["declared_requirements"],
+                specs[dependency]["distribution"],
+                extra,
+            )
+        except _CapabilityContractIncompatible:
+            results[dependency] = {"status": "incompatible"}
+            continue
+        if dependency_result["status"] == "missing":
+            continue
+        try:
+            version_satisfies_floor = _provider_version_meets_floor(
+                dependency_result["declared_version"],
+                floor,
+            )
+        except _CapabilityContractIncompatible:
+            results[dependency] = {"status": "incompatible"}
+            continue
+        if not version_satisfies_floor:
+            results[dependency] = {"status": "incompatible"}
     return results
 
 

@@ -3906,7 +3906,10 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             "vivary-tropo",
             "0.5.0",
             "tropo",
-            requirements=("vivary-core>=0.2.1",),
+            requirements=(
+                "vivary-core>=0.2.1",
+                'lancedb>=0.14.0; extra == "embedded"',
+            ),
             script="tropo",
         )
         self._write_distribution(
@@ -4037,6 +4040,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
 
     def test_optional_metadata_version_must_match_dist_info(self):
         with temp_workspace() as root:
+            self._write_governed_install(root)
             self._write_distribution(
                 root,
                 "lancedb",
@@ -4068,6 +4072,165 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             embedded["reason_codes"],
             ["capability_contract_incompatible"],
         )
+
+    def test_optional_provider_version_uses_owner_extra_floor(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            tropo_metadata = next(root.glob("vivary_tropo-*.dist-info/METADATA"))
+            tropo_metadata.write_text(
+                tropo_metadata.read_text(encoding="utf-8").replace(
+                    "lancedb>=0.14.0",
+                    "lancedb>=0.40.0",
+                ),
+                encoding="utf-8",
+            )
+            self._write_distribution(
+                root,
+                "lancedb",
+                "0.36.0",
+                "lancedb",
+                package=True,
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        embedded = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "storage:embedded"
+        )
+        self.assertFalse(embedded["installed"])
+        self.assertEqual(embedded["install_status"], "incompatible")
+        self.assertEqual(
+            embedded["reason_codes"],
+            ["capability_contract_incompatible"],
+        )
+
+    def test_optional_provider_accepts_supported_pep440_versions(self):
+        for version in ("0.14.0.post1", "0.14.0+vendor.1"):
+            with self.subTest(version=version):
+                with temp_workspace() as root:
+                    self._write_governed_install(root)
+                    self._write_distribution(
+                        root,
+                        "lancedb",
+                        version,
+                        "lancedb",
+                        package=True,
+                    )
+                    with mock.patch.object(
+                        create_vivary,
+                        "_capability_install_roots",
+                        return_value=(root,),
+                    ):
+                        report = create_vivary.capability_report("coding")
+
+                embedded = next(
+                    item
+                    for item in report["available_capabilities"]
+                    if item["id"] == "storage:embedded"
+                )
+                self.assertTrue(embedded["installed"])
+                self.assertEqual(embedded["install_status"], "installed")
+                self.assertEqual(embedded["reason_codes"], [])
+                self.assertEqual(embedded["missing_install"], [])
+
+    def test_optional_provider_rejects_ambiguous_owner_extra_floor(self):
+        conflicts = (
+            'lancedb~=999.0.0; extra == "embedded"',
+            'lancedb>=999.0.0; extra == "EMBEDDED"',
+        )
+        for conflict in conflicts:
+            with self.subTest(conflict=conflict):
+                with temp_workspace() as root:
+                    self._write_governed_install(root)
+                    tropo_metadata = next(
+                        root.glob("vivary_tropo-*.dist-info/METADATA")
+                    )
+                    tropo_metadata.write_text(
+                        tropo_metadata.read_text(encoding="utf-8")
+                        + f"Requires-Dist: {conflict}\n",
+                        encoding="utf-8",
+                    )
+                    self._write_distribution(
+                        root,
+                        "lancedb",
+                        "0.36.0",
+                        "lancedb",
+                        package=True,
+                    )
+                    with mock.patch.object(
+                        create_vivary,
+                        "_capability_install_roots",
+                        return_value=(root,),
+                    ):
+                        report = create_vivary.capability_report("coding")
+
+                embedded = next(
+                    item
+                    for item in report["available_capabilities"]
+                    if item["id"] == "storage:embedded"
+                )
+                self.assertFalse(embedded["installed"])
+                self.assertEqual(embedded["install_status"], "incompatible")
+                self.assertEqual(
+                    embedded["reason_codes"],
+                    ["capability_contract_incompatible"],
+                )
+
+    def test_missing_optional_provider_keeps_install_hint(self):
+        with temp_workspace() as root:
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        embedded = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "storage:embedded"
+        )
+        self.assertFalse(embedded["installed"])
+        self.assertEqual(embedded["install_status"], "not-installed")
+        self.assertEqual(
+            embedded["reason_codes"],
+            ["capability_dependency_missing"],
+        )
+        self.assertEqual(
+            embedded["missing_install"],
+            ["vivary-tropo[embedded]"],
+        )
+
+    def test_missing_optional_provider_rejects_invalid_installed_owner_floor(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            tropo_metadata = next(root.glob("vivary_tropo-*.dist-info/METADATA"))
+            tropo_metadata.write_text(
+                tropo_metadata.read_text(encoding="utf-8").replace(
+                    'Requires-Dist: lancedb>=0.14.0; extra == "embedded"\n',
+                    "",
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        embedded = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "storage:embedded"
+        )
+        self.assertFalse(embedded["installed"])
+        self.assertEqual(embedded["install_status"], "incompatible")
+        self.assertEqual(
+            embedded["reason_codes"],
+            ["capability_contract_incompatible"],
+        )
+        self.assertEqual(embedded["missing_install"], [])
 
     def test_role_dependency_and_console_contracts_are_required(self):
         cases = (
@@ -4566,6 +4729,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             temp_workspace() as system_site,
             temp_workspace() as user_site,
         ):
+            self._write_governed_install(system_site)
             self._write_distribution(
                 system_site,
                 "lancedb",

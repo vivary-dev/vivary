@@ -919,6 +919,15 @@ distribution must include exactly one non-empty `Metadata-Version`, `Name`, `Ver
 and `Requires-Python` field and at most 64 dependency records. The combined 256 KiB
 metadata-and-entrypoint byte cap bounds unrelated metadata headers.
 
+When an optional provider's install hint names another package's extra, the reader
+derives the provider's minimum version from that installed package's matching
+`Requires-Dist` declaration. It validates an installed owner's floor even when the
+provider is absent, and a present provider also requires the owner. A missing,
+duplicate, malformed, or unsatisfied floor is incompatible. When both are absent, the
+capability remains `not-installed`. The inventory does not copy the floor.
+Provider version comparison accepts bounded PEP 440 release, post-release, and local
+forms. Pre-release, development, and invalid forms fail closed.
+
 The reader binds modules, control metadata, and console scripts to the exact
 distribution's `RECORD`.
 It accepts at most 20,000 `RECORD` rows and 2 MiB. The reader does not import role or

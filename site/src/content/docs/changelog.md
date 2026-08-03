@@ -49,7 +49,8 @@ versions stay unchanged. Published versions stay unchanged.
 - CI installs only `vivary` from the eight-wheel local wheelhouse before `pip check`,
   verifies the five passive governed capability rows, and executes Tropo, Strato,
   Ozone, and Exo governed CLI smokes. An explicit Strato install cannot mask a missing
-  meta-package edge. CI also refuses generated documentation drift after site build.
+  meta-package edge. CI refuses both tracked drift and untracked files under generated
+  documentation outputs after the site build.
 
 ### Security
 
@@ -61,6 +62,13 @@ versions stay unchanged. Published versions stay unchanged.
   and `Requires-Python` field and at most 64 dependency records. The combined 256 KiB
   metadata-and-entrypoint byte cap bounds unrelated metadata headers. The reader also
   accepts at most 20,000 `RECORD` rows and 2 MiB.
+- Optional-provider floors come from the installed owning package's matching
+  `Requires-Dist` extra declaration. An installed owner's floor is validated even when
+  the provider is absent, and a present provider also requires the owner. Missing,
+  duplicate, malformed, or unsatisfied floors are incompatible. When both are absent,
+  the capability remains `not-installed`; the inventory carries no second floor.
+  Bounded comparison accepts PEP 440 release, post-release, and local forms while
+  rejecting pre-release, development, and invalid forms.
 - Only canonical roots active on the interpreter path are eligible. Linked metadata
   aliases and mismatched distribution-directory versions are incompatible.
 - Capability probing does not import role or provider modules, dispatch ambient import

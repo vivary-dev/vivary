@@ -631,11 +631,20 @@ jobs:
         run: npm run build
         working-directory: site
       - name: verify generated docs are committed
-        run: >-
-          git diff --exit-code --
-          site/src/content/docs
-          site/public/llms.txt
-          site/public/llms-full.txt
+        run: |
+          git diff --exit-code -- \
+            site/src/content/docs \
+            site/public/llms.txt \
+            site/public/llms-full.txt
+          untracked="$(git ls-files --others --exclude-standard -- \
+            site/src/content/docs \
+            site/public/llms.txt \
+            site/public/llms-full.txt)"
+          if [ -n "$untracked" ]; then
+            echo "Generated documentation contains untracked files:"
+            printf '%s\n' "$untracked"
+            exit 1
+          fi
       - name: check built links and anchors
         run: npm run test:links
         working-directory: site
