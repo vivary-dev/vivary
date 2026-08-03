@@ -4,8 +4,7 @@ description: "Agents forget between sessions, projects rot, and context is the r
 date: 2026-07-17
 author: "Jeff Kazzee"
 tags: ["philosophy", "agents", "context"]
-draft: true
----
+draft: false---
 
 Here's the failure mode, and you've probably lived it: you spend a session getting
 an agent up to speed on a project, you make real progress, and then the session

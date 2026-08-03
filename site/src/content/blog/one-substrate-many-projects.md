@@ -4,8 +4,7 @@ description: "The same typed-workspace shape in every project I run means each o
 date: 2026-07-27
 author: "Jeff Kazzee"
 tags: ["philosophy", "context", "workflow"]
-draft: true
----
+draft: false---
 
 I don't run one project. On a given week I'm in a coding repo, a content
 pipeline, a research workbench, and a personal notes vault, sometimes all in
