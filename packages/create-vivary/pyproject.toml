@@ -18,7 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Software Development :: Code Generators",
 ]
-dependencies = ["vivary-tropo>=0.3.0"]
+dependencies = ["vivary-tropo>=0.4.1"]
 
 [project.urls]
 Homepage = "https://vivary.vercel.app/"
