@@ -4,16 +4,14 @@ Scaffold a complete Vivary agent workspace: tropo config, strato workspace files
 runtime skills, private-memory boundaries, progressive module indexes, and a starter
 typed graph.
 
-**Current published release:** 0.3.1. Use 0.3.1 for registry installs. Users of
-0.2.1, 0.2.2, 0.2.3, 0.2.5, 0.2.6, 0.2.7, or 0.2.8 need no migration.
+Published and development version truth lives in the
+[root release status](../../README.md#release-status).
 
-**Development source:** Version 0.3.2 has not reached registries. It adds
-distribution-bound governed capability reporting to `capabilities` and Doctor. The
-published 0.3.1 release remains the adoption line. Brownfield
-`create-vivary adopt <path>` brings Vivary into an
-existing repo or vault without touching existing files (dry-run by default, `--yes`
-to write), and `doctor --trend` tracks graph and routing drift across runs in
-`.vivary/doctor-state.json`.
+This development source adds distribution-bound governed capability reporting to
+`capabilities` and Doctor. Brownfield `create-vivary adopt <path>` brings Vivary
+into an existing repo or vault without touching existing files (dry-run by default,
+`--yes` to write), and `doctor --trend` tracks graph and routing drift across runs
+in `.vivary/doctor-state.json`.
 
 **Security hardening:** The 0.2.5 line validates active `.gitignore` rules for `USER.md`,
 `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`; scaffolds private heartbeat report
@@ -23,7 +21,7 @@ paths.
 ## Install & scaffold
 
 ```bash
-pip install create-vivary==0.3.1              # or: uvx create-vivary@0.3.1 ...
+pip install create-vivary                     # or: uvx create-vivary ...
 create-vivary my-workspace --preset coding    # interactive wizard on a TTY
 create-vivary my-workbench --preset knowledge-work --memory local
 create-vivary my-codebase --preset coding --active-context cocoindex-code

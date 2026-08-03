@@ -63,12 +63,15 @@ versions stay unchanged. Published versions stay unchanged.
   metadata-and-entrypoint byte cap bounds unrelated metadata headers. The reader also
   accepts at most 20,000 `RECORD` rows and 2 MiB.
 - Optional-provider floors come from the installed owning package's matching
-  `Requires-Dist` extra declaration. An installed owner's floor is validated even when
-  the provider is absent, and a present provider also requires the owner. Missing,
-  duplicate, malformed, or unsatisfied floors are incompatible. When both are absent,
-  the capability remains `not-installed`; the inventory carries no second floor.
-  Bounded comparison accepts PEP 440 release, post-release, and local forms while
-  rejecting pre-release, development, and invalid forms.
+  `Requires-Dist` extra declaration. Floor extraction uses independently validated
+  owner metadata before projecting the separate governed-role dependency contract, so
+  a pre-governed but otherwise valid owner can still establish the floor. An installed
+  owner's floor is validated even when the provider is absent, and a present provider
+  also requires the owner. Missing, duplicate, malformed, or unsatisfied floors are
+  incompatible. When both are absent, the capability remains `not-installed`; the
+  inventory carries no second floor. Bounded comparison accepts PEP 440 release,
+  post-release, and local forms while rejecting pre-release, development, and invalid
+  forms.
 - Only canonical roots active on the interpreter path are eligible. Linked metadata
   aliases and mismatched distribution-directory versions are incompatible.
 - Capability probing does not import role or provider modules, dispatch ambient import

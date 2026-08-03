@@ -4944,7 +4944,6 @@ def _read_capability_distribution(
     spec: dict,
     roots: tuple[Path, ...],
     index: dict[str, list[tuple[int, Path, Path, str]]],
-    expected_dependencies: tuple[str, ...],
 ) -> dict:
     selected = _selected_dist_info(index, requirement)
     if selected is None:
@@ -5001,11 +5000,6 @@ def _read_capability_distribution(
         "version": _stable_version(fields["version"]) if spec.get("vivary") else None,
         "declared_version": fields["version"],
         "declared_requirements": requirements,
-        "dependency_floors": (
-            _required_dependency_floors(requirements, expected_dependencies)
-            if expected_dependencies
-            else {}
-        ),
     }
 
 
@@ -5027,18 +5021,17 @@ def _capability_probe_results(capabilities: list[dict]) -> dict[str, dict]:
             )
         }
 
-    results: dict[str, dict] = {}
+    observed_results: dict[str, dict] = {}
     for requirement in requirements:
         try:
-            results[requirement] = _read_capability_distribution(
+            observed_results[requirement] = _read_capability_distribution(
                 requirement,
                 specs[requirement],
                 roots,
                 index,
-                role_dependencies.get(requirement, ()),
             )
         except _CapabilityContractIncompatible:
-            results[requirement] = {"status": "incompatible"}
+            observed_results[requirement] = {"status": "incompatible"}
         except (
             OSError,
             RuntimeError,
@@ -5046,13 +5039,25 @@ def _capability_probe_results(capabilities: list[dict]) -> dict[str, dict]:
             ValueError,
             _CapabilityProbeFailure,
         ):
-            results[requirement] = {"status": "probe-failed"}
+            observed_results[requirement] = {"status": "probe-failed"}
 
-    for role in role_dependencies:
-        result = results.get(role)
-        if result is None or result["status"] != "installed":
+    results = {
+        requirement: dict(result)
+        for requirement, result in observed_results.items()
+    }
+    for role, expected_dependencies in role_dependencies.items():
+        observed_result = observed_results.get(role)
+        if observed_result is None or observed_result["status"] != "installed":
             continue
-        for dependency, floor in result["dependency_floors"].items():
+        try:
+            dependency_floors = _required_dependency_floors(
+                observed_result["declared_requirements"],
+                expected_dependencies,
+            )
+        except _CapabilityContractIncompatible:
+            results[role] = {"status": "incompatible"}
+            continue
+        for dependency, floor in dependency_floors.items():
             dependency_result = results.get(dependency)
             if dependency_result is None:
                 results[role] = {"status": "incompatible"}
@@ -5070,7 +5075,7 @@ def _capability_probe_results(capabilities: list[dict]) -> dict[str, dict]:
             "missing",
         }:
             continue
-        owner_result = results.get(owner)
+        owner_result = observed_results.get(owner)
         if owner_result is None or owner_result["status"] == "missing":
             if dependency_result["status"] == "installed":
                 results[dependency] = {"status": "incompatible"}

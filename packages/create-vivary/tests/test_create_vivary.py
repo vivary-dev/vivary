@@ -4108,6 +4108,43 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             ["capability_contract_incompatible"],
         )
 
+    def test_optional_provider_uses_metadata_from_pre_governed_owner(self):
+        with temp_workspace() as root:
+            self._write_distribution(
+                root,
+                "vivary-tropo",
+                "0.4.1",
+                "tropo",
+                requirements=('lancedb>=0.14.0; extra == "embedded"',),
+                script="tropo",
+            )
+            self._write_distribution(
+                root,
+                "lancedb",
+                "0.36.0",
+                "lancedb",
+                package=True,
+            )
+            with mock.patch.object(
+                create_vivary,
+                "_capability_install_roots",
+                return_value=(root,),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        by_id = {
+            item["id"]: item for item in report["available_capabilities"]
+        }
+        self.assertEqual(
+            by_id["governed-context:tropo"]["install_status"],
+            "incompatible",
+        )
+        embedded = by_id["storage:embedded"]
+        self.assertTrue(embedded["installed"])
+        self.assertEqual(embedded["install_status"], "installed")
+        self.assertEqual(embedded["reason_codes"], [])
+        self.assertEqual(embedded["missing_install"], [])
+
     def test_optional_provider_accepts_supported_pep440_versions(self):
         for version in ("0.14.0.post1", "0.14.0+vendor.1"):
             with self.subTest(version=version):

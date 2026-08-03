@@ -5,13 +5,12 @@ with a typed knowledge graph (tropo), agent OS (strato), starter graph, visible 
 and human gates in one command. Generated modules use `modules/<id>/index.md` routers
 so agents load context progressively.
 
-**Current published release:** 0.3.1. Use 0.3.1 for registry installs. Users of
-0.2.1, 0.2.2, 0.2.3, 0.2.5, 0.2.6, 0.2.7, or 0.2.8 need no migration.
+Published and development version truth lives in the
+[root release status](../../../README.md#release-status).
 
-**Development source:** Version 0.3.2 has not reached registries and remains in
-lockstep with the Python package. It forwards the new governed capability and Doctor
-reports without adding a JavaScript implementation. Published 0.3.1 remains the
-adoption line. `create-vivary adopt <path>` uses dry-run by default, and
+This development source remains in lockstep with the Python package. It forwards
+the governed capability and Doctor reports without adding a JavaScript
+implementation. `create-vivary adopt <path>` uses dry-run by default, and
 `doctor --trend` tracks graph and routing drift in `.vivary/doctor-state.json`.
 
 **Security hardening:** The 0.2.5 line validates active `.gitignore` rules for `USER.md`,
@@ -78,9 +77,9 @@ This package is a thin, shell-free transport: it forwards argv unchanged to the 
 [pipx](https://pipx.pypa.io/), so the scaffolder stays one source of truth while you
 get a Node-native entry point. **Python 3.11+ and uv (or pipx) must already be installed.**
 
-Prefer Python directly? `uvx create-vivary@0.3.1 my-workspace --preset coding` — a bare
-target defaults to `init` there too (the PyPI `create-vivary` is versioned in lockstep
-with this launcher) — or `pip install create-vivary==0.3.1`.
+Prefer Python directly? `uvx create-vivary my-workspace --preset coding` — a bare
+target defaults to `init` there too (the PyPI `create-vivary` stays in lockstep with
+this launcher) — or `pip install create-vivary`.
 
 For coding workspaces, `--active-context cocoindex-code` scaffolds optional
 CocoIndex-code guidance and ignored sidecar state. It does not auto-install, index, or

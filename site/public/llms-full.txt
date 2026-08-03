@@ -1433,12 +1433,15 @@ metadata-and-entrypoint byte cap bounds unrelated metadata headers.
 
 When an optional provider's install hint names another package's extra, the reader
 derives the provider's minimum version from that installed package's matching
-`Requires-Dist` declaration. It validates an installed owner's floor even when the
-provider is absent, and a present provider also requires the owner. A missing,
+`Requires-Dist` declaration. Floor extraction uses the owner's independently
+validated distribution metadata before projecting its separate governed-role
+dependency contract. A pre-governed but otherwise valid owner can therefore establish
+the optional provider floor. The reader validates an installed owner's floor even when
+the provider is absent, and a present provider also requires the owner. A missing,
 duplicate, malformed, or unsatisfied floor is incompatible. When both are absent, the
-capability remains `not-installed`. The inventory does not copy the floor.
-Provider version comparison accepts bounded PEP 440 release, post-release, and local
-forms. Pre-release, development, and invalid forms fail closed.
+capability remains `not-installed`. The inventory does not copy the floor. Provider
+version comparison accepts bounded PEP 440 release, post-release, and local forms.
+Pre-release, development, and invalid forms fail closed.
 
 The reader binds modules, control metadata, and console scripts to the exact
 distribution's `RECORD`.
@@ -5053,12 +5056,15 @@ versions stay unchanged. Published versions stay unchanged.
   metadata-and-entrypoint byte cap bounds unrelated metadata headers. The reader also
   accepts at most 20,000 `RECORD` rows and 2 MiB.
 - Optional-provider floors come from the installed owning package's matching
-  `Requires-Dist` extra declaration. An installed owner's floor is validated even when
-  the provider is absent, and a present provider also requires the owner. Missing,
-  duplicate, malformed, or unsatisfied floors are incompatible. When both are absent,
-  the capability remains `not-installed`; the inventory carries no second floor.
-  Bounded comparison accepts PEP 440 release, post-release, and local forms while
-  rejecting pre-release, development, and invalid forms.
+  `Requires-Dist` extra declaration. Floor extraction uses independently validated
+  owner metadata before projecting the separate governed-role dependency contract, so
+  a pre-governed but otherwise valid owner can still establish the floor. An installed
+  owner's floor is validated even when the provider is absent, and a present provider
+  also requires the owner. Missing, duplicate, malformed, or unsatisfied floors are
+  incompatible. When both are absent, the capability remains `not-installed`; the
+  inventory carries no second floor. Bounded comparison accepts PEP 440 release,
+  post-release, and local forms while rejecting pre-release, development, and invalid
+  forms.
 - Only canonical roots active on the interpreter path are eligible. Linked metadata
   aliases and mismatched distribution-directory versions are incompatible.
 - Capability probing does not import role or provider modules, dispatch ambient import

@@ -921,12 +921,15 @@ metadata-and-entrypoint byte cap bounds unrelated metadata headers.
 
 When an optional provider's install hint names another package's extra, the reader
 derives the provider's minimum version from that installed package's matching
-`Requires-Dist` declaration. It validates an installed owner's floor even when the
-provider is absent, and a present provider also requires the owner. A missing,
+`Requires-Dist` declaration. Floor extraction uses the owner's independently
+validated distribution metadata before projecting its separate governed-role
+dependency contract. A pre-governed but otherwise valid owner can therefore establish
+the optional provider floor. The reader validates an installed owner's floor even when
+the provider is absent, and a present provider also requires the owner. A missing,
 duplicate, malformed, or unsatisfied floor is incompatible. When both are absent, the
-capability remains `not-installed`. The inventory does not copy the floor.
-Provider version comparison accepts bounded PEP 440 release, post-release, and local
-forms. Pre-release, development, and invalid forms fail closed.
+capability remains `not-installed`. The inventory does not copy the floor. Provider
+version comparison accepts bounded PEP 440 release, post-release, and local forms.
+Pre-release, development, and invalid forms fail closed.
 
 The reader binds modules, control metadata, and console scripts to the exact
 distribution's `RECORD`.
