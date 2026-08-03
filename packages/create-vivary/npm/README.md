@@ -6,7 +6,7 @@ and human gates in one command. Generated modules use `modules/<id>/index.md` ro
 so agents load context progressively.
 
 Published and development version truth lives in the
-[root release status](../../../README.md#release-status).
+[root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status).
 
 This development source remains in lockstep with the Python package. It forwards
 the governed capability and Doctor reports without adding a JavaScript

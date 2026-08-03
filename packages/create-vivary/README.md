@@ -5,7 +5,7 @@ runtime skills, private-memory boundaries, progressive module indexes, and a sta
 typed graph.
 
 Published and development version truth lives in the
-[root release status](../../README.md#release-status).
+[root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status).
 
 This development source adds distribution-bound governed capability reporting to
 `capabilities` and Doctor. Brownfield `create-vivary adopt <path>` brings Vivary

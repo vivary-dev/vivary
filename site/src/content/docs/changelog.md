@@ -42,15 +42,20 @@ versions stay unchanged. Published versions stay unchanged.
   `create-vivary>=0.3.2`. It still receives `vivary-core` transitively through role
   packages and does not declare a duplicate Core edge.
 - Capability installation truth is distribution-backed instead of importability-based.
-  The probe accepts only active-interpreter canonical package roots and verifies that
-  each credited module or console script belongs to the exact distribution `RECORD`.
+  The probe accepts only active-interpreter canonical package roots. It enforces
+  `Requires-Python` for each selected distribution and verifies same-distribution
+  selected-extra dependency closure. It binds credited modules to the exact
+  distribution `RECORD`. Each console target also requires a regular executable
+  launcher in the scripts directory mapped from its selected active installation
+  root. The `RECORD` must contain exactly one matching row.
 - The npm package remains a launcher for the Python product. Its 0.3.2 source forwards
   `capabilities` and Doctor unchanged instead of adding a JavaScript implementation.
-- CI installs only `vivary` from the eight-wheel local wheelhouse before `pip check`,
-  verifies the five passive governed capability rows, and executes Tropo, Strato,
-  Ozone, and Exo governed CLI smokes. An explicit Strato install cannot mask a missing
-  meta-package edge. CI refuses both tracked drift and untracked files under generated
-  documentation outputs after the site build.
+- CI installs only `vivary` from the eight-wheel local wheelhouse into a fresh
+  environment before `pip check`. It executes the installed `vivary` launcher outside
+  the checkout, verifies the five passive governed capability rows, and runs governed
+  CLI smokes for Tropo, Strato, Ozone, and Exo. An explicit Strato install cannot mask
+  a missing meta-package edge. CI refuses tracked drift and untracked files under
+  generated documentation outputs after the site build.
 
 ### Security
 
@@ -59,9 +64,20 @@ versions stay unchanged. Published versions stay unchanged.
   `platlib` roots, at most eight system-site candidates, and at most eight user-site
   candidates. It then selects at most eight unique active package roots. Each
   distribution must include exactly one non-empty `Metadata-Version`, `Name`, `Version`,
-  and `Requires-Python` field and at most 64 dependency records. The combined 256 KiB
+  and `Requires-Python` field. It may declare at most 64 extras and 256 dependency
+  records. Each dependency record may contain no more than 4 KiB. Bounded final-release
+  comparison enforces every selected distribution's `Requires-Python`. Unsupported or
+  unsatisfied constraints are incompatible. The combined 256 KiB
   metadata-and-entrypoint byte cap bounds unrelated metadata headers. The reader also
   accepts at most 20,000 `RECORD` rows and 2 MiB.
+- A same-distribution install extra requires its normalized `Provides-Extra`
+  declaration and complete selected dependency closure. Nested extras use the same
+  passive metadata proof. The reader follows only selected edges. It accepts at most
+  eight extra nodes and 16 dependency edges. Maximum depth is four levels. Each
+  dependency may name four child extras and four version clauses. Missing leaves remain
+  `not-installed`. Malformed, ambiguous, unsupported, or unsatisfied selected dependency
+  declarations are incompatible. Malformed distribution metadata, I/O failures, and
+  work ceilings report `probe-failed`.
 - Optional-provider floors come from the installed owning package's matching
   `Requires-Dist` extra declaration. Floor extraction uses independently validated
   owner metadata before projecting the separate governed-role dependency contract, so

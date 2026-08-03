@@ -905,19 +905,34 @@ Each capability row has `installed`, `install_status`, `reason_codes`, and
 `probe-failed`. Resolution checks `probe-failed` first, then `incompatible`,
 `not-installed`, and `installed`.
 Missing role or Core artifacts report `capability_dependency_missing`.
-A role whose installed manifest, Core floor, normalized distribution identity, module
-record, exact console-script target, or competing import artifact violates the public
-contract reports `capability_contract_incompatible`. A bounded read or parse failure
-reports `capability_probe_failed`. Only `not-installed` rows include ordered install
-hints.
+A role reports `capability_contract_incompatible` when its installed manifest, Core
+floor, normalized distribution identity, or module record violates the public contract.
+The same status applies to an invalid exact console-script target, generated launcher,
+or competing import artifact.
+A bounded read or parse failure reports `capability_probe_failed`. Only `not-installed`
+rows include ordered install hints.
 
 The status reader considers the interpreter's canonical `purelib` and `platlib` roots,
 at most eight system-site candidates, and at most eight user-site candidates. It then
 selects at most eight unique roots that appear on the active interpreter path. It
-inspects up to 256 `sys.path` entries and 10,000 entries across the selected roots. Each
-distribution must include exactly one non-empty `Metadata-Version`, `Name`, `Version`,
-and `Requires-Python` field and at most 64 dependency records. The combined 256 KiB
-metadata-and-entrypoint byte cap bounds unrelated metadata headers.
+inspects up to 256 `sys.path` entries and 10,000 entries across the selected roots.
+Each distribution must include exactly one non-empty `Metadata-Version`, `Name`,
+`Version`, and `Requires-Python` field. It may declare at most 64 extras and 256
+dependency records. Each dependency record may contain no more than 4 KiB.
+For every selected distribution, bounded final-release comparison checks whether the
+active interpreter satisfies `Requires-Python`. Unsupported or unsatisfied constraints
+are incompatible. The combined 256 KiB metadata-and-entrypoint byte cap bounds
+unrelated metadata headers.
+
+When an install hint names an extra on the same distribution, the reader verifies the
+normalized `Provides-Extra` declaration. It also verifies the complete installed
+dependency closure selected by that extra. Nested extras use the same rule.
+The reader follows only selected-extra edges. It accepts at most eight extra nodes and
+16 dependency edges. Maximum depth is four levels. Each dependency may name four child
+extras and four version clauses. A missing dependency remains `not-installed`.
+Malformed, ambiguous, unsupported, or unsatisfied selected dependency declarations
+are incompatible. Malformed distribution metadata, I/O failures, and work ceilings
+report `probe-failed`.
 
 When an optional provider's install hint names another package's extra, the reader
 derives the provider's minimum version from that installed package's matching
@@ -931,11 +946,14 @@ capability remains `not-installed`. The inventory does not copy the floor. Provi
 version comparison accepts bounded PEP 440 release, post-release, and local forms.
 Pre-release, development, and invalid forms fail closed.
 
-The reader binds modules, control metadata, and console scripts to the exact
-distribution's `RECORD`.
-It accepts at most 20,000 `RECORD` rows and 2 MiB. The reader does not import role or
-provider packages, dispatch ambient import or distribution hooks, invoke entrypoints,
-spawn commands, or use the network.
+For every declared console script, the reader maps the selected active installation
+root to its matching interpreter scheme. It checks the generated launcher in the
+scripts directory for that scheme. The launcher must be a regular executable file.
+Its distribution `RECORD` must contain exactly one matching row. The reader also binds
+modules and control metadata to that exact distribution. It accepts at most 20,000
+`RECORD` rows and 2 MiB.
+The reader does not import role or provider packages, dispatch ambient import or
+distribution hooks, invoke entrypoints, spawn commands, or use the network.
 
 Optional absence, incompatibility, and probe failure remain visible but do not make
 `capabilities` or Doctor unhealthy. Doctor derives its preset from the workspace

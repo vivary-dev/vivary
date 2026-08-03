@@ -9,6 +9,7 @@ import importlib
 import importlib.machinery
 import importlib.metadata as importlib_metadata
 import importlib.util
+import io
 import json
 import os
 import platform
@@ -4201,8 +4202,18 @@ _CAPABILITY_SYS_PATH_ENTRY_LIMIT = 256
 _CAPABILITY_ROOT_ENTRY_LIMIT = 10_000
 _CAPABILITY_METADATA_BYTE_LIMIT = 256 * 1024
 _CAPABILITY_RECORD_BYTE_LIMIT = 2 * 1024 * 1024
-_CAPABILITY_REQUIREMENT_LIMIT = 64
+_CAPABILITY_REQUIREMENT_LIMIT = 256
 _CAPABILITY_RECORD_ROW_LIMIT = 20_000
+_CAPABILITY_REQUIREMENT_TEXT_LIMIT = 4 * 1024
+_CAPABILITY_EXTRA_LIMIT = 64
+_CAPABILITY_EXTRA_NODE_LIMIT = 8
+_CAPABILITY_EXTRA_EDGE_LIMIT = 16
+_CAPABILITY_EXTRA_DEPTH_LIMIT = 4
+_CAPABILITY_CHILD_EXTRA_LIMIT = 4
+_CAPABILITY_SPECIFIER_TEXT_LIMIT = 256
+_CAPABILITY_SPECIFIER_CLAUSE_LIMIT = 4
+_CAPABILITY_VERSION_TEXT_LIMIT = 128
+_CAPABILITY_VERSION_COMPONENT_LIMIT = 8
 
 _STABLE_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 _SUPPORTED_PROVIDER_VERSION_RE = re.compile(
@@ -4235,10 +4246,37 @@ _OPTIONAL_REQUIREMENT_FLOOR_RE = re.compile(
     r"""extra\s*==\s*(?P<quote>['"])(?P<extra>[A-Za-z0-9][A-Za-z0-9._-]*)"""
     r"""(?P=quote)\s*$"""
 )
-_EXTRA_MARKER_TOKEN_RE = re.compile(
-    r"(?<![A-Za-z0-9_])extra(?![A-Za-z0-9_])",
+_EXACT_EXTRA_MARKER_RE = re.compile(
+    r";\s*extra\s*==\s*(?P<quote>['\"])"
+    r"(?P<extra>[A-Za-z0-9][A-Za-z0-9._-]*)(?P=quote)\s*$",
     re.IGNORECASE,
 )
+_FORWARD_EXTRA_MARKER_COMPARISON_RE = re.compile(
+    r"""extra\s*(?P<operator>==|!=)\s*(?P<quote>['"])"""
+    r"""(?P<extra>[A-Za-z0-9][A-Za-z0-9._-]*)(?P=quote)""",
+    re.IGNORECASE,
+)
+_REVERSED_EXTRA_MARKER_COMPARISON_RE = re.compile(
+    r"""(?P<quote>['"])(?P<extra>[A-Za-z0-9][A-Za-z0-9._-]*)"""
+    r"""(?P=quote)\s*(?P<operator>==|!=)\s*extra$""",
+    re.IGNORECASE,
+)
+_NUMERIC_VERSION_RE = re.compile(r"^\d+(?:\.\d+)*$")
+_SPECIFIER_CLAUSE_RE = re.compile(
+    r"^(?P<operator>~=|==|!=|<=|>=|<|>)\s*"
+    r"(?P<version>\d+(?:\.\d+)*(?:\.\*)?)$"
+)
+_SELECTED_EXTRA_REQUIREMENT_RE = re.compile(
+    r"^\s*(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"(?:\[(?P<extras>[A-Za-z0-9][A-Za-z0-9._-]*"
+    r"(?:\s*,\s*[A-Za-z0-9][A-Za-z0-9._-]*)*)\])?"
+    r"\s*(?P<specifiers>[^;]*?)\s*;\s*"
+    r"extra\s*==\s*(?P<quote>['\"])"
+    r"(?P<extra>[A-Za-z0-9][A-Za-z0-9._-]*)(?P=quote)\s*$",
+    re.IGNORECASE,
+)
+_EXTRA_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
 
 
 # This fixed inventory is the one owner for every public capability row and passive
@@ -4557,17 +4595,10 @@ def _read_capability_file(path: Path, root: Path, limit: int) -> bytes:
 
 def _capability_distribution_index(
     roots: tuple[Path, ...],
-    requirements: dict[str, dict],
 ) -> dict[str, list[tuple[int, Path, Path, str]]]:
     if len(roots) > _CAPABILITY_ROOT_LIMIT:
         raise _CapabilityProbeFailure
-    expected = {
-        requirement: _normalize_distribution_name(spec["distribution"])
-        for requirement, spec in requirements.items()
-    }
-    index: dict[str, list[tuple[int, Path, Path, str]]] = {
-        requirement: [] for requirement in expected
-    }
+    index: dict[str, list[tuple[int, Path, Path, str]]] = {}
     entries_seen = 0
     for root_index, root in enumerate(roots):
         try:
@@ -4603,16 +4634,14 @@ def _capability_distribution_index(
                     if identity is None:
                         continue
                     distribution_name, distribution_version = identity
-                    for distribution, normalized_name in expected.items():
-                        if distribution_name == normalized_name:
-                            index[distribution].append(
-                                (
-                                    root_index,
-                                    resolved_root,
-                                    Path(entry.path),
-                                    distribution_version,
-                                )
-                            )
+                    index.setdefault(distribution_name, []).append(
+                        (
+                            root_index,
+                            resolved_root,
+                            Path(entry.path),
+                            distribution_version,
+                        )
+                    )
         except _CapabilityProbeFailure:
             raise
         except (OSError, ValueError) as exc:
@@ -4623,7 +4652,7 @@ def _capability_distribution_index(
 def _selected_dist_info(
     index: dict[str, list[tuple[int, Path, Path, str]]], distribution: str
 ) -> tuple[int, Path, Path, str] | None:
-    matches = index[distribution]
+    matches = index.get(_normalize_distribution_name(distribution), ())
     if not matches:
         return None
     first_root = min(match[0] for match in matches)
@@ -4689,7 +4718,9 @@ def _has_competing_module_artifact(
             return True
     return False
 
-def _parse_capability_metadata(content: bytes) -> tuple[dict[str, str], tuple[str, ...]]:
+def _parse_capability_metadata(
+    content: bytes,
+) -> tuple[dict[str, str], tuple[str, ...], tuple[str, ...]]:
     try:
         message = BytesParser().parsebytes(content)
     except Exception as exc:
@@ -4711,10 +4742,19 @@ def _parse_capability_metadata(content: bytes) -> tuple[dict[str, str], tuple[st
     requirements = tuple(message.get_all("Requires-Dist") or ())
     if (
         len(requirements) > _CAPABILITY_REQUIREMENT_LIMIT
-        or not all(isinstance(requirement, str) for requirement in requirements)
+        or not all(
+            isinstance(requirement, str)
+            and len(requirement.encode("utf-8")) <= _CAPABILITY_REQUIREMENT_TEXT_LIMIT
+            for requirement in requirements
+        )
     ):
         raise _CapabilityProbeFailure
-    return fields, requirements
+    provided_extras = tuple(message.get_all("Provides-Extra") or ())
+    if len(provided_extras) > _CAPABILITY_EXTRA_LIMIT or not all(
+        isinstance(extra, str) for extra in provided_extras
+    ):
+        raise _CapabilityProbeFailure
+    return fields, requirements, provided_extras
 
 
 def _parse_console_target(content: bytes, script: str) -> tuple[str, str]:
@@ -4737,43 +4777,169 @@ def _parse_console_target(content: bytes, script: str) -> tuple[str, str]:
     return module, callable_name
 
 
-def _recorded_module_path(
-    content: bytes,
-    module: str,
-    *,
-    owned_paths: tuple[str, ...] = (),
-) -> str:
+def _record_rows(content: bytes):
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise _CapabilityProbeFailure from exc
-    reader = csv.reader(text.splitlines())
-    candidates = {
-        f"{module.replace('.', '/')}.py",
-        f"{module.replace('.', '/')}/__init__.py",
-    }
-    module_path: str | None = None
-    found_owned_paths: set[str] = set()
+    if re.search(r"\r(?!\n)|[\v\f\x1c-\x1e\x85\u2028\u2029]", text):
+        raise _CapabilityProbeFailure
+
     rows = 0
+    reader = csv.reader(io.StringIO(text, newline=""), strict=True)
     try:
         for row in reader:
             rows += 1
             if rows > _CAPABILITY_RECORD_ROW_LIMIT:
                 raise _CapabilityProbeFailure
-            if not row:
-                continue
-            path = row[0].replace("\\", "/")
-            if path in candidates:
-                if module_path is not None and module_path != path:
-                    raise _CapabilityContractIncompatible
-                module_path = path
-            if path in owned_paths:
-                found_owned_paths.add(path)
+            if len(row) != 3:
+                raise _CapabilityProbeFailure
+            path, digest, size = row
+            if (
+                not path
+                or path.startswith("/")
+                or re.match(r"^[A-Za-z]:", path)
+                or any(ord(character) < 32 or ord(character) == 127 for character in path)
+                or digest
+                and re.fullmatch(r"[A-Za-z0-9_]+=[A-Za-z0-9_-]+", digest)
+                is None
+                or size
+                and (
+                    len(size) > 20
+                    or not size.isascii()
+                    or not size.isdecimal()
+                )
+            ):
+                raise _CapabilityProbeFailure
+            yield path, digest, size
     except csv.Error as exc:
         raise _CapabilityProbeFailure from exc
-    if module_path is None or found_owned_paths != set(owned_paths):
+
+
+def _recorded_module_path(
+    content: bytes,
+    module: str | None,
+    *,
+    owned_paths: tuple[str, ...] = (),
+) -> str | None:
+    candidates = (
+        set()
+        if module is None
+        else {
+            f"{module.replace('.', '/')}.py",
+            f"{module.replace('.', '/')}/__init__.py",
+        }
+    )
+    module_path: str | None = None
+    found_owned_paths: set[str] = set()
+    for path, _digest, _size in _record_rows(content):
+        if path in candidates:
+            if module_path is not None and module_path != path:
+                raise _CapabilityContractIncompatible
+            module_path = path
+        if path in owned_paths:
+            found_owned_paths.add(path)
+    if (
+        module is not None
+        and module_path is None
+        or found_owned_paths != set(owned_paths)
+    ):
         raise _CapabilityContractIncompatible
     return module_path
+
+
+def _capability_scripts_path(root: Path) -> Path:
+    try:
+        path_sets = [
+            sysconfig.get_paths(),
+            sysconfig.get_paths(
+                scheme=sysconfig.get_preferred_scheme("user"),
+            ),
+        ]
+        prefixes: list[str] = []
+        for name in ("prefix", "exec_prefix", "base_prefix", "base_exec_prefix"):
+            value = getattr(sys, name, None)
+            if type(value) is not str or not value:
+                raise _CapabilityProbeFailure
+            if value not in prefixes:
+                prefixes.append(value)
+        path_sets.extend(
+            sysconfig.get_paths(vars={"base": prefix, "platbase": prefix})
+            for prefix in prefixes
+        )
+    except _CapabilityProbeFailure:
+        raise
+    except Exception as exc:
+        raise _CapabilityProbeFailure from exc
+
+    try:
+        root_key = os.path.normcase(os.path.abspath(root))
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise _CapabilityProbeFailure from exc
+    if os.name == "nt" and root_key.replace("/", "\\").startswith("\\\\"):
+        raise _CapabilityContractIncompatible
+    matches: dict[str, Path] = {}
+    for paths in path_sets:
+        if type(paths) is not dict:
+            raise _CapabilityProbeFailure
+        scripts_value = paths.get("scripts")
+        if type(scripts_value) is not str or not scripts_value:
+            raise _CapabilityProbeFailure
+        for key in ("purelib", "platlib"):
+            library_value = paths.get(key)
+            if library_value is None:
+                continue
+            if type(library_value) is not str or not library_value:
+                raise _CapabilityProbeFailure
+            try:
+                library_key = os.path.normcase(os.path.abspath(library_value))
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                raise _CapabilityProbeFailure from exc
+            if library_key != root_key:
+                continue
+            if (
+                os.name == "nt"
+                and scripts_value.replace("/", "\\").startswith("\\\\")
+            ):
+                raise _CapabilityContractIncompatible
+            try:
+                scripts = Path(scripts_value).resolve(strict=True)
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise _CapabilityProbeFailure from exc
+            if not scripts.is_dir():
+                raise _CapabilityProbeFailure
+            matches[os.path.normcase(str(scripts))] = scripts
+    if len(matches) != 1:
+        raise _CapabilityContractIncompatible
+    return next(iter(matches.values()))
+
+
+def _require_recorded_launcher(
+    record: bytes,
+    root: Path,
+    script: str,
+) -> None:
+    launcher_name = f"{script}.exe" if os.name == "nt" else script
+    scripts = _capability_scripts_path(root)
+    launcher_path = scripts / launcher_name
+    try:
+        launcher_stat = launcher_path.lstat()
+        launcher = launcher_path.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise _CapabilityContractIncompatible from exc
+    if not stat.S_ISREG(launcher_stat.st_mode) or not os.access(launcher, os.X_OK):
+        raise _CapabilityContractIncompatible
+    try:
+        expected_record_path = os.path.relpath(launcher_path, root).replace("\\", "/")
+    except ValueError as exc:
+        raise _CapabilityContractIncompatible from exc
+
+    matches = 0
+    for path, _digest, _size in _record_rows(record):
+        if os.path.normcase(path) == os.path.normcase(expected_record_path):
+            matches += 1
+    if matches != 1:
+        raise _CapabilityContractIncompatible
 
 
 def _stable_version(value: str) -> tuple[int, int, int]:
@@ -4803,6 +4969,209 @@ def _provider_version_meets_floor(
     width = max(len(release), len(floor))
     return release + (0,) * (width - len(release)) >= floor + (0,) * (
         width - len(floor)
+    )
+
+
+def _numeric_version(value: str) -> tuple[int, ...]:
+    if (
+        len(value) > _CAPABILITY_VERSION_TEXT_LIMIT
+        or _NUMERIC_VERSION_RE.fullmatch(value) is None
+    ):
+        raise _CapabilityContractIncompatible
+    parts = value.split(".")
+    if len(parts) > _CAPABILITY_VERSION_COMPONENT_LIMIT:
+        raise _CapabilityContractIncompatible
+    try:
+        return tuple(int(part) for part in parts)
+    except ValueError as exc:
+        raise _CapabilityContractIncompatible from exc
+
+
+def _parse_version_specifier(
+    value: str,
+) -> tuple[tuple[str, tuple[int, ...], bool], ...]:
+    if not value or len(value) > _CAPABILITY_SPECIFIER_TEXT_LIMIT:
+        raise _CapabilityContractIncompatible
+    parts = tuple(part.strip() for part in value.split(","))
+    if (
+        not parts
+        or len(parts) > _CAPABILITY_SPECIFIER_CLAUSE_LIMIT
+        or any(not part for part in parts)
+    ):
+        raise _CapabilityContractIncompatible
+    clauses: list[tuple[str, tuple[int, ...], bool]] = []
+    for part in parts:
+        match = _SPECIFIER_CLAUSE_RE.fullmatch(part)
+        if match is None:
+            raise _CapabilityContractIncompatible
+        operator = match.group("operator")
+        version = match.group("version")
+        wildcard = version.endswith(".*")
+        if wildcard:
+            if operator not in {"==", "!="}:
+                raise _CapabilityContractIncompatible
+            version = version[:-2]
+        release = _numeric_version(version)
+        if operator == "~=" and len(release) < 2:
+            raise _CapabilityContractIncompatible
+        clauses.append((operator, release, wildcard))
+    return tuple(clauses)
+
+
+def _compare_versions(left: tuple[int, ...], right: tuple[int, ...]) -> int:
+    width = max(len(left), len(right))
+    padded_left = left + (0,) * (width - len(left))
+    padded_right = right + (0,) * (width - len(right))
+    return (padded_left > padded_right) - (padded_left < padded_right)
+
+
+def _version_satisfies_clauses(
+    value: str,
+    clauses: tuple[tuple[str, tuple[int, ...], bool], ...],
+) -> bool:
+    release = _numeric_version(value)
+    for operator, expected, wildcard in clauses:
+        if wildcard:
+            candidate = release + (0,) * max(0, len(expected) - len(release))
+            matches = candidate[: len(expected)] == expected
+            satisfied = matches if operator == "==" else not matches
+        else:
+            comparison = _compare_versions(release, expected)
+            if operator == "~=":
+                candidate = release + (0,) * max(
+                    0, len(expected) - 1 - len(release)
+                )
+                satisfied = (
+                    comparison >= 0
+                    and candidate[: len(expected) - 1] == expected[:-1]
+                )
+            else:
+                satisfied = {
+                    "==": comparison == 0,
+                    "!=": comparison != 0,
+                    "<=": comparison <= 0,
+                    ">=": comparison >= 0,
+                    "<": comparison < 0,
+                    ">": comparison > 0,
+                }[operator]
+        if not satisfied:
+            return False
+    return True
+
+
+def _version_satisfies_specifier(value: str, specifier: str) -> bool:
+    return _version_satisfies_clauses(value, _parse_version_specifier(specifier))
+
+
+def _marker_selects_extra(value: str, selected_extra: str) -> bool:
+    comparisons: list[bool] = []
+    has_or = False
+    quote: str | None = None
+    escaped = False
+    index = 0
+    while index < len(value):
+        character = value[index]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == quote:
+                quote = None
+            index += 1
+            continue
+        if character in {'"', "'"}:
+            quote = character
+            index += 1
+            continue
+        if character.isascii() and (character.isalnum() or character == "_"):
+            end = index + 1
+            while end < len(value):
+                token_character = value[end]
+                if not (
+                    token_character.isascii()
+                    and (token_character.isalnum() or token_character == "_")
+                ):
+                    break
+                end += 1
+            token = value[index:end].lower()
+            if token == "or":
+                has_or = True
+            if token == "extra":
+                match = _FORWARD_EXTRA_MARKER_COMPARISON_RE.match(value, index)
+                if match is None:
+                    match = _REVERSED_EXTRA_MARKER_COMPARISON_RE.search(
+                        value[:end]
+                    )
+                if match is None:
+                    raise _CapabilityContractIncompatible
+                matches_selected = (
+                    _normalize_distribution_name(match.group("extra"))
+                    == selected_extra
+                )
+                comparisons.append(
+                    matches_selected
+                    if match.group("operator") == "=="
+                    else not matches_selected
+                )
+                if len(comparisons) > _CAPABILITY_CHILD_EXTRA_LIMIT:
+                    raise _CapabilityContractIncompatible
+                index = max(end, match.end())
+                continue
+            index = end
+            continue
+        index += 1
+    if has_or and comparisons:
+        raise _CapabilityContractIncompatible
+    return any(comparisons)
+
+
+def _selected_extra_dependency(
+    value: str,
+    selected_extra: str,
+) -> (
+    tuple[
+        str,
+        tuple[tuple[str, tuple[int, ...], bool], ...],
+        tuple[str, ...],
+    ]
+    | None
+):
+    if len(value.encode("utf-8")) > _CAPABILITY_REQUIREMENT_TEXT_LIMIT:
+        raise _CapabilityProbeFailure
+    marker_text = value.partition(";")[2]
+    if not marker_text or not _marker_selects_extra(
+        marker_text, selected_extra
+    ):
+        return None
+    marker = _EXACT_EXTRA_MARKER_RE.search(value)
+    if marker is None:
+        raise _CapabilityContractIncompatible
+    if _normalize_distribution_name(marker.group("extra")) != selected_extra:
+        return None
+    match = _SELECTED_EXTRA_REQUIREMENT_RE.fullmatch(value)
+    if match is None:
+        raise _CapabilityContractIncompatible
+    extras_text = match.group("extras")
+    child_extras = (
+        ()
+        if extras_text is None
+        else tuple(
+            _normalize_distribution_name(extra.strip())
+            for extra in extras_text.split(",")
+        )
+    )
+    if (
+        len(child_extras) > _CAPABILITY_CHILD_EXTRA_LIMIT
+        or len(set(child_extras)) != len(child_extras)
+    ):
+        raise _CapabilityContractIncompatible
+    specifiers = match.group("specifiers").strip()
+    clauses = () if not specifiers else _parse_version_specifier(specifiers)
+    return (
+        _normalize_distribution_name(match.group("name")),
+        clauses,
+        child_extras,
     )
 
 
@@ -4858,7 +5227,10 @@ def _optional_dependency_floor(
             continue
         match = _OPTIONAL_REQUIREMENT_FLOOR_RE.fullmatch(declared)
         if match is None:
-            if _EXTRA_MARKER_TOKEN_RE.search(declared) is not None:
+            marker_text = declared.partition(";")[2]
+            if marker_text and _marker_selects_extra(
+                marker_text, normalized_extra
+            ):
                 raise _CapabilityContractIncompatible
             continue
         if (
@@ -4884,6 +5256,7 @@ def _capability_requirement_specs(
 ) -> tuple[
     dict[str, dict],
     dict[str, tuple[str, ...]],
+    dict[str, tuple[str, str]],
     dict[str, tuple[str, str]],
 ]:
     specs: dict[str, dict] = {}
@@ -4921,47 +5294,92 @@ def _capability_requirement_specs(
             raise _CapabilityProbeFailure
 
     optional_floor_sources: dict[str, tuple[str, str]] = {}
+    selected_extra_sources: dict[str, tuple[str, str]] = {}
     for requirement, spec in specs.items():
         match = _EXTRA_INSTALL_HINT_RE.fullmatch(requirement)
         if match is None:
             continue
         dependency = _normalize_distribution_name(spec["distribution"])
         owner = _normalize_distribution_name(match.group("name"))
+        extra = _normalize_distribution_name(match.group("extra"))
         if owner == dependency:
+            selected_extra_sources[requirement] = (owner, extra)
             continue
         owner_requirement = requirements_by_distribution.get(owner)
         if owner_requirement is None:
             raise _CapabilityProbeFailure
-        optional_floor_sources[requirement] = (
-            owner_requirement,
-            _normalize_distribution_name(match.group("extra")),
-        )
-    return specs, role_dependencies, optional_floor_sources
+        optional_floor_sources[requirement] = (owner_requirement, extra)
+    return (
+        specs,
+        role_dependencies,
+        optional_floor_sources,
+        selected_extra_sources,
+    )
 
 
-def _read_capability_distribution(
-    requirement: str,
-    spec: dict,
+def _read_distribution_contract(
+    distribution: str,
     roots: tuple[Path, ...],
     index: dict[str, list[tuple[int, Path, Path, str]]],
 ) -> dict:
-    selected = _selected_dist_info(index, requirement)
+    selected = _selected_dist_info(index, distribution)
     if selected is None:
         return {"status": "missing"}
     root_index, root, dist_info, distribution_version = selected
     metadata = _read_capability_file(
         dist_info / "METADATA", root, _CAPABILITY_METADATA_BYTE_LIMIT
     )
-    fields, requirements = _parse_capability_metadata(metadata)
+    fields, requirements, provided_extras = _parse_capability_metadata(metadata)
     if _normalize_distribution_name(fields["name"]) != _normalize_distribution_name(
-        spec["distribution"]
+        distribution
     ):
         raise _CapabilityContractIncompatible
     if fields["version"] != distribution_version:
         raise _CapabilityContractIncompatible
-    if spec.get("vivary") and fields["requires_python"] != ">=3.11":
+    if getattr(sys.version_info, "releaselevel", None) != "final":
+        raise _CapabilityContractIncompatible
+    current_python = ".".join(str(part) for part in sys.version_info[:3])
+    if not _version_satisfies_specifier(
+        current_python,
+        fields["requires_python"],
+    ):
+        raise _CapabilityContractIncompatible
+    record = _read_capability_file(
+        dist_info / "RECORD", root, _CAPABILITY_RECORD_BYTE_LIMIT
+    )
+    _recorded_module_path(
+        record,
+        None,
+        owned_paths=(f"{dist_info.name}/METADATA",),
+    )
+    return {
+        "status": "installed",
+        "root_index": root_index,
+        "root": root,
+        "dist_info": dist_info,
+        "record": record,
+        "metadata_size": len(metadata),
+        "requires_python": fields["requires_python"],
+        "declared_version": fields["version"],
+        "declared_requirements": requirements,
+        "declared_extras": provided_extras,
+    }
+
+
+def _read_capability_distribution(
+    spec: dict,
+    roots: tuple[Path, ...],
+    index: dict[str, list[tuple[int, Path, Path, str]]],
+) -> dict:
+    evidence = _read_distribution_contract(spec["distribution"], roots, index)
+    if evidence["status"] == "missing":
+        return evidence
+    if spec.get("vivary") and evidence["requires_python"] != ">=3.11":
         raise _CapabilityContractIncompatible
 
+    root_index = evidence["root_index"]
+    root = evidence["root"]
+    dist_info = evidence["dist_info"]
     module = spec["module"]
     if _has_earlier_module_artifact(roots, root_index, module):
         raise _CapabilityContractIncompatible
@@ -4970,7 +5388,7 @@ def _read_capability_distribution(
         entrypoints = _read_capability_file(
             dist_info / "entry_points.txt",
             root,
-            _CAPABILITY_METADATA_BYTE_LIMIT - len(metadata),
+            _CAPABILITY_METADATA_BYTE_LIMIT - evidence["metadata_size"],
         )
         if _parse_console_target(entrypoints, script) != (
             module,
@@ -4978,14 +5396,14 @@ def _read_capability_distribution(
         ):
             raise _CapabilityContractIncompatible
         owned_paths.append(f"{dist_info.name}/entry_points.txt")
-    record = _read_capability_file(
-        dist_info / "RECORD", root, _CAPABILITY_RECORD_BYTE_LIMIT
-    )
+        _require_recorded_launcher(evidence["record"], root, script)
     artifact = _recorded_module_path(
-        record,
+        evidence["record"],
         module,
         owned_paths=tuple(owned_paths),
     )
+    if artifact is None:
+        raise _CapabilityContractIncompatible
     if _has_competing_module_artifact(root, module, artifact):
         raise _CapabilityContractIncompatible
     try:
@@ -4997,20 +5415,185 @@ def _read_capability_distribution(
 
     return {
         "status": "installed",
-        "version": _stable_version(fields["version"]) if spec.get("vivary") else None,
-        "declared_version": fields["version"],
-        "declared_requirements": requirements,
+        "version": (
+            _stable_version(evidence["declared_version"])
+            if spec.get("vivary")
+            else None
+        ),
+        "declared_version": evidence["declared_version"],
+        "declared_requirements": evidence["declared_requirements"],
+        "declared_extras": evidence["declared_extras"],
     }
+
+
+def _normalized_declared_extras(extras: tuple[str, ...]) -> set[str]:
+    normalized: set[str] = set()
+    for extra in extras:
+        if _EXTRA_NAME_RE.fullmatch(extra) is None:
+            raise _CapabilityContractIncompatible
+        value = _normalize_distribution_name(extra)
+        if value in normalized:
+            raise _CapabilityContractIncompatible
+        normalized.add(value)
+    return normalized
+
+
+def _selected_extra_status(
+    distribution: str,
+    extra: str,
+    initial_evidence: dict,
+    roots: tuple[Path, ...],
+    index: dict[str, list[tuple[int, Path, Path, str]]],
+) -> str:
+    initial_distribution = _normalize_distribution_name(distribution)
+    initial_extra = _normalize_distribution_name(extra)
+    cache = {initial_distribution: initial_evidence}
+    pending = [(initial_distribution, initial_extra, 0)]
+    pending_index = 0
+    scheduled = {(initial_distribution, initial_extra)}
+    visited: set[tuple[str, str]] = set()
+    nodes = 0
+    edges = 0
+    missing_evidence = False
+    incompatible_evidence = False
+
+    while pending_index < len(pending):
+        owner, selected_extra, depth = pending[pending_index]
+        pending_index += 1
+        node = (owner, selected_extra)
+        if node in visited:
+            continue
+        nodes += 1
+        if (
+            nodes > _CAPABILITY_EXTRA_NODE_LIMIT
+            or depth > _CAPABILITY_EXTRA_DEPTH_LIMIT
+        ):
+            raise _CapabilityProbeFailure
+        try:
+            evidence = cache.get(owner)
+            if evidence is None:
+                evidence = _read_distribution_contract(owner, roots, index)
+                cache[owner] = evidence
+        except _CapabilityContractIncompatible:
+            incompatible_evidence = True
+            visited.add(node)
+            continue
+        if evidence["status"] == "missing":
+            missing_evidence = True
+            visited.add(node)
+            continue
+        try:
+            declared_extras = _normalized_declared_extras(
+                evidence["declared_extras"]
+            )
+        except _CapabilityContractIncompatible:
+            incompatible_evidence = True
+            visited.add(node)
+            continue
+        if selected_extra not in declared_extras:
+            incompatible_evidence = True
+            visited.add(node)
+            continue
+
+        selected_rows: set[
+            tuple[
+                str,
+                tuple[tuple[str, tuple[int, ...], bool], ...],
+                tuple[str, ...],
+            ]
+        ] = set()
+        dependencies: dict[
+            str,
+            tuple[
+                tuple[tuple[str, tuple[int, ...], bool], ...],
+                tuple[str, ...],
+            ],
+        ] = {}
+        for requirement in evidence["declared_requirements"]:
+            try:
+                dependency = _selected_extra_dependency(requirement, selected_extra)
+            except _CapabilityContractIncompatible:
+                incompatible_evidence = True
+                continue
+            if dependency is None:
+                continue
+            child, clauses, child_extras = dependency
+            edges += 1
+            if edges > _CAPABILITY_EXTRA_EDGE_LIMIT:
+                raise _CapabilityProbeFailure
+            if dependency in selected_rows:
+                incompatible_evidence = True
+                continue
+            selected_rows.add(dependency)
+            existing_clauses, existing_extras = dependencies.get(
+                child, ((), ())
+            )
+            combined_clauses = existing_clauses + tuple(
+                clause for clause in clauses if clause not in existing_clauses
+            )
+            combined_extras = existing_extras + tuple(
+                child_extra
+                for child_extra in child_extras
+                if child_extra not in existing_extras
+            )
+            if (
+                len(combined_clauses) > _CAPABILITY_SPECIFIER_CLAUSE_LIMIT
+                or len(combined_extras) > _CAPABILITY_CHILD_EXTRA_LIMIT
+            ):
+                incompatible_evidence = True
+                continue
+            dependencies[child] = (combined_clauses, combined_extras)
+
+        child_nodes: list[tuple[str, str, int]] = []
+        for child, (clauses, child_extras) in dependencies.items():
+            try:
+                child_evidence = cache.get(child)
+                if child_evidence is None:
+                    child_evidence = _read_distribution_contract(child, roots, index)
+                    cache[child] = child_evidence
+            except _CapabilityContractIncompatible:
+                incompatible_evidence = True
+                continue
+            if child_evidence["status"] == "missing":
+                missing_evidence = True
+                continue
+            try:
+                version_satisfied = not clauses or _version_satisfies_clauses(
+                    child_evidence["declared_version"],
+                    clauses,
+                )
+            except _CapabilityContractIncompatible:
+                incompatible_evidence = True
+                continue
+            if not version_satisfied:
+                incompatible_evidence = True
+                continue
+            for child_extra in child_extras:
+                child_node = (child, child_extra)
+                if child_node in scheduled:
+                    continue
+                if depth >= _CAPABILITY_EXTRA_DEPTH_LIMIT:
+                    raise _CapabilityProbeFailure
+                scheduled.add(child_node)
+                child_nodes.append((child, child_extra, depth + 1))
+        pending.extend(child_nodes)
+        visited.add(node)
+    if incompatible_evidence:
+        return "incompatible"
+    return "missing" if missing_evidence else "installed"
 
 
 def _capability_probe_results(capabilities: list[dict]) -> dict[str, dict]:
     try:
-        specs, role_dependencies, optional_floor_sources = (
-            _capability_requirement_specs(capabilities)
-        )
+        (
+            specs,
+            role_dependencies,
+            optional_floor_sources,
+            selected_extra_sources,
+        ) = _capability_requirement_specs(capabilities)
         requirements = tuple(specs)
         roots = _capability_install_roots()
-        index = _capability_distribution_index(roots, specs)
+        index = _capability_distribution_index(roots)
     except (OSError, RuntimeError, ValueError, _CapabilityProbeFailure):
         return {
             requirement: {"status": "probe-failed"}
@@ -5025,7 +5608,6 @@ def _capability_probe_results(capabilities: list[dict]) -> dict[str, dict]:
     for requirement in requirements:
         try:
             observed_results[requirement] = _read_capability_distribution(
-                requirement,
                 specs[requirement],
                 roots,
                 index,
@@ -5045,6 +5627,31 @@ def _capability_probe_results(capabilities: list[dict]) -> dict[str, dict]:
         requirement: dict(result)
         for requirement, result in observed_results.items()
     }
+    for requirement, (owner, extra) in selected_extra_sources.items():
+        observed_result = observed_results[requirement]
+        if observed_result["status"] != "installed":
+            continue
+        try:
+            status = _selected_extra_status(
+                owner,
+                extra,
+                observed_result,
+                roots,
+                index,
+            )
+        except _CapabilityContractIncompatible:
+            status = "incompatible"
+        except (
+            OSError,
+            RuntimeError,
+            UnicodeError,
+            ValueError,
+            _CapabilityProbeFailure,
+        ):
+            status = "probe-failed"
+        if status != "installed":
+            results[requirement] = {"status": status}
+
     for role, expected_dependencies in role_dependencies.items():
         observed_result = observed_results.get(role)
         if observed_result is None or observed_result["status"] != "installed":
