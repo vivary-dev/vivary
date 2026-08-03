@@ -1,21 +1,28 @@
 # vivary
 
-One install for the full Vivary CLI suite:
+The unpublished 0.1.5 source manifest defines one install for the full Vivary CLI
+suite. Release verification builds all local wheels. It proves that composition
+without consulting a registry:
 
 ```bash
-python -m pip install vivary
+python -m pip install --no-index --find-links <wheelhouse> vivary
 ```
 
-Current published and development source versions live in the
+Do not use an unpinned registry install to verify this development line. Current
+published and source versions live in the
 [root release status](../../README.md#release-status).
 
-That pulls the four layers, each still usable on its own:
+The source install pulls every role, each still usable on its own:
 
-- `create-vivary` — scaffold or adopt an agent-native workspace
-- `tropo` (`vivary-tropo`) — the typed knowledge graph
-- `ozone` (`vivary-ozone`) — graph-aware review and governed evidence verification
-- `exo` (`vivary-exo`) — legacy coordination and a bounded governed-control adapter
+- `create-vivary`: scaffold or adopt an agent-native workspace.
+- `tropo` (`vivary-tropo`): the typed knowledge graph and governed context compiler.
+- `strato` (`vivary-strato`): governed policy and human-gate decisions.
+- `ozone` (`vivary-ozone`): graph-aware review and governed evidence verification.
+- `exo` (`vivary-exo`): legacy coordination and bounded governed control.
 
+The unpublished 0.1.5 source line requires `create-vivary>=0.3.2` and
+`vivary-strato>=0.1.2`. It receives `vivary-core` transitively through the role
+packages rather than owning a duplicate Core floor.
 Ozone's opt-in governed path verifies capsule-bound evidence without writing:
 
 ```bash
@@ -41,7 +48,7 @@ vivary logs email .vivary/receipts.jsonl --to support@example.com --out .vivary/
 ```
 
 `vivary logs email` writes a local draft or prints a `mailto:` URL. It does not send
-mail, upload telemetry, or include stdout/stderr, file contents, raw query text, target
-ids, or local paths.
+mail or upload telemetry. The draft excludes stdout, stderr, file contents, raw query
+text, target ids, and local paths.
 
 Docs: https://vivary.vercel.app/

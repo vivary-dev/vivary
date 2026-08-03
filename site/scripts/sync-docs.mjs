@@ -313,5 +313,5 @@ for (const [src, slug, title] of pages) {
 const changelogBody = makeAbsolute(rewrite(changelog));
 llmsFullText += `\n---\n\n${changelogBody}\n`;
 
-fs.writeFileSync(path.join(publicDir, 'llms-full.txt'), llmsFullText);
+fs.writeFileSync(path.join(publicDir, 'llms-full.txt'), `${llmsFullText.trimEnd()}\n`);
 console.log('  generated site/public/llms-full.txt');

@@ -865,8 +865,8 @@ create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writin
 |---|---|
 | `init <target>` | Lay down a complete workspace: the agent contract, the strato shell (SOUL/USER/STATE/MEMORY), runtime skills, a `tropo.toml`, a starter typed graph, and optional storage or semantic-memory config based on flags/wizard answers. |
 | `wizard <target>` | Re-run the setup wizard on an existing workspace to reconfigure storage and optional semantic-memory policy. |
-| `capabilities` | List optional capabilities for a preset: storage, semantic memory, and preset-specific sidecars. |
-| `doctor <target>` | Validate the strict common workspace shell, the inferred published module contract, active privacy ignore rules, module directory indexes, tropo graph health, declared capability config, backend reachability, and semantic-memory status. |
+| `capabilities` | Report optional capabilities plus Core and all four governed role surfaces for the selected preset. |
+| `doctor <target>` | Validate the strict common workspace shell, the inferred published module contract, active privacy ignore rules, module directory indexes, tropo graph health, declared capability config, backend reachability, semantic-memory status, and the same governed capability envelope. |
 | `adopt <target>` | Bring Vivary to an existing repo or vault. Only adds files that don't already exist; never moves, renames, edits, or overwrites anything. Dry-run by default. |
 
 | Flag | Effect |
@@ -886,6 +886,80 @@ create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writin
 | `--privacy local\|cloud` | Hint for `--auto` storage decisions. |
 | `--repair` | Doctor-only. Include a conservative guided repair plan. Dry-run by default; writes nothing without `--yes`. |
 | `--yes` | With `doctor --repair`, apply deterministic safe repairs, rerun doctor, and keep a nonzero exit if the workspace is still invalid. |
+
+### Capability status (development source)
+
+The 0.3.2 development source reports a fixed Core-and-role inventory alongside the
+existing storage, semantic-memory, and preset sidecar rows:
+
+| Capability | Command | Authority |
+|---|---|---|
+| `governed-context:core` | Library only | `library-only` |
+| `governed-context:tropo` | `tropo find --governed` | `read-only-context` |
+| `governed-policy:strato` | `strato decide --governed` | `decision-only` |
+| `governed-verification:ozone` | `ozone verify --governed` | `verification-and-proposal-only` |
+| `governed-control:exo` | `exo control --governed` | `projection-only` |
+
+Each capability row has `installed`, `install_status`, `reason_codes`, and
+`missing_install`. Status is `installed`, `not-installed`, `incompatible`, or
+`probe-failed`. Resolution checks `probe-failed` first, then `incompatible`,
+`not-installed`, and `installed`.
+Missing role or Core artifacts report `capability_dependency_missing`.
+A role reports `capability_contract_incompatible` when its installed manifest, Core
+floor, normalized distribution identity, or module record violates the public contract.
+The same status applies to an invalid exact console-script target, generated launcher,
+or competing import artifact.
+A bounded read or parse failure reports `capability_probe_failed`. Only `not-installed`
+rows include ordered install hints.
+
+The status reader considers the interpreter's canonical `purelib` and `platlib` roots,
+at most eight system-site candidates, and at most eight user-site candidates. It then
+selects at most eight unique roots that appear on the active interpreter path. It
+inspects up to 256 `sys.path` entries and 10,000 entries across the selected roots.
+Each distribution must include exactly one non-empty `Metadata-Version`, `Name`,
+`Version`, and `Requires-Python` field. It may declare at most 64 extras and 256
+dependency records. Each dependency record may contain no more than 4 KiB.
+For every selected distribution, bounded final-release comparison checks whether the
+active interpreter satisfies `Requires-Python`. Unsupported or unsatisfied constraints
+are incompatible. The combined 256 KiB metadata-and-entrypoint byte cap bounds
+unrelated metadata headers.
+
+When an install hint names an extra on the same distribution, the reader verifies the
+normalized `Provides-Extra` declaration. It also verifies the complete installed
+dependency closure selected by that extra. Nested extras use the same rule.
+The reader follows only selected-extra edges. It accepts at most eight extra nodes and
+16 dependency edges. Maximum depth is four levels. Each dependency may name four child
+extras and four version clauses. A missing dependency remains `not-installed`.
+Malformed, ambiguous, unsupported, or unsatisfied selected dependency declarations
+are incompatible. Malformed distribution metadata, I/O failures, and work ceilings
+report `probe-failed`.
+
+When an optional provider's install hint names another package's extra, the reader
+derives the provider's minimum version from that installed package's matching
+`Requires-Dist` declaration. Floor extraction uses the owner's independently
+validated distribution metadata before projecting its separate governed-role
+dependency contract. A pre-governed but otherwise valid owner can therefore establish
+the optional provider floor. The reader validates an installed owner's floor even when
+the provider is absent, and a present provider also requires the owner. A missing,
+duplicate, malformed, or unsatisfied floor is incompatible. When both are absent, the
+capability remains `not-installed`. The inventory does not copy the floor. Provider
+version comparison accepts bounded PEP 440 release, post-release, and local forms.
+Pre-release, development, and invalid forms fail closed.
+
+For every declared console script, the reader maps the selected active installation
+root to its matching interpreter scheme. It checks the generated launcher in the
+scripts directory for that scheme. The launcher must be a regular executable file.
+Its distribution `RECORD` must contain exactly one matching row. The reader also binds
+modules and control metadata to that exact distribution. It accepts at most 20,000
+`RECORD` rows and 2 MiB.
+The reader does not import role or provider packages, dispatch ambient import or
+distribution hooks, invoke entrypoints, spawn commands, or use the network.
+
+Optional absence, incompatibility, and probe failure remain visible but do not make
+`capabilities` or Doctor unhealthy. Doctor derives its preset from the workspace
+`README.md`. A missing, unsupported, or unreadable `Preset:` declaration yields
+`"preset": null` and omits only preset-specific active-context rows. Existing
+configured-Cognee health checks remain separate from this passive capability subreport.
 
 `doctor` always requires active ignore rules for `USER.md`, `MEMORY.md`, `memory/*`,
 and `.strato/private/`. Published workspaces can predate `heartbeat-reports/*` or

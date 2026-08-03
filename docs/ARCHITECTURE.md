@@ -91,11 +91,10 @@ Baseline = **tropo + strato** (knowledge + the self-improving loop over it).
 
 ### The shared seam: `vivary-core`
 
-The four layers above are the *vertical* column. `vivary-core` is the horizontal
-seam beneath them — the governed-context primitives every role package is *meant* to
-speak through, so that "what is true, and how do we know" ends up with exactly one
-implementation rather than four that drift. Tropo, Strato, and Ozone now speak
-through it; the remaining role packages adopt the seam in their integration slices.
+The four layers above are the *vertical* column. `vivary-core` forms the horizontal
+seam beneath them. Each role package speaks through these governed-context primitives,
+so "what is true, and how do we know" has exactly one implementation rather than four
+that drift. Tropo, Strato, Ozone, and Exo use this seam in the development source.
 
 It is a library, not a layer and not a CLI. Nothing about the baseline changes
 because it exists: you still install and run `tropo`, `strato`, `ozone`, `exo`.
@@ -174,11 +173,19 @@ ambiguity it merely observed. Conflicts are handed to review, not to confidence,
 anything unproven is reported `unknown` rather than guessed.
 
 **Selected dependency direction:** a shipping package that imports `vivary-core`
-declares its own floor in the same commit. The `vivary` meta package receives Core
-transitively and declares the Exo floor instead. One owner per edge avoids
-version-pinning fights. Tropo, Strato, and Ozone keep their declared floors. Exo
-declares its Core floor in [its package manifest](https://github.com/vivary-dev/vivary/blob/dev/packages/exo/pyproject.toml), and
-the meta package declares Exo's floor in [its manifest](https://github.com/vivary-dev/vivary/blob/dev/packages/vivary/pyproject.toml).
+declares its own floor in the same commit. The `vivary` meta-package receives Core
+transitively through the role packages instead of declaring a duplicate Core edge.
+Tropo, Strato, Ozone, and Exo own their Core floors. The meta-package owns its five
+component floors, including `create-vivary>=0.3.2` and `vivary-strato>=0.1.2`. One
+owner per edge avoids version-pinning fights.
+
+**Installed-capability truth:** development-source `create-vivary capabilities`
+projects a fixed public inventory for Core and the four governed roles. A bounded
+passive reader binds each credited module or console script to the exact distribution
+record under the active interpreter's canonical package roots. It neither imports
+optional packages nor dispatches ambient import or distribution hooks. Each row reports
+`installed`, `not-installed`, `incompatible`, or `probe-failed`. Optional absence and
+probe failure do not make the workspace unhealthy. Doctor embeds the same envelope.
 
 **Status:** Tropo, Strato, Ozone, and Exo Core adapters are present in the development
 source and remain unpublished behind explicit `--governed` flags. Plain Tropo retrieval,

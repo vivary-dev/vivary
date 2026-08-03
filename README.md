@@ -36,11 +36,13 @@ versions declared in this checkout. Development versions are not published.
 | `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
 | `vivary-memory-cognee` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-memory-cognee/) |
 
-**Unpublished development source:** `vivary-core` **0.2.6**, `vivary-tropo`
-**0.5.0**, `vivary-strato` **0.1.2**, `vivary-ozone` **0.3.1**, `vivary-exo`
-**0.3.0**, and the `vivary` meta-package **0.1.4**. The package manifests own
-dependency floors, including [Exo's Core floor](packages/exo/pyproject.toml) and
-the [meta package's Exo floor](packages/vivary/pyproject.toml).
+**Unpublished development source:** `create-vivary` and `@vivary/create` **0.3.2**,
+`vivary-core` **0.2.6**, `vivary-tropo` **0.5.0**, `vivary-strato` **0.1.2**,
+`vivary-ozone` **0.3.1**, `vivary-exo` **0.3.0**, `vivary-memory-cognee`
+**0.1.1**, and the `vivary` meta-package **0.1.5**. The package manifests own
+role-to-Core floors. The [meta-package manifest](packages/vivary/pyproject.toml)
+owns its component floors, including `create-vivary>=0.3.2` and
+`vivary-strato>=0.1.2`. It receives Core transitively.
 
 No development source version above was published, deployed, or enabled by default.
 Publication remains a later coordinated release-train decision with a separate human

@@ -70,8 +70,11 @@ Update every surface that names versions or the command set, in the repo,
   and read what it claims;
 - `AGENTS.md` only when the public agent contract itself changes.
 
-Fast completeness check — the old version string should survive nowhere except
-the changelog history:
+Before publication, old registry versions remain in the published-status table and
+published install examples. Check that each source version appears only in its manifest,
+runtime owner, development-status copy, generated mirror, and changelog entry. After
+publication, search the same surfaces for the replaced version and keep it only where
+the changelog or compatibility history owns it:
 
 ```bash
 grep -rn "<old-version>" README.md docs/ packages/ site/src/pages/ --include="*.md" --include="*.toml" --include="*.json" --include="*.astro"
@@ -85,6 +88,7 @@ Source docs live in `docs/` plus root `CHANGELOG.md`; the site mirrors them.
 cd site
 npm run sync-docs
 npm run build
+git diff --exit-code -- src/content/docs public/llms.txt public/llms-full.txt
 ```
 
 Commit the regenerated `site/src/content/docs/*` with the source docs — CI's

@@ -3797,77 +3797,1932 @@ class VersionParityTests(unittest.TestCase):
         npm = json.loads((root / "npm" / "package.json").read_text(encoding="utf-8"))
         self.assertEqual(npm["version"], declared, "npm package.json must stay in lockstep")
 
+    def test_governed_install_hints_match_role_manifests(self):
+        import tomllib
 
-class GovernedContextCapabilityTests(unittest.TestCase):
-    """#207 slice: the install must be able to report the governed-context seam.
-
-    `vivary-core` is merged but nothing outside `packages/core/` references it, so a
-    user has no way to find out whether the seam is present. A capability nobody can
-    observe is indistinguishable from one that does not exist.
-    """
-
-    def test_core_is_reported_as_a_capability(self):
-        report = create_vivary.capability_report("coding")
-        core = next(
-            (c for c in report["available_capabilities"] if c["id"] == "governed-context:core"),
-            None,
-        )
-        self.assertIsNotNone(core, "governed-context:core must appear in the capability report")
-        self.assertEqual(core["requires_install"], ["vivary-core"])
-        self.assertFalse(core["requires_approval"], "reading local context needs no approval")
-        self.assertFalse(core["network"], "the seam is local-only and must say so")
-        self.assertFalse(core["default"], "core is not yet part of the default install")
-
-    def test_every_capability_reports_whether_it_is_installed(self):
-        """Install truth, not just declared intent — that is what makes the report
-        actionable rather than a restatement of the docs."""
-        report = create_vivary.capability_report("coding")
-        for capability in report["available_capabilities"]:
-            self.assertIn(
-                "installed", capability, f"{capability['id']} does not report install state"
-            )
-            self.assertIsInstance(capability["installed"], bool)
-
-        base = next(c for c in report["available_capabilities"] if c["id"] == "storage:file")
-        self.assertTrue(base["installed"], "a zero-dependency capability is always present")
-
-    def test_install_truth_is_derived_from_each_capability_s_requirements(self):
-        """`installed` must follow `requires_install`, not a second hand-kept list.
-
-        The first version of this kept a parallel capability-id -> module map, and it
-        disagreed with the declarations it was meant to describe: `memory:cognee`
-        needs `vivary-memory-cognee` and was reported installed, while `memory:local`
-        needs nothing and was reported absent. Exactly backwards, and exactly the
-        class of "reports something it cannot evidence" this report exists to remove.
-        """
-        report = create_vivary.capability_report("coding")
-        by_id = {c["id"]: c for c in report["available_capabilities"]}
-
-        # Anything requiring nothing is present by definition.
-        for capability in report["available_capabilities"]:
-            if not capability["requires_install"]:
-                self.assertTrue(
-                    capability["installed"],
-                    f"{capability['id']} requires nothing and must report installed",
+        expected = {
+            "governed-context:tropo": (
+                "tropo",
+                ["vivary-tropo", "vivary-core"],
+                ("vivary-core>=0.2.1",),
+            ),
+            "governed-policy:strato": (
+                "strato",
+                ["vivary-strato", "vivary-core"],
+                ("vivary-core>=0.2.4",),
+            ),
+            "governed-verification:ozone": (
+                "ozone",
+                ["vivary-ozone", "vivary-tropo", "vivary-core"],
+                ("vivary-core>=0.2.4", "vivary-tropo>=0.3.0"),
+            ),
+            "governed-control:exo": (
+                "exo",
+                ["vivary-exo", "vivary-tropo", "vivary-core"],
+                ("vivary-core>=0.2.5", "vivary-tropo>=0.2.3"),
+            ),
+        }
+        by_id = {
+            capability["id"]: capability
+            for capability in create_vivary._capability_declarations("coding")
+        }
+        for capability_id, (package_dir, hints, dependencies) in expected.items():
+            manifest = tomllib.loads(
+                (ROOT / "packages" / package_dir / "pyproject.toml").read_text(
+                    encoding="utf-8"
                 )
-
-        # A capability naming a package that is genuinely absent must say so.
-        self.assertFalse(by_id["memory:cognee"]["installed"])
-        self.assertFalse(by_id["governed-context:core"]["installed"])
-
-        # And the probe must agree with a direct import check, requirement by
-        # requirement — no capability may claim more than its packages support.
-        for capability in report["available_capabilities"]:
-            expected = all(
-                create_vivary._requirement_importable(r)
-                for r in capability["requires_install"]
+            )["project"]
+            self.assertEqual(manifest["requires-python"], ">=3.11")
+            for dependency in dependencies:
+                self.assertIn(dependency, manifest["dependencies"])
+            self.assertEqual(by_id[capability_id]["requires_install"], hints)
+            declaration = create_vivary._CAPABILITY_DECLARATIONS[capability_id]
+            role_requirement = next(
+                requirement
+                for requirement in declaration["requirements"]
+                if requirement["hint"] == hints[0]
             )
             self.assertEqual(
-                capability["installed"], expected, f"{capability['id']} misreports"
+                manifest["scripts"][role_requirement["script"]],
+                f"{role_requirement['module']}:{role_requirement['callable']}",
             )
 
-    def test_absent_optional_capability_is_not_an_error(self):
-        """Doctor must never call an *optional* absent package broken."""
+    def test_package_release_status_links_survive_registry_rendering(self):
+        import tomllib
+
+        manifest = tomllib.loads(
+            (ROOT / "packages/create-vivary/pyproject.toml").read_text(
+                encoding="utf-8"
+            )
+        )["project"]
+        self.assertEqual(manifest["readme"], "README.md")
+
+        release_status_url = (
+            "https://github.com/vivary-dev/vivary/blob/dev/"
+            "README.md#release-status"
+        )
+        for relative_path in (
+            "packages/create-vivary/README.md",
+            "packages/create-vivary/npm/README.md",
+        ):
+            content = (ROOT / relative_path).read_text(encoding="utf-8")
+            self.assertIn(release_status_url, content, relative_path)
+            self.assertNotIn("](../../README.md#release-status)", content)
+            self.assertNotIn("](../../../README.md#release-status)", content)
+
+
+class GovernedContextCapabilityTests(unittest.TestCase):
+    """#207: report governed package surfaces without importing them."""
+
+    def setUp(self):
+        self._real_capability_scripts_path = (
+            create_vivary._capability_scripts_path
+        )
+        scripts_patcher = mock.patch.object(
+            create_vivary,
+            "_capability_scripts_path",
+            side_effect=lambda root: root / ".scripts",
+        )
+        scripts_patcher.start()
+        self.addCleanup(scripts_patcher.stop)
+
+    @staticmethod
+    def _write_distribution(
+        root: Path,
+        name: str,
+        version: str,
+        module: str,
+        *,
+        requirements: tuple[str, ...] = (),
+        requires_python: str = ">=3.11",
+        extras: tuple[str, ...] = (),
+        script: str | None = None,
+        package: bool = False,
+    ) -> None:
+        normalized = re.sub(r"[-_.]+", "_", name)
+        dist_info = root / f"{normalized}-{version}.dist-info"
+        dist_info.mkdir(parents=True)
+        metadata = [
+            "Metadata-Version: 2.3",
+            f"Name: {name}",
+            f"Version: {version}",
+            f"Requires-Python: {requires_python}",
+        ]
+        metadata.extend(f"Requires-Dist: {requirement}" for requirement in requirements)
+        metadata.extend(f"Provides-Extra: {extra}" for extra in extras)
+        (dist_info / "METADATA").write_text(
+            "\n".join(metadata) + "\n", encoding="utf-8"
+        )
+
+        artifact = (
+            Path(*module.split(".")) / "__init__.py"
+            if package
+            else Path(f"{module}.py")
+        )
+        artifact_path = root / artifact
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_text("", encoding="utf-8")
+
+        records = [artifact.as_posix(), f"{dist_info.name}/METADATA"]
+        if script is not None:
+            (dist_info / "entry_points.txt").write_text(
+                f"[console_scripts]\n{script} = {module}:main\n",
+                encoding="utf-8",
+            )
+            records.append(f"{dist_info.name}/entry_points.txt")
+            launcher_name = f"{script}.exe" if os.name == "nt" else script
+            launcher = root / ".scripts" / launcher_name
+            launcher.parent.mkdir(exist_ok=True)
+            launcher.write_text("", encoding="utf-8")
+            launcher.chmod(0o755)
+            records.append(launcher.relative_to(root).as_posix())
+        (dist_info / "RECORD").write_text(
+            "".join(f"{record},,\n" for record in records),
+            encoding="utf-8",
+        )
+
+    def _write_governed_install(self, root: Path) -> None:
+        self._write_distribution(
+            root, "vivary-core", "0.2.6", "vivary_core", package=True
+        )
+        self._write_distribution(
+            root,
+            "vivary-tropo",
+            "0.5.0",
+            "tropo",
+            requirements=(
+                "vivary-core>=0.2.1",
+                'lancedb>=0.14.0; extra == "embedded"',
+            ),
+            script="tropo",
+        )
+        self._write_distribution(
+            root,
+            "vivary-strato",
+            "0.1.2",
+            "strato",
+            requirements=("vivary-core>=0.2.4",),
+            script="strato",
+        )
+        self._write_distribution(
+            root,
+            "vivary-ozone",
+            "0.3.1",
+            "ozone",
+            requirements=("vivary-tropo>=0.3.0", "vivary-core>=0.2.4"),
+            script="ozone",
+        )
+        self._write_distribution(
+            root,
+            "vivary-exo",
+            "0.3.0",
+            "exo",
+            requirements=("vivary-tropo>=0.2.3", "vivary-core>=0.2.5"),
+            script="exo",
+        )
+
+    def _write_cocoindex_full_install(
+        self,
+        root: Path,
+        *,
+        include_leaf: bool = True,
+    ) -> None:
+        self._write_distribution(
+            root,
+            "cocoindex-code",
+            "0.2.39",
+            "cocoindex_code",
+            requirements=(
+                'cocoindex[sentence-transformers]<1.1.0,>=1.0.13; '
+                'extra == "full"',
+            ),
+            extras=("full",),
+            package=True,
+        )
+        cocoindex_extras = ("sentence-transformers",) + tuple(
+            f"optional-{index}" for index in range(21)
+        )
+        cocoindex_requirements = tuple(
+            f'optional-dependency-{index}; extra == "optional-{index % 21}"'
+            for index in range(64)
+        ) + (
+            'sentence-transformers>=3.3.1; '
+            'extra == "sentence-transformers"',
+        )
+        self._write_distribution(
+            root,
+            "cocoindex",
+            "1.0.14",
+            "cocoindex",
+            requirements=cocoindex_requirements,
+            extras=cocoindex_extras,
+            package=True,
+        )
+        if include_leaf:
+            self._write_distribution(
+                root,
+                "sentence-transformers",
+                "5.2.0",
+                "sentence_transformers",
+                package=True,
+            )
+
+    def test_governed_capabilities_report_exact_public_truth(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        by_id = {item["id"]: item for item in report["available_capabilities"]}
+        expected = {
+            "governed-context:core": (None, "library-only"),
+            "governed-context:tropo": (
+                "tropo find --governed",
+                "read-only-context",
+            ),
+            "governed-policy:strato": (
+                "strato decide --governed",
+                "decision-only",
+            ),
+            "governed-verification:ozone": (
+                "ozone verify --governed",
+                "verification-and-proposal-only",
+            ),
+            "governed-control:exo": (
+                "exo control --governed",
+                "projection-only",
+            ),
+        }
+        for capability_id, (command, authority) in expected.items():
+            capability = by_id[capability_id]
+            self.assertEqual(capability["command"], command)
+            self.assertEqual(capability["authority"], authority)
+            self.assertFalse(capability["default"])
+            self.assertFalse(capability["requires_approval"])
+            self.assertFalse(capability["network"])
+            self.assertTrue(capability["installed"])
+            self.assertEqual(capability["install_status"], "installed")
+            self.assertEqual(capability["reason_codes"], [])
+            self.assertEqual(capability["missing_install"], [])
+
+        for capability in report["available_capabilities"]:
+            self.assertIs(
+                capability["installed"],
+                capability["install_status"] == "installed",
+            )
+        self.assertTrue(by_id["storage:file"]["installed"])
+
+    def test_command_capability_requires_recorded_launcher(self):
+        for mutation in ("missing", "unrecorded"):
+            with self.subTest(mutation=mutation), temp_workspace() as root:
+                self._write_governed_install(root)
+                launcher_name = "tropo.exe" if os.name == "nt" else "tropo"
+                launcher = root / ".scripts" / launcher_name
+                launcher_record = launcher.relative_to(root).as_posix()
+                if mutation == "missing":
+                    launcher.unlink()
+                else:
+                    record = root / "vivary_tropo-0.5.0.dist-info" / "RECORD"
+                    record.write_text(
+                        "".join(
+                            line
+                            for line in record.read_text(encoding="utf-8").splitlines(
+                                keepends=True
+                            )
+                            if line.partition(",")[0] != launcher_record
+                        ),
+                        encoding="utf-8",
+                    )
+                with mock.patch.object(
+                    create_vivary,
+                    "_capability_install_roots",
+                    return_value=(root,),
+                ):
+                    report = create_vivary.capability_report("coding")
+
+                tropo = next(
+                    item
+                    for item in report["available_capabilities"]
+                    if item["id"] == "governed-context:tropo"
+                )
+                self.assertFalse(tropo["installed"])
+                self.assertEqual(tropo["install_status"], "incompatible")
+                self.assertEqual(
+                    tropo["reason_codes"],
+                    ["capability_contract_incompatible"],
+                )
+                self.assertEqual(tropo["missing_install"], [])
+
+    @unittest.skipIf(os.name == "nt", "POSIX RECORD path semantics")
+    def test_posix_launcher_record_does_not_treat_backslash_as_separator(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            record = root / "vivary_tropo-0.5.0.dist-info" / "RECORD"
+            record.write_text(
+                record.read_text(encoding="utf-8").replace(
+                    ".scripts/tropo,",
+                    ".scripts\\tropo,",
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                create_vivary,
+                "_capability_install_roots",
+                return_value=(root,),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        tropo = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:tropo"
+        )
+        self.assertEqual(tropo["install_status"], "incompatible")
+        self.assertEqual(
+            tropo["reason_codes"],
+            ["capability_contract_incompatible"],
+        )
+
+    def test_malformed_record_rows_fail_probe_closed(self):
+        for mutation in ("one-column", "vertical-tab"):
+            with self.subTest(mutation=mutation), temp_workspace() as root:
+                self._write_governed_install(root)
+                record = root / "vivary_tropo-0.5.0.dist-info" / "RECORD"
+                content = record.read_text(encoding="utf-8")
+                if mutation == "one-column":
+                    first, *remaining = content.splitlines()
+                    content = "\n".join(
+                        (first.partition(",")[0], *remaining)
+                    ) + "\n"
+                else:
+                    content = content.replace("\n", "\v", 1)
+                record.write_text(content, encoding="utf-8")
+                with mock.patch.object(
+                    create_vivary,
+                    "_capability_install_roots",
+                    return_value=(root,),
+                ):
+                    report = create_vivary.capability_report("coding")
+
+                tropo = next(
+                    item
+                    for item in report["available_capabilities"]
+                    if item["id"] == "governed-context:tropo"
+                )
+                self.assertEqual(tropo["install_status"], "probe-failed")
+                self.assertEqual(
+                    tropo["reason_codes"],
+                    ["capability_probe_failed"],
+                )
+
+    @unittest.skipIf(os.name == "nt", "POSIX RECORD path semantics")
+    def test_posix_dependency_record_does_not_normalize_backslashes(self):
+        with temp_workspace() as root:
+            self._write_cocoindex_full_install(root)
+            record = (
+                root / "sentence_transformers-5.2.0.dist-info" / "RECORD"
+            )
+            record.write_text(
+                record.read_text(encoding="utf-8").replace(
+                    "sentence_transformers-5.2.0.dist-info/METADATA,",
+                    "sentence_transformers-5.2.0.dist-info\\METADATA,",
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                create_vivary,
+                "_capability_install_roots",
+                return_value=(root,),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        active_context = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "active-context:cocoindex-code"
+        )
+        self.assertEqual(active_context["install_status"], "incompatible")
+
+    def test_missing_and_incompatible_governed_installs_are_distinct(self):
+        with temp_workspace() as root:
+            self._write_distribution(
+                root,
+                "vivary-tropo",
+                "0.5.0",
+                "tropo",
+                requirements=("vivary-core>=0.2.1",),
+                script="tropo",
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                missing = create_vivary.capability_report("coding")
+
+            self._write_distribution(
+                root, "vivary-core", "0.2.6", "vivary_core", package=True
+            )
+            tropo_metadata = next(root.glob("vivary_tropo-*.dist-info/METADATA"))
+            tropo_metadata.write_text(
+                "Metadata-Version: 2.3\n"
+                "Name: vivary-tropo\n"
+                "Version: 0.5.0\n"
+                "Requires-Python: >=3.11\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                incompatible = create_vivary.capability_report("coding")
+
+        missing_tropo = next(
+            item
+            for item in missing["available_capabilities"]
+            if item["id"] == "governed-context:tropo"
+        )
+        self.assertEqual(missing_tropo["install_status"], "not-installed")
+        self.assertEqual(
+            missing_tropo["reason_codes"], ["capability_dependency_missing"]
+        )
+        self.assertEqual(missing_tropo["missing_install"], ["vivary-core"])
+
+        incompatible_tropo = next(
+            item
+            for item in incompatible["available_capabilities"]
+            if item["id"] == "governed-context:tropo"
+        )
+        self.assertEqual(incompatible_tropo["install_status"], "incompatible")
+        self.assertEqual(
+            incompatible_tropo["reason_codes"],
+            ["capability_contract_incompatible"],
+        )
+        self.assertEqual(incompatible_tropo["missing_install"], [])
+
+    def test_optional_metadata_version_must_match_dist_info(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            self._write_distribution(
+                root,
+                "lancedb",
+                "9.9.9",
+                "lancedb",
+                package=True,
+            )
+            metadata = root / "lancedb-9.9.9.dist-info" / "METADATA"
+            metadata.write_text(
+                metadata.read_text(encoding="utf-8").replace(
+                    "Version: 9.9.9\n",
+                    "Version: 0.0.1\n",
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        embedded = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "storage:embedded"
+        )
+        self.assertFalse(embedded["installed"])
+        self.assertEqual(embedded["install_status"], "incompatible")
+        self.assertEqual(
+            embedded["reason_codes"],
+            ["capability_contract_incompatible"],
+        )
+
+    def test_optional_provider_version_uses_owner_extra_floor(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            tropo_metadata = next(root.glob("vivary_tropo-*.dist-info/METADATA"))
+            tropo_metadata.write_text(
+                tropo_metadata.read_text(encoding="utf-8").replace(
+                    "lancedb>=0.14.0",
+                    "lancedb>=0.40.0",
+                ),
+                encoding="utf-8",
+            )
+            self._write_distribution(
+                root,
+                "lancedb",
+                "0.36.0",
+                "lancedb",
+                package=True,
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        embedded = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "storage:embedded"
+        )
+        self.assertFalse(embedded["installed"])
+        self.assertEqual(embedded["install_status"], "incompatible")
+        self.assertEqual(
+            embedded["reason_codes"],
+            ["capability_contract_incompatible"],
+        )
+
+    def test_optional_provider_uses_metadata_from_pre_governed_owner(self):
+        with temp_workspace() as root:
+            self._write_distribution(
+                root,
+                "vivary-tropo",
+                "0.4.1",
+                "tropo",
+                requirements=('lancedb>=0.14.0; extra == "embedded"',),
+                script="tropo",
+            )
+            self._write_distribution(
+                root,
+                "lancedb",
+                "0.36.0",
+                "lancedb",
+                package=True,
+            )
+            with mock.patch.object(
+                create_vivary,
+                "_capability_install_roots",
+                return_value=(root,),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        by_id = {
+            item["id"]: item for item in report["available_capabilities"]
+        }
+        self.assertEqual(
+            by_id["governed-context:tropo"]["install_status"],
+            "incompatible",
+        )
+        embedded = by_id["storage:embedded"]
+        self.assertTrue(embedded["installed"])
+        self.assertEqual(embedded["install_status"], "installed")
+        self.assertEqual(embedded["reason_codes"], [])
+        self.assertEqual(embedded["missing_install"], [])
+
+    def test_optional_provider_accepts_supported_pep440_versions(self):
+        for version in ("0.14.0.post1", "0.14.0+vendor.1"):
+            with self.subTest(version=version):
+                with temp_workspace() as root:
+                    self._write_governed_install(root)
+                    self._write_distribution(
+                        root,
+                        "lancedb",
+                        version,
+                        "lancedb",
+                        package=True,
+                    )
+                    with mock.patch.object(
+                        create_vivary,
+                        "_capability_install_roots",
+                        return_value=(root,),
+                    ):
+                        report = create_vivary.capability_report("coding")
+
+                embedded = next(
+                    item
+                    for item in report["available_capabilities"]
+                    if item["id"] == "storage:embedded"
+                )
+                self.assertTrue(embedded["installed"])
+                self.assertEqual(embedded["install_status"], "installed")
+                self.assertEqual(embedded["reason_codes"], [])
+                self.assertEqual(embedded["missing_install"], [])
+
+    def test_optional_provider_rejects_ambiguous_owner_extra_floor(self):
+        conflicts = (
+            'lancedb~=999.0.0; extra == "embedded"',
+            'lancedb>=999.0.0; extra == "EMBEDDED"',
+        )
+        for conflict in conflicts:
+            with self.subTest(conflict=conflict):
+                with temp_workspace() as root:
+                    self._write_governed_install(root)
+                    tropo_metadata = next(
+                        root.glob("vivary_tropo-*.dist-info/METADATA")
+                    )
+                    tropo_metadata.write_text(
+                        tropo_metadata.read_text(encoding="utf-8")
+                        + f"Requires-Dist: {conflict}\n",
+                        encoding="utf-8",
+                    )
+                    self._write_distribution(
+                        root,
+                        "lancedb",
+                        "0.36.0",
+                        "lancedb",
+                        package=True,
+                    )
+                    with mock.patch.object(
+                        create_vivary,
+                        "_capability_install_roots",
+                        return_value=(root,),
+                    ):
+                        report = create_vivary.capability_report("coding")
+
+                embedded = next(
+                    item
+                    for item in report["available_capabilities"]
+                    if item["id"] == "storage:embedded"
+                )
+                self.assertFalse(embedded["installed"])
+                self.assertEqual(embedded["install_status"], "incompatible")
+                self.assertEqual(
+                    embedded["reason_codes"],
+                    ["capability_contract_incompatible"],
+                )
+
+    def test_missing_optional_provider_keeps_install_hint(self):
+        with temp_workspace() as root:
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        embedded = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "storage:embedded"
+        )
+        self.assertFalse(embedded["installed"])
+        self.assertEqual(embedded["install_status"], "not-installed")
+        self.assertEqual(
+            embedded["reason_codes"],
+            ["capability_dependency_missing"],
+        )
+        self.assertEqual(
+            embedded["missing_install"],
+            ["vivary-tropo[embedded]"],
+        )
+
+    def test_missing_optional_provider_rejects_invalid_installed_owner_floor(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            tropo_metadata = next(root.glob("vivary_tropo-*.dist-info/METADATA"))
+            tropo_metadata.write_text(
+                tropo_metadata.read_text(encoding="utf-8").replace(
+                    'Requires-Dist: lancedb>=0.14.0; extra == "embedded"\n',
+                    "",
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        embedded = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "storage:embedded"
+        )
+        self.assertFalse(embedded["installed"])
+        self.assertEqual(embedded["install_status"], "incompatible")
+        self.assertEqual(
+            embedded["reason_codes"],
+            ["capability_contract_incompatible"],
+        )
+        self.assertEqual(embedded["missing_install"], [])
+
+    def test_same_distribution_extra_requires_complete_selected_closure(self):
+        with temp_workspace() as root:
+            self._write_cocoindex_full_install(root)
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        active_context = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "active-context:cocoindex-code"
+        )
+        self.assertTrue(active_context["installed"])
+        self.assertEqual(active_context["install_status"], "installed")
+        self.assertEqual(active_context["reason_codes"], [])
+
+    def test_same_distribution_extra_ignores_extra_named_base_dependency(self):
+        with temp_workspace() as root:
+            self._write_cocoindex_full_install(root)
+            metadata = next(root.glob("cocoindex-*.dist-info/METADATA"))
+            metadata.write_text(
+                metadata.read_text(encoding="utf-8")
+                + "Requires-Dist: extra-package>=1\n"
+                + 'Requires-Dist: unrelated; platform_system == "extra"\n'
+                + 'Requires-Dist: unrelated-leaf; python_version < "4" '
+                'and extra == "optional-0"\n'
+                + 'Requires-Dist: reversed-leaf; "optional-0" == extra\n'
+                + 'Requires-Dist: excluded-leaf; '
+                'extra != "sentence-transformers"\n',
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        active_context = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "active-context:cocoindex-code"
+        )
+        self.assertEqual(active_context["install_status"], "installed")
+
+    def test_same_distribution_extra_rejects_boolean_or_marker(self):
+        with temp_workspace() as root:
+            self._write_cocoindex_full_install(root)
+            metadata = next(root.glob("cocoindex-*.dist-info/METADATA"))
+            metadata.write_text(
+                metadata.read_text(encoding="utf-8")
+                + 'Requires-Dist: missing-leaf; python_version < "4" '
+                'or extra == "optional-0"\n',
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        active_context = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "active-context:cocoindex-code"
+        )
+        self.assertEqual(active_context["install_status"], "incompatible")
+
+    def test_same_distribution_extra_merges_distinct_child_extra_rows(self):
+        with temp_workspace() as root:
+            self._write_distribution(
+                root,
+                "cocoindex-code",
+                "0.2.39",
+                "cocoindex_code",
+                requirements=(
+                    'cocoindex[first]>=1.0; extra == "full"',
+                    'cocoindex[second]<2.0; extra == "full"',
+                ),
+                extras=("full",),
+                package=True,
+            )
+            self._write_distribution(
+                root,
+                "cocoindex",
+                "1.0.14",
+                "cocoindex",
+                requirements=(
+                    'first-leaf; extra == "first"',
+                    'second-leaf; extra == "second"',
+                ),
+                extras=("first", "second"),
+                package=True,
+            )
+            self._write_distribution(
+                root, "first-leaf", "1.0.0", "first_leaf", package=True
+            )
+            self._write_distribution(
+                root, "second-leaf", "1.0.0", "second_leaf", package=True
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        active_context = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "active-context:cocoindex-code"
+        )
+        self.assertEqual(active_context["install_status"], "installed")
+
+    def test_missing_selected_leaf_does_not_mask_incompatible_sibling(self):
+        with temp_workspace() as root:
+            self._write_distribution(
+                root,
+                "cocoindex-code",
+                "0.2.39",
+                "cocoindex_code",
+                requirements=(
+                    'missing-leaf; extra == "full"',
+                    'nested[bad]; extra == "full"',
+                ),
+                extras=("full",),
+                package=True,
+            )
+            self._write_distribution(
+                root,
+                "nested",
+                "1.0.0",
+                "nested",
+                requirements=('incompatible-leaf>=2; extra == "bad"',),
+                extras=("bad",),
+                package=True,
+            )
+            self._write_distribution(
+                root,
+                "incompatible-leaf",
+                "1.0.0",
+                "incompatible_leaf",
+                package=True,
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        active_context = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "active-context:cocoindex-code"
+        )
+        self.assertEqual(active_context["install_status"], "incompatible")
+
+    def test_incompatible_selected_leaf_does_not_mask_probe_failed_sibling(self):
+        for requirements in (
+            ("old-child>=2", "broken-child"),
+            ("broken-child", "old-child>=2"),
+        ):
+            with self.subTest(requirements=requirements), temp_workspace() as root:
+                self._write_distribution(
+                    root,
+                    "cocoindex-code",
+                    "0.2.39",
+                    "cocoindex_code",
+                    requirements=tuple(
+                        f'{requirement}; extra == "full"'
+                        for requirement in requirements
+                    ),
+                    extras=("full",),
+                    package=True,
+                )
+                self._write_distribution(
+                    root,
+                    "old-child",
+                    "1.0.0",
+                    "old_child",
+                    package=True,
+                )
+                self._write_distribution(
+                    root,
+                    "broken-child",
+                    "1.0.0",
+                    "broken_child",
+                    package=True,
+                )
+                broken_metadata = (
+                    root / "broken_child-1.0.0.dist-info" / "METADATA"
+                )
+                broken_metadata.write_bytes(b"\xff")
+                with mock.patch.object(
+                    create_vivary,
+                    "_capability_install_roots",
+                    return_value=(root,),
+                ):
+                    report = create_vivary.capability_report("coding")
+
+                active_context = next(
+                    item
+                    for item in report["available_capabilities"]
+                    if item["id"] == "active-context:cocoindex-code"
+                )
+                self.assertEqual(active_context["install_status"], "probe-failed")
+                self.assertEqual(
+                    active_context["reason_codes"],
+                    ["capability_probe_failed"],
+                )
+
+    def test_same_distribution_extra_missing_leaf_is_not_installed(self):
+        with temp_workspace() as root:
+            self._write_cocoindex_full_install(root, include_leaf=False)
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        active_context = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "active-context:cocoindex-code"
+        )
+        self.assertFalse(active_context["installed"])
+        self.assertEqual(active_context["install_status"], "not-installed")
+        self.assertEqual(
+            active_context["missing_install"],
+            ["cocoindex-code[full]"],
+        )
+
+    def test_same_distribution_extra_rejects_bare_owner_metadata(self):
+        with temp_workspace() as root:
+            self._write_distribution(
+                root,
+                "cocoindex-code",
+                "0.2.39",
+                "cocoindex_code",
+                requirements=(
+                    'cocoindex[sentence-transformers]<1.1.0,>=1.0.13; '
+                    'extra == "full"',
+                ),
+                package=True,
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        active_context = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "active-context:cocoindex-code"
+        )
+        self.assertEqual(active_context["install_status"], "incompatible")
+        self.assertEqual(
+            active_context["reason_codes"],
+            ["capability_contract_incompatible"],
+        )
+
+    def test_same_distribution_extra_depth_is_requirement_order_independent(self):
+        root_rows = (
+            ("shallow[branch]>=1", "deep-one[branch]>=1"),
+            ("deep-one[branch]>=1", "shallow[branch]>=1"),
+        )
+        nodes = (
+            ("shallow", "branch", "pivot[pivot]>=1"),
+            ("deep-one", "branch", "deep-two[branch]>=1"),
+            ("deep-two", "branch", "deep-three[branch]>=1"),
+            ("deep-three", "branch", "pivot[pivot]>=1"),
+            ("pivot", "pivot", "leaf[leaf]>=1"),
+            ("leaf", "leaf", None),
+        )
+        for requirements in root_rows:
+            with self.subTest(requirements=requirements), temp_workspace() as root:
+                self._write_distribution(
+                    root,
+                    "cocoindex-code",
+                    "0.2.39",
+                    "cocoindex_code",
+                    requirements=tuple(
+                        f'{requirement}; extra == "full"'
+                        for requirement in requirements
+                    ),
+                    extras=("full",),
+                    package=True,
+                )
+                for name, selected_extra, dependency in nodes:
+                    self._write_distribution(
+                        root,
+                        name,
+                        "1.0.0",
+                        name.replace("-", "_"),
+                        requirements=(
+                            ()
+                            if dependency is None
+                            else (f'{dependency}; extra == "{selected_extra}"',)
+                        ),
+                        extras=(selected_extra,),
+                        package=True,
+                    )
+                with mock.patch.object(
+                    create_vivary,
+                    "_capability_install_roots",
+                    return_value=(root,),
+                ):
+                    report = create_vivary.capability_report("coding")
+
+                active_context = next(
+                    item
+                    for item in report["available_capabilities"]
+                    if item["id"] == "active-context:cocoindex-code"
+                )
+                self.assertEqual(active_context["install_status"], "installed")
+
+    def test_same_distribution_extra_cycle_terminates(self):
+        with temp_workspace() as root:
+            self._write_distribution(
+                root,
+                "cocoindex-code",
+                "0.2.39",
+                "cocoindex_code",
+                requirements=(
+                    'cocoindex[local]>=1.0.13; extra == "full"',
+                ),
+                extras=("full",),
+                package=True,
+            )
+            self._write_distribution(
+                root,
+                "cocoindex",
+                "1.0.14",
+                "cocoindex",
+                requirements=(
+                    'cocoindex-code[full]>=0.2.0; extra == "local"',
+                ),
+                extras=("local",),
+                package=True,
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        active_context = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "active-context:cocoindex-code"
+        )
+        self.assertEqual(active_context["install_status"], "installed")
+
+    def test_same_distribution_extra_work_limit_fails_closed(self):
+        with temp_workspace() as root:
+            self._write_cocoindex_full_install(root)
+            with (
+                mock.patch.object(
+                    create_vivary, "_capability_install_roots", return_value=(root,)
+                ),
+                mock.patch.object(create_vivary, "_CAPABILITY_EXTRA_EDGE_LIMIT", 0),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        active_context = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "active-context:cocoindex-code"
+        )
+        self.assertEqual(active_context["install_status"], "probe-failed")
+        self.assertEqual(
+            active_context["reason_codes"],
+            ["capability_probe_failed"],
+        )
+
+    def test_third_party_requires_python_is_enforced(self):
+        cases = (
+            (">=3.10,<4,!=99.*,~=3.0", "installed"),
+            (">=99", "incompatible"),
+            (">=3.11; os_name == 'nt'", "incompatible"),
+        )
+        for requires_python, expected_status in cases:
+            with self.subTest(requires_python=requires_python):
+                with temp_workspace() as root:
+                    self._write_governed_install(root)
+                    self._write_distribution(
+                        root,
+                        "lancedb",
+                        "0.36.0",
+                        "lancedb",
+                        requires_python=requires_python,
+                        package=True,
+                    )
+                    with mock.patch.object(
+                        create_vivary,
+                        "_capability_install_roots",
+                        return_value=(root,),
+                    ):
+                        report = create_vivary.capability_report("coding")
+
+                embedded = next(
+                    item
+                    for item in report["available_capabilities"]
+                    if item["id"] == "storage:embedded"
+                )
+                self.assertEqual(embedded["install_status"], expected_status)
+
+    def test_prerelease_interpreter_fails_python_constraint_closed(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            self._write_distribution(
+                root,
+                "lancedb",
+                "0.36.0",
+                "lancedb",
+                requires_python=">=3.14",
+                package=True,
+            )
+            candidate_version = mock.MagicMock()
+            candidate_version.__getitem__.return_value = (3, 14, 0)
+            candidate_version.releaselevel = "candidate"
+            with (
+                mock.patch.object(
+                    create_vivary, "_capability_install_roots", return_value=(root,)
+                ),
+                mock.patch.object(
+                    create_vivary.sys, "version_info", candidate_version
+                ),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        embedded = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "storage:embedded"
+        )
+        self.assertEqual(embedded["install_status"], "incompatible")
+
+    def test_role_dependency_and_console_contracts_are_required(self):
+        cases = (
+            ("vivary-ozone", "governed-verification:ozone", "vivary-tropo>=0.3.0"),
+            ("vivary-exo", "governed-control:exo", "vivary-tropo>=0.2.3"),
+        )
+        for distribution, capability_id, dependency in cases:
+            with self.subTest(distribution=distribution, failure="dependency"):
+                with temp_workspace() as root:
+                    self._write_governed_install(root)
+                    metadata = next(
+                        root.glob(
+                            f"{re.sub(r'[-_.]+', '_', distribution)}-*.dist-info/METADATA"
+                        )
+                    )
+                    metadata.write_text(
+                        metadata.read_text(encoding="utf-8").replace(
+                            f"Requires-Dist: {dependency}\n", ""
+                        ),
+                        encoding="utf-8",
+                    )
+                    with mock.patch.object(
+                        create_vivary, "_capability_install_roots", return_value=(root,)
+                    ):
+                        report = create_vivary.capability_report("coding")
+
+                capability = next(
+                    item
+                    for item in report["available_capabilities"]
+                    if item["id"] == capability_id
+                )
+                self.assertEqual(capability["install_status"], "incompatible")
+
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            entrypoints = next(
+                root.glob("vivary_ozone-*.dist-info/entry_points.txt")
+            )
+            entrypoints.write_text(
+                "[console_scripts]\nozone = ozone_shadow:main\n", encoding="utf-8"
+            )
+            (root / "ozone_shadow.py").write_text("", encoding="utf-8")
+            record = next(root.glob("vivary_ozone-*.dist-info/RECORD"))
+            record.write_text(
+                record.read_text(encoding="utf-8") + "ozone_shadow.py,,\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        ozone = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-verification:ozone"
+        )
+        self.assertEqual(ozone["install_status"], "incompatible")
+
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            record = next(root.glob("vivary_strato-*.dist-info/RECORD"))
+            record.write_text(
+                "".join(
+                    line
+                    for line in record.read_text(encoding="utf-8").splitlines(
+                        keepends=True
+                    )
+                    if "/entry_points.txt," not in line
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        strato = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-policy:strato"
+        )
+        self.assertEqual(strato["install_status"], "incompatible")
+
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            record = next(root.glob("vivary_core-*.dist-info/RECORD"))
+            record.write_text(
+                "".join(
+                    line
+                    for line in record.read_text(encoding="utf-8").splitlines(
+                        keepends=True
+                    )
+                    if "/METADATA," not in line
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        core = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:core"
+        )
+        self.assertEqual(core["install_status"], "incompatible")
+
+    def test_broken_console_callable_and_conflicting_floor_are_incompatible(self):
+        for target in ("tropo", "tropo:not_main"):
+            with self.subTest(target=target), temp_workspace() as root:
+                self._write_governed_install(root)
+                entrypoints = next(
+                    root.glob("vivary_tropo-*.dist-info/entry_points.txt")
+                )
+                entrypoints.write_text(
+                    f"[console_scripts]\ntropo = {target}\n",
+                    encoding="utf-8",
+                )
+                with mock.patch.object(
+                    create_vivary,
+                    "_capability_install_roots",
+                    return_value=(root,),
+                ):
+                    report = create_vivary.capability_report("coding")
+
+                tropo = next(
+                    item
+                    for item in report["available_capabilities"]
+                    if item["id"] == "governed-context:tropo"
+                )
+                self.assertEqual(tropo["install_status"], "incompatible")
+
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            metadata = next(root.glob("vivary_tropo-*.dist-info/METADATA"))
+            metadata.write_text(
+                metadata.read_text(encoding="utf-8")
+                + "Requires-Dist: vivary-core<0.1.0\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                create_vivary,
+                "_capability_install_roots",
+                return_value=(root,),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        tropo = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:tropo"
+        )
+        self.assertEqual(tropo["install_status"], "incompatible")
+
+    def test_malformed_metadata_fails_the_probe(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            metadata = next(root.glob("vivary_core-*.dist-info/METADATA"))
+            metadata.write_bytes(
+                b"Metadata-Version: 2.3\n"
+                b"Name: vivary-core\n"
+                b"Version: 0.2.6\n"
+                b"Requires-Python: >=3.11\n"
+                b"broken metadata header\n"
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        core = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:core"
+        )
+        self.assertEqual(core["install_status"], "probe-failed")
+
+    def test_irrelevant_metadata_fields_do_not_hide_valid_install(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            metadata = next(root.glob("vivary_core-*.dist-info/METADATA"))
+            metadata.write_text(
+                metadata.read_text(encoding="utf-8")
+                + ("Classifier: bounded-probe\n" * 128),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        core = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:core"
+        )
+        self.assertEqual(core["install_status"], "installed")
+
+    def test_excessive_dependency_metadata_fields_fail_the_probe(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            metadata = next(root.glob("vivary_core-*.dist-info/METADATA"))
+            metadata.write_text(
+                metadata.read_text(encoding="utf-8")
+                + (
+                    "Requires-Dist: unrelated>=1.0.0\n"
+                    * (create_vivary._CAPABILITY_REQUIREMENT_LIMIT + 1)
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        core = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:core"
+        )
+        self.assertEqual(core["install_status"], "probe-failed")
+
+    def test_passive_probe_ignores_ambient_import_hooks_and_workspace_metadata(self):
+        class ExplodingFinder:
+            def find_spec(self, fullname, path=None, target=None):
+                raise AssertionError(f"ambient finder called for {fullname}")
+
+            def find_distributions(self, context=None):
+                raise AssertionError("ambient distribution finder called")
+
+        with temp_workspace() as canonical_root, temp_workspace() as workspace_root:
+            self._write_governed_install(canonical_root)
+            self._write_distribution(
+                workspace_root,
+                "vivary-core",
+                "99.0.0",
+                "vivary_core",
+                package=True,
+            )
+            shadow = workspace_root / "tropo.py"
+            shadow.write_text("raise RuntimeError('shadow imported')\n", encoding="utf-8")
+
+            with (
+                mock.patch.object(
+                    create_vivary,
+                    "_capability_install_roots",
+                    return_value=(canonical_root,),
+                ),
+                mock.patch.object(sys, "meta_path", [ExplodingFinder(), *sys.meta_path]),
+                mock.patch.object(sys, "path", [str(workspace_root), *sys.path]),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        governed = [
+            item
+            for item in report["available_capabilities"]
+            if item["id"].startswith("governed-")
+        ]
+        self.assertTrue(governed)
+        self.assertTrue(all(item["installed"] for item in governed))
+
+    def test_earlier_canonical_root_shadow_is_incompatible(self):
+        with temp_workspace() as earlier, temp_workspace() as installed:
+            (earlier / "tropo.py").write_text(
+                "raise RuntimeError('shadow imported')\n",
+                encoding="utf-8",
+            )
+            self._write_governed_install(installed)
+            with mock.patch.object(
+                create_vivary,
+                "_capability_install_roots",
+                return_value=(earlier, installed),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        tropo = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:tropo"
+        )
+        self.assertEqual(tropo["install_status"], "incompatible")
+        self.assertEqual(
+            tropo["reason_codes"],
+            ["capability_contract_incompatible"],
+        )
+
+    def test_dist_info_names_accept_standard_separator_normalization(self):
+        for separator in ("-", "."):
+            with self.subTest(separator=separator), temp_workspace() as root:
+                self._write_governed_install(root)
+                original = next(root.glob("vivary_core-*.dist-info"))
+                renamed = root / original.name.replace(
+                    "vivary_core",
+                    f"Vivary{separator}Core",
+                )
+                original.rename(renamed)
+                record = renamed / "RECORD"
+
+                record.write_text(
+                    record.read_text(encoding="utf-8").replace(
+                        original.name,
+                        renamed.name,
+                    ),
+                    encoding="utf-8",
+                )
+                with mock.patch.object(
+                    create_vivary,
+                    "_capability_install_roots",
+                    return_value=(root,),
+                ):
+                    report = create_vivary.capability_report("coding")
+
+                core = next(
+                    item
+                    for item in report["available_capabilities"]
+                    if item["id"] == "governed-context:core"
+                )
+                self.assertEqual(core["install_status"], "installed")
+
+    def test_dist_info_version_must_match_metadata(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            original = next(root.glob("vivary_core-*.dist-info"))
+            renamed = root / original.name.replace("0.2.6", "9.9.9")
+            original.rename(renamed)
+            record = renamed / "RECORD"
+            record.write_text(
+                record.read_text(encoding="utf-8").replace(
+                    original.name,
+                    renamed.name,
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                create_vivary,
+                "_capability_install_roots",
+                return_value=(root,),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        core = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:core"
+        )
+        self.assertEqual(core["install_status"], "incompatible")
+
+    def test_dist_info_link_alias_is_incompatible(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            alias = next(root.glob("vivary_core-*.dist-info"))
+            target = root / alias.name.replace("vivary_core", "other")
+            alias.rename(target)
+            record = target / "RECORD"
+            record.write_text(
+                record.read_text(encoding="utf-8").replace(
+                    alias.name,
+                    target.name,
+                ),
+                encoding="utf-8",
+            )
+            try:
+                alias.symlink_to(target, target_is_directory=True)
+            except OSError:
+                self.skipTest("symlink creation is unavailable")
+            with mock.patch.object(
+                create_vivary,
+                "_capability_install_roots",
+                return_value=(root,),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        core = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:core"
+        )
+        self.assertEqual(core["install_status"], "incompatible")
+
+    def test_same_root_competing_module_artifact_is_incompatible(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            shadow = root / "tropo" / "__init__.py"
+            shadow.parent.mkdir()
+            shadow.write_text("raise RuntimeError('shadow imported')\n", encoding="utf-8")
+            with mock.patch.object(
+                create_vivary,
+                "_capability_install_roots",
+                return_value=(root,),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        tropo = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:tropo"
+        )
+        self.assertEqual(tropo["install_status"], "incompatible")
+
+    def test_metadata_and_entrypoint_share_one_byte_budget(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            dist_info = next(root.glob("vivary_tropo-*.dist-info"))
+            limit = max(
+                len((dist_info / "METADATA").read_bytes()),
+                len((dist_info / "entry_points.txt").read_bytes()),
+            )
+            with mock.patch.object(
+                create_vivary,
+                "_CAPABILITY_METADATA_BYTE_LIMIT",
+                limit,
+            ), mock.patch.object(
+                create_vivary,
+                "_capability_install_roots",
+                return_value=(root,),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        tropo = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:tropo"
+        )
+        self.assertEqual(tropo["install_status"], "probe-failed")
+
+    def test_probe_limits_fail_closed_without_path_details(self):
+        with temp_workspace() as root:
+            (root / "one").mkdir()
+            (root / "two").mkdir()
+            with (
+                mock.patch.object(
+                    create_vivary, "_capability_install_roots", return_value=(root,)
+                ),
+                mock.patch.object(create_vivary, "_CAPABILITY_ROOT_ENTRY_LIMIT", 1),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        core = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:core"
+        )
+        self.assertEqual(core["install_status"], "probe-failed")
+        self.assertEqual(core["reason_codes"], ["capability_probe_failed"])
+        self.assertEqual(core["missing_install"], [])
+        self.assertNotIn(str(root), json.dumps(report))
+
+    def test_probe_entry_limit_applies_across_canonical_roots(self):
+        with temp_workspace() as first, temp_workspace() as second:
+            (first / "one").mkdir()
+            (second / "two").mkdir()
+            with (
+                mock.patch.object(
+                    create_vivary,
+                    "_capability_install_roots",
+                    return_value=(first, second),
+                ),
+                mock.patch.object(
+                    create_vivary,
+                    "_CAPABILITY_ROOT_ENTRY_LIMIT",
+                    1,
+                ),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        core = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:core"
+        )
+        self.assertEqual(core["install_status"], "probe-failed")
+        self.assertEqual(core["reason_codes"], ["capability_probe_failed"])
+
+    def test_sys_path_limit_fails_closed(self):
+        with mock.patch.object(
+            sys,
+            "path",
+            [""] * (create_vivary._CAPABILITY_SYS_PATH_ENTRY_LIMIT + 1),
+        ):
+            report = create_vivary.capability_report("coding")
+
+        core = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:core"
+        )
+        self.assertEqual(core["install_status"], "probe-failed")
+        self.assertEqual(core["reason_codes"], ["capability_probe_failed"])
+
+    def test_user_site_root_uses_user_scheme_scripts_directory(self):
+        with (
+            temp_workspace() as default_site,
+            temp_workspace() as default_scripts,
+            temp_workspace() as user_site,
+            temp_workspace() as user_scripts,
+        ):
+            default_paths = {
+                "purelib": str(default_site),
+                "platlib": str(default_site),
+                "scripts": str(default_scripts),
+            }
+            user_paths = {
+                "purelib": str(user_site),
+                "platlib": str(user_site),
+                "scripts": str(user_scripts),
+            }
+
+            def scheme_paths(*, scheme=None, vars=None):
+                if scheme == "test-user":
+                    return user_paths
+                return default_paths
+
+            with (
+                mock.patch.object(
+                    create_vivary.sysconfig,
+                    "get_preferred_scheme",
+                    return_value="test-user",
+                ),
+                mock.patch.object(
+                    create_vivary.sysconfig,
+                    "get_paths",
+                    side_effect=scheme_paths,
+                ),
+            ):
+                scripts = self._real_capability_scripts_path(user_site.resolve())
+
+        self.assertEqual(scripts, user_scripts.resolve())
+
+    def test_scripts_mapping_does_not_resolve_unmatched_scheme_roots(self):
+        with (
+            temp_workspace() as selected_site,
+            temp_workspace() as selected_scripts,
+            temp_workspace() as unrelated_site,
+            temp_workspace() as unrelated_scripts,
+        ):
+            selected_root = selected_site.resolve()
+            unrelated_library = unrelated_site / "must-not-resolve"
+            default_paths = {
+                "purelib": str(selected_site),
+                "platlib": str(selected_site),
+                "scripts": str(selected_scripts),
+            }
+            user_paths = {
+                "purelib": str(unrelated_library),
+                "platlib": str(unrelated_library),
+                "scripts": str(unrelated_scripts),
+            }
+
+            def scheme_paths(*, scheme=None, vars=None):
+                if scheme == "test-user":
+                    return user_paths
+                return default_paths
+
+            path_type = type(selected_site)
+            real_resolve = path_type.resolve
+
+            def guarded_resolve(path, *args, **kwargs):
+                if path == unrelated_library:
+                    raise AssertionError("resolved unmatched scheme root")
+                return real_resolve(path, *args, **kwargs)
+
+            with (
+                mock.patch.object(
+                    create_vivary.sysconfig,
+                    "get_preferred_scheme",
+                    return_value="test-user",
+                ),
+                mock.patch.object(
+                    create_vivary.sysconfig,
+                    "get_paths",
+                    side_effect=scheme_paths,
+                ),
+                mock.patch.object(
+                    path_type,
+                    "resolve",
+                    autospec=True,
+                    side_effect=guarded_resolve,
+                ),
+            ):
+                scripts = self._real_capability_scripts_path(selected_root)
+
+        self.assertEqual(scripts, selected_scripts.resolve())
+
+
+    def test_install_roots_intersect_active_sys_path_in_order(self):
+        with (
+            temp_workspace() as purelib,
+            temp_workspace() as platlib,
+            temp_workspace() as system_site,
+            temp_workspace() as user_site,
+        ):
+            self._write_governed_install(system_site)
+            self._write_distribution(
+                system_site,
+                "lancedb",
+                "0.36.0",
+                "lancedb",
+                package=True,
+            )
+            with (
+                mock.patch.object(
+                    create_vivary.sysconfig,
+                    "get_paths",
+                    return_value={
+                        "purelib": str(purelib),
+                        "platlib": str(platlib),
+                    },
+                ),
+                mock.patch.object(
+                    create_vivary.site,
+                    "getsitepackages",
+                    return_value=[str(purelib), str(system_site)],
+                ),
+                mock.patch.object(create_vivary.site, "ENABLE_USER_SITE", True),
+                mock.patch.object(
+                    create_vivary,
+                    "_CAPABILITY_ROOT_LIMIT",
+                    3,
+                ),
+                mock.patch.object(
+                    create_vivary.site,
+                    "getusersitepackages",
+                    return_value=str(user_site),
+                ),
+                mock.patch.object(
+                    create_vivary.sys,
+                    "path",
+                    [
+                        7,
+                        str(system_site),
+                        str(user_site),
+                        str(purelib),
+                        str(platlib),
+                    ],
+                ),
+            ):
+                roots = create_vivary._capability_install_roots()
+                report = create_vivary.capability_report("coding")
+
+        self.assertEqual(
+            roots,
+            (
+                system_site.resolve(),
+                user_site.resolve(),
+                purelib.resolve(),
+            ),
+        )
+        embedded = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "storage:embedded"
+        )
+        self.assertEqual(embedded["install_status"], "installed")
+
+    def test_site_root_provider_failures_are_contained_without_details(self):
+        class ExplodingSites(list):
+            def __len__(self):
+                raise LookupError("sensitive provider detail")
+
+        class LyingSites(list):
+            def __len__(self):
+                return 0
+
+            def __iter__(self):
+                return iter(("sensitive provider detail",) * 9)
+
+        class ExplodingSysPath(list):
+            def __len__(self):
+                raise LookupError("sensitive provider detail")
+
+        reports = []
+        with (
+            mock.patch.object(
+                create_vivary.site,
+                "getsitepackages",
+                return_value=ExplodingSites(),
+            ),
+            mock.patch.object(create_vivary.site, "ENABLE_USER_SITE", False),
+        ):
+            reports.append(create_vivary.capability_report("coding"))
+
+        with (
+            mock.patch.object(
+                create_vivary.site,
+                "getsitepackages",
+                return_value=LyingSites(),
+            ),
+            mock.patch.object(create_vivary.site, "ENABLE_USER_SITE", False),
+        ):
+            reports.append(create_vivary.capability_report("coding"))
+
+        with (
+            mock.patch.object(
+                create_vivary.site,
+                "getsitepackages",
+                return_value=[],
+            ),
+            mock.patch.object(create_vivary.site, "ENABLE_USER_SITE", True),
+            mock.patch.object(
+                create_vivary.site,
+                "getusersitepackages",
+                side_effect=LookupError("sensitive provider detail"),
+            ),
+        ):
+            reports.append(create_vivary.capability_report("coding"))
+
+        with (
+            mock.patch.object(
+                create_vivary.site,
+                "getsitepackages",
+                return_value=[],
+            ),
+            mock.patch.object(create_vivary.site, "ENABLE_USER_SITE", False),
+            mock.patch.object(
+                create_vivary.sys,
+                "path",
+                ExplodingSysPath(),
+            ),
+        ):
+            reports.append(create_vivary.capability_report("coding"))
+
+        for report in reports:
+            core = next(
+                item
+                for item in report["available_capabilities"]
+                if item["id"] == "governed-context:core"
+            )
+            self.assertEqual(core["install_status"], "probe-failed")
+            self.assertEqual(core["reason_codes"], ["capability_probe_failed"])
+            self.assertNotIn("sensitive provider detail", json.dumps(report))
+
+    def test_incomplete_metadata_and_out_of_root_dist_info_are_not_credited(self):
+        with temp_workspace() as root:
+            self._write_governed_install(root)
+            metadata = next(root.glob("vivary_core-*.dist-info/METADATA"))
+            metadata.write_text(
+                metadata.read_text(encoding="utf-8").replace(
+                    "Metadata-Version: 2.3\n", ""
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        core = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:core"
+        )
+        self.assertEqual(core["install_status"], "probe-failed")
+        with self.assertRaises(create_vivary._CapabilityProbeFailure):
+            create_vivary._parse_capability_metadata(
+                b"Metadata-Version: \n"
+                b"Name: vivary-core\n"
+                b"Version: 0.2.6\n"
+                b"Requires-Python: >=3.11\n"
+            )
+
+        with temp_workspace() as root, temp_workspace() as outside:
+            self._write_distribution(
+                outside, "vivary-core", "0.2.6", "vivary_core", package=True
+            )
+            external = next(outside.glob("vivary_core-*.dist-info"))
+            try:
+                (root / external.name).symlink_to(external, target_is_directory=True)
+            except OSError:
+                self.skipTest("symlink creation is unavailable")
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                report = create_vivary.capability_report("coding")
+
+        core = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "governed-context:core"
+        )
+        self.assertEqual(core["install_status"], "incompatible")
+
+    def test_canonical_root_resolution_failure_is_not_skipped(self):
+        with temp_workspace() as root:
+            original_resolve = Path.resolve
+
+            def inaccessible_resolve(path, *args, **kwargs):
+                if path == root:
+                    raise PermissionError("unavailable")
+                return original_resolve(path, *args, **kwargs)
+
+            with (
+                mock.patch.object(
+                    create_vivary.sysconfig,
+                    "get_paths",
+                    return_value={"purelib": str(root), "platlib": str(root)},
+                ),
+                mock.patch.object(create_vivary.site, "ENABLE_USER_SITE", False),
+                mock.patch.object(Path, "resolve", new=inaccessible_resolve),
+            ):
+                with self.assertRaises(create_vivary._CapabilityProbeFailure):
+                    create_vivary._capability_install_roots()
+
+    def test_doctor_embeds_same_capability_envelope_and_optional_absence_is_nonfatal(self):
         with temp_workspace() as td:
             target = Path(td) / "capability-probe"
             create_vivary.scaffold_workspace(
@@ -3876,9 +5731,72 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             report = create_vivary.doctor_workspace(target, repo_root=ROOT)
 
             self.assertTrue(report["ok"], report)
-            joined = json.dumps(report["errors"])
-            self.assertNotIn("vivary-core", joined)
-            self.assertNotIn("vivary_core", joined)
+            self.assertEqual(report["capabilities"], create_vivary.capability_report("coding"))
+            self.assertNotIn("vivary-core", json.dumps(report["errors"]))
+
+            readme = target / "README.md"
+            original = readme.read_text(encoding="utf-8")
+            readme.write_text(
+                original.replace("Preset: coding", "Preset: knowledge-work"),
+                encoding="utf-8",
+            )
+            knowledge_work = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            self.assertEqual(knowledge_work["capabilities"]["preset"], "knowledge-work")
+            self.assertFalse(
+                any(
+                    item["id"].startswith("active-context:")
+                    for item in knowledge_work["capabilities"]["available_capabilities"]
+                )
+            )
+
+            readme.write_text(
+                original.replace("Preset: coding", "Preset: unsupported"),
+                encoding="utf-8",
+            )
+            unknown = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            self.assertIsNone(unknown["capabilities"]["preset"])
+            self.assertFalse(
+                any(
+                    item["id"].startswith("active-context:")
+                    for item in unknown["capabilities"]["available_capabilities"]
+                )
+            )
+
+            readme.write_text(
+                original.replace("Preset: coding\n", ""), encoding="utf-8"
+            )
+            missing = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            self.assertIsNone(missing["capabilities"]["preset"])
+
+        with mock.patch.object(
+            create_vivary,
+            "_resolve_doctor_repair_target",
+            side_effect=create_vivary.ScaffoldError("simulated refusal"),
+        ):
+            refused = create_vivary.doctor_repair_workspace(
+                "ignored", repo_root=ROOT, yes=False
+            )
+        self.assertFalse(refused["ok"])
+        self.assertIsNone(refused["capabilities"]["preset"])
+        self.assertTrue(
+            any(
+                item["id"] == "governed-context:core"
+                for item in refused["capabilities"]["available_capabilities"]
+            )
+        )
+
+    def test_workspace_declared_preset_refuses_oversized_readme(self):
+        with temp_workspace() as target:
+            readme = target / "README.md"
+            readme.write_bytes(
+                b"Preset: coding\n"
+                + b"x" * create_vivary._WORKSPACE_PRESET_BYTE_LIMIT
+            )
+
+            self.assertEqual(
+                create_vivary._workspace_declared_preset(target), "<preset>"
+            )
+
 
 
 if __name__ == "__main__":

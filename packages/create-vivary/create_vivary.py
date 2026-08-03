@@ -3,24 +3,31 @@
 from __future__ import annotations
 
 import argparse
+import configparser
+import csv
 import importlib
+import importlib.machinery
 import importlib.metadata as importlib_metadata
 import importlib.util
+import io
 import json
 import os
 import platform
 import re
 import shutil
+import site
 import stat
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 from datetime import date, datetime, timezone
+from email.parser import BytesParser
 from pathlib import Path
 
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 PRESETS = ("coding", "second-brain", "knowledge-work", "writing")
 
@@ -179,6 +186,7 @@ WORKSPACE_COMPATIBILITY_SCHEMA_VERSION = 1
 LEGACY_WORKSPACE_CONTRACT = "legacy-v0.1"
 INDEXED_WORKSPACE_CONTRACT = "indexed-v0.2+"
 LEGACY_RECOMMENDED_WORKSPACE_FILES = INDEXED_WORKSPACE_FILES
+_WORKSPACE_PRESET_BYTE_LIMIT = 64 * 1024
 
 PRESET_STARTERS = {
     "coding": {
@@ -526,10 +534,45 @@ def _empty_workspace_compatibility() -> dict:
 
 def _workspace_declared_preset(target: Path) -> str:
     """Return a supported `Preset:` declaration or an explicit safe placeholder."""
+    readme_path = target / "README.md"
+    descriptor = None
     try:
-        readme = (target / "README.md").read_text(encoding="utf-8-sig")
-    except Exception:
+        if _is_symlink_or_junction(readme_path):
+            return "<preset>"
+        before = os.stat(readme_path, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_size > _WORKSPACE_PRESET_BYTE_LIMIT
+        ):
+            return "<preset>"
+
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        descriptor = os.open(readme_path, flags)
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_size > _WORKSPACE_PRESET_BYTE_LIMIT
+            or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)
+        ):
+            return "<preset>"
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            payload = handle.read(_WORKSPACE_PRESET_BYTE_LIMIT + 1)
+        if len(payload) > _WORKSPACE_PRESET_BYTE_LIMIT:
+            return "<preset>"
+        readme = payload.decode("utf-8-sig")
+    except (OSError, UnicodeError, ValueError):
         return "<preset>"
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
     match = re.search(r"(?mi)^Preset:\s*([^\r\n]+?)\s*$", readme)
     preset = match.group(1).strip() if match else ""
@@ -789,6 +832,10 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
     memory_report, memory_privacy_requirements = _memory_report(target)
     compatibility = _empty_workspace_compatibility()
     backend_name = "file"
+    declared_preset = _workspace_declared_preset(target) if target.is_dir() else None
+    capability_summary = _build_capability_report(
+        declared_preset if declared_preset in PRESETS else None
+    )
 
     if not target.exists():
         errors.append(f"workspace does not exist: {target}")
@@ -880,6 +927,7 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         "backend": backend_name,
         "memory": memory_report,
         "compatibility": compatibility,
+        "capabilities": capability_summary,
     }
 
 
@@ -944,6 +992,7 @@ def _doctor_repair_error_report(target: str | Path, *, yes: bool, error: Excepti
             "detail": "doctor repair refused to inspect target",
         },
         "compatibility": _empty_workspace_compatibility(),
+        "capabilities": _build_capability_report(None),
         "repair": {
             "mode": "applied" if yes else "dry-run",
             "actions": [],
@@ -4148,136 +4197,1598 @@ def _print_adopt_report(result: dict, *, mode: str) -> None:
             print(f"  warning: {warning}")
 
 
-# Import name for each installable requirement, keyed by the exact string used in a
-# capability's `requires_install`. An extra maps to what the extra actually provides
-# (`vivary-tropo[embedded]` is only useful once lancedb is importable), and a
-# distribution whose import name differs from its package name is spelled out. A
-# requirement absent from this map falls back to the usual `-` → `_` normalization.
-REQUIREMENT_IMPORTS = {
-    "vivary-tropo[embedded]": "lancedb",
-    "vivary-tropo": "tropo",
-    "vivary-memory-cognee": "vivary_cognee",
-    "cocoindex-code[full]": "cocoindex_code",
-    "vivary-core": "vivary_core",
+_CAPABILITY_ROOT_LIMIT = 8
+_CAPABILITY_SYS_PATH_ENTRY_LIMIT = 256
+_CAPABILITY_ROOT_ENTRY_LIMIT = 10_000
+_CAPABILITY_METADATA_BYTE_LIMIT = 256 * 1024
+_CAPABILITY_RECORD_BYTE_LIMIT = 2 * 1024 * 1024
+_CAPABILITY_REQUIREMENT_LIMIT = 256
+_CAPABILITY_RECORD_ROW_LIMIT = 20_000
+_CAPABILITY_REQUIREMENT_TEXT_LIMIT = 4 * 1024
+_CAPABILITY_EXTRA_LIMIT = 64
+_CAPABILITY_EXTRA_NODE_LIMIT = 8
+_CAPABILITY_EXTRA_EDGE_LIMIT = 16
+_CAPABILITY_EXTRA_DEPTH_LIMIT = 4
+_CAPABILITY_CHILD_EXTRA_LIMIT = 4
+_CAPABILITY_SPECIFIER_TEXT_LIMIT = 256
+_CAPABILITY_SPECIFIER_CLAUSE_LIMIT = 4
+_CAPABILITY_VERSION_TEXT_LIMIT = 128
+_CAPABILITY_VERSION_COMPONENT_LIMIT = 8
+
+_STABLE_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+_SUPPORTED_PROVIDER_VERSION_RE = re.compile(
+    r"""
+    ^v?
+    (?:(?P<epoch>\d+)!)?
+    (?P<release>\d+(?:\.\d+)*)
+    (?P<pre>[-_.]?(?:a|b|c|rc|alpha|beta|pre|preview)[-_.]?\d*)?
+    (?P<post>-(?:\d+)|[-_.]?(?:post|rev|r)[-_.]?\d*)?
+    (?P<dev>[-_.]?dev[-_.]?\d*)?
+    (?:\+(?P<local>[A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)*))?
+    $
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+_REQUIREMENT_FLOOR_RE = re.compile(
+    r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)\s*>=\s*"
+    r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)\s*$"
+)
+_REQUIREMENT_NAME_RE = re.compile(
+    r"^\s*(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$|[\[<>=!~;@])"
+)
+_EXTRA_INSTALL_HINT_RE = re.compile(
+    r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"\[(?P<extra>[A-Za-z0-9][A-Za-z0-9._-]*)\]$"
+)
+_OPTIONAL_REQUIREMENT_FLOOR_RE = re.compile(
+    r"""^\s*(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)\s*>=\s*"""
+    r"""(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)\s*;\s*"""
+    r"""extra\s*==\s*(?P<quote>['"])(?P<extra>[A-Za-z0-9][A-Za-z0-9._-]*)"""
+    r"""(?P=quote)\s*$"""
+)
+_EXACT_EXTRA_MARKER_RE = re.compile(
+    r";\s*extra\s*==\s*(?P<quote>['\"])"
+    r"(?P<extra>[A-Za-z0-9][A-Za-z0-9._-]*)(?P=quote)\s*$",
+    re.IGNORECASE,
+)
+_FORWARD_EXTRA_MARKER_COMPARISON_RE = re.compile(
+    r"""extra\s*(?P<operator>==|!=)\s*(?P<quote>['"])"""
+    r"""(?P<extra>[A-Za-z0-9][A-Za-z0-9._-]*)(?P=quote)""",
+    re.IGNORECASE,
+)
+_REVERSED_EXTRA_MARKER_COMPARISON_RE = re.compile(
+    r"""(?P<quote>['"])(?P<extra>[A-Za-z0-9][A-Za-z0-9._-]*)"""
+    r"""(?P=quote)\s*(?P<operator>==|!=)\s*extra$""",
+    re.IGNORECASE,
+)
+_NUMERIC_VERSION_RE = re.compile(r"^\d+(?:\.\d+)*$")
+_SPECIFIER_CLAUSE_RE = re.compile(
+    r"^(?P<operator>~=|==|!=|<=|>=|<|>)\s*"
+    r"(?P<version>\d+(?:\.\d+)*(?:\.\*)?)$"
+)
+_SELECTED_EXTRA_REQUIREMENT_RE = re.compile(
+    r"^\s*(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"(?:\[(?P<extras>[A-Za-z0-9][A-Za-z0-9._-]*"
+    r"(?:\s*,\s*[A-Za-z0-9][A-Za-z0-9._-]*)*)\])?"
+    r"\s*(?P<specifiers>[^;]*?)\s*;\s*"
+    r"extra\s*==\s*(?P<quote>['\"])"
+    r"(?P<extra>[A-Za-z0-9][A-Za-z0-9._-]*)(?P=quote)\s*$",
+    re.IGNORECASE,
+)
+_EXTRA_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+
+# This fixed inventory is the one owner for every public capability row and passive
+# probe fact. Dependency floors and console targets remain package-manifest facts:
+# the probe accepts only supported declared floors and records its public script name.
+_CAPABILITY_DECLARATIONS = {
+    "storage:file": {
+        "label": "File-backed typed graph",
+        "default": True,
+        "requires_approval": False,
+        "network": False,
+        "requirements": (),
+    },
+    "storage:embedded": {
+        "label": "Local embedded storage",
+        "default": False,
+        "requires_approval": True,
+        "network": False,
+        "requirements": (
+            {
+                "hint": "vivary-tropo[embedded]",
+                "distribution": "lancedb",
+                "module": "lancedb",
+            },
+        ),
+    },
+    "memory:none": {
+        "label": "No semantic memory",
+        "default": True,
+        "requires_approval": False,
+        "network": False,
+        "requirements": (),
+    },
+    "memory:local": {
+        "label": "Local semantic memory policy",
+        "default": False,
+        "requires_approval": True,
+        "requires_explicit_index": True,
+        "network": False,
+        "requirements": (),
+    },
+    "memory:cognee": {
+        "label": "Cognee semantic memory",
+        "default": False,
+        "requires_approval": True,
+        "requires_explicit_index": True,
+        "network": "configurable, default false",
+        "adapter_status": "optional-package",
+        "requirements": (
+            {
+                "hint": "vivary-memory-cognee",
+                "distribution": "vivary-memory-cognee",
+                "module": "vivary_cognee",
+                "vivary": True,
+            },
+        ),
+    },
+    "active-context:cocoindex-code": {
+        "label": "CocoIndex-code active context",
+        "default": False,
+        "requires_approval": True,
+        "requires_explicit_index": True,
+        "network": "provider-dependent, default local guidance",
+        "presets": ("coding",),
+        "requirements": (
+            {
+                "hint": "cocoindex-code[full]",
+                "distribution": "cocoindex-code",
+                "module": "cocoindex_code",
+            },
+        ),
+    },
+    "governed-context:core": {
+        "label": "Governed contracts (vivary-core)",
+        "default": False,
+        "requires_approval": False,
+        "network": False,
+        "command": None,
+        "authority": "library-only",
+        "requirements": (
+            {
+                "hint": "vivary-core",
+                "distribution": "vivary-core",
+                "module": "vivary_core",
+                "vivary": True,
+            },
+        ),
+    },
+    "governed-context:tropo": {
+        "label": "Governed context compilation (Tropo)",
+        "default": False,
+        "requires_approval": False,
+        "network": False,
+        "command": "tropo find --governed",
+        "authority": "read-only-context",
+        "governed_role": "vivary-tropo",
+        "requirements": (
+            {
+                "hint": "vivary-tropo",
+                "distribution": "vivary-tropo",
+                "module": "tropo",
+                "script": "tropo",
+                "callable": "main",
+                "vivary": True,
+            },
+            {
+                "hint": "vivary-core",
+                "distribution": "vivary-core",
+                "module": "vivary_core",
+                "vivary": True,
+            },
+        ),
+    },
+    "governed-policy:strato": {
+        "label": "Governed policy decisions (Strato)",
+        "default": False,
+        "requires_approval": False,
+        "network": False,
+        "command": "strato decide --governed",
+        "authority": "decision-only",
+        "governed_role": "vivary-strato",
+        "requirements": (
+            {
+                "hint": "vivary-strato",
+                "distribution": "vivary-strato",
+                "module": "strato",
+                "script": "strato",
+                "callable": "main",
+                "vivary": True,
+            },
+            {
+                "hint": "vivary-core",
+                "distribution": "vivary-core",
+                "module": "vivary_core",
+                "vivary": True,
+            },
+        ),
+    },
+    "governed-verification:ozone": {
+        "label": "Governed verification (Ozone)",
+        "default": False,
+        "requires_approval": False,
+        "network": False,
+        "command": "ozone verify --governed",
+        "authority": "verification-and-proposal-only",
+        "governed_role": "vivary-ozone",
+        "requirements": (
+            {
+                "hint": "vivary-ozone",
+                "distribution": "vivary-ozone",
+                "module": "ozone",
+                "script": "ozone",
+                "callable": "main",
+                "vivary": True,
+            },
+            {
+                "hint": "vivary-tropo",
+                "distribution": "vivary-tropo",
+                "module": "tropo",
+                "script": "tropo",
+                "callable": "main",
+                "vivary": True,
+            },
+            {
+                "hint": "vivary-core",
+                "distribution": "vivary-core",
+                "module": "vivary_core",
+                "vivary": True,
+            },
+        ),
+    },
+    "governed-control:exo": {
+        "label": "Governed execution control (Exo)",
+        "default": False,
+        "requires_approval": False,
+        "network": False,
+        "command": "exo control --governed",
+        "authority": "projection-only",
+        "governed_role": "vivary-exo",
+        "requirements": (
+            {
+                "hint": "vivary-exo",
+                "distribution": "vivary-exo",
+                "module": "exo",
+                "script": "exo",
+                "callable": "main",
+                "vivary": True,
+            },
+            {
+                "hint": "vivary-tropo",
+                "distribution": "vivary-tropo",
+                "module": "tropo",
+                "script": "tropo",
+                "callable": "main",
+                "vivary": True,
+            },
+            {
+                "hint": "vivary-core",
+                "distribution": "vivary-core",
+                "module": "vivary_core",
+                "vivary": True,
+            },
+        ),
+    },
 }
 
 
-def _requirement_importable(requirement: str) -> bool:
-    module = REQUIREMENT_IMPORTS.get(requirement)
-    if module is None:
-        module = requirement.split("[", 1)[0].replace("-", "_")
+class _CapabilityProbeFailure(Exception):
+    pass
+
+
+class _CapabilityContractIncompatible(Exception):
+    pass
+
+
+def _normalize_distribution_name(value: str) -> str:
+    return re.sub(r"[-_.]+", "-", value).lower()
+
+
+def _dist_info_identity(value: str) -> tuple[str, str] | None:
+    suffix = ".dist-info"
+    if not value.lower().endswith(suffix):
+        return None
+    stem = value[: -len(suffix)]
+    name, separator, version = stem.rpartition("-")
+    if not separator or not name or not version:
+        return None
+    return _normalize_distribution_name(name), version
+
+
+def _capability_install_roots() -> tuple[Path, ...]:
+    candidates: list[Path] = []
     try:
-        return importlib.util.find_spec(module) is not None
-    except (ImportError, ValueError, AttributeError):
-        return False
+        paths = sysconfig.get_paths()
+        for key in ("purelib", "platlib"):
+            value = paths.get(key)
+            if value:
+                candidates.append(Path(value))
+
+        system_sites = site.getsitepackages()
+        if type(system_sites) not in (list, tuple):
+            raise _CapabilityProbeFailure
+        system_sites = tuple(system_sites[: _CAPABILITY_ROOT_LIMIT + 1])
+        if len(system_sites) > _CAPABILITY_ROOT_LIMIT or not all(
+            isinstance(value, str) and value for value in system_sites
+        ):
+            raise _CapabilityProbeFailure
+        candidates.extend(Path(value) for value in system_sites)
+
+        if site.ENABLE_USER_SITE:
+            user_site = site.getusersitepackages()
+            if type(user_site) is str:
+                user_sites = (user_site,)
+            elif type(user_site) in (list, tuple):
+                user_sites = tuple(user_site[: _CAPABILITY_ROOT_LIMIT + 1])
+            else:
+                raise _CapabilityProbeFailure
+            if (
+                len(user_sites) > _CAPABILITY_ROOT_LIMIT
+                or not all(isinstance(value, str) and value for value in user_sites)
+            ):
+                raise _CapabilityProbeFailure
+            candidates.extend(Path(value) for value in user_sites)
+    except _CapabilityProbeFailure:
+        raise
+    except Exception as exc:
+        raise _CapabilityProbeFailure from exc
+
+    canonical: dict[str, Path] = {}
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise _CapabilityProbeFailure from exc
+        canonical[os.path.normcase(str(resolved))] = resolved
+
+    if type(sys.path) not in (list, tuple):
+        raise _CapabilityProbeFailure
+    active_paths = tuple(sys.path[: _CAPABILITY_SYS_PATH_ENTRY_LIMIT + 1])
+    if len(active_paths) > _CAPABILITY_SYS_PATH_ENTRY_LIMIT:
+        raise _CapabilityProbeFailure
+    ordered: list[Path] = []
+    for entry in active_paths:
+        if not isinstance(entry, str) or not entry:
+            continue
+        try:
+            key = os.path.normcase(str(Path(entry).resolve()))
+        except (OSError, RuntimeError, ValueError):
+            continue
+        candidate = canonical.pop(key, None)
+        if candidate is not None:
+            if len(ordered) >= _CAPABILITY_ROOT_LIMIT:
+                break
+            ordered.append(candidate)
+        if not canonical:
+            break
+    return tuple(ordered)
 
 
-def _capability_installed(capability: dict) -> bool:
-    """Whether everything a capability declares it needs is actually importable.
+def _read_capability_file(path: Path, root: Path, limit: int) -> bytes:
+    try:
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise _CapabilityContractIncompatible from exc
+    if not _path_within(root, resolved) or not resolved.is_file():
+        raise _CapabilityContractIncompatible
+    try:
+        with resolved.open("rb") as handle:
+            content = handle.read(limit + 1)
+    except OSError as exc:
+        raise _CapabilityProbeFailure from exc
+    if len(content) > limit:
+        raise _CapabilityProbeFailure
+    return content
 
-    Derived from the capability's own `requires_install` rather than a parallel map,
-    which is what keeps the answer honest: a second hand-maintained list can disagree
-    with the declaration it is supposed to describe, and the first version of this did
-    exactly that — reporting a capability needing `vivary-memory-cognee` as installed
-    while reporting one needing nothing as absent.
 
-    A capability requiring nothing is always present. Declared intent is not install
-    truth: the report is only actionable if it says what is present *here*. Absence is
-    never an error — these are optional by construction, and calling an optional
-    package's absence "broken" is precisely what this report exists to avoid.
-    """
-    return all(
-        _requirement_importable(requirement)
-        for requirement in capability.get("requires_install") or []
+def _capability_distribution_index(
+    roots: tuple[Path, ...],
+) -> dict[str, list[tuple[int, Path, Path, str]]]:
+    if len(roots) > _CAPABILITY_ROOT_LIMIT:
+        raise _CapabilityProbeFailure
+    index: dict[str, list[tuple[int, Path, Path, str]]] = {}
+    entries_seen = 0
+    for root_index, root in enumerate(roots):
+        try:
+            resolved_root = root.resolve(strict=True)
+        except FileNotFoundError:
+            continue
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise _CapabilityProbeFailure from exc
+        if not resolved_root.is_dir():
+            raise _CapabilityProbeFailure
+        try:
+            with os.scandir(resolved_root) as entries:
+                for entry in entries:
+                    entries_seen += 1
+                    if entries_seen > _CAPABILITY_ROOT_ENTRY_LIMIT:
+                        raise _CapabilityProbeFailure
+                    try:
+                        is_dist_info_directory = entry.is_dir(follow_symlinks=False)
+                        is_link = entry.is_symlink()
+                        if not is_dist_info_directory and os.name == "nt":
+                            attributes = entry.stat(
+                                follow_symlinks=False
+                            ).st_file_attributes
+                            is_link = is_link or bool(
+                                attributes
+                                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+                            )
+                    except OSError as exc:
+                        raise _CapabilityProbeFailure from exc
+                    if not is_dist_info_directory and not is_link:
+                        continue
+                    identity = _dist_info_identity(entry.name)
+                    if identity is None:
+                        continue
+                    distribution_name, distribution_version = identity
+                    index.setdefault(distribution_name, []).append(
+                        (
+                            root_index,
+                            resolved_root,
+                            Path(entry.path),
+                            distribution_version,
+                        )
+                    )
+        except _CapabilityProbeFailure:
+            raise
+        except (OSError, ValueError) as exc:
+            raise _CapabilityProbeFailure from exc
+    return index
+
+
+def _selected_dist_info(
+    index: dict[str, list[tuple[int, Path, Path, str]]], distribution: str
+) -> tuple[int, Path, Path, str] | None:
+    matches = index.get(_normalize_distribution_name(distribution), ())
+    if not matches:
+        return None
+    first_root = min(match[0] for match in matches)
+    selected = [match for match in matches if match[0] == first_root]
+    if len(selected) != 1:
+        raise _CapabilityContractIncompatible
+    root_index, root, dist_info, distribution_version = selected[0]
+    try:
+        resolved = dist_info.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise _CapabilityContractIncompatible from exc
+    lexical = os.path.normcase(os.path.abspath(dist_info))
+    if (
+        not _path_within(root, resolved)
+        or lexical != os.path.normcase(str(resolved))
+    ):
+        raise _CapabilityContractIncompatible
+    return root_index, root, resolved, distribution_version
+
+
+def _module_artifact_candidates(module: str) -> tuple[Path, ...]:
+    relative = Path(*module.split("."))
+    return tuple(
+        path
+        for suffix in importlib.machinery.all_suffixes()
+        for path in (
+            relative.with_suffix(suffix),
+            relative / f"__init__{suffix}",
+        )
     )
 
 
-def capability_report(preset: str = "coding") -> dict:
-    if preset not in PRESETS:
-        raise ScaffoldError(f"unknown preset {preset!r}; expected one of {', '.join(PRESETS)}")
+def _has_earlier_module_artifact(
+    roots: tuple[Path, ...],
+    selected_root_index: int,
+    module: str,
+) -> bool:
+    for root in roots[:selected_root_index]:
+        for candidate in _module_artifact_candidates(module):
+            try:
+                os.lstat(root / candidate)
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                raise _CapabilityProbeFailure from exc
+            return True
+    return False
 
-    capabilities = [
-        {
-            "id": "storage:file",
-            "label": "File-backed typed graph",
-            "default": True,
-            "requires_install": [],
-            "requires_approval": False,
-            "network": False,
-        },
-        {
-            "id": "storage:embedded",
-            "label": "Local embedded storage",
-            "default": False,
-            "requires_install": ["vivary-tropo[embedded]"],
-            "requires_approval": True,
-            "network": False,
-        },
-        {
-            "id": "memory:none",
-            "label": "No semantic memory",
-            "default": True,
-            "requires_install": [],
-            "requires_approval": False,
-            "network": False,
-        },
-        {
-            "id": "memory:local",
-            "label": "Local semantic memory policy",
-            "default": False,
-            "requires_install": [],
-            "requires_approval": True,
-            "requires_explicit_index": True,
-            "network": False,
-        },
-        {
-            "id": "memory:cognee",
-            "label": "Cognee semantic memory",
-            "default": False,
-            "requires_install": ["vivary-memory-cognee"],
-            "requires_approval": True,
-            "requires_explicit_index": True,
-            "network": "configurable, default false",
-            "adapter_status": "optional-package",
-        },
-    ]
 
-    if preset == "coding":
-        capabilities.append(
-            {
-                "id": "active-context:cocoindex-code",
-                "label": "CocoIndex-code active context",
-                "default": False,
-                "requires_install": ["cocoindex-code[full]"],
-                "requires_approval": True,
-                "requires_explicit_index": True,
-                "network": "provider-dependent, default local guidance",
-            }
+def _has_competing_module_artifact(
+    root: Path,
+    module: str,
+    recorded_artifact: str,
+) -> bool:
+    for candidate in _module_artifact_candidates(module):
+        try:
+            os.lstat(root / candidate)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise _CapabilityProbeFailure from exc
+        if candidate.as_posix() != recorded_artifact:
+            return True
+    return False
+
+def _parse_capability_metadata(
+    content: bytes,
+) -> tuple[dict[str, str], tuple[str, ...], tuple[str, ...]]:
+    try:
+        message = BytesParser().parsebytes(content)
+    except Exception as exc:
+        raise _CapabilityProbeFailure from exc
+    if message.defects:
+        raise _CapabilityProbeFailure
+    # The input byte ceiling bounds unrelated headers. Repeated fields consumed by
+    # the probe have their own semantic limits below.
+    fields: dict[str, str] = {}
+    for field in ("Metadata-Version", "Name", "Version", "Requires-Python"):
+        values = message.get_all(field) or ()
+        if (
+            len(values) != 1
+            or not isinstance(values[0], str)
+            or not values[0].strip()
+        ):
+            raise _CapabilityProbeFailure
+        fields[field.lower().replace("-", "_")] = values[0]
+    requirements = tuple(message.get_all("Requires-Dist") or ())
+    if (
+        len(requirements) > _CAPABILITY_REQUIREMENT_LIMIT
+        or not all(
+            isinstance(requirement, str)
+            and len(requirement.encode("utf-8")) <= _CAPABILITY_REQUIREMENT_TEXT_LIMIT
+            for requirement in requirements
         )
+    ):
+        raise _CapabilityProbeFailure
+    provided_extras = tuple(message.get_all("Provides-Extra") or ())
+    if len(provided_extras) > _CAPABILITY_EXTRA_LIMIT or not all(
+        isinstance(extra, str) for extra in provided_extras
+    ):
+        raise _CapabilityProbeFailure
+    return fields, requirements, provided_extras
 
-    # The governed-context seam. Local-only and approval-free: it reads a workspace
-    # and never writes, fetches, or reaches a provider. Not a default — it is not
-    # published yet, and nothing in the baseline install requires it (#207).
-    capabilities.append(
-        {
-            "id": "governed-context:core",
-            "label": "Governed context seam (vivary-core)",
-            "default": False,
-            "requires_install": ["vivary-core"],
-            "requires_approval": False,
-            "network": False,
+
+def _parse_console_target(content: bytes, script: str) -> tuple[str, str]:
+    parser = configparser.ConfigParser(interpolation=None, strict=True)
+    parser.optionxform = str
+    try:
+        parser.read_string(content.decode("utf-8"))
+        value = parser["console_scripts"][script]
+    except (UnicodeDecodeError, configparser.Error, KeyError) as exc:
+        raise _CapabilityContractIncompatible from exc
+    target = value.split(":")
+    if len(target) != 2:
+        raise _CapabilityContractIncompatible
+    module, callable_name = (part.strip() for part in target)
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", module) or not re.fullmatch(
+        r"[A-Za-z_][A-Za-z0-9_.]*",
+        callable_name,
+    ):
+        raise _CapabilityContractIncompatible
+    return module, callable_name
+
+
+def _record_rows(content: bytes):
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _CapabilityProbeFailure from exc
+    if re.search(r"\r(?!\n)|[\v\f\x1c-\x1e\x85\u2028\u2029]", text):
+        raise _CapabilityProbeFailure
+
+    rows = 0
+    reader = csv.reader(io.StringIO(text, newline=""), strict=True)
+    try:
+        for row in reader:
+            rows += 1
+            if rows > _CAPABILITY_RECORD_ROW_LIMIT:
+                raise _CapabilityProbeFailure
+            if len(row) != 3:
+                raise _CapabilityProbeFailure
+            path, digest, size = row
+            if (
+                not path
+                or path.startswith("/")
+                or re.match(r"^[A-Za-z]:", path)
+                or any(ord(character) < 32 or ord(character) == 127 for character in path)
+                or digest
+                and re.fullmatch(r"[A-Za-z0-9_]+=[A-Za-z0-9_-]+", digest)
+                is None
+                or size
+                and (
+                    len(size) > 20
+                    or not size.isascii()
+                    or not size.isdecimal()
+                )
+            ):
+                raise _CapabilityProbeFailure
+            yield path, digest, size
+    except csv.Error as exc:
+        raise _CapabilityProbeFailure from exc
+
+
+def _recorded_module_path(
+    content: bytes,
+    module: str | None,
+    *,
+    owned_paths: tuple[str, ...] = (),
+) -> str | None:
+    candidates = (
+        set()
+        if module is None
+        else {
+            f"{module.replace('.', '/')}.py",
+            f"{module.replace('.', '/')}/__init__.py",
         }
     )
+    module_path: str | None = None
+    found_owned_paths: set[str] = set()
+    for path, _digest, _size in _record_rows(content):
+        if path in candidates:
+            if module_path is not None and module_path != path:
+                raise _CapabilityContractIncompatible
+            module_path = path
+        if path in owned_paths:
+            found_owned_paths.add(path)
+    if (
+        module is not None
+        and module_path is None
+        or found_owned_paths != set(owned_paths)
+    ):
+        raise _CapabilityContractIncompatible
+    return module_path
 
+
+def _capability_scripts_path(root: Path) -> Path:
+    try:
+        path_sets = [
+            sysconfig.get_paths(),
+            sysconfig.get_paths(
+                scheme=sysconfig.get_preferred_scheme("user"),
+            ),
+        ]
+        prefixes: list[str] = []
+        for name in ("prefix", "exec_prefix", "base_prefix", "base_exec_prefix"):
+            value = getattr(sys, name, None)
+            if type(value) is not str or not value:
+                raise _CapabilityProbeFailure
+            if value not in prefixes:
+                prefixes.append(value)
+        path_sets.extend(
+            sysconfig.get_paths(vars={"base": prefix, "platbase": prefix})
+            for prefix in prefixes
+        )
+    except _CapabilityProbeFailure:
+        raise
+    except Exception as exc:
+        raise _CapabilityProbeFailure from exc
+
+    try:
+        root_key = os.path.normcase(os.path.abspath(root))
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise _CapabilityProbeFailure from exc
+    if os.name == "nt" and root_key.replace("/", "\\").startswith("\\\\"):
+        raise _CapabilityContractIncompatible
+    matches: dict[str, Path] = {}
+    for paths in path_sets:
+        if type(paths) is not dict:
+            raise _CapabilityProbeFailure
+        scripts_value = paths.get("scripts")
+        if type(scripts_value) is not str or not scripts_value:
+            raise _CapabilityProbeFailure
+        for key in ("purelib", "platlib"):
+            library_value = paths.get(key)
+            if library_value is None:
+                continue
+            if type(library_value) is not str or not library_value:
+                raise _CapabilityProbeFailure
+            try:
+                library_key = os.path.normcase(os.path.abspath(library_value))
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                raise _CapabilityProbeFailure from exc
+            if library_key != root_key:
+                continue
+            if (
+                os.name == "nt"
+                and scripts_value.replace("/", "\\").startswith("\\\\")
+            ):
+                raise _CapabilityContractIncompatible
+            try:
+                scripts = Path(scripts_value).resolve(strict=True)
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise _CapabilityProbeFailure from exc
+            if not scripts.is_dir():
+                raise _CapabilityProbeFailure
+            matches[os.path.normcase(str(scripts))] = scripts
+    if len(matches) != 1:
+        raise _CapabilityContractIncompatible
+    return next(iter(matches.values()))
+
+
+def _require_recorded_launcher(
+    record: bytes,
+    root: Path,
+    script: str,
+) -> None:
+    launcher_name = f"{script}.exe" if os.name == "nt" else script
+    scripts = _capability_scripts_path(root)
+    launcher_path = scripts / launcher_name
+    try:
+        launcher_stat = launcher_path.lstat()
+        launcher = launcher_path.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise _CapabilityContractIncompatible from exc
+    if not stat.S_ISREG(launcher_stat.st_mode) or not os.access(launcher, os.X_OK):
+        raise _CapabilityContractIncompatible
+    try:
+        expected_record_path = os.path.relpath(launcher_path, root).replace("\\", "/")
+    except ValueError as exc:
+        raise _CapabilityContractIncompatible from exc
+
+    matches = 0
+    for path, _digest, _size in _record_rows(record):
+        if os.path.normcase(path) == os.path.normcase(expected_record_path):
+            matches += 1
+    if matches != 1:
+        raise _CapabilityContractIncompatible
+
+
+def _stable_version(value: str) -> tuple[int, int, int]:
+    match = _STABLE_VERSION_RE.fullmatch(value)
+    if match is None:
+        raise _CapabilityContractIncompatible
+    try:
+        return tuple(int(part) for part in match.groups())
+    except ValueError as exc:
+        raise _CapabilityContractIncompatible from exc
+
+
+def _provider_version_meets_floor(
+    value: str,
+    floor: tuple[int, int, int],
+) -> bool:
+    match = _SUPPORTED_PROVIDER_VERSION_RE.fullmatch(value)
+    if match is None or match.group("pre") is not None or match.group("dev") is not None:
+        raise _CapabilityContractIncompatible
+    try:
+        epoch = int(match.group("epoch") or "0")
+        release = tuple(int(part) for part in match.group("release").split("."))
+    except ValueError as exc:
+        raise _CapabilityContractIncompatible from exc
+    if epoch:
+        return True
+    width = max(len(release), len(floor))
+    return release + (0,) * (width - len(release)) >= floor + (0,) * (
+        width - len(floor)
+    )
+
+
+def _numeric_version(value: str) -> tuple[int, ...]:
+    if (
+        len(value) > _CAPABILITY_VERSION_TEXT_LIMIT
+        or _NUMERIC_VERSION_RE.fullmatch(value) is None
+    ):
+        raise _CapabilityContractIncompatible
+    parts = value.split(".")
+    if len(parts) > _CAPABILITY_VERSION_COMPONENT_LIMIT:
+        raise _CapabilityContractIncompatible
+    try:
+        return tuple(int(part) for part in parts)
+    except ValueError as exc:
+        raise _CapabilityContractIncompatible from exc
+
+
+def _parse_version_specifier(
+    value: str,
+) -> tuple[tuple[str, tuple[int, ...], bool], ...]:
+    if not value or len(value) > _CAPABILITY_SPECIFIER_TEXT_LIMIT:
+        raise _CapabilityContractIncompatible
+    parts = tuple(part.strip() for part in value.split(","))
+    if (
+        not parts
+        or len(parts) > _CAPABILITY_SPECIFIER_CLAUSE_LIMIT
+        or any(not part for part in parts)
+    ):
+        raise _CapabilityContractIncompatible
+    clauses: list[tuple[str, tuple[int, ...], bool]] = []
+    for part in parts:
+        match = _SPECIFIER_CLAUSE_RE.fullmatch(part)
+        if match is None:
+            raise _CapabilityContractIncompatible
+        operator = match.group("operator")
+        version = match.group("version")
+        wildcard = version.endswith(".*")
+        if wildcard:
+            if operator not in {"==", "!="}:
+                raise _CapabilityContractIncompatible
+            version = version[:-2]
+        release = _numeric_version(version)
+        if operator == "~=" and len(release) < 2:
+            raise _CapabilityContractIncompatible
+        clauses.append((operator, release, wildcard))
+    return tuple(clauses)
+
+
+def _compare_versions(left: tuple[int, ...], right: tuple[int, ...]) -> int:
+    width = max(len(left), len(right))
+    padded_left = left + (0,) * (width - len(left))
+    padded_right = right + (0,) * (width - len(right))
+    return (padded_left > padded_right) - (padded_left < padded_right)
+
+
+def _version_satisfies_clauses(
+    value: str,
+    clauses: tuple[tuple[str, tuple[int, ...], bool], ...],
+) -> bool:
+    release = _numeric_version(value)
+    for operator, expected, wildcard in clauses:
+        if wildcard:
+            candidate = release + (0,) * max(0, len(expected) - len(release))
+            matches = candidate[: len(expected)] == expected
+            satisfied = matches if operator == "==" else not matches
+        else:
+            comparison = _compare_versions(release, expected)
+            if operator == "~=":
+                candidate = release + (0,) * max(
+                    0, len(expected) - 1 - len(release)
+                )
+                satisfied = (
+                    comparison >= 0
+                    and candidate[: len(expected) - 1] == expected[:-1]
+                )
+            else:
+                satisfied = {
+                    "==": comparison == 0,
+                    "!=": comparison != 0,
+                    "<=": comparison <= 0,
+                    ">=": comparison >= 0,
+                    "<": comparison < 0,
+                    ">": comparison > 0,
+                }[operator]
+        if not satisfied:
+            return False
+    return True
+
+
+def _version_satisfies_specifier(value: str, specifier: str) -> bool:
+    return _version_satisfies_clauses(value, _parse_version_specifier(specifier))
+
+
+def _marker_selects_extra(value: str, selected_extra: str) -> bool:
+    comparisons: list[bool] = []
+    has_or = False
+    quote: str | None = None
+    escaped = False
+    index = 0
+    while index < len(value):
+        character = value[index]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == quote:
+                quote = None
+            index += 1
+            continue
+        if character in {'"', "'"}:
+            quote = character
+            index += 1
+            continue
+        if character.isascii() and (character.isalnum() or character == "_"):
+            end = index + 1
+            while end < len(value):
+                token_character = value[end]
+                if not (
+                    token_character.isascii()
+                    and (token_character.isalnum() or token_character == "_")
+                ):
+                    break
+                end += 1
+            token = value[index:end].lower()
+            if token == "or":
+                has_or = True
+            if token == "extra":
+                match = _FORWARD_EXTRA_MARKER_COMPARISON_RE.match(value, index)
+                if match is None:
+                    match = _REVERSED_EXTRA_MARKER_COMPARISON_RE.search(
+                        value[:end]
+                    )
+                if match is None:
+                    raise _CapabilityContractIncompatible
+                matches_selected = (
+                    _normalize_distribution_name(match.group("extra"))
+                    == selected_extra
+                )
+                comparisons.append(
+                    matches_selected
+                    if match.group("operator") == "=="
+                    else not matches_selected
+                )
+                if len(comparisons) > _CAPABILITY_CHILD_EXTRA_LIMIT:
+                    raise _CapabilityContractIncompatible
+                index = max(end, match.end())
+                continue
+            index = end
+            continue
+        index += 1
+    if has_or and comparisons:
+        raise _CapabilityContractIncompatible
+    return any(comparisons)
+
+
+def _selected_extra_dependency(
+    value: str,
+    selected_extra: str,
+) -> (
+    tuple[
+        str,
+        tuple[tuple[str, tuple[int, ...], bool], ...],
+        tuple[str, ...],
+    ]
+    | None
+):
+    if len(value.encode("utf-8")) > _CAPABILITY_REQUIREMENT_TEXT_LIMIT:
+        raise _CapabilityProbeFailure
+    marker_text = value.partition(";")[2]
+    if not marker_text or not _marker_selects_extra(
+        marker_text, selected_extra
+    ):
+        return None
+    marker = _EXACT_EXTRA_MARKER_RE.search(value)
+    if marker is None:
+        raise _CapabilityContractIncompatible
+    if _normalize_distribution_name(marker.group("extra")) != selected_extra:
+        return None
+    match = _SELECTED_EXTRA_REQUIREMENT_RE.fullmatch(value)
+    if match is None:
+        raise _CapabilityContractIncompatible
+    extras_text = match.group("extras")
+    child_extras = (
+        ()
+        if extras_text is None
+        else tuple(
+            _normalize_distribution_name(extra.strip())
+            for extra in extras_text.split(",")
+        )
+    )
+    if (
+        len(child_extras) > _CAPABILITY_CHILD_EXTRA_LIMIT
+        or len(set(child_extras)) != len(child_extras)
+    ):
+        raise _CapabilityContractIncompatible
+    specifiers = match.group("specifiers").strip()
+    clauses = () if not specifiers else _parse_version_specifier(specifiers)
+    return (
+        _normalize_distribution_name(match.group("name")),
+        clauses,
+        child_extras,
+    )
+
+
+def _required_dependency_floors(
+    requirements: tuple[str, ...],
+    expected_dependencies: tuple[str, ...],
+) -> dict[str, tuple[int, int, int]]:
+    expected = {
+        _normalize_distribution_name(dependency): dependency
+        for dependency in expected_dependencies
+    }
+    floors: dict[str, tuple[int, int, int]] = {}
+    for declared in requirements:
+        name_match = _REQUIREMENT_NAME_RE.match(declared)
+        if name_match is None:
+            continue
+        dependency = expected.get(
+            _normalize_distribution_name(name_match.group("name"))
+        )
+        if dependency is None:
+            continue
+        match = _REQUIREMENT_FLOOR_RE.fullmatch(declared)
+        if match is None:
+            raise _CapabilityContractIncompatible
+        if dependency in floors:
+            raise _CapabilityContractIncompatible
+        try:
+            floors[dependency] = tuple(
+                int(match.group(part)) for part in ("major", "minor", "patch")
+            )
+        except ValueError as exc:
+            raise _CapabilityContractIncompatible from exc
+    if set(floors) != set(expected_dependencies):
+        raise _CapabilityContractIncompatible
+    return floors
+
+
+def _optional_dependency_floor(
+    requirements: tuple[str, ...],
+    dependency: str,
+    extra: str,
+) -> tuple[int, int, int]:
+    normalized_dependency = _normalize_distribution_name(dependency)
+    normalized_extra = _normalize_distribution_name(extra)
+    floor: tuple[int, int, int] | None = None
+    for declared in requirements:
+        name_match = _REQUIREMENT_NAME_RE.match(declared)
+        if (
+            name_match is None
+            or _normalize_distribution_name(name_match.group("name"))
+            != normalized_dependency
+        ):
+            continue
+        match = _OPTIONAL_REQUIREMENT_FLOOR_RE.fullmatch(declared)
+        if match is None:
+            marker_text = declared.partition(";")[2]
+            if marker_text and _marker_selects_extra(
+                marker_text, normalized_extra
+            ):
+                raise _CapabilityContractIncompatible
+            continue
+        if (
+            _normalize_distribution_name(match.group("extra"))
+            != normalized_extra
+        ):
+            continue
+        if floor is not None:
+            raise _CapabilityContractIncompatible
+        try:
+            floor = tuple(
+                int(match.group(part)) for part in ("major", "minor", "patch")
+            )
+        except ValueError as exc:
+            raise _CapabilityContractIncompatible from exc
+    if floor is None:
+        raise _CapabilityContractIncompatible
+    return floor
+
+
+def _capability_requirement_specs(
+    capabilities: list[dict],
+) -> tuple[
+    dict[str, dict],
+    dict[str, tuple[str, ...]],
+    dict[str, tuple[str, str]],
+    dict[str, tuple[str, str]],
+]:
+    specs: dict[str, dict] = {}
+    role_dependencies: dict[str, tuple[str, ...]] = {}
     for capability in capabilities:
-        capability["installed"] = _capability_installed(capability)
+        declaration = _CAPABILITY_DECLARATIONS.get(capability["id"])
+        if declaration is None:
+            raise _CapabilityProbeFailure
+        requirements = declaration["requirements"]
+        role = declaration.get("governed_role")
+        if role is not None and not any(
+            requirement["hint"] == role for requirement in requirements
+        ):
+            raise _CapabilityProbeFailure
+        for requirement in requirements:
+            hint = requirement["hint"]
+            existing = specs.setdefault(hint, requirement)
+            if existing != requirement:
+                raise _CapabilityProbeFailure
+        if role is not None:
+            dependencies = tuple(
+                requirement["hint"]
+                for requirement in requirements
+                if requirement["hint"] != role
+            )
+            existing = role_dependencies.setdefault(role, dependencies)
+            if existing != dependencies:
+                raise _CapabilityProbeFailure
 
+    requirements_by_distribution: dict[str, str] = {}
+    for requirement, spec in specs.items():
+        distribution = _normalize_distribution_name(spec["distribution"])
+        existing = requirements_by_distribution.setdefault(distribution, requirement)
+        if existing != requirement:
+            raise _CapabilityProbeFailure
+
+    optional_floor_sources: dict[str, tuple[str, str]] = {}
+    selected_extra_sources: dict[str, tuple[str, str]] = {}
+    for requirement, spec in specs.items():
+        match = _EXTRA_INSTALL_HINT_RE.fullmatch(requirement)
+        if match is None:
+            continue
+        dependency = _normalize_distribution_name(spec["distribution"])
+        owner = _normalize_distribution_name(match.group("name"))
+        extra = _normalize_distribution_name(match.group("extra"))
+        if owner == dependency:
+            selected_extra_sources[requirement] = (owner, extra)
+            continue
+        owner_requirement = requirements_by_distribution.get(owner)
+        if owner_requirement is None:
+            raise _CapabilityProbeFailure
+        optional_floor_sources[requirement] = (owner_requirement, extra)
+    return (
+        specs,
+        role_dependencies,
+        optional_floor_sources,
+        selected_extra_sources,
+    )
+
+
+def _read_distribution_contract(
+    distribution: str,
+    roots: tuple[Path, ...],
+    index: dict[str, list[tuple[int, Path, Path, str]]],
+) -> dict:
+    selected = _selected_dist_info(index, distribution)
+    if selected is None:
+        return {"status": "missing"}
+    root_index, root, dist_info, distribution_version = selected
+    metadata = _read_capability_file(
+        dist_info / "METADATA", root, _CAPABILITY_METADATA_BYTE_LIMIT
+    )
+    fields, requirements, provided_extras = _parse_capability_metadata(metadata)
+    if _normalize_distribution_name(fields["name"]) != _normalize_distribution_name(
+        distribution
+    ):
+        raise _CapabilityContractIncompatible
+    if fields["version"] != distribution_version:
+        raise _CapabilityContractIncompatible
+    if getattr(sys.version_info, "releaselevel", None) != "final":
+        raise _CapabilityContractIncompatible
+    current_python = ".".join(str(part) for part in sys.version_info[:3])
+    if not _version_satisfies_specifier(
+        current_python,
+        fields["requires_python"],
+    ):
+        raise _CapabilityContractIncompatible
+    record = _read_capability_file(
+        dist_info / "RECORD", root, _CAPABILITY_RECORD_BYTE_LIMIT
+    )
+    _recorded_module_path(
+        record,
+        None,
+        owned_paths=(f"{dist_info.name}/METADATA",),
+    )
+    return {
+        "status": "installed",
+        "root_index": root_index,
+        "root": root,
+        "dist_info": dist_info,
+        "record": record,
+        "metadata_size": len(metadata),
+        "requires_python": fields["requires_python"],
+        "declared_version": fields["version"],
+        "declared_requirements": requirements,
+        "declared_extras": provided_extras,
+    }
+
+
+def _read_capability_distribution(
+    spec: dict,
+    roots: tuple[Path, ...],
+    index: dict[str, list[tuple[int, Path, Path, str]]],
+) -> dict:
+    evidence = _read_distribution_contract(spec["distribution"], roots, index)
+    if evidence["status"] == "missing":
+        return evidence
+    if spec.get("vivary") and evidence["requires_python"] != ">=3.11":
+        raise _CapabilityContractIncompatible
+
+    root_index = evidence["root_index"]
+    root = evidence["root"]
+    dist_info = evidence["dist_info"]
+    module = spec["module"]
+    if _has_earlier_module_artifact(roots, root_index, module):
+        raise _CapabilityContractIncompatible
+    owned_paths = [f"{dist_info.name}/METADATA"]
+    if script := spec.get("script"):
+        entrypoints = _read_capability_file(
+            dist_info / "entry_points.txt",
+            root,
+            _CAPABILITY_METADATA_BYTE_LIMIT - evidence["metadata_size"],
+        )
+        if _parse_console_target(entrypoints, script) != (
+            module,
+            spec["callable"],
+        ):
+            raise _CapabilityContractIncompatible
+        owned_paths.append(f"{dist_info.name}/entry_points.txt")
+        _require_recorded_launcher(evidence["record"], root, script)
+    artifact = _recorded_module_path(
+        evidence["record"],
+        module,
+        owned_paths=tuple(owned_paths),
+    )
+    if artifact is None:
+        raise _CapabilityContractIncompatible
+    if _has_competing_module_artifact(root, module, artifact):
+        raise _CapabilityContractIncompatible
+    try:
+        artifact_path = (root / Path(*artifact.split("/"))).resolve(strict=True)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise _CapabilityContractIncompatible from exc
+    if not _path_within(root, artifact_path) or not artifact_path.is_file():
+        raise _CapabilityContractIncompatible
+
+    return {
+        "status": "installed",
+        "version": (
+            _stable_version(evidence["declared_version"])
+            if spec.get("vivary")
+            else None
+        ),
+        "declared_version": evidence["declared_version"],
+        "declared_requirements": evidence["declared_requirements"],
+        "declared_extras": evidence["declared_extras"],
+    }
+
+
+def _normalized_declared_extras(extras: tuple[str, ...]) -> set[str]:
+    normalized: set[str] = set()
+    for extra in extras:
+        if _EXTRA_NAME_RE.fullmatch(extra) is None:
+            raise _CapabilityContractIncompatible
+        value = _normalize_distribution_name(extra)
+        if value in normalized:
+            raise _CapabilityContractIncompatible
+        normalized.add(value)
+    return normalized
+
+
+def _selected_extra_status(
+    distribution: str,
+    extra: str,
+    initial_evidence: dict,
+    roots: tuple[Path, ...],
+    index: dict[str, list[tuple[int, Path, Path, str]]],
+) -> str:
+    initial_distribution = _normalize_distribution_name(distribution)
+    initial_extra = _normalize_distribution_name(extra)
+    cache = {initial_distribution: initial_evidence}
+    pending = [(initial_distribution, initial_extra, 0)]
+    pending_index = 0
+    scheduled = {(initial_distribution, initial_extra)}
+    visited: set[tuple[str, str]] = set()
+    nodes = 0
+    edges = 0
+    missing_evidence = False
+    incompatible_evidence = False
+
+    while pending_index < len(pending):
+        owner, selected_extra, depth = pending[pending_index]
+        pending_index += 1
+        node = (owner, selected_extra)
+        if node in visited:
+            continue
+        nodes += 1
+        if (
+            nodes > _CAPABILITY_EXTRA_NODE_LIMIT
+            or depth > _CAPABILITY_EXTRA_DEPTH_LIMIT
+        ):
+            raise _CapabilityProbeFailure
+        try:
+            evidence = cache.get(owner)
+            if evidence is None:
+                evidence = _read_distribution_contract(owner, roots, index)
+                cache[owner] = evidence
+        except _CapabilityContractIncompatible:
+            incompatible_evidence = True
+            visited.add(node)
+            continue
+        if evidence["status"] == "missing":
+            missing_evidence = True
+            visited.add(node)
+            continue
+        try:
+            declared_extras = _normalized_declared_extras(
+                evidence["declared_extras"]
+            )
+        except _CapabilityContractIncompatible:
+            incompatible_evidence = True
+            visited.add(node)
+            continue
+        if selected_extra not in declared_extras:
+            incompatible_evidence = True
+            visited.add(node)
+            continue
+
+        selected_rows: set[
+            tuple[
+                str,
+                tuple[tuple[str, tuple[int, ...], bool], ...],
+                tuple[str, ...],
+            ]
+        ] = set()
+        dependencies: dict[
+            str,
+            tuple[
+                tuple[tuple[str, tuple[int, ...], bool], ...],
+                tuple[str, ...],
+            ],
+        ] = {}
+        for requirement in evidence["declared_requirements"]:
+            try:
+                dependency = _selected_extra_dependency(requirement, selected_extra)
+            except _CapabilityContractIncompatible:
+                incompatible_evidence = True
+                continue
+            if dependency is None:
+                continue
+            child, clauses, child_extras = dependency
+            edges += 1
+            if edges > _CAPABILITY_EXTRA_EDGE_LIMIT:
+                raise _CapabilityProbeFailure
+            if dependency in selected_rows:
+                incompatible_evidence = True
+                continue
+            selected_rows.add(dependency)
+            existing_clauses, existing_extras = dependencies.get(
+                child, ((), ())
+            )
+            combined_clauses = existing_clauses + tuple(
+                clause for clause in clauses if clause not in existing_clauses
+            )
+            combined_extras = existing_extras + tuple(
+                child_extra
+                for child_extra in child_extras
+                if child_extra not in existing_extras
+            )
+            if (
+                len(combined_clauses) > _CAPABILITY_SPECIFIER_CLAUSE_LIMIT
+                or len(combined_extras) > _CAPABILITY_CHILD_EXTRA_LIMIT
+            ):
+                incompatible_evidence = True
+                continue
+            dependencies[child] = (combined_clauses, combined_extras)
+
+        child_nodes: list[tuple[str, str, int]] = []
+        for child, (clauses, child_extras) in dependencies.items():
+            try:
+                child_evidence = cache.get(child)
+                if child_evidence is None:
+                    child_evidence = _read_distribution_contract(child, roots, index)
+                    cache[child] = child_evidence
+            except _CapabilityContractIncompatible:
+                incompatible_evidence = True
+                continue
+            if child_evidence["status"] == "missing":
+                missing_evidence = True
+                continue
+            try:
+                version_satisfied = not clauses or _version_satisfies_clauses(
+                    child_evidence["declared_version"],
+                    clauses,
+                )
+            except _CapabilityContractIncompatible:
+                incompatible_evidence = True
+                continue
+            if not version_satisfied:
+                incompatible_evidence = True
+                continue
+            for child_extra in child_extras:
+                child_node = (child, child_extra)
+                if child_node in scheduled:
+                    continue
+                if depth >= _CAPABILITY_EXTRA_DEPTH_LIMIT:
+                    raise _CapabilityProbeFailure
+                scheduled.add(child_node)
+                child_nodes.append((child, child_extra, depth + 1))
+        pending.extend(child_nodes)
+        visited.add(node)
+    if incompatible_evidence:
+        return "incompatible"
+    return "missing" if missing_evidence else "installed"
+
+
+def _capability_probe_results(capabilities: list[dict]) -> dict[str, dict]:
+    try:
+        (
+            specs,
+            role_dependencies,
+            optional_floor_sources,
+            selected_extra_sources,
+        ) = _capability_requirement_specs(capabilities)
+        requirements = tuple(specs)
+        roots = _capability_install_roots()
+        index = _capability_distribution_index(roots)
+    except (OSError, RuntimeError, ValueError, _CapabilityProbeFailure):
+        return {
+            requirement: {"status": "probe-failed"}
+            for requirement in (
+                requirement
+                for capability in capabilities
+                for requirement in capability.get("requires_install", ())
+            )
+        }
+
+    observed_results: dict[str, dict] = {}
+    for requirement in requirements:
+        try:
+            observed_results[requirement] = _read_capability_distribution(
+                specs[requirement],
+                roots,
+                index,
+            )
+        except _CapabilityContractIncompatible:
+            observed_results[requirement] = {"status": "incompatible"}
+        except (
+            OSError,
+            RuntimeError,
+            UnicodeError,
+            ValueError,
+            _CapabilityProbeFailure,
+        ):
+            observed_results[requirement] = {"status": "probe-failed"}
+
+    results = {
+        requirement: dict(result)
+        for requirement, result in observed_results.items()
+    }
+    for requirement, (owner, extra) in selected_extra_sources.items():
+        observed_result = observed_results[requirement]
+        if observed_result["status"] != "installed":
+            continue
+        try:
+            status = _selected_extra_status(
+                owner,
+                extra,
+                observed_result,
+                roots,
+                index,
+            )
+        except _CapabilityContractIncompatible:
+            status = "incompatible"
+        except (
+            OSError,
+            RuntimeError,
+            UnicodeError,
+            ValueError,
+            _CapabilityProbeFailure,
+        ):
+            status = "probe-failed"
+        if status != "installed":
+            results[requirement] = {"status": status}
+
+    for role, expected_dependencies in role_dependencies.items():
+        observed_result = observed_results.get(role)
+        if observed_result is None or observed_result["status"] != "installed":
+            continue
+        try:
+            dependency_floors = _required_dependency_floors(
+                observed_result["declared_requirements"],
+                expected_dependencies,
+            )
+        except _CapabilityContractIncompatible:
+            results[role] = {"status": "incompatible"}
+            continue
+        for dependency, floor in dependency_floors.items():
+            dependency_result = results.get(dependency)
+            if dependency_result is None:
+                results[role] = {"status": "incompatible"}
+                break
+            if (
+                dependency_result["status"] == "installed"
+                and dependency_result["version"] < floor
+            ):
+                results[role] = {"status": "incompatible"}
+                break
+    for dependency, (owner, extra) in optional_floor_sources.items():
+        dependency_result = results.get(dependency)
+        if dependency_result is None or dependency_result["status"] not in {
+            "installed",
+            "missing",
+        }:
+            continue
+        owner_result = observed_results.get(owner)
+        if owner_result is None or owner_result["status"] == "missing":
+            if dependency_result["status"] == "installed":
+                results[dependency] = {"status": "incompatible"}
+            continue
+        if owner_result["status"] != "installed":
+            results[dependency] = {
+                "status": (
+                    "probe-failed"
+                    if owner_result["status"] == "probe-failed"
+                    else "incompatible"
+                )
+            }
+            continue
+        try:
+            floor = _optional_dependency_floor(
+                owner_result["declared_requirements"],
+                specs[dependency]["distribution"],
+                extra,
+            )
+        except _CapabilityContractIncompatible:
+            results[dependency] = {"status": "incompatible"}
+            continue
+        if dependency_result["status"] == "missing":
+            continue
+        try:
+            version_satisfies_floor = _provider_version_meets_floor(
+                dependency_result["declared_version"],
+                floor,
+            )
+        except _CapabilityContractIncompatible:
+            results[dependency] = {"status": "incompatible"}
+            continue
+        if not version_satisfies_floor:
+            results[dependency] = {"status": "incompatible"}
+    return results
+
+
+def _annotate_capability(capability: dict, results: dict[str, dict]) -> None:
+    requirements = capability.get("requires_install", ())
+    statuses = [results[requirement]["status"] for requirement in requirements]
+    if "probe-failed" in statuses:
+        status = "probe-failed"
+        reasons = ["capability_probe_failed"]
+        missing: list[str] = []
+    elif "incompatible" in statuses:
+        status = "incompatible"
+        reasons = ["capability_contract_incompatible"]
+        missing = []
+    elif "missing" in statuses:
+        status = "not-installed"
+        reasons = ["capability_dependency_missing"]
+        missing = [
+            requirement
+            for requirement in requirements
+            if results[requirement]["status"] == "missing"
+        ]
+    else:
+        status = "installed"
+        reasons = []
+        missing = []
+    capability["installed"] = status == "installed"
+    capability["install_status"] = status
+    capability["reason_codes"] = reasons
+    capability["missing_install"] = missing
+
+
+def _capability_declarations(preset: str | None) -> list[dict]:
+    capabilities: list[dict] = []
+    for capability_id, declaration in _CAPABILITY_DECLARATIONS.items():
+        presets = declaration.get("presets")
+        if presets is not None and preset not in presets:
+            continue
+        capability = {
+            "id": capability_id,
+            **{
+                field: value
+                for field, value in declaration.items()
+                if field not in {"governed_role", "presets", "requirements"}
+            },
+            "requires_install": [
+                requirement["hint"] for requirement in declaration["requirements"]
+            ],
+        }
+        capabilities.append(capability)
+    return capabilities
+
+
+def _build_capability_report(preset: str | None) -> dict:
+    capabilities = _capability_declarations(preset)
+    results = _capability_probe_results(capabilities)
+    for capability in capabilities:
+        _annotate_capability(capability, results)
     return {
         "ok": True,
         "preset": preset,
         "default_capabilities": ["storage:file", "memory:none"],
         "available_capabilities": capabilities,
     }
+
+
+def capability_report(preset: str = "coding") -> dict:
+    if preset not in PRESETS:
+        raise ScaffoldError(
+            f"unknown preset {preset!r}; expected one of {', '.join(PRESETS)}"
+        )
+    return _build_capability_report(preset)
 
 
 def _add_receipt_argument(parser: argparse.ArgumentParser) -> None:
@@ -4616,8 +6127,12 @@ def _main(argv: list[str] | None = None) -> int:
         else:
             print(f"create-vivary capabilities for {report['preset']}:")
             for cap in report["available_capabilities"]:
-                marker = " (default)" if cap["default"] else ""
-                print(f"- {cap['id']}: {cap['label']}{marker}")
+                markers = [
+                    "default" if cap["default"] else None,
+                    cap["install_status"],
+                ]
+                marker = ", ".join(value for value in markers if value)
+                print(f"- {cap['id']}: {cap['label']} ({marker})")
         return 0
 
     if args.command == "doctor":
@@ -4908,6 +6423,13 @@ def _print_doctor_report(report: dict) -> None:
             f"memory: {memory.get('status', 'unknown')} "
             f"({memory.get('provider', 'none')})"
         )
+    capabilities = report.get("capabilities", {}).get("available_capabilities", ())
+    for capability in capabilities:
+        if capability["id"].startswith("governed-"):
+            print(
+                f"capability: {capability['id']} "
+                f"({capability['install_status']})"
+            )
     for warning in report["warnings"]:
         print(f"warning: {warning}")
     for error in report["errors"]:

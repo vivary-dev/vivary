@@ -32,6 +32,29 @@ class OrientationProofTests(unittest.TestCase):
                 self.assertTrue(fixture["find"]["read_only"])
                 self.assertTrue(fixture["unsafe_boundary_pruned"])
                 self.assertTrue(fixture["find"]["contained_in_fixture"])
+                capabilities = fixture["doctor"]["capabilities"]
+                expected_preset = orientation_proof.EXPECTED_FIXTURE_PRESETS[
+                    fixture["kind"]
+                ]
+                self.assertTrue(
+                    capabilities["reports_match_doctor"],
+                )
+                self.assertEqual(
+                    capabilities["python"]["preset"],
+                    expected_preset,
+                )
+                self.assertEqual(
+                    capabilities["npm"]["preset"],
+                    expected_preset,
+                )
+                self.assertEqual(
+                    set(capabilities["python"]["governed"]),
+                    orientation_proof.GOVERNED_CAPABILITY_IDS,
+                )
+                self.assertEqual(
+                    set(capabilities["npm"]["governed"]),
+                    orientation_proof.GOVERNED_CAPABILITY_IDS,
+                )
             return receipt
 
     def test_brownfield_dry_run_precedes_exact_bounded_apply(self):
@@ -94,6 +117,47 @@ class OrientationProofTests(unittest.TestCase):
         )
         self.assertTrue(fixtures["adopted"]["adopt"]["dry_run_read_only"])
         self.assertTrue(fixtures["adopted"]["adopt"]["idempotent"])
+
+
+    def test_capability_truth_rejects_status_reason_disagreement(self):
+        capabilities = json.loads(
+            json.dumps(
+                orientation_proof.create_vivary.capability_report("coding")
+            )
+        )
+        core = next(
+            row
+            for row in capabilities["available_capabilities"]
+            if row["id"] == "governed-context:core"
+        )
+        core.update(
+            installed=False,
+            install_status="not-installed",
+            reason_codes=[],
+            missing_install=["vivary-core"],
+        )
+
+        with self.assertRaises(orientation_proof.ProofFailure):
+            orientation_proof._require_capability_truth(
+                {"capabilities": capabilities},
+                transport="test",
+                kind="current",
+            )
+
+    def test_capability_truth_rejects_incomplete_static_declarations(self):
+        capabilities = json.loads(
+            json.dumps(
+                orientation_proof.create_vivary.capability_report("coding")
+            )
+        )
+        capabilities["available_capabilities"][0]["label"] = "forged"
+
+        with self.assertRaises(orientation_proof.ProofFailure):
+            orientation_proof._require_capability_truth(
+                {"capabilities": capabilities},
+                transport="test",
+                kind="current",
+            )
 
     def test_fixture_failure_still_writes_a_sanitized_receipt(self):
         with tempfile.TemporaryDirectory(prefix="orientation-proof-failure-") as raw:

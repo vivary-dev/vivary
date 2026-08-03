@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vivary"
-version = "0.1.4"
-description = "Typed memory and gates for AI-agent projects. One install for the full Vivary CLI suite: create-vivary, tropo, ozone, and exo."
+version = "0.1.5"
+description = "Typed memory and gates for AI-agent projects. One install for the full Vivary CLI suite: create-vivary, tropo, strato, ozone, and exo."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -18,8 +18,9 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
 ]
 dependencies = [
-    "create-vivary>=0.3.1",
+    "create-vivary>=0.3.2",
     "vivary-tropo>=0.5.0",
+    "vivary-strato>=0.1.2",
     "vivary-ozone>=0.3.1",
     "vivary-exo>=0.3.0",
 ]
