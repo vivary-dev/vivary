@@ -4,8 +4,7 @@ description: "create-vivary adopt brings Vivary to a repo you already have. Dry-
 date: 2026-07-10
 author: "Jeff Kazzee"
 tags: ["adopt", "release", "trust"]
-draft: true
----
+draft: false---
 
 The single scariest thing a scaffolding tool can do is touch a file you
 already had. Not create a new one, not fail loudly, touch one of yours and get
