@@ -4,8 +4,7 @@ description: "Capture isn't the hard part of a second brain. Retrieval is. What 
 date: 2026-07-20
 author: "Jeff Kazzee"
 tags: ["second-brain", "knowledge", "tropo"]
-draft: true
----
+draft: false---
 
 Almost everyone who tries a second brain starts the same way: they get
 excited about capture. A new app, a new folder structure, a burst of energy
