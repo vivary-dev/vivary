@@ -14,6 +14,35 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: brownfield and memory privacy blockers (#266, #235, #236)] — 2026-08-09
+
+This release-train slice advances unpublished `vivary-tropo` to **0.5.2**,
+`vivary-memory-cognee` to **0.1.2**, `vivary-mcp` to **0.1.1**,
+`create-vivary` / `@vivary/create` to **0.3.4**, and the `vivary` meta-package to
+**0.1.7**. `vivary-core` remains **0.2.7**; published registry versions remain
+unchanged.
+
+### Fixed
+
+- `base.allow_untyped = true` now permits untyped documents: Tropo omits `W201`,
+  validates declared base fields, and ignores fields with no owning type. Setting it
+  to `false` still emits `W201` as an error, and typed documents retain `W202`.
+  [Regression coverage](packages/tropo/tests/test_tropo.py)
+- Cognee Doctor validates `memory.cognee.state_path` before testing provider
+  availability, so an escaping path is `misconfigured` even when Cognee is absent.
+  [Regression coverage](packages/memory-cognee/tests/test_memory_cognee.py)
+- Memory snapshots now reuse Core's fail-closed Git-ignore privacy policy and pass
+  only admitted absolute Markdown paths to Tropo analysis. Built-in and configured
+  private paths remain the floor when Git-ignore matching is disabled.
+  [Differential privacy coverage](packages/memory-cognee/tests/test_memory_cognee.py)
+
+### Changed
+
+- Direct floors are `vivary-tropo>=0.5.2` for MCP and create-vivary,
+  `vivary-core>=0.2.7` plus `vivary-tropo>=0.5.2` for memory-cognee, and
+  `create-vivary>=0.3.4` plus `vivary-tropo>=0.5.2` for the meta-package.
+- Publishing remains a manual human gate.
+
 ## [Unreleased: optional read-only MCP adapter (#206)] — 2026-08-02
 
 Implements [#206](https://github.com/vivary-dev/vivary/issues/206) under the tool
@@ -58,6 +87,10 @@ versions stay unchanged.
   privacy fingerprint after content processing. Core content search likewise rechecks
   the effective tracked-tree ignore policy after fixed-literal Git search and discards
   results if policy changed.
+- On Python 3.11 for Windows, public candidate snapshots now read NTFS change time
+  through an attribute-only handle instead of treating creation time as change time.
+  The [same-size rewrite regression](packages/tropo/tests/test_tropo.py#L2569-L2592)
+  restores the documented race refusal on the package's lowest supported Python.
 - Public enumeration applies cancellation and hard entry ceilings while consuming
   directory iterators, before sorting. Cancellation propagates through ranking,
   validation, content search, graph projection, capsule compilation, and fixed Git
@@ -86,6 +119,10 @@ versions stay unchanged.
   exact capsule scope root, reject Unicode format-control and normalized credential
   obfuscation, and omit every absolute machine path. Exact JSON-escaped wire responses
   refuse rather than truncate when a response or work ceiling is exceeded.
+- The npm trusted-publishing workflow now pins checkout, Python, and Node Actions to
+  reviewed immutable commit SHAs before granting publication identity. The
+  [workflow guard](scripts/check_npm_trusted_publish_workflow.py) rejects those
+  Actions when referenced by mutable version tags.
 
 ### Verification
 

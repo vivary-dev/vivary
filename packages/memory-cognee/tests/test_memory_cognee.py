@@ -7,7 +7,9 @@ import contextlib
 import io
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
 import types
 import tomllib
@@ -21,11 +23,32 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[3]
 PKG = ROOT / "packages" / "memory-cognee"
 TROPO = ROOT / "packages" / "tropo"
+CORE = ROOT / "packages" / "core"
 
 sys.path.insert(0, str(PKG))
 sys.path.insert(0, str(TROPO))
+sys.path.insert(0, str(CORE))
 
 import vivary_cognee  # noqa: E402
+
+
+def _init_git_repo(path: Path) -> None:
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "init.templateDir=",
+            "-C",
+            str(path),
+            "init",
+            "-q",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 @contextmanager
@@ -210,6 +233,7 @@ Verify one login path against the auth module.
     )
     (root / "USER.md").write_text("private identity token\n", encoding="utf-8")
     (root / "MEMORY.md").write_text("private durable memory\n", encoding="utf-8")
+    _init_git_repo(root)
 
 
 class CogneeMemoryAdapterTests(unittest.TestCase):
@@ -248,6 +272,38 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
 
         sent_text = "\n".join(node.text for node in snapshot.nodes)
         self.assertNotIn("strato private sentinel", sent_text)
+
+    def test_disabled_gitignore_keeps_private_floor_without_calling_core_policy(self):
+        with temp_workspace() as root:
+            write_workspace(root)
+            memory_config = root / ".vivary" / "memory.toml"
+            memory_config.write_text(
+                memory_config.read_text(encoding="utf-8").replace(
+                    "respect_gitignore = true",
+                    "respect_gitignore = false",
+                ),
+                encoding="utf-8",
+            )
+            relative_path = "modules/auth/gitignored-but-admitted.md"
+            with (root / ".gitignore").open("a", encoding="utf-8") as gitignore:
+                gitignore.write(f"{relative_path}\n")
+            candidate = root.joinpath(*relative_path.split("/"))
+            candidate.write_text(
+                "---\nproject: demo\nstatus: active\nmodule_area: admitted\n---\n"
+                "# Admitted\n\nGITIGNORE_DISABLED_SENTINEL\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(
+                vivary_cognee,
+                "content_privacy_policy",
+                side_effect=AssertionError("Core Git-ignore policy was called"),
+            ):
+                snapshot = vivary_cognee.build_snapshot(root)
+
+        sent_text = "\n".join(node.text for node in snapshot.nodes)
+        self.assertIn("GITIGNORE_DISABLED_SENTINEL", sent_text)
+        self.assertNotIn("private identity token", sent_text)
 
     def test_private_patterns_are_case_insensitive_on_windows(self):
         with mock.patch.object(vivary_cognee.os, "name", "nt"):
@@ -331,6 +387,116 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
         sent_text = "\n".join(node.text for node in snapshot.nodes)
         self.assertNotIn("parent exception private leak", sent_text)
 
+
+    def test_gitignore_privacy_matches_real_git_for_complex_patterns(self):
+        cases = (
+            (r"modules/secret\ file/", "modules/secret file/index.md"),
+            ("**/secrets", "modules/auth/secrets/index.md"),
+            ("/build", "build/index.md"),
+            ("a/**/b", "a/x/y/b/index.md"),
+        )
+        for pattern, relative_path in cases:
+            with self.subTest(pattern=pattern), temp_workspace() as root:
+                write_workspace(root)
+                with (root / ".gitignore").open("a", encoding="utf-8") as gitignore:
+                    gitignore.write(f"{pattern}\n")
+                candidate = root.joinpath(*relative_path.split("/"))
+                candidate.parent.mkdir(parents=True, exist_ok=True)
+                sentinel = f"PRIVATE_GITIGNORE_SENTINEL_{len(pattern)}"
+                candidate.write_text(
+                    f"# Ignored\n\n{sentinel}\n",
+                    encoding="utf-8",
+                )
+
+                oracle = subprocess.run(
+                    [
+                        "git",
+                        "-c",
+                        "core.fsmonitor=false",
+                        "-C",
+                        str(root),
+                        "check-ignore",
+                        "--no-index",
+                        "--quiet",
+                        "--",
+                        relative_path,
+                    ],
+                    check=False,
+                )
+                self.assertEqual(oracle.returncode, 0)
+
+                tropo = vivary_cognee._import_tropo()
+                analyze = tropo.analyze
+                analyzed_docs = []
+
+                def record_analyzed_docs(*args, **kwargs):
+                    docs = analyze(*args, **kwargs)
+                    analyzed_docs.extend(docs)
+                    return docs
+
+                with mock.patch.object(
+                    tropo,
+                    "analyze",
+                    side_effect=record_analyzed_docs,
+                ):
+                    snapshot = vivary_cognee.build_snapshot(root)
+
+                self.assertNotIn(
+                    sentinel,
+                    "\n".join(node.text for node in snapshot.nodes),
+                )
+                self.assertNotIn(
+                    relative_path,
+                    {node.path for node in snapshot.nodes},
+                )
+                self.assertNotIn(
+                    relative_path,
+                    {_norm_doc.rel.replace("\\", "/") for _norm_doc in analyzed_docs},
+                )
+
+    def test_privacy_policy_failures_precede_candidate_analysis(self):
+        cases = (
+            vivary_cognee.ContentPrivacyPathRefusedError(),
+            vivary_cognee.ContentPrivacyPolicyUnavailableError(),
+        )
+        for error in cases:
+            with self.subTest(error=type(error).__name__), temp_workspace() as root:
+                write_workspace(root)
+                tropo = vivary_cognee._import_tropo()
+                with (
+                    mock.patch.object(
+                        vivary_cognee,
+                        "content_privacy_policy",
+                        side_effect=error,
+                    ),
+                    mock.patch.object(
+                        tropo,
+                        "analyze",
+                        side_effect=AssertionError("candidate bytes were analyzed"),
+                    ),
+                ):
+                    with self.assertRaisesRegex(
+                        vivary_cognee.AdapterError,
+                        "^semantic memory privacy policy unavailable$",
+                    ):
+                        vivary_cognee.build_snapshot(root)
+
+    def test_all_gitignored_candidates_do_not_fall_back_to_workspace_analysis(self):
+        with temp_workspace() as root:
+            write_workspace(root)
+            with (root / ".gitignore").open("a", encoding="utf-8") as gitignore:
+                gitignore.write("*.md\n")
+            tropo = vivary_cognee._import_tropo()
+            with mock.patch.object(
+                tropo,
+                "analyze",
+                side_effect=AssertionError("empty allowlist expanded to workspace"),
+            ):
+                snapshot = vivary_cognee.build_snapshot(root)
+
+        self.assertEqual(snapshot.nodes, [])
+        self.assertEqual(snapshot.edges, [])
+
     def test_dataset_name_is_workspace_bound_even_when_configured(self):
         with temp_workspace() as root:
             write_workspace(root, dataset="shared-prod")
@@ -385,6 +551,14 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
     def test_index_sends_typed_packets_and_writes_manifest(self):
         with temp_workspace() as root:
             write_workspace(root, allow_network=True, allow_without_api_key=True)
+            ignored_sentinel = "PRIVATE_GITIGNORE_PROVIDER_SENTINEL"
+            with (root / ".gitignore").open("a", encoding="utf-8") as gitignore:
+                gitignore.write("modules/auth/ignored.md\n")
+            (root / "modules" / "auth" / "ignored.md").write_text(
+                "---\nproject: demo\nstatus: active\nmodule_area: ignored\n---\n"
+                f"# Ignored\n\n{ignored_sentinel}\n",
+                encoding="utf-8",
+            )
             fake = FakeCognee()
             adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=fake)
 
@@ -400,6 +574,7 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
         self.assertIn("vivary_node_id: auth", sent_text)
         self.assertNotIn("private identity token", sent_text)
         self.assertNotIn("private durable memory", sent_text)
+        self.assertNotIn(ignored_sentinel, sent_text)
         self.assertEqual(len(fake.forget_calls), 1)
         self.assertFalse(fake.forget_calls[0]["memory_only"])
 
@@ -475,9 +650,20 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
             {"text": "stale match\nvivary_node_id: missing-node"},
             {"text": "private match\nvivary_node_id: user"},
             {"text": "opaque untyped chunk with no Vivary marker"},
+            {
+                "text": "PRIVATE_GITIGNORE_RECALL_SENTINEL\n"
+                "vivary_node_id: ignored-node",
+            },
         ]
         with temp_workspace() as root:
             write_workspace(root, allow_network=True, allow_without_api_key=True)
+            with (root / ".gitignore").open("a", encoding="utf-8") as gitignore:
+                gitignore.write("modules/auth/ignored-node.md\n")
+            (root / "modules" / "auth" / "ignored-node.md").write_text(
+                "---\nproject: demo\nstatus: active\nmodule_area: ignored\n---\n"
+                "# Ignored\n\nPRIVATE_GITIGNORE_RECALL_SENTINEL\n",
+                encoding="utf-8",
+            )
             fake = FakeCognee(recall_items=recall_items)
             adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=fake)
             asyncio.run(adapter.index(approved=True))
@@ -489,6 +675,7 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
         self.assertEqual(hits[0].path, "modules/auth/index.md")
         self.assertEqual(hits[0].source, "provider")
         self.assertEqual(hits[0].provider, "cognee")
+        self.assertNotIn("PRIVATE_GITIGNORE_RECALL_SENTINEL", repr(hits))
         self.assertEqual(fake.recall_calls[0]["top_k"], 3)
 
     def test_recall_rejects_zero_k_and_caps_large_k(self):
@@ -658,20 +845,16 @@ allow_network = false
             outside = root.parent / f"outside-{uuid.uuid4().hex}.md"
             outside.write_text("# Outside\n\nsecret\n", encoding="utf-8")
             try:
-                class Doc:
-                    full = str(outside)
-                    rel = "modules/auth/outside.md"
-                    derived = {"id": "outside", "title": "Outside"}
-                    declared = {}
-                    type = "module"
-
                 fake_tropo = types.SimpleNamespace(
-                    ConfigResolver=lambda *args: object(),
+                    ConfigResolver=lambda *args: types.SimpleNamespace(
+                        base=types.SimpleNamespace(exclude=[]),
+                    ),
                     __file__=str(ROOT / "packages" / "tropo" / "tropo.py"),
-                    analyze=lambda *args: [Doc()],
-                    build_graph=lambda docs: (
-                        {"outside": {"path": "modules/auth/outside.md", "type": "module"}},
-                        [],
+                    iter_markdown=lambda *args: [
+                        (str(outside), "modules/auth/outside.md"),
+                    ],
+                    analyze=lambda *args: (_ for _ in ()).throw(
+                        AssertionError("unsafe candidate was analyzed"),
                     ),
                 )
 
@@ -690,20 +873,16 @@ allow_network = false
             except (NotImplementedError, OSError):
                 self.skipTest("filesystem does not permit symlink creation")
 
-            class Doc:
-                full = str(link)
-                rel = "modules/auth/linked-user.md"
-                derived = {"id": "linked-user", "title": "Linked User"}
-                declared = {}
-                type = "module"
-
             fake_tropo = types.SimpleNamespace(
-                ConfigResolver=lambda *args: object(),
+                ConfigResolver=lambda *args: types.SimpleNamespace(
+                    base=types.SimpleNamespace(exclude=[]),
+                ),
                 __file__=str(ROOT / "packages" / "tropo" / "tropo.py"),
-                analyze=lambda *args: [Doc()],
-                build_graph=lambda docs: (
-                    {"linked-user": {"path": "modules/auth/linked-user.md", "type": "module"}},
-                    [],
+                iter_markdown=lambda *args: [
+                    (str(link), "modules/auth/linked-user.md"),
+                ],
+                analyze=lambda *args: (_ for _ in ()).throw(
+                    AssertionError("unsafe candidate was analyzed"),
                 ),
             )
 
@@ -720,20 +899,16 @@ allow_network = false
             except (AttributeError, NotImplementedError, OSError):
                 self.skipTest("filesystem does not permit hardlink creation")
 
-            class Doc:
-                full = str(hard_link)
-                rel = "modules/auth/hard-user.md"
-                derived = {"id": "hard-user", "title": "Hard User"}
-                declared = {}
-                type = "module"
-
             fake_tropo = types.SimpleNamespace(
-                ConfigResolver=lambda *args: object(),
+                ConfigResolver=lambda *args: types.SimpleNamespace(
+                    base=types.SimpleNamespace(exclude=[]),
+                ),
                 __file__=str(ROOT / "packages" / "tropo" / "tropo.py"),
-                analyze=lambda *args: [Doc()],
-                build_graph=lambda docs: (
-                    {"hard-user": {"path": "modules/auth/hard-user.md", "type": "module"}},
-                    [],
+                iter_markdown=lambda *args: [
+                    (str(hard_link), "modules/auth/hard-user.md"),
+                ],
+                analyze=lambda *args: (_ for _ in ()).throw(
+                    AssertionError("unsafe candidate was analyzed"),
                 ),
             )
 
@@ -796,16 +971,38 @@ allow_network = false
 
         self.assertEqual(report["status"], "stale")
 
-    def test_doctor_reports_bad_state_path_without_traceback(self):
+    def test_doctor_reports_bad_state_path_before_provider_or_snapshot_probe(self):
         with temp_workspace() as root:
             outside = root.parent / "outside-cognee-state"
             write_workspace(root, state_path=str(outside).replace("\\", "/"))
-            with mock.patch.object(vivary_cognee, "_cognee_available", return_value=True):
+            with (
+                mock.patch.object(
+                    vivary_cognee,
+                    "_cognee_available",
+                    side_effect=AssertionError("Cognee availability was probed"),
+                ),
+                mock.patch.object(
+                    vivary_cognee,
+                    "_import_cognee",
+                    side_effect=AssertionError("Cognee was imported"),
+                ),
+                mock.patch.object(
+                    vivary_cognee,
+                    "build_snapshot",
+                    side_effect=AssertionError("candidate bytes were analyzed"),
+                ),
+            ):
                 report = vivary_cognee.doctor(root)
 
-        self.assertFalse(report["ok"])
-        self.assertEqual(report["status"], "misconfigured")
-        self.assertIn("state_path", report["detail"])
+        self.assertEqual(
+            report,
+            {
+                "ok": False,
+                "provider": "cognee",
+                "status": "misconfigured",
+                "detail": "memory.cognee.state_path must stay inside the workspace",
+            },
+        )
 
     def test_index_refuses_linked_manifest_target(self):
         with temp_workspace() as root:

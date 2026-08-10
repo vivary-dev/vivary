@@ -1,6 +1,6 @@
 # vivary
 
-The unpublished 0.1.6 source manifest defines one install for the full Vivary CLI
+The unpublished 0.1.7 source manifest defines one install for the full Vivary CLI
 suite. Release verification builds all local wheels. It proves that composition
 without consulting a registry:
 
@@ -20,8 +20,8 @@ The source install pulls every role, each still usable on its own:
 - `ozone` (`vivary-ozone`): graph-aware review and governed evidence verification.
 - `exo` (`vivary-exo`): legacy coordination and bounded governed control.
 
-The unpublished 0.1.6 source line requires `create-vivary>=0.3.3`,
-`vivary-tropo>=0.5.1`, and `vivary-strato>=0.1.2`. It receives `vivary-core`
+The unpublished 0.1.7 source line requires `create-vivary>=0.3.4`,
+`vivary-tropo>=0.5.2`, and `vivary-strato>=0.1.2`. It receives `vivary-core`
 transitively through the role packages rather than owning a duplicate Core floor.
 Ozone's opt-in governed path verifies capsule-bound evidence without writing:
 

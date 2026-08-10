@@ -21,8 +21,8 @@ class VivaryReleaseMetadataTests(unittest.TestCase):
             (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         )["project"]
         self.assertEqual(vivary_cli.__version__, manifest["version"])
-        self.assertIn("create-vivary>=0.3.3", manifest["dependencies"])
-        self.assertIn("vivary-tropo>=0.5.1", manifest["dependencies"])
+        self.assertIn("create-vivary>=0.3.4", manifest["dependencies"])
+        self.assertIn("vivary-tropo>=0.5.2", manifest["dependencies"])
         self.assertIn("vivary-strato>=0.1.2", manifest["dependencies"])
         self.assertIn("vivary-ozone>=0.3.1", manifest["dependencies"])
         self.assertIn("vivary-exo>=0.3.0", manifest["dependencies"])

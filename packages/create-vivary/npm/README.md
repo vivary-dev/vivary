@@ -13,6 +13,9 @@ the governed capability and Doctor reports without adding a JavaScript
 implementation. `create-vivary adopt <path>` uses dry-run by default, and
 `doctor --trend` tracks graph and routing drift in `.vivary/doctor-state.json`.
 
+The unpublished source candidates are `@vivary/create 0.3.4` and
+`create-vivary 0.3.4`; both require `vivary-tropo>=0.5.2`.
+
 **Security hardening:** The 0.2.5 line validates active `.gitignore` rules for `USER.md`,
 `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`; scaffolds private heartbeat report
 storage; and refuses symlinked or out-of-workspace scaffold, storage, and cleanup

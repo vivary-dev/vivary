@@ -767,8 +767,11 @@ tropo query "release truth" --mode semantic --json
 
 ### Strictness (the `check` gate)
 
-`check` is **strict by default** — untyped docs, unknown fields, broken refs, and
-redundant frontmatter all fail it. Relax when you need to:
+`check` is **strict by default** — unknown fields on typed documents, broken refs, and
+redundant frontmatter fail it. Untyped documents are allowed only when
+`[base] allow_untyped = true`; that setting omits `W201`, validates declared base
+fields, and ignores undeclared fields because no type owns them. Relax emitted
+warnings when you need to:
 
 ```bash
 tropo check                 # strict: any warning fails (exit 1)
@@ -780,6 +783,10 @@ Or persistently per vault, in `tropo.toml`: `[base] strict = false`. `--strict` 
 it back on (overrides a lenient config). `strict` is *tighten-only* across nested
 configs — a sub-folder may turn it on, never off.
 
+`allow_untyped = false` emits `W201` as an error. Typed documents retain strict
+`W202` handling regardless of that setting.
+[Behavioral evidence](../packages/tropo/tests/test_tropo.py); verified: 2026-08-09.
+
 ### Finding codes
 
 | Code | Level | Meaning |
@@ -789,12 +796,12 @@ configs — a sub-folder may turn it on, never off.
 | `E101` | error | required field missing for the type |
 | `E102` | error | required field is empty |
 | `E103` | error | field value violates its type spec |
-| `W201` | warn | untyped document (no ancestor folder is a registered type) |
-| `W202` | warn | unknown field for the type (typo? add it to the schema) |
+| `W201` | error | untyped document when `base.allow_untyped = false`; omitted when permission is true |
+| `W202` | warn | unknown field on a typed document (typo? add it to the schema) |
 | `W210` | warn | field equals its derived value (noise — run `tropo fix`) |
 | `W220` | warn | ref points at no document id (broken edge) |
 
-(Under the default strict mode, every `W2xx` fails the check.)
+(Under the default strict mode, every emitted warning fails the check.)
 
 ### Filesystem map (`tropo map`)
 
@@ -869,7 +876,7 @@ Directories at depth 1-2 with >= 5 files (recursive) and no `index.md`/`README.m
 [base]
 derive       = ["id", "title", "created", "updated"]   # never required, never noise
 optional     = { tags = "string-list", status = "string" }   # any doc MAY carry these
-allow_untyped = true     # W201 instead of error for files outside any type root
+allow_untyped = true     # permit docs outside type roots; validate only declared base fields
 strict        = true     # warnings fail check (the opinionated default)
 timezone      = "local"
 
@@ -1425,7 +1432,7 @@ create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writin
 
 ### Capability status (development source)
 
-The 0.3.3 development source reports a fixed Core-and-role inventory and passive MCP
+The 0.3.4 development source reports a fixed Core-and-role inventory and passive MCP
 interoperability status alongside the existing storage, semantic-memory, and preset
 sidecar rows:
 
@@ -1703,7 +1710,7 @@ or missing manifests so provider results cannot outrun Tropo graph truth. Datase
 names include a workspace path hash even when a label is configured. Tropo refuses
 workspace-local `vivary_cognee.py` adapter imports for semantic query mode; installed
 adapters must resolve outside the workspace and current working tree, and must expose
-the hardened `vivary-memory-cognee` `0.1.1+` adapter contract.
+the hardened `vivary-memory-cognee` `0.1.2+` adapter contract.
 
 ```bash
 # Human flow — interactive wizard:
@@ -2471,30 +2478,30 @@ Current scaffold output diverges: it writes `enabled = true` with runtime gates 
 indexes nothing, and makes no provider call, but does not yet meet the approved
 disabled-policy contract.
 
-In the source checkout's unreleased `vivary-memory-cognee` 0.1.1 adapter, privacy
-filtering is owned by `build_snapshot`: built-in private patterns always apply, and
-Git ignore rules apply when `respect_gitignore` (default `true`) is enabled.
-`respect_vivary_private` and `fail_closed` are accepted and type-checked policy fields,
-but they are not current filtering switches. Before path filtering, snapshot
-construction refuses linked, out-of-root, hard-linked, or unstatable source files; it
-raises rather than silently skipping them.
+In the source checkout's unreleased `vivary-memory-cognee` 0.1.2 adapter, privacy
+filtering is owned by `build_snapshot`. Built-in private patterns and
+`memory.privacy.private_paths` always apply. When `respect_gitignore` is `true` (the
+default), the adapter passes only relative Markdown candidates through Core's
+fail-closed `content_privacy_policy` and analyzes only the admitted absolute paths.
+`respect_vivary_private` and `fail_closed` remain accepted and type-checked policy
+fields, not filtering switches. Snapshot construction refuses linked, out-of-root,
+hard-linked, or unstatable source files instead of silently skipping them. [Behavioral
+evidence](../packages/memory-cognee/tests/test_memory_cognee.py); verified: 2026-08-09.
 
 ### Privacy boundary
 
 The source checkout and next `vivary-memory-cognee` release include
-`.strato/private/**` in the built-in floor and compare privacy patterns
+`.strato/private/**` in the built-in floor and compare explicit privacy patterns
 case-insensitively on Windows. The currently published 0.1.0 package lacks that
 built-in `.strato/private/**` entry; its generated Vivary configuration lists the path
-in `memory.privacy.private_paths`, but hand-written or older configurations must add
-it explicitly before indexing.
+in `memory.privacy.private_paths`, but hand-written or older configuration must add it
+explicitly before indexing.
 
-The dependency-free `.gitignore` matcher is not fully Git-equivalent:
-backslash-escaped patterns and some complex `**` or anchored patterns can disagree
-with Git. Until [#236](https://github.com/vivary-dev/vivary/issues/236) lands, do not
-use `respect_gitignore` as the sole privacy boundary for such paths. Add each sensitive
-path to `memory.privacy.private_paths` as an unescaped workspace-relative literal or
-simple glob, and do not approve indexing when privacy depends on unsupported Git
-pattern syntax.
+Git-ignore privacy now uses Core's Git-equivalent policy rather than the adapter's
+former dependency-free approximation. Core executes bounded
+`git check-ignore --no-index` work at the canonical workspace root and fails closed
+when policy cannot be established. Built-in and explicit private paths remain the
+independent privacy floor even when `respect_gitignore` is `false`.
 
 Runtime/index state belongs under `.vivary/memory/` and should be ignored. The adapter
 binds Cognee's data, system, cache, and log roots to the configured `state_path`
@@ -2629,11 +2636,13 @@ availability without importing it, and, when Cognee is available, resolves and
 compares the manifest. It does not construct an adapter or make provider, embedding,
 or LLM calls.
 
-Package unavailability short-circuits manifest and `state_path` resolution. An
-`unavailable` report therefore confirms only that Cognee is configured and absent; it
-does **not** attest that the configured state path is safe. Live adapter operations
-always validate the path before use, and Doctor reports an unsafe path as
-`misconfigured` once Cognee is available.
+Doctor resolves and confines `state_path` before checking provider availability. An
+unsafe path is therefore `misconfigured` whether Cognee is installed or absent, and
+that refusal occurs before Cognee is imported, probed, or called. A safe
+`unavailable` report confirms both that the configured state path stays in the
+workspace and that the package is absent.
+[Doctor regressions](../packages/memory-cognee/tests/test_memory_cognee.py);
+verified: 2026-08-09.
 
 Its current states are:
 
@@ -2641,8 +2650,8 @@ Its current states are:
 |---|---|
 | `disabled` | semantic memory is disabled or its provider is `none` |
 | `not-cognee` | another enabled provider is configured; this adapter does not handle it |
-| `unavailable` | Cognee is configured but its package is not installed; manifest and state-path validation have not run |
-| `misconfigured` | root, config, or snapshot validation failed, or state-path validation failed while Cognee was available |
+| `unavailable` | Cognee is configured, its state path is confined to the workspace, and its package is not installed |
+| `misconfigured` | root, config, snapshot, or state-path validation failed |
 | `stale` | Cognee is available but the manifest is absent, unreadable, or does not match the current snapshot |
 | `healthy` | Cognee is available and the manifest matches the current snapshot |
 
@@ -2696,8 +2705,9 @@ Recommended retrieval order:
 Current adapter safeguards:
 
 - Recall mapping drops a provider item without a stable Vivary node marker or whose
-  node ID is absent from the rebuilt snapshot. A Git-ignored path admitted to the
-  snapshot because of the matcher limitation above is not recovered at this stage.
+  node ID is absent from the freshly rebuilt, privacy-filtered snapshot. Private and
+  Git-ignored documents are therefore ineligible for recall even if a stale provider
+  item names them.
 - If semantic score and graph edges disagree, prefer graph edges for truth and use the
   semantic hit as a lead to inspect.
 - `tropo query --mode semantic` is the shipped optional-provider bridge. It invokes
@@ -5075,7 +5085,7 @@ anything unproven is reported `unknown` rather than guessed.
 declares its own floor in the same commit. The `vivary` meta-package receives Core
 transitively through the role packages instead of declaring a duplicate Core edge.
 Tropo, Strato, Ozone, and Exo own their Core floors. The meta-package owns its five
-component floors, including `create-vivary>=0.3.3`, `vivary-tropo>=0.5.1`, and
+component floors, including `create-vivary>=0.3.4`, `vivary-tropo>=0.5.2`, and
 `vivary-strato>=0.1.2`. One owner per edge avoids version-pinning fights.
 
 **Optional MCP boundary:** `vivary-mcp` is an interoperability adapter, not a layer
@@ -5206,6 +5216,35 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: brownfield and memory privacy blockers (#266, #235, #236)] — 2026-08-09
+
+This release-train slice advances unpublished `vivary-tropo` to **0.5.2**,
+`vivary-memory-cognee` to **0.1.2**, `vivary-mcp` to **0.1.1**,
+`create-vivary` / `@vivary/create` to **0.3.4**, and the `vivary` meta-package to
+**0.1.7**. `vivary-core` remains **0.2.7**; published registry versions remain
+unchanged.
+
+### Fixed
+
+- `base.allow_untyped = true` now permits untyped documents: Tropo omits `W201`,
+  validates declared base fields, and ignores fields with no owning type. Setting it
+  to `false` still emits `W201` as an error, and typed documents retain `W202`.
+  [Regression coverage](packages/tropo/tests/test_tropo.py)
+- Cognee Doctor validates `memory.cognee.state_path` before testing provider
+  availability, so an escaping path is `misconfigured` even when Cognee is absent.
+  [Regression coverage](packages/memory-cognee/tests/test_memory_cognee.py)
+- Memory snapshots now reuse Core's fail-closed Git-ignore privacy policy and pass
+  only admitted absolute Markdown paths to Tropo analysis. Built-in and configured
+  private paths remain the floor when Git-ignore matching is disabled.
+  [Differential privacy coverage](packages/memory-cognee/tests/test_memory_cognee.py)
+
+### Changed
+
+- Direct floors are `vivary-tropo>=0.5.2` for MCP and create-vivary,
+  `vivary-core>=0.2.7` plus `vivary-tropo>=0.5.2` for memory-cognee, and
+  `create-vivary>=0.3.4` plus `vivary-tropo>=0.5.2` for the meta-package.
+- Publishing remains a manual human gate.
+
 ## [Unreleased: optional read-only MCP adapter (#206)] — 2026-08-02
 
 Implements [#206](https://github.com/vivary-dev/vivary/issues/206) under the tool
@@ -5250,6 +5289,10 @@ versions stay unchanged.
   privacy fingerprint after content processing. Core content search likewise rechecks
   the effective tracked-tree ignore policy after fixed-literal Git search and discards
   results if policy changed.
+- On Python 3.11 for Windows, public candidate snapshots now read NTFS change time
+  through an attribute-only handle instead of treating creation time as change time.
+  The [same-size rewrite regression](packages/tropo/tests/test_tropo.py#L2569-L2592)
+  restores the documented race refusal on the package's lowest supported Python.
 - Public enumeration applies cancellation and hard entry ceilings while consuming
   directory iterators, before sorting. Cancellation propagates through ranking,
   validation, content search, graph projection, capsule compilation, and fixed Git
@@ -5278,6 +5321,10 @@ versions stay unchanged.
   exact capsule scope root, reject Unicode format-control and normalized credential
   obfuscation, and omit every absolute machine path. Exact JSON-escaped wire responses
   refuse rather than truncate when a response or work ceiling is exceeded.
+- The npm trusted-publishing workflow now pins checkout, Python, and Node Actions to
+  reviewed immutable commit SHAs before granting publication identity. The
+  [workflow guard](scripts/check_npm_trusted_publish_workflow.py) rejects those
+  Actions when referenced by mutable version tags.
 
 ### Verification
 

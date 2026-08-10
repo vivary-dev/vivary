@@ -28,7 +28,7 @@ from email.message import Message
 from pathlib import Path
 
 
-__version__ = "0.3.3"
+__version__ = "0.3.4"
 
 PRESETS = ("coding", "second-brain", "knowledge-work", "writing")
 
@@ -3400,7 +3400,7 @@ def _safe_cognee_adapter_available(target: Path) -> bool:
         version = importlib_metadata.version("vivary-memory-cognee")
     except importlib_metadata.PackageNotFoundError:
         return False
-    if _version_tuple(version) < (0, 1, 1):
+    if _version_tuple(version) < (0, 1, 2):
         return False
     spec = importlib.util.find_spec("vivary_cognee")
     if spec is None or spec.origin is None:
@@ -3427,7 +3427,7 @@ def _safe_cognee_adapter_available(target: Path) -> bool:
         callable(adapter)
         and adapter_api >= 1
         and getattr(module, "REQUIRES_EXPLICIT_PROVIDER_GATES", None) is True
-        and _version_tuple(getattr(module, "__version__", "")) >= (0, 1, 1)
+        and _version_tuple(getattr(module, "__version__", "")) >= (0, 1, 2)
     )
 
 

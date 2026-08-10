@@ -10,13 +10,12 @@ This package keeps Vivary graph-first:
 - provider state under `.vivary/memory/cognee/` is rebuildable cache.
 - Cognee runtime directories are scoped to the workspace `state_path`.
 
-Source builds and the next package release add `.strato/private/**` to the built-in
-privacy floor and match privacy patterns case-insensitively on Windows. The currently
-published 0.1.0 package relies on `memory.privacy.private_paths` for that path; generated
-Vivary configuration already includes it, while hand-written or older configuration
-must add it explicitly before indexing. The dependency-free Git-ignore matcher still
-has the escaped/complex-pattern limitation tracked in
-[#236](https://github.com/vivary-dev/vivary/issues/236).
+Source candidate `0.1.2` depends directly on `vivary-core>=0.2.7` and
+`vivary-tropo>=0.5.2`. It uses Vivary Core's fail-closed content-privacy policy
+when Git-ignore privacy is enabled. The currently published `0.1.0` package relies
+on `memory.privacy.private_paths` for `.strato/private/**`; generated Vivary
+configuration already includes it, while hand-written or older configuration must
+add it explicitly before indexing.
 
 Install this package only when a workspace explicitly opts into Cognee:
 

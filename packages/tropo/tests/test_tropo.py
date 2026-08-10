@@ -408,8 +408,7 @@ def test_check_json_has_summary():
 # --- opinionated check: strict by default ----------------------------------
 
 def _bad_vault(td):
-    """A vault with one broken ref (W220), one unknown field (W202), and one
-    untyped doc (W201) — three warnings, no hard errors."""
+    """A vault with one broken ref (W220) and one typed unknown field (W202)."""
     Path(td, "tropo.toml").write_text(
         '[base]\nallow_untyped = true\n'
         '[types.module]\nfolder = "modules"\n'
@@ -428,6 +427,86 @@ def _check_rc(root, strict=False, lenient=False):
                               json=False, quiet=False)
     with contextlib.redirect_stdout(io.StringIO()):
         return tropo.cmd_check(args, res(root))
+
+def _write_brownfield_fixture(root, *, allow_untyped, typed=False):
+    type_config = (
+        '\n[types.scratch]\nfolder = "scratch"\n'
+        if typed
+        else ""
+    )
+    Path(root, "tropo.toml").write_text(
+        "[base]\n"
+        f"allow_untyped = {str(allow_untyped).lower()}\n"
+        'strict = true\n'
+        "[base.required]\n"
+        'status = "enum:active|inactive"\n'
+        f"{type_config}",
+        encoding="utf-8",
+    )
+    Path(root, "scratch").mkdir()
+    Path(root, "scratch", "example.md").write_text(
+        "---\n"
+        "type: foo\n"
+        "status: active\n"
+        "---\n"
+        "\n"
+        "# Example\n",
+        encoding="utf-8",
+    )
+
+
+def _legacy_findings(root):
+    return [
+        finding
+        for doc in tropo.analyze(str(root), [], res(str(root)))
+        for finding in doc.findings
+    ]
+
+
+def test_allow_untyped_true_permits_exact_brownfield_reproduction(tmp_path):
+    _write_brownfield_fixture(tmp_path, allow_untyped=True)
+    docs = tropo.analyze(str(tmp_path), [], res(str(tmp_path)))
+    assert len(docs) == 1
+    assert docs[0].declared["status"] == "active"
+    assert {finding.code for finding in docs[0].findings}.isdisjoint({"W201", "W202"})
+    assert _check_rc(str(tmp_path)) == 0
+
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    checked = tropo.check_workspace(root, allowlist=[root])
+    assert checked["complete"] is True
+    assert checked["findings"] == []
+    assert checked["errors"] == checked["warnings"] == 0
+
+
+def test_allow_untyped_false_retains_w201_error(tmp_path):
+    _write_brownfield_fixture(tmp_path, allow_untyped=False)
+    findings = _legacy_findings(tmp_path)
+    assert [(finding.level, finding.code) for finding in findings] == [
+        ("error", "W201")
+    ]
+
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    checked = tropo.check_workspace(root, allowlist=[root])
+    assert [(row["level"], row["code"]) for row in checked["findings"]] == [
+        ("error", "W201")
+    ]
+
+
+def test_typed_document_retains_w202_for_unknown_field(tmp_path):
+    _write_brownfield_fixture(tmp_path, allow_untyped=True, typed=True)
+    findings = _legacy_findings(tmp_path)
+    assert [(finding.level, finding.code) for finding in findings] == [
+        ("warning", "W202")
+    ]
+
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    checked = tropo.check_workspace(root, allowlist=[root])
+    assert [(row["level"], row["code"]) for row in checked["findings"]] == [
+        ("warning", "W202")
+    ]
 
 
 def test_check_is_strict_by_default():
@@ -453,7 +532,7 @@ def test_check_quiet_hides_warning_codes_after_strict_promotion():
         out = buf.getvalue()
         assert rc == 1
         assert "W201" not in out and "W202" not in out and "W220" not in out
-        assert "3 error(s)" in out
+        assert "2 error(s)" in out
 
 
 def test_check_strict_config_false_relaxes_and_flag_overrides():

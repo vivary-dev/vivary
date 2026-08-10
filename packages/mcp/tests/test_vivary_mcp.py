@@ -1,5 +1,6 @@
 from __future__ import annotations
 import importlib.util
+import tomllib
 
 import asyncio
 import io
@@ -114,6 +115,13 @@ def test_contract_pins_current_protocol_schema_and_unrun_harness(adapter):
         "vivary_check",
         "vivary_capsule",
     )
+
+def test_package_identity_matches_candidate_manifest(adapter):
+    manifest = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
+        "project"
+    ]
+    assert adapter.__version__ == manifest["version"] == "0.1.1"
+    assert "vivary-tropo>=0.5.2" in manifest["dependencies"]
 
 
 def test_all_input_schemas_are_closed_local_draft_2020_12_objects(adapter):

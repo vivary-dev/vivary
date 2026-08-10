@@ -10,6 +10,35 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: brownfield and memory privacy blockers (#266, #235, #236)] — 2026-08-09
+
+This release-train slice advances unpublished `vivary-tropo` to **0.5.2**,
+`vivary-memory-cognee` to **0.1.2**, `vivary-mcp` to **0.1.1**,
+`create-vivary` / `@vivary/create` to **0.3.4**, and the `vivary` meta-package to
+**0.1.7**. `vivary-core` remains **0.2.7**; published registry versions remain
+unchanged.
+
+### Fixed
+
+- `base.allow_untyped = true` now permits untyped documents: Tropo omits `W201`,
+  validates declared base fields, and ignores fields with no owning type. Setting it
+  to `false` still emits `W201` as an error, and typed documents retain `W202`.
+  [Regression coverage](packages/tropo/tests/test_tropo.py)
+- Cognee Doctor validates `memory.cognee.state_path` before testing provider
+  availability, so an escaping path is `misconfigured` even when Cognee is absent.
+  [Regression coverage](packages/memory-cognee/tests/test_memory_cognee.py)
+- Memory snapshots now reuse Core's fail-closed Git-ignore privacy policy and pass
+  only admitted absolute Markdown paths to Tropo analysis. Built-in and configured
+  private paths remain the floor when Git-ignore matching is disabled.
+  [Differential privacy coverage](packages/memory-cognee/tests/test_memory_cognee.py)
+
+### Changed
+
+- Direct floors are `vivary-tropo>=0.5.2` for MCP and create-vivary,
+  `vivary-core>=0.2.7` plus `vivary-tropo>=0.5.2` for memory-cognee, and
+  `create-vivary>=0.3.4` plus `vivary-tropo>=0.5.2` for the meta-package.
+- Publishing remains a manual human gate.
+
 ## [Unreleased: optional read-only MCP adapter (#206)] — 2026-08-02
 
 Implements [#206](https://github.com/vivary-dev/vivary/issues/206) under the tool

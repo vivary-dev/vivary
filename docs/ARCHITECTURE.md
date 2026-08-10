@@ -176,7 +176,7 @@ anything unproven is reported `unknown` rather than guessed.
 declares its own floor in the same commit. The `vivary` meta-package receives Core
 transitively through the role packages instead of declaring a duplicate Core edge.
 Tropo, Strato, Ozone, and Exo own their Core floors. The meta-package owns its five
-component floors, including `create-vivary>=0.3.3`, `vivary-tropo>=0.5.1`, and
+component floors, including `create-vivary>=0.3.4`, `vivary-tropo>=0.5.2`, and
 `vivary-strato>=0.1.2`. One owner per edge avoids version-pinning fights.
 
 **Optional MCP boundary:** `vivary-mcp` is an interoperability adapter, not a layer

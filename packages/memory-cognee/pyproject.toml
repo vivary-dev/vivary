@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vivary-memory-cognee"
-version = "0.1.1"
+version = "0.1.2"
 description = "Optional Cognee adapter for Vivary typed memory recall."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,7 +19,8 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "vivary-tropo>=0.3.0",
+    "vivary-core>=0.2.7",
+    "vivary-tropo>=0.5.2",
     "cognee>=1.2.2",
 ]
 

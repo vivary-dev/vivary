@@ -258,8 +258,11 @@ tropo query "release truth" --mode semantic --json
 
 ### Strictness (the `check` gate)
 
-`check` is **strict by default** — untyped docs, unknown fields, broken refs, and
-redundant frontmatter all fail it. Relax when you need to:
+`check` is **strict by default** — unknown fields on typed documents, broken refs, and
+redundant frontmatter fail it. Untyped documents are allowed only when
+`[base] allow_untyped = true`; that setting omits `W201`, validates declared base
+fields, and ignores undeclared fields because no type owns them. Relax emitted
+warnings when you need to:
 
 ```bash
 tropo check                 # strict: any warning fails (exit 1)
@@ -271,6 +274,10 @@ Or persistently per vault, in `tropo.toml`: `[base] strict = false`. `--strict` 
 it back on (overrides a lenient config). `strict` is *tighten-only* across nested
 configs — a sub-folder may turn it on, never off.
 
+`allow_untyped = false` emits `W201` as an error. Typed documents retain strict
+`W202` handling regardless of that setting.
+[Behavioral evidence](../packages/tropo/tests/test_tropo.py); verified: 2026-08-09.
+
 ### Finding codes
 
 | Code | Level | Meaning |
@@ -280,12 +287,12 @@ configs — a sub-folder may turn it on, never off.
 | `E101` | error | required field missing for the type |
 | `E102` | error | required field is empty |
 | `E103` | error | field value violates its type spec |
-| `W201` | warn | untyped document (no ancestor folder is a registered type) |
-| `W202` | warn | unknown field for the type (typo? add it to the schema) |
+| `W201` | error | untyped document when `base.allow_untyped = false`; omitted when permission is true |
+| `W202` | warn | unknown field on a typed document (typo? add it to the schema) |
 | `W210` | warn | field equals its derived value (noise — run `tropo fix`) |
 | `W220` | warn | ref points at no document id (broken edge) |
 
-(Under the default strict mode, every `W2xx` fails the check.)
+(Under the default strict mode, every emitted warning fails the check.)
 
 ### Filesystem map (`tropo map`)
 
@@ -360,7 +367,7 @@ Directories at depth 1-2 with >= 5 files (recursive) and no `index.md`/`README.m
 [base]
 derive       = ["id", "title", "created", "updated"]   # never required, never noise
 optional     = { tags = "string-list", status = "string" }   # any doc MAY carry these
-allow_untyped = true     # W201 instead of error for files outside any type root
+allow_untyped = true     # permit docs outside type roots; validate only declared base fields
 strict        = true     # warnings fail check (the opinionated default)
 timezone      = "local"
 
@@ -916,7 +923,7 @@ create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writin
 
 ### Capability status (development source)
 
-The 0.3.3 development source reports a fixed Core-and-role inventory and passive MCP
+The 0.3.4 development source reports a fixed Core-and-role inventory and passive MCP
 interoperability status alongside the existing storage, semantic-memory, and preset
 sidecar rows:
 
@@ -1194,7 +1201,7 @@ or missing manifests so provider results cannot outrun Tropo graph truth. Datase
 names include a workspace path hash even when a label is configured. Tropo refuses
 workspace-local `vivary_cognee.py` adapter imports for semantic query mode; installed
 adapters must resolve outside the workspace and current working tree, and must expose
-the hardened `vivary-memory-cognee` `0.1.1+` adapter contract.
+the hardened `vivary-memory-cognee` `0.1.2+` adapter contract.
 
 ```bash
 # Human flow — interactive wizard:

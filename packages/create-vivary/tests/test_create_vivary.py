@@ -3796,6 +3796,10 @@ class VersionParityTests(unittest.TestCase):
         )
         npm = json.loads((root / "npm" / "package.json").read_text(encoding="utf-8"))
         self.assertEqual(npm["version"], declared, "npm package.json must stay in lockstep")
+        manifest = tomllib.loads(
+            (root / "pyproject.toml").read_text(encoding="utf-8")
+        )["project"]
+        self.assertIn("vivary-tropo>=0.5.2", manifest["dependencies"])
 
     def test_governed_install_hints_match_role_manifests(self):
         import tomllib
@@ -3948,7 +3952,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         self._write_distribution(
             root,
             "vivary-tropo",
-            "0.5.1",
+            "0.5.2",
             "tropo",
             requirements=(
                 "vivary-core>=0.2.7",
@@ -3994,7 +3998,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         self._write_distribution(
             root,
             "vivary-tropo",
-            "0.5.1",
+            "0.5.2",
             "tropo",
             requirements=("vivary-core>=0.2.7",),
             script="tropo",
@@ -4010,9 +4014,9 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         self._write_distribution(
             root,
             "vivary-mcp",
-            "0.1.0",
+            "0.1.1",
             "vivary_mcp",
-            requirements=("vivary-tropo>=0.5.1", "mcp==2.0.0"),
+            requirements=("vivary-tropo>=0.5.2", "mcp==2.0.0"),
             script="vivary-mcp",
             package=True,
         )
@@ -4280,7 +4284,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
                 if mutation == "missing":
                     launcher.unlink()
                 else:
-                    record = root / "vivary_tropo-0.5.1.dist-info" / "RECORD"
+                    record = root / "vivary_tropo-0.5.2.dist-info" / "RECORD"
                     record.write_text(
                         "".join(
                             line
@@ -4315,7 +4319,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
     def test_posix_launcher_record_does_not_treat_backslash_as_separator(self):
         with temp_workspace() as root:
             self._write_governed_install(root)
-            record = root / "vivary_tropo-0.5.1.dist-info" / "RECORD"
+            record = root / "vivary_tropo-0.5.2.dist-info" / "RECORD"
             record.write_text(
                 record.read_text(encoding="utf-8").replace(
                     ".scripts/tropo,",
@@ -4345,7 +4349,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         for mutation in ("one-column", "vertical-tab"):
             with self.subTest(mutation=mutation), temp_workspace() as root:
                 self._write_governed_install(root)
-                record = root / "vivary_tropo-0.5.1.dist-info" / "RECORD"
+                record = root / "vivary_tropo-0.5.2.dist-info" / "RECORD"
                 content = record.read_text(encoding="utf-8")
                 if mutation == "one-column":
                     first, *remaining = content.splitlines()
@@ -4406,7 +4410,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             self._write_distribution(
                 root,
                 "vivary-tropo",
-                "0.5.1",
+                "0.5.2",
                 "tropo",
                 requirements=("vivary-core>=0.2.7",),
                 script="tropo",
@@ -4423,7 +4427,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             tropo_metadata.write_text(
                 "Metadata-Version: 2.3\n"
                 "Name: vivary-tropo\n"
-                "Version: 0.5.1\n"
+                "Version: 0.5.2\n"
                 "Requires-Python: >=3.11\n",
                 encoding="utf-8",
             )

@@ -112,7 +112,7 @@ if os.name == "nt":
     _PUBLIC_FILE_SHARE_ALL = 0x00000001 | 0x00000002 | 0x00000004
     _PUBLIC_OPEN_EXISTING = 3
 
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
 RECEIPT_SCHEMA = "vivary.run_receipt.v1"
 COMMANDS = (
@@ -566,11 +566,20 @@ def _merge_config(base, add):
     """Compose a partial config `add` onto `base` (tighten-only)."""
     b_base, a_base = base.setdefault("base", {}), add.get("base", {})
     b_base.setdefault("derive", [])
+    b_base.setdefault("required", {})
     b_base.setdefault("optional", {})
     for d in a_base.get("derive", []):
         if d not in b_base["derive"]:
             b_base["derive"].append(d)
+    for f, spec in (a_base.get("required") or {}).items():
+        if f in b_base["optional"]:
+            del b_base["optional"][f]
+        if f in b_base["required"] and not _spec_tightens(b_base["required"][f], spec):
+            raise ConfigError(f"base field {f!r}: {spec!r} loosens {b_base['required'][f]!r}")
+        b_base["required"][f] = spec
     for f, spec in (a_base.get("optional") or {}).items():
+        if f in b_base["required"]:
+            raise ConfigError(f"base field {f!r}: required->optional is a loosening")
         if f in b_base["optional"] and not _spec_tightens(b_base["optional"][f], spec):
             raise ConfigError(f"base field {f!r}: {spec!r} loosens {b_base['optional'][f]!r}")
         b_base["optional"][f] = spec
@@ -636,6 +645,7 @@ class Config:
         self.root = root
         base = data.get("base", {})
         self.derive = base.get("derive", [])
+        self.base_required = base.get("required", {})
         self.base_optional = base.get("optional", {})
         self.allow_untyped = base.get("allow_untyped", True)
         self.strict = base.get("strict", True)
@@ -652,14 +662,16 @@ class Config:
                 self.folder_map[folder] = name
 
     def fields_for(self, type_name):
+        required = dict(self.base_required)
         known = dict(self.base_optional)
+        known.update(required)
         for d in self.derive:
             known[d] = DERIVED_SPECS.get(d, "any")
-        required = {}
         t = self.types.get(type_name)
         if t:
-            required = dict(t.get("required", {}))
-            known.update(required)
+            type_required = dict(t.get("required", {}))
+            required.update(type_required)
+            known.update(type_required)
             known.update(t.get("optional", {}))
         return required, known
 
@@ -952,9 +964,9 @@ def analyze_file(full, rel, config, *, text=None, use_git_dates=True):
         return key_lines.get(k, 1) + 1
 
     doc.type = type_for(full, config)
-    if doc.type is None:
+    if doc.type is None and not config.allow_untyped:
         doc.findings.append(Finding(
-            rel, 1, "warning" if config.allow_untyped else "error", "W201",
+            rel, 1, "error", "W201",
             "untyped document (no ancestor folder is a registered type)"))
 
     required, known = config.fields_for(doc.type)
@@ -976,9 +988,10 @@ def analyze_file(full, rel, config, *, text=None, use_git_dates=True):
             continue
         spec = known.get(key)
         if spec is None:
-            doc.findings.append(Finding(
-                rel, line_of(key), "warning", "W202",
-                f"unknown field {key!r}" + (f" for type {doc.type!r}" if doc.type else "")))
+            if doc.type is not None:
+                doc.findings.append(Finding(
+                    rel, line_of(key), "warning", "W202",
+                    f"unknown field {key!r} for type {doc.type!r}"))
             continue
         if spec in ("ref", "ref-list") and value is not None:
             targets = value if isinstance(value, list) else [value]
@@ -2895,10 +2908,11 @@ def _public_config_shape_is_safe(raw):
         or any(not _public_safe_text(value, 128) for value in base["derive"])
     ):
         return False
-    if "optional" in base and (
-        type(base["optional"]) is not dict or len(base["optional"]) > 128
-    ):
-        return False
+    for field_name in ("required", "optional"):
+        if field_name in base and (
+            type(base[field_name]) is not dict or len(base[field_name]) > 128
+        ):
+            return False
     for name, definition in types.items():
         if not _public_safe_text(name, 128) or type(definition) is not dict:
             return False
@@ -3044,12 +3058,12 @@ def _public_analyze_document(full, rel, config, text, info, *, collect, finding_
         return value + 1 if isinstance(value, int) else 1
 
     doc.type = type_for(full, config)
-    if doc.type is None:
+    if doc.type is None and not config.allow_untyped:
         _public_add_finding(
             doc,
             state,
             finding_state,
-            "warning" if config.allow_untyped else "error",
+            "error",
             "W201",
             1,
         )
@@ -3067,7 +3081,15 @@ def _public_analyze_document(full, rel, config, text, info, *, collect, finding_
             continue
         spec = known.get(key)
         if spec is None:
-            _public_add_finding(doc, state, finding_state, "warning", "W202", line_of(key))
+            if doc.type is not None:
+                _public_add_finding(
+                    doc,
+                    state,
+                    finding_state,
+                    "warning",
+                    "W202",
+                    line_of(key),
+                )
             continue
         if spec in ("ref", "ref-list") and value is not None:
             targets = value if isinstance(value, list) else [value]

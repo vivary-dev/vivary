@@ -44,6 +44,9 @@ create-vivary adopt .
 `@vivary/create` npm launcher forwards argv unchanged to this Python CLI, which owns
 that command recognition and normalization; both packages are versioned in lockstep.
 
+The unpublished source candidates are `create-vivary 0.3.4` and
+`@vivary/create 0.3.4`; both require `vivary-tropo>=0.5.2`.
+
 Presets share the same agent OS shell, then seed a different starter graph. Each
 starter module is generated as `modules/<id>/index.md` so agents route through a small
 module index before opening deeper context:

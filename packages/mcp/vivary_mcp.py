@@ -32,7 +32,7 @@ from mcp.types import (
     ToolAnnotations,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 PROTOCOL_VERSION = "2026-07-28"
 MCP_SCHEMA_REVISION = "mcp-types==2.0.0"
