@@ -281,7 +281,7 @@ fail-closed `content_privacy_policy` and analyzes only the admitted absolute pat
 `respect_vivary_private` and `fail_closed` remain accepted and type-checked policy
 fields, not filtering switches. Snapshot construction refuses linked, out-of-root,
 hard-linked, or unstatable source files instead of silently skipping them. [Behavioral
-evidence](../packages/memory-cognee/tests/test_memory_cognee.py); verified: 2026-08-09.
+evidence](https://github.com/vivary-dev/vivary/blob/dev/packages/memory-cognee/tests/test_memory_cognee.py); verified: 2026-08-09.
 
 ### Privacy boundary
 
@@ -436,7 +436,7 @@ unsafe path is therefore `misconfigured` whether Cognee is installed or absent, 
 that refusal occurs before Cognee is imported, probed, or called. A safe
 `unavailable` report confirms both that the configured state path stays in the
 workspace and that the package is absent.
-[Doctor regressions](../packages/memory-cognee/tests/test_memory_cognee.py);
+[Doctor regressions](https://github.com/vivary-dev/vivary/blob/dev/packages/memory-cognee/tests/test_memory_cognee.py);
 verified: 2026-08-09.
 
 Its current states are:

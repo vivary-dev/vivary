@@ -23,14 +23,30 @@ unchanged.
 - `base.allow_untyped = true` now permits untyped documents: Tropo omits `W201`,
   validates declared base fields, and ignores fields with no owning type. Setting it
   to `false` still emits `W201` as an error, and typed documents retain `W202`.
-  [Regression coverage](packages/tropo/tests/test_tropo.py)
+  [Regression coverage](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py)
 - Cognee Doctor validates `memory.cognee.state_path` before testing provider
   availability, so an escaping path is `misconfigured` even when Cognee is absent.
-  [Regression coverage](packages/memory-cognee/tests/test_memory_cognee.py)
+  [Regression coverage](https://github.com/vivary-dev/vivary/blob/dev/packages/memory-cognee/tests/test_memory_cognee.py)
 - Memory snapshots now reuse Core's fail-closed Git-ignore privacy policy and pass
   only admitted absolute Markdown paths to Tropo analysis. Built-in and configured
   private paths remain the floor when Git-ignore matching is disabled.
-  [Differential privacy coverage](packages/memory-cognee/tests/test_memory_cognee.py)
+  [Differential privacy coverage](https://github.com/vivary-dev/vivary/blob/dev/packages/memory-cognee/tests/test_memory_cognee.py)
+
+### Security
+
+- The site CI job now runs blocking `npm audit --audit-level=high` immediately after
+  `npm ci`. HIGH and CRITICAL advisories block; MODERATE findings remain visible but
+  do not block. This threshold catches release-threatening dependency defects while
+  reducing unrelated advisory churn. If the live advisory database makes an unrelated
+  PR red, maintainers open a dependency-remediation slice and preserve the gate rather
+  than skipping, weakening, or marking it non-blocking.
+- Red control: the `7a43117^` lockfile pinned PostCSS 8.5.16 and SVGO 4.0.1; the
+  blocking audit exited 1 with four HIGH findings, including those two packages.
+  Green candidate: after reviewed transitive lock updates to `js-yaml` 4.3.1 and
+  `nanoid` 3.3.18, the same audit reported zero vulnerabilities. The site behavior
+  suite, production build, and link check then passed. [CI gate](https://github.com/vivary-dev/vivary/blob/dev/.github/workflows/ci.yml);
+  [decision record](https://github.com/vivary-dev/vivary/issues/232);
+  verified: 2026-08-09.
 
 ### Changed
 
@@ -85,7 +101,7 @@ versions stay unchanged.
   results if policy changed.
 - On Python 3.11 for Windows, public candidate snapshots now read NTFS change time
   through an attribute-only handle instead of treating creation time as change time.
-  The [same-size rewrite regression](packages/tropo/tests/test_tropo.py#L2569-L2592)
+  The [same-size rewrite regression](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py#L2569-L2592)
   restores the documented race refusal on the package's lowest supported Python.
 - Public enumeration applies cancellation and hard entry ceilings while consuming
   directory iterators, before sorting. Cancellation propagates through ranking,
@@ -117,7 +133,7 @@ versions stay unchanged.
   refuse rather than truncate when a response or work ceiling is exceeded.
 - The npm trusted-publishing workflow now pins checkout, Python, and Node Actions to
   reviewed immutable commit SHAs before granting publication identity. The
-  [workflow guard](scripts/check_npm_trusted_publish_workflow.py) rejects those
+  [workflow guard](https://github.com/vivary-dev/vivary/blob/dev/scripts/check_npm_trusted_publish_workflow.py) rejects those
   Actions when referenced by mutable version tags.
 
 ### Verification

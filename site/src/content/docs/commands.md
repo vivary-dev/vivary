@@ -276,7 +276,7 @@ configs — a sub-folder may turn it on, never off.
 
 `allow_untyped = false` emits `W201` as an error. Typed documents retain strict
 `W202` handling regardless of that setting.
-[Behavioral evidence](../packages/tropo/tests/test_tropo.py); verified: 2026-08-09.
+[Behavioral evidence](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py); verified: 2026-08-09.
 
 ### Finding codes
 

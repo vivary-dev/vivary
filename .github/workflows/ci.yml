@@ -704,6 +704,9 @@ jobs:
       - name: install
         run: npm ci
         working-directory: site
+      - name: audit high and critical site dependencies
+        run: npm audit --audit-level=high
+        working-directory: site
       - name: site behavior and information architecture tests
         run: npm run test:site
         working-directory: site
