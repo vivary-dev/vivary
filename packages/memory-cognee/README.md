@@ -16,6 +16,8 @@ when Git-ignore privacy is enabled. The currently published `0.1.0` package reli
 on `memory.privacy.private_paths` for `.strato/private/**`; generated Vivary
 configuration already includes it, while hand-written or older configuration must
 add it explicitly before indexing.
+Source: [`pyproject.toml`](pyproject.toml); published-version reference:
+[PyPI](https://pypi.org/project/vivary-memory-cognee/); verified: 2026-08-09.
 
 Install this package only when a workspace explicitly opts into Cognee:
 

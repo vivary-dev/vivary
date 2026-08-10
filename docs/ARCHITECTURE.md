@@ -63,17 +63,35 @@ default preset path. See [Optional semantic memory](SEMANTIC-MEMORY.md).
 
 ## 3. The layer model
 
-A vertical column. Each layer is a standalone module that reads/writes the same graph
-and obeys the same convention. Published CLIs are thin. Strato's agent-OS templates
-remain bundled in generated workspaces, while its new Python facade is declared as the
-unpublished `vivary-strato` source package during development.
+The role packages share Core contracts but keep distinct authority. Strato's agent-OS
+templates remain bundled in generated workspaces, while its Python facade is declared
+as the unpublished `vivary-strato` source package. Bellamente memory and MCP remain
+optional adapters, outside the baseline.
 
+```mermaid
+flowchart TB
+    Core["vivary-core<br/>pure governed-context contracts"]
+    Tropo["Tropo<br/>observe · graph · retrieve"]
+    Strato["Strato<br/>decide · request gates"]
+    Ozone["Ozone<br/>verify · propose repairs"]
+    Exo["Exo<br/>project control state"]
+    Memory["Bellamente / memory-cognee<br/>recall candidates · caller-owned persistence"]
+    MCP["vivary-mcp<br/>four read-only local projections"]
+
+    Tropo -->|compile context| Core
+    Strato -->|evaluate policy| Core
+    Ozone -->|verify evidence| Core
+    Exo -->|derive transitions| Core
+    Memory -->|classify and propose| Core
+    Memory -->|consume typed nodes| Tropo
+    MCP -->|bounded public producers| Tropo
 ```
-        exo      ── multi-agent orchestration            (outermost, optional)
-       ozone     ── review: code + editorial / gates     (protective filter, optional)
-       strato    ── agent OS: state · memory · loop · gates · self-improvement   (BASELINE)
-       tropo     ── typed knowledge graph: what's true   (dense foundation, BASELINE)
-```
+
+Arrows mean “uses,” not “controls.” Core performs pure validation and projection;
+callers retain clocks, execution, persistence, and human approval. The behavior is
+covered by the [Core contract suite](https://github.com/vivary-dev/vivary/tree/dev/packages/core/tests),
+the [role suites](https://github.com/vivary-dev/vivary/tree/dev/packages), and the
+[MCP adapter suite](https://github.com/vivary-dev/vivary/tree/dev/packages/mcp/tests).
 
 - **tropo** (troposphere) — the dense, living foundation. Typed frontmatter →
   typed graph → search/navigation. Ground truth. *(ported from loam)*
@@ -99,11 +117,38 @@ that drift. Tropo, Strato, Ozone, and Exo use this seam in the development sourc
 It is a library, not a layer and not a CLI. Nothing about the baseline changes
 because it exists: you still install and run `tropo`, `strato`, `ozone`, `exo`.
 
+### Package dependency map
+
+This map shows direct source-manifest dependencies; omitted arrows are deliberately
+absent. In particular, the `vivary` meta-package receives Core transitively, while MCP
+and memory remain optional and outside that meta-package.
+
+```mermaid
+flowchart BT
+    core["vivary-core"]
+    tropo["vivary-tropo"] --> core
+    strato["vivary-strato"] --> core
+    ozone["vivary-ozone"] --> core
+    ozone --> tropo
+    exo["vivary-exo"] --> core
+    exo --> tropo
+    memory["vivary-memory-cognee"] --> core
+    memory --> tropo
+    mcp["vivary-mcp"] --> tropo
+    mcp --> sdk["official MCP SDK"]
+    create["create-vivary"] --> tropo
+    npm["@vivary/create"] -. installs / dispatches .-> create
+    suite["vivary meta-package"] --> create
+    suite --> tropo
+    suite --> strato
+    suite --> ozone
+    suite --> exo
 ```
-   exo · ozone · strato · tropo      ── the layers, each with its own CLI
-   ─────────────────────────────
-          vivary-core               ── the seam they share (library, no CLI)
-```
+
+Exact floors and source versions live only in the
+[package manifests](https://github.com/vivary-dev/vivary/tree/dev/packages); the
+[root release status](../README.md#release-status) distinguishes those source versions
+from registry truth. The map was checked against those manifests on **2026-08-09**.
 
 What it owns:
 

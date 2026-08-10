@@ -46,6 +46,8 @@ that command recognition and normalization; both packages are versioned in locks
 
 The unpublished source candidates are `create-vivary 0.3.4` and
 `@vivary/create 0.3.4`; both require `vivary-tropo>=0.5.2`.
+Source: [`pyproject.toml`](pyproject.toml) and
+[`npm/package.json`](npm/package.json); verified: 2026-08-09.
 
 Presets share the same agent OS shell, then seed a different starter graph. Each
 starter module is generated as `modules/<id>/index.md` so agents route through a small

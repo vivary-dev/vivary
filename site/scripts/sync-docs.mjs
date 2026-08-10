@@ -25,6 +25,7 @@ const pages = [
   ['GETTING-STARTED', 'getting-started', 'Getting started', 'Install Vivary and run your first agent workspace.'],
   ['WALKTHROUGH', 'walkthrough', 'Getting started proof', 'A public, generic product walkthrough showing Vivary scaffold, health, review, coordination, and impact checks.'],
   ['COMMANDS', 'commands', 'Command reference', 'Every CLI across Vivary: tropo, strato, ozone, exo, create-vivary, and optional adapters.'],
+  ['LEARN-BY-DOING', 'learn-by-doing', 'Learn by doing', 'A concise, evidence-led path to inspecting Vivary, previewing additive adoption, and understanding governed context.'],
   ['MCP', 'mcp', 'MCP adapter', 'Optional local read-only MCP adapter contract, tools, privacy boundary, and verification.'],
   ['SKILLS', 'skills', 'Agent skills', 'The strato, tropo, and loops skills that operate a Vivary workspace.'],
   ['ACTIVE-CONTEXT', 'active-context', 'Active context', 'Optional CocoIndex-code sidecar guidance for semantic code retrieval.'],
@@ -35,6 +36,8 @@ const pages = [
   ['SIGNALS', 'signals', 'Public signals', 'Public npm, PyPI, and GitHub metrics snapshots.'],
   ['RELEASE-WORKFLOW', 'release-workflow', 'Release workflow', 'End-of-update checklist for Vivary release truth, docs, publishing, and post copy.'],
   ['ARCHITECTURE', 'architecture', 'Architecture', 'The four-layer model and the principles behind Vivary.'],
+  ['MIGRATION-STATUS', 'migration-status', 'Migration status', 'Current status of stable, optional, experimental, held, deprecated, and planned Vivary surfaces.'],
+  ['DECISIONS', 'decisions', 'Decisions', 'Hard-to-reverse Vivary decisions and links to their canonical owners.'],
   ['OBSIDIAN', 'obsidian', 'Obsidian (optional)', 'Optional Obsidian setup for fans, never required.'],
 ];
 
@@ -44,30 +47,48 @@ const retiredGeneratedSlugs = ['brand', 'content-roadmap', 'faq', 'product-roadm
 const rewrite = (s) =>
   s.replaceAll('](CONCEPTS.md)', '](/concepts/)')
    .replaceAll('](GETTING-STARTED.md)', '](/getting-started/)')
+   .replaceAll('](GETTING-STARTED.md#', '](/getting-started/#')
    .replaceAll('](WALKTHROUGH.md)', '](/walkthrough/)')
+   .replaceAll('](WALKTHROUGH.md#', '](/walkthrough/#')
+   .replaceAll('](LEARN-BY-DOING.md)', '](/learn-by-doing/)')
+   .replaceAll('](LEARN-BY-DOING.md#', '](/learn-by-doing/#')
    .replaceAll('](COMMANDS.md#', '](/commands/#')
    .replaceAll('](COMMANDS.md)', '](/commands/)')
    .replaceAll('](MCP.md)', '](/mcp/)')
+   .replaceAll('](MCP.md#', '](/mcp/#')
    .replaceAll('](SKILLS.md)', '](/skills/)')
    .replaceAll('](ACTIVE-CONTEXT.md)', '](/active-context/)')
+   .replaceAll('](ACTIVE-CONTEXT.md#', '](/active-context/#')
    .replaceAll('](LLM-ACTIVE-CONTEXT.md)', '](/llm-active-context/)')
    .replaceAll('](SEMANTIC-MEMORY.md)', '](/semantic-memory/)')
+   .replaceAll('](SEMANTIC-MEMORY.md#', '](/semantic-memory/#')
    .replaceAll('](WHITE-PAPER.md)', '](/white-paper/)')
    .replaceAll('](PRODUCT-ROADMAP.md)', '](/roadmap/)')
    .replaceAll('](CONTENT-ROADMAP.md)', `](${GH}/docs/CONTENT-ROADMAP.md)`)
    .replaceAll('](HOWTO.md)', '](/howto/)')
    .replaceAll('](SIGNALS.md)', '](/signals/)')
    .replaceAll('](RELEASE-WORKFLOW.md)', '](/release-workflow/)')
+   .replaceAll('](RELEASE-WORKFLOW.md#', '](/release-workflow/#')
+   .replaceAll('](MIGRATION-STATUS.md)', '](/migration-status/)')
+   .replaceAll('](MIGRATION-STATUS.md#', '](/migration-status/#')
+   .replaceAll('](DECISIONS.md)', '](/decisions/)')
+   .replaceAll('](DECISIONS.md#', '](/decisions/#')
    .replaceAll('](FAQ.md)', '](/#faq)')
    .replaceAll('](ARCHITECTURE.md)', '](/architecture/)')
+   .replaceAll('](ARCHITECTURE.md#', '](/architecture/#')
    .replaceAll('](OBSIDIAN.md)', '](/obsidian/)')
+   .replaceAll('](OBSIDIAN.md#', '](/obsidian/#')
    .replaceAll('](../CHANGELOG.md)', '](/changelog/)')
    .replaceAll('](README.md)', '](/)')
    .replaceAll('](assets/walkthrough/', '](/assets/walkthrough/')
    .replaceAll('](../stats/usage-snapshot.svg)', '](/usage-snapshot.svg)')
    .replaceAll('](../stats/latest.json)', `](${GH}/stats/latest.json)`)
    .replaceAll('](../stats/history.csv)', `](${GH}/stats/history.csv)`)
+   .replaceAll('](../README.md#', `](${GH}/README.md#`)
+   .replaceAll('](README.md#', `](${GH}/README.md#`)
    .replaceAll('](SPEC-data-layer.md)', `](${GH}/docs/SPEC-data-layer.md)`)
+   .replaceAll('](SPEC-data-layer.md#', `](${GH}/docs/SPEC-data-layer.md#`)
+   .replaceAll('](bellamente-memory/', `](${GH}/docs/bellamente-memory/`)
    .replaceAll('](../packages/tropo/SPEC.md)', `](${GH}/packages/tropo/SPEC.md)`)
    .replaceAll('](../HANDOFF.md)', `](${GH}/HANDOFF.md)`);
 

@@ -89,6 +89,35 @@ Every call returns a `vivary.mcp-tool-result/v0` envelope with `known`, `unknown
 adapter returns exact results whole or refuses them. It does not silently truncate an
 oversized result.
 
+## Bounded work
+
+The adapter's public ceilings are part of its contract, not tuning guidance:
+
+| Boundary | Limit |
+|---|---:|
+| Operator-bound workspaces per process | 16 |
+| Workspace alias | 1–64 characters |
+| One newline-delimited input frame | 65,536 bytes |
+| Question or query text | 4,096 characters |
+| Returned matches (`limit`) | 1–20 |
+| `vivary_find` budget | 64–4,000; default 1,200 |
+| Each query filter list | 16 unique values; type 128, path 512, and edge 256 characters per value |
+| Query snippet | 0–1,000 characters; default 160 |
+| `vivary_check` paths | 200 unique workspace-relative paths, 512 characters each |
+| `vivary_capsule` claims | 0–24; default 24 |
+| Active producer work | 1 call, 30-second timeout, 5-second cancellation grace |
+| Complete JSON-escaped tool response | 1 MiB |
+| One standard-error diagnostic | 4,096 bytes |
+
+An over-limit argument is invalid. Work, privacy, or response overflow returns a typed
+unknown/refusal envelope; the adapter never turns a prefix into a complete answer. A
+producer that ignores cancellation keeps the sole slot quarantined until its worker
+exits, so later calls receive `server_busy` instead of overlapping it. Downstream
+Tropo/Core ceilings still apply, and the tighter limit wins. The constants and schema
+live in the [adapter source](https://github.com/vivary-dev/vivary/blob/dev/packages/mcp/vivary_mcp.py);
+[limit, timeout, and quarantine regressions](https://github.com/vivary-dev/vivary/blob/dev/packages/mcp/tests/test_vivary_mcp.py)
+provide the behavior evidence.
+
 ## Data and authority boundaries
 
 The adapter can:

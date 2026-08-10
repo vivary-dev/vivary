@@ -21,10 +21,17 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
 ## Release status
 
-Packages are independently versioned. There is no single "Vivary 0.4.1" release.
+The current coordinated development train is named **Vivary Governed Context**. A train is a
+release label, not a suite version: packages retain independent semvers. The only
+numeric lockstep is the same scaffolder distributed as `create-vivary` on PyPI and
+`@vivary/create` on npm. This policy resolves
+[#149](https://github.com/vivary-dev/vivary/issues/149); its lifecycle lives in the
+[release workflow](docs/RELEASE-WORKFLOW.md#train-and-version-lifecycle).
 
-The registry versions below are published truth. The development source line names
-versions declared in this checkout. Development versions are not published.
+The registry table is published install truth. The development-source paragraph below
+is checkout truth. A source version does not become published because it is higher,
+merged, tagged, documented, or grouped into the train. Registry status was verified
+**2026-08-09**.
 
 | Surface | Published version | Link |
 |---|---:|---|
@@ -46,8 +53,10 @@ owns its component floors, including `create-vivary>=0.3.4`,
 `vivary-tropo>=0.5.2`, and `vivary-strato>=0.1.2`. It receives Core transitively.
 
 No development source version above was published, deployed, or enabled by default.
-Publication remains a later coordinated release-train decision with a separate human
-gate. [CHANGELOG.md](CHANGELOG.md) records the changes in each development line.
+The Vivary Governed Context train remains held at a later, separate human publication gate.
+[CHANGELOG.md](CHANGELOG.md) records its development slices without rewriting earlier
+independent-version history. [Migration status](docs/MIGRATION-STATUS.md) owns maturity
+classifications; [decisions](docs/DECISIONS.md) routes the durable policy.
 
 ## Public Signals
 
@@ -237,10 +246,12 @@ down `tropo` + `strato` and whichever optional layers fit. See
 [docs/](docs/):
 
 - [Getting started](docs/GETTING-STARTED.md) — install → workspace → loop
+- [Learn by doing](docs/LEARN-BY-DOING.md) — short, evidence-led first loop; routes to the full proof and exact command owners
 - [Command reference](docs/COMMANDS.md) — every CLI, flag, and exit code
 - [How-to recipes](docs/HOWTO.md) · [Agent skills](docs/SKILLS.md) · [Homepage FAQ](https://vivary.vercel.app/#faq) · [White paper](docs/WHITE-PAPER.md)
 - [Active context](docs/ACTIVE-CONTEXT.md) · [LLM active-context guide](docs/LLM-ACTIVE-CONTEXT.md)
 - [Architecture](docs/ARCHITECTURE.md) · [Product roadmap](docs/PRODUCT-ROADMAP.md) · [Semantic memory](docs/SEMANTIC-MEMORY.md) · [Obsidian (optional)](docs/OBSIDIAN.md)
+- [Migration status](docs/MIGRATION-STATUS.md) · [Decisions](docs/DECISIONS.md)
 - [Release workflow](docs/RELEASE-WORKFLOW.md) — end-of-update release truth, docs/site sync, and publish checks
 - [Portfolio proof](docs/PORTFOLIO.md) — shipped surfaces, screenshots, and case-study notes
 

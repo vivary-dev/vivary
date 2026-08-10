@@ -14,7 +14,13 @@ documentation, package/version truth, and release verification are complete and
 separately approved. At that final gate, core and all dependent packages publish as one
 coordinated train, and the website copy updates with them.
 
-## 1. Decide the release scope
+The current coordinated development train is named **Vivary Governed Context**. The name is a
+planning and release label, not a suite version and not evidence that any artifact has
+published. Exact current source and registry versions live in the
+[root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status); maturity lives in
+[MIGRATION-STATUS.md](/migration-status/).
+
+## 1. Name the train and decide the release scope
 
 Versions are independent per package — there is no single "Vivary X.Y.Z".
 Work out which packages actually changed, then bump only those:
@@ -28,6 +34,7 @@ Work out which packages actually changed, then bump only those:
 | `packages/strato/` templates or skills | `create-vivary` + `@vivary/create` — templates still ride the scaffolder release train | same |
 | `packages/strato/strato.py`, its tests, or CLI contract | `vivary-strato` — bump the version, but keep it unpublished on `dev`; publish only in the final coordinated train with core and the other role packages | ARCHITECTURE seam section, COMMANDS, README surface row |
 | `packages/memory-cognee/vivary_cognee.py` | `vivary-memory-cognee` | same |
+| `packages/mcp/vivary_mcp.py` or its tests | `vivary-mcp` — keep optional and unpublished until its explicit train item; preserve the exact reviewed MCP SDK pin | MCP guide, package README, Tropo floor |
 | `packages/core/` modules or tests | `vivary-core` — bump the version, but keep it unpublished on `dev`; publish it only in the final coordinated train with every dependent role package | ARCHITECTURE seam section, README surface row |
 | dependency floors in `packages/vivary/pyproject.toml` | `vivary` (meta) — bump its floors and patch version when component minimums move | README table |
 | `docs/`, `site/`, root README only | **no package bump** — site redeploys from `dev` via Vercel automatically | keep docs/site sync (step 3) |
@@ -44,6 +51,27 @@ Bump rules (semver-ish, pre-1.0):
   bump at minimum;
 - never re-release an existing version number; registries are immutable.
 
+### Train and version lifecycle
+
+1. **Planned** — name the train in the approved plan and top changelog entry. Do not
+   assign a suite semver.
+2. **Staged** — set each changed package's independent next version, dependency floors,
+   and source status. Keep `create-vivary` and `@vivary/create` identical. The README
+   registry table still shows the old published versions.
+3. **Publishing** — after the train-level approval, publish one exact artifact at a
+   time in dependency order. If publication is partial, name each artifact that reached
+   its registry and keep the train itself incomplete.
+4. **Registry-complete** — every planned artifact is visible at its exact version, but
+   the train is not yet verified.
+5. **Verified** — cache-resistant install and CLI smokes pass for every artifact; only
+   then update the root registry table and change the same changelog entry to
+   "Published and verified."
+
+The historical independent versions remain valid history. A source change after one
+of its versions has published requires a new package version; it never reuses the
+published number or forces unrelated packages to match it. This is the selected
+versioning policy for [#149](https://github.com/vivary-dev/vivary/issues/149).
+
 ## 2. Set release truth first
 
 Update every surface that names versions or the command set, in the repo,
@@ -55,13 +83,15 @@ Update every surface that names versions or the command set, in the repo,
 - `vivary-core` has no module `__version__`; `packages/core/pyproject.toml` is its sole
   in-repo version declaration, and step 6 verifies the installed distribution version.
 - `packages/create-vivary/npm/package.json` — lockstep version;
-- root `README.md` — the release-status blockquote, the surface/version table,
-  and the "Current command surface" list;
+- root `README.md` — the train name/state, registry table, development-source line,
+  create-only lockstep statement, and "Current command surface" list;
 - `CHANGELOG.md` — new entry at the top, matching the existing format: package
   names + versions + date, what changed, and a **Verification** section listing
-  the exact smoke commands run. Before publishing, the entry says
+  only the exact smoke commands actually run. Before publishing, the entry says
   "Publishing remains a manual human gate." After publishing, change that same
   entry to "Published and verified" with exact versions;
+- `docs/MIGRATION-STATUS.md` only when a surface changes classification, and
+  `docs/DECISIONS.md` only when a durable decision changes;
 - package `README.md`s whose status lines name versions;
 - `docs/COMMANDS.md` for CLI changes; the homepage FAQ / `docs/PORTFOLIO.md` if
   they name versions or surfaces (grep for the old version string);
@@ -98,6 +128,26 @@ is dependency-free; plain `node scripts/sync-docs.mjs` works without
 is no separate site publish step, but the copy only updates if you committed it.
 
 ## 4. Make local CLI truth explicit before command smokes
+
+Build, smoke, tag, and publish only from a dedicated clean checkout/worktree at the
+approved release commit. A clean release worktree prevents ignored build debris,
+untracked files, and an unrelated developer diff from entering the artifact or changing
+the command under test. Record the resulting HEAD in the release evidence.
+
+```bash
+git worktree add --detach ../vivary-release-governed-context <approved-commit>
+cd ../vivary-release-governed-context
+git rev-parse HEAD
+git status --porcelain=v1 --untracked-files=all
+git diff --quiet
+git diff --cached --quiet
+```
+
+The status command must print nothing and both diff commands must exit `0`. Verify that
+the release tag or workflow input resolves to that same HEAD before any publish gate.
+Do not publish from a dirty primary checkout and do not clean or reset it to make it
+look releasable; user work may be present there. Worktree cleanup is a separate
+destructive action and needs its own approval.
 
 If the change adds or changes CLI behavior that is not published yet, refresh
 the local CLIs from the current checkout before testing bare commands:
@@ -192,10 +242,14 @@ the create-vivary release checks, and runs `npm pack --dry-run`. Leave
 npm publish gate is approved.
 
 Order when multiple packages ship: dependencies first. Publish `vivary-core` before
-every role package that depends on it; then publish `vivary-tropo` before
-`ozone`/`exo`/`memory-cognee` packages that pin tropo. Publish the `vivary` meta
-package after all of its component floors are available. Publish `create-vivary` PyPI
-before `@vivary/create` npm (the launcher installs the PyPI package at run time).
+every package that depends on it. Publish `vivary-tropo` next; then the eligible
+`vivary-strato`, `vivary-ozone`, `vivary-exo`, `vivary-memory-cognee`, `vivary-mcp`, and
+`create-vivary` artifacts after their declared floors exist. Publish the `vivary`
+meta-package only after all five of its component floors are available. Publish
+`create-vivary` on PyPI before the same-version `@vivary/create` npm launcher, because
+the launcher installs the PyPI distribution at run time. Optional memory and MCP do not
+become meta-package dependencies merely because they ride the same train. The
+[package dependency map](/architecture/#package-dependency-map) owns the edges.
 
 ## 6. Verify from the public registries after publish
 
@@ -230,9 +284,12 @@ Then flip the changelog entry to "Published and verified" (step 2) and commit.
 
 ## 7. GitHub release
 
-Create or update the GitHub release (human gate) titled after the headline
-package set, e.g. "v0.2.8 — Cognee adapter + published release truth", with the
-changelog entry as the body.
+Create or update the GitHub release (human gate) only after the train is verified.
+Title it with the train name and the exact independently versioned package set, for
+example `Vivary Governed Context — vivary-core <ver>, vivary-tropo <ver>, …`; do not present
+one package's version as a suite version. Use the changelog entry as the body. If the
+release needs a repository tag, select and approve that tag in the release plan rather
+than inventing an unowned suite semver.
 
 ## 8. Announce the release
 

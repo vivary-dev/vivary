@@ -23,6 +23,7 @@ The source install pulls every role, each still usable on its own:
 The unpublished 0.1.7 source line requires `create-vivary>=0.3.4`,
 `vivary-tropo>=0.5.2`, and `vivary-strato>=0.1.2`. It receives `vivary-core`
 transitively through the role packages rather than owning a duplicate Core floor.
+Source: [`pyproject.toml`](pyproject.toml); verified: 2026-08-09.
 Ozone's opt-in governed path verifies capsule-bound evidence without writing:
 
 ```bash

@@ -14,6 +14,53 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: Vivary Governed Context release truth and benchmark protocol (#149, #151, #210, #214)] — 2026-08-09
+
+This slice names the coordinated development train **Vivary Governed Context** and
+freezes its context-retrieval benchmark protocol. A train coordinates independently
+versioned artifacts; it is not a suite semver. Only `create-vivary` and
+`@vivary/create` remain version-lockstep. No package version changes in this slice,
+and no publication, graduation, benchmark result, or savings claim is made.
+
+### Added
+
+- Added the single migration-classification owner and the compact durable-decision
+  index. They route version truth to README, package edges and authority to
+  architecture, envelopes to COMMANDS, adapter ceilings to MCP, and release mechanics
+  to RELEASE-WORKFLOW.
+- Added current Mermaid maps for Core, the four roles, optional memory, MCP, and direct
+  package dependencies; added the six public governed-context vocabulary terms and a
+  compact schema-envelope index. Behavior claims link to source tests, fixtures, or
+  manifests; the retained retrieval-performance comparison is labeled as a hypothesis.
+- Added an evidence-led learn-by-doing route and generated-site navigation for the
+  tutorial, migration status, and decision index.
+- Froze the stdlib Python 3.11 context-retrieval protocol at public corpus
+  `cbbd340dbf0ffebfe17ad5257ecd93b83ab570de`: four roadmap questions, baseline
+  and governed-retrieval arms, three isolated replicates, exact model/effort/prompt
+  settings, fixed work ceilings, deterministic statistics, and strict source-line,
+  result-schema, support, runtime, and drift validation. The protocol-only state
+  deliberately contains no `results.json` or `docs/BENCHMARK.md`.
+
+### Changed
+
+- README now separates the held Vivary Governed Context source train from the registry table.
+- The release workflow now requires a dedicated clean release checkout/worktree and
+  defines the named-train lifecycle from planned through verified without aligning
+  unrelated package versions.
+- MCP now publishes its exact work, input, concurrency, timeout, response, and
+  diagnostic ceilings alongside its read-only authority boundary.
+
+### Status
+
+- Source and registry facts in this documentation snapshot: **verified: 2026-08-09**.
+- Benchmark validator regressions passed **22 tests** and the protocol-only guard
+  verified four questions with no results artifact. Create-version parity passed
+  **5 checks**; package-doc parity passed **10 tests** and its canonical check.
+- With pinned Node **22.23.2** and npm **10.9.8**, the site audit reported zero
+  vulnerabilities, **9 tests** passed, **27 pages** built, and the link check found
+  zero failures across **2,075 references** and **1,242 anchors**.
+- Publishing remains a manual human gate.
+
 ## [Unreleased: brownfield and memory privacy blockers (#266, #235, #236)] — 2026-08-09
 
 This release-train slice advances unpublished `vivary-tropo` to **0.5.2**,

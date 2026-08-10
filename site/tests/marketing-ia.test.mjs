@@ -68,7 +68,35 @@ test('white paper has the structure and evidence boundaries of a full technical 
   assert.match(whitePaper, /arxiv\.org\/abs\/2307\.03172/);
 });
 
+test('release-program docs are canonical-generated routes with deliberate navigation', () => {
+  const canonicalRoutes = [
+    ['LEARN-BY-DOING', 'learn-by-doing', 'Learn by doing'],
+    ['MIGRATION-STATUS', 'migration-status', 'Migration status'],
+    ['DECISIONS', 'decisions', 'Decisions'],
+  ];
+
+  for (const [source, slug, label] of canonicalRoutes) {
+    assert.match(syncScript, new RegExp(`\\['${source}',\\s*'${slug}'`));
+    assert.equal(
+      existsSync(new URL(`../../docs/${source}.md`, import.meta.url)),
+      true,
+      `docs/${source}.md must remain the canonical source for /${slug}/`,
+    );
+    assert.match(astroConfig, new RegExp(`label:\\s*'${label}',\\s*slug:\\s*'${slug}'`));
+  }
+
+  assert.match(syncScript, /const coreDocsList = pages/);
+  assert.match(syncScript, /for \(const \[src, slug, title\] of pages\)/);
+  assert.match(syncScript, /replaceAll\('\]\(LEARN-BY-DOING\.md\)', '\]\(\/learn-by-doing\/\)'\)/);
+  assert.match(syncScript, /replaceAll\('\]\(MIGRATION-STATUS\.md\)', '\]\(\/migration-status\/\)'\)/);
+  assert.match(syncScript, /replaceAll\('\]\(DECISIONS\.md\)', '\]\(\/decisions\/\)'\)/);
+});
+
+
 test('generated docs edit their canonical repo sources rather than generated copies', () => {
   assert.match(syncScript, /edit\/dev\/docs\/\$\{src\}\.md/);
   assert.match(syncScript, /edit\/dev\/CHANGELOG\.md/);
+  assert.match(syncScript, /readCanonicalMarkdown\(docsDir, `\$\{src\}\.md`, `docs\/\$\{src\}\.md`\)/);
+  assert.match(syncScript, /fs\.writeFileSync\(path\.join\(outDir, `\$\{slug\}\.md`\), render\(raw, title, desc, editUrl\)\)/);
+  assert.doesNotMatch(syncScript, /readCanonicalMarkdown\(outDir,/);
 });

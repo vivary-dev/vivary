@@ -662,7 +662,7 @@ class CreateVivaryTests(unittest.TestCase):
                 with mock.patch.object(
                     create_vivary.importlib_metadata,
                     "version",
-                    return_value="0.1.1",
+                    return_value="0.1.2",
                 ):
                     report = create_vivary.doctor_workspace(target, repo_root=ROOT)
             finally:
@@ -684,7 +684,7 @@ class CreateVivaryTests(unittest.TestCase):
             )
             fake_site = Path(td) / "fake-site"
             fake_site.mkdir()
-            (fake_site / "vivary_cognee.py").write_text('__version__ = "0.1.1"\n', encoding="utf-8")
+            (fake_site / "vivary_cognee.py").write_text('__version__ = "0.1.2"\n', encoding="utf-8")
             importlib.invalidate_caches()
             old_path = list(sys.path)
             old_module = sys.modules.pop("vivary_cognee", None)
@@ -693,7 +693,7 @@ class CreateVivaryTests(unittest.TestCase):
                 with mock.patch.object(
                     create_vivary.importlib_metadata,
                     "version",
-                    return_value="0.1.1",
+                    return_value="0.1.2",
                 ):
                     report = create_vivary.doctor_workspace(target, repo_root=ROOT)
             finally:
@@ -720,7 +720,7 @@ class CreateVivaryTests(unittest.TestCase):
             fake_site = Path(td) / "fake-site"
             fake_site.mkdir()
             (fake_site / "vivary_cognee.py").write_text(
-                '__version__ = "0.1.1"\n'
+                '__version__ = "0.1.2"\n'
                 "TROPO_SEMANTIC_ADAPTER_API = 1\n"
                 "REQUIRES_EXPLICIT_PROVIDER_GATES = True\n"
                 "CogneeMemoryAdapter = None\n",
@@ -734,7 +734,7 @@ class CreateVivaryTests(unittest.TestCase):
                 with mock.patch.object(
                     create_vivary.importlib_metadata,
                     "version",
-                    return_value="0.1.1",
+                    return_value="0.1.2",
                 ):
                     report = create_vivary.doctor_workspace(target, repo_root=ROOT)
             finally:

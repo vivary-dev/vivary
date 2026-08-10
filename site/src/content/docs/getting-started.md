@@ -225,6 +225,7 @@ graph is wrong. Run `tropo fix` to clear redundant frontmatter.
 ## Next
 
 - [Concepts](/concepts/) — what everything means, in plain language.
+- [Learn by doing](/learn-by-doing/) — a short, evidence-led first loop before the full public proof.
 - [Getting started proof](/walkthrough/) — a generic, public walkthrough of the product loop.
 - [Command reference](/commands/) — every CLI, flag, exit code, and data storage options.
 - [How-to recipes](/howto/) — review a change, multi-agent, CI, embedded storage, and more.

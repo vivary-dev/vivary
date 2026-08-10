@@ -63,6 +63,27 @@ optional MCP adapter exposes only four read-only context operations. See
 [SPEC-data-layer.md](https://github.com/vivary-dev/vivary/blob/dev/docs/SPEC-data-layer.md) for the agent CLI contract and
 [MCP.md](/mcp/) for that adapter's separate boundary.
 
+### Governed machine-readable envelopes (development source)
+
+This is the schema router; the command sections below own fields, limits, and exit
+behavior. A named request schema is a closed object: missing or unknown fields refuse
+rather than being ignored. Core artifacts carried through the envelopes use the
+[public vocabulary](https://github.com/vivary-dev/vivary/blob/dev/docs/SPEC-data-layer.md#public-governed-context-vocabulary).
+
+| Surface | Request | Success | Refusal / incomplete result | Contract evidence |
+|---|---|---|---|---|
+| `tropo find --governed --json` | CLI arguments plus an operator-selected root | `vivary.task-capsule/v0` | Structured CLI error; no partial capsule is presented as complete | [Tropo regressions](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py) |
+| `strato decide --governed --json` | `vivary.strato-decision-request/v0` | `vivary.strato-decision/v0` | `vivary.strato-decision-refusal/v0` | [Strato regressions](https://github.com/vivary-dev/vivary/blob/dev/packages/strato/tests/test_strato.py) |
+| `ozone verify --governed --json` | `vivary.ozone-verification-request/v0` | `vivary.ozone-verification/v0`, carrying Core receipt/gate verdicts and an optional repair proposal | `vivary.ozone-verification-refusal/v0` | [Ozone regressions](https://github.com/vivary-dev/vivary/blob/dev/packages/ozone/tests/test_ozone.py) |
+| `exo control --governed --json` | `vivary.exo-control-request/v0` | `vivary.exo-control-result/v0` | `vivary.exo-control-refusal/v0`; a Core refusal remains a typed `result` | [Exo regressions](https://github.com/vivary-dev/vivary/blob/dev/packages/exo/tests/test_exo.py) |
+| `vivary-mcp` tools | Closed per-tool Draft 2020-12 arguments | `vivary.mcp-tool-result/v0` with `status: "known"` | The same envelope with `unknown` or `refused`; oversized results refuse whole | [MCP regressions](https://github.com/vivary-dev/vivary/tree/dev/packages/mcp/tests) |
+
+An Execution Receipt is `vivary.execution-receipt/v0`; Ozone's nested Core outputs are
+`vivary.receipt-verdict/v0`, `vivary.gate-verdict/v0`, and
+`vivary.context-repair-proposal/v0`. Provider-neutral learning returns
+`vivary.recall-transition/v0` through the Core API, not a baseline CLI. Exact MCP
+argument and work bounds live only in [MCP.md](/mcp/#bounded-work).
+
 ---
 
 ## vivary — local visibility helpers

@@ -15,6 +15,8 @@ implementation. `create-vivary adopt <path>` uses dry-run by default, and
 
 The unpublished source candidates are `@vivary/create 0.3.4` and
 `create-vivary 0.3.4`; both require `vivary-tropo>=0.5.2`.
+Source: [`../pyproject.toml`](../pyproject.toml) and
+[`package.json`](package.json); verified: 2026-08-09.
 
 **Security hardening:** The 0.2.5 line validates active `.gitignore` rules for `USER.md`,
 `MEMORY.md`, `memory/*`, and `heartbeat-reports/*`; scaffolds private heartbeat report

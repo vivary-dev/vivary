@@ -34,6 +34,7 @@ pip install vivary
 - Getting started: https://vivary.vercel.app/getting-started/
 - Getting started proof: https://vivary.vercel.app/walkthrough/
 - Command reference: https://vivary.vercel.app/commands/
+- Learn by doing: https://vivary.vercel.app/learn-by-doing/
 - MCP adapter: https://vivary.vercel.app/mcp/
 - Agent skills: https://vivary.vercel.app/skills/
 - Active context: https://vivary.vercel.app/active-context/
@@ -44,6 +45,8 @@ pip install vivary
 - Public signals: https://vivary.vercel.app/signals/
 - Release workflow: https://vivary.vercel.app/release-workflow/
 - Architecture: https://vivary.vercel.app/architecture/
+- Migration status: https://vivary.vercel.app/migration-status/
+- Decisions: https://vivary.vercel.app/decisions/
 - Obsidian (optional): https://vivary.vercel.app/obsidian/
 - Product roadmap: https://vivary.vercel.app/roadmap/
 - FAQ: https://vivary.vercel.app/#faq

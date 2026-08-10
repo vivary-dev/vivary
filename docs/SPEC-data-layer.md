@@ -35,6 +35,46 @@ work.
 
 ---
 
+## Public governed-context vocabulary
+
+These terms name the development-source contract; they do not imply publication or
+graduation. Current maturity lives in [MIGRATION-STATUS.md](MIGRATION-STATUS.md), and
+exact command schemas live in [COMMANDS.md](COMMANDS.md#governed-machine-readable-envelopes-development-source).
+
+- **Governed context** — bounded context whose claims retain typed evidence, selection
+  reasons, conflicts, unknowns, omissions, workspace identity, and required checks.
+  Core fails closed when those bindings cannot be reconstructed. [Capsule contract and
+  tests](https://github.com/vivary-dev/vivary/blob/dev/packages/core/vivary_core/capsule_compile.py)
+  are the behavior evidence.
+- **Task Capsule** — the fingerprinted `vivary.task-capsule/v0` artifact compiled for
+  one question and declared scope. It carries the context and effective checks that
+  downstream policy and verification evaluate; it does not execute those checks.
+  [Frozen fixtures](https://github.com/vivary-dev/vivary/tree/dev/packages/core/tests/fixtures/parity)
+  cover its identity and omissions.
+- **Execution Receipt** — the `vivary.execution-receipt/v0` record of what actually ran,
+  bound to one capsule and workspace fingerprint. It reports passed, failed, or skipped
+  checks and never treats provenance as proof of correctness. [Receipt implementation](https://github.com/vivary-dev/vivary/blob/dev/packages/core/vivary_core/receipt.py)
+  and [verification tests](https://github.com/vivary-dev/vivary/blob/dev/packages/core/tests/test_verify.py)
+  own that behavior.
+- **Learning Proposal** — the public name for the deterministic `proposal` returned by
+  a `vivary.recall-transition/v0` create or supersede projection. It names the proposed
+  assertion transition, requires exact proposal-bound human approval, and performs no
+  write by itself. [Recall transition implementation](https://github.com/vivary-dev/vivary/blob/dev/packages/core/vivary_core/recall_transition.py)
+  and [recall tests](https://github.com/vivary-dev/vivary/blob/dev/packages/core/tests/test_recall.py)
+  are the evidence. It is distinct from Ozone's context-repair proposal.
+- **Integrity View** — the read projection returned by Core's `task_integrity_view`.
+  It joins caller-owned task status to append-only execution edges and continues to
+  expose failed verification after a task is marked done. [Control implementation](https://github.com/vivary-dev/vivary/blob/dev/packages/core/vivary_core/control_tasks.py)
+  and [control tests](https://github.com/vivary-dev/vivary/blob/dev/packages/core/tests/test_control.py)
+  own its shape and behavior.
+- **ContextIntegrityEvent** — the frozen `vivary.context-integrity-event/v0` envelope
+  for project-scoped append-only integrity facts. Occurrence time and recording time
+  remain distinct, validation uses pinned reason codes, and accepted events rebuild a
+  fingerprinted projection. [Conformance and replay fixtures](https://github.com/vivary-dev/vivary/tree/dev/packages/core/tests/fixtures/context-integrity-event-v0)
+  are the byte-level evidence.
+
+---
+
 ## Agent CLI contract
 
 **The CLI is the complete agent interface for the data-layer and setup behavior in
@@ -160,7 +200,13 @@ Cognee is evaluated there as an optional provider, not a storage default.
 tropo-to-vector pipeline for source code. CocoIndex owns structured code indexing;
 tropo owns the typed workspace graph.
 
-Naive chunked-text RAG on code achieves ~2% task accuracy vs. 50–80% for AST-based structured indexing (SWE-bench class). Tropo typed-node vectors keep one important advantage over naive RAG: node type is preserved as a filter dimension, so a `decision` node and a `reference` node don't collapse into identical-looking text chunks.
+**Historical hypothesis, not Vivary benchmark evidence:** the approved 0.2.0 plan
+recorded an external comparison of roughly 2% task accuracy for naive chunked-text RAG
+and 50–80% for AST-based structured indexing on SWE-bench-class work. No linked Vivary
+fixture establishes those figures, so they must not be repeated as a product-performance
+claim. The design implication retained here is structural: Tropo preserves node type as
+a filter dimension, so a `decision` and a `reference` do not become indistinguishable
+text chunks.
 
 Full GraphRAG (Microsoft-style community summarization) is overkill for local workspaces. A future tropo graph + LanceDB node-embedding layer can provide the same structural benefit without the cost.
 
