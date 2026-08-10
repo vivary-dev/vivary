@@ -46,6 +46,7 @@ export default defineConfig({
 					label: 'Reference',
 					items: [
 						{ label: 'Command reference', slug: 'commands' },
+						{ label: 'MCP adapter (optional)', slug: 'mcp' },
 						{ label: 'Architecture', slug: 'architecture' },
 						{ label: 'Obsidian (optional)', slug: 'obsidian' },
 						{ label: 'Changelog', slug: 'changelog' },

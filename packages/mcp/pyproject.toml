@@ -3,30 +3,37 @@ requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vivary-core"
-version = "0.2.7"
-description = "Vivary's governed-context seam for deterministic evidence, task capsules, receipts, and Strato, Ozone, Exo, and Bellamente policy surfaces."
+name = "vivary-mcp"
+version = "0.1.0"
+description = "Optional read-only MCP adapter for governed Vivary context."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-license-files = ["LICENSE"]
 authors = [{ name = "Jeff Kazzee" }]
-keywords = ["agents", "provenance", "evidence", "context", "vivary"]
+keywords = ["agents", "context", "mcp", "vivary"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-dependencies = []
-
-[project.optional-dependencies]
-test = ["pytest"]
+dependencies = [
+    "vivary-tropo>=0.5.1",
+    "mcp==2.0.0",
+]
 
 [project.urls]
 Homepage = "https://vivary.vercel.app/"
+Documentation = "https://vivary.vercel.app/"
 Repository = "https://github.com/vivary-dev/vivary"
 Issues = "https://github.com/vivary-dev/vivary/issues"
 Changelog = "https://github.com/vivary-dev/vivary/blob/dev/CHANGELOG.md"
 
+[project.scripts]
+vivary-mcp = "vivary_mcp:main"
+
 [tool.setuptools]
-packages = ["vivary_core"]
+py-modules = ["vivary_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

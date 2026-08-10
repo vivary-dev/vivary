@@ -26,7 +26,10 @@ work.
 
 1. **Minimalism law holds.** The baseline must stay zero-dependency. Storage is opt-in — the default path installs nothing new.
 2. **Windows-first.** Any embedded option must run on Windows without Docker or a server process.
-3. **The CLI is the agent API.** No MCP server, no special protocol. Every command a human can run, an agent must be able to run non-interactively with structured output. This is the core agent-native contract — see the [Agent CLI contract](#agent-cli-contract) section.
+3. **The CLI is the baseline agent API.** No MCP server or special protocol is
+   required or enabled by default. Every command a human can run must remain available
+   non-interactively with structured output. Optional adapters cannot replace or widen
+   this core agent-native contract.
 4. **Non-technical users are first-class.** Wizard language is plain English; no database jargon in the primary flow.
 5. **Config lives in `.vivary/`.** Workspace-level storage config is `.vivary/storage.toml`. This keeps generated/runtime infra out of the workspace root and gitignore-able as a directory.
 
@@ -34,7 +37,10 @@ work.
 
 ## Agent CLI contract
 
-**The CLI is the only agent interface for Vivary.** No MCP server, no SDK, no special protocol. The same commands humans type are what agents call.
+**The CLI is the complete agent interface for the data-layer and setup behavior in
+this spec.** The same commands humans type are what agents call. The separate optional
+[`vivary-mcp`](MCP.md) package wraps four read-only context producers; it exposes none
+of this spec's setup, storage, migration, or mutation operations.
 
 ### Universal flags (every command)
 

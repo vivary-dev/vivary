@@ -8,6 +8,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import uuid
 from contextlib import contextmanager
@@ -2336,9 +2337,452 @@ def test_cmd_find_governed_maps_missing_core_to_install_error(tmp_path):
 
     assert rc == 2
     assert stderr.getvalue() == (
-        "tropo find --governed: vivary-core>=0.2.1 is required; "
+        "tropo find --governed: vivary-core>=0.2.7 is required; "
         "install Tropo with its declared dependencies\n"
     )
+
+def _public_workspace_root(path):
+    return normalize_path(os.path.realpath(path))
+
+
+def _assert_public_producer_unavailable(invoke):
+    try:
+        invoke()
+    except tropo.ProducerUnavailableError as error:
+        assert error.reason == "producer_unavailable"
+    else:
+        assert False, "expected ProducerUnavailableError"
+
+
+def test_public_context_producers_return_stable_shaped_snapshots(tmp_path):
+    _search_vault(tmp_path)
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    allowlist = [root]
+
+    query = tropo.query_context(
+        root,
+        "release workflow",
+        k=2,
+        type_filters=("decision",),
+        explain=True,
+        allowlist=allowlist,
+    )
+    query_again = tropo.query_context(
+        root,
+        "release workflow",
+        k=2,
+        type_filters=("decision",),
+        explain=True,
+        allowlist=allowlist,
+    )
+    found = tropo.find_context(
+        root,
+        "release workflow",
+        k=2,
+        budget=1_000,
+        type_filters=("decision",),
+        allowlist=allowlist,
+    )
+    checked = tropo.check_workspace(root, allowlist=allowlist)
+
+    assert set(query) == {
+        "schema",
+        "query",
+        "k",
+        "filters",
+        "results",
+        "complete",
+        "workspace_fingerprint",
+        "omissions",
+    }
+    assert query["schema"] == "vivary.query-result/v0"
+    assert query["query"] == "release workflow"
+    assert query["k"] == 2
+    assert query["filters"] == {"type": ["decision"], "path": [], "edge": []}
+    assert query["complete"] is True, query["omissions"]
+    assert [hit["path"] for hit in query["results"]] == [
+        "decisions/release-workflow.md"
+    ]
+    assert all(
+        set(hit) == {
+            "id",
+            "type",
+            "path",
+            "title",
+            "score",
+            "snippet",
+            "reasons",
+            "edges",
+        }
+        for hit in query["results"]
+    )
+
+    assert set(found) == {
+        "schema",
+        "query",
+        "k",
+        "budget",
+        "estimated_tokens",
+        "filters",
+        "results",
+        "complete",
+        "workspace_fingerprint",
+        "omissions",
+    }
+    assert found["schema"] == "vivary.find-result/v0"
+    assert found["query"] == "release workflow"
+    assert found["filters"] == query["filters"]
+    assert found["complete"] is True
+    assert 0 < found["estimated_tokens"] <= found["budget"]
+    assert [hit["path"] for hit in found["results"]] == [
+        "decisions/release-workflow.md"
+    ]
+    assert all(
+        set(hit) == {"id", "type", "path", "reason", "snippet", "edges"}
+        for hit in found["results"]
+    )
+
+    assert set(checked) == {
+        "schema",
+        "checked",
+        "clean",
+        "errors",
+        "warnings",
+        "findings",
+        "strict",
+        "complete",
+        "workspace_fingerprint",
+        "omissions",
+    }
+    assert checked["schema"] == "vivary.check-result/v0"
+    assert checked["checked"] == checked["clean"] == 3
+    assert checked["errors"] == checked["warnings"] == 0
+    assert checked["findings"] == []
+    assert checked["strict"] is True
+    assert checked["complete"] is True
+
+    fingerprints = {
+        query["workspace_fingerprint"],
+        query_again["workspace_fingerprint"],
+        found["workspace_fingerprint"],
+        checked["workspace_fingerprint"],
+    }
+    assert len(fingerprints) == 1
+    fingerprint = fingerprints.pop()
+    assert fingerprint.startswith("sha256:") and len(fingerprint) == 71
+
+
+def test_public_context_refuses_any_absolute_machine_path_in_query():
+    for absolute_path in (
+        "/usr/local/private.txt",
+        "/data/private.txt",
+        "see `/usr/local/private.txt`",
+        "source:/data/private.txt",
+    ):
+        try:
+            tropo.query_context(
+                "/workspace",
+                f"read {absolute_path}",
+                allowlist=["/workspace"],
+            )
+        except tropo.PathRefusedError:
+            pass
+        else:
+            assert False, f"expected absolute path refusal: {absolute_path}"
+
+
+def test_public_context_refuses_obfuscated_credentials_in_query():
+    for query in (
+        "password\u200b=do-not-disclose",
+        "ｐａｓｓｗｏｒｄ=do-not-disclose",
+    ):
+        try:
+            tropo.query_context(
+                "/workspace",
+                query,
+                allowlist=["/workspace"],
+            )
+        except tropo.PathRefusedError:
+            pass
+        else:
+            assert False, "expected obfuscated credential refusal"
+
+
+def test_public_context_policy_admits_before_any_candidate_byte_read(tmp_path):
+    _minimal_vault(tmp_path)
+    ignored = tmp_path / "notes" / "ignored.md"
+    ignored.write_text(
+        "# Ignored\nPRIVATE_IGNORED_CONTENT_MARKER\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".gitignore").write_text("notes/ignored.md\n", encoding="utf-8")
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    policy_candidates = []
+    read_candidates = []
+    original_policy = vivary_core.content_privacy_policy
+    original_read_candidate = tropo._public_read_candidate
+
+    def record_policy(checkout_path, candidates, **kwargs):
+        if not policy_candidates:
+            assert read_candidates == []
+        policy_candidates.append(tuple(candidates))
+        return original_policy(checkout_path, candidates, **kwargs)
+
+    def record_candidate_read(workspace, candidate, *args, **kwargs):
+        read_candidates.append(candidate["rel"])
+        return original_read_candidate(workspace, candidate, *args, **kwargs)
+
+    with (
+        mock.patch.object(
+            vivary_core,
+            "content_privacy_policy",
+            side_effect=record_policy,
+        ),
+        mock.patch.object(
+            tropo,
+            "_public_read_candidate",
+            side_effect=record_candidate_read,
+        ),
+    ):
+        result = tropo.query_context(
+            root,
+            "auth",
+            allowlist=[root],
+        )
+
+    assert len(policy_candidates) == 2
+    assert policy_candidates[0] == policy_candidates[1]
+    assert "notes/ignored.md" in policy_candidates[0]
+    assert "notes/ignored.md" not in read_candidates
+    assert {
+        "kind": "privacy_excluded",
+        "reason": "git_ignored",
+        "count": 1,
+    } in result["omissions"]
+    serialized = json.dumps(result, sort_keys=True)
+    assert "ignored.md" not in serialized
+    assert "PRIVATE_IGNORED_CONTENT_MARKER" not in serialized
+
+
+def test_public_candidate_refuses_same_size_rewrite_with_restored_mtime(tmp_path):
+    candidate_path = tmp_path / "note.md"
+    candidate_path.write_bytes(b"before")
+    original = os.lstat(candidate_path)
+    candidate, reason = tropo._public_candidate_from_info(
+        "note.md",
+        "markdown",
+        original,
+    )
+    assert reason is None
+    time.sleep(0.02)
+    candidate_path.write_bytes(b"after!")
+    os.utime(
+        candidate_path,
+        ns=(original.st_atime_ns, original.st_mtime_ns),
+    )
+
+    data, reason = tropo._public_read_candidate(
+        _public_workspace_root(tmp_path),
+        candidate,
+    )
+
+    assert data is None
+    assert reason == "changed"
+
+
+def test_public_context_refuses_changed_privacy_policy_after_reads(tmp_path):
+    _minimal_vault(tmp_path)
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    original_policy = vivary_core.content_privacy_policy
+    calls = {"count": 0}
+
+    def changing_policy(checkout_path, candidates, **kwargs):
+        result = original_policy(checkout_path, candidates, **kwargs)
+        calls["count"] += 1
+        if calls["count"] == 2:
+            result = {**result, "privacy_fingerprint": "sha256:" + "b" * 64}
+        return result
+
+    with mock.patch.object(
+        vivary_core,
+        "content_privacy_policy",
+        side_effect=changing_policy,
+    ):
+        try:
+            tropo.query_context(root, "auth", allowlist=[root])
+        except tropo.PrivacyPolicyUnavailableError as error:
+            assert error.reason == "privacy_policy_unavailable"
+        else:
+            assert False, "expected changed privacy policy to refuse the snapshot"
+
+    assert calls["count"] == 2
+
+
+def test_public_producer_cancellation_is_unavailable_for_every_facade(tmp_path):
+    _search_vault(tmp_path)
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    allowlist = [root]
+
+    for name, invoke in (
+        (
+            "query_context",
+            lambda: tropo.query_context(
+                root,
+                "release workflow",
+                allowlist=allowlist,
+                cancelled=lambda: True,
+            ),
+        ),
+        (
+            "find_context",
+            lambda: tropo.find_context(
+                root,
+                "release workflow",
+                allowlist=allowlist,
+                cancelled=lambda: True,
+            ),
+        ),
+        (
+            "check_workspace",
+            lambda: tropo.check_workspace(
+                root,
+                allowlist=allowlist,
+                cancelled=lambda: True,
+            ),
+        ),
+        (
+            "governed_find",
+            lambda: tropo.governed_find(
+                root,
+                "release workflow",
+                max_claims=24,
+                cancelled=lambda: True,
+            ),
+        ),
+    ):
+        try:
+            invoke()
+        except tropo.ProducerUnavailableError as error:
+            assert error.reason == "producer_unavailable", name
+        else:
+            assert False, f"{name} did not surface cancellation"
+
+
+def test_public_context_cancellation_interrupts_enumeration_and_ranking(tmp_path):
+    _search_vault(tmp_path)
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    allowlist = [root]
+
+    enumeration = {"requested": False, "calls": 0}
+    original_scandir = tropo.os.scandir
+
+    def cancel_after_scandir(*args, **kwargs):
+        enumeration["calls"] += 1
+        enumeration["requested"] = True
+        return original_scandir(*args, **kwargs)
+
+    with mock.patch.object(
+        tropo.os,
+        "scandir",
+        side_effect=cancel_after_scandir,
+    ):
+        _assert_public_producer_unavailable(
+            lambda: tropo.query_context(
+                root,
+                "release workflow",
+                allowlist=allowlist,
+                cancelled=lambda: enumeration["requested"],
+            )
+        )
+    assert enumeration["calls"] == 1
+
+    ranking = {"requested": False, "calls": 0}
+    original_rank = tropo._rank_search_records
+
+    def cancel_at_ranking(*args, **kwargs):
+        ranking["calls"] += 1
+        ranking["requested"] = True
+        return original_rank(*args, **kwargs)
+
+    with mock.patch.object(
+        tropo,
+        "_rank_search_records",
+        side_effect=cancel_at_ranking,
+    ):
+        _assert_public_producer_unavailable(
+            lambda: tropo.find_context(
+                root,
+                "release workflow",
+                allowlist=allowlist,
+                cancelled=lambda: ranking["requested"],
+            )
+        )
+    assert ranking["calls"] == 1
+
+
+def test_public_query_raises_work_limit_for_oversized_candidate(tmp_path):
+    _minimal_vault(tmp_path)
+    (tmp_path / "notes" / "over-limit.md").write_bytes(
+        b"# Over Limit\n" + b"x" * (1_048_576 + 1)
+    )
+    root = _public_workspace_root(tmp_path)
+
+    try:
+        tropo.query_context(root, "auth", allowlist=[root])
+    except tropo.WorkLimitExceededError as error:
+        assert error.reason == "work_limit_exceeded"
+    else:
+        assert False, "expected the public file-size work limit"
+
+
+def test_public_facades_leave_legacy_cli_output_and_receipts_unchanged(tmp_path):
+    _search_vault(tmp_path)
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    argv = [
+        "query",
+        "release workflow",
+        "--root",
+        str(tmp_path),
+        "--json",
+    ]
+
+    def run_legacy_query():
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = tropo.main(argv)
+        return rc, stdout.getvalue(), stderr.getvalue()
+
+    with mock.patch.dict(os.environ, {tropo.RECEIPT_ENV: ""}):
+        legacy_before = run_legacy_query()
+        unexpected_receipt = tmp_path / "unexpected-public-receipt.jsonl"
+        with (
+            mock.patch.dict(
+                os.environ,
+                {tropo.RECEIPT_ENV: str(unexpected_receipt)},
+            ),
+            mock.patch.object(
+                tropo,
+                "_append_run_receipt",
+                side_effect=AssertionError("public producer wrote a receipt"),
+            ),
+        ):
+            tropo.query_context(root, "release workflow", allowlist=[root])
+            tropo.find_context(root, "release workflow", allowlist=[root])
+            tropo.check_workspace(root, allowlist=[root])
+            tropo.governed_find(root, "release workflow", max_claims=24)
+
+        assert not unexpected_receipt.exists()
+        assert run_legacy_query() == legacy_before
 
 
 def test_cmd_query_no_results(tmp_path):

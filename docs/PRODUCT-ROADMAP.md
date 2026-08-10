@@ -198,21 +198,28 @@ Ship copyable, verified workflows for:
 Each workflow must name the input, verifier, stop rule, and gate. Prefer five strong
 workflows to twenty superficial presets.
 
-## Later: meet agents on their existing rails
+## Development source: meet agents on existing rails
 
 ### 9. Read-only `vivary-mcp`
 
-**Outcome:** Claude Code, Codex, Cursor, and other MCP clients can use the typed graph
-without shell glue.
+**Development-source outcome:** MCP `2026-07-28` clients can request bounded Vivary
+context over local standard input/output without adding MCP to the baseline or Core.
+Compatibility with a named client and external conformance remain unproven until
+tested directly.
 
-First slice exposes exactly:
+The optional first slice exposes exactly:
 
-- `find`;
-- `query`;
-- `check`.
+- `vivary_find`;
+- `vivary_query`;
+- `vivary_check`;
+- `vivary_capsule`.
 
-No write tools, no server in the core package, no auto-enable behavior, and the same
-privacy/ignore rules as the CLI.
+There are no write tools, extensions, remote transports, provider calls, or
+auto-enable behavior. Operator-configured aliases own root authority. The adapter
+reuses the public Tropo/Core privacy contract and projects capsules without raw
+evidence. [MCP.md](MCP.md) owns the complete boundary and proof.
+
+## Later: provider and integration proofs
 
 ### 10. Typed recall provider contract
 

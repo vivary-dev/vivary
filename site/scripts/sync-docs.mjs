@@ -25,6 +25,7 @@ const pages = [
   ['GETTING-STARTED', 'getting-started', 'Getting started', 'Install Vivary and run your first agent workspace.'],
   ['WALKTHROUGH', 'walkthrough', 'Getting started proof', 'A public, generic product walkthrough showing Vivary scaffold, health, review, coordination, and impact checks.'],
   ['COMMANDS', 'commands', 'Command reference', 'Every CLI across Vivary: tropo, strato, ozone, exo, create-vivary, and optional adapters.'],
+  ['MCP', 'mcp', 'MCP adapter', 'Optional local read-only MCP adapter contract, tools, privacy boundary, and verification.'],
   ['SKILLS', 'skills', 'Agent skills', 'The strato, tropo, and loops skills that operate a Vivary workspace.'],
   ['ACTIVE-CONTEXT', 'active-context', 'Active context', 'Optional CocoIndex-code sidecar guidance for semantic code retrieval.'],
   ['LLM-ACTIVE-CONTEXT', 'llm-active-context', 'LLM active-context guide', 'Copyable agent instructions for graph-first CocoIndex-code retrieval.'],
@@ -46,6 +47,7 @@ const rewrite = (s) =>
    .replaceAll('](WALKTHROUGH.md)', '](/walkthrough/)')
    .replaceAll('](COMMANDS.md#', '](/commands/#')
    .replaceAll('](COMMANDS.md)', '](/commands/)')
+   .replaceAll('](MCP.md)', '](/mcp/)')
    .replaceAll('](SKILLS.md)', '](/skills/)')
    .replaceAll('](ACTIVE-CONTEXT.md)', '](/active-context/)')
    .replaceAll('](LLM-ACTIVE-CONTEXT.md)', '](/llm-active-context/)')

@@ -24,10 +24,11 @@ import tempfile
 import time
 from datetime import date, datetime, timezone
 from email.parser import BytesParser
+from email.message import Message
 from pathlib import Path
 
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 
 PRESETS = ("coding", "second-brain", "knowledge-work", "writing")
 
@@ -4229,10 +4230,6 @@ _SUPPORTED_PROVIDER_VERSION_RE = re.compile(
     """,
     re.IGNORECASE | re.VERBOSE,
 )
-_REQUIREMENT_FLOOR_RE = re.compile(
-    r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)\s*>=\s*"
-    r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)\s*$"
-)
 _REQUIREMENT_NAME_RE = re.compile(
     r"^\s*(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$|[\[<>=!~;@])"
 )
@@ -4346,6 +4343,48 @@ _CAPABILITY_DECLARATIONS = {
                 "hint": "cocoindex-code[full]",
                 "distribution": "cocoindex-code",
                 "module": "cocoindex_code",
+            },
+        ),
+    },
+    "interop:mcp": {
+        "label": "Read-only MCP interoperability",
+        "default": False,
+        "requires_approval": False,
+        "network": False,
+        "authority": "read-only-context",
+        "governed_role": "vivary-mcp",
+        "protocol_revision": "2026-07-28",
+        "transport_stdio": True,
+        "tool_names": (
+            "vivary_find",
+            "vivary_query",
+            "vivary_check",
+            "vivary_capsule",
+        ),
+        "extensions": (),
+        "conformance_status": "unproven",
+        "requirements": (
+            {
+                "hint": "vivary-mcp",
+                "distribution": "vivary-mcp",
+                "module": "vivary_mcp",
+                "script": "vivary-mcp",
+                "callable": "main",
+                "vivary": True,
+            },
+            {
+                "hint": "vivary-tropo",
+                "distribution": "vivary-tropo",
+                "module": "tropo",
+                "script": "tropo",
+                "callable": "main",
+                "vivary": True,
+            },
+            {
+                "hint": "mcp",
+                "distribution": "mcp",
+                "module": "mcp",
+                "versioned": True,
             },
         ),
     },
@@ -4722,7 +4761,7 @@ def _parse_capability_metadata(
     content: bytes,
 ) -> tuple[dict[str, str], tuple[str, ...], tuple[str, ...]]:
     try:
-        message = BytesParser().parsebytes(content)
+        message = BytesParser(_class=Message).parsebytes(content)
     except Exception as exc:
         raise _CapabilityProbeFailure from exc
     if message.defects:
@@ -5175,15 +5214,15 @@ def _selected_extra_dependency(
     )
 
 
-def _required_dependency_floors(
+def _required_dependency_constraints(
     requirements: tuple[str, ...],
     expected_dependencies: tuple[str, ...],
-) -> dict[str, tuple[int, int, int]]:
+) -> dict[str, tuple[str, tuple[int, int, int]]]:
     expected = {
         _normalize_distribution_name(dependency): dependency
         for dependency in expected_dependencies
     }
-    floors: dict[str, tuple[int, int, int]] = {}
+    constraints: dict[str, tuple[str, tuple[int, int, int]]] = {}
     for declared in requirements:
         name_match = _REQUIREMENT_NAME_RE.match(declared)
         if name_match is None:
@@ -5193,20 +5232,30 @@ def _required_dependency_floors(
         )
         if dependency is None:
             continue
-        match = _REQUIREMENT_FLOOR_RE.fullmatch(declared)
-        if match is None:
+        specifier_text = declared[name_match.end():].strip()
+        clauses = _parse_version_specifier(specifier_text)
+        exact_clauses = [
+            release
+            for operator, release, wildcard in clauses
+            if operator == "==" and not wildcard and len(release) == 3
+        ]
+        floor_clauses = [
+            release
+            for operator, release, wildcard in clauses
+            if operator == ">=" and not wildcard and len(release) == 3
+        ]
+        if len(exact_clauses) == 1 and not floor_clauses:
+            constraint = ("==", exact_clauses[0])
+        elif len(floor_clauses) == 1 and not exact_clauses:
+            constraint = (">=", floor_clauses[0])
+        else:
             raise _CapabilityContractIncompatible
-        if dependency in floors:
+        if dependency in constraints:
             raise _CapabilityContractIncompatible
-        try:
-            floors[dependency] = tuple(
-                int(match.group(part)) for part in ("major", "minor", "patch")
-            )
-        except ValueError as exc:
-            raise _CapabilityContractIncompatible from exc
-    if set(floors) != set(expected_dependencies):
+        constraints[dependency] = constraint
+    if set(constraints) != set(expected_dependencies):
         raise _CapabilityContractIncompatible
-    return floors
+    return constraints
 
 
 def _optional_dependency_floor(
@@ -5417,7 +5466,7 @@ def _read_capability_distribution(
         "status": "installed",
         "version": (
             _stable_version(evidence["declared_version"])
-            if spec.get("vivary")
+            if spec.get("vivary") or spec.get("versioned")
             else None
         ),
         "declared_version": evidence["declared_version"],
@@ -5657,21 +5706,26 @@ def _capability_probe_results(capabilities: list[dict]) -> dict[str, dict]:
         if observed_result is None or observed_result["status"] != "installed":
             continue
         try:
-            dependency_floors = _required_dependency_floors(
+            dependency_constraints = _required_dependency_constraints(
                 observed_result["declared_requirements"],
                 expected_dependencies,
             )
         except _CapabilityContractIncompatible:
             results[role] = {"status": "incompatible"}
             continue
-        for dependency, floor in dependency_floors.items():
+        for dependency, (operator, required_version) in dependency_constraints.items():
             dependency_result = results.get(dependency)
             if dependency_result is None:
                 results[role] = {"status": "incompatible"}
                 break
+            if dependency_result["status"] != "installed":
+                continue
+            installed_version = dependency_result["version"]
             if (
-                dependency_result["status"] == "installed"
-                and dependency_result["version"] < floor
+                operator == ">="
+                and installed_version < required_version
+                or operator == "=="
+                and installed_version != required_version
             ):
                 results[role] = {"status": "incompatible"}
                 break
@@ -5748,6 +5802,34 @@ def _annotate_capability(capability: dict, results: dict[str, dict]) -> None:
     capability["reason_codes"] = reasons
     capability["missing_install"] = missing
 
+def _annotate_mcp_capability(capability: dict, results: dict[str, dict]) -> None:
+    package = results.get("vivary-mcp", {"status": "probe-failed"})
+    sdk = results.get("mcp", {"status": "probe-failed"})
+    package_status = package.get("status")
+    capability["package_present"] = (
+        False
+        if package_status == "missing"
+        else True
+        if package_status in {"installed", "incompatible"}
+        else None
+    )
+    capability["entry_point_present"] = (
+        True
+        if package_status in {"installed", "incompatible"}
+        else False
+        if package_status == "missing"
+        else None
+    )
+    capability["sdk_version"] = (
+        sdk.get("declared_version")
+        if sdk.get("status") == "installed"
+        else None
+    )
+    capability["sdk_compatible"] = (
+        sdk.get("status") == "installed"
+        and sdk.get("version") == (2, 0, 0)
+    )
+
 
 def _capability_declarations(preset: str | None) -> list[dict]:
     capabilities: list[dict] = []
@@ -5760,12 +5842,21 @@ def _capability_declarations(preset: str | None) -> list[dict]:
             **{
                 field: value
                 for field, value in declaration.items()
-                if field not in {"governed_role", "presets", "requirements"}
+                if field
+                not in {
+                    "governed_role",
+                    "presets",
+                    "requirements",
+                    "versioned",
+                }
             },
             "requires_install": [
                 requirement["hint"] for requirement in declaration["requirements"]
             ],
         }
+        for field in ("tool_names", "extensions"):
+            if field in capability:
+                capability[field] = list(capability[field])
         capabilities.append(capability)
     return capabilities
 
@@ -5775,6 +5866,8 @@ def _build_capability_report(preset: str | None) -> dict:
     results = _capability_probe_results(capabilities)
     for capability in capabilities:
         _annotate_capability(capability, results)
+        if capability["id"] == "interop:mcp":
+            _annotate_mcp_capability(capability, results)
     return {
         "ok": True,
         "preset": preset,
@@ -6425,7 +6518,10 @@ def _print_doctor_report(report: dict) -> None:
         )
     capabilities = report.get("capabilities", {}).get("available_capabilities", ())
     for capability in capabilities:
-        if capability["id"].startswith("governed-"):
+        if (
+            capability["id"].startswith("governed-")
+            or capability["id"] == "interop:mcp"
+        ):
             print(
                 f"capability: {capability['id']} "
                 f"({capability['install_status']})"

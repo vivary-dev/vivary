@@ -3804,7 +3804,7 @@ class VersionParityTests(unittest.TestCase):
             "governed-context:tropo": (
                 "tropo",
                 ["vivary-tropo", "vivary-core"],
-                ("vivary-core>=0.2.1",),
+                ("vivary-core>=0.2.7",),
             ),
             "governed-policy:strato": (
                 "strato",
@@ -3943,15 +3943,15 @@ class GovernedContextCapabilityTests(unittest.TestCase):
 
     def _write_governed_install(self, root: Path) -> None:
         self._write_distribution(
-            root, "vivary-core", "0.2.6", "vivary_core", package=True
+            root, "vivary-core", "0.2.7", "vivary_core", package=True
         )
         self._write_distribution(
             root,
             "vivary-tropo",
-            "0.5.0",
+            "0.5.1",
             "tropo",
             requirements=(
-                "vivary-core>=0.2.1",
+                "vivary-core>=0.2.7",
                 'lancedb>=0.14.0; extra == "embedded"',
             ),
             script="tropo",
@@ -3979,6 +3979,42 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             "exo",
             requirements=("vivary-tropo>=0.2.3", "vivary-core>=0.2.5"),
             script="exo",
+        )
+
+    def _write_mcp_install(
+        self,
+        root: Path,
+        *,
+        include_mcp: bool = True,
+        sdk_version: str = "2.0.0",
+    ) -> None:
+        self._write_distribution(
+            root, "vivary-core", "0.2.7", "vivary_core", package=True
+        )
+        self._write_distribution(
+            root,
+            "vivary-tropo",
+            "0.5.1",
+            "tropo",
+            requirements=("vivary-core>=0.2.7",),
+            script="tropo",
+        )
+        if include_mcp:
+            self._write_distribution(
+                root,
+                "mcp",
+                sdk_version,
+                "mcp",
+                package=True,
+            )
+        self._write_distribution(
+            root,
+            "vivary-mcp",
+            "0.1.0",
+            "vivary_mcp",
+            requirements=("vivary-tropo>=0.5.1", "mcp==2.0.0"),
+            script="vivary-mcp",
+            package=True,
         )
 
     def _write_cocoindex_full_install(
@@ -4074,6 +4110,166 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             )
         self.assertTrue(by_id["storage:file"]["installed"])
 
+    def test_mcp_capability_is_passively_detected_without_default_enablement(self):
+        class ExplodingFinder:
+            def find_spec(self, fullname, path=None, target=None):
+                raise AssertionError(f"ambient finder called for {fullname}")
+
+            def find_distributions(self, context=None):
+                raise AssertionError("ambient distribution finder called")
+
+        with temp_workspace() as root:
+            self._write_mcp_install(root)
+            with (
+                mock.patch.object(
+                    create_vivary,
+                    "_capability_install_roots",
+                    return_value=(root,),
+                ),
+                mock.patch.object(sys, "meta_path", [ExplodingFinder(), *sys.meta_path]),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        interop = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "interop:mcp"
+        )
+        self.assertEqual(
+            report["default_capabilities"], ["storage:file", "memory:none"]
+        )
+        self.assertNotIn("interop:mcp", report["default_capabilities"])
+        self.assertEqual(interop["authority"], "read-only-context")
+        self.assertFalse(interop["default"])
+        self.assertFalse(interop["requires_approval"])
+        self.assertFalse(interop["network"])
+        self.assertEqual(
+            interop["requires_install"], ["vivary-mcp", "vivary-tropo", "mcp"]
+        )
+        self.assertTrue(interop["installed"])
+        self.assertEqual(interop["install_status"], "installed")
+        self.assertEqual(interop["reason_codes"], [])
+        self.assertEqual(interop["missing_install"], [])
+        self.assertNotIn("versioned", interop)
+        self.assertTrue(interop["package_present"])
+        self.assertTrue(interop["entry_point_present"])
+        self.assertEqual(interop["sdk_version"], "2.0.0")
+        self.assertTrue(interop["sdk_compatible"])
+        self.assertEqual(interop["protocol_revision"], "2026-07-28")
+        self.assertTrue(interop["transport_stdio"])
+        self.assertEqual(
+            interop["tool_names"],
+            ["vivary_find", "vivary_query", "vivary_check", "vivary_capsule"],
+        )
+        self.assertEqual(interop["extensions"], [])
+        self.assertEqual(interop["conformance_status"], "unproven")
+
+    def test_mcp_capability_requires_the_exact_reviewed_sdk_version(self):
+        with temp_workspace() as root:
+            self._write_mcp_install(root, sdk_version="2.0.1")
+            with mock.patch.object(
+                create_vivary,
+                "_capability_install_roots",
+                return_value=(root,),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        interop = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "interop:mcp"
+        )
+        self.assertEqual(interop["install_status"], "incompatible")
+        self.assertEqual(
+            interop["reason_codes"],
+            ["capability_contract_incompatible"],
+        )
+        self.assertTrue(interop["package_present"])
+        self.assertTrue(interop["entry_point_present"])
+        self.assertEqual(interop["sdk_version"], "2.0.1")
+        self.assertFalse(interop["sdk_compatible"])
+
+    def test_text_doctor_reports_optional_mcp_interoperability(self):
+        output = io.StringIO()
+        report = {
+            "ok": True,
+            "graph": {"nodes": 0, "edges": 0, "broken": 0},
+            "memory": {},
+            "capabilities": {
+                "available_capabilities": [
+                    {
+                        "id": "interop:mcp",
+                        "install_status": "not-installed",
+                    }
+                ]
+            },
+            "warnings": [],
+            "errors": [],
+        }
+
+        with redirect_stdout(output):
+            create_vivary._print_doctor_report(report)
+
+        self.assertIn(
+            "capability: interop:mcp (not-installed)",
+            output.getvalue(),
+        )
+
+    def test_mcp_capability_reports_missing_incompatible_and_probe_failed_dependencies(self):
+        def report_for(root: Path) -> dict:
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                return create_vivary.capability_report("coding")
+
+        with self.subTest(status="not-installed"), temp_workspace() as root:
+            self._write_mcp_install(root, include_mcp=False)
+            interop = next(
+                item
+                for item in report_for(root)["available_capabilities"]
+                if item["id"] == "interop:mcp"
+            )
+            self.assertEqual(interop["install_status"], "not-installed")
+            self.assertEqual(
+                interop["reason_codes"], ["capability_dependency_missing"]
+            )
+            self.assertEqual(interop["missing_install"], ["mcp"])
+
+        with self.subTest(status="incompatible"), temp_workspace() as root:
+            self._write_mcp_install(root)
+            metadata = next(root.glob("vivary_mcp-*.dist-info/METADATA"))
+            metadata.write_text(
+                metadata.read_text(encoding="utf-8").replace(
+                    "Requires-Dist: mcp==2.0.0\n", ""
+                ),
+                encoding="utf-8",
+            )
+            interop = next(
+                item
+                for item in report_for(root)["available_capabilities"]
+                if item["id"] == "interop:mcp"
+            )
+            self.assertEqual(interop["install_status"], "incompatible")
+            self.assertEqual(
+                interop["reason_codes"], ["capability_contract_incompatible"]
+            )
+            self.assertEqual(interop["missing_install"], [])
+
+        with self.subTest(status="probe-failed"), temp_workspace() as root:
+            self._write_mcp_install(root)
+            record = next(root.glob("mcp-*.dist-info/RECORD"))
+            record.write_text("not-a-record-row\n", encoding="utf-8")
+            interop = next(
+                item
+                for item in report_for(root)["available_capabilities"]
+                if item["id"] == "interop:mcp"
+            )
+            self.assertEqual(interop["install_status"], "probe-failed")
+            self.assertEqual(
+                interop["reason_codes"], ["capability_probe_failed"]
+            )
+            self.assertEqual(interop["missing_install"], [])
+
     def test_command_capability_requires_recorded_launcher(self):
         for mutation in ("missing", "unrecorded"):
             with self.subTest(mutation=mutation), temp_workspace() as root:
@@ -4084,7 +4280,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
                 if mutation == "missing":
                     launcher.unlink()
                 else:
-                    record = root / "vivary_tropo-0.5.0.dist-info" / "RECORD"
+                    record = root / "vivary_tropo-0.5.1.dist-info" / "RECORD"
                     record.write_text(
                         "".join(
                             line
@@ -4119,7 +4315,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
     def test_posix_launcher_record_does_not_treat_backslash_as_separator(self):
         with temp_workspace() as root:
             self._write_governed_install(root)
-            record = root / "vivary_tropo-0.5.0.dist-info" / "RECORD"
+            record = root / "vivary_tropo-0.5.1.dist-info" / "RECORD"
             record.write_text(
                 record.read_text(encoding="utf-8").replace(
                     ".scripts/tropo,",
@@ -4149,7 +4345,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         for mutation in ("one-column", "vertical-tab"):
             with self.subTest(mutation=mutation), temp_workspace() as root:
                 self._write_governed_install(root)
-                record = root / "vivary_tropo-0.5.0.dist-info" / "RECORD"
+                record = root / "vivary_tropo-0.5.1.dist-info" / "RECORD"
                 content = record.read_text(encoding="utf-8")
                 if mutation == "one-column":
                     first, *remaining = content.splitlines()
@@ -4210,9 +4406,9 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             self._write_distribution(
                 root,
                 "vivary-tropo",
-                "0.5.0",
+                "0.5.1",
                 "tropo",
-                requirements=("vivary-core>=0.2.1",),
+                requirements=("vivary-core>=0.2.7",),
                 script="tropo",
             )
             with mock.patch.object(
@@ -4221,13 +4417,13 @@ class GovernedContextCapabilityTests(unittest.TestCase):
                 missing = create_vivary.capability_report("coding")
 
             self._write_distribution(
-                root, "vivary-core", "0.2.6", "vivary_core", package=True
+                root, "vivary-core", "0.2.7", "vivary_core", package=True
             )
             tropo_metadata = next(root.glob("vivary_tropo-*.dist-info/METADATA"))
             tropo_metadata.write_text(
                 "Metadata-Version: 2.3\n"
                 "Name: vivary-tropo\n"
-                "Version: 0.5.0\n"
+                "Version: 0.5.1\n"
                 "Requires-Python: >=3.11\n",
                 encoding="utf-8",
             )
@@ -5081,7 +5277,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             metadata.write_bytes(
                 b"Metadata-Version: 2.3\n"
                 b"Name: vivary-core\n"
-                b"Version: 0.2.6\n"
+                b"Version: 0.2.7\n"
                 b"Requires-Python: >=3.11\n"
                 b"broken metadata header\n"
             )
@@ -5243,7 +5439,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         with temp_workspace() as root:
             self._write_governed_install(root)
             original = next(root.glob("vivary_core-*.dist-info"))
-            renamed = root / original.name.replace("0.2.6", "9.9.9")
+            renamed = root / original.name.replace("0.2.7", "9.9.9")
             original.rename(renamed)
             record = renamed / "RECORD"
             record.write_text(
@@ -5676,13 +5872,13 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             create_vivary._parse_capability_metadata(
                 b"Metadata-Version: \n"
                 b"Name: vivary-core\n"
-                b"Version: 0.2.6\n"
+                b"Version: 0.2.7\n"
                 b"Requires-Python: >=3.11\n"
             )
 
         with temp_workspace() as root, temp_workspace() as outside:
             self._write_distribution(
-                outside, "vivary-core", "0.2.6", "vivary_core", package=True
+                outside, "vivary-core", "0.2.7", "vivary_core", package=True
             )
             external = next(outside.glob("vivary_core-*.dist-info"))
             try:
@@ -5732,6 +5928,16 @@ class GovernedContextCapabilityTests(unittest.TestCase):
 
             self.assertTrue(report["ok"], report)
             self.assertEqual(report["capabilities"], create_vivary.capability_report("coding"))
+            interop = next(
+                item
+                for item in report["capabilities"]["available_capabilities"]
+                if item["id"] == "interop:mcp"
+            )
+            self.assertFalse(interop["default"])
+            self.assertNotIn(
+                "interop:mcp", report["capabilities"]["default_capabilities"]
+            )
+            self.assertNotIn("vivary-mcp", json.dumps(report["errors"]))
             self.assertNotIn("vivary-core", json.dumps(report["errors"]))
 
             readme = target / "README.md"

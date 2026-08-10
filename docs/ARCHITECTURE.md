@@ -176,8 +176,14 @@ anything unproven is reported `unknown` rather than guessed.
 declares its own floor in the same commit. The `vivary` meta-package receives Core
 transitively through the role packages instead of declaring a duplicate Core edge.
 Tropo, Strato, Ozone, and Exo own their Core floors. The meta-package owns its five
-component floors, including `create-vivary>=0.3.2` and `vivary-strato>=0.1.2`. One
-owner per edge avoids version-pinning fights.
+component floors, including `create-vivary>=0.3.3`, `vivary-tropo>=0.5.1`, and
+`vivary-strato>=0.1.2`. One owner per edge avoids version-pinning fights.
+
+**Optional MCP boundary:** `vivary-mcp` is an interoperability adapter, not a layer
+or part of Core. Its dependency direction is `vivary-mcp → vivary-tropo →
+vivary-core`; it separately pins the official MCP SDK. The adapter exposes only
+bounded public Tropo/Core projections over operator-bound local roots. The baseline
+and `vivary` meta-package do not install or start it.
 
 **Installed-capability truth:** development-source `create-vivary capabilities`
 projects a fixed public inventory for Core and the four governed roles. A bounded
@@ -185,12 +191,15 @@ passive reader binds each credited module or console script to the exact distrib
 record under the active interpreter's canonical package roots. It neither imports
 optional packages nor dispatches ambient import or distribution hooks. Each row reports
 `installed`, `not-installed`, `incompatible`, or `probe-failed`. Optional absence and
-probe failure do not make the workspace unhealthy. Doctor embeds the same envelope.
+probe failure do not make the workspace unhealthy. Doctor embeds the same envelope
+and a separate passive `interop:mcp` row; neither probe imports or starts the adapter.
 
 **Status:** Tropo, Strato, Ozone, and Exo Core adapters are present in the development
-source and remain unpublished behind explicit `--governed` flags. Plain Tropo retrieval,
-Ozone review and impact, and legacy Exo graph coordination remain unchanged. Current
-versions and publication status live in [the root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status).
+source and remain unpublished behind explicit `--governed` flags. The optional
+read-only MCP adapter is also present only in development source and disabled by
+default. Plain Tropo retrieval, Ozone review and impact, and legacy Exo graph
+coordination remain unchanged. Current versions and publication status live in
+[the root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status).
 
 ## 4. The moat
 
@@ -220,10 +229,13 @@ The brand owns the namespace; current package truth is:
 - `vivary-strato` is declared in-repo and remains unpublished during development.
   Strato's templates and skills also remain bundled by `create-vivary`; the runtime
   package adds the policy facade rather than replacing those workspace assets.
+- `vivary-mcp` is declared in-repo and remains unpublished during development. It is
+  an optional local standard-input/output adapter, not a `vivary` meta-package
+  dependency. [MCP.md](MCP.md) owns its contract.
 - GitHub: `vivary-dev/vivary` holds the public repo.
 
-Future packages can still use the Vivary namespace, but public docs should only name
-packages that are actually published.
+Future packages can still use the Vivary namespace. Release surfaces must distinguish
+published packages from declared, unpublished development source.
 
 ## 6. Module naming = atmosphere strata
 

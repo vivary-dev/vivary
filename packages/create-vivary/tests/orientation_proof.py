@@ -112,10 +112,19 @@ def _require_capability_truth(
         "reason_codes",
         "missing_install",
     }
+    mcp_dynamic_fields = {
+        "package_present",
+        "entry_point_present",
+        "sdk_version",
+        "sdk_compatible",
+    }
     for row, expected in zip(available, expected_available):
         _require(
             isinstance(row, dict)
-            and set(row) == set(expected) | dynamic_fields
+            and set(row)
+            == set(expected)
+            | dynamic_fields
+            | (mcp_dynamic_fields if expected.get("id") == "interop:mcp" else set())
             and all(row.get(field) == value for field, value in expected.items()),
             f"{kind}: {transport} capability declaration is invalid",
         )

@@ -10,7 +10,7 @@ model made every file pay a ceremony tax — `type:`, `created:`, `updated:`,
 write down only the irreducible signal. A clean note can have **zero
 frontmatter** and still be fully typed and valid.
 
-> Status: **working engine (v0.5.0).** `tropo.py` implements spec v1 end-to-end —
+> Status: **working engine (v0.5.1).** `tropo.py` implements spec v1 end-to-end —
 > folder-as-type resolution, derivation, validation, packs, **overlays**, the
 > `signal` report, **`fix`** (de-noise), **`init`**, the graph layer
 > (`graph`/`blast`/`view`/`plan`), typed retrieval (`find`/`query`), read-only
@@ -41,7 +41,7 @@ PYTHONPATH=../core python3 tropo.py find "folder as type decision" \
 )
 ```
 
-Requires Python 3.11+ (stdlib `tomllib`) and the first-party `vivary-core>=0.2.1`
+Requires Python 3.11+ (stdlib `tomllib`) and the first-party `vivary-core>=0.2.7`
 contract seam. Neither package adds third-party runtime dependencies. Optional
 extras: `python -m pip install "vivary-tropo[embedded]"` for LanceDB embedded storage and
 backend-level experiments. Plain `tropo find` and default `tropo query` read the typed

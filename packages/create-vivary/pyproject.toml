@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "create-vivary"
-version = "0.3.2"
+version = "0.3.3"
 description = "Scaffold a normalized Vivary agent workspace with typed project context, visible state, and human gates."
 readme = "README.md"
 requires-python = ">=3.11"

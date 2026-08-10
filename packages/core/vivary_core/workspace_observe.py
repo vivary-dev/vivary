@@ -19,10 +19,14 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import suppress
 import re
 import stat
 import subprocess
+import signal
 import threading
+import time
+import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
@@ -75,6 +79,10 @@ _READ_CHUNK = 64 * 1024
 _MAX_STDERR_BYTES = 8 * 1024
 _MAX_MANIFEST_BYTES = 1024 * 1024
 _SUBPROCESS_CLEANUP_TIMEOUT = 2.0
+_SUBPROCESS_TIMEOUT_SECONDS = 10.0
+_SUBPROCESS_POLL_SECONDS = 0.05
+_PROCESS_SCOPE_STATE_LOCK = threading.Lock()
+_PROCESS_SCOPE_QUARANTINED = False
 
 RunGit = Callable[[str, List[str]], Dict[str, Any]]
 
@@ -110,21 +118,398 @@ def _config_discovery_git_env() -> Dict[str, str]:
     return env
 
 
+def _close_parent_pipe(pipe: Any) -> None:
+    """Best-effort close for a parent-owned pipe endpoint."""
+    if pipe is not None:
+        with suppress(OSError, ValueError):
+            pipe.close()
+
+
+def _reap_direct_child(
+    proc: Any,
+    deadline: float,
+) -> tuple[Optional[int], Optional[Exception]]:
+    """Boundedly reap the direct child after its containing scope is stopped."""
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            code = proc.wait(timeout=min(_SUBPROCESS_POLL_SECONDS, remaining))
+        except subprocess.TimeoutExpired:
+            continue
+        except OSError as error:
+            return getattr(proc, "returncode", None), error
+        if code is not None:
+            return code, None
+        code = getattr(proc, "returncode", None)
+        if code is not None:
+            return code, None
+        time.sleep(min(_SUBPROCESS_POLL_SECONDS, remaining))
+    return (
+        getattr(proc, "returncode", None),
+        RuntimeError("direct child reap timed out"),
+    )
+
+
+def _abort_uncontained_child(proc: Any) -> Optional[str]:
+    """Boundedly stop a child when Windows Job assignment itself failed."""
+    details: List[str] = []
+    with suppress(OSError, ValueError):
+        proc.kill()
+    code, error = _reap_direct_child(
+        proc,
+        time.monotonic() + _SUBPROCESS_CLEANUP_TIMEOUT,
+    )
+    if error is not None:
+        details.append(str(error))
+    if code is None:
+        details.append("direct child was not reaped")
+    for pipe in (
+        getattr(proc, "stdin", None),
+        getattr(proc, "stdout", None),
+        getattr(proc, "stderr", None),
+    ):
+        _close_parent_pipe(pipe)
+    return "; ".join(details) or None
+
+
+def _fixed_popen(
+    argv: List[str],
+    env: Dict[str, str],
+    stdin_data: Optional[bytes],
+    **options: Any,
+) -> Any:
+    return subprocess.Popen(
+        argv,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.PIPE if stdin_data is not None else None,
+        env=env,
+        **options,
+    )
+
+
+class _PosixProcessScope:
+    """A new session whose process group is the complete child process scope."""
+
+    def __init__(self, proc: Any) -> None:
+        self.proc = proc
+        self._pgid = proc.pid
+        self._terminated = False
+        self._lock = threading.Lock()
+
+    def terminate(self) -> None:
+        with self._lock:
+            if self._terminated:
+                return
+            try:
+                os.killpg(self._pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                # A normal direct-child exit with no remaining descendants has
+                # already disposed this process group.
+                pass
+            self._terminated = True
+
+    def wait_stopped(self, deadline: float) -> None:
+        while True:
+            try:
+                os.killpg(self._pgid, 0)
+            except ProcessLookupError:
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("POSIX process group cleanup timed out")
+            time.sleep(min(_SUBPROCESS_POLL_SECONDS, remaining))
+
+    def dispose(self) -> None:
+        # The session is the scope resource on POSIX. Retrying here covers a
+        # previous failed termination without widening containment.
+        self.terminate()
+
+
+class _WindowsProcessScope:
+    """A Job Object process scope configured to kill every member on close."""
+
+    def __init__(
+        self,
+        proc: Any,
+        terminate_job: Callable[[], None],
+        wait_job: Callable[[float], None],
+        close_job: Callable[[], None],
+    ) -> None:
+        self.proc = proc
+        self._terminate_job = terminate_job
+        self._wait_job = wait_job
+        self._close_job = close_job
+        self._terminated = False
+        self._disposed = False
+        self._lock = threading.Lock()
+
+    @classmethod
+    def launch(
+        cls,
+        argv: List[str],
+        env: Dict[str, str],
+        stdin_data: Optional[bytes],
+    ) -> "_WindowsProcessScope":
+        import ctypes
+        from ctypes import wintypes
+
+        class _BasicLimitInformation(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_longlong),
+                ("PerJobUserTimeLimit", ctypes.c_longlong),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class _IoCounters(ctypes.Structure):
+            _fields_ = [
+                ("ReadOperationCount", ctypes.c_ulonglong),
+                ("WriteOperationCount", ctypes.c_ulonglong),
+                ("OtherOperationCount", ctypes.c_ulonglong),
+                ("ReadTransferCount", ctypes.c_ulonglong),
+                ("WriteTransferCount", ctypes.c_ulonglong),
+                ("OtherTransferCount", ctypes.c_ulonglong),
+            ]
+
+        class _ExtendedLimitInformation(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", _BasicLimitInformation),
+                ("IoInfo", _IoCounters),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.SetInformationJobObject.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+        ]
+        kernel32.SetInformationJobObject.restype = wintypes.BOOL
+        kernel32.AssignProcessToJobObject.argtypes = [
+            wintypes.HANDLE,
+            wintypes.HANDLE,
+        ]
+        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        kernel32.TerminateJobObject.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        ntdll = ctypes.WinDLL("ntdll")
+        ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
+        ntdll.NtResumeProcess.restype = wintypes.LONG
+
+        def last_error(action: str) -> OSError:
+            error_code = ctypes.get_last_error()
+            detail = ctypes.FormatError(error_code).strip() if error_code else action
+            return OSError(error_code, f"{action}: {detail}")
+
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            raise OSError(f"process containment setup failed: {last_error('CreateJobObjectW')}")
+        try:
+            limits = _ExtendedLimitInformation()
+            limits.BasicLimitInformation.LimitFlags = 0x00002000
+            if not kernel32.SetInformationJobObject(
+                job,
+                9,
+                ctypes.byref(limits),
+                ctypes.sizeof(limits),
+            ):
+                raise last_error("SetInformationJobObject")
+        except BaseException as error:
+            kernel32.CloseHandle(job)
+            raise OSError(f"process containment setup failed: {error}") from error
+
+        try:
+            proc = _fixed_popen(
+                argv,
+                env,
+                stdin_data,
+                creationflags=(
+                    getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                    | 0x00000004  # CREATE_SUSPENDED
+                ),
+            )
+        except BaseException:
+            kernel32.CloseHandle(job)
+            raise
+
+        try:
+            process_handle = getattr(proc, "_handle", None)
+            if process_handle is None:
+                raise OSError("Popen did not expose a Windows process handle")
+            if not kernel32.AssignProcessToJobObject(
+                job,
+                wintypes.HANDLE(int(process_handle)),
+            ):
+                raise last_error("AssignProcessToJobObject")
+            status = ntdll.NtResumeProcess(wintypes.HANDLE(int(process_handle)))
+            if status != 0:
+                raise OSError(
+                    int(status),
+                    f"NtResumeProcess failed with NTSTATUS 0x{int(status) & 0xFFFFFFFF:08x}",
+                )
+        except BaseException as error:
+            cleanup_error = _abort_uncontained_child(proc)
+            kernel32.CloseHandle(job)
+            suffix = f"; {cleanup_error}" if cleanup_error else ""
+            raise OSError(
+                f"process containment setup failed: {error}{suffix}"
+            ) from error
+
+        def terminate_job() -> None:
+            if not kernel32.TerminateJobObject(job, 1):
+                raise last_error("TerminateJobObject")
+
+        def wait_job(deadline: float) -> None:
+            remaining = max(0.0, deadline - time.monotonic())
+            result = kernel32.WaitForSingleObject(
+                job,
+                min(0xFFFFFFFE, int(remaining * 1_000)),
+            )
+            if result == 0:
+                return
+            if result == 0x00000102:
+                raise RuntimeError("Windows process job cleanup timed out")
+            if result == 0xFFFFFFFF:
+                raise last_error("WaitForSingleObject")
+            raise OSError(f"unexpected Windows job wait result: {result}")
+
+        def close_job() -> None:
+            if not kernel32.CloseHandle(job):
+                raise last_error("CloseHandle")
+
+        return cls(proc, terminate_job, wait_job, close_job)
+
+    def terminate(self) -> None:
+        with self._lock:
+            if self._disposed or self._terminated:
+                return
+            self._terminate_job()
+            self._terminated = True
+
+    def wait_stopped(self, deadline: float) -> None:
+        self._wait_job(deadline)
+
+    def dispose(self) -> None:
+        with self._lock:
+            if self._disposed:
+                return
+            self._disposed = True
+            self._close_job()
+
+
+def _open_process_scope(
+    argv: List[str],
+    env: Dict[str, str],
+    stdin_data: Optional[bytes],
+) -> Any:
+    """Launch a child only after choosing a process-tree containment primitive."""
+    if os.name == "nt":
+        return _WindowsProcessScope.launch(argv, env, stdin_data)
+    if os.name == "posix":
+        return _PosixProcessScope(
+            _fixed_popen(argv, env, stdin_data, start_new_session=True)
+        )
+    raise OSError("process containment is unavailable on this platform")
+
+
+def _record_scope_cleanup_failure(
+    errors: List[Exception],
+    error: Exception,
+) -> None:
+    errors.append(RuntimeError(f"process scope cleanup failed: {error}"))
+
+
+def _process_scope_is_quarantined() -> bool:
+    with _PROCESS_SCOPE_STATE_LOCK:
+        return _PROCESS_SCOPE_QUARANTINED
+
+
+def _quarantined_process_result() -> Dict[str, Any]:
+    return {
+        "error": "process execution quarantined after unconfirmed cleanup",
+        "stdout": b"",
+        "stderr": b"",
+        "code": None,
+        "exceeded": False,
+        "cancelled": False,
+        "timed_out": False,
+    }
+
+
+def _admit_process_scope(
+    argv: List[str],
+    env: Dict[str, str],
+    stdin_data: Optional[bytes],
+) -> Any:
+    with _PROCESS_SCOPE_STATE_LOCK:
+        if _PROCESS_SCOPE_QUARANTINED:
+            return None
+        return _open_process_scope(argv, env, stdin_data)
+
+
+def _quarantine_process_scope() -> None:
+    global _PROCESS_SCOPE_QUARANTINED
+    with _PROCESS_SCOPE_STATE_LOCK:
+        _PROCESS_SCOPE_QUARANTINED = True
+
+
 def _capped_run(
     argv: List[str],
     env: Dict[str, str],
     limit: int,
     stdin_data: Optional[bytes] = None,
+    cancelled: Optional[Callable[[], bool]] = None,
+    timeout_seconds: float = _SUBPROCESS_TIMEOUT_SECONDS,
 ) -> Dict[str, Any]:
-    """Run ``argv`` with bounded stdout while draining stderr concurrently."""
+    """Run one fixed command with bounded output, cancellation, and a deadline."""
+    if _process_scope_is_quarantined():
+        return _quarantined_process_result()
+
     try:
-        proc = subprocess.Popen(
-            argv,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE if stdin_data is not None else None,
-            env=env,
-        )
+        if cancelled is not None and cancelled():
+            return {
+                "error": "operation cancelled",
+                "stdout": b"",
+                "stderr": b"",
+                "code": None,
+                "exceeded": False,
+                "cancelled": True,
+                "timed_out": False,
+            }
+    except Exception:
+        return {
+            "error": "cancellation probe failed",
+            "stdout": b"",
+            "stderr": b"",
+            "code": None,
+            "exceeded": False,
+            "cancelled": True,
+            "timed_out": False,
+        }
+
+    try:
+        scope = _admit_process_scope(argv, env, stdin_data)
+        if scope is None:
+            return _quarantined_process_result()
+        proc = scope.proc
     except OSError as error:
         return {
             "error": str(error),
@@ -132,17 +517,67 @@ def _capped_run(
             "stderr": b"",
             "code": None,
             "exceeded": False,
+            "cancelled": False,
+            "timed_out": False,
         }
 
+    stdout_pipe = getattr(proc, "stdout", None)
+    stderr_pipe = getattr(proc, "stderr", None)
+    stdin_pipe = getattr(proc, "stdin", None)
+    stdout_chunks: List[bytes] = []
     stderr_chunks: List[bytes] = []
+    stdout_errors: List[Exception] = []
     stderr_errors: List[Exception] = []
+    stdin_errors: List[Exception] = []
+    scope_cleanup_errors: List[Exception] = []
+    exceeded_event = threading.Event()
+    termination_requested = threading.Event()
+    cleanup_started = threading.Event()
+    scope_termination_lock = threading.Lock()
+    scope_termination_started = False
+
+    def request_scope_termination() -> None:
+        nonlocal scope_termination_started
+        termination_requested.set()
+        with scope_termination_lock:
+            if scope_termination_started:
+                return
+            scope_termination_started = True
+        try:
+            scope.terminate()
+        except Exception as error:
+            _record_scope_cleanup_failure(scope_cleanup_errors, error)
+
+    def drain_stdout() -> None:
+        captured = 0
+        try:
+            if stdout_pipe is None:
+                raise OSError("stdout pipe was unavailable")
+            while True:
+                chunk = stdout_pipe.read(_READ_CHUNK)
+                if not chunk:
+                    break
+                room = limit - captured
+                if room > 0:
+                    kept = chunk[:room]
+                    stdout_chunks.append(kept)
+                    captured += len(kept)
+                if len(chunk) > room:
+                    exceeded_event.set()
+                    request_scope_termination()
+                    break
+        except (OSError, ValueError) as error:
+            if not cleanup_started.is_set():
+                stdout_errors.append(error)
+                request_scope_termination()
 
     def drain_stderr() -> None:
         captured = 0
         try:
-            assert proc.stderr is not None
+            if stderr_pipe is None:
+                raise OSError("stderr pipe was unavailable")
             while True:
-                chunk = proc.stderr.read(_READ_CHUNK)
+                chunk = stderr_pipe.read(_READ_CHUNK)
                 if not chunk:
                     break
                 room = _MAX_STDERR_BYTES - captured
@@ -151,99 +586,153 @@ def _capped_run(
                     stderr_chunks.append(kept)
                     captured += len(kept)
         except (OSError, ValueError) as error:
-            stderr_errors.append(error)
+            if not cleanup_started.is_set():
+                stderr_errors.append(error)
+                request_scope_termination()
 
+    stdout_reader = threading.Thread(target=drain_stdout, daemon=True)
     stderr_reader = threading.Thread(target=drain_stderr, daemon=True)
+    stdout_reader.start()
     stderr_reader.start()
-    stdin_errors: List[Exception] = []
+
     stdin_writer = None
     if stdin_data is not None:
+
         def write_stdin() -> None:
             try:
-                assert proc.stdin is not None
-                proc.stdin.write(stdin_data)
-                proc.stdin.close()
+                if stdin_pipe is None:
+                    raise OSError("stdin pipe was unavailable")
+                stdin_pipe.write(stdin_data)
+                stdin_pipe.close()
             except (BrokenPipeError, OSError, ValueError) as error:
-                stdin_errors.append(error)
+                if not cleanup_started.is_set():
+                    stdin_errors.append(error)
+                    request_scope_termination()
 
         stdin_writer = threading.Thread(target=write_stdin, daemon=True)
         stdin_writer.start()
 
-    stdout_chunks: List[bytes] = []
-    total = 0
-    exceeded = False
-    stdout_error: Optional[Exception] = None
-    try:
-        assert proc.stdout is not None
-        while True:
-            chunk = proc.stdout.read(_READ_CHUNK)
-            if not chunk:
-                break
-            room = limit - total
-            if room > 0:
-                kept = chunk[:room]
-                stdout_chunks.append(kept)
-                total += len(kept)
-            if len(chunk) > room:
-                exceeded = True
-                proc.kill()
-                break
-    except (OSError, ValueError) as error:
-        stdout_error = error
+    deadline = time.monotonic() + timeout_seconds
+    was_cancelled = False
+    timed_out = False
+    wait_error: Optional[Exception] = None
+    code = None
+    while code is None:
         try:
-            proc.kill()
-        except OSError:
-            pass
-    finally:
+            if cancelled is not None and cancelled():
+                was_cancelled = True
+                break
+        except Exception as error:
+            was_cancelled = True
+            wait_error = error
+            break
+        if termination_requested.is_set():
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+            break
         try:
-            code = proc.wait(timeout=_SUBPROCESS_CLEANUP_TIMEOUT)
+            code = proc.wait(timeout=min(_SUBPROCESS_POLL_SECONDS, remaining))
         except subprocess.TimeoutExpired:
+            continue
+        except OSError as error:
+            wait_error = error
+            code = getattr(proc, "returncode", None)
+            break
+        if code is None:
+            code = getattr(proc, "returncode", None)
+            if code is None:
+                time.sleep(min(_SUBPROCESS_POLL_SECONDS, remaining))
+
+    cleanup_started.set()
+    cleanup_deadline = time.monotonic() + _SUBPROCESS_CLEANUP_TIMEOUT
+    request_scope_termination()
+
+    # Stop a possibly blocked writer before waiting for it. The process scope
+    # has already been stopped, so no command can observe this as live input.
+    _close_parent_pipe(stdin_pipe)
+
+    if code is None:
+        if getattr(proc, "returncode", None) is None:
             try:
                 proc.kill()
-            except OSError:
-                pass
-            try:
-                code = proc.wait(timeout=_SUBPROCESS_CLEANUP_TIMEOUT)
-            except (OSError, subprocess.TimeoutExpired) as error:
-                code = proc.returncode
-                if stdout_error is None:
-                    stdout_error = error
-        except OSError as error:
-            code = proc.returncode
-            if stdout_error is None:
-                stdout_error = error
+            except (OSError, ValueError) as error:
+                _record_scope_cleanup_failure(scope_cleanup_errors, error)
+        reaped_code, reap_error = _reap_direct_child(proc, cleanup_deadline)
+        if reaped_code is not None:
+            code = reaped_code
+        if reap_error is not None:
+            wait_error = wait_error or reap_error
+    if code is None:
+        _record_scope_cleanup_failure(
+            scope_cleanup_errors,
+            RuntimeError("direct child was not reaped"),
+        )
+    try:
+        scope.wait_stopped(cleanup_deadline)
+    except Exception as error:
+        _record_scope_cleanup_failure(scope_cleanup_errors, error)
+        _quarantine_process_scope()
+    try:
+        scope.dispose()
+    except Exception as error:
+        _record_scope_cleanup_failure(scope_cleanup_errors, error)
 
-        stderr_reader.join(_SUBPROCESS_CLEANUP_TIMEOUT)
-        stderr_drain_timed_out = stderr_reader.is_alive()
-        if stderr_drain_timed_out:
-            # Closing BufferedReader here can block on the same lock held by its
-            # read. The daemon already caps captured bytes, so report the timeout
-            # and return rather than turning cleanup itself into an unbounded wait.
-            stderr_errors.append(RuntimeError("stderr drain timed out"))
+    helpers = (
+        (stdout_reader, stdout_errors, "stdout drain timed out", stdout_pipe),
+        (stderr_reader, stderr_errors, "stderr drain timed out", stderr_pipe),
+        (stdin_writer, stdin_errors, "stdin write timed out", stdin_pipe),
+    )
+    close_grace = min(
+        _SUBPROCESS_POLL_SECONDS,
+        max(0.0, _SUBPROCESS_CLEANUP_TIMEOUT / 4),
+    )
+    drain_deadline = max(time.monotonic(), cleanup_deadline - close_grace)
+    for helper, _errors, _message, _pipe in helpers:
+        if helper is not None:
+            helper.join(max(0.0, drain_deadline - time.monotonic()))
 
-        if stdin_writer is not None:
-            stdin_writer.join(_SUBPROCESS_CLEANUP_TIMEOUT)
-            if stdin_writer.is_alive():
-                stdin_errors.append(RuntimeError("stdin write timed out"))
-        for pipe in (getattr(proc, "stdin", None), proc.stdout, proc.stderr):
-            if pipe is None or (pipe is proc.stderr and stderr_drain_timed_out):
-                continue
-            try:
-                pipe.close()
-            except (OSError, ValueError):
-                pass
+    # A held inherited handle should have been released by the scope stop. If
+    # not, close our endpoint before the final bounded join.
+    for helper, _errors, _message, pipe in helpers:
+        if helper is not None and helper.is_alive():
+            _close_parent_pipe(pipe)
 
-    run_error = (
-        stdout_error
+    for helper, errors, message, _pipe in helpers:
+        if helper is None:
+            continue
+        helper.join(max(0.0, cleanup_deadline - time.monotonic()))
+        if helper.is_alive():
+            errors.append(RuntimeError(message))
+
+    for pipe in (stdin_pipe, stdout_pipe, stderr_pipe):
+        _close_parent_pipe(pipe)
+
+    primary_error = (
+        ("operation cancelled" if was_cancelled else None)
+        or ("subprocess timed out" if timed_out else None)
+        or wait_error
+        or (stdout_errors[0] if stdout_errors else None)
         or (stderr_errors[0] if stderr_errors else None)
         or (stdin_errors[0] if stdin_errors else None)
     )
+    if primary_error is not None and scope_cleanup_errors:
+        run_error = RuntimeError(
+            f"{primary_error}; {scope_cleanup_errors[0]}"
+        )
+    else:
+        run_error = primary_error or (
+            scope_cleanup_errors[0] if scope_cleanup_errors else None
+        )
     return {
         "error": str(run_error) if run_error is not None else None,
         "stdout": b"".join(stdout_chunks),
         "stderr": b"".join(stderr_chunks),
         "code": code,
-        "exceeded": exceeded,
+        "exceeded": exceeded_event.is_set(),
+        "cancelled": was_cancelled,
+        "timed_out": timed_out,
     }
 
 
@@ -253,7 +742,11 @@ _WORKTREE_SEMANTIC_CONFIG = (
 )
 
 
-def _worktree_semantic_config(checkout_path: str) -> Dict[str, str]:
+def _worktree_semantic_config(
+    checkout_path: str,
+    *,
+    cancelled: Optional[Callable[[], bool]] = None,
+) -> Dict[str, str]:
     """Preserve validated host worktree/ignore policy across the hardened Git boundary.
 
     The enum filters affect checkout bytes; ``core.excludesFile`` affects privacy.
@@ -267,6 +760,7 @@ def _worktree_semantic_config(checkout_path: str) -> Dict[str, str]:
             ["git", "--no-optional-locks", "-C", checkout_path, "config", "--get", key],
             env,
             1024,
+            cancelled=cancelled,
         )
         if (
             outcome["error"] is not None
@@ -292,6 +786,7 @@ def _worktree_semantic_config(checkout_path: str) -> Dict[str, str]:
                 ],
                 env,
                 1024,
+                cancelled=cancelled,
             )
             if (
                 parsed["error"] is not None
@@ -322,6 +817,7 @@ def _worktree_semantic_config(checkout_path: str) -> Dict[str, str]:
         ],
         _sanitized_git_env(),
         1024,
+        cancelled=cancelled,
     )
     if (
         repo_excludes["error"] is not None
@@ -349,6 +845,7 @@ def _worktree_semantic_config(checkout_path: str) -> Dict[str, str]:
             ],
             env,
             1024,
+            cancelled=cancelled,
         )
         if (
             excludes["error"] is not None
@@ -400,6 +897,7 @@ def _default_run_git(
     *,
     worktree_config: Optional[Dict[str, str]] = None,
     stdin_data: Optional[bytes] = None,
+    cancelled: Optional[Callable[[], bool]] = None,
 ) -> Dict[str, Any]:
     # `core.fsmonitor` is repository configuration and can name an executable.
     # Override it on every Git invocation rather than trusting an observed
@@ -410,7 +908,7 @@ def _default_run_git(
     # re-applied through the pinned environment so Git-for-Windows autocrlf
     # worktrees are not falsely reported as dirty.
     semantic_config = (
-        _worktree_semantic_config(checkout_path)
+        _worktree_semantic_config(checkout_path, cancelled=cancelled)
         if worktree_config is None
         else worktree_config
     )
@@ -428,6 +926,7 @@ def _default_run_git(
         _sanitized_git_env(semantic_config),
         _MAX_BUFFER,
         stdin_data,
+        cancelled,
     )
     if outcome["error"] is not None:
         return {
@@ -729,6 +1228,301 @@ def _ignored_paths(
         if result.get("code") != 1:
             return None, evidence_command
     return ignored, evidence_command
+
+
+class ContentPrivacyPathRefusedError(ValueError):
+    """The requested checkout or candidates exceed the public policy authority."""
+
+    reason = "path_refused"
+
+    def __init__(self) -> None:
+        super().__init__(self.reason)
+
+
+class ContentPrivacyPolicyUnavailableError(RuntimeError):
+    """The checkout's effective Git privacy policy could not be established."""
+
+    reason = "privacy_policy_unavailable"
+
+    def __init__(self) -> None:
+        super().__init__(self.reason)
+
+
+_CONTENT_PRIVACY_POLICY_SCHEMA = "vivary.content-privacy-policy/v0"
+# A producer needs one root configuration file in addition to its 5,000
+# Markdown candidates. This is a request-wide limit, before de-duplication.
+_MAX_CONTENT_PRIVACY_CANDIDATES = 5_001
+_MAX_CONTENT_PRIVACY_CANDIDATE_BYTES = 4 * 1024 * 1024
+_CONTENT_PRIVACY_SENSITIVE_PATH_PARTS = frozenset(
+    {
+        ".aws",
+        ".env",
+        ".git",
+        ".gnupg",
+        ".ssh",
+        "credentials",
+        "private",
+        "secrets",
+    }
+)
+_CONTENT_PRIVACY_SENSITIVE_NAME_TOKENS = (
+    "api-key",
+    "apikey",
+    "credential",
+    "private-key",
+    "secret",
+    "token",
+)
+_CONTENT_PRIVACY_SENSITIVE_SUFFIXES = (
+    ".kdbx",
+    ".key",
+    ".p12",
+    ".pem",
+    ".pfx",
+)
+_CONTENT_PRIVACY_PRIVATE_KEY_NAMES = frozenset(
+    {"id_dsa", "id_ecdsa", "id_ed25519", "id_rsa"}
+)
+_CONTENT_PRIVACY_CREDENTIAL_SEGMENT_RE = re.compile(r"[^/@:\s]+:[^/@\s]+@")
+
+
+def _content_privacy_string_is_safe(value: str) -> bool:
+    """Reject controls, format controls, and lone surrogate path ambiguity."""
+
+    return all(unicodedata.category(character) not in {"Cc", "Cf", "Cs"} for character in value)
+
+
+def _content_privacy_path_is_safe(path: object) -> bool:
+    """Keep public candidate admission narrower than Git's pathname grammar."""
+
+    return (
+        is_safe_checkout_relative_path(path)
+        and not path.startswith(":(")
+        and _content_privacy_string_is_safe(path)
+        and not any(not segment for segment in path.split("/"))
+        and not (path.startswith('"') and path.endswith('"'))
+        and not any(
+            re.match(r"^[A-Za-z]:", segment) is not None
+            for segment in path.split("/")
+        )
+    )
+
+
+def _content_privacy_absolute_path_is_safe(path: object) -> bool:
+    return (
+        isinstance(path, str)
+        and is_canonical_absolute_path(path)
+        and _content_privacy_string_is_safe(path)
+    )
+
+
+def _content_privacy_path_is_sensitive(path: str) -> bool:
+    """Whether a syntactically safe name remains unsafe to disclose publicly."""
+
+    for segment in path.split("/"):
+        folded = segment.casefold()
+        if (
+            folded in _CONTENT_PRIVACY_SENSITIVE_PATH_PARTS
+            or folded.startswith(".env.")
+            or folded in _CONTENT_PRIVACY_PRIVATE_KEY_NAMES
+            or folded.endswith(_CONTENT_PRIVACY_SENSITIVE_SUFFIXES)
+            or any(token in folded for token in _CONTENT_PRIVACY_SENSITIVE_NAME_TOKENS)
+            or _CONTENT_PRIVACY_CREDENTIAL_SEGMENT_RE.search(segment) is not None
+        ):
+            return True
+    return False
+
+
+def _is_safe_content_privacy_checkout(path: str) -> bool:
+    """Require a physical directory rather than a link or reparse-point alias."""
+
+    try:
+        info = os.lstat(path)
+    except (OSError, ValueError):
+        return False
+    return (
+        stat.S_ISDIR(info.st_mode)
+        and not stat.S_ISLNK(info.st_mode)
+        and not getattr(info, "st_reparse_tag", 0)
+    )
+
+
+def _is_safe_content_privacy_candidate(checkout_path: str, candidate: str) -> bool:
+    """Walk each segment with ``lstat`` so no candidate can cross a link."""
+
+    current = checkout_path
+    parts = candidate.split("/")
+    for index, part in enumerate(parts):
+        current = os.path.join(current, part)
+        try:
+            info = os.lstat(current)
+        except (OSError, ValueError):
+            return False
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_reparse_tag", 0):
+            return False
+        if index < len(parts) - 1:
+            if not stat.S_ISDIR(info.st_mode):
+                return False
+            continue
+        return stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+    return False
+
+
+def _require_content_privacy_checkout(
+    checkout_path: object,
+    allowlist: object,
+) -> str:
+    """Validate one exact, physical allowlisted checkout."""
+
+    if (
+        not _content_privacy_absolute_path_is_safe(checkout_path)
+        or not isinstance(allowlist, list)
+        or not allowlist
+        or not all(_content_privacy_absolute_path_is_safe(root) for root in allowlist)
+        or not any(
+            path_identity_key(root) == path_identity_key(checkout_path)
+            for root in allowlist
+        )
+        or not _is_safe_content_privacy_checkout(checkout_path)
+    ):
+        raise ContentPrivacyPathRefusedError()
+    return checkout_path
+
+
+def _bounded_content_privacy_candidates(
+    checkout_path: str,
+    candidate_paths: object,
+) -> List[str]:
+    """Refuse before Git sees an unsafe, oversized, or non-regular candidate."""
+
+    if not isinstance(candidate_paths, list) or len(candidate_paths) > _MAX_CONTENT_PRIVACY_CANDIDATES:
+        raise ContentPrivacyPathRefusedError()
+
+    candidate_bytes = 0
+    candidates = set()
+    for path in candidate_paths:
+        if (
+            not isinstance(path, str)
+            or len(path) > _MAX_CONTENT_PRIVACY_CANDIDATE_BYTES
+            or not _content_privacy_path_is_safe(path)
+        ):
+            raise ContentPrivacyPathRefusedError()
+        try:
+            candidate_bytes += len(path.encode("utf-8")) + 3
+        except UnicodeEncodeError:
+            raise ContentPrivacyPathRefusedError() from None
+        if candidate_bytes > _MAX_CONTENT_PRIVACY_CANDIDATE_BYTES:
+            raise ContentPrivacyPathRefusedError()
+        candidates.add(path)
+
+    ordered_candidates = sorted(candidates, key=utf16_sort_key)
+    if not all(
+        _is_safe_content_privacy_candidate(checkout_path, candidate)
+        for candidate in ordered_candidates
+    ):
+        raise ContentPrivacyPathRefusedError()
+    return ordered_candidates
+
+
+def _git_toplevel_is_exact_checkout(result: Dict[str, Any], checkout_path: str) -> bool:
+    """Accept only Git's one-line, canonical report of this physical worktree."""
+
+    raw_root = result.get("stdout") if result.get("ok") else None
+    if not isinstance(raw_root, str) or not raw_root.endswith("\n"):
+        return False
+    try:
+        root = normalize_path(raw_root[:-1])
+    except (TypeError, ValueError):
+        return False
+    return (
+        _content_privacy_absolute_path_is_safe(root)
+        and path_identity_key(root) == path_identity_key(checkout_path)
+    )
+
+
+def content_privacy_policy(
+    checkout_path: str,
+    candidate_paths: List[str],
+    *,
+    allowlist: List[str],
+    cancelled: Optional[Callable[[], bool]] = None,
+) -> Dict[str, Any]:
+    """Approve public, regular candidates under the effective Git ignore policy.
+
+    Only a caller-owned, canonical checkout root may be queried. Candidates are
+    checked segment by segment without following links, then Git decides whether
+    a non-sensitive name is ignored. Returned names are relative POSIX paths;
+    every excluded class is represented only by a deterministic count.
+    """
+
+    checkout_path = _require_content_privacy_checkout(checkout_path, allowlist)
+    candidates = _bounded_content_privacy_candidates(checkout_path, candidate_paths)
+    public_candidates = [
+        path for path in candidates if not _content_privacy_path_is_sensitive(path)
+    ]
+    sensitive_count = len(candidates) - len(public_candidates)
+
+    try:
+        worktree_config = _worktree_semantic_config(
+            checkout_path,
+            cancelled=cancelled,
+        )
+    except (OSError, ValueError):
+        raise ContentPrivacyPolicyUnavailableError() from None
+
+    def run_hardened_git(
+        _checkout_path: str,
+        args: List[str],
+        *,
+        stdin_data: Optional[bytes] = None,
+    ) -> Dict[str, Any]:
+        return _default_run_git(
+            checkout_path,
+            args,
+            worktree_config=worktree_config,
+            stdin_data=stdin_data,
+            cancelled=cancelled,
+        )
+
+    if not _git_toplevel_is_exact_checkout(
+        run_hardened_git(checkout_path, ["rev-parse", "--show-toplevel"]),
+        checkout_path,
+    ):
+        raise ContentPrivacyPolicyUnavailableError()
+
+    ignored, _ = _ignored_paths(
+        checkout_path,
+        public_candidates,
+        run_hardened_git,
+    )
+    if ignored is None:
+        raise ContentPrivacyPolicyUnavailableError()
+
+    ignored_paths = sorted(ignored, key=utf16_sort_key)
+    allowed_paths = [path for path in public_candidates if path not in ignored]
+    omissions = [
+        {"kind": "privacy_excluded", "reason": reason, "count": count}
+        for reason, count in (
+            ("git_ignored", len(ignored_paths)),
+            ("sensitive_name", sensitive_count),
+        )
+        if count
+    ]
+    return {
+        "schema": _CONTENT_PRIVACY_POLICY_SCHEMA,
+        "status": "known",
+        "complete": True,
+        "privacy_fingerprint": fingerprint(
+            {
+                "schema": _CONTENT_PRIVACY_POLICY_SCHEMA,
+                "allowed_paths": allowed_paths,
+                "omissions": omissions,
+            }
+        ),
+        "allowed_paths": allowed_paths,
+        "omissions": omissions,
+    }
+
 def _content_privacy_policy(
     checkout_path: str,
     revision: str,
@@ -1048,6 +1842,7 @@ def observe_checkouts(
     allowlist: Optional[List[str]] = None,
     now: Optional[Callable[[], str]] = None,
     run_git: Optional[RunGit] = None,
+    cancelled: Optional[Callable[[], bool]] = None,
 ) -> Dict[str, Any]:
     """Observe explicit checkout roots read-only.
 
@@ -1069,12 +1864,16 @@ def observe_checkouts(
         ) -> Dict[str, Any]:
             key = normalize_path(path)
             if key not in worktree_config:
-                worktree_config[key] = _worktree_semantic_config(path)
+                worktree_config[key] = _worktree_semantic_config(
+                    path,
+                    cancelled=cancelled,
+                )
             return _default_run_git(
                 path,
                 args,
                 worktree_config=worktree_config[key],
                 stdin_data=stdin_data,
+                cancelled=cancelled,
             )
 
         run_git = run_default

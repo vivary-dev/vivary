@@ -43,6 +43,10 @@ jobs:
         run: python packages/create-vivary/tests/test_strato_integrity.py
       - name: memory-cognee
         run: python packages/memory-cognee/tests/test_memory_cognee.py
+      - name: mcp read-only adapter
+        run: |
+          python -m pip install "mcp==2.0.0"
+          python -m pytest packages/mcp/tests/ -q
       - name: vivary meta CLI
         run: python packages/vivary/tests/test_vivary_cli.py
       - name: core (governed-context seam; suite is the ported reference tests)
@@ -65,7 +69,8 @@ jobs:
             ./packages/exo \
             ./packages/create-vivary \
             ./packages/vivary \
-            ./packages/memory-cognee
+            ./packages/memory-cognee \
+            ./packages/mcp
           python -m venv "$smoke/venv"
           venv_python="$smoke/venv/bin/python"
           export PATH="$smoke/venv/bin:$PATH"
@@ -217,13 +222,14 @@ jobs:
           assert strato_result["reason_codes"] == ["gate_required"]
           assert ozone_result["schema"] == "vivary.ozone-verification/v0"
           assert ozone_result["outcome"] == "sufficient"
-          assert version("vivary-core") == "0.2.6"
+          assert version("vivary-core") == "0.2.7"
           assert version("vivary-exo") == "0.3.0"
-          assert version("create-vivary") == "0.3.2"
-          assert version("vivary") == "0.1.5"
+          assert version("create-vivary") == "0.3.3"
+          assert version("vivary") == "0.1.6"
           assert "vivary-core>=0.2.5" in requires("vivary-exo")
           vivary_requirements = requires("vivary") or []
-          assert "create-vivary>=0.3.2" in vivary_requirements
+          assert "create-vivary>=0.3.3" in vivary_requirements
+          assert "vivary-tropo>=0.5.1" in vivary_requirements
           assert "vivary-strato>=0.1.2" in vivary_requirements
           assert "vivary-exo>=0.3.0" in vivary_requirements
           assert not any(
@@ -241,6 +247,45 @@ jobs:
               capability["install_status"] == "installed"
               for capability in governed
           )
+          PY
+          mcp_venv="$smoke/mcp-venv"
+          python -m venv "$mcp_venv"
+          mcp_python="$mcp_venv/bin/python"
+          "$mcp_python" -m pip install --find-links "$wheelhouse" vivary-mcp create-vivary
+          "$mcp_python" -m pip check
+          "$mcp_venv/bin/vivary-mcp" --help > /dev/null
+          "$mcp_python" - <<'PY'
+          from importlib.metadata import PackageNotFoundError, requires, version
+          import create_vivary
+
+          assert version("vivary-mcp") == "0.1.0"
+          assert version("vivary-tropo") == "0.5.1"
+          assert version("vivary-core") == "0.2.7"
+          assert version("mcp") == "2.0.0"
+          assert version("mcp-types") == "2.0.0"
+          mcp_requirements = requires("vivary-mcp") or []
+          assert "vivary-tropo>=0.5.1" in mcp_requirements
+          assert "mcp==2.0.0" in mcp_requirements
+          assert not any(
+              requirement.startswith("vivary-core")
+              for requirement in mcp_requirements
+          )
+          report = create_vivary.capability_report("coding")
+          interop = next(
+              row
+              for row in report["available_capabilities"]
+              if row["id"] == "interop:mcp"
+          )
+          assert interop["installed"] is True
+          assert interop["install_status"] == "installed"
+          assert interop["sdk_version"] == "2.0.0"
+          assert interop["conformance_status"] == "unproven"
+          try:
+              version("vivary")
+          except PackageNotFoundError:
+              pass
+          else:
+              raise AssertionError("optional MCP install pulled the vivary meta-package")
           PY
           "$venv_python" -m pip install --no-index --find-links "$wheelhouse" --no-deps \
             vivary-memory-cognee
@@ -513,7 +558,8 @@ jobs:
             ./packages/exo `
             ./packages/create-vivary `
             ./packages/vivary `
-            ./packages/memory-cognee
+            ./packages/memory-cognee `
+            ./packages/mcp
           if ($LASTEXITCODE -ne 0) { throw "wheel build failed" }
           python -m venv (Join-Path $smoke "venv")
           if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
@@ -548,6 +594,51 @@ jobs:
             & (Join-Path $scripts "$command.exe") --help | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "$command entrypoint failed" }
           }
+          $mcpVenv = Join-Path $smoke "mcp-venv"
+          python -m venv $mcpVenv
+          if ($LASTEXITCODE -ne 0) { throw "MCP venv creation failed" }
+          $mcpScripts = Join-Path $mcpVenv "Scripts"
+          $mcpPython = Join-Path $mcpScripts "python.exe"
+          & $mcpPython -m pip install --find-links $wheelhouse vivary-mcp create-vivary
+          if ($LASTEXITCODE -ne 0) { throw "optional MCP install failed" }
+          & $mcpPython -m pip check
+          if ($LASTEXITCODE -ne 0) { throw "optional MCP pip check failed" }
+          & (Join-Path $mcpScripts "vivary-mcp.exe") --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "vivary-mcp entrypoint failed" }
+          @'
+          from importlib.metadata import PackageNotFoundError, requires, version
+          import create_vivary
+
+          assert version("vivary-mcp") == "0.1.0"
+          assert version("vivary-tropo") == "0.5.1"
+          assert version("vivary-core") == "0.2.7"
+          assert version("mcp") == "2.0.0"
+          assert version("mcp-types") == "2.0.0"
+          mcp_requirements = requires("vivary-mcp") or []
+          assert "vivary-tropo>=0.5.1" in mcp_requirements
+          assert "mcp==2.0.0" in mcp_requirements
+          assert not any(
+              requirement.startswith("vivary-core")
+              for requirement in mcp_requirements
+          )
+          report = create_vivary.capability_report("coding")
+          interop = next(
+              row
+              for row in report["available_capabilities"]
+              if row["id"] == "interop:mcp"
+          )
+          assert interop["installed"] is True
+          assert interop["install_status"] == "installed"
+          assert interop["sdk_version"] == "2.0.0"
+          assert interop["conformance_status"] == "unproven"
+          try:
+              version("vivary")
+          except PackageNotFoundError:
+              pass
+          else:
+              raise AssertionError("optional MCP install pulled the vivary meta-package")
+          '@ | & $mcpPython -
+          if ($LASTEXITCODE -ne 0) { throw "optional MCP identity proof failed" }
 
   orientation-proof:
     name: orientation proof (${{ matrix.os }})

@@ -10,6 +10,112 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: optional read-only MCP adapter (#206)] — 2026-08-02
+
+Implements [#206](https://github.com/vivary-dev/vivary/issues/206) under the tool
+contract resolved by [#225](https://github.com/vivary-dev/vivary/issues/225). The
+[release-status section](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status)
+owns current published and development version truth.
+
+This slice adds unpublished `vivary-mcp` **0.1.0** and advances unpublished
+`vivary-core` to **0.2.7**, `vivary-tropo` to **0.5.1**, `create-vivary` and
+`@vivary/create` to **0.3.3**, and the `vivary` meta-package to **0.1.6**. Published
+versions stay unchanged.
+
+### Added
+
+- Added the optional Python 3.11+ `vivary-mcp` package with local standard-input/output
+  transport and exact official `mcp==2.0.0` dependency for protocol `2026-07-28`.
+- Added exactly `vivary_find`, `vivary_query`, `vivary_check`, and `vivary_capsule`.
+  Closed Draft 2020-12 schemas, typed omissions, bounded whole responses, immutable
+  operator-owned aliases, SDK-owned discovery, and one active producer bound every
+  call.
+- Added public Tropo find, query, check, and governed capsule producer contracts over
+  Core privacy admission. Public capsule projection excludes raw evidence, commands,
+  scope roots, machine paths, credentials, private content, and unsafe claim kinds.
+- Added passive `interop:mcp` capability and Doctor reporting. It reads installed
+  metadata and entry-point declarations without imports, process launch, or network
+  access. Optional absence is healthy; exact SDK mismatch is incompatible; external
+  conformance reports `unproven`.
+- Added fake-surface unit regressions and official-SDK wire regressions for discovery,
+  server/client metadata, schema validation, malformed requests, cancellation,
+  timeout, recovery, diagnostics, and exact tool identity.
+
+### Changed
+
+- Core's fixed Git subprocess runner now uses a bounded process scope: a new POSIX
+  session/process group or a Windows kill-on-close Job Object assigned before the
+  suspended child resumes. Timeout, cancellation, overflow, normal parent exit, and
+  read/write failure terminate descendants, reap the direct child, verify scope exit,
+  close pipes, and join helpers before returning. An unconfirmed scope stop
+  quarantines later process starts for the server lifetime.
+- Tropo now binds approved candidates to device, inode, size, nanosecond modification
+  and change times around descriptor reads. It rechecks Core's exact allowed paths and
+  privacy fingerprint after content processing. Core content search likewise rechecks
+  the effective tracked-tree ignore policy after fixed-literal Git search and discards
+  results if policy changed.
+- On Python 3.11 for Windows, public candidate snapshots now read NTFS change time
+  through an attribute-only handle instead of treating creation time as change time.
+  The [same-size rewrite regression](packages/tropo/tests/test_tropo.py#L2569-L2592)
+  restores the documented race refusal on the package's lowest supported Python.
+- Public enumeration applies cancellation and hard entry ceilings while consuming
+  directory iterators, before sorting. Cancellation propagates through ranking,
+  validation, content search, graph projection, capsule compilation, and fixed Git
+  work.
+- MCP producers have one slot. A timed-out producer that ignores cooperative
+  cancellation keeps that slot until its thread exits, so later calls fail closed
+  instead of overlapping uncontrolled work.
+- The coordinated dependency floors are now `vivary-tropo>=0.5.1`,
+  `vivary-core>=0.2.7` from Tropo, and `create-vivary>=0.3.3` from the `vivary`
+  meta-package. MCP remains an optional edge: `vivary-mcp → vivary-tropo →
+  vivary-core`.
+- Canonical architecture, command, data-layer, roadmap, white-paper, package, and MCP
+  documentation now distinguish the baseline CLI from the optional read-only adapter.
+  No named-client or external-conformance claim is made.
+
+### Security
+
+- Tool callers cannot select a root, executable, shell command, process, transport,
+  endpoint, provider, or network destination. The adapter has no write, repair,
+  memory-promotion, check-execution, publishing, deployment, or gate-approval path.
+- Standard output is protocol-only. Bounded standard-error diagnostics exclude roots,
+  aliases, queries, filters, snippets, paths, identifiers, arguments, environment,
+  client identity, claims, evidence, credentials, exceptions, and stack traces.
+- Candidate bytes remain unopened until Core admits their public names. Changed file,
+  workspace, or privacy-policy identity refuses the result. Public capsules bind one
+  exact capsule scope root, reject Unicode format-control and normalized credential
+  obfuscation, and omit every absolute machine path. Exact JSON-escaped wire responses
+  refuse rather than truncate when a response or work ceiling is exceeded.
+- The npm trusted-publishing workflow now pins checkout, Python, and Node Actions to
+  reviewed immutable commit SHAs before granting publication identity. The
+  [workflow guard](scripts/check_npm_trusted_publish_workflow.py) rejects those
+  Actions when referenced by mutable version tags.
+
+### Verification
+
+- All 15 Core test modules passed on Windows: **800 tests** across three bounded
+  `pytest` invocations. A WSL stdlib smoke also stopped an inherited-pipe descendant
+  process group in **0.12 seconds**.
+- `python packages/tropo/tests/test_tropo.py` — **181/181 passed** on Windows.
+- The four bounded `test_create_vivary.py` class runs passed **194 tests** with **3
+  skips**. The orientation proof passed **9 tests** and the npm launcher passed **11
+  checks**.
+- `python -m pytest packages/mcp/tests/ -q` — **28 passed** against official
+  `mcp==2.0.0` and `mcp-types==2.0.0`, including a real SDK stdio subprocess and a
+  noncooperative timeout quarantine.
+- Nine coordinated wheels built without test packages. A fresh offline `vivary`
+  install passed `pip check` and proved MCP absent by default. The optional Core,
+  Tropo, and MCP wheels also passed `pip check` and launched `vivary-mcp --help`
+  against the reviewed SDK closure.
+- Package-doc parity passed **10 tests** with three development-source allowlist
+  entries. The site passed **8 tests**, built **24 pages**, and checked **1,830 local
+  references** and **1,154 anchors** with zero failures.
+
+The pinned external harness documents URL-based HTTP server mode, not stdio server
+launch. It has not exercised this adapter, so external conformance remains
+`unproven`. Publication, deployment, and default enablement remain manual human
+gates.
+
 ## [Unreleased: governed installation and capability truth (#207)] (2026-08-02)
 
 Implements [#207](https://github.com/vivary-dev/vivary/issues/207). The

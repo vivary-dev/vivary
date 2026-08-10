@@ -2,6 +2,11 @@ from pathlib import Path
 
 
 WORKFLOW = Path(".github/workflows/npm-trusted-publish.yml")
+ACTION_PINS = (
+    "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+    "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1",
+    "actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38",
+)
 
 
 def require(condition: bool, message: str) -> None:
@@ -21,7 +26,7 @@ def main() -> None:
         "needs: verify",
         "environment: npm-publish",
         "runs-on: ubuntu-latest",
-        "actions/setup-node@v6",
+        *ACTION_PINS,
         'node-version: "24"',
         'registry-url: "https://registry.npmjs.org"',
         "package-manager-cache: false",
@@ -50,6 +55,16 @@ def main() -> None:
 
     for snippet in forbidden_snippets:
         require(snippet not in text, f"{WORKFLOW}: forbidden token/auth snippet: {snippet}")
+
+    for mutable_ref in (
+        "actions/checkout@v",
+        "actions/setup-python@v",
+        "actions/setup-node@v",
+    ):
+        require(
+            mutable_ref not in text,
+            f"{WORKFLOW}: external Action must use an immutable commit SHA: {mutable_ref}",
+        )
 
     require(
         'test "${{ inputs.release_tag }}" = "v${{ inputs.version }}"' in text,

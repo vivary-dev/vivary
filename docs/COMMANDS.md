@@ -4,10 +4,11 @@ This is the full, technical list of every command. If you're just starting, you 
 need a handful (`create-vivary init`, `doctor`, `tropo check`); the [getting started
 guide](/getting-started/) walks through those. Come back here for the details.
 
-Every CLI across the four atmospheric layers uses Python 3.11+ and no third-party
-runtime dependency; the optional governed paths compose the first-party `vivary-core`
+The four atmospheric layer CLIs use Python 3.11+ and no third-party runtime
+dependency; the optional governed paths compose the first-party `vivary-core`
 contract seam. Command names are `tropo` / `strato` / `ozone` / `exo`; the scaffolder
-remains `create-vivary`, regardless of installation method.
+remains `create-vivary`. The separate, optional `vivary-mcp` package pins its reviewed
+MCP SDK dependency.
 
 - **Install (PyPI):** `pip install vivary`
 - **Run without installing (uv):** `uvx --from vivary-tropo tropo check`, `uvx --from vivary-ozone ozone review`, …
@@ -18,9 +19,9 @@ Features called out as **unreleased** are present on the `dev` branch and genera
 site docs, but are not available from the current PyPI/npm packages until the next
 release-train PR bumps and publishes them.
 
-Exit codes are uniform: **`0`** success · **`1`** findings/errors · **`2`** usage/config
-error. Gate CI on the exit code; don't parse text. Every command takes `--json` for
-machine-readable output.
+For the four layer CLIs and the scaffolder, exit codes are uniform: **`0`** success ·
+**`1`** findings/errors · **`2`** usage/config error. Gate CI on the exit code; don't
+parse text. Those commands take `--json` for machine-readable output.
 
 ### Local run receipts are not telemetry
 
@@ -50,12 +51,13 @@ vivary logs email .vivary/receipts.jsonl --to support@example.com --out .vivary/
 `vivary logs email` writes a local `.eml` draft or prints a `mailto:` URL. It does not
 connect to SMTP, call an API, upload logs, or send mail by itself.
 
-**The CLI is the agent API.** Every command an agent needs to run Vivary is here — no
-MCP server, no special protocol. Commands that interact or install also accept `--yes`
-(auto-confirm all prompts), `--auto` (agent selects from explicit storage/privacy/size
-hints), and `--dry-run` (inspect without side effects). See
-[SPEC-data-layer.md](SPEC-data-layer.md) for the full agent CLI contract and the new
-storage/migration commands.
+**The CLI remains the baseline agent API.** Every baseline operation an agent needs is
+available without MCP or another special protocol. Commands that interact or install
+also accept `--yes` (auto-confirm all prompts), `--auto` (agent selects from explicit
+storage/privacy/size hints), and `--dry-run` (inspect without side effects). The
+optional MCP adapter exposes only four read-only context operations. See
+[SPEC-data-layer.md](SPEC-data-layer.md) for the agent CLI contract and
+[MCP.md](MCP.md) for that adapter's separate boundary.
 
 ---
 
@@ -81,6 +83,27 @@ summary.
 | `logs --json` | Return `{summary, records}` for agents and bug-report tooling. |
 | `logs email ... --out FILE` | Write a local `.eml` draft; directory targets, symlink targets, symlink/junction ancestors, and Windows device names are refused. |
 | `logs email ...` | Without `--out`, print a `mailto:` URL for the user's mail client. |
+
+## vivary-mcp — optional local read-only bridge
+
+```text
+vivary-mcp --workspace ALIAS PATH [--workspace ALIAS PATH ...]
+           [--observability off|errors|json]
+```
+
+This unreleased, optional package serves exactly `vivary_find`, `vivary_query`,
+`vivary_check`, and `vivary_capsule` over local standard input/output. Workspace
+roots are operator-bound at startup; tool callers cannot provide roots, executables,
+commands, transports, or endpoints. The adapter has no write, repair, network,
+provider, publication, deployment, or gate-approval path.
+
+Standard output is reserved for MCP JSON-RPC. `--observability` writes bounded,
+sanitized diagnostics to standard error: none in `off`, refusal/cancellation/timeout
+events in `errors`, or all bounded lifecycle events in `json`.
+
+The package pins protocol `2026-07-28` and official SDK `mcp==2.0.0`. External
+conformance remains unproven. [MCP.md](MCP.md) owns the tool schemas, privacy and
+process boundaries, passive Doctor report, and verification procedure.
 
 ## tropo — the typed knowledge graph
 
@@ -889,8 +912,9 @@ create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writin
 
 ### Capability status (development source)
 
-The 0.3.2 development source reports a fixed Core-and-role inventory alongside the
-existing storage, semantic-memory, and preset sidecar rows:
+The 0.3.3 development source reports a fixed Core-and-role inventory and passive MCP
+interoperability status alongside the existing storage, semantic-memory, and preset
+sidecar rows:
 
 | Capability | Command | Authority |
 |---|---|---|
@@ -899,6 +923,7 @@ existing storage, semantic-memory, and preset sidecar rows:
 | `governed-policy:strato` | `strato decide --governed` | `decision-only` |
 | `governed-verification:ozone` | `ozone verify --governed` | `verification-and-proposal-only` |
 | `governed-control:exo` | `exo control --governed` | `projection-only` |
+| `interop:mcp` | `vivary-mcp` local stdio entry point | `read-only-context` |
 
 Each capability row has `installed`, `install_status`, `reason_codes`, and
 `missing_install`. Status is `installed`, `not-installed`, `incompatible`, or
@@ -911,6 +936,12 @@ The same status applies to an invalid exact console-script target, generated lau
 or competing import artifact.
 A bounded read or parse failure reports `capability_probe_failed`. Only `not-installed`
 rows include ordered install hints.
+
+The MCP row is optional and `not-installed` by default. A compatible row requires the
+recorded `vivary-mcp` entry point, its exact `mcp==2.0.0` dependency declaration, the
+matching SDK version, local standard-input/output transport, and the exact four tool
+names. Doctor reports external conformance as `unproven`; it does not import or start
+the adapter.
 
 The status reader considers the interpreter's canonical `purelib` and `platlib` roots,
 at most eight system-site candidates, and at most eight user-site candidates. It then

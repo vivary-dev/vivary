@@ -34,6 +34,7 @@ pip install vivary
 - Getting started: https://vivary.vercel.app/getting-started/
 - Getting started proof: https://vivary.vercel.app/walkthrough/
 - Command reference: https://vivary.vercel.app/commands/
+- MCP adapter: https://vivary.vercel.app/mcp/
 - Agent skills: https://vivary.vercel.app/skills/
 - Active context: https://vivary.vercel.app/active-context/
 - LLM active-context guide: https://vivary.vercel.app/llm-active-context/

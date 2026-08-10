@@ -29,7 +29,9 @@ Language mapping notes (decision 0008 / documented rules for this slice):
 
 from __future__ import annotations
 
+from copy import deepcopy
 import re
+import unicodedata
 from datetime import datetime
 
 from vivary_core.canonical import (
@@ -80,6 +82,692 @@ MAX_GRAPH_CONTEXT_CHECKOUTS = 300
 MAX_CAPSULE_CANDIDATE_WORK = 10_000
 MAX_CONTENT_VALIDATION_WORK = 1_000_000
 MAX_TASK_SCOPE_ROOTS = 1_000
+
+
+# This schema is deliberately a data contract rather than a second validator:
+# ``is_task_capsule_shape`` retains the semantic checks that JSON Schema cannot
+# express (canonical paths, deterministic IDs, and cross-record bindings).
+# Keeping the portable structural contract here makes it travel with the field
+# contract it describes, without adding a runtime dependency.
+_TASK_CAPSULE_JSON_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "urn:vivary:task-capsule:v0",
+    "title": "Vivary Task Capsule v0",
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "capsule_id",
+        "schema",
+        "task",
+        "workspace",
+        "claims",
+        "conflicts",
+        "unknowns",
+        "omissions",
+        "required_checks",
+        "budget",
+        "fingerprint",
+    ],
+    "properties": {
+        "capsule_id": {"$ref": "#/$defs/non_empty_string"},
+        "schema": {"const": CAPSULE_SCHEMA},
+        "task": {"$ref": "#/$defs/task"},
+        "workspace": {"$ref": "#/$defs/workspace"},
+        "claims": {"type": "array", "items": {"$ref": "#/$defs/claim"}},
+        "conflicts": {"type": "array", "items": {"$ref": "#/$defs/conflict"}},
+        "unknowns": {"type": "array", "items": {"$ref": "#/$defs/unknown"}},
+        "omissions": {"type": "array", "items": {"$ref": "#/$defs/omission"}},
+        "required_checks": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/required_check"},
+        },
+        "budget": {"$ref": "#/$defs/budget"},
+        "fingerprint": {"$ref": "#/$defs/non_empty_string"},
+    },
+    "$defs": {
+        "non_empty_string": {"type": "string", "minLength": 1},
+        "nonblank_string": {"type": "string", "pattern": r"\S"},
+        "absolute_path": {
+            "oneOf": [
+                {"const": "/"},
+                {
+                    "type": "string",
+                    "pattern": (
+                        r"^(?:/[^/]+(?:/[^/]+)*|[a-z]:/[^/]+(?:/[^/]+)*)$"
+                    ),
+                    "not": {"pattern": r"(?:^|/)(?:\.|\.\.)(?:/|$)"},
+                },
+            ]
+        },
+        "evidence": {"type": "object"},
+        "task_filter": {
+            "type": "object",
+            "required": ["field"],
+            "properties": {
+                "field": {
+                    "enum": ["fact", "label", "path", "repository", "branch"]
+                },
+                "equals": {"$ref": "#/$defs/nonblank_string"},
+                "includes": {"$ref": "#/$defs/nonblank_string"},
+            },
+            "oneOf": [
+                {
+                    "required": ["equals"],
+                    "not": {"required": ["includes"]},
+                },
+                {
+                    "required": ["includes"],
+                    "not": {"required": ["equals"]},
+                },
+            ],
+            "additionalProperties": False,
+        },
+        "task": {
+            "type": "object",
+            "required": ["question"],
+            "properties": {
+                "question": {"$ref": "#/$defs/nonblank_string"},
+                "scope": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": MAX_TASK_SCOPE_ROOTS,
+                    "items": {"$ref": "#/$defs/absolute_path"},
+                },
+                "filters": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/task_filter"},
+                },
+                "required_checks": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {"$ref": "#/$defs/declared_required_check"},
+                },
+            },
+            "additionalProperties": False,
+        },
+        "declared_required_check": {
+            "type": "object",
+            "required": ["name", "command", "cwd"],
+            "properties": {
+                "name": {"$ref": "#/$defs/nonblank_string"},
+                "command": {"$ref": "#/$defs/nonblank_string"},
+                "cwd": {"$ref": "#/$defs/absolute_path"},
+            },
+            "additionalProperties": False,
+        },
+        "workspace": {
+            "type": "object",
+            "required": ["fingerprint"],
+            "properties": {
+                "fingerprint": {"$ref": "#/$defs/non_empty_string"},
+                "content_fingerprint": {"$ref": "#/$defs/non_empty_string"},
+                "repair_topology_fingerprint": {
+                    "$ref": "#/$defs/non_empty_string"
+                },
+                "observed_at": {"type": ["string", "null"]},
+            },
+            "additionalProperties": False,
+        },
+        "signal": {
+            "type": "object",
+            "oneOf": [
+                {
+                    "required": ["signal"],
+                    "properties": {"signal": {"const": "allowlisted"}},
+                    "additionalProperties": False,
+                },
+                {
+                    "required": ["signal", "conflict"],
+                    "properties": {
+                        "signal": {"const": "conflict_side"},
+                        "conflict": {"$ref": "#/$defs/non_empty_string"},
+                    },
+                    "additionalProperties": False,
+                },
+                {
+                    "required": ["signal", "term", "field"],
+                    "properties": {
+                        "signal": {"const": "question_term_match"},
+                        "term": {"$ref": "#/$defs/non_empty_string"},
+                        "field": {"enum": ["label", "repository", "branch"]},
+                    },
+                    "additionalProperties": False,
+                },
+                {
+                    "required": ["signal", "term", "path"],
+                    "properties": {
+                        "signal": {"const": "content_term_match"},
+                        "term": {"$ref": "#/$defs/non_empty_string"},
+                        "path": {"$ref": "#/$defs/non_empty_string"},
+                    },
+                    "additionalProperties": False,
+                },
+            ],
+        },
+        "selection": {
+            "type": "object",
+            "required": ["tier", "signals"],
+            "properties": {
+                "tier": {
+                    "enum": ["conflict_side", "question_match", "allowlisted"]
+                },
+                "signals": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {"$ref": "#/$defs/signal"},
+                },
+                "matched_filters": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/normalized_filter"},
+                },
+            },
+            "additionalProperties": False,
+        },
+        "normalized_filter": {
+            "type": "object",
+            "required": ["field", "operator", "value"],
+            "properties": {
+                "field": {
+                    "enum": ["fact", "label", "path", "repository", "branch"]
+                },
+                "operator": {"enum": ["equals", "includes"]},
+                "value": {"$ref": "#/$defs/non_empty_string"},
+            },
+            "additionalProperties": False,
+        },
+        "claim": {
+            "type": "object",
+            "required": [
+                "id",
+                "subject",
+                "subject_path",
+                "fact",
+                "claim",
+                "status",
+                "evidence",
+                "selection_reason",
+                "selection",
+            ],
+            "properties": {
+                "id": {"$ref": "#/$defs/non_empty_string"},
+                "subject": {"$ref": "#/$defs/non_empty_string"},
+                "subject_path": {"$ref": "#/$defs/non_empty_string"},
+                "fact": {"$ref": "#/$defs/non_empty_string"},
+                "claim": {"$ref": "#/$defs/non_empty_string"},
+                "status": {"const": "known"},
+                "evidence": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/evidence"},
+                },
+                "selection_reason": {"$ref": "#/$defs/non_empty_string"},
+                "selection": {"$ref": "#/$defs/selection"},
+            },
+            "additionalProperties": False,
+        },
+        "head_ref": {
+            "oneOf": [
+                {"type": "null"},
+                {
+                    "type": "object",
+                    "required": ["kind"],
+                    "properties": {"kind": {"const": "detached"}},
+                    "additionalProperties": False,
+                },
+                {
+                    "type": "object",
+                    "required": ["kind", "name"],
+                    "properties": {
+                        "kind": {"const": "branch"},
+                        "name": {"$ref": "#/$defs/nonblank_string"},
+                    },
+                    "additionalProperties": False,
+                },
+            ]
+        },
+        "conflict_side": {
+            "type": "object",
+            "required": [
+                "checkout",
+                "path",
+                "head_revision",
+                "head_ref",
+                "last_fetch",
+                "evidence",
+            ],
+            "properties": {
+                "checkout": {"$ref": "#/$defs/non_empty_string"},
+                "path": {"$ref": "#/$defs/non_empty_string"},
+                "head_revision": {
+                    "oneOf": [
+                        {"$ref": "#/$defs/non_empty_string"},
+                        {"type": "null"},
+                    ]
+                },
+                "head_ref": {"$ref": "#/$defs/head_ref"},
+                "last_fetch": {"type": ["string", "null"]},
+                "evidence": {
+                    "oneOf": [
+                        {"type": "object"},
+                        {
+                            "type": "array",
+                            "items": {"$ref": "#/$defs/evidence"},
+                        },
+                        {"type": "null"},
+                    ]
+                },
+            },
+            "additionalProperties": False,
+        },
+        "conflict": {
+            "type": "object",
+            "required": [
+                "id",
+                "kind",
+                "repository",
+                "question",
+                "sides",
+                "status",
+                "reason_codes",
+                "decision",
+            ],
+            "properties": {
+                "id": {"$ref": "#/$defs/non_empty_string"},
+                "kind": {"const": "divergent_checkouts"},
+                "repository": {"$ref": "#/$defs/non_empty_string"},
+                "question": {"$ref": "#/$defs/non_empty_string"},
+                "sides": {
+                    "type": "array",
+                    "minItems": 2,
+                    "items": {"$ref": "#/$defs/conflict_side"},
+                },
+                "status": {"const": "unresolved"},
+                "reason_codes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {"$ref": "#/$defs/non_empty_string"},
+                },
+                "decision": {"const": "review_required"},
+            },
+            "additionalProperties": False,
+        },
+        "unknown": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "required": ["checkout", "path", "fact", "reason"],
+                    "not": {"required": ["kind"]},
+                    "properties": {
+                        "checkout": {"$ref": "#/$defs/non_empty_string"},
+                        "path": {"$ref": "#/$defs/non_empty_string"},
+                        "fact": {"$ref": "#/$defs/non_empty_string"},
+                        "reason": {"type": ["string", "null"]},
+                    },
+                    "additionalProperties": False,
+                },
+                {
+                    "type": "object",
+                    "required": [
+                        "kind",
+                        "subject",
+                        "subject_path",
+                        "reason",
+                        "observed_markers",
+                        "resolution",
+                        "evidence",
+                    ],
+                    "properties": {
+                        "kind": {"const": "required_check_undetermined"},
+                        "subject": {"$ref": "#/$defs/non_empty_string"},
+                        "subject_path": {"$ref": "#/$defs/non_empty_string"},
+                        "reason": {"$ref": "#/$defs/non_empty_string"},
+                        "observed_markers": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {"$ref": "#/$defs/non_empty_string"},
+                        },
+                        "resolution": {"$ref": "#/$defs/non_empty_string"},
+                        "evidence": {
+                            "type": "array",
+                            "items": {"$ref": "#/$defs/evidence"},
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                {
+                    "type": "object",
+                    "required": [
+                        "kind",
+                        "subject",
+                        "subject_path",
+                        "reason",
+                        "observed_revision",
+                        "searched_revision",
+                        "evidence",
+                    ],
+                    "properties": {
+                        "kind": {"const": "content_snapshot_stale"},
+                        "subject": {"$ref": "#/$defs/non_empty_string"},
+                        "subject_path": {"$ref": "#/$defs/non_empty_string"},
+                        "reason": {"$ref": "#/$defs/non_empty_string"},
+                        "observed_revision": {"type": ["string", "null"]},
+                        "searched_revision": {"type": ["string", "null"]},
+                        "evidence": {
+                            "type": "array",
+                            "items": {"$ref": "#/$defs/evidence"},
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                {
+                    "type": "object",
+                    "required": [
+                        "kind",
+                        "subject",
+                        "subject_path",
+                        "status",
+                        "reason",
+                        "evidence",
+                    ],
+                    "properties": {
+                        "kind": {"const": "content_search_incomplete"},
+                        "subject": {"type": ["string", "null"]},
+                        "subject_path": {"type": ["string", "null"]},
+                        "status": {"$ref": "#/$defs/non_empty_string"},
+                        "reason": {"$ref": "#/$defs/non_empty_string"},
+                        "evidence": {
+                            "type": "array",
+                            "items": {"$ref": "#/$defs/evidence"},
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            ]
+        },
+        "omitted_claim": {
+            "type": "object",
+            "required": ["subject_path", "fact", "tier"],
+            "properties": {
+                "subject_path": {"$ref": "#/$defs/non_empty_string"},
+                "fact": {"$ref": "#/$defs/non_empty_string"},
+                "tier": {
+                    "enum": [
+                        "conflict_side",
+                        "question_match",
+                        "allowlisted",
+                    ]
+                },
+            },
+            "additionalProperties": False,
+        },
+        "omission_common": {
+            "type": "object",
+            "required": ["kind", "reason"],
+            "properties": {
+                "kind": {
+                    "enum": [
+                        "claims_over_budget",
+                        "filtered_out",
+                        "refused_root",
+                        "dirty_paths_truncated",
+                        "content_matches_outside_task",
+                        "collation_domain_excluded",
+                        "conflict_outside_scope",
+                        "ignored_paths_excluded",
+                        "neighbor_of_pairs_capped",
+                        "content_lines_truncated",
+                        "content_files_truncated",
+                        "privacy_matches_excluded",
+                        "content_root_refused",
+                    ]
+                },
+                "reason": {"$ref": "#/$defs/nonblank_string"},
+            },
+        },
+        "omission": {
+            "type": "object",
+            "allOf": [
+                {"$ref": "#/$defs/omission_common"},
+                {
+                    "oneOf": [
+                        {
+                            "properties": {
+                                "kind": {"const": "claims_over_budget"},
+                                "omitted_count": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                },
+                                "omitted": {
+                                    "type": "array",
+                                    "maxItems": OMITTED_LIST_CAP,
+                                    "items": {"$ref": "#/$defs/omitted_claim"},
+                                },
+                                "truncated": {"const": True},
+                            },
+                            "required": ["kind", "omitted_count", "omitted"],
+                            "allOf": [
+                                {
+                                    "if": {
+                                        "required": ["omitted_count"],
+                                        "properties": {
+                                            "omitted_count": {
+                                                "maximum": OMITTED_LIST_CAP
+                                            }
+                                        },
+                                    },
+                                    "then": {"not": {"required": ["truncated"]}},
+                                    "else": {"required": ["truncated"]},
+                                }
+                            ],
+                        },
+                        {
+                            "properties": {
+                                "kind": {"const": "filtered_out"},
+                                "omitted_count": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                },
+                                "filters": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "items": {"$ref": "#/$defs/task_filter"},
+                                },
+                            },
+                            "required": ["kind", "omitted_count", "filters"],
+                        },
+                        {
+                            "properties": {
+                                "kind": {"const": "refused_root"},
+                                "path": {"$ref": "#/$defs/non_empty_string"},
+                            },
+                            "required": ["kind", "path"],
+                        },
+                        {
+                            "properties": {
+                                "kind": {"const": "dirty_paths_truncated"},
+                                "subject": {"$ref": "#/$defs/non_empty_string"},
+                                "subject_path": {
+                                    "$ref": "#/$defs/non_empty_string"
+                                },
+                                "omitted_count": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                },
+                            },
+                            "required": [
+                                "kind",
+                                "subject",
+                                "subject_path",
+                                "omitted_count",
+                            ],
+                        },
+                        {
+                            "properties": {
+                                "kind": {
+                                    "const": "content_matches_outside_task"
+                                },
+                                "omitted_count": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                },
+                            },
+                            "required": ["kind", "omitted_count"],
+                        },
+                        {
+                            "properties": {
+                                "kind": {
+                                    "const": "collation_domain_excluded"
+                                },
+                                "subject": {"$ref": "#/$defs/non_empty_string"},
+                                "fact": {"$ref": "#/$defs/non_empty_string"},
+                            },
+                            "required": ["kind", "subject", "fact"],
+                        },
+                        {
+                            "properties": {
+                                "kind": {"const": "conflict_outside_scope"},
+                                "conflict": {
+                                    "$ref": "#/$defs/non_empty_string"
+                                },
+                                "subject": {"$ref": "#/$defs/non_empty_string"},
+                                "subject_path": {
+                                    "$ref": "#/$defs/non_empty_string"
+                                },
+                            },
+                            "required": [
+                                "kind",
+                                "conflict",
+                                "subject",
+                                "subject_path",
+                            ],
+                        },
+                        {
+                            "properties": {
+                                "kind": {"const": "ignored_paths_excluded"},
+                            },
+                            "required": ["kind"],
+                        },
+                        {
+                            "properties": {
+                                "kind": {"const": "neighbor_of_pairs_capped"},
+                                "repository": {
+                                    "$ref": "#/$defs/non_empty_string"
+                                },
+                                "omitted_count": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                },
+                            },
+                            "required": ["kind", "repository", "omitted_count"],
+                        },
+                        {
+                            "properties": {
+                                "kind": {"const": "content_lines_truncated"},
+                                "subject": {"$ref": "#/$defs/non_empty_string"},
+                                "subject_path": {
+                                    "$ref": "#/$defs/non_empty_string"
+                                },
+                                "path": {"$ref": "#/$defs/non_empty_string"},
+                                "omitted_count": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                },
+                            },
+                            "required": [
+                                "kind",
+                                "subject",
+                                "subject_path",
+                                "path",
+                                "omitted_count",
+                            ],
+                        },
+                        {
+                            "properties": {
+                                "kind": {"const": "content_files_truncated"},
+                                "subject": {"$ref": "#/$defs/non_empty_string"},
+                                "subject_path": {
+                                    "$ref": "#/$defs/non_empty_string"
+                                },
+                                "omitted_count": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                },
+                                "total_files_matched": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                },
+                            },
+                            "required": [
+                                "kind",
+                                "subject",
+                                "subject_path",
+                                "omitted_count",
+                                "total_files_matched",
+                            ],
+                        },
+                        {
+                            "properties": {
+                                "kind": {"const": "privacy_matches_excluded"},
+                                "subject": {"$ref": "#/$defs/non_empty_string"},
+                                "subject_path": {
+                                    "$ref": "#/$defs/non_empty_string"
+                                },
+                                "omitted_count": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                },
+                                "evidence": {"$ref": "#/$defs/evidence"},
+                            },
+                            "required": [
+                                "kind",
+                                "subject",
+                                "subject_path",
+                                "omitted_count",
+                                "evidence",
+                            ],
+                        },
+                        {
+                            "properties": {
+                                "kind": {"const": "content_root_refused"},
+                                "path": {"$ref": "#/$defs/non_empty_string"},
+                            },
+                            "required": ["kind", "path"],
+                        },
+                    ]
+                },
+            ],
+            "unevaluatedProperties": False,
+        },
+        "required_check": {
+            "type": "object",
+            "required": ["name", "command"],
+            "properties": {
+                "name": {"$ref": "#/$defs/nonblank_string"},
+                "command": {"$ref": "#/$defs/nonblank_string"},
+                "cwd": {"$ref": "#/$defs/absolute_path"},
+                "evidence": {"type": ["object", "null"]},
+            },
+            "additionalProperties": False,
+        },
+        "budget": {
+            "type": "object",
+            "required": ["max_claims"],
+            "properties": {
+                "max_claims": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": MAX_LOSSLESS_INTEGER,
+                }
+            },
+            "additionalProperties": False,
+        },
+    },
+}
+
+
+def task_capsule_json_schema():
+    """Return a fresh, dependency-free Draft 2020-12 Task Capsule schema."""
+
+    return deepcopy(_TASK_CAPSULE_JSON_SCHEMA)
 
 _OMISSION_EXACT_KEYS = {
     "filtered_out": frozenset(
@@ -1399,6 +2087,357 @@ def verify_task_capsule_integrity(capsule) -> bool:
         )
     except TypeError:
         return False
+
+PUBLIC_TASK_CAPSULE_SCHEMA = "vivary.public-task-capsule/v0"
+MAX_PUBLIC_TASK_CAPSULE_CLAIMS = 24
+MAX_PUBLIC_TASK_CAPSULE_DETAILS = 64
+_PUBLIC_CAPSULE_UNSAFE_FACTS = frozenset(
+    {
+        "dirty_entries",
+        "content_match",
+        "git_common_dir",
+        "recommended_checks",
+        "remotes",
+        "worktree_root",
+    }
+)
+_PUBLIC_CAPSULE_MACHINE_PATH_RE = re.compile(
+    r"""(?ix)
+    (?:^|[^\w/])
+    (?:
+        [a-z]:[\\/]
+        |
+        \\\\[^\s\\/]+[\\/][^\s\\/]+
+        |
+        /(?!/)[^\s/"'<>()\[\]{}]+(?:/[^\s"'<>()\[\]{}]+)*
+    )
+    """
+)
+_PUBLIC_CAPSULE_URI_RE = re.compile(
+    r"(?i)(?:[a-z][a-z0-9+.-]*://|[^\s/@:]+:[^\s/@]+@[^\s/]+:)"
+)
+_PUBLIC_CAPSULE_CREDENTIAL_ASSIGNMENT_RE = re.compile(
+    r"""(?ix)
+    \b(?:api[_-]?key|access[_-]?key|auth(?:orization)?|credential|password|
+       passwd|private[_ -]?key|secret|token)\b
+    \s*(?:=|:)\s*["']?([^\s"',;}\]]+)
+    """
+)
+_PUBLIC_CAPSULE_TOKEN_RE = re.compile(
+    r"\b(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})\b"
+)
+_PUBLIC_CAPSULE_PRIVATE_KEY_RE = re.compile(
+    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"
+)
+
+_PUBLIC_TASK_CAPSULE_JSON_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "urn:vivary:public-task-capsule:v0",
+    "title": "Vivary Public Task Capsule v0",
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "schema",
+        "capsule_id",
+        "workspace",
+        "claims",
+        "conflict_count",
+        "unknowns",
+        "omissions",
+        "required_checks",
+        "budget",
+        "complete",
+        "projection_omissions",
+        "fingerprint",
+    ],
+    "properties": {
+        "schema": {"const": PUBLIC_TASK_CAPSULE_SCHEMA},
+        "capsule_id": {"$ref": "#/$defs/id"},
+        "workspace": {"$ref": "#/$defs/workspace"},
+        "claims": {
+            "type": "array",
+            "maxItems": MAX_PUBLIC_TASK_CAPSULE_CLAIMS,
+            "items": {"$ref": "#/$defs/claim"},
+        },
+        "conflict_count": {"type": "integer", "minimum": 0},
+        "unknowns": {
+            "type": "array",
+            "maxItems": MAX_PUBLIC_TASK_CAPSULE_DETAILS,
+            "items": {"$ref": "#/$defs/unknown"},
+        },
+        "omissions": {
+            "type": "array",
+            "maxItems": MAX_PUBLIC_TASK_CAPSULE_DETAILS,
+            "items": {"$ref": "#/$defs/omission"},
+        },
+        "required_checks": {
+            "type": "array",
+            "maxItems": MAX_PUBLIC_TASK_CAPSULE_DETAILS,
+            "items": {"$ref": "#/$defs/required_check"},
+        },
+        "budget": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["max_claims"],
+            "properties": {
+                "max_claims": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": MAX_LOSSLESS_INTEGER,
+                }
+            },
+        },
+        "complete": {"type": "boolean"},
+        "projection_omissions": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {"$ref": "#/$defs/projection_omission"},
+        },
+        "fingerprint": {"$ref": "#/$defs/digest"},
+    },
+    "$defs": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "digest": {
+            "type": "string",
+            "pattern": r"^sha256:[0-9a-f]{64}$",
+        },
+        "safe_text": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "workspace": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["fingerprint"],
+            "properties": {
+                "fingerprint": {"$ref": "#/$defs/digest"},
+                "content_fingerprint": {"$ref": "#/$defs/digest"},
+                "repair_topology_fingerprint": {"$ref": "#/$defs/digest"},
+            },
+        },
+        "claim": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["fact", "claim", "status", "selection_reason"],
+            "properties": {
+                "fact": {"type": "string", "pattern": r"^[a-z][a-z0-9_]{0,63}$"},
+                "claim": {"$ref": "#/$defs/safe_text"},
+                "status": {"const": "known"},
+                "selection_reason": {"$ref": "#/$defs/safe_text"},
+            },
+        },
+        "unknown": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["kind", "fact", "reason"],
+            "properties": {
+                "kind": {"type": "string", "pattern": r"^[a-z][a-z0-9_]{0,63}$"},
+                "fact": {
+                    "oneOf": [
+                        {"type": "string", "pattern": r"^[a-z][a-z0-9_]{0,63}$"},
+                        {"type": "null"},
+                    ]
+                },
+                "reason": {"$ref": "#/$defs/safe_text"},
+            },
+        },
+        "omission": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["kind", "reason", "count"],
+            "properties": {
+                "kind": {"type": "string", "pattern": r"^[a-z][a-z0-9_]{0,63}$"},
+                "reason": {"$ref": "#/$defs/safe_text"},
+                "count": {"type": "integer", "minimum": 1},
+            },
+        },
+        "required_check": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["name"],
+            "properties": {
+                "name": {"type": "string", "minLength": 1, "maxLength": 256}
+            },
+        },
+        "projection_omission": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["kind", "reason", "count"],
+            "properties": {
+                "kind": {
+                    "enum": ["claim", "conflict", "unknown", "omission", "required_check"]
+                },
+                "reason": {"const": "unsafe_for_public_projection"},
+                "count": {"type": "integer", "minimum": 1},
+            },
+        },
+    },
+}
+
+
+def public_task_capsule_json_schema():
+    """Return the closed Draft 2020-12 schema for privacy-safe capsule output."""
+
+    return deepcopy(_PUBLIC_TASK_CAPSULE_JSON_SCHEMA)
+
+
+def _public_capsule_text_is_safe(value, checkout_path, maximum):
+    if (
+        not isinstance(value, str)
+        or not 0 < len(value) <= maximum
+        or any(not character.isprintable() for character in value)
+    ):
+        return False
+    normalized = unicodedata.normalize("NFKC", value)
+    security_text = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", normalized)
+        if not unicodedata.category(character).startswith(("C", "M"))
+    )
+    normalized_checkout = unicodedata.normalize("NFKC", checkout_path)
+    return (
+        normalized_checkout not in normalized
+        and normalized_checkout.replace("/", "\\") not in normalized
+        and _PUBLIC_CAPSULE_MACHINE_PATH_RE.search(security_text) is None
+        and _PUBLIC_CAPSULE_URI_RE.search(security_text) is None
+        and _PUBLIC_CAPSULE_CREDENTIAL_ASSIGNMENT_RE.search(security_text) is None
+        and _PUBLIC_CAPSULE_TOKEN_RE.search(security_text) is None
+        and _PUBLIC_CAPSULE_PRIVATE_KEY_RE.search(security_text) is None
+    )
+
+
+def _public_capsule_identifier(value):
+    return (
+        value
+        if isinstance(value, str)
+        and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", value)
+        else None
+    )
+
+
+def project_public_task_capsule(capsule, *, checkout_path):
+    """Project a verified Task Capsule without roots, commands, or raw evidence."""
+
+    if (
+        not is_canonical_absolute_path(checkout_path)
+        or normalize_path(checkout_path) != checkout_path
+        or not verify_task_capsule_integrity(capsule)
+        or type(capsule.get("task")) is not dict
+        or capsule["task"].get("scope") != [checkout_path]
+    ):
+        raise ValueError("public Task Capsule projection refused")
+    projection_omissions = {}
+
+    def omit(kind, count=1):
+        if count > 0:
+            projection_omissions[kind] = projection_omissions.get(kind, 0) + count
+
+    claims = []
+    for claim in capsule["claims"]:
+        if len(claims) >= MAX_PUBLIC_TASK_CAPSULE_CLAIMS:
+            omit("claim")
+            continue
+        fact = _public_capsule_identifier(claim.get("fact"))
+        statement = claim.get("claim")
+        selection_reason = claim.get("selection_reason")
+        if (
+            fact is None
+            or fact in _PUBLIC_CAPSULE_UNSAFE_FACTS
+            or not _public_capsule_text_is_safe(statement, checkout_path, 4096)
+            or not _public_capsule_text_is_safe(
+                selection_reason, checkout_path, 4096
+            )
+        ):
+            omit("claim")
+            continue
+        claims.append(
+            {
+                "fact": fact,
+                "claim": statement,
+                "status": "known",
+                "selection_reason": selection_reason,
+            }
+        )
+
+    conflict_count = len(capsule["conflicts"])
+    omit("conflict", conflict_count)
+
+    unknowns = []
+    seen_unknowns = set()
+    for unknown in capsule["unknowns"]:
+        kind = _public_capsule_identifier(
+            unknown.get("kind", "workspace_fact")
+        )
+        fact = _public_capsule_identifier(unknown.get("fact"))
+        reason = unknown.get("reason")
+        if (
+            len(unknowns) >= MAX_PUBLIC_TASK_CAPSULE_DETAILS
+            or kind is None
+            or not _public_capsule_text_is_safe(reason, checkout_path, 4096)
+        ):
+            omit("unknown")
+            continue
+        key = (kind, fact, reason)
+        if key in seen_unknowns:
+            continue
+        seen_unknowns.add(key)
+        unknowns.append({"kind": kind, "fact": fact, "reason": reason})
+
+    omissions = []
+    for omission in capsule["omissions"]:
+        kind = _public_capsule_identifier(omission.get("kind"))
+        reason = omission.get("reason")
+        raw_count = omission.get("omitted_count", 1)
+        count = raw_count if type(raw_count) is int and raw_count > 0 else 1
+        if (
+            len(omissions) >= MAX_PUBLIC_TASK_CAPSULE_DETAILS
+            or kind is None
+            or not _public_capsule_text_is_safe(reason, checkout_path, 4096)
+        ):
+            omit("omission")
+            continue
+        omissions.append({"kind": kind, "reason": reason, "count": count})
+
+    required_checks = []
+    for check in capsule["required_checks"]:
+        name = check.get("name")
+        if (
+            len(required_checks) >= MAX_PUBLIC_TASK_CAPSULE_DETAILS
+            or not _public_capsule_text_is_safe(name, checkout_path, 256)
+        ):
+            omit("required_check")
+            continue
+        required_checks.append({"name": name})
+
+    workspace = {
+        key: capsule["workspace"][key]
+        for key in (
+            "fingerprint",
+            "content_fingerprint",
+            "repair_topology_fingerprint",
+        )
+        if key in capsule["workspace"]
+    }
+    rows = [
+        {
+            "kind": kind,
+            "reason": "unsafe_for_public_projection",
+            "count": projection_omissions[kind],
+        }
+        for kind in ("claim", "conflict", "unknown", "omission", "required_check")
+        if kind in projection_omissions
+    ]
+    body = {
+        "schema": PUBLIC_TASK_CAPSULE_SCHEMA,
+        "capsule_id": capsule["capsule_id"],
+        "workspace": workspace,
+        "claims": claims,
+        "conflict_count": conflict_count,
+        "unknowns": unknowns,
+        "omissions": omissions,
+        "required_checks": required_checks,
+        "budget": {"max_claims": capsule["budget"]["max_claims"]},
+        "complete": not rows,
+        "projection_omissions": rows,
+    }
+    return {**body, "fingerprint": fingerprint(body)}
 
 # Checks were hardcoded for every workspace, so a Python-only project was told to
 # run `npm test` and had no way to say otherwise. They are now derived from what was

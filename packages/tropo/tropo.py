@@ -43,10 +43,76 @@ import sysconfig
 import tempfile
 import time
 import tomllib
+import unicodedata
+from typing import Any, Sequence, TypedDict
 from collections import Counter, deque
 from fnmatch import fnmatchcase
 
-__version__ = "0.5.0"
+if os.name == "nt":
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    class _PublicFileBasicInfo(ctypes.Structure):
+        _fields_ = [
+            ("creation_time", ctypes.c_longlong),
+            ("last_access_time", ctypes.c_longlong),
+            ("last_write_time", ctypes.c_longlong),
+            ("change_time", ctypes.c_longlong),
+            ("file_attributes", wintypes.DWORD),
+        ]
+
+    class _PublicByHandleFileInformation(ctypes.Structure):
+        _fields_ = [
+            ("file_attributes", wintypes.DWORD),
+            ("creation_time", wintypes.FILETIME),
+            ("last_access_time", wintypes.FILETIME),
+            ("last_write_time", wintypes.FILETIME),
+            ("volume_serial_number", wintypes.DWORD),
+            ("file_size_high", wintypes.DWORD),
+            ("file_size_low", wintypes.DWORD),
+            ("number_of_links", wintypes.DWORD),
+            ("file_index_high", wintypes.DWORD),
+            ("file_index_low", wintypes.DWORD),
+        ]
+
+    _PUBLIC_KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _PUBLIC_CREATE_FILE = _PUBLIC_KERNEL32.CreateFileW
+    _PUBLIC_CREATE_FILE.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    _PUBLIC_CREATE_FILE.restype = wintypes.HANDLE
+    _PUBLIC_GET_FILE_INFO = _PUBLIC_KERNEL32.GetFileInformationByHandle
+    _PUBLIC_GET_FILE_INFO.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(_PublicByHandleFileInformation),
+    ]
+    _PUBLIC_GET_FILE_INFO.restype = wintypes.BOOL
+    _PUBLIC_GET_FILE_INFO_EX = _PUBLIC_KERNEL32.GetFileInformationByHandleEx
+    _PUBLIC_GET_FILE_INFO_EX.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+    ]
+    _PUBLIC_GET_FILE_INFO_EX.restype = wintypes.BOOL
+    _PUBLIC_CLOSE_HANDLE = _PUBLIC_KERNEL32.CloseHandle
+    _PUBLIC_CLOSE_HANDLE.argtypes = [wintypes.HANDLE]
+    _PUBLIC_CLOSE_HANDLE.restype = wintypes.BOOL
+    _PUBLIC_INVALID_HANDLE = ctypes.c_void_p(-1).value
+    _PUBLIC_FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
+    _PUBLIC_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+    _PUBLIC_FILE_READ_ATTRIBUTES = 0x00000080
+    _PUBLIC_FILE_SHARE_ALL = 0x00000001 | 0x00000002 | 0x00000004
+    _PUBLIC_OPEN_EXISTING = 3
+
+__version__ = "0.5.1"
 RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
 RECEIPT_SCHEMA = "vivary.run_receipt.v1"
 COMMANDS = (
@@ -739,8 +805,8 @@ def _derive_id(full):
     return slugify(base)
 
 
-def derive(full, body):
-    created, updated = _git_dates(full)
+def derive(full, body, *, use_git_dates=True):
+    created, updated = _git_dates(full) if use_git_dates else (None, None)
     if not updated:
         st = os.stat(full)
         created = datetime.date.fromtimestamp(min(st.st_mtime, st.st_ctime)).isoformat()
@@ -846,22 +912,23 @@ def iter_markdown(root, paths, exclude):
                     yield full, rel
 
 
-def analyze_file(full, rel, config):
+def analyze_file(full, rel, config, *, text=None, use_git_dates=True):
     doc = Doc()
     doc.full, doc.rel = full, rel
     doc.findings, doc.refs, doc.declared, doc.noise = [], [], {}, []
     rel = rel.replace("\\", "/")
 
-    try:
-        with open(full, encoding="utf-8", errors="replace") as fh:
-            text = fh.read()
-    except OSError as e:
-        doc.findings.append(Finding(rel, 0, "error", "E000", f"cannot read file: {e}"))
-        doc.type, doc.fields, doc.derived = None, {}, {}
-        return doc
+    if text is None:
+        try:
+            with open(full, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError as e:
+            doc.findings.append(Finding(rel, 0, "error", "E000", f"cannot read file: {e}"))
+            doc.type, doc.fields, doc.derived = None, {}, {}
+            return doc
 
     yaml_text, body = extract_frontmatter(text)
-    doc.derived = derive(full, body)
+    doc.derived = derive(full, body, use_git_dates=use_git_dates)
 
     fields, key_lines = {}, {}
     if yaml_text is not None:
@@ -1225,6 +1292,12 @@ _LOCAL_VECTOR_PROVIDER = "local-hash"
 _LOCAL_VECTOR_VERSION = "local-hash-v2"
 _VECTOR_QUERY_MAX_VALIDATE_ROWS = 10_000
 _VECTOR_QUERY_MAX_CANDIDATES = 250
+_PUBLIC_MAX_SCAN_ENTRIES = 50_000
+_PUBLIC_MAX_MARKDOWN_FILES = 5_000
+_PUBLIC_MAX_FILE_BYTES = 1 * 1024 * 1024
+_PUBLIC_MAX_AGGREGATE_BYTES = 32 * 1024 * 1024
+_PUBLIC_MAX_FINDINGS = 200
+_PUBLIC_MAX_SNIPPET_CHARS = 1_000
 _VECTOR_QUERY_FILTER_OVERFETCH = 5
 _VECTOR_METADATA_COLUMNS = [
     "id",
@@ -1857,6 +1930,1700 @@ def get_backend(root, *, allow_auto_fallback=True):
 # ---------------------------------------------------------------------------
 # Graph search: shared by `query` and context-packet `find`
 # ---------------------------------------------------------------------------
+class TropoFacadeError(RuntimeError):
+    """Base class for public read-only facade failures."""
+
+    reason = "producer_unavailable"
+
+    def __init__(self):
+        super().__init__(self.reason)
+
+
+class PathRefusedError(TropoFacadeError):
+    reason = "path_refused"
+
+
+class PrivacyPolicyUnavailableError(TropoFacadeError):
+    reason = "privacy_policy_unavailable"
+
+
+class WorkLimitExceededError(TropoFacadeError):
+    reason = "work_limit_exceeded"
+
+
+class ProducerUnavailableError(TropoFacadeError):
+    reason = "producer_unavailable"
+
+def _public_cancel_if_requested(cancelled):
+    if cancelled is None:
+        return
+    try:
+        if cancelled():
+            raise ProducerUnavailableError()
+    except ProducerUnavailableError:
+        raise
+    except Exception:
+        raise ProducerUnavailableError() from None
+
+
+class PublicOmission(TypedDict):
+    kind: str
+    reason: str
+    count: int
+
+
+class PublicQueryHit(TypedDict):
+    id: str
+    type: str | None
+    path: str
+    title: str
+    score: int
+    snippet: str | None
+    reasons: list[str]
+    edges: list[dict[str, str]]
+
+
+class PublicFindHit(TypedDict):
+    id: str
+    type: str | None
+    path: str
+    reason: str
+    snippet: str | None
+    edges: list[dict[str, str]]
+
+
+class QueryContextResult(TypedDict):
+    schema: str
+    query: str
+    k: int
+    filters: dict[str, list[str]]
+    results: list[PublicQueryHit]
+    complete: bool
+    workspace_fingerprint: str | None
+    omissions: list[PublicOmission]
+
+
+class FindContextResult(TypedDict):
+    schema: str
+    query: str
+    k: int
+    budget: int
+    estimated_tokens: int
+    filters: dict[str, list[str]]
+    results: list[PublicFindHit]
+    complete: bool
+    workspace_fingerprint: str | None
+    omissions: list[PublicOmission]
+
+
+class CheckWorkspaceResult(TypedDict):
+    schema: str
+    checked: int
+    clean: int
+    errors: int
+    warnings: int
+    findings: list[dict[str, Any]]
+    strict: bool
+    complete: bool
+    workspace_fingerprint: str | None
+    omissions: list[PublicOmission]
+
+
+_PUBLIC_SENSITIVE_PATH_PARTS = {
+    ".aws",
+    ".env",
+    ".gnupg",
+    ".ssh",
+    "credentials",
+    "private",
+    "secrets",
+}
+_PUBLIC_SENSITIVE_NAME_TOKENS = (
+    "api-key",
+    "apikey",
+    "credential",
+    "private-key",
+    "secret",
+    "token",
+)
+
+# Public producer facades deliberately do not reuse the CLI's open-ended
+# filesystem/configuration paths.  They are an adapter boundary for optional
+# transports, so they operate on one bounded, descriptor-verified snapshot.
+_PUBLIC_QUERY_SCHEMA = "vivary.query-result/v0"
+_PUBLIC_FIND_SCHEMA = "vivary.find-result/v0"
+_PUBLIC_CHECK_SCHEMA = "vivary.check-result/v0"
+_PUBLIC_MAX_FILESYSTEM_ENTRIES = 50_000
+_PUBLIC_MAX_MARKDOWN_FILES = 5_000
+_PUBLIC_MAX_FILE_BYTES = 1 * 1024 * 1024
+_PUBLIC_MAX_AGGREGATE_BYTES = 32 * 1024 * 1024
+_PUBLIC_MAX_FINDINGS = 200
+_PUBLIC_MAX_RESULTS = 20
+_PUBLIC_MAX_QUERY_CHARS = 4_096
+_PUBLIC_MAX_FILTERS = 16
+_PUBLIC_MAX_CHECK_PATHS = 200
+_PUBLIC_MAX_PATH_CHARS = 512
+_PUBLIC_MAX_TYPE_FILTER_CHARS = 128
+_PUBLIC_MAX_EDGE_FILTER_CHARS = 256
+_PUBLIC_MAX_SNIPPET_CHARS = 1_000
+_PUBLIC_MAX_FIND_BUDGET = 4_000
+_PUBLIC_MIN_FIND_BUDGET = 64
+_PUBLIC_MAX_OMISSIONS = 16
+_PUBLIC_MAX_EDGES_PER_DOCUMENT = 64
+_PUBLIC_MAX_TITLE_CHARS = 512
+_PUBLIC_MAX_FRONTMATTER_CHARS = 4_096
+_PUBLIC_REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+_PUBLIC_CREDENTIAL_ASSIGNMENT_RE = re.compile(
+    r"""(?ix)
+    \b(?:api[_-]?key|access[_-]?key|auth(?:orization)?|credential|password|
+       passwd|private[_ -]?key|secret|token)\b
+    \s*(?:=|:)\s*["']?([^\s"',;}\]]+)
+    """
+)
+_PUBLIC_CREDENTIAL_URL_RE = re.compile(
+    r"[A-Za-z][A-Za-z0-9+.-]*://[^\s/@:]+:[^\s/@]+@"
+)
+_PUBLIC_TOKEN_RE = re.compile(
+    r"\b(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})\b"
+)
+_PUBLIC_PRIVATE_KEY_RE = re.compile(
+    r"-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----"
+)
+_PUBLIC_ABSOLUTE_VALUE_RE = re.compile(r"^(?:/|[A-Za-z]:[\\/])")
+_PUBLIC_MACHINE_PATH_RE = re.compile(
+    r"""(?ix)
+    (?:^|[^\w/])
+    (?:
+        [A-Z]:[\\/]
+        | \\\\[^\s\\/]+[\\/][^\s\\/]+
+        | /(?!/)[^\s/"'<>()\[\]{}]+(?:/[^\s"'<>()\[\]{}]+)*
+    )
+    """
+)
+_PUBLIC_SAFE_CONFIG_VALUES = frozenset(
+    {
+        "any", "boolean", "bool", "date", "datetime", "float", "integer",
+        "number", "null", "ref", "ref-list", "slug", "string", "url",
+    }
+)
+_PUBLIC_FINDING_MESSAGES = {
+    "E001": "invalid frontmatter",
+    "E101": "required field missing",
+    "E102": "required field empty",
+    "E103": "field value invalid",
+    "W201": "untyped document",
+    "W202": "unknown field",
+    "W210": "redundant derived field",
+    "W220": "unresolved reference",
+}
+
+
+def _public_closed_schema(properties, required):
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+def _public_string_array_schema(max_items, max_length):
+    return {
+        "type": "array",
+        "items": {"type": "string", "minLength": 1, "maxLength": max_length},
+        "maxItems": max_items,
+        "uniqueItems": True,
+    }
+
+
+def _public_omission_schema():
+    return _public_closed_schema(
+        {
+            "kind": {"type": "string", "minLength": 1, "maxLength": 64},
+            "reason": {"type": "string", "minLength": 1, "maxLength": 64},
+            "count": {"type": "integer", "minimum": 1},
+        },
+        ["kind", "reason", "count"],
+    )
+
+
+def _public_filters_schema():
+    return _public_closed_schema(
+        {
+            "type": _public_string_array_schema(
+                _PUBLIC_MAX_FILTERS, _PUBLIC_MAX_TYPE_FILTER_CHARS
+            ),
+            "path": _public_string_array_schema(
+                _PUBLIC_MAX_FILTERS, _PUBLIC_MAX_PATH_CHARS
+            ),
+            "edge": _public_string_array_schema(
+                _PUBLIC_MAX_FILTERS, _PUBLIC_MAX_EDGE_FILTER_CHARS
+            ),
+        },
+        ["type", "path", "edge"],
+    )
+
+
+def _public_edge_schema():
+    return _public_closed_schema(
+        {
+            "field": {"type": "string", "minLength": 1, "maxLength": 128},
+            "to": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": _PUBLIC_MAX_EDGE_FILTER_CHARS,
+            },
+        },
+        ["field", "to"],
+    )
+
+
+def _public_hit_schema(kind):
+    properties = {
+        "id": {"type": "string", "minLength": 1, "maxLength": 512},
+        "type": {
+            "oneOf": [
+                {"type": "string", "minLength": 1, "maxLength": 128},
+                {"type": "null"},
+            ]
+        },
+        "path": {"type": "string", "minLength": 1, "maxLength": _PUBLIC_MAX_PATH_CHARS},
+        "snippet": {
+            "oneOf": [
+                {"type": "string", "minLength": 1, "maxLength": _PUBLIC_MAX_SNIPPET_CHARS + 6},
+                {"type": "null"},
+            ]
+        },
+        "edges": {
+            "type": "array",
+            "items": _public_edge_schema(),
+            "maxItems": _PUBLIC_MAX_EDGES_PER_DOCUMENT,
+        },
+    }
+    if kind == "query":
+        properties.update(
+            {
+                "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": _PUBLIC_MAX_TITLE_CHARS,
+                },
+                "score": {"type": "integer", "minimum": 1},
+                "reasons": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1, "maxLength": 64},
+                    "maxItems": 8,
+                },
+            }
+        )
+        required = [
+            "id", "type", "path", "title", "score", "snippet", "reasons", "edges"
+        ]
+    else:
+        properties["reason"] = {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+        }
+        required = ["id", "type", "path", "reason", "snippet", "edges"]
+    return _public_closed_schema(properties, required)
+
+
+def _public_base_result_properties(schema):
+    return {
+        "schema": {"const": schema},
+        "complete": {"type": "boolean"},
+        "workspace_fingerprint": {
+            "type": "string",
+            "pattern": r"^sha256:[0-9a-f]{64}$",
+        },
+        "omissions": {
+            "type": "array",
+            "items": _public_omission_schema(),
+            "maxItems": _PUBLIC_MAX_OMISSIONS,
+        },
+    }
+
+
+def query_result_json_schema():
+    properties = _public_base_result_properties(_PUBLIC_QUERY_SCHEMA)
+    properties.update(
+        {
+            "query": {"type": "string", "minLength": 1, "maxLength": _PUBLIC_MAX_QUERY_CHARS},
+            "k": {"type": "integer", "minimum": 1, "maximum": _PUBLIC_MAX_RESULTS},
+            "filters": _public_filters_schema(),
+            "results": {
+                "type": "array",
+                "items": _public_hit_schema("query"),
+                "maxItems": _PUBLIC_MAX_RESULTS,
+            },
+        }
+    )
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        **_public_closed_schema(
+            properties,
+            [
+                "schema", "query", "k", "filters", "results", "complete",
+                "workspace_fingerprint", "omissions",
+            ],
+        ),
+    }
+
+
+def find_result_json_schema():
+    properties = _public_base_result_properties(_PUBLIC_FIND_SCHEMA)
+    properties.update(
+        {
+            "query": {"type": "string", "minLength": 1, "maxLength": _PUBLIC_MAX_QUERY_CHARS},
+            "k": {"type": "integer", "minimum": 1, "maximum": _PUBLIC_MAX_RESULTS},
+            "budget": {
+                "type": "integer",
+                "minimum": _PUBLIC_MIN_FIND_BUDGET,
+                "maximum": _PUBLIC_MAX_FIND_BUDGET,
+            },
+            "estimated_tokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": _PUBLIC_MAX_FIND_BUDGET,
+            },
+            "filters": _public_filters_schema(),
+            "results": {
+                "type": "array",
+                "items": _public_hit_schema("find"),
+                "maxItems": _PUBLIC_MAX_RESULTS,
+            },
+        }
+    )
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        **_public_closed_schema(
+            properties,
+            [
+                "schema", "query", "k", "budget", "estimated_tokens", "filters",
+                "results", "complete", "workspace_fingerprint", "omissions",
+            ],
+        ),
+    }
+
+
+def check_result_json_schema():
+    finding = _public_closed_schema(
+        {
+            "path": {"type": "string", "minLength": 1, "maxLength": _PUBLIC_MAX_PATH_CHARS},
+            "line": {"type": "integer", "minimum": 0},
+            "level": {"enum": ["error", "warning"]},
+            "code": {"type": "string", "minLength": 1, "maxLength": 16},
+            "message": {"type": "string", "minLength": 1, "maxLength": 256},
+        },
+        ["path", "line", "level", "code", "message"],
+    )
+    properties = _public_base_result_properties(_PUBLIC_CHECK_SCHEMA)
+    properties.update(
+        {
+            "checked": {"type": "integer", "minimum": 0, "maximum": _PUBLIC_MAX_MARKDOWN_FILES},
+            "clean": {"type": "integer", "minimum": 0, "maximum": _PUBLIC_MAX_MARKDOWN_FILES},
+            "errors": {"type": "integer", "minimum": 0},
+            "warnings": {"type": "integer", "minimum": 0},
+            "findings": {
+                "type": "array",
+                "items": finding,
+                "maxItems": _PUBLIC_MAX_FINDINGS,
+            },
+            "strict": {"type": "boolean"},
+        }
+    )
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        **_public_closed_schema(
+            properties,
+            [
+                "schema", "checked", "clean", "errors", "warnings", "findings",
+                "strict", "complete", "workspace_fingerprint", "omissions",
+            ],
+        ),
+    }
+
+
+def _public_sort_key(value):
+    """Use the same portable ordering basis as Core's public path policy."""
+    return value.encode("utf-16-be", "surrogatepass")
+
+
+def _public_add_omission(omissions, kind, reason, count=1):
+    if count <= 0:
+        return
+    key = (kind, reason)
+    omissions[key] = omissions.get(key, 0) + count
+
+
+def _public_omission_rows(omissions):
+    rows = [
+        {"kind": kind, "reason": reason, "count": count}
+        for (kind, reason), count in sorted(
+            omissions.items(),
+            key=lambda item: (_public_sort_key(item[0][0]), _public_sort_key(item[0][1])),
+        )
+        if count > 0
+    ]
+    if len(rows) <= _PUBLIC_MAX_OMISSIONS:
+        return rows
+    kept = rows[:_PUBLIC_MAX_OMISSIONS - 1]
+    remaining = sum(row["count"] for row in rows[_PUBLIC_MAX_OMISSIONS - 1:])
+    kept.append(
+        {
+            "kind": "snapshot",
+            "reason": "omissions_truncated",
+            "count": remaining,
+        }
+    )
+    return kept
+
+
+def _public_safe_text(value, maximum):
+    if not isinstance(value, str) or not value or len(value) > maximum:
+        return False
+    if any(not character.isprintable() for character in value):
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _public_safe_relative_path(path, *, maximum=_PUBLIC_MAX_PATH_CHARS):
+    if not _public_safe_text(path, maximum) or "\\" in path or path.startswith("/"):
+        return False
+    if re.match(r"^[A-Za-z]:", path):
+        return False
+    return all(part not in ("", ".", "..") for part in path.split("/"))
+
+
+def _public_path_is_sensitive(relpath):
+    parts = [part.casefold() for part in relpath.split("/")]
+    for part in parts:
+        if part in _PUBLIC_SENSITIVE_PATH_PARTS or part.startswith(".env"):
+            return True
+        if any(token in part for token in _PUBLIC_SENSITIVE_NAME_TOKENS):
+            return True
+    return False
+
+
+def _public_link_or_reparse(info):
+    return (
+        stat.S_ISLNK(info.st_mode)
+        or bool(getattr(info, "st_reparse_tag", 0))
+        or bool(getattr(info, "st_file_attributes", 0) & _PUBLIC_REPARSE_POINT)
+    )
+
+
+def _public_is_regular_single_link(info):
+    return stat.S_ISREG(info.st_mode) and getattr(info, "st_nlink", 1) == 1
+
+
+def _public_security_text(text):
+    normalized = unicodedata.normalize("NFKD", text)
+    return "".join(
+        character
+        for character in normalized
+        if not unicodedata.category(character).startswith(("C", "M"))
+    )
+
+
+def _public_text_has_credential(text):
+    security_text = _public_security_text(text)
+    if (
+        _PUBLIC_CREDENTIAL_URL_RE.search(security_text)
+        or _PUBLIC_TOKEN_RE.search(security_text)
+        or _PUBLIC_PRIVATE_KEY_RE.search(security_text)
+    ):
+        return True
+    for match in _PUBLIC_CREDENTIAL_ASSIGNMENT_RE.finditer(security_text):
+        value = match.group(1).strip().casefold()
+        if value not in _PUBLIC_SAFE_CONFIG_VALUES:
+            return True
+    return False
+
+
+def _public_output_text_is_safe(value, maximum):
+    return (
+        _public_safe_text(value, maximum)
+        and not _public_text_has_credential(value)
+        and _PUBLIC_MACHINE_PATH_RE.search(_public_security_text(value)) is None
+    )
+
+
+def _public_contains_workspace_path(text, root):
+    normalized_text = unicodedata.normalize("NFKC", text)
+    normalized_root = unicodedata.normalize("NFKC", root).replace("\\", "/")
+    variants = {normalized_root, normalized_root.replace("/", "\\")}
+    if os.name == "nt":
+        lowered = normalized_text.casefold()
+        return any(variant.casefold() in lowered for variant in variants if variant)
+    return any(variant in normalized_text for variant in variants if variant)
+
+def _public_trim_text(value, maximum):
+    if not isinstance(value, str):
+        return ""
+    if len(value) <= maximum:
+        return value
+    return value[:max(0, maximum - 3)].rstrip() + "..."
+
+
+def _public_core_api():
+    try:
+        from vivary_core import (
+            ContentPrivacyPathRefusedError,
+            ContentPrivacyPolicyUnavailableError,
+            content_privacy_policy,
+            is_canonical_absolute_path,
+            normalize_path,
+        )
+    except Exception:
+        raise PrivacyPolicyUnavailableError() from None
+    return {
+        "path_error": ContentPrivacyPathRefusedError,
+        "policy_error": ContentPrivacyPolicyUnavailableError,
+        "policy": content_privacy_policy,
+        "is_canonical_absolute_path": is_canonical_absolute_path,
+        "normalize_path": normalize_path,
+    }
+
+
+def _public_require_root(root, allowlist, core):
+    if (
+        not isinstance(root, str)
+        or type(allowlist) is not list
+        or len(allowlist) != 1
+        or allowlist[0] != root
+        or not core["is_canonical_absolute_path"](root)
+        or core["normalize_path"](root) != root
+    ):
+        raise PathRefusedError()
+    try:
+        info = os.lstat(root)
+        resolved = core["normalize_path"](os.path.realpath(root))
+    except (OSError, ValueError):
+        raise PathRefusedError() from None
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or _public_link_or_reparse(info)
+        or resolved != root
+    ):
+        raise PathRefusedError()
+
+
+def _public_candidate_from_info(rel, kind, info, full_path=None):
+    if not _public_safe_relative_path(rel):
+        return None, "unsafe_path"
+    if _public_path_is_sensitive(rel):
+        return None, "sensitive_name"
+    if _public_link_or_reparse(info):
+        return None, "link_or_reparse"
+    if not _public_is_regular_single_link(info):
+        return None, "hard_link_or_nonregular"
+    if info.st_size < 0 or info.st_size > _PUBLIC_MAX_FILE_BYTES:
+        return None, "file_size_limit"
+    if full_path is None:
+        change_marker = None if os.name == "nt" else _public_stat_ns(info, "ctime")
+    else:
+        change_marker = _public_path_change_marker(full_path, info)
+        if change_marker is None:
+            return None, "unavailable"
+    return {
+        "rel": rel,
+        "kind": kind,
+        "size": info.st_size,
+        "device": info.st_dev,
+        "inode": info.st_ino,
+        "mtime": info.st_mtime,
+        "ctime": info.st_ctime,
+        "mtime_ns": getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000)),
+        "change_marker": change_marker,
+    }, None
+
+
+def _public_root_config_candidate(root, omissions):
+    config_path = os.path.join(root, CONFIG_NAME)
+    try:
+        info = os.lstat(config_path)
+    except FileNotFoundError:
+        return None, True
+    except OSError:
+        _public_add_omission(omissions, "config", "unavailable")
+        return None, False
+    candidate, reason = _public_candidate_from_info(
+        CONFIG_NAME,
+        "config",
+        info,
+        config_path,
+    )
+    if candidate is None:
+        if reason == "file_size_limit":
+            raise WorkLimitExceededError()
+        _public_add_omission(omissions, "config", reason)
+        return None, True
+    return candidate, True
+
+
+def _public_enumerate_markdown(root, omissions, cancelled=None):
+    """Enumerate metadata only; content cannot be opened before Core approves it."""
+    markdown = []
+    complete = True
+    entries = 0
+    pending = [("", root)]
+    while pending:
+        _public_cancel_if_requested(cancelled)
+        rel_dir, full_dir = pending.pop()
+        try:
+            with os.scandir(full_dir) as iterator:
+                children = []
+                for entry in iterator:
+                    _public_cancel_if_requested(cancelled)
+                    if entries + len(children) >= _PUBLIC_MAX_FILESYSTEM_ENTRIES:
+                        raise WorkLimitExceededError()
+                    children.append(entry)
+                children.sort(key=lambda entry: _public_sort_key(entry.name))
+        except OSError:
+            _public_add_omission(omissions, "filesystem", "directory_unavailable")
+            complete = False
+            continue
+        directories = []
+        for entry in children:
+            _public_cancel_if_requested(cancelled)
+            if entries >= _PUBLIC_MAX_FILESYSTEM_ENTRIES:
+                raise WorkLimitExceededError()
+            entries += 1
+            name = entry.name
+            rel = f"{rel_dir}/{name}" if rel_dir else name
+            if not _public_safe_relative_path(rel):
+                _public_add_omission(omissions, "filesystem", "unsafe_path")
+                continue
+            try:
+                info = os.lstat(entry.path)
+            except OSError:
+                _public_add_omission(omissions, "filesystem", "entry_unavailable")
+                complete = False
+                continue
+            if _public_link_or_reparse(info):
+                _public_add_omission(omissions, "filesystem", "link_or_reparse")
+                continue
+            if stat.S_ISDIR(info.st_mode):
+                if _public_path_is_sensitive(rel):
+                    _public_add_omission(omissions, "filesystem", "sensitive_name")
+                elif not is_excluded(rel, DEFAULT_EXCLUDE):
+                    directories.append((rel, entry.path))
+                continue
+            if rel == CONFIG_NAME:
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                continue
+            if not name.casefold().endswith((".md", ".markdown")):
+                continue
+            candidate, reason = _public_candidate_from_info(
+                rel,
+                "markdown",
+                info,
+                entry.path,
+            )
+            if candidate is None:
+                if reason == "file_size_limit":
+                    raise WorkLimitExceededError()
+                _public_add_omission(omissions, "document", reason)
+                continue
+
+
+            if len(markdown) >= _PUBLIC_MAX_MARKDOWN_FILES:
+                raise WorkLimitExceededError()
+            markdown.append(candidate)
+        pending.extend(reversed(directories))
+    markdown.sort(key=lambda candidate: _public_sort_key(candidate["rel"]))
+    return markdown, complete
+
+
+def _public_stat_ns(info, name):
+    return getattr(
+        info,
+        f"st_{name}_ns",
+        int(getattr(info, f"st_{name}") * 1_000_000_000),
+    )
+
+
+def _public_path_change_marker(path, expected):
+    if os.name != "nt":
+        return _public_stat_ns(expected, "ctime")
+    handle = _PUBLIC_CREATE_FILE(
+        path,
+        _PUBLIC_FILE_READ_ATTRIBUTES,
+        _PUBLIC_FILE_SHARE_ALL,
+        None,
+        _PUBLIC_OPEN_EXISTING,
+        _PUBLIC_FILE_FLAG_OPEN_REPARSE_POINT,
+        None,
+    )
+    if handle == _PUBLIC_INVALID_HANDLE:
+        return None
+    try:
+        basic = _PublicFileBasicInfo()
+        identity = _PublicByHandleFileInformation()
+        if (
+            not _PUBLIC_GET_FILE_INFO_EX(
+                handle,
+                0,
+                ctypes.byref(basic),
+                ctypes.sizeof(basic),
+            )
+            or not _PUBLIC_GET_FILE_INFO(handle, ctypes.byref(identity))
+        ):
+            return None
+        inode = (identity.file_index_high << 32) | identity.file_index_low
+        size = (identity.file_size_high << 32) | identity.file_size_low
+        if (
+            identity.file_attributes & _PUBLIC_FILE_ATTRIBUTE_REPARSE_POINT
+            or identity.number_of_links != 1
+            or inode != expected.st_ino
+            or size != expected.st_size
+        ):
+            return None
+        return int(basic.change_time)
+    finally:
+        _PUBLIC_CLOSE_HANDLE(handle)
+
+
+def _public_open_change_marker(file_fd, info):
+    if os.name != "nt":
+        return _public_stat_ns(info, "ctime")
+    try:
+        handle = wintypes.HANDLE(msvcrt.get_osfhandle(file_fd))
+        basic = _PublicFileBasicInfo()
+        if not _PUBLIC_GET_FILE_INFO_EX(
+            handle,
+            0,
+            ctypes.byref(basic),
+            ctypes.sizeof(basic),
+        ):
+            return None
+        return int(basic.change_time)
+    except OSError:
+        return None
+
+
+def _public_candidate_identity_matches(info, candidate, change_marker):
+    return (
+        _public_is_regular_single_link(info)
+        and info.st_dev == candidate["device"]
+        and info.st_ino == candidate["inode"]
+        and info.st_size == candidate["size"]
+        and _public_stat_ns(info, "mtime") == candidate["mtime_ns"]
+        and change_marker is not None
+        and change_marker == candidate["change_marker"]
+    )
+
+
+def _public_open_identity_matches(before, after, before_change, after_change):
+    return (
+        _public_is_regular_single_link(after)
+        and before.st_dev == after.st_dev
+        and before.st_ino == after.st_ino
+        and before.st_size == after.st_size
+        and _public_stat_ns(before, "mtime") == _public_stat_ns(after, "mtime")
+        and before_change is not None
+        and before_change == after_change
+    )
+
+
+def _public_read_candidate(root, candidate, cancelled=None):
+    """Read a previously lstat'd single-link file through a checked descriptor."""
+    root_fd = -1
+    parent_fd = -1
+    file_fd = -1
+    try:
+        _public_cancel_if_requested(cancelled)
+        file_flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
+        supports_dir_fd = os.open in getattr(os, "supports_dir_fd", set())
+        pieces = candidate["rel"].split("/")
+        if supports_dir_fd:
+            directory_flags = (
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+                | nofollow
+            )
+            root_fd = os.open(root, directory_flags)
+            parent_fd = root_fd
+            for piece in pieces[:-1]:
+                _public_cancel_if_requested(cancelled)
+                next_fd = os.open(piece, directory_flags, dir_fd=parent_fd)
+                if parent_fd != root_fd:
+                    os.close(parent_fd)
+                parent_fd = next_fd
+            file_fd = os.open(pieces[-1], file_flags | nofollow, dir_fd=parent_fd)
+        else:
+            current = root
+            for index, piece in enumerate(pieces):
+                _public_cancel_if_requested(cancelled)
+                current = os.path.join(current, piece)
+                info = os.lstat(current)
+                if _public_link_or_reparse(info):
+                    return None, "link_or_reparse"
+                if index < len(pieces) - 1 and not stat.S_ISDIR(info.st_mode):
+                    return None, "unavailable"
+            file_fd = os.open(current, file_flags | nofollow)
+        info = os.fstat(file_fd)
+        change_marker = _public_open_change_marker(file_fd, info)
+        if (
+            not _public_candidate_identity_matches(info, candidate, change_marker)
+            or info.st_size > _PUBLIC_MAX_FILE_BYTES
+        ):
+            return None, "changed"
+        remaining = _PUBLIC_MAX_FILE_BYTES + 1
+        chunks = []
+        while remaining:
+            _public_cancel_if_requested(cancelled)
+            chunk = os.read(file_fd, min(65_536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        after = os.fstat(file_fd)
+        after_change_marker = _public_open_change_marker(file_fd, after)
+        if not _public_open_identity_matches(
+            info,
+            after,
+            change_marker,
+            after_change_marker,
+        ):
+            return None, "changed"
+        data = b"".join(chunks)
+        if len(data) > _PUBLIC_MAX_FILE_BYTES:
+            return None, "file_size_limit"
+        return data, None
+    except OSError:
+        return None, "unavailable"
+    finally:
+        if file_fd >= 0:
+            os.close(file_fd)
+        if parent_fd >= 0 and parent_fd != root_fd:
+            os.close(parent_fd)
+        if root_fd >= 0:
+            os.close(root_fd)
+
+
+def _public_apply_privacy_policy(root, candidates, core, cancelled=None):
+    candidate_paths = [candidate["rel"] for candidate in candidates]
+    _public_cancel_if_requested(cancelled)
+    try:
+        result = core["policy"](
+            root,
+            candidate_paths,
+            allowlist=[root],
+            cancelled=cancelled,
+        )
+    except core["path_error"]:
+        _public_cancel_if_requested(cancelled)
+        raise PathRefusedError() from None
+    except core["policy_error"]:
+        _public_cancel_if_requested(cancelled)
+        raise PrivacyPolicyUnavailableError() from None
+    except Exception:
+        _public_cancel_if_requested(cancelled)
+        raise PrivacyPolicyUnavailableError() from None
+    _public_cancel_if_requested(cancelled)
+    allowed_paths = result.get("allowed_paths") if type(result) is dict else None
+    omission_rows = result.get("omissions") if type(result) is dict else None
+    if (
+        type(result) is not dict
+        or result.get("schema") != "vivary.content-privacy-policy/v0"
+        or result.get("status") != "known"
+        or result.get("complete") is not True
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", result.get("privacy_fingerprint", ""))
+        is None
+        or type(allowed_paths) is not list
+        or allowed_paths != sorted(allowed_paths, key=_public_sort_key)
+        or any(path not in candidate_paths for path in allowed_paths)
+        or len(set(allowed_paths)) != len(allowed_paths)
+        or type(omission_rows) is not list
+        or len(omission_rows) > _PUBLIC_MAX_OMISSIONS
+        or any(
+            type(row) is not dict
+            or set(row) != {"kind", "reason", "count"}
+            or row.get("kind") != "privacy_excluded"
+            or row.get("reason") not in {"git_ignored", "sensitive_name"}
+            or isinstance(row.get("count"), bool)
+            or not isinstance(row.get("count"), int)
+            or row["count"] < 1
+            for row in omission_rows
+        )
+        or len(allowed_paths) + sum(row["count"] for row in omission_rows)
+        != len(candidate_paths)
+    ):
+        raise PrivacyPolicyUnavailableError()
+    omissions = {
+        (row["kind"], row["reason"]): row["count"] for row in omission_rows
+    }
+    return (
+        set(allowed_paths),
+        [result["privacy_fingerprint"]],
+        omissions,
+    )
+
+
+def _public_config_shape_is_safe(raw):
+    if type(raw) is not dict:
+        return False
+    packs = raw.get("packs", [])
+    exclude = raw.get("exclude", [])
+    base = raw.get("base", {})
+    types = raw.get("types", {})
+    if (
+        type(packs) is not list
+        or len(packs) > _PUBLIC_MAX_FILTERS
+        or any(not _public_safe_text(value, 128) for value in packs)
+        or type(exclude) is not list
+        or len(exclude) > 128
+        or any(not _public_safe_text(value, _PUBLIC_MAX_PATH_CHARS) for value in exclude)
+        or type(base) is not dict
+        or type(types) is not dict
+        or len(types) > 128
+    ):
+        return False
+    if "derive" in base and (
+        type(base["derive"]) is not list
+        or len(base["derive"]) > 64
+        or any(not _public_safe_text(value, 128) for value in base["derive"])
+    ):
+        return False
+    if "optional" in base and (
+        type(base["optional"]) is not dict or len(base["optional"]) > 128
+    ):
+        return False
+    for name, definition in types.items():
+        if not _public_safe_text(name, 128) or type(definition) is not dict:
+            return False
+        for field_name in ("required", "optional"):
+            fields = definition.get(field_name, {})
+            if type(fields) is not dict or len(fields) > 128:
+                return False
+        folders = definition.get("folder", name)
+        folders = folders if type(folders) is list else [folders]
+        if (
+            len(folders) > _PUBLIC_MAX_FILTERS
+            or any(not _public_safe_text(folder, _PUBLIC_MAX_PATH_CHARS) for folder in folders)
+        ):
+            return False
+    return True
+
+
+def _public_default_config(root):
+    return Config({"base": {}, "types": {}, "exclude": []}, root)
+
+
+def _public_config_from_candidate(
+    root,
+    candidate,
+    allowed,
+    omissions,
+    cancelled=None,
+):
+    """Use root TOML plus embedded packs only; overlays and local packs stay unopened."""
+    if candidate is None:
+        return _public_default_config(root), None, True
+    if candidate["rel"] not in allowed:
+        _public_add_omission(omissions, "config", "git_ignored")
+        return _public_default_config(root), None, False
+    data, reason = _public_read_candidate(root, candidate, cancelled)
+    if data is None:
+        if reason == "file_size_limit":
+            raise WorkLimitExceededError()
+        _public_add_omission(omissions, "config", reason)
+        return _public_default_config(root), None, False
+    text = data.decode("utf-8", errors="replace")
+    if _public_text_has_credential(text) or _public_contains_workspace_path(text, root):
+        _public_add_omission(omissions, "config", "sensitive_content")
+        return _public_default_config(root), None, False
+    try:
+        raw = tomllib.loads(text.lstrip(UTF8_BOM))
+    except (TypeError, ValueError, tomllib.TOMLDecodeError):
+        _public_add_omission(omissions, "config", "invalid")
+        return _public_default_config(root), None, False
+    if not _public_config_shape_is_safe(raw):
+        _public_add_omission(omissions, "config", "unsupported")
+        return _public_default_config(root), None, False
+    try:
+        composed = {"base": {}, "types": {}, "exclude": []}
+        for pack in raw.get("packs", []):
+            if pack not in BUNDLED_PACKS:
+                _public_add_omission(omissions, "config", "local_pack_excluded")
+                continue
+            _merge_config(composed, tomllib.loads(BUNDLED_PACKS[pack]))
+        _merge_config(composed, raw)
+        config = Config(composed, root)
+    except (AttributeError, ConfigError, TypeError, ValueError, tomllib.TOMLDecodeError):
+        _public_add_omission(omissions, "config", "invalid")
+        return _public_default_config(root), None, False
+    return config, hashlib.sha256(data).hexdigest(), True
+
+
+def _public_derived_fields(full, body, info):
+    try:
+        created = datetime.date.fromtimestamp(
+            min(info.st_mtime, info.st_ctime)
+        ).isoformat()
+        updated = datetime.date.fromtimestamp(info.st_mtime).isoformat()
+    except (OverflowError, OSError, ValueError):
+        created = updated = "1970-01-01"
+    sid = _derive_id(full)
+    heading = re.search(r"^#\s+(.+)$", body, re.M)
+    title = heading.group(1).strip() if heading else sid.replace("-", " ").title()
+    return {
+        "id": sid,
+        "slug": sid,
+        "title": _public_trim_text(title, _PUBLIC_MAX_TITLE_CHARS),
+        "created": created,
+        "updated": updated,
+    }
+
+
+def _public_add_finding(doc, state, finding_state, level, code, line):
+    state["total"] += 1
+    state[level] += 1
+    if not state["collect"]:
+        return
+    if finding_state["emitted"] >= _PUBLIC_MAX_FINDINGS:
+        raise WorkLimitExceededError()
+    doc.findings.append(
+        Finding(
+            doc.rel,
+            max(0, int(line or 0)),
+            level,
+            code,
+            _PUBLIC_FINDING_MESSAGES.get(code, "document validation finding"),
+        )
+    )
+    finding_state["emitted"] += 1
+
+def _public_safe_edge_value(field, target):
+    return (
+        _public_output_text_is_safe(field, 128)
+        and _public_output_text_is_safe(
+            target, _PUBLIC_MAX_EDGE_FILTER_CHARS
+        )
+        and not _PUBLIC_ABSOLUTE_VALUE_RE.match(target)
+    )
+
+
+def _public_analyze_document(full, rel, config, text, info, *, collect, finding_state):
+    """Analyze safe bytes without delegating to path-opening legacy helpers."""
+    doc = Doc()
+    doc.full, doc.rel = full, rel
+    doc.findings, doc.refs, doc.declared, doc.noise = [], [], {}, []
+    state = {"collect": collect, "total": 0, "error": 0, "warning": 0}
+    edge_omitted = 0
+    yaml_text, body = extract_frontmatter(text)
+    doc.derived = _public_derived_fields(full, body, info)
+    fields, key_lines = {}, {}
+    if yaml_text is not None:
+        try:
+            parsed = parse_yaml(yaml_text)
+        except YamlError as error:
+            _public_add_finding(doc, state, finding_state, "error", "E001", error.lineno + 1)
+            doc.type, doc.fields = type_for(full, config), {}
+            return doc, state, edge_omitted
+        if not isinstance(parsed, dict):
+            _public_add_finding(doc, state, finding_state, "error", "E001", 2)
+            doc.type, doc.fields = type_for(full, config), {}
+            return doc, state, edge_omitted
+        key_lines = parsed.get("__lines__", {})
+        fields = strip_meta(parsed)
+    doc.fields = fields
+
+    def line_of(key):
+        value = key_lines.get(key, 1)
+        return value + 1 if isinstance(value, int) else 1
+
+    doc.type = type_for(full, config)
+    if doc.type is None:
+        _public_add_finding(
+            doc,
+            state,
+            finding_state,
+            "warning" if config.allow_untyped else "error",
+            "W201",
+            1,
+        )
+    required, known = config.fields_for(doc.type)
+    for key, spec in required.items():
+        if key not in fields:
+            _public_add_finding(doc, state, finding_state, "error", "E101", 1)
+        elif fields[key] is None or fields[key] == "":
+            _public_add_finding(doc, state, finding_state, "error", "E102", line_of(key))
+    for key, value in fields.items():
+        if key in config.derive:
+            if value == doc.derived.get(key):
+                doc.noise.append(key)
+                _public_add_finding(doc, state, finding_state, "warning", "W210", line_of(key))
+            continue
+        spec = known.get(key)
+        if spec is None:
+            _public_add_finding(doc, state, finding_state, "warning", "W202", line_of(key))
+            continue
+        if spec in ("ref", "ref-list") and value is not None:
+            targets = value if isinstance(value, list) else [value]
+            for target in targets:
+                if not isinstance(target, str) or not _public_safe_edge_value(key, target):
+                    edge_omitted += 1
+                    _public_add_finding(doc, state, finding_state, "error", "E103", line_of(key))
+                elif len(doc.refs) < _PUBLIC_MAX_EDGES_PER_DOCUMENT:
+                    doc.refs.append((key, target, line_of(key)))
+                else:
+                    edge_omitted += 1
+        error = check_field_type(value, spec)
+        if error:
+            _public_add_finding(doc, state, finding_state, "error", "E103", line_of(key))
+        else:
+            doc.declared[key] = value
+    return doc, state, edge_omitted
+
+
+def _public_path_selected(rel, paths):
+    return not paths or any(rel == path or rel.startswith(path + "/") for path in paths)
+
+
+def _public_snapshot_fingerprint(documents, config_digest, privacy_fingerprints, omissions, complete):
+    payload = {
+        "schema": "vivary.tropo-document-snapshot/v0",
+        "config": config_digest or "default",
+        "documents": [
+            {
+                "path": record["doc"].rel,
+                "content": hashlib.sha256(record["body"].encode("utf-8")).hexdigest(),
+            }
+            for record in documents
+        ],
+        "privacy": privacy_fingerprints,
+        "omissions": _public_omission_rows(omissions),
+        "complete": complete,
+    }
+    encoded = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _public_document_snapshot(
+    root,
+    *,
+    allowlist,
+    validation_paths=None,
+    cancelled=None,
+):
+    core = _public_core_api()
+    _public_require_root(root, allowlist, core)
+    _public_cancel_if_requested(cancelled)
+    omissions = {}
+    config_candidate, config_candidate_complete = _public_root_config_candidate(root, omissions)
+    markdown, enumeration_complete = _public_enumerate_markdown(
+        root,
+        omissions,
+        cancelled,
+    )
+    candidates = ([] if config_candidate is None else [config_candidate]) + markdown
+    candidates.sort(key=lambda candidate: _public_sort_key(candidate["rel"]))
+    allowed, privacy_fingerprints, privacy_omissions = _public_apply_privacy_policy(
+        root,
+        candidates,
+        core,
+        cancelled,
+    )
+    for (kind, reason), count in privacy_omissions.items():
+        _public_add_omission(omissions, kind, reason, count)
+    config, config_digest, config_complete = _public_config_from_candidate(
+        root,
+        config_candidate,
+        allowed,
+        omissions,
+        cancelled,
+    )
+    remaining_bytes = _PUBLIC_MAX_AGGREGATE_BYTES
+    if config_candidate is not None and config_candidate["rel"] in allowed:
+        # The config has already been descriptor-read above. Account for the
+        # descriptor-verified size even when it was intentionally discarded.
+        remaining_bytes -= config_candidate["size"]
+    documents = []
+    finding_state = {"emitted": 0, "suppressed": 0}
+    complete = (
+        config_candidate_complete
+        and enumeration_complete
+        and config_complete
+    )
+    for candidate in markdown:
+        _public_cancel_if_requested(cancelled)
+        rel = candidate["rel"]
+        if rel not in allowed:
+            continue
+        if is_excluded(rel, config.exclude):
+            _public_add_omission(omissions, "document", "config_excluded")
+            continue
+        if candidate["size"] > remaining_bytes:
+            raise WorkLimitExceededError()
+        data, reason = _public_read_candidate(root, candidate, cancelled)
+        if data is None:
+            if reason == "file_size_limit":
+                raise WorkLimitExceededError()
+            _public_add_omission(omissions, "document", reason)
+            complete = False
+            continue
+        remaining_bytes -= len(data)
+        text = data.decode("utf-8", errors="replace")
+        if _public_text_has_credential(text) or _public_contains_workspace_path(text, root):
+            _public_add_omission(omissions, "document", "sensitive_content")
+            continue
+        full = os.path.join(root, *rel.split("/"))
+        try:
+            doc_info = type(
+                "_PublicStat",
+                (),
+                {
+                    "st_mtime": candidate["mtime"],
+                    "st_ctime": candidate["ctime"],
+                },
+            )()
+            doc, state, edge_omitted = _public_analyze_document(
+                full,
+                rel,
+                config,
+                text,
+                doc_info,
+                collect=(
+                    validation_paths is not None
+                    and _public_path_selected(rel, validation_paths)
+                ),
+                finding_state=finding_state,
+            )
+        except WorkLimitExceededError:
+            raise
+        except Exception:
+            _public_add_omission(omissions, "document", "analysis_unavailable")
+            complete = False
+            continue
+        if edge_omitted:
+            _public_add_omission(omissions, "edge", "edge_limit_or_unsafe", edge_omitted)
+            complete = False
+        documents.append({"doc": doc, "body": text, "findings": state})
+    documents.sort(key=lambda record: _public_sort_key(record["doc"].rel))
+    revalidated = _public_apply_privacy_policy(
+        root,
+        candidates,
+        core,
+        cancelled,
+    )
+    # Bind both the policy identity and its canonical exclusion accounting. The
+    # latter stays fail-closed even if a provider returns an inconsistent body
+    # and fingerprint.
+    if revalidated != (allowed, privacy_fingerprints, privacy_omissions):
+        raise PrivacyPolicyUnavailableError()
+    if validation_paths is not None:
+        selected = [
+            record for record in documents
+            if _public_path_selected(record["doc"].rel, validation_paths)
+        ]
+        ids = {record["doc"].derived.get("id") for record in selected}
+        for record in selected:
+            doc = record["doc"]
+            for _key, target, line in doc.refs:
+                if target not in ids:
+                    _public_add_finding(
+                        doc, record["findings"], finding_state, "warning", "W220", line
+                    )
+    fingerprint = _public_snapshot_fingerprint(
+        documents, config_digest, privacy_fingerprints, omissions, complete
+    )
+    return {
+        "config": config,
+        "complete": complete,
+        "documents": documents,
+        "fingerprint": fingerprint,
+        "finding_suppressed": finding_state["suppressed"],
+        "omissions": omissions,
+    }
+
+
+def _public_query_value(root, value):
+    if (
+        not _public_output_text_is_safe(value, _PUBLIC_MAX_QUERY_CHARS)
+        or _public_contains_workspace_path(value, root)
+    ):
+        raise PathRefusedError()
+    return value
+
+
+def _public_bounded_integer(value, minimum, maximum):
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("integer argument required")
+    if value < minimum or value > maximum:
+        raise ValueError("integer argument outside the public bound")
+    return value
+
+
+def _public_filter_values(values, maximum_length, *, paths=False, edges=False):
+    if values is None:
+        return []
+    if not isinstance(values, (list, tuple)) or len(values) > _PUBLIC_MAX_FILTERS:
+        raise ValueError("filter list outside the public bound")
+    result = []
+    for value in values:
+        if not _public_output_text_is_safe(value, maximum_length):
+            raise PathRefusedError() if paths else ValueError("unsafe filter")
+        if paths and (
+            "\\" in value
+            or value.startswith("/")
+            or re.match(r"^[A-Za-z]:", value)
+            or any(part in ("", ".", "..") for part in value.split("/"))
+            or _public_path_is_sensitive(value)
+        ):
+            raise PathRefusedError()
+        if edges:
+            field, separator, target = value.partition(":")
+            if (
+                not field
+                or not _public_output_text_is_safe(field, 128)
+                or (
+                    separator
+                    and not _public_output_text_is_safe(
+                        target, _PUBLIC_MAX_EDGE_FILTER_CHARS
+                    )
+                )
+                or (separator and _PUBLIC_ABSOLUTE_VALUE_RE.match(target))
+            ):
+                raise PathRefusedError()
+        if value in result:
+            raise ValueError("duplicate filter")
+        result.append(value)
+    return result
+
+
+def _public_validation_paths(paths):
+    if paths is None:
+        return []
+    if (
+        not isinstance(paths, (list, tuple))
+        or len(paths) > _PUBLIC_MAX_CHECK_PATHS
+    ):
+        raise PathRefusedError()
+    result = []
+    for path in paths:
+        if (
+            not _public_safe_relative_path(path)
+            or _public_path_is_sensitive(path)
+            or path in result
+        ):
+            raise PathRefusedError()
+        result.append(path)
+    return result
+
+
+def _public_filters(type_filters, path_filters, edge_filters):
+    return {
+        "type": _public_filter_values(
+            type_filters, _PUBLIC_MAX_TYPE_FILTER_CHARS
+        ),
+        "path": _public_filter_values(
+            path_filters, _PUBLIC_MAX_PATH_CHARS, paths=True
+        ),
+        "edge": _public_filter_values(
+            edge_filters, _PUBLIC_MAX_EDGE_FILTER_CHARS, edges=True
+        ),
+    }
+
+
+def _public_search_hits(
+    snapshot,
+    text,
+    *,
+    k,
+    filters,
+    snippet_chars,
+    explain,
+    cancelled=None,
+):
+    documents = snapshot["documents"]
+    docs = [record["doc"] for record in documents]
+    bodies = {record["doc"].full: record["body"] for record in documents}
+    try:
+        ranked = _search_docs(
+            docs,
+            text,
+            k=k,
+            type_filters=filters["type"],
+            path_filters=filters["path"],
+            edge_filters=filters["edge"],
+            snippet_chars=snippet_chars,
+            explain=True,
+            body_lookup=bodies,
+            cancelled=cancelled,
+        )
+    except Exception:
+        raise ProducerUnavailableError() from None
+    hits = []
+    for result in ranked:
+        _public_cancel_if_requested(cancelled)
+        path = result.get("path")
+        identifier = result.get("id")
+        if (
+            not _public_safe_relative_path(path)
+            or not _public_output_text_is_safe(identifier, 512)
+        ):
+            raise ProducerUnavailableError()
+        title = result.get("title")
+        if not _public_output_text_is_safe(title, _PUBLIC_MAX_TITLE_CHARS):
+            title = identifier
+        result_type = result.get("type")
+        if result_type is not None and not _public_output_text_is_safe(
+            result_type, _PUBLIC_MAX_TYPE_FILTER_CHARS
+        ):
+            result_type = None
+        snippet = result.get("snippet")
+        if snippet is not None and not _public_output_text_is_safe(
+            snippet, _PUBLIC_MAX_SNIPPET_CHARS + 6
+        ):
+            snippet = None
+        edges = []
+        for edge in result.get("edges", []):
+            _public_cancel_if_requested(cancelled)
+            field = edge.get("field") if type(edge) is dict else None
+            target = edge.get("to") if type(edge) is dict else None
+            if not _public_safe_edge_value(field, target):
+                raise ProducerUnavailableError()
+            edges.append({"field": field, "to": target})
+        reasons = [
+            reason
+            for reason in result.get("reasons", [])
+            if _public_output_text_is_safe(reason, 64)
+        ]
+        hits.append(
+            {
+                "id": identifier,
+                "type": result_type,
+                "path": path,
+                "title": title,
+                "score": result["score"],
+                "snippet": snippet,
+                "reasons": reasons if explain else [],
+                "edges": edges if explain or filters["edge"] else [],
+            }
+        )
+    hits.sort(
+        key=lambda hit: (
+            -hit["score"],
+            _public_sort_key(hit["path"]),
+            _public_sort_key(hit["id"]),
+        )
+    )
+    return hits
+
+
+def query_context(
+    root,
+    text,
+    *,
+    k=10,
+    type_filters=(),
+    path_filters=(),
+    edge_filters=(),
+    snippet_chars=160,
+    explain=False,
+    allowlist=None,
+    cancelled=None,
+):
+    """Query one bounded, privacy-filtered Markdown snapshot."""
+
+    text = _public_query_value(root, text)
+    k = _public_bounded_integer(k, 1, _PUBLIC_MAX_RESULTS)
+    snippet_chars = _public_bounded_integer(
+        snippet_chars, 0, _PUBLIC_MAX_SNIPPET_CHARS
+    )
+    if type(explain) is not bool:
+        raise ValueError("explain must be boolean")
+    filters = _public_filters(type_filters, path_filters, edge_filters)
+    snapshot = _public_document_snapshot(
+        root,
+        allowlist=allowlist,
+        cancelled=cancelled,
+    )
+    results = _public_search_hits(
+        snapshot,
+        text,
+        k=k,
+        filters=filters,
+        snippet_chars=snippet_chars,
+        explain=explain,
+        cancelled=cancelled,
+    )
+    return {
+        "schema": _PUBLIC_QUERY_SCHEMA,
+        "query": text,
+        "k": k,
+        "filters": filters,
+        "results": results,
+        "complete": snapshot["complete"],
+        "workspace_fingerprint": snapshot["fingerprint"],
+        "omissions": _public_omission_rows(snapshot["omissions"]),
+    }
+
+
+def find_context(
+    root,
+    question,
+    *,
+    k=5,
+    budget=1_200,
+    type_filters=(),
+    path_filters=(),
+    edge_filters=(),
+    snippet_chars=320,
+    allowlist=None,
+    cancelled=None,
+):
+    """Return a budgeted context packet from one governed document snapshot."""
+
+    question = _public_query_value(root, question)
+    k = _public_bounded_integer(k, 1, _PUBLIC_MAX_RESULTS)
+    budget = _public_bounded_integer(
+        budget, _PUBLIC_MIN_FIND_BUDGET, _PUBLIC_MAX_FIND_BUDGET
+    )
+    snippet_chars = _public_bounded_integer(
+        snippet_chars, 0, _PUBLIC_MAX_SNIPPET_CHARS
+    )
+    filters = _public_filters(type_filters, path_filters, edge_filters)
+    snapshot = _public_document_snapshot(
+        root,
+        allowlist=allowlist,
+        cancelled=cancelled,
+    )
+    ranked = _public_search_hits(
+        snapshot,
+        question,
+        k=k,
+        filters=filters,
+        snippet_chars=snippet_chars,
+        explain=True,
+        cancelled=cancelled,
+    )
+    results = []
+    estimated_tokens = 0
+    omissions = dict(snapshot["omissions"])
+    for index, hit in enumerate(ranked):
+        _public_cancel_if_requested(cancelled)
+        projected = {
+            "id": hit["id"],
+            "type": hit["type"],
+            "path": hit["path"],
+            "reason": hit["reasons"][0] if hit["reasons"] else "typed context match",
+            "snippet": hit["snippet"],
+            "edges": hit["edges"],
+        }
+        encoded = json.dumps(
+            projected, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        projected_tokens = (len(encoded) + 3) // 4
+        if estimated_tokens + projected_tokens > budget:
+            _public_add_omission(
+                omissions, "result", "budget_limit", len(ranked) - index
+            )
+            break
+        results.append(projected)
+        estimated_tokens += projected_tokens
+    complete = snapshot["complete"] and len(results) == len(ranked)
+    return {
+        "schema": _PUBLIC_FIND_SCHEMA,
+        "query": question,
+        "k": k,
+        "budget": budget,
+        "estimated_tokens": estimated_tokens,
+        "filters": filters,
+        "results": results,
+        "complete": complete,
+        "workspace_fingerprint": snapshot["fingerprint"],
+        "omissions": _public_omission_rows(omissions),
+    }
+
+
+def check_workspace(
+    root,
+    *,
+    paths=(),
+    strict=None,
+    allowlist=None,
+    cancelled=None,
+):
+    """Validate one bounded, privacy-filtered Markdown snapshot."""
+
+    selected_paths = _public_validation_paths(paths)
+    if strict is not None and type(strict) is not bool:
+        raise ValueError("strict must be boolean")
+    snapshot = _public_document_snapshot(
+        root,
+        allowlist=allowlist,
+        validation_paths=selected_paths,
+        cancelled=cancelled,
+    )
+    strict_value = snapshot["config"].strict if strict is None else strict
+    if type(strict_value) is not bool:
+        raise ProducerUnavailableError()
+    selected = []
+    for record in snapshot["documents"]:
+        _public_cancel_if_requested(cancelled)
+        if _public_path_selected(record["doc"].rel, selected_paths):
+            selected.append(record)
+    omissions = dict(snapshot["omissions"])
+    missing = 0
+    for path in selected_paths:
+        _public_cancel_if_requested(cancelled)
+        found = False
+        for record in selected:
+            _public_cancel_if_requested(cancelled)
+            relative = record["doc"].rel
+            if relative == path or relative.startswith(path + "/"):
+                found = True
+                break
+        if not found:
+            missing += 1
+    _public_add_omission(omissions, "selection", "path_not_found", missing)
+    findings = []
+    for record in selected:
+        _public_cancel_if_requested(cancelled)
+        for finding in record["doc"].findings:
+            findings.append(finding.as_dict())
+    findings.sort(
+        key=lambda finding: (
+            _public_sort_key(finding["path"]),
+            finding["line"],
+            finding["level"],
+            finding["code"],
+        )
+    )
+    errors = 0
+    warnings = 0
+    clean = 0
+    for record in selected:
+        _public_cancel_if_requested(cancelled)
+        errors += record["findings"]["error"]
+        warnings += record["findings"]["warning"]
+        clean += record["findings"]["total"] == 0
+    return {
+        "schema": _PUBLIC_CHECK_SCHEMA,
+        "checked": len(selected),
+        "clean": clean,
+        "errors": errors,
+        "warnings": warnings,
+        "findings": findings,
+        "strict": strict_value,
+        "complete": snapshot["complete"] and missing == 0,
+        "workspace_fingerprint": snapshot["fingerprint"],
+        "omissions": _public_omission_rows(omissions),
+    }
 
 def _stringify_field_value(value):
     if isinstance(value, list):
@@ -1912,10 +3679,18 @@ def _edge_filter_matches(edges, spec):
     return False
 
 
-def _build_search_records(docs, nodes, edges, body_limit=None):
+def _build_search_records(
+    docs,
+    nodes,
+    edges,
+    body_limit=None,
+    body_lookup=None,
+    cancelled=None,
+):
     docs_by_id = {d.derived.get("id"): d for d in docs if d.derived.get("id") is not None}
     outbound = {}
     for edge in edges:
+        _public_cancel_if_requested(cancelled)
         if edge["broken"]:
             continue
         outbound.setdefault(edge["from"], []).append({
@@ -1924,6 +3699,7 @@ def _build_search_records(docs, nodes, edges, body_limit=None):
         })
     records = []
     for nid in sorted(nodes):
+        _public_cancel_if_requested(cancelled)
         doc = docs_by_id.get(nid)
         node = nodes[nid]
         fields = doc.fields if doc is not None else {}
@@ -1931,7 +3707,12 @@ def _build_search_records(docs, nodes, edges, body_limit=None):
             f"{key}: {_stringify_field_value(value)}"
             for key, value in sorted(fields.items())
         )
-        body = _file_body(doc.full, limit=body_limit) if doc is not None else ""
+        if doc is None:
+            body = ""
+        elif body_lookup is not None:
+            body = body_lookup.get(doc.full, "")
+        else:
+            body = _file_body(doc.full, limit=body_limit)
         title = (doc.derived.get("title") if doc is not None else "") or nid
         records.append({
             "id": nid,
@@ -1945,7 +3726,14 @@ def _build_search_records(docs, nodes, edges, body_limit=None):
     return records
 
 
-def _score_source(query, terms, source, phrase_weight, term_weight):
+def _score_source(
+    query,
+    terms,
+    source,
+    phrase_weight,
+    term_weight,
+    cancelled=None,
+):
     if not source:
         return 0, False
     source_l = source.lower()
@@ -1956,6 +3744,7 @@ def _score_source(query, terms, source, phrase_weight, term_weight):
         score += phrase_weight
         matched = True
     for term in terms:
+        _public_cancel_if_requested(cancelled)
         count = len(re.findall(rf"\b{re.escape(term)}\b", source_l))
         if count:
             score += count * term_weight
@@ -1963,7 +3752,7 @@ def _score_source(query, terms, source, phrase_weight, term_weight):
     return score, matched
 
 
-def _best_snippet(record, query, terms, limit):
+def _best_snippet(record, query, terms, limit, cancelled=None):
     if limit is None:
         limit = _DEFAULT_SNIPPET_CHARS
     if limit <= 0:
@@ -1973,8 +3762,15 @@ def _best_snippet(record, query, terms, limit):
     if not text:
         return None
     lower = text.lower()
-    needles = [query.lower().strip()] + terms
-    starts = [lower.find(n) for n in needles if n and lower.find(n) >= 0]
+    needles = [query.lower().strip(), *terms]
+    starts = []
+    for needle in needles:
+        _public_cancel_if_requested(cancelled)
+        if not needle:
+            continue
+        start = lower.find(needle)
+        if start >= 0:
+            starts.append(start)
     start = min(starts) if starts else 0
     if len(text) <= limit:
         return text
@@ -2005,12 +3801,11 @@ def _passes_search_filters(record, type_filters, path_filters, edge_filters):
     return True
 
 
-def search_graph(resolver, text, *, k=10, type_filters=None, path_filters=None,
-                 edge_filters=None, snippet_chars=_DEFAULT_SNIPPET_CHARS,
-                 explain=False):
-    docs = analyze(resolver.root, [], resolver)
-    nodes, edges = build_graph(docs)
-    records = _build_search_records(docs, nodes, edges, body_limit=None)
+def _rank_search_records(
+    records, text, *, k=10, type_filters=None,
+    path_filters=None, edge_filters=None,
+    snippet_chars=_DEFAULT_SNIPPET_CHARS, explain=False, cancelled=None,
+):
     terms = _query_terms(text)
     type_filters = type_filters or []
     path_filters = path_filters or []
@@ -2018,30 +3813,41 @@ def search_graph(resolver, text, *, k=10, type_filters=None, path_filters=None,
     results = []
 
     for record in records:
+        _public_cancel_if_requested(cancelled)
         if not _passes_search_filters(record, type_filters, path_filters, edge_filters):
             continue
 
         score = 0
         reasons = []
         id_title = f"{record['id']} {record['title']}"
-        s, matched = _score_source(text, terms, id_title, 120, 40)
+        s, matched = _score_source(
+            text, terms, id_title, 120, 40, cancelled
+        )
         if matched:
             score += s
             reasons.append("title/id match")
-        s, matched = _score_source(text, terms, record["frontmatter_text"], 80, 24)
+        s, matched = _score_source(
+            text, terms, record["frontmatter_text"], 80, 24, cancelled
+        )
         if matched:
             score += s
             reasons.append("frontmatter match")
-        s, matched = _score_source(text, terms, record["path"], 60, 16)
+        s, matched = _score_source(
+            text, terms, record["path"], 60, 16, cancelled
+        )
         if matched:
             score += s
             reasons.append("path match")
-        s, matched = _score_source(text, terms, record["body"], 40, 10)
+        s, matched = _score_source(
+            text, terms, record["body"], 40, 10, cancelled
+        )
         if matched:
             score += s
             reasons.append("body match")
         edge_text = " ".join(f"{e['field']} {e['to']}" for e in record["edges"])
-        s, matched = _score_source(text, terms, edge_text, 30, 8)
+        s, matched = _score_source(
+            text, terms, edge_text, 30, 8, cancelled
+        )
         if matched:
             score += s
             reasons.append("edge context match")
@@ -2058,7 +3864,9 @@ def search_graph(resolver, text, *, k=10, type_filters=None, path_filters=None,
             "title": record["title"],
             "score": score,
         }
-        snippet = _best_snippet(record, text, terms, snippet_chars)
+        snippet = _best_snippet(
+            record, text, terms, snippet_chars, cancelled
+        )
         if snippet:
             result["snippet"] = snippet
         if explain:
@@ -2069,6 +3877,49 @@ def search_graph(resolver, text, *, k=10, type_filters=None, path_filters=None,
 
     results.sort(key=lambda r: (-r["score"], r["path"], r["id"]))
     return results[:max(0, k)]
+
+
+def _search_docs(
+    docs, text, *, k=10, type_filters=None, path_filters=None,
+    edge_filters=None, snippet_chars=_DEFAULT_SNIPPET_CHARS,
+    explain=False, body_lookup=None, cancelled=None,
+):
+    nodes, edges = build_graph(docs)
+    records = _build_search_records(
+        docs,
+        nodes,
+        edges,
+        body_limit=None,
+        body_lookup=body_lookup,
+        cancelled=cancelled,
+    )
+    return _rank_search_records(
+        records,
+        text,
+        k=k,
+        type_filters=type_filters,
+        path_filters=path_filters,
+        edge_filters=edge_filters,
+        snippet_chars=snippet_chars,
+        explain=explain,
+        cancelled=cancelled,
+    )
+
+
+def search_graph(resolver, text, *, k=10, type_filters=None, path_filters=None,
+                 edge_filters=None, snippet_chars=_DEFAULT_SNIPPET_CHARS,
+                 explain=False):
+    docs = analyze(resolver.root, [], resolver)
+    return _search_docs(
+        docs,
+        text,
+        k=k,
+        type_filters=type_filters,
+        path_filters=path_filters,
+        edge_filters=edge_filters,
+        snippet_chars=snippet_chars,
+        explain=explain,
+    )
 
 
 def _text_vector_fallback(resolver, text, k, type_filters, path_filters, edge_filters,
@@ -3993,7 +5844,7 @@ def _governed_content_unavailable(
     }
 
 
-def governed_find(root, question, *, max_claims=24):
+def governed_find(root, question, *, max_claims=24, cancelled=None):
     """Compile a bounded governed-context capsule for one Tropo workspace.
 
     Facts and content must describe one worktree state. A content scan is
@@ -4014,14 +5865,27 @@ def governed_find(root, question, *, max_claims=24):
     terms = _governed_query_terms(question)
 
     for _attempt in range(2):
-        before = observe_checkouts(paths, allowlist=paths)
+        _public_cancel_if_requested(cancelled)
+        before = observe_checkouts(
+            paths,
+            allowlist=paths,
+            cancelled=cancelled,
+        )
+        _public_cancel_if_requested(cancelled)
         _refuse_nested_governed_root(before, root, normalize_path)
         scanned_content = observe_content(
             paths,
             allowlist=paths,
             terms=terms,
+            cancelled=cancelled,
         )
-        after = observe_checkouts(paths, allowlist=paths)
+        _public_cancel_if_requested(cancelled)
+        after = observe_checkouts(
+            paths,
+            allowlist=paths,
+            cancelled=cancelled,
+        )
+        _public_cancel_if_requested(cancelled)
         _refuse_nested_governed_root(after, root, normalize_path)
         if _governed_observation_state(before) != _governed_observation_state(after):
             continue
@@ -4046,8 +5910,15 @@ def governed_find(root, question, *, max_claims=24):
                 paths,
                 allowlist=paths,
                 terms=terms,
+                cancelled=cancelled,
             )
-            final = observe_checkouts(paths, allowlist=paths)
+            _public_cancel_if_requested(cancelled)
+            final = observe_checkouts(
+                paths,
+                allowlist=paths,
+                cancelled=cancelled,
+            )
+            _public_cancel_if_requested(cancelled)
             _refuse_nested_governed_root(final, root, normalize_path)
             if (
                 _governed_observation_state(after)
@@ -4068,13 +5939,17 @@ def governed_find(root, question, *, max_claims=24):
         observation = after
         content = _governed_content_unavailable(scanned_content, root)
 
+    _public_cancel_if_requested(cancelled)
     graph = project_workspace_graph(observation)
-    return compile_task_capsule(
+    _public_cancel_if_requested(cancelled)
+    capsule = compile_task_capsule(
         task={"question": question, "scope": paths},
         graph=graph,
         content=content,
         budget={"max_claims": max_claims},
     )
+    _public_cancel_if_requested(cancelled)
+    return capsule
 
 
 def _print_governed_find(capsule):
@@ -4138,7 +6013,7 @@ def cmd_find(args, resolver):
             )
         except ImportError:
             print(
-                "tropo find --governed: vivary-core>=0.2.1 is required; "
+                "tropo find --governed: vivary-core>=0.2.7 is required; "
                 "install Tropo with its declared dependencies",
                 file=sys.stderr,
             )
