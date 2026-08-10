@@ -4,8 +4,7 @@ description: "Autonomy in the body of the work, alignment at the edges: which ga
 date: 2026-08-03
 author: "Jeff Kazzee"
 tags: ["gates", "process", "trust"]
-draft: true
----
+draft: false---
 
 The instinct people have about agent gates, when they first hear the phrase,
 is usually wrong. They picture a human checking every step (reviewing each
