@@ -86,7 +86,21 @@ python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
   --json
 ```
 
-Recovery restores the transaction-bound backups.
+This command writes nothing.
+It returns `recovery_plan_hash` and the bounded recovery actions.
+Review that exact plan.
+
+Apply the separately approved recovery hash.
+
+```bash
+python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
+  --recover sha256:<reported-plan-hash> \
+  --yes \
+  --plan sha256:<approved-recovery-plan-hash> \
+  --json
+```
+
+Recovery restores only the authenticated transaction-bound backups.
 Run Doctor after recovery.
 
 ## 5. Understand record rollback
@@ -101,30 +115,24 @@ Do not invent one.
 If the process stops unexpectedly, inspect Doctor and the transaction evidence.
 Stop when the required action is not explicit.
 
-## 6. Plan a legacy repair
+## 6. Inspect legacy repair diagnostics
 
 Use repair mode only for a recognized legacy full workspace.
-Preview the repair first.
+Request the report.
 
 ```bash
 python packages/create-vivary/create_vivary.py doctor C:/path/to/project --repair --json
 ```
 
-The preview writes nothing.
+The report writes nothing.
 Review each proposed action.
 
-Apply deterministic repairs only after approval.
-
-```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/project --repair --yes --json
-```
-
-Repair can restore approved placeholders and privacy ignore lines.
-Repair can remove simple redundant derived metadata.
-Repair does not fix broken references or complex content.
+Recognized legacy-full workspaces remain report-only even with `--yes`.
+No reported action is applied.
+Use a reviewed thin adoption plan for an approved legacy change.
 
 Thin adoption uses `adopt --recover`.
-Do not use legacy repair as thin recovery.
+Do not use legacy diagnostics as thin recovery.
 
 ## 7. Use trend only when approved
 

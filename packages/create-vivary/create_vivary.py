@@ -24,11 +24,109 @@ import sys
 import sysconfig
 import tempfile
 import time
+from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from email.parser import BytesParser
 from email.message import Message
 from pathlib import Path
 from typing import Callable
+
+
+if os.name == "nt":
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    class _WindowsDirectoryInformation(ctypes.Structure):
+        _fields_ = [
+            ("file_attributes", wintypes.DWORD),
+            ("creation_time", wintypes.FILETIME),
+            ("last_access_time", wintypes.FILETIME),
+            ("last_write_time", wintypes.FILETIME),
+            ("volume_serial_number", wintypes.DWORD),
+            ("file_size_high", wintypes.DWORD),
+            ("file_size_low", wintypes.DWORD),
+            ("number_of_links", wintypes.DWORD),
+            ("file_index_high", wintypes.DWORD),
+            ("file_index_low", wintypes.DWORD),
+        ]
+
+    class _WindowsRenameInformation(ctypes.Structure):
+        _fields_ = [
+            ("replace_if_exists", wintypes.BOOLEAN),
+            ("root_directory", wintypes.HANDLE),
+            ("file_name_length", wintypes.DWORD),
+            ("file_name", wintypes.WCHAR * 1),
+        ]
+
+    class _WindowsDispositionInformation(ctypes.Structure):
+        _fields_ = [("delete_file", wintypes.BOOLEAN)]
+
+    class _WindowsIoStatusBlock(ctypes.Structure):
+        _fields_ = [
+            ("status_or_pointer", ctypes.c_void_p),
+            ("information", ctypes.c_size_t),
+        ]
+
+    _WINDOWS_KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _WINDOWS_CREATE_FILE = _WINDOWS_KERNEL32.CreateFileW
+    _WINDOWS_CREATE_FILE.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    _WINDOWS_CREATE_FILE.restype = wintypes.HANDLE
+    _WINDOWS_GET_FILE_INFO = _WINDOWS_KERNEL32.GetFileInformationByHandle
+    _WINDOWS_GET_FILE_INFO.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(_WindowsDirectoryInformation),
+    ]
+    _WINDOWS_GET_FILE_INFO.restype = wintypes.BOOL
+    _WINDOWS_CLOSE_HANDLE = _WINDOWS_KERNEL32.CloseHandle
+    _WINDOWS_CLOSE_HANDLE.argtypes = [wintypes.HANDLE]
+    _WINDOWS_CLOSE_HANDLE.restype = wintypes.BOOL
+    _WINDOWS_SET_FILE_INFO = _WINDOWS_KERNEL32.SetFileInformationByHandle
+    _WINDOWS_SET_FILE_INFO.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+    ]
+    _WINDOWS_SET_FILE_INFO.restype = wintypes.BOOL
+    _WINDOWS_NTDLL = ctypes.WinDLL("ntdll")
+    _WINDOWS_NT_SET_FILE_INFO = _WINDOWS_NTDLL.NtSetInformationFile
+    _WINDOWS_NT_SET_FILE_INFO.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(_WindowsIoStatusBlock),
+        wintypes.LPVOID,
+        wintypes.ULONG,
+        ctypes.c_int,
+    ]
+    _WINDOWS_NT_SET_FILE_INFO.restype = ctypes.c_long
+    _WINDOWS_NT_STATUS_TO_DOS_ERROR = _WINDOWS_NTDLL.RtlNtStatusToDosError
+    _WINDOWS_NT_STATUS_TO_DOS_ERROR.argtypes = [ctypes.c_long]
+    _WINDOWS_NT_STATUS_TO_DOS_ERROR.restype = wintypes.ULONG
+    _WINDOWS_INVALID_HANDLE = ctypes.c_void_p(-1).value
+    _WINDOWS_FILE_READ_ATTRIBUTES = 0x00000080
+    _WINDOWS_FILE_TRAVERSE = 0x00000020
+    _WINDOWS_DELETE = 0x00010000
+    _WINDOWS_GENERIC_READ = 0x80000000
+    _WINDOWS_GENERIC_WRITE = 0x40000000
+    _WINDOWS_FILE_SHARE_READ_WRITE = 0x00000001 | 0x00000002
+    _WINDOWS_FILE_SHARE_DELETE = 0x00000004
+    _WINDOWS_CREATE_NEW = 1
+    _WINDOWS_OPEN_EXISTING = 3
+    _WINDOWS_FILE_ATTRIBUTE_TEMPORARY = 0x00000100
+    _WINDOWS_FILE_ATTRIBUTE_DIRECTORY = 0x00000010
+    _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
+    _WINDOWS_FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+    _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+    _WINDOWS_FILE_RENAME_INFORMATION_CLASS = 10
+    _WINDOWS_FILE_DISPOSITION_INFO_CLASS = 4
 
 
 __version__ = "0.4.0"
@@ -549,17 +647,10 @@ def _validate_thin_init_target(target: Path, *, force: bool) -> None:
         except OSError as exc:
             raise ScaffoldError(f"cannot inspect init target: {exc}") from exc
         if has_content:
-            is_thin = (target / ".vivary" / "workspace.toml").is_file()
-            if not force:
-                raise ScaffoldError(
-                    "init requires a new or empty directory; use create-vivary adopt "
-                    "for an existing project"
-                )
-            if not is_thin:
-                raise ScaffoldError(
-                    "thin init cannot replace a legacy or brownfield workspace; use "
-                    "governed adoption or an approved migration plan"
-                )
+            raise ScaffoldError(
+                "init requires a new or empty directory; use create-vivary adopt "
+                "for every existing workspace, including thin workspaces"
+            )
 
 
 def scaffold_thin_workspace(
@@ -625,11 +716,9 @@ def scaffold_thin_workspace(
     for adapter in sorted(selected_adapters):
         text, _source_hash, _content_hash = _thin_adapter_doc(adapter)
         writes.append((target / _THIN_ADAPTER_PATHS[adapter], text))
-    if active_context == "cocoindex-code":
-        writes.extend(_thin_active_context_writes(target))
 
     paths = [path for path, _text in writes]
-    _ensure_safe_destinations(target, paths, force=force)
+    _ensure_safe_destinations(target, paths, force=False)
     if dry_run:
         return paths
 
@@ -649,7 +738,12 @@ def scaffold_thin_workspace(
 
     try:
         for action in actions:
-            _write_bytes_no_follow(target, action["path"], action["after"])
+            _write_bytes_no_follow(
+                target,
+                action["path"],
+                action["after"],
+                replace_existing=False,
+            )
         doctor = doctor_workspace(target, repo_root=root)
         if not doctor["ok"]:
             raise ScaffoldError(
@@ -1174,6 +1268,16 @@ def doctor_repair_workspace(
         target = _resolve_doctor_repair_target(target)
     except ScaffoldError as exc:
         return _doctor_repair_error_report(target, yes=yes, error=exc)
+
+    initial = doctor_workspace(target, repo_root=root)
+    if initial["compatibility"]["workspace_contract"] == LEGACY_FULL_WORKSPACE_CONTRACT:
+        actions = _doctor_repair_actions(target, root)
+        initial["warnings"].append(
+            "legacy-full repair is unavailable; Doctor is report-only for legacy "
+            "workspaces; review a thin adoption plan for any approved change"
+        )
+        initial["repair"] = {"mode": "report-only", "actions": actions}
+        return initial
 
     actions = _doctor_repair_actions(target, root)
     if yes:
@@ -2573,68 +2677,494 @@ def _existing_regular_file_mode(path: Path) -> int | None:
     return stat.S_IMODE(st.st_mode) & 0o777
 
 
+def _nearest_existing_directory(path: Path) -> Path:
+    current = path
+    while not (current.exists() or os.path.lexists(current)):
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    if _is_symlink_or_junction(current) or not current.is_dir():
+        raise ScaffoldError(f"safe destination ancestor is not a regular directory: {current}")
+    return current
+
+
+def _windows_open_locked_directory(path: Path, *, delete: bool = False):
+    before = os.stat(path, follow_symlinks=False)
+    if not stat.S_ISDIR(before.st_mode) or _is_symlink_or_junction(path):
+        raise ScaffoldError(f"destination parent is not a regular directory: {path}")
+    handle = _WINDOWS_CREATE_FILE(
+        str(path),
+        (
+            _WINDOWS_FILE_READ_ATTRIBUTES
+            | _WINDOWS_FILE_TRAVERSE
+            | (_WINDOWS_DELETE if delete else 0)
+        ),
+        _WINDOWS_FILE_SHARE_READ_WRITE,
+        None,
+        _WINDOWS_OPEN_EXISTING,
+        _WINDOWS_FILE_FLAG_BACKUP_SEMANTICS | _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
+        None,
+    )
+    if handle == _WINDOWS_INVALID_HANDLE:
+        raise ScaffoldError(
+            f"cannot lock destination parent {path}: {ctypes.WinError(ctypes.get_last_error())}"
+        )
+    info = _WindowsDirectoryInformation()
+    if not _WINDOWS_GET_FILE_INFO(handle, ctypes.byref(info)):
+        error = ctypes.WinError(ctypes.get_last_error())
+        _WINDOWS_CLOSE_HANDLE(handle)
+        raise ScaffoldError(f"cannot inspect locked destination parent {path}: {error}")
+    inode = (info.file_index_high << 32) | info.file_index_low
+    if (
+        not info.file_attributes & _WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+        or info.file_attributes & _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT
+        or inode != before.st_ino
+    ):
+        _WINDOWS_CLOSE_HANDLE(handle)
+        raise ScaffoldError(f"destination parent changed or is a reparse point: {path}")
+    return handle, (before.st_dev, inode)
+
+
+def _windows_open_locked_regular_file(path: Path):
+    before = os.stat(path, follow_symlinks=False)
+    if not stat.S_ISREG(before.st_mode) or _is_symlink_or_junction(path):
+        raise ScaffoldError(f"delete target is not a regular file: {path}")
+    handle = _WINDOWS_CREATE_FILE(
+        str(path),
+        _WINDOWS_GENERIC_READ | _WINDOWS_FILE_READ_ATTRIBUTES | _WINDOWS_DELETE,
+        0x00000001 | _WINDOWS_FILE_SHARE_DELETE,
+        None,
+        _WINDOWS_OPEN_EXISTING,
+        _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
+        None,
+    )
+    if handle == _WINDOWS_INVALID_HANDLE:
+        raise ScaffoldError(
+            f"cannot lock delete target {path}: {ctypes.WinError(ctypes.get_last_error())}"
+        )
+    info = _WindowsDirectoryInformation()
+    if not _WINDOWS_GET_FILE_INFO(handle, ctypes.byref(info)):
+        error = ctypes.WinError(ctypes.get_last_error())
+        _WINDOWS_CLOSE_HANDLE(handle)
+        raise ScaffoldError(f"cannot inspect locked delete target {path}: {error}")
+    inode = (info.file_index_high << 32) | info.file_index_low
+    if (
+        info.file_attributes & _WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+        or info.file_attributes & _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT
+        or inode != before.st_ino
+    ):
+        _WINDOWS_CLOSE_HANDLE(handle)
+        raise ScaffoldError(f"delete target changed or is a reparse point: {path}")
+    return handle, (before.st_dev, inode)
+
+
+def _windows_assert_directory_identity(path: Path, identity: tuple[int, int]) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ScaffoldError(f"destination parent changed during write: {path}") from exc
+    if (
+        not stat.S_ISDIR(current.st_mode)
+        or _is_symlink_or_junction(path)
+        or (current.st_dev, current.st_ino) != identity
+    ):
+        raise ScaffoldError(f"destination parent changed during write: {path}")
+
+
+def _windows_create_temporary_file(parent: Path, destination_name: str) -> int:
+    for _attempt in range(16):
+        temporary = parent / f".{destination_name}.{os.urandom(8).hex()}.vivary-tmp"
+        handle = _WINDOWS_CREATE_FILE(
+            str(temporary),
+            _WINDOWS_GENERIC_WRITE | _WINDOWS_DELETE,
+            _WINDOWS_FILE_SHARE_READ_WRITE | _WINDOWS_FILE_SHARE_DELETE,
+            None,
+            _WINDOWS_CREATE_NEW,
+            _WINDOWS_FILE_ATTRIBUTE_TEMPORARY,
+            None,
+        )
+        if handle != _WINDOWS_INVALID_HANDLE:
+            try:
+                descriptor = msvcrt.open_osfhandle(handle, os.O_WRONLY | os.O_BINARY)
+            except Exception:
+                _WINDOWS_CLOSE_HANDLE(handle)
+                raise
+            return descriptor
+        error = ctypes.get_last_error()
+        if error != 80:  # ERROR_FILE_EXISTS
+            raise ScaffoldError(
+                f"cannot create temporary file in {parent}: {ctypes.WinError(error)}"
+            )
+    raise ScaffoldError(f"cannot create a unique temporary file in {parent}")
+
+
+def _windows_rename_open_file(
+    file_handle: int,
+    parent_handle: object,
+    name: str,
+    *,
+    replace_existing: bool,
+) -> None:
+    encoded_name = name.encode("utf-16-le")
+    size = _WindowsRenameInformation.file_name.offset + len(encoded_name)
+    buffer = ctypes.create_string_buffer(size)
+    information = _WindowsRenameInformation.from_buffer(buffer)
+    information.replace_if_exists = replace_existing
+    information.root_directory = parent_handle
+    information.file_name_length = len(encoded_name)
+    ctypes.memmove(
+        ctypes.addressof(buffer) + _WindowsRenameInformation.file_name.offset,
+        encoded_name,
+        len(encoded_name),
+    )
+    io_status = _WindowsIoStatusBlock()
+    status = _WINDOWS_NT_SET_FILE_INFO(
+        wintypes.HANDLE(file_handle),
+        ctypes.byref(io_status),
+        buffer,
+        size,
+        _WINDOWS_FILE_RENAME_INFORMATION_CLASS,
+    )
+    if status != 0:
+        error = _WINDOWS_NT_STATUS_TO_DOS_ERROR(status)
+        raise ScaffoldError(
+            f"cannot commit generated file {name}: {ctypes.WinError(error)}"
+        )
+
+
+def _windows_delete_open_file(file_handle: int) -> None:
+    information = _WindowsDispositionInformation(True)
+    if not _WINDOWS_SET_FILE_INFO(
+        wintypes.HANDLE(file_handle),
+        _WINDOWS_FILE_DISPOSITION_INFO_CLASS,
+        ctypes.byref(information),
+        ctypes.sizeof(information),
+    ):
+        raise ScaffoldError(
+            "cannot remove opened generated path: "
+            f"{ctypes.WinError(ctypes.get_last_error())}"
+        )
+
+
+@contextmanager
+def _windows_destination_parent(target: Path, dst: Path, *, create_missing: bool = True):
+    anchor = Path(dst.anchor)
+    if not dst.is_absolute() or not _path_within(target, dst.parent):
+        raise ScaffoldError("destination parent is outside the selected workspace")
+    locked: list[tuple[Path, object, tuple[int, int]]] = []
+    try:
+        current = anchor
+        handle, identity = _windows_open_locked_directory(current)
+        locked.append((current, handle, identity))
+        for part in dst.parent.relative_to(anchor).parts:
+            current = current / part
+            if not (current.exists() or os.path.lexists(current)):
+                if not create_missing:
+                    raise FileNotFoundError(current)
+                if not _path_within(target, current):
+                    raise ScaffoldError(
+                        f"safe destination ancestor does not exist: {current}"
+                    )
+                try:
+                    current.mkdir()
+                except FileExistsError:
+                    pass
+                except OSError as exc:
+                    raise ScaffoldError(
+                        f"cannot create destination parent {current}: {exc}"
+                    ) from exc
+            handle, identity = _windows_open_locked_directory(current)
+            locked.append((current, handle, identity))
+            for locked_path, _locked_handle, locked_identity in locked:
+                _windows_assert_directory_identity(locked_path, locked_identity)
+        yield locked[-1]
+        for path, _handle, identity in locked:
+            _windows_assert_directory_identity(path, identity)
+    finally:
+        for _path, handle, _identity in reversed(locked):
+            _WINDOWS_CLOSE_HANDLE(handle)
+
+
+@contextmanager
+def _posix_destination_parent(target: Path, dst: Path, *, create_missing: bool = True):
+    # CPython exposes src_dir_fd/dst_dir_fd on POSIX os.replace(), but does not
+    # include os.replace in os.supports_dir_fd. Check the other required primitives;
+    # the supported Python 3.11+ POSIX runtimes provide descriptor-relative replace.
+    required = (os.open, os.mkdir, os.stat)
+    if not all(func in os.supports_dir_fd for func in required):
+        raise ScaffoldError("this platform cannot enforce descriptor-relative safe writes")
+    directory_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    anchor = Path(dst.anchor)
+    if not dst.is_absolute() or not _path_within(target, dst.parent):
+        raise ScaffoldError("destination parent is outside the selected workspace")
+    descriptor = os.open(anchor, directory_flags)
+    current = anchor
+    try:
+        for part in dst.parent.relative_to(anchor).parts:
+            current = current / part
+            try:
+                next_descriptor = os.open(part, directory_flags, dir_fd=descriptor)
+            except FileNotFoundError:
+                if not create_missing:
+                    raise
+                if not _path_within(target, current):
+                    raise ScaffoldError(
+                        f"safe destination ancestor does not exist: {current}"
+                    )
+                try:
+                    os.mkdir(part, 0o755, dir_fd=descriptor)
+                except FileExistsError:
+                    pass
+                next_descriptor = os.open(part, directory_flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_descriptor
+        opened = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened.st_mode):
+            raise ScaffoldError("destination parent descriptor is not a directory")
+        yield descriptor
+        try:
+            after = os.stat(dst.parent, follow_symlinks=False)
+        except OSError as exc:
+            raise ScaffoldError("destination parent changed during write") from exc
+        if (
+            not stat.S_ISDIR(after.st_mode)
+            or (after.st_dev, after.st_ino) != (opened.st_dev, opened.st_ino)
+        ):
+            raise ScaffoldError("destination parent changed during write")
+    finally:
+        os.close(descriptor)
+
+
+@contextmanager
+def _safe_destination_parent(target: Path, dst: Path, *, create_missing: bool = True):
+    _ensure_safe_destinations(target, [dst], force=True)
+    if os.name == "nt":
+        with _windows_destination_parent(target, dst, create_missing=create_missing) as parent:
+            yield parent
+    else:
+        with _posix_destination_parent(target, dst, create_missing=create_missing) as parent:
+            yield parent
+
+
+def _descriptor_regular_file_mode(parent_fd: int, name: str) -> int | None:
+    try:
+        info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(info.st_mode):
+        return None
+    return stat.S_IMODE(info.st_mode) & 0o777
+
+
+def _atomic_write_bytes_no_follow(
+    target: Path,
+    dst: Path,
+    data: bytes,
+    *,
+    source_mode: int | None = None,
+    replace_existing: bool = True,
+) -> None:
+    with _safe_destination_parent(target, dst) as parent:
+        if os.name == "nt":
+            parent_path, parent_handle, parent_identity = parent
+            mode = source_mode if source_mode is not None else _existing_regular_file_mode(dst)
+            _windows_assert_directory_identity(parent_path, parent_identity)
+            descriptor = _windows_create_temporary_file(parent_path, dst.name)
+            committed = False
+            try:
+                file_handle = msvcrt.get_osfhandle(descriptor)
+                _windows_assert_directory_identity(parent_path, parent_identity)
+                with os.fdopen(descriptor, "wb", closefd=False) as handle:
+                    handle.write(data)
+                    if mode is not None and hasattr(os, "fchmod"):
+                        try:
+                            os.fchmod(handle.fileno(), mode)
+                        except OSError:
+                            pass
+                _windows_assert_directory_identity(parent_path, parent_identity)
+                _windows_rename_open_file(
+                    file_handle,
+                    parent_handle,
+                    dst.name,
+                    replace_existing=replace_existing,
+                )
+                _windows_assert_directory_identity(parent_path, parent_identity)
+                committed = True
+            finally:
+                try:
+                    if not committed:
+                        _windows_delete_open_file(msvcrt.get_osfhandle(descriptor))
+                finally:
+                    os.close(descriptor)
+            return
+
+        parent_fd = parent
+        mode = (
+            source_mode
+            if source_mode is not None
+            else _descriptor_regular_file_mode(parent_fd, dst.name)
+        )
+        temp_name = f".{dst.name}.{os.urandom(8).hex()}.vivary-tmp"
+        flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        descriptor = os.open(temp_name, flags, 0o600, dir_fd=parent_fd)
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                descriptor = -1
+                handle.write(data)
+                if mode is not None and hasattr(os, "fchmod"):
+                    try:
+                        os.fchmod(handle.fileno(), mode)
+                    except OSError:
+                        pass
+            try:
+                if replace_existing:
+                    os.replace(
+                        temp_name,
+                        dst.name,
+                        src_dir_fd=parent_fd,
+                        dst_dir_fd=parent_fd,
+                    )
+                else:
+                    os.link(
+                        temp_name,
+                        dst.name,
+                        src_dir_fd=parent_fd,
+                        dst_dir_fd=parent_fd,
+                        follow_symlinks=False,
+                    )
+            except FileExistsError as exc:
+                raise ScaffoldError(
+                    f"refusing to replace a file created during init: {dst}"
+                ) from exc
+            except OSError as exc:
+                raise ScaffoldError(f"cannot commit generated file {dst}: {exc}") from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+            try:
+                os.unlink(temp_name, dir_fd=parent_fd)
+            except FileNotFoundError:
+                pass
+
+
 def _write_text_no_follow(target: Path, dst: Path, text: str) -> None:
-    _ensure_safe_destinations(target, [dst], force=True)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    # Read the mode before `mkstemp`, which always creates at 0600. Without this, an
-    # atomic replace of an existing 0644 file silently makes it owner-only on POSIX.
-    mode = _existing_regular_file_mode(dst)
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{dst.name}.", suffix=".vivary-tmp", dir=dst.parent
-    )
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(text)
-            if mode is not None and hasattr(os, "fchmod"):
-                try:
-                    os.fchmod(fh.fileno(), mode)
-                except OSError:
-                    # A mode we cannot restore must not abort an otherwise good repair.
-                    pass
-        os.replace(tmp, dst)
-    finally:
-        if tmp.exists() or tmp.is_symlink():
-            tmp.unlink()
+    _atomic_write_bytes_no_follow(target, dst, text.encode("utf-8"))
 
 
-def _write_bytes_no_follow(target: Path, dst: Path, data: bytes) -> None:
-    _ensure_safe_destinations(target, [dst], force=True)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    mode = _existing_regular_file_mode(dst)
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{dst.name}.", suffix=".vivary-tmp", dir=dst.parent
+def _write_bytes_no_follow(
+    target: Path,
+    dst: Path,
+    data: bytes,
+    *,
+    replace_existing: bool = True,
+) -> None:
+    _atomic_write_bytes_no_follow(
+        target,
+        dst,
+        data,
+        replace_existing=replace_existing,
     )
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-            if mode is not None and hasattr(os, "fchmod"):
-                try:
-                    os.fchmod(fh.fileno(), mode)
-                except OSError:
-                    pass
-        os.replace(tmp, dst)
-    finally:
-        if tmp.exists() or tmp.is_symlink():
-            tmp.unlink()
 
 
 def _copy_file_no_follow(target: Path, src: Path, dst: Path) -> None:
-    _ensure_safe_destinations(target, [dst], force=True)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{dst.name}.", suffix=".vivary-tmp", dir=dst.parent
-    )
-    tmp = Path(tmp_name)
+    source_mode = stat.S_IMODE(src.stat().st_mode) & 0o777
+    _atomic_write_bytes_no_follow(target, dst, src.read_bytes(), source_mode=source_mode)
+
+
+def _unlink_no_follow(
+    target: Path,
+    path: Path,
+    *,
+    expected_hashes: set[str] | None = None,
+    missing_ok: bool = False,
+) -> None:
+    with _safe_destination_parent(target, path, create_missing=False) as parent:
+        if os.name == "nt":
+            parent_path, _parent_handle, parent_identity = parent
+            _windows_assert_directory_identity(parent_path, parent_identity)
+            try:
+                handle, _file_identity = _windows_open_locked_regular_file(path)
+            except FileNotFoundError:
+                if missing_ok:
+                    return
+                raise
+            try:
+                descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+            except Exception:
+                _WINDOWS_CLOSE_HANDLE(handle)
+                raise
+            try:
+                with os.fdopen(descriptor, "rb", closefd=False) as stream:
+                    data = stream.read() if expected_hashes is not None else None
+                if expected_hashes is not None and _sha256_prefixed(data) not in expected_hashes:
+                    raise ScaffoldError("delete target changed after apply")
+                _windows_assert_directory_identity(parent_path, parent_identity)
+                _windows_delete_open_file(msvcrt.get_osfhandle(descriptor))
+            finally:
+                os.close(descriptor)
+            _windows_assert_directory_identity(parent_path, parent_identity)
+            return
+
+        parent_fd = parent
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(path.name, flags, dir_fd=parent_fd)
+        except FileNotFoundError:
+            if missing_ok:
+                return
+            raise
+        try:
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode):
+                raise ScaffoldError("delete target is not a regular file")
+            if expected_hashes is not None:
+                with os.fdopen(descriptor, "rb", closefd=False) as stream:
+                    data = stream.read()
+                if _sha256_prefixed(data) not in expected_hashes:
+                    raise ScaffoldError("delete target changed after apply")
+            current = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+            if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+                raise ScaffoldError("delete target changed before removal")
+            os.unlink(path.name, dir_fd=parent_fd)
+        finally:
+            os.close(descriptor)
+
+
+def _rmdir_no_follow(target: Path, path: Path, *, missing_ok: bool = False) -> None:
     try:
-        with os.fdopen(fd, "wb") as out, src.open("rb") as inp:
-            shutil.copyfileobj(inp, out)
-        shutil.copystat(src, tmp)
-        os.replace(tmp, dst)
-    finally:
-        if tmp.exists() or tmp.is_symlink():
-            tmp.unlink()
+        with _safe_destination_parent(target, path, create_missing=False) as parent:
+            if os.name == "nt":
+                parent_path, _parent_handle, parent_identity = parent
+                _windows_assert_directory_identity(parent_path, parent_identity)
+                handle, _directory_identity = _windows_open_locked_directory(path, delete=True)
+                try:
+                    _windows_assert_directory_identity(parent_path, parent_identity)
+                    _windows_delete_open_file(handle)
+                finally:
+                    _WINDOWS_CLOSE_HANDLE(handle)
+                _windows_assert_directory_identity(parent_path, parent_identity)
+                return
+
+            parent_fd = parent
+            current = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+            if not stat.S_ISDIR(current.st_mode):
+                raise ScaffoldError("directory cleanup target is not a regular directory")
+            os.rmdir(path.name, dir_fd=parent_fd)
+    except FileNotFoundError:
+        if not missing_ok:
+            raise
 
 
 def _cleanup_stale_scaffold_state(
@@ -4698,18 +5228,37 @@ def _append_patch_text(existing: bytes, block: str) -> str:
     return prefix + block
 
 
-def _thin_plan_hash(
+def _thin_target_identity(target: Path) -> dict[str, str | int]:
+    """Bind approval to one canonical directory, not only its relative contents."""
+    try:
+        resolved = target.resolve(strict=True)
+        info = os.stat(resolved, follow_symlinks=False)
+    except OSError as exc:
+        raise ScaffoldError(f"cannot bind adoption plan to target root: {exc}") from exc
+    if not stat.S_ISDIR(info.st_mode) or _is_symlink_or_junction(resolved):
+        raise ScaffoldError("adoption target root must be a regular non-link directory")
+    return {
+        "canonical_path": os.path.normcase(str(resolved)),
+        "device": int(info.st_dev),
+        "inode": int(info.st_ino),
+    }
+
+
+def _thin_plan_payload(
     target: Path,
     *,
     preset: str,
+    adapters: tuple[str, ...] | list[str],
     writes: list[tuple[Path, str]],
     patches: list[dict],
     adapter_replacements: list[dict],
     kept_identities: list[dict],
-) -> str:
-    payload = {
+) -> dict:
+    return {
         "contract": THIN_WORKSPACE_CONTRACT,
+        "target": _thin_target_identity(target),
         "preset": preset,
+        "adapters": sorted(adapters),
         "creates": [
             {
                 "path": path.relative_to(target).as_posix(),
@@ -4736,6 +5285,9 @@ def _thin_plan_hash(
         ],
         "kept": kept_identities,
     }
+
+
+def _thin_approval_hash(payload: dict) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return _sha256_prefixed(encoded)
 
@@ -5008,14 +5560,16 @@ def plan_adopt(
     ]
     conflicts.sort(key=lambda item: item["path"])
     creates = [path for path, _ in writes]
-    plan_hash = _thin_plan_hash(
+    approval_payload = _thin_plan_payload(
         target,
         preset=chosen_preset,
+        adapters=selected_adapters,
         writes=writes + projection_writes,
         patches=patches,
         adapter_replacements=adapter_replacements,
         kept_identities=kept_identities,
     )
+    plan_hash = _thin_approval_hash(approval_payload)
 
     return {
         "contract": THIN_WORKSPACE_CONTRACT,
@@ -5032,6 +5586,7 @@ def plan_adopt(
         "conflicts": conflicts,
         "privacy": {"status": privacy_status, "rules": list(_THIN_PRIVATE_RULES)},
         "plan_hash": plan_hash,
+        "approval_payload": approval_payload,
         # Transitional aliases keep report consumers readable during the
         # following apply/Doctor slice; they contain only thin-v0.3 paths.
         "would_create": creates,
@@ -5045,7 +5600,8 @@ def plan_adopt(
 
 
 _ADOPT_JOURNAL_REL = Path(".vivary/runtime/adopt-journal.json")
-_ADOPT_JOURNAL_SCHEMA = "vivary.adopt-journal.v1"
+_ADOPT_JOURNAL_SCHEMA = "vivary.adopt-journal.v2"
+_ADOPT_RECOVERY_PLAN_SCHEMA = "vivary.adopt-recovery-plan.v1"
 _ADOPT_PREJOURNAL_RE = re.compile(
     rb"# vivary-adopt-prejournal "
     rb"plan=(sha256:[0-9a-f]{64}) "
@@ -5113,17 +5669,18 @@ def _assert_adopt_kept_inputs(target: Path, plan: dict) -> None:
 
 
 def _adopt_journal_payload(
-    target: Path,
-    plan_hash: str,
+    plan: dict,
     actions: list[dict],
     backups: dict[Path, bytes | None],
     *,
     phase: str,
     completed: int,
 ) -> dict:
+    target = plan["target"]
     return {
         "schema": _ADOPT_JOURNAL_SCHEMA,
-        "plan_hash": plan_hash,
+        "plan_hash": plan["plan_hash"],
+        "approval": plan["approval_payload"],
         "phase": phase,
         "completed": completed,
         "actions": [
@@ -5164,8 +5721,8 @@ def _write_adopt_journal(target: Path, payload: dict) -> None:
 def _remove_empty_adopt_dirs(target: Path) -> None:
     for path in (target / ".vivary" / "runtime", target / ".vivary"):
         try:
-            path.rmdir()
-        except OSError:
+            _rmdir_no_follow(target, path, missing_ok=True)
+        except (OSError, ScaffoldError):
             pass
 
 
@@ -5200,7 +5757,11 @@ def _rollback_adopt(
                     raise ScaffoldError("created destination changed type")
                 if _sha256_prefixed(path.read_bytes()) not in _adopt_action_after_hashes(action):
                     raise ScaffoldError("created destination changed after apply")
-                path.unlink()
+                _unlink_no_follow(
+                    target,
+                    path,
+                    expected_hashes=_adopt_action_after_hashes(action),
+                )
             else:
                 if not path.exists() or _is_symlink_or_junction(path) or not path.is_file():
                     raise ScaffoldError("modified destination is missing or unsafe")
@@ -5217,7 +5778,7 @@ def _rollback_adopt(
     if cleanup_journal:
         journal = target / _ADOPT_JOURNAL_REL
         if journal.exists() and not _is_symlink_or_junction(journal):
-            journal.unlink()
+            _unlink_no_follow(target, journal)
         _remove_empty_adopt_dirs(target)
 
 
@@ -5260,16 +5821,19 @@ def _prejournal_privacy_match(data: bytes) -> re.Match[bytes] | None:
     return _ADOPT_PREJOURNAL_RE.search(data)
 
 
-def _recover_prejournal_privacy(target: Path, recover_hash: str) -> bool:
+def _prejournal_recovery_state(
+    target: Path,
+    recover_hash: str,
+) -> tuple[list[dict], dict[Path, bytes | None]] | None:
     gitignore = target / ".gitignore"
     if _is_symlink_or_junction(gitignore) or not gitignore.is_file():
-        return False
+        return None
     data = gitignore.read_bytes()
     match = _prejournal_privacy_match(data)
     if match is None:
         if _ADOPT_PREJOURNAL_MARKER_PREFIX.encode("ascii") in data:
             raise ScaffoldError("pre-journal adoption marker is malformed")
-        return False
+        return None
 
     marker_hash = match.group(1).decode("ascii")
     if marker_hash != recover_hash:
@@ -5294,98 +5858,307 @@ def _recover_prejournal_privacy(target: Path, recover_hash: str) -> bool:
     if clean_after != expected_after:
         raise ScaffoldError("pre-journal adoption privacy replacement changed unexpectedly")
 
-    if existed:
-        _write_bytes_no_follow(target, gitignore, before)
-    else:
-        gitignore.unlink()
-    _remove_empty_adopt_dirs(target)
-    return True
+    return (
+        [
+            {
+                "kind": "patch" if existed else "create",
+                "path": gitignore,
+                "after_hash": _sha256_prefixed(clean_after),
+                "transient_after_hash": _sha256_prefixed(data),
+            }
+        ],
+        {gitignore: before if existed else None},
+    )
 
 
-def _recover_adopt(target: Path, recover_hash: str, *, repo_root: str | Path | None) -> dict:
-    journal_path = target / _ADOPT_JOURNAL_REL
-    if not journal_path.exists() and _recover_prejournal_privacy(target, recover_hash):
-        return {
-            "contract": THIN_WORKSPACE_CONTRACT,
-            "target": target,
-            "preset": _workspace_declared_preset(target),
-            "preset_reason": "recovered approved pre-journal privacy replacement",
-            "inventory": BrownfieldInventory(target),
-            "creates": [],
-            "patches": [],
-            "optional_projections": [],
-            "adapter_replacements": [],
-            "kept": [],
-            "conflicts": [],
-            "privacy": None,
-            "plan_hash": recover_hash,
-            "would_create": [],
-            "followups": [],
-            "gitignore_followups": [],
-            "excluded_pre_existing": [],
-            "skipped_module_collisions": [],
-            "writes": [],
-            "copies": [],
-            "applied": False,
-            "recovered": True,
-            "doctor": None,
-        }
-    if _is_symlink_or_junction(journal_path) or not journal_path.is_file():
-        raise ScaffoldError("no safe adoption journal exists to recover")
-    if journal_path.stat().st_size > 1024 * 1024:
-        raise ScaffoldError("adoption journal exceeds the recovery size limit")
-    try:
-        payload = json.loads(journal_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ScaffoldError(f"adoption journal is unreadable: {exc}") from exc
+def _adopt_expected_generated_bytes(
+    target: Path,
+    preset: str,
+    adapters: tuple[str, ...],
+) -> dict[str, bytes]:
+    project = target.name or "vivary-workspace"
+    expected = {
+        ".gitignore": _thin_gitignore_block().encode("utf-8"),
+        ".vivary/context.md": _thin_context_doc(project, preset).encode("utf-8"),
+        ".vivary/workspace.toml": _thin_workspace_toml(preset, adapters).encode("utf-8"),
+        "AGENTS.md": ("# AGENTS.md\n\n" + _thin_agents_block()).encode("utf-8"),
+        "STATE.md": _thin_state_doc().encode("utf-8"),
+    }
+    for adapter in adapters:
+        text, _source_hash, _content_hash = _thin_adapter_doc(adapter)
+        expected[_THIN_ADAPTER_PATHS[adapter]] = text.encode("utf-8")
+    return expected
+
+
+def _validated_journal_state(
+    target: Path,
+    payload: dict,
+    recover_hash: str,
+) -> tuple[list[dict], dict[Path, bytes | None]]:
     if payload.get("schema") != _ADOPT_JOURNAL_SCHEMA:
         raise ScaffoldError("adoption journal schema is not supported")
     if payload.get("plan_hash") != recover_hash:
         raise ScaffoldError(
-            f"recovery hash mismatch: journal {payload.get('plan_hash')}, requested {recover_hash}"
+            f"recovery hash mismatch: journal {payload.get('plan_hash')}, "
+            f"requested {recover_hash}"
         )
+    approval = payload.get("approval")
+    approval_keys = {
+        "contract",
+        "target",
+        "preset",
+        "adapters",
+        "creates",
+        "patches",
+        "adapter_replacements",
+        "kept",
+    }
+    if not isinstance(approval, dict) or set(approval) != approval_keys:
+        raise ScaffoldError("adoption journal approval payload is malformed")
+    if approval["contract"] != THIN_WORKSPACE_CONTRACT:
+        raise ScaffoldError("adoption journal approval contract is not supported")
+    if approval["target"] != _thin_target_identity(target):
+        raise ScaffoldError("adoption journal is bound to a different workspace root")
+    if _thin_approval_hash(approval) != recover_hash:
+        raise ScaffoldError("adoption journal approval hash does not match")
+
+    preset = approval["preset"]
+    raw_adapters = approval["adapters"]
+    if preset not in PRESETS or not isinstance(raw_adapters, list):
+        raise ScaffoldError("adoption journal approval policy is malformed")
+    if (
+        any(not isinstance(adapter, str) for adapter in raw_adapters)
+        or raw_adapters != sorted(set(raw_adapters))
+        or set(raw_adapters) - set(_THIN_ADAPTER_PATHS)
+    ):
+        raise ScaffoldError("adoption journal approval adapters are malformed")
+    adapters = tuple(raw_adapters)
+    expected_bytes = _adopt_expected_generated_bytes(target, preset, adapters)
+    allowed_paths = set(expected_bytes)
+    expected_actions: dict[str, dict] = {}
+
+    creates = approval["creates"]
+    patches = approval["patches"]
+    replacements = approval["adapter_replacements"]
+    kept = approval["kept"]
+    if not all(isinstance(rows, list) for rows in (creates, patches, replacements, kept)):
+        raise ScaffoldError("adoption journal approval actions are malformed")
+    if sum(len(rows) for rows in (creates, patches, replacements, kept)) > 32:
+        raise ScaffoldError("adoption journal approval exceeds the action limit")
+
+    for row in creates:
+        if not isinstance(row, dict) or set(row) != {"path", "content_hash"}:
+            raise ScaffoldError("adoption journal approved create is malformed")
+        rel = row["path"]
+        if (
+            rel not in allowed_paths
+            or row["content_hash"] != _sha256_prefixed(expected_bytes[rel])
+            or rel in expected_actions
+        ):
+            raise ScaffoldError("adoption journal approved create is not canonical")
+        expected_actions[rel] = {
+            "kind": "create",
+            "before_hash": None,
+            "after_hash": row["content_hash"],
+        }
+
+    patch_blocks = {
+        "AGENTS.md": _thin_agents_block(),
+        ".gitignore": _thin_gitignore_block(),
+    }
+    for row in patches:
+        if not isinstance(row, dict) or set(row) != {
+            "path",
+            "before_hash",
+            "anchor",
+            "inserted_text",
+        }:
+            raise ScaffoldError("adoption journal approved patch is malformed")
+        rel = row["path"]
+        if rel not in patch_blocks or row["anchor"] != "eof" or rel in expected_actions:
+            raise ScaffoldError("adoption journal approved patch is not canonical")
+        expected_actions[rel] = {"kind": "patch", **row}
+
+    adapter_paths = {_THIN_ADAPTER_PATHS[adapter] for adapter in adapters}
+    for row in replacements:
+        if not isinstance(row, dict) or set(row) != {
+            "path",
+            "before_hash",
+            "content_hash",
+        }:
+            raise ScaffoldError("adoption journal approved replacement is malformed")
+        rel = row["path"]
+        if (
+            rel not in adapter_paths
+            or row["content_hash"] != _sha256_prefixed(expected_bytes[rel])
+            or rel in expected_actions
+        ):
+            raise ScaffoldError("adoption journal approved replacement is not canonical")
+        expected_actions[rel] = {
+            "kind": "replace",
+            "before_hash": row["before_hash"],
+            "after_hash": row["content_hash"],
+        }
+
+    seen_kept: set[str] = set()
+    for row in kept:
+        if not isinstance(row, dict) or set(row) != {"path", "content_hash"}:
+            raise ScaffoldError("adoption journal approved kept input is malformed")
+        rel = row["path"]
+        if rel not in allowed_paths or rel in expected_actions or rel in seen_kept:
+            raise ScaffoldError("adoption journal approved kept input is not canonical")
+        if not isinstance(row["content_hash"], str) or not re.fullmatch(
+            r"sha256:[0-9a-f]{64}", row["content_hash"]
+        ):
+            raise ScaffoldError("adoption journal approved kept hash is malformed")
+        seen_kept.add(rel)
+
     raw_actions = payload.get("actions")
     if not isinstance(raw_actions, list) or not raw_actions:
         raise ScaffoldError("adoption journal has no recoverable actions")
+    if len(raw_actions) != len(expected_actions):
+        raise ScaffoldError("adoption journal actions do not match the approved plan")
+    if payload.get("phase") not in {"planned", "applying"}:
+        raise ScaffoldError("adoption journal progress is malformed")
+    completed = payload.get("completed")
+    if not isinstance(completed, int) or not 0 <= completed <= len(raw_actions):
+        raise ScaffoldError("adoption journal progress exceeds the action count")
 
+    action_keys = {
+        "path",
+        "kind",
+        "existed",
+        "before",
+        "before_hash",
+        "after_hash",
+        "transient_after_hash",
+    }
     actions: list[dict] = []
     backups: dict[Path, bytes | None] = {}
+    seen_actions: set[str] = set()
     for row in raw_actions:
-        if not isinstance(row, dict) or not isinstance(row.get("path"), str):
+        if not isinstance(row, dict) or set(row) != action_keys:
             raise ScaffoldError("adoption journal action is malformed")
-        path = target / Path(row["path"])
+        rel = row["path"]
+        expected = expected_actions.get(rel)
+        if expected is None or rel in seen_actions or row["kind"] != expected["kind"]:
+            raise ScaffoldError("adoption journal action is outside the approved plan")
+        path = target / Path(rel)
         _ensure_within_target(target, [path])
-        before_text = row.get("before")
+        before_text = row["before"]
         try:
-            before = base64.b64decode(before_text, validate=True) if before_text is not None else None
+            before = (
+                base64.b64decode(before_text, validate=True)
+                if before_text is not None
+                else None
+            )
         except (ValueError, TypeError) as exc:
             raise ScaffoldError("adoption journal backup is malformed") from exc
-        if before is not None and _sha256_prefixed(before) != row.get("before_hash"):
-            raise ScaffoldError("adoption journal backup hash does not match")
-        after_hash = row.get("after_hash")
-        if not isinstance(after_hash, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", after_hash):
-            raise ScaffoldError("adoption journal destination hash is malformed")
-        transient_after_hash = row.get("transient_after_hash")
-        if transient_after_hash is not None and (
-            not isinstance(transient_after_hash, str)
-            or not re.fullmatch(r"sha256:[0-9a-f]{64}", transient_after_hash)
-        ):
-            raise ScaffoldError("adoption journal transient hash is malformed")
-        action = {
-            "kind": row.get("kind"),
-            "path": path,
-            "after_hash": after_hash,
-            "transient_after_hash": transient_after_hash,
-        }
-        actions.append(action)
-        backups[path] = before
+        if not isinstance(row["existed"], bool) or row["existed"] != (before is not None):
+            raise ScaffoldError("adoption journal backup presence is malformed")
+        before_hash = _sha256_prefixed(before) if before is not None else None
+        if row["before_hash"] != before_hash or expected["before_hash"] != before_hash:
+            raise ScaffoldError("adoption journal backup hash does not match approval")
 
-    _rollback_adopt(target, actions, backups)
+        if expected["kind"] == "patch":
+            inserted = _append_patch_text(before or b"", patch_blocks[rel])
+            if expected["inserted_text"] != inserted:
+                raise ScaffoldError("adoption journal patch text does not match approval")
+            after_bytes = (before or b"") + inserted.encode("utf-8")
+            expected_after_hash = _sha256_prefixed(after_bytes)
+        else:
+            after_bytes = expected_bytes[rel]
+            expected_after_hash = expected["after_hash"]
+        if row["after_hash"] != expected_after_hash:
+            raise ScaffoldError("adoption journal destination hash does not match approval")
+
+        transient_hash = row["transient_after_hash"]
+        if rel == ".gitignore":
+            transient = _prejournal_privacy_bytes(
+                {"after": after_bytes},
+                before,
+                recover_hash,
+            )
+            if transient_hash != _sha256_prefixed(transient):
+                raise ScaffoldError("adoption journal privacy transition is not canonical")
+        elif transient_hash is not None:
+            raise ScaffoldError("adoption journal has an unexpected transient destination")
+        actions.append(
+            {
+                "kind": row["kind"],
+                "path": path,
+                "after_hash": row["after_hash"],
+                "transient_after_hash": transient_hash,
+            }
+        )
+        backups[path] = before
+        seen_actions.add(rel)
+    return actions, backups
+
+
+def _adopt_recovery_plan(
+    target: Path,
+    transaction_hash: str,
+    actions: list[dict],
+    backups: dict[Path, bytes | None],
+) -> tuple[str, list[dict]]:
+    rows: list[dict] = []
+    for action in actions:
+        path = action["path"]
+        _ensure_safe_destinations(target, [path], force=True)
+        before = backups[path]
+        if not path.exists():
+            if before is not None:
+                raise ScaffoldError(
+                    f"recovery destination is missing: {path.relative_to(target).as_posix()}"
+                )
+            current_hash = None
+            operation = "no-op"
+        else:
+            if _is_symlink_or_junction(path) or not path.is_file():
+                raise ScaffoldError(
+                    f"recovery destination is unsafe: {path.relative_to(target).as_posix()}"
+                )
+            current = path.read_bytes()
+            current_hash = _sha256_prefixed(current)
+            if before is not None and current == before:
+                operation = "no-op"
+            elif current_hash not in _adopt_action_after_hashes(action):
+                raise ScaffoldError(
+                    f"recovery destination changed: {path.relative_to(target).as_posix()}"
+                )
+            else:
+                operation = "restore" if before is not None else "delete-created"
+        rows.append(
+            {
+                "path": path.relative_to(target).as_posix(),
+                "operation": operation,
+                "current_hash": current_hash,
+                "restore_hash": _sha256_prefixed(before) if before is not None else None,
+            }
+        )
+    recovery_payload = {
+        "schema": _ADOPT_RECOVERY_PLAN_SCHEMA,
+        "target": _thin_target_identity(target),
+        "transaction_plan_hash": transaction_hash,
+        "actions": rows,
+    }
+    return _thin_approval_hash(recovery_payload), rows
+
+
+def _recovery_result(
+    target: Path,
+    transaction_hash: str,
+    recovery_plan_hash: str,
+    recovery_actions: list[dict],
+    *,
+    recovered: bool,
+) -> dict:
     return {
         "contract": THIN_WORKSPACE_CONTRACT,
         "target": target,
         "preset": _workspace_declared_preset(target),
-        "preset_reason": "recovered approved interrupted transaction",
+        "preset_reason": "approved interrupted-transaction recovery",
         "inventory": BrownfieldInventory(target),
         "creates": [],
         "patches": [],
@@ -5394,7 +6167,9 @@ def _recover_adopt(target: Path, recover_hash: str, *, repo_root: str | Path | N
         "kept": [],
         "conflicts": [],
         "privacy": None,
-        "plan_hash": recover_hash,
+        "plan_hash": transaction_hash,
+        "recovery_plan_hash": recovery_plan_hash,
+        "recovery_actions": recovery_actions,
         "would_create": [],
         "followups": [],
         "gitignore_followups": [],
@@ -5403,9 +6178,67 @@ def _recover_adopt(target: Path, recover_hash: str, *, repo_root: str | Path | N
         "writes": [],
         "copies": [],
         "applied": False,
-        "recovered": True,
+        "recovered": recovered,
         "doctor": None,
     }
+
+
+def _recover_adopt(
+    target: Path,
+    recover_hash: str,
+    *,
+    yes: bool,
+    approved_recovery_hash: str | None,
+    repo_root: str | Path | None,
+) -> dict:
+    journal_path = target / _ADOPT_JOURNAL_REL
+    if not journal_path.exists():
+        prejournal = _prejournal_recovery_state(target, recover_hash)
+        if prejournal is None:
+            raise ScaffoldError("no safe adoption journal exists to recover")
+        actions, backups = prejournal
+    else:
+        if _is_symlink_or_junction(journal_path) or not journal_path.is_file():
+            raise ScaffoldError("no safe adoption journal exists to recover")
+        if journal_path.stat().st_size > 1024 * 1024:
+            raise ScaffoldError("adoption journal exceeds the recovery size limit")
+        try:
+            payload = json.loads(journal_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ScaffoldError(f"adoption journal is unreadable: {exc}") from exc
+        actions, backups = _validated_journal_state(target, payload, recover_hash)
+
+    recovery_plan_hash, recovery_actions = _adopt_recovery_plan(
+        target,
+        recover_hash,
+        actions,
+        backups,
+    )
+    if not yes:
+        return _recovery_result(
+            target,
+            recover_hash,
+            recovery_plan_hash,
+            recovery_actions,
+            recovered=False,
+        )
+    if approved_recovery_hash is None:
+        raise ScaffoldError(
+            "recovery apply requires --plan <hash> from the recovery dry-run"
+        )
+    if approved_recovery_hash != recovery_plan_hash:
+        raise ScaffoldError(
+            "recovery plan hash mismatch: "
+            f"approved {approved_recovery_hash}, current {recovery_plan_hash}"
+        )
+    _rollback_adopt(target, actions, backups)
+    return _recovery_result(
+        target,
+        recover_hash,
+        recovery_plan_hash,
+        recovery_actions,
+        recovered=True,
+    )
 
 
 def adopt_workspace(
@@ -5432,7 +6265,13 @@ def adopt_workspace(
     """
     resolved_target = _resolve_scaffold_target(target)
     if recover_hash is not None:
-        return _recover_adopt(resolved_target, recover_hash, repo_root=repo_root)
+        return _recover_adopt(
+            resolved_target,
+            recover_hash,
+            yes=yes,
+            approved_recovery_hash=plan_hash,
+            repo_root=repo_root,
+        )
 
     plan = plan_adopt(resolved_target, preset=preset, adapters=adapters, repo_root=repo_root)
     target_path = plan["target"]
@@ -5523,8 +6362,7 @@ def adopt_workspace(
             plan["plan_hash"],
         )
     journal = _adopt_journal_payload(
-        target_path,
-        plan["plan_hash"],
+        plan,
         actions,
         backups,
         phase="planned",
@@ -5584,7 +6422,7 @@ def adopt_workspace(
             raise ScaffoldError(
                 "Doctor failed after apply: " + "; ".join(doctor["errors"])
             )
-        journal_path.unlink()
+        _unlink_no_follow(target_path, journal_path)
         return {**plan, "applied": True, "doctor": doctor}
     except Exception as exc:
         try:
@@ -6067,6 +6905,8 @@ def _adopt_report_to_json(result: dict, *, mode: str) -> dict:
         ],
         "privacy": result.get("privacy"),
         "plan_hash": result.get("plan_hash"),
+        "recovery_plan_hash": result.get("recovery_plan_hash"),
+        "recovery_actions": result.get("recovery_actions", []),
         "followups": result["followups"],
         "candidate_modules": inventory.candidate_modules,
         "excluded_pre_existing": result["excluded_pre_existing"],
@@ -7850,15 +8690,18 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument(
         "--force",
         action="store_true",
-        help="refresh generated files in an existing thin Vivary workspace",
+        help=(
+            "compatibility flag; init still refuses nonempty targets and directs "
+            "existing workspaces to governed adopt"
+        ),
     )
     init.add_argument(
         "--active-context",
         choices=ACTIVE_CONTEXTS,
         default=None,
         help=(
-            "add an optional active-context sidecar profile; currently "
-            "'cocoindex-code' for coding workspaces"
+            "declare an optional active-context capability in the five-file seed; "
+            "does not install or materialize its sidecar"
         ),
     )
     init.add_argument(
@@ -7906,12 +8749,18 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument(
         "--repair",
         action="store_true",
-        help="include a conservative repair plan; dry-run unless --yes is also passed",
+        help=(
+            "include conservative repair diagnostics; legacy-full workspaces remain "
+            "report-only"
+        ),
     )
     doctor.add_argument(
         "--yes",
         action="store_true",
-        help="with --repair, apply deterministic safe repairs before rerunning doctor",
+        help=(
+            "with --repair, apply deterministic safe repairs to supported contracts; "
+            "never writes legacy-full workspaces"
+        ),
     )
     doctor.add_argument(
         "--trend",
@@ -7954,7 +8803,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--recover",
         default=None,
         metavar="PLAN_HASH",
-        help="roll back an interrupted transaction bound to this plan hash",
+        help=(
+            "plan recovery for an interrupted transaction bound to this adoption "
+            "hash; apply only with --yes --plan <recovery-hash>"
+        ),
     )
     adopt.add_argument(
         "--adapter",
@@ -8264,6 +9116,9 @@ def _main(argv: list[str] | None = None) -> int:
         trend_lines: list[str] = []
         if getattr(args, "trend", False):
             repair_actions = report.get("repair", {}).get("actions", [])
+            repair_report_only = (
+                report.get("repair", {}).get("mode") == "report-only"
+            )
             repair_target_refused = getattr(args, "repair", False) and (
                 any(
                     error.startswith("doctor --repair: refusing to repair")
@@ -8274,7 +9129,13 @@ def _main(argv: list[str] | None = None) -> int:
                     for action in repair_actions
                 )
             )
-            if repair_target_refused:
+            if repair_report_only:
+                report["trend"] = None
+                report["warnings"].append(
+                    "doctor --trend skipped because legacy repair is report-only"
+                )
+                trend_lines = ["trend: skipped because legacy repair is report-only"]
+            elif repair_target_refused:
                 report["trend"] = None
                 report["warnings"].append(
                     "doctor --trend skipped because repair target was refused"
@@ -8340,7 +9201,15 @@ def _main(argv: list[str] | None = None) -> int:
             else:
                 print(f"create-vivary adopt: {exc}", file=sys.stderr)
             return 1
-        mode = "recovered" if result.get("recovered") else ("applied" if yes else "dry-run")
+        mode = (
+            "recovered"
+            if result.get("recovered")
+            else "recovery-dry-run"
+            if args.recover is not None
+            else "applied"
+            if yes
+            else "dry-run"
+        )
         if args.json:
             print(json.dumps(_adopt_report_to_json(result, mode=mode), indent=2))
         else:

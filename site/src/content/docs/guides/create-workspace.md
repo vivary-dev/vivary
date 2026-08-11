@@ -128,8 +128,9 @@ Include active code context only after explicit selection.
 python packages/create-vivary/create_vivary.py init C:/path/to/my-code-project --preset coding --active-context cocoindex-code --no-wizard
 ```
 
-This option adds two guidance files.
-It does not install or run an indexer.
+This option keeps the five-file seed.
+It declares the capability and ignores its local index path.
+It does not copy guidance, install an indexer, or create an index.
 
 ## Stop conditions
 

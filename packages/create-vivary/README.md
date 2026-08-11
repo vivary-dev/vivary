@@ -25,9 +25,9 @@ A default greenfield init creates exactly five files:
 
 It does not copy templates, runtime skills, placeholders, starter records, or
 framework prose. `--adapter agents` and `--adapter claude` add at most one bounded
-adapter file each. `--active-context cocoindex-code` is also explicit and adds only
-`docs/active-context.md` plus `.agents/skills/active-context/SKILL.md`; it does not
-install CocoIndex-code, create an index, enable MCP, or send source text anywhere.
+adapter file each. `--active-context cocoindex-code` is also explicit but keeps the
+five-file seed: it declares the capability and ignores `.cocoindex_code/`. It does not
+copy guidance, install CocoIndex-code, create an index, enable MCP, or send source.
 
 Storage and semantic-memory config remain explicit options. Non-interactive init
 without those options stays file-backed and writes no optional provider config.
@@ -42,11 +42,15 @@ create-vivary adopt . --json
 create-vivary adopt . --yes --plan sha256:<plan-hash> --json
 # After an interrupted transaction only:
 create-vivary adopt . --recover sha256:<plan-hash> --json
+create-vivary adopt . --recover sha256:<plan-hash> \
+  --yes --plan sha256:<recovery-plan-hash> --json
 ```
 
 The preview reports `creates`, managed `patches`, `optional_projections`, `kept`,
 `conflicts`, privacy checks, and `plan_hash`. Apply accepts only that exact plan and
 revalidates kept files before writing.
+The first recovery command is read-only. It returns the exact recovery plan hash that
+must receive separate approval before the second command rolls the transaction back.
 
 Brownfield adoption is capped at three Vivary payload creates: `.vivary/context.md`,
 `.vivary/workspace.toml`, and `STATE.md` when it is absent. Independently, adoption may

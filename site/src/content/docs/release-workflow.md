@@ -268,8 +268,11 @@ uv run --isolated --no-project --no-cache --index-url https://pypi.org/simple \
   --with vivary==<vivary-ver> python -c \
   "from importlib.metadata import version; import vivary_core; assert version('vivary') == '<vivary-ver>'; assert version('vivary-core') == '<core-ver>'"
 uvx --no-cache --index-url https://pypi.org/simple --from vivary-tropo==<ver> tropo --version
+uvx --no-cache --index-url https://pypi.org/simple --from vivary-strato==<ver> strato --version
 uvx --no-cache --index-url https://pypi.org/simple --from vivary-ozone==<ver> ozone --version
 uvx --no-cache --index-url https://pypi.org/simple --from vivary-exo==<ver> exo --version
+uvx --no-cache --index-url https://pypi.org/simple --from vivary-memory-cognee==<ver> vivary-cognee --version
+uvx --no-cache --index-url https://pypi.org/simple --from vivary-mcp==<ver> vivary-mcp --version
 uvx --no-cache --index-url https://pypi.org/simple --from create-vivary==<ver> create-vivary --version
 ```
 

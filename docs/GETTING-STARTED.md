@@ -79,9 +79,10 @@ create-vivary init my-workspace --preset coding --adapter claude
 create-vivary init my-codebase --preset coding --active-context cocoindex-code
 ```
 
-Each agent adapter adds one file of at most 1,200 bytes. Active context adds only
-`docs/active-context.md` and `.agents/skills/active-context/SKILL.md`; it does not
-install an indexer, create an index, enable MCP, or send source text anywhere.
+Each agent adapter adds one file of at most 1,200 bytes. Active context keeps the
+five-file seed and declares `cocoindex-code` in `.vivary/workspace.toml`. It also
+ignores `.cocoindex_code/`; it does not copy guidance, install an indexer, create an
+index, enable MCP, or send source text anywhere.
 Configure Obsidian or another editor separately after initialization.
 
 Storage and semantic memory are separate opt-ins. A non-interactive init without
@@ -114,10 +115,18 @@ that expose private paths, stale or divergent generated adapters, invalid thin
 contracts, and changed plan inputs are conflicts that fail closed.
 
 Apply is transactional. If a process is interrupted, the next run reports the bound
-recovery hash; recover that exact transaction before replanning:
+adoption hash. Plan recovery before any rollback:
 
 ```bash
 create-vivary adopt . --recover sha256:<plan-hash> --json
+```
+
+Review `recovery_plan_hash` and its bounded actions. Apply only that separately
+approved recovery plan:
+
+```bash
+create-vivary adopt . --recover sha256:<plan-hash> \
+  --yes --plan sha256:<recovery-plan-hash> --json
 ```
 
 ## 3. Verify

@@ -237,7 +237,7 @@ class ThinInitTests(unittest.TestCase):
             if target.exists():
                 shutil.rmtree(target)
 
-    def test_active_context_adds_two_files_and_keeps_index_state_out_of_scope(self):
+    def test_active_context_is_config_only_and_keeps_the_five_file_seed(self):
         target = temp_target()
         try:
             paths = create_vivary.scaffold_thin_workspace(
@@ -247,11 +247,9 @@ class ThinInitTests(unittest.TestCase):
                 repo_root=ROOT,
             )
 
-            self.assertEqual(len(paths), 7)
-            self.assertTrue((target / "docs" / "active-context.md").is_file())
-            skill = target / ".agents" / "skills" / "active-context" / "SKILL.md"
-            self.assertTrue(skill.is_file())
-            self.assertLessEqual(len(skill.read_bytes()), 1200)
+            self.assertEqual(len(paths), 5)
+            self.assertFalse((target / "docs" / "active-context.md").exists())
+            self.assertFalse((target / ".agents").exists())
             self.assertIn(
                 ".cocoindex_code/",
                 (target / ".gitignore").read_text(encoding="utf-8"),
@@ -285,6 +283,163 @@ class ThinInitTests(unittest.TestCase):
         finally:
             if target.exists():
                 shutil.rmtree(target)
+
+    def test_force_does_not_replace_user_edits_in_an_existing_thin_workspace(self):
+        target = temp_target()
+        try:
+            create_vivary.scaffold_thin_workspace(
+                target,
+                preset="coding",
+                repo_root=ROOT,
+            )
+            agents = target / "AGENTS.md"
+            state = target / "STATE.md"
+            agents.write_text(
+                agents.read_text(encoding="utf-8") + "\nUser-owned rule.\n",
+                encoding="utf-8",
+            )
+            state.write_text(
+                state.read_text(encoding="utf-8") + "\nUser-owned state.\n",
+                encoding="utf-8",
+            )
+            before = {
+                path.relative_to(target).as_posix(): path.read_bytes()
+                for path in target.rglob("*")
+                if path.is_file()
+            }
+
+            with self.assertRaisesRegex(
+                create_vivary.ScaffoldError,
+                "use create-vivary adopt",
+            ):
+                create_vivary.scaffold_thin_workspace(
+                    target,
+                    preset="coding",
+                    force=True,
+                    repo_root=ROOT,
+                )
+
+            self.assertEqual(
+                {
+                    path.relative_to(target).as_posix(): path.read_bytes()
+                    for path in target.rglob("*")
+                    if path.is_file()
+                },
+                before,
+            )
+        finally:
+            if target.exists():
+                shutil.rmtree(target)
+
+    def test_force_cannot_replace_a_file_created_after_the_empty_target_check(self):
+        target = temp_target()
+        real_write = create_vivary._write_bytes_no_follow
+        injected = {"done": False}
+
+        def create_competing_file(target_root, destination, data, **kwargs):
+            if not injected["done"]:
+                injected["done"] = True
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text("user-created during init\n", encoding="utf-8")
+            return real_write(target_root, destination, data, **kwargs)
+
+        try:
+            with mock.patch.object(
+                create_vivary,
+                "_write_bytes_no_follow",
+                side_effect=create_competing_file,
+            ):
+                with self.assertRaises(create_vivary.ScaffoldError):
+                    create_vivary.scaffold_thin_workspace(
+                        target,
+                        preset="coding",
+                        force=True,
+                        repo_root=ROOT,
+                    )
+
+            self.assertTrue(injected["done"])
+            self.assertEqual(
+                (target / ".gitignore").read_text(encoding="utf-8"),
+                "user-created during init\n",
+            )
+        finally:
+            if target.exists():
+                shutil.rmtree(target)
+
+    def test_parent_swap_cannot_redirect_a_seed_write_outside_the_workspace(self):
+        target = temp_target()
+        outside = target.with_name(target.name + "-outside")
+        moved = target.with_name(target.name + "-moved-workspace")
+        (outside / ".vivary").mkdir(parents=True)
+        sentinel = outside / "sentinel.txt"
+        sentinel.write_text("outside stays unchanged\n", encoding="utf-8")
+        real_replace = create_vivary.os.replace
+        real_link = create_vivary.os.link
+        real_windows_rename = getattr(create_vivary, "_windows_rename_open_file", None)
+        attack = {"attempted": False, "blocked": False}
+
+        def swap_destination_parent():
+            attack["attempted"] = True
+            try:
+                real_replace(target, moved)
+                target.symlink_to(
+                    outside,
+                    target_is_directory=True,
+                )
+            except OSError:
+                attack["blocked"] = True
+
+        def attempt_posix_parent_swap(src, dst, *args, **kwargs):
+            if not attack["attempted"] and Path(dst).name == "context.md":
+                swap_destination_parent()
+            return real_link(src, dst, *args, **kwargs)
+
+        def attempt_windows_parent_swap(file_handle, parent_handle, name, **kwargs):
+            if not attack["attempted"] and name == "context.md":
+                swap_destination_parent()
+            return real_windows_rename(file_handle, parent_handle, name, **kwargs)
+
+        failed_closed = False
+        try:
+            patcher = (
+                mock.patch.object(
+                    create_vivary,
+                    "_windows_rename_open_file",
+                    side_effect=attempt_windows_parent_swap,
+                )
+                if create_vivary.os.name == "nt"
+                else mock.patch.object(
+                    create_vivary.os,
+                    "link",
+                    side_effect=attempt_posix_parent_swap,
+                )
+            )
+            with patcher:
+                try:
+                    create_vivary.scaffold_thin_workspace(
+                        target,
+                        preset="coding",
+                        repo_root=ROOT,
+                    )
+                except create_vivary.ScaffoldError:
+                    failed_closed = True
+
+            self.assertTrue(attack["attempted"])
+            self.assertTrue(attack["blocked"] or failed_closed)
+            if not attack["blocked"]:
+                self.assertTrue(failed_closed)
+            self.assertEqual(
+                sentinel.read_text(encoding="utf-8"),
+                "outside stays unchanged\n",
+            )
+            self.assertFalse((outside / ".vivary" / "context.md").exists())
+        finally:
+            for path in (target, moved, outside):
+                if path.exists() or path.is_symlink():
+                    if path.is_symlink():
+                        path.unlink()
+                    else:
+                        shutil.rmtree(path)
 
     def test_cli_rejects_brownfield_before_wizard_or_backend_install(self):
         target = temp_target()

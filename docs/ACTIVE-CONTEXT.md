@@ -9,21 +9,21 @@ The baseline remains small and deterministic: `tropo` owns the typed graph, `str
 owns the agent loop, and no index, daemon, embedding model, or MCP server is enabled by
 default.
 
-For coding workspaces, `create-vivary` can add a bounded CocoIndex-code projection:
+For coding workspaces, `create-vivary` can declare the CocoIndex-code capability:
 
 ```bash
 create-vivary init my-workspace --preset coding --active-context cocoindex-code
 ```
 
-This writes exactly two files:
+This keeps the exact five-file Core seed. It changes only existing policy:
 
-- `.agents/skills/active-context/SKILL.md`, a bounded agent projection;
-- `docs/active-context.md`, the local policy.
+- `.vivary/workspace.toml` declares `cocoindex-code` and excludes its local index;
+- `.gitignore` ignores `.cocoindex_code/`.
 
-The thin workspace contract already excludes `.cocoindex_code/` from governed scans.
-No graph node, starter record, Claude-specific duplicate, or framework router is added.
+It does not copy a skill, guide, graph node, starter record, template, or framework
+router into the new workspace. Use this canonical guide when setup is later approved.
 
-It does **not** automatically install CocoIndex-code, initialize an index, run
+The declaration does **not** install CocoIndex-code, initialize an index, run
 embeddings, enable MCP, or send source text anywhere. Those are explicit gates after
 the user approves active context. For copy/paste agent instructions, use
 [LLM-ACTIVE-CONTEXT.md](LLM-ACTIVE-CONTEXT.md).

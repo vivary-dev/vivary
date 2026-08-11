@@ -29,8 +29,9 @@ contract.
   process interruption.
 - Added thin Tropo root/config resolution. `.vivary/workspace.toml` owns the base scope;
   root or nested legacy config may tighten it, while competing thin roots fail closed.
-- Added optional one-file `agents` and `claude` projections and a two-file bounded
-  `cocoindex-code` active-context projection.
+- Added optional one-file `agents` and `claude` projections. Explicit
+  `cocoindex-code` selection stays inside the same five-file seed by declaring the
+  capability and excluding its private index path; it copies no sidecar files.
 - Added `create-vivary record`, a read-only plan plus exact-hash apply transaction for
   one typed record earned by real work. It verifies a complete governed or public Task
   Capsule envelope against the current workspace, then binds its id, capsule and
@@ -75,10 +76,27 @@ contract.
 
 ### Fixed
 
+- Init now refuses every nonempty target even with `--force`, so it cannot replace
+  user edits in an existing thin workspace. Existing workspaces route through the
+  governed adoption plan.
+- Adoption approvals now bind the canonical workspace root, stable filesystem
+  identity, selected adapters, and exact planned inputs. An approval from an
+  identically shaped workspace cannot be replayed against another root.
+- Interrupted adoption recovery now authenticates the journal against its approved
+  plan and canonical action set. Recovery is read-only by default and requires a
+  separate exact recovery-plan hash plus `--yes` before rollback writes.
+- Generated-file writes now use verified directory identities and descriptor- or
+  handle-relative atomic replacement. Parent swaps fail closed without redirecting
+  content outside the intended workspace on Windows or POSIX.
+- Recognized legacy-full Doctor repair is now report-only. `--repair --yes` does not
+  recreate placeholders, alter privacy policy, or normalize legacy content.
 - Updated Linux and Windows installed-wheel CI assertions to the staged package
   versions and dependency floors. Required CI and npm release checks now run thin init,
   governed record, and brownfield adoption suites instead of leaving the new release
   contract outside the gate.
+- The optional MCP wheel smoke now installs `mcp==2.0.0` first, then resolves every
+  Vivary artifact only from the local candidate wheelhouse. Registry packages cannot
+  mask a broken branch dependency.
 - Replaced the record command's caller-typed capsule id/hash pair with full-envelope
   canonical integrity, exact scope or workspace fingerprint, and current-workspace
   validation. Tampered and wrong-workspace capsules now fail before a plan exists.
@@ -99,6 +117,8 @@ python -m pytest packages/core/tests/ -q
 uv run --offline --with mcp==2.0.0 --with mcp-types==2.0.0 --with pytest -- python -m pytest packages/mcp/tests/ -q
 python packages/create-vivary/tests/test_create_vivary.py
 python packages/create-vivary/tests/test_init_thin.py
+# WSL/Linux
+python3 packages/create-vivary/tests/test_init_thin.py
 python packages/create-vivary/tests/test_record_workflow.py
 python packages/create-vivary/tests/test_adopt.py
 python packages/create-vivary/tests/test_orientation_proof.py
@@ -122,26 +142,25 @@ cd site && node --test tests/*.test.mjs && node scripts/check-built-links.mjs
 
 - Results: Tropo **191/191**, Core **801/801**, optional MCP **30/30**,
   create-vivary **194 run** with 191 passed and 3 intentional skips, thin init
-  **10/10**, governed record **12/12**, thin adoption **12/12**, orientation proof
+  **13/13** on Windows and WSL/Linux, governed record **12/12**, thin adoption
+  **16/16** on Windows and WSL/Linux, orientation proof
   **9/9**, privacy differential **2/2**, Vivary meta CLI **9/9**, Ozone **110/110**,
   Exo **29/29**, Strato **48/48**, optional memory **54/54**, asset parity **5/5**,
   and site contracts **11/11**. The built-link gate checked **2,678** local references
   and **1,480** anchors across 33 pages with zero failures. Local browser review found
   zero console warnings or errors across the guide index and all six task guides.
-- A clean detached release-worktree build produced 18 wheel/source-distribution artifacts
-  for the nine package manifests. The replacement `create-vivary` source distribution
-  has 24 members and its wheel has seven; neither contains the legacy asset tree. An
-  isolated install passed `pip check`, all six suite CLI help smokes, MCP **30/30**, and
-  MCP capability discovery at SDK **2.0.0**. npm dry-run produced a three-file, 2.5 kB
-  `@vivary/create` **0.4.0** tarball inventory.
+- The current working tree built all nine wheels. A fresh isolated environment
+  installed `mcp==2.0.0`, then installed `vivary-mcp` and `create-vivary` with
+  `--no-index` from that wheelhouse; `pip check`, versions, and the MCP entry point
+  passed. npm dry-run produced a three-file, 2.6 kB `@vivary/create` **0.4.0** tarball.
 
 ### Status
 
 - Publishing remains a manual human gate.
 - No package was published or site deployed. Generated mirrors were synchronized and
   built locally, but brownfield benchmark and adoption dogfood were not performed.
-- Clean release-worktree artifact proof is complete. Remote CI, PR, merge, and release-tag
-  identity remain pending.
+- Exact-commit clean-worktree artifact proof must be repeated after the reviewed
+  candidate is committed. Remote CI, PR, merge, and release-tag identity remain pending.
 
 ## [Unreleased: Vivary Governed Context release truth and benchmark protocol (#149, #151, #210, #214)] — 2026-08-09
 

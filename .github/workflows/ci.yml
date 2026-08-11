@@ -255,7 +255,8 @@ jobs:
           mcp_venv="$smoke/mcp-venv"
           python -m venv "$mcp_venv"
           mcp_python="$mcp_venv/bin/python"
-          "$mcp_python" -m pip install --find-links "$wheelhouse" vivary-mcp create-vivary
+          "$mcp_python" -m pip install "mcp==2.0.0"
+          "$mcp_python" -m pip install --no-index --find-links "$wheelhouse" vivary-mcp create-vivary
           "$mcp_python" -m pip check
           "$mcp_venv/bin/vivary-mcp" --help > /dev/null
           "$mcp_python" - <<'PY'
@@ -603,7 +604,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MCP venv creation failed" }
           $mcpScripts = Join-Path $mcpVenv "Scripts"
           $mcpPython = Join-Path $mcpScripts "python.exe"
-          & $mcpPython -m pip install --find-links $wheelhouse vivary-mcp create-vivary
+          & $mcpPython -m pip install "mcp==2.0.0"
+          if ($LASTEXITCODE -ne 0) { throw "MCP dependency install failed" }
+          & $mcpPython -m pip install --no-index --find-links $wheelhouse vivary-mcp create-vivary
           if ($LASTEXITCODE -ne 0) { throw "optional MCP install failed" }
           & $mcpPython -m pip check
           if ($LASTEXITCODE -ne 0) { throw "optional MCP pip check failed" }

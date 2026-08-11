@@ -45,9 +45,10 @@ agent runtime. Workspaces operate in any editor or none, with Claude Code via
 bounded opt-in `.claude/` or `.agents/` projections; tropo ignores `.obsidian/`,
 `.vscode/`, and similar tool state.
 
-**Active context is a sidecar.** For codebases, a workspace may opt into
-CocoIndex-code guidance (`--active-context cocoindex-code`) so agents can ask before
-using semantic code search. This does not move embeddings or indexing into the tropo
+**Active context is a sidecar.** For codebases, a workspace may declare
+CocoIndex-code (`--active-context cocoindex-code`) so agents can ask before using
+semantic code search. The declaration stays inside the five-file seed and copies no
+sidecar files. This does not move embeddings or indexing into the tropo
 core; it keeps the deterministic graph as truth and treats semantic search as
 candidate retrieval.
 

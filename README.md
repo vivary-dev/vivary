@@ -172,8 +172,9 @@ typed graph, reports whether results came from stored or computed vectors, and f
 back to text search when no trustworthy local vector index is present.
 
 For coding workspaces that need richer source retrieval, `--active-context
-cocoindex-code` adds two bounded optional guidance files. It does not auto-install,
-index, enable MCP, create starter graph records, or send source text anywhere. See
+cocoindex-code` declares that optional capability in the same five-file seed. It adds
+the private index path to policy, but does not copy guidance, install, index, enable
+MCP, create starter graph records, or send source text anywhere. See
 [docs/ACTIVE-CONTEXT.md](docs/ACTIVE-CONTEXT.md) and the copyable
 [LLM active-context guide](docs/LLM-ACTIVE-CONTEXT.md).
 

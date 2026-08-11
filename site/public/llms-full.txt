@@ -278,9 +278,10 @@ create-vivary init my-workspace --preset coding --adapter claude
 create-vivary init my-codebase --preset coding --active-context cocoindex-code
 ```
 
-Each agent adapter adds one file of at most 1,200 bytes. Active context adds only
-`docs/active-context.md` and `.agents/skills/active-context/SKILL.md`; it does not
-install an indexer, create an index, enable MCP, or send source text anywhere.
+Each agent adapter adds one file of at most 1,200 bytes. Active context keeps the
+five-file seed and declares `cocoindex-code` in `.vivary/workspace.toml`. It also
+ignores `.cocoindex_code/`; it does not copy guidance, install an indexer, create an
+index, enable MCP, or send source text anywhere.
 Configure Obsidian or another editor separately after initialization.
 
 Storage and semantic memory are separate opt-ins. A non-interactive init without
@@ -313,10 +314,18 @@ that expose private paths, stale or divergent generated adapters, invalid thin
 contracts, and changed plan inputs are conflicts that fail closed.
 
 Apply is transactional. If a process is interrupted, the next run reports the bound
-recovery hash; recover that exact transaction before replanning:
+adoption hash. Plan recovery before any rollback:
 
 ```bash
 create-vivary adopt . --recover sha256:<plan-hash> --json
+```
+
+Review `recovery_plan_hash` and its bounded actions. Apply only that separately
+approved recovery plan:
+
+```bash
+create-vivary adopt . --recover sha256:<plan-hash> \
+  --yes --plan sha256:<recovery-plan-hash> --json
 ```
 
 ## 3. Verify
@@ -1440,9 +1449,9 @@ create-vivary record <target> <modules|changes|decisions|verification|gates>/<sl
 | Flag | Effect |
 |---|---|
 | `--preset coding\|second-brain\|knowledge-work\|writing` | Select thin workspace policy (default `coding`); does not seed starter content. |
-| `--force` | Refresh generated files only in an existing valid thin workspace. A nonempty brownfield target is redirected to `adopt`. |
+| `--force` | Compatibility flag. Init still refuses every nonempty target, including an existing thin workspace. Use `adopt` for governed changes. |
 | `--adapter agents\|claude` | Add one bounded runtime projection; repeat for both. Each adapter owns one file of at most 1,200 bytes. |
-| `--active-context cocoindex-code` | For `coding` workspaces, add exactly two bounded guidance files. Does not install, index, enable MCP, or transmit source. |
+| `--active-context cocoindex-code` | For `coding` workspaces, declare the capability and ignore its local index path within the same five-file seed. Does not copy guidance, install, index, enable MCP, or transmit source. |
 | `--storage auto\|file\|embedded\|cloud` | Storage backend to configure. `auto` defaults to `file` with no new dependencies. Explicit cloud locality can select cloud configuration. Embedded storage always requires `--storage embedded` or the matching wizard choice. |
 | `--provider lancedb\|sqlite-vec\|qdrant\|astra` | Which implementation to use for the selected tier. `lancedb` is the shipped embedded provider. |
 | `--memory none\|local\|cognee` | Optional semantic-memory policy. Default: `none`. `local` writes local-only policy. `cognee` writes gated Cognee policy and graph docs, but does not install Cognee or index content. |
@@ -1452,8 +1461,8 @@ create-vivary record <target> <modules|changes|decisions|verification|gates>/<sl
 | `--json` | Machine-readable output. Init reports the thin contract and files; adoption reports the deterministic plan/apply envelope described below. |
 | `--size small\|medium\|large` | Workspace classification hint. Size never selects or installs a provider. |
 | `--privacy local\|cloud` | Local keeps file storage unless another tier is explicit. Cloud can select cloud configuration. |
-| `--repair` | Doctor-only. Include a conservative guided repair plan. Dry-run by default; writes nothing without `--yes`. |
-| `--yes` | With `doctor --repair`, apply deterministic safe repairs, rerun doctor, and keep a nonzero exit if the workspace is still invalid. |
+| `--repair` | Doctor-only. Include conservative repair diagnostics. Recognized legacy-full workspaces are always report-only. |
+| `--yes` | With `doctor --repair`, apply deterministic safe repairs only to supported non-legacy contracts. It never writes a legacy-full workspace. |
 
 ### Capability status (development source)
 
@@ -1593,23 +1602,20 @@ failing reports. It exits `0` exactly when `errors` is empty and `1` otherwise;
 warnings do not change the exit code. `doctor --trend` is the explicit state-write
 exception, and `doctor --repair --yes` is the explicit repair-write exception.
 
-`doctor --repair` remains a guided, conservative legacy-full compatibility tool.
-Plain `doctor` stays read-only; thin adoption recovery uses `adopt --recover` instead.
-`doctor --repair --json` reports `repair.actions` without writing. Each action has
-`kind`, `status`, `path`, `summary`, and `applied`, with extra details when useful.
-`doctor --repair --yes --json` applies only deterministic safe repairs, then reruns
-doctor and returns that final report. Safe repairs are limited to regenerating missing
-ignored private/runtime placeholders (`USER.md`, `MEMORY.md`, `memory/.gitkeep`,
-`heartbeat-reports/.gitkeep`), appending missing privacy ignore lines, and removing
-simple single-line W210 redundant derived metadata. Non-workspace targets, symlinked,
-junctioned, hardlinked, non-file, and non-UTF-8 repair targets are refused or kept as
-manual guidance. Lower-level `.gitignore` negations that unignore private paths are
-reported as manual cleanup instead of being papered over by another root ignore block.
-Complex YAML W210 cases, broken refs (W220), exo active-work conflicts, and missing
-coordination-pack setup are manual guidance only; they are never auto-mutated.
+`doctor --repair --json` reports `repair.actions`. Each action has `kind`, `status`,
+`path`, `summary`, and `applied`, with extra details when useful. Recognized
+legacy-full workspaces always return `repair.mode: "report-only"`; `--yes` does not
+write them, and `--trend` does not create state during that report. Use a reviewed
+thin adoption plan for an approved legacy change.
 
-Legacy-full repair retains the published private-placeholder exceptions. These are
-compatibility rules, not thin-workspace output:
+For supported non-legacy contracts, `doctor --repair --yes --json` applies only
+deterministic safe actions, reruns Doctor, and remains nonzero while errors exist.
+Non-workspace targets, symlinked, junctioned, hardlinked, non-file, and non-UTF-8
+targets are refused or kept as manual guidance. Broken references, complex content,
+active-work conflicts, and missing coordination setup are never auto-mutated.
+
+Legacy-full diagnostics retain the published private-placeholder exceptions. These
+are compatibility rules, not thin-workspace output or permission to recreate files:
 
 ```gitignore
 memory/*
@@ -1643,7 +1649,7 @@ the bounded generated blocks in `AGENTS.md` and `.gitignore`.
 | `--adapter agents\|claude` | Add one optional bounded projection; repeat for both. |
 | `--yes` | Apply a plan. Requires `--plan` from the reviewed dry-run. |
 | `--plan PLAN_HASH` | Bind apply to the exact deterministic plan. Inputs and kept files are revalidated before writes. |
-| `--recover PLAN_HASH` | Roll back one interrupted transaction bound to that exact plan hash. |
+| `--recover PLAN_HASH` | Produce a read-only rollback plan for the interrupted transaction bound to that adoption hash. Apply only with `--yes --plan RECOVERY_PLAN_HASH`. |
 | `--json` | Report `mode`, `root`, `preset`, `contract`, `creates`, `patches`, `optional_projections`, `kept`, `conflicts`, `privacy`, and `plan_hash`; applied results also include Doctor proof. |
 
 The two host edits are managed blocks, not arbitrary rewrites. Existing user content
@@ -1667,8 +1673,12 @@ create-vivary adopt . --json
 # Apply the exact reviewed plan.
 create-vivary adopt . --yes --plan sha256:<plan-hash> --json
 
-# Recover only after an interrupted transaction reports this hash.
+# Plan recovery only after an interrupted transaction reports this adoption hash.
 create-vivary adopt . --recover sha256:<plan-hash> --json
+
+# Apply only the exact separately approved recovery plan.
+create-vivary adopt . --recover sha256:<plan-hash> \
+  --yes --plan sha256:<recovery-plan-hash> --json
 ```
 
 ### record
@@ -2045,8 +2055,9 @@ Include active code context only after explicit selection.
 python packages/create-vivary/create_vivary.py init C:/path/to/my-code-project --preset coding --active-context cocoindex-code --no-wizard
 ```
 
-This option adds two guidance files.
-It does not install or run an indexer.
+This option keeps the five-file seed.
+It declares the capability and ignores its local index path.
+It does not copy guidance, install an indexer, or create an index.
 
 ## Stop conditions
 
@@ -2523,7 +2534,7 @@ The default payload limit is three Vivary-owned files.
 Confirm that the directory is the intended project.
 Confirm that no higher or lower directory is the correct root.
 
-Do not run `init --force` on a brownfield project.
+Do not run `init --force` on any nonempty workspace.
 Use `adopt` for all nonempty targets.
 
 ## 2. Preview the adoption
@@ -2644,6 +2655,19 @@ python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
   --json
 ```
 
+This command is a read-only recovery plan.
+Review its `recovery_plan_hash` and actions.
+
+```bash
+python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
+  --recover sha256:<reported-plan-hash> \
+  --yes \
+  --plan sha256:<approved-recovery-plan-hash> \
+  --json
+```
+
+The second command restores only the approved transaction-bound bytes.
+
 Do not guess a recovery hash.
 Do not start a new plan before recovery completes.
 
@@ -2748,7 +2772,21 @@ python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
   --json
 ```
 
-Recovery restores the transaction-bound backups.
+This command writes nothing.
+It returns `recovery_plan_hash` and the bounded recovery actions.
+Review that exact plan.
+
+Apply the separately approved recovery hash.
+
+```bash
+python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
+  --recover sha256:<reported-plan-hash> \
+  --yes \
+  --plan sha256:<approved-recovery-plan-hash> \
+  --json
+```
+
+Recovery restores only the authenticated transaction-bound backups.
 Run Doctor after recovery.
 
 ## 5. Understand record rollback
@@ -2763,30 +2801,24 @@ Do not invent one.
 If the process stops unexpectedly, inspect Doctor and the transaction evidence.
 Stop when the required action is not explicit.
 
-## 6. Plan a legacy repair
+## 6. Inspect legacy repair diagnostics
 
 Use repair mode only for a recognized legacy full workspace.
-Preview the repair first.
+Request the report.
 
 ```bash
 python packages/create-vivary/create_vivary.py doctor C:/path/to/project --repair --json
 ```
 
-The preview writes nothing.
+The report writes nothing.
 Review each proposed action.
 
-Apply deterministic repairs only after approval.
-
-```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/project --repair --yes --json
-```
-
-Repair can restore approved placeholders and privacy ignore lines.
-Repair can remove simple redundant derived metadata.
-Repair does not fix broken references or complex content.
+Recognized legacy-full workspaces remain report-only even with `--yes`.
+No reported action is applied.
+Use a reviewed thin adoption plan for an approved legacy change.
 
 Thin adoption uses `adopt --recover`.
-Do not use legacy repair as thin recovery.
+Do not use legacy diagnostics as thin recovery.
 
 ## 7. Use trend only when approved
 
@@ -3039,13 +3071,10 @@ same MCP session. It asserts that no template, module pack, or extra record appe
 
 # Vivary — agent skills
 
-Vivary ships **agent skills**: load-on-demand procedures that tell an agent *how* to
-operate the workspace. They live next to the workspace (`.claude/skills/` for Claude
-Code, `.agents/skills/` for Codex) and load only when relevant, so they cost nothing
-until needed (the minimalism law). A generated workspace includes the **strato** and
-**loops** skills; the **tropo** skill ships with the tropo package. Coding workspaces
-created with `--active-context cocoindex-code` also include the optional
-**active-context** skill.
+Vivary packages include **agent skills**: load-on-demand procedures that tell an
+agent *how* to operate a capability. The five-file Core seed copies no skills. An
+explicit `--adapter` can add one bounded runtime projection; package and repository
+skills remain available at their documented install surfaces.
 
 Skills follow the same DRY/progressive-disclosure rule as module indexes: the skill is
 the procedure's source of truth, while `AGENTS.md` and `modules/**/index.md` only route
@@ -3157,11 +3186,14 @@ this order:
 where this is implemented", "search the codebase", or code work where grep is too
 thin/noisy.
 
-Generated only by:
+Declare the optional capability without copying this skill:
 
 ```bash
 create-vivary init my-codebase --preset coding --active-context cocoindex-code
 ```
+
+That command changes only the five-file seed policy. Use this canonical section or
+the LLM guide when a human later approves sidecar setup.
 
 ---
 
@@ -3189,21 +3221,21 @@ The baseline remains small and deterministic: `tropo` owns the typed graph, `str
 owns the agent loop, and no index, daemon, embedding model, or MCP server is enabled by
 default.
 
-For coding workspaces, `create-vivary` can add a bounded CocoIndex-code projection:
+For coding workspaces, `create-vivary` can declare the CocoIndex-code capability:
 
 ```bash
 create-vivary init my-workspace --preset coding --active-context cocoindex-code
 ```
 
-This writes exactly two files:
+This keeps the exact five-file Core seed. It changes only existing policy:
 
-- `.agents/skills/active-context/SKILL.md`, a bounded agent projection;
-- `docs/active-context.md`, the local policy.
+- `.vivary/workspace.toml` declares `cocoindex-code` and excludes its local index;
+- `.gitignore` ignores `.cocoindex_code/`.
 
-The thin workspace contract already excludes `.cocoindex_code/` from governed scans.
-No graph node, starter record, Claude-specific duplicate, or framework router is added.
+It does not copy a skill, guide, graph node, starter record, template, or framework
+router into the new workspace. Use this canonical guide when setup is later approved.
 
-It does **not** automatically install CocoIndex-code, initialize an index, run
+The declaration does **not** install CocoIndex-code, initialize an index, run
 embeddings, enable MCP, or send source text anywhere. Those are explicit gates after
 the user approves active context. For copy/paste agent instructions, use
 [LLM-ACTIVE-CONTEXT.md](https://vivary.vercel.app/llm-active-context/).
@@ -6038,8 +6070,11 @@ uv run --isolated --no-project --no-cache --index-url https://pypi.org/simple \
   --with vivary==<vivary-ver> python -c \
   "from importlib.metadata import version; import vivary_core; assert version('vivary') == '<vivary-ver>'; assert version('vivary-core') == '<core-ver>'"
 uvx --no-cache --index-url https://pypi.org/simple --from vivary-tropo==<ver> tropo --version
+uvx --no-cache --index-url https://pypi.org/simple --from vivary-strato==<ver> strato --version
 uvx --no-cache --index-url https://pypi.org/simple --from vivary-ozone==<ver> ozone --version
 uvx --no-cache --index-url https://pypi.org/simple --from vivary-exo==<ver> exo --version
+uvx --no-cache --index-url https://pypi.org/simple --from vivary-memory-cognee==<ver> vivary-cognee --version
+uvx --no-cache --index-url https://pypi.org/simple --from vivary-mcp==<ver> vivary-mcp --version
 uvx --no-cache --index-url https://pypi.org/simple --from create-vivary==<ver> create-vivary --version
 ```
 
@@ -6164,9 +6199,10 @@ agent runtime. Workspaces operate in any editor or none, with Claude Code via
 bounded opt-in `.claude/` or `.agents/` projections; tropo ignores `.obsidian/`,
 `.vscode/`, and similar tool state.
 
-**Active context is a sidecar.** For codebases, a workspace may opt into
-CocoIndex-code guidance (`--active-context cocoindex-code`) so agents can ask before
-using semantic code search. This does not move embeddings or indexing into the tropo
+**Active context is a sidecar.** For codebases, a workspace may declare
+CocoIndex-code (`--active-context cocoindex-code`) so agents can ask before using
+semantic code search. The declaration stays inside the five-file seed and copies no
+sidecar files. This does not move embeddings or indexing into the tropo
 core; it keeps the deterministic graph as truth and treats semantic search as
 candidate retrieval.
 
@@ -6567,8 +6603,9 @@ contract.
   process interruption.
 - Added thin Tropo root/config resolution. `.vivary/workspace.toml` owns the base scope;
   root or nested legacy config may tighten it, while competing thin roots fail closed.
-- Added optional one-file `agents` and `claude` projections and a two-file bounded
-  `cocoindex-code` active-context projection.
+- Added optional one-file `agents` and `claude` projections. Explicit
+  `cocoindex-code` selection stays inside the same five-file seed by declaring the
+  capability and excluding its private index path; it copies no sidecar files.
 - Added `create-vivary record`, a read-only plan plus exact-hash apply transaction for
   one typed record earned by real work. It verifies a complete governed or public Task
   Capsule envelope against the current workspace, then binds its id, capsule and
@@ -6613,10 +6650,27 @@ contract.
 
 ### Fixed
 
+- Init now refuses every nonempty target even with `--force`, so it cannot replace
+  user edits in an existing thin workspace. Existing workspaces route through the
+  governed adoption plan.
+- Adoption approvals now bind the canonical workspace root, stable filesystem
+  identity, selected adapters, and exact planned inputs. An approval from an
+  identically shaped workspace cannot be replayed against another root.
+- Interrupted adoption recovery now authenticates the journal against its approved
+  plan and canonical action set. Recovery is read-only by default and requires a
+  separate exact recovery-plan hash plus `--yes` before rollback writes.
+- Generated-file writes now use verified directory identities and descriptor- or
+  handle-relative atomic replacement. Parent swaps fail closed without redirecting
+  content outside the intended workspace on Windows or POSIX.
+- Recognized legacy-full Doctor repair is now report-only. `--repair --yes` does not
+  recreate placeholders, alter privacy policy, or normalize legacy content.
 - Updated Linux and Windows installed-wheel CI assertions to the staged package
   versions and dependency floors. Required CI and npm release checks now run thin init,
   governed record, and brownfield adoption suites instead of leaving the new release
   contract outside the gate.
+- The optional MCP wheel smoke now installs `mcp==2.0.0` first, then resolves every
+  Vivary artifact only from the local candidate wheelhouse. Registry packages cannot
+  mask a broken branch dependency.
 - Replaced the record command's caller-typed capsule id/hash pair with full-envelope
   canonical integrity, exact scope or workspace fingerprint, and current-workspace
   validation. Tampered and wrong-workspace capsules now fail before a plan exists.
@@ -6637,6 +6691,8 @@ python -m pytest packages/core/tests/ -q
 uv run --offline --with mcp==2.0.0 --with mcp-types==2.0.0 --with pytest -- python -m pytest packages/mcp/tests/ -q
 python packages/create-vivary/tests/test_create_vivary.py
 python packages/create-vivary/tests/test_init_thin.py
+# WSL/Linux
+python3 packages/create-vivary/tests/test_init_thin.py
 python packages/create-vivary/tests/test_record_workflow.py
 python packages/create-vivary/tests/test_adopt.py
 python packages/create-vivary/tests/test_orientation_proof.py
@@ -6660,26 +6716,25 @@ cd site && node --test tests/*.test.mjs && node scripts/check-built-links.mjs
 
 - Results: Tropo **191/191**, Core **801/801**, optional MCP **30/30**,
   create-vivary **194 run** with 191 passed and 3 intentional skips, thin init
-  **10/10**, governed record **12/12**, thin adoption **12/12**, orientation proof
+  **13/13** on Windows and WSL/Linux, governed record **12/12**, thin adoption
+  **16/16** on Windows and WSL/Linux, orientation proof
   **9/9**, privacy differential **2/2**, Vivary meta CLI **9/9**, Ozone **110/110**,
   Exo **29/29**, Strato **48/48**, optional memory **54/54**, asset parity **5/5**,
   and site contracts **11/11**. The built-link gate checked **2,678** local references
   and **1,480** anchors across 33 pages with zero failures. Local browser review found
   zero console warnings or errors across the guide index and all six task guides.
-- A clean detached release-worktree build produced 18 wheel/source-distribution artifacts
-  for the nine package manifests. The replacement `create-vivary` source distribution
-  has 24 members and its wheel has seven; neither contains the legacy asset tree. An
-  isolated install passed `pip check`, all six suite CLI help smokes, MCP **30/30**, and
-  MCP capability discovery at SDK **2.0.0**. npm dry-run produced a three-file, 2.5 kB
-  `@vivary/create` **0.4.0** tarball inventory.
+- The current working tree built all nine wheels. A fresh isolated environment
+  installed `mcp==2.0.0`, then installed `vivary-mcp` and `create-vivary` with
+  `--no-index` from that wheelhouse; `pip check`, versions, and the MCP entry point
+  passed. npm dry-run produced a three-file, 2.6 kB `@vivary/create` **0.4.0** tarball.
 
 ### Status
 
 - Publishing remains a manual human gate.
 - No package was published or site deployed. Generated mirrors were synchronized and
   built locally, but brownfield benchmark and adoption dogfood were not performed.
-- Clean release-worktree artifact proof is complete. Remote CI, PR, merge, and release-tag
-  identity remain pending.
+- Exact-commit clean-worktree artifact proof must be repeated after the reviewed
+  candidate is committed. Remote CI, PR, merge, and release-tag identity remain pending.
 
 ## [Unreleased: Vivary Governed Context release truth and benchmark protocol (#149, #151, #210, #214)] — 2026-08-09
 

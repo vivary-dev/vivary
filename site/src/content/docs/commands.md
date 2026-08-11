@@ -932,9 +932,9 @@ create-vivary record <target> <modules|changes|decisions|verification|gates>/<sl
 | Flag | Effect |
 |---|---|
 | `--preset coding\|second-brain\|knowledge-work\|writing` | Select thin workspace policy (default `coding`); does not seed starter content. |
-| `--force` | Refresh generated files only in an existing valid thin workspace. A nonempty brownfield target is redirected to `adopt`. |
+| `--force` | Compatibility flag. Init still refuses every nonempty target, including an existing thin workspace. Use `adopt` for governed changes. |
 | `--adapter agents\|claude` | Add one bounded runtime projection; repeat for both. Each adapter owns one file of at most 1,200 bytes. |
-| `--active-context cocoindex-code` | For `coding` workspaces, add exactly two bounded guidance files. Does not install, index, enable MCP, or transmit source. |
+| `--active-context cocoindex-code` | For `coding` workspaces, declare the capability and ignore its local index path within the same five-file seed. Does not copy guidance, install, index, enable MCP, or transmit source. |
 | `--storage auto\|file\|embedded\|cloud` | Storage backend to configure. `auto` defaults to `file` with no new dependencies. Explicit cloud locality can select cloud configuration. Embedded storage always requires `--storage embedded` or the matching wizard choice. |
 | `--provider lancedb\|sqlite-vec\|qdrant\|astra` | Which implementation to use for the selected tier. `lancedb` is the shipped embedded provider. |
 | `--memory none\|local\|cognee` | Optional semantic-memory policy. Default: `none`. `local` writes local-only policy. `cognee` writes gated Cognee policy and graph docs, but does not install Cognee or index content. |
@@ -944,8 +944,8 @@ create-vivary record <target> <modules|changes|decisions|verification|gates>/<sl
 | `--json` | Machine-readable output. Init reports the thin contract and files; adoption reports the deterministic plan/apply envelope described below. |
 | `--size small\|medium\|large` | Workspace classification hint. Size never selects or installs a provider. |
 | `--privacy local\|cloud` | Local keeps file storage unless another tier is explicit. Cloud can select cloud configuration. |
-| `--repair` | Doctor-only. Include a conservative guided repair plan. Dry-run by default; writes nothing without `--yes`. |
-| `--yes` | With `doctor --repair`, apply deterministic safe repairs, rerun doctor, and keep a nonzero exit if the workspace is still invalid. |
+| `--repair` | Doctor-only. Include conservative repair diagnostics. Recognized legacy-full workspaces are always report-only. |
+| `--yes` | With `doctor --repair`, apply deterministic safe repairs only to supported non-legacy contracts. It never writes a legacy-full workspace. |
 
 ### Capability status (development source)
 
@@ -1085,23 +1085,20 @@ failing reports. It exits `0` exactly when `errors` is empty and `1` otherwise;
 warnings do not change the exit code. `doctor --trend` is the explicit state-write
 exception, and `doctor --repair --yes` is the explicit repair-write exception.
 
-`doctor --repair` remains a guided, conservative legacy-full compatibility tool.
-Plain `doctor` stays read-only; thin adoption recovery uses `adopt --recover` instead.
-`doctor --repair --json` reports `repair.actions` without writing. Each action has
-`kind`, `status`, `path`, `summary`, and `applied`, with extra details when useful.
-`doctor --repair --yes --json` applies only deterministic safe repairs, then reruns
-doctor and returns that final report. Safe repairs are limited to regenerating missing
-ignored private/runtime placeholders (`USER.md`, `MEMORY.md`, `memory/.gitkeep`,
-`heartbeat-reports/.gitkeep`), appending missing privacy ignore lines, and removing
-simple single-line W210 redundant derived metadata. Non-workspace targets, symlinked,
-junctioned, hardlinked, non-file, and non-UTF-8 repair targets are refused or kept as
-manual guidance. Lower-level `.gitignore` negations that unignore private paths are
-reported as manual cleanup instead of being papered over by another root ignore block.
-Complex YAML W210 cases, broken refs (W220), exo active-work conflicts, and missing
-coordination-pack setup are manual guidance only; they are never auto-mutated.
+`doctor --repair --json` reports `repair.actions`. Each action has `kind`, `status`,
+`path`, `summary`, and `applied`, with extra details when useful. Recognized
+legacy-full workspaces always return `repair.mode: "report-only"`; `--yes` does not
+write them, and `--trend` does not create state during that report. Use a reviewed
+thin adoption plan for an approved legacy change.
 
-Legacy-full repair retains the published private-placeholder exceptions. These are
-compatibility rules, not thin-workspace output:
+For supported non-legacy contracts, `doctor --repair --yes --json` applies only
+deterministic safe actions, reruns Doctor, and remains nonzero while errors exist.
+Non-workspace targets, symlinked, junctioned, hardlinked, non-file, and non-UTF-8
+targets are refused or kept as manual guidance. Broken references, complex content,
+active-work conflicts, and missing coordination setup are never auto-mutated.
+
+Legacy-full diagnostics retain the published private-placeholder exceptions. These
+are compatibility rules, not thin-workspace output or permission to recreate files:
 
 ```gitignore
 memory/*
@@ -1135,7 +1132,7 @@ the bounded generated blocks in `AGENTS.md` and `.gitignore`.
 | `--adapter agents\|claude` | Add one optional bounded projection; repeat for both. |
 | `--yes` | Apply a plan. Requires `--plan` from the reviewed dry-run. |
 | `--plan PLAN_HASH` | Bind apply to the exact deterministic plan. Inputs and kept files are revalidated before writes. |
-| `--recover PLAN_HASH` | Roll back one interrupted transaction bound to that exact plan hash. |
+| `--recover PLAN_HASH` | Produce a read-only rollback plan for the interrupted transaction bound to that adoption hash. Apply only with `--yes --plan RECOVERY_PLAN_HASH`. |
 | `--json` | Report `mode`, `root`, `preset`, `contract`, `creates`, `patches`, `optional_projections`, `kept`, `conflicts`, `privacy`, and `plan_hash`; applied results also include Doctor proof. |
 
 The two host edits are managed blocks, not arbitrary rewrites. Existing user content
@@ -1159,8 +1156,12 @@ create-vivary adopt . --json
 # Apply the exact reviewed plan.
 create-vivary adopt . --yes --plan sha256:<plan-hash> --json
 
-# Recover only after an interrupted transaction reports this hash.
+# Plan recovery only after an interrupted transaction reports this adoption hash.
 create-vivary adopt . --recover sha256:<plan-hash> --json
+
+# Apply only the exact separately approved recovery plan.
+create-vivary adopt . --recover sha256:<plan-hash> \
+  --yes --plan sha256:<recovery-plan-hash> --json
 ```
 
 ### record

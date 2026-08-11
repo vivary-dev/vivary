@@ -9,6 +9,7 @@ import sys
 import unittest
 import uuid
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 PKG = ROOT / "packages" / "create-vivary"
@@ -211,6 +212,26 @@ class ThinAdoptPlanTests(unittest.TestCase):
         finally:
             shutil.rmtree(target)
 
+    def test_plan_hash_is_bound_to_the_exact_workspace_root(self):
+        parent_a = temp_dir()
+        parent_b = temp_dir()
+        target_a = parent_a / "project"
+        target_b = parent_b / "project"
+        try:
+            for target in (target_a, target_b):
+                target.mkdir()
+                write(target / "AGENTS.md", "# Existing agent rules\n")
+                write(target / ".gitignore", "node_modules/\n")
+                write(target / "STATE.md", "# Existing state\n")
+
+            plan_a = create_vivary.plan_adopt(target_a, preset="coding")
+            plan_b = create_vivary.plan_adopt(target_b, preset="coding")
+
+            self.assertNotEqual(plan_a["plan_hash"], plan_b["plan_hash"])
+        finally:
+            shutil.rmtree(parent_a)
+            shutil.rmtree(parent_b)
+
 
 class ThinAdoptApplyTests(unittest.TestCase):
     def test_apply_requires_the_exact_approved_plan_hash_before_any_write(self):
@@ -381,6 +402,7 @@ class ThinAdoptApplyTests(unittest.TestCase):
                             for error in interrupted_doctor["errors"]
                         )
                     )
+                    interrupted = snapshot(target)
 
                     rc, out = run_cli(
                         [
@@ -393,10 +415,33 @@ class ThinAdoptApplyTests(unittest.TestCase):
                     )
 
                     self.assertEqual(rc, 0, out)
-                    self.assertEqual(snapshot(target), before)
                     payload = json.loads(out)
-                    self.assertEqual(payload["mode"], "recovered")
-                    self.assertTrue(payload["recovered"])
+                    self.assertEqual(payload["mode"], "recovery-dry-run")
+                    self.assertFalse(payload["recovered"])
+                    self.assertRegex(
+                        payload["recovery_plan_hash"],
+                        r"^sha256:[0-9a-f]{64}$",
+                    )
+                    self.assertEqual(snapshot(target), interrupted)
+
+                    apply_rc, apply_out = run_cli(
+                        [
+                            "adopt",
+                            str(target),
+                            "--recover",
+                            plan["plan_hash"],
+                            "--yes",
+                            "--plan",
+                            payload["recovery_plan_hash"],
+                            "--json",
+                        ]
+                    )
+
+                    self.assertEqual(apply_rc, 0, apply_out)
+                    self.assertEqual(snapshot(target), before)
+                    applied = json.loads(apply_out)
+                    self.assertEqual(applied["mode"], "recovered")
+                    self.assertTrue(applied["recovered"])
                 finally:
                     shutil.rmtree(target)
 
@@ -429,6 +474,7 @@ class ThinAdoptApplyTests(unittest.TestCase):
             self.assertTrue(
                 any("pre-journal" in error for error in interrupted_doctor["errors"])
             )
+            interrupted = snapshot(target)
 
             rc, out = run_cli(
                 [
@@ -441,8 +487,159 @@ class ThinAdoptApplyTests(unittest.TestCase):
             )
 
             self.assertEqual(rc, 0, out)
+            payload = json.loads(out)
+            self.assertEqual(payload["mode"], "recovery-dry-run")
+            self.assertFalse(payload["recovered"])
+            self.assertEqual(snapshot(target), interrupted)
+
+            apply_rc, apply_out = run_cli(
+                [
+                    "adopt",
+                    str(target),
+                    "--recover",
+                    plan["plan_hash"],
+                    "--yes",
+                    "--plan",
+                    payload["recovery_plan_hash"],
+                    "--json",
+                ]
+            )
+
+            self.assertEqual(apply_rc, 0, apply_out)
             self.assertEqual(snapshot(target), before)
-            self.assertTrue(json.loads(out)["recovered"])
+            self.assertTrue(json.loads(apply_out)["recovered"])
+        finally:
+            shutil.rmtree(target)
+
+    def test_workspace_controlled_journal_cannot_delete_an_arbitrary_file(self):
+        target = temp_dir()
+        try:
+            victim = target / "README.md"
+            write(victim, "# User-owned project\n")
+            transaction_hash = "sha256:" + "a" * 64
+            journal = target / ".vivary" / "runtime" / "adopt-journal.json"
+            forged = {
+                "schema": create_vivary._ADOPT_JOURNAL_SCHEMA,
+                "plan_hash": transaction_hash,
+                "phase": "applying",
+                "completed": 1,
+                "actions": [
+                    {
+                        "path": "README.md",
+                        "kind": "create",
+                        "existed": False,
+                        "before": None,
+                        "before_hash": None,
+                        "after_hash": create_vivary._sha256_prefixed(victim.read_bytes()),
+                        "transient_after_hash": None,
+                    }
+                ],
+            }
+            write(journal, json.dumps(forged))
+
+            rc, out = run_cli(
+                [
+                    "adopt",
+                    str(target),
+                    "--recover",
+                    transaction_hash,
+                    "--json",
+                ]
+            )
+
+            self.assertEqual(rc, 1, out)
+            self.assertEqual(victim.read_text(encoding="utf-8"), "# User-owned project\n")
+        finally:
+            shutil.rmtree(target)
+
+    def test_rollback_delete_cannot_follow_a_swapped_parent(self):
+        target = temp_dir()
+        outside = target.with_name(target.name + "-outside")
+        moved = target.with_name(target.name + "-moved-vivary")
+        (outside / ".vivary").mkdir(parents=True)
+        victim = outside / ".vivary" / "context.md"
+        write(victim, "outside stays unchanged\n")
+        generated = target / ".vivary" / "context.md"
+        generated_bytes = b"generated context\n"
+        generated.parent.mkdir(parents=True)
+        generated.write_bytes(generated_bytes)
+        action = {
+            "path": generated,
+            "after": generated_bytes,
+            "after_hash": create_vivary._sha256_prefixed(generated_bytes),
+        }
+        attack = {"attempted": False, "blocked": False}
+        real_replace = create_vivary.os.replace
+
+        def swap_parent():
+            attack["attempted"] = True
+            try:
+                real_replace(target / ".vivary", moved)
+                (target / ".vivary").symlink_to(outside / ".vivary", target_is_directory=True)
+            except OSError:
+                attack["blocked"] = True
+
+        if create_vivary.os.name == "nt":
+            real_delete = create_vivary._windows_delete_open_file
+
+            def attempt_windows_swap(file_handle):
+                if not attack["attempted"]:
+                    swap_parent()
+                return real_delete(file_handle)
+
+            patcher = mock.patch.object(
+                create_vivary,
+                "_windows_delete_open_file",
+                side_effect=attempt_windows_swap,
+            )
+        else:
+            real_unlink = create_vivary.os.unlink
+
+            def attempt_posix_swap(path, *args, **kwargs):
+                if not attack["attempted"] and Path(path).name == "context.md":
+                    swap_parent()
+                return real_unlink(path, *args, **kwargs)
+
+            patcher = mock.patch.object(
+                create_vivary.os,
+                "unlink",
+                side_effect=attempt_posix_swap,
+            )
+
+        try:
+            with patcher:
+                try:
+                    create_vivary._rollback_adopt(
+                        target,
+                        [action],
+                        {generated: None},
+                        cleanup_journal=False,
+                    )
+                except create_vivary.ScaffoldError:
+                    pass
+
+            self.assertTrue(attack["attempted"])
+            self.assertTrue(attack["blocked"] or not generated.exists())
+            self.assertEqual(victim.read_text(encoding="utf-8"), "outside stays unchanged\n")
+        finally:
+            link = target / ".vivary"
+            if link.is_symlink():
+                link.unlink()
+            for path in (target, moved, outside):
+                if path.exists():
+                    shutil.rmtree(path)
+
+    def test_empty_directory_cleanup_does_not_use_pathname_rmdir(self):
+        target = temp_dir()
+        try:
+            (target / ".vivary" / "runtime").mkdir(parents=True)
+
+            with mock.patch.object(Path, "rmdir") as unsafe_rmdir:
+                create_vivary._remove_empty_adopt_dirs(target)
+
+            unsafe_rmdir.assert_not_called()
+            create_vivary._remove_empty_adopt_dirs(target)
+            self.assertFalse((target / ".vivary").exists())
         finally:
             shutil.rmtree(target)
 

@@ -43,9 +43,10 @@ npx @vivary/create@latest init my-workspace --adapter agents --adapter claude
 npx @vivary/create@latest init my-codebase --active-context cocoindex-code
 ```
 
-Each agent adapter adds at most one bounded file. The active-context option adds two
-bounded guidance files; it does not install or run an indexer, enable MCP, or transmit
-source. Obsidian setup is separate from thin init.
+Each agent adapter adds at most one bounded file. The active-context option keeps the
+five-file seed: it declares the capability and ignores its local index path. It does
+not copy guidance, install or run an indexer, enable MCP, or transmit source. Obsidian
+setup is separate from thin init.
 
 Doctor is read-only unless an explicit write mode such as `--trend` is selected. It
 recognizes both the new `thin-v0.3` contract and older `legacy-full` workspaces without

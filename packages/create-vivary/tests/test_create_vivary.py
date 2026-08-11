@@ -1567,7 +1567,7 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertEqual(rc, 1)
             payload = json.loads(buf.getvalue())
             self.assertFalse(payload["ok"])
-            self.assertIn("cannot replace a legacy or brownfield workspace", payload["error"])
+            self.assertIn("use create-vivary adopt", payload["error"])
 
     @unittest.skipIf(os.name != "nt", "junctions are Windows-only")
     def test_force_cleanup_removes_stale_junction_without_touching_its_target(self):
@@ -1710,9 +1710,21 @@ class CreateVivaryTests(unittest.TestCase):
             )
 
             self.assertEqual(rc, 0)
-            self.assertTrue((target / "docs" / "active-context.md").exists())
-            self.assertTrue(
-                (target / ".agents" / "skills" / "active-context" / "SKILL.md").exists()
+            config = (target / ".vivary" / "workspace.toml").read_text(encoding="utf-8")
+            self.assertIn('capabilities = ["cocoindex-code"]', config)
+            self.assertEqual(
+                sorted(
+                    path.relative_to(target).as_posix()
+                    for path in target.rglob("*")
+                    if path.is_file()
+                ),
+                [
+                    ".gitignore",
+                    ".vivary/context.md",
+                    ".vivary/workspace.toml",
+                    "AGENTS.md",
+                    "STATE.md",
+                ],
             )
 
     def test_doctor_accepts_generated_workspace(self):
@@ -1903,7 +1915,7 @@ class CreateVivaryTests(unittest.TestCase):
                         )
                     self.assertEqual(snapshot_workspace(target), before)
 
-    def test_doctor_repair_recognizes_legacy_v01_module_contract(self):
+    def test_doctor_repair_is_report_only_for_legacy_full_workspaces(self):
         with temp_workspace() as td:
             target = Path(td) / "legacy-repair"
             create_vivary.scaffold_workspace(
@@ -1915,22 +1927,23 @@ class CreateVivaryTests(unittest.TestCase):
                 gitignore.read_text(encoding="utf-8").replace("USER.md\n", ""),
                 encoding="utf-8",
             )
+            before = snapshot_workspace(target)
 
             report = create_vivary.doctor_repair_workspace(
-                target, repo_root=ROOT, yes=False
+                target, repo_root=ROOT, yes=True
             )
 
-            actions = report["repair"]["actions"]
-            self.assertFalse(any(action["kind"] == "workspace" for action in actions))
-            self.assertTrue(
-                any(
-                    action["kind"] == "gitignore"
-                    and action["status"] == "safe"
-                    and action["path"] == ".gitignore"
-                    for action in actions
-                ),
-                actions,
+            self.assertEqual(report["compatibility"]["workspace_contract"], "legacy-full")
+            self.assertEqual(report["repair"]["mode"], "report-only")
+            self.assertTrue(report["repair"]["actions"])
+            self.assertFalse(
+                any(action["applied"] for action in report["repair"]["actions"])
             )
+            self.assertIn(
+                "legacy-full repair is unavailable",
+                " ".join(report["warnings"]),
+            )
+            self.assertEqual(snapshot_workspace(target), before)
 
     def test_doctor_rejects_partial_indexed_workspace_contract(self):
         with temp_workspace() as td:
@@ -2301,7 +2314,7 @@ class CreateVivaryTests(unittest.TestCase):
 
             self.assertEqual(rc, 1)
             actions = out["repair"]["actions"]
-            self.assertEqual(out["repair"]["mode"], "dry-run")
+            self.assertEqual(out["repair"]["mode"], "report-only")
             self.assertTrue(any(a["kind"] == "placeholder" and a["path"] == "USER.md" for a in actions))
             self.assertTrue(any(a["kind"] == "gitignore" and a["status"] == "safe" for a in actions))
             self.assertTrue(any(a["kind"] == "tropo-w210" and a["status"] == "safe" for a in actions))
@@ -2314,7 +2327,7 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertNotIn("USER.md", (target / ".gitignore").read_text(encoding="utf-8"))
             self.assertIn("title: Codebase", module.read_text(encoding="utf-8"))
 
-    def test_doctor_repair_yes_applies_safe_repairs_and_reruns_doctor(self):
+    def test_doctor_repair_yes_remains_report_only_for_legacy_full(self):
         with temp_workspace() as td:
             target = Path(td) / "repair-apply"
             create_vivary.scaffold_workspace(
@@ -2334,30 +2347,25 @@ class CreateVivaryTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            before = snapshot_workspace(target)
 
             rc, out = run_doctor_json(target, "--repair", "--yes", "--trend")
 
-            self.assertEqual(rc, 0, out)
-            self.assertTrue(out["ok"], out)
+            self.assertEqual(rc, 1, out)
+            self.assertFalse(out["ok"], out)
             actions = out["repair"]["actions"]
-            self.assertEqual(out["repair"]["mode"], "applied")
-            self.assertTrue(any(a["kind"] == "placeholder" and a["path"] == "MEMORY.md" and a["applied"] for a in actions))
-            self.assertTrue(any(a["kind"] == "placeholder" and a["path"] == "memory/.gitkeep" and a["applied"] for a in actions))
-            self.assertTrue(any(a["kind"] == "tropo-w210" and a["applied"] for a in actions))
+            self.assertEqual(out["repair"]["mode"], "report-only")
+            self.assertFalse(any(a["applied"] for a in actions))
             self.assertEqual((target / "USER.md").read_text(encoding="utf-8"), "existing private note\n")
-            self.assertTrue((target / "MEMORY.md").exists())
-            self.assertTrue((target / "memory" / ".gitkeep").exists())
-            gitignore = (target / ".gitignore").read_text(encoding="utf-8")
-            for pattern in (
-                "USER.md",
-                "MEMORY.md",
-                "memory/*",
-                "heartbeat-reports/*",
-                ".strato/private/",
-                "*.vivary-tmp",
-            ):
-                self.assertIn(pattern, gitignore)
-            self.assertNotIn("title: Codebase", module.read_text(encoding="utf-8"))
+            self.assertFalse((target / "MEMORY.md").exists())
+            self.assertFalse((target / "memory" / ".gitkeep").exists())
+            self.assertEqual(
+                (target / ".gitignore").read_text(encoding="utf-8"),
+                "node_modules/\n",
+            )
+            self.assertIn("title: Codebase", module.read_text(encoding="utf-8"))
+            self.assertIsNone(out["trend"])
+            self.assertEqual(snapshot_workspace(target), before)
 
     def test_doctor_repair_yes_does_not_mutate_non_vivary_directory(self):
         with temp_workspace() as td:
@@ -2396,7 +2404,7 @@ class CreateVivaryTests(unittest.TestCase):
             rc, out = run_doctor_json(target, "--repair")
 
             self.assertEqual(rc, 1)
-            self.assertEqual(out["repair"]["mode"], "dry-run")
+            self.assertEqual(out["repair"]["mode"], "report-only")
             actions = out["repair"]["actions"]
             self.assertFalse(any(action["kind"] == "workspace" for action in actions))
             self.assertTrue(
@@ -2473,33 +2481,27 @@ class CreateVivaryTests(unittest.TestCase):
                 rc, 1, "doctor must not pass while the nested negation still unignores"
             )
 
-    def test_doctor_repair_restores_private_files_from_canonical_templates(self):
-        """Repair must regenerate USER.md/MEMORY.md as scaffold would, not as stubs.
-
-        Regression for `PRIVATE_PLACEHOLDER_TEXT` carrying a second, hardcoded definition
-        of these files: doctor passed on a workspace stripped of its identity, privacy,
-        decision and open-loop prompts, and template changes never reached the copy.
-        """
+    def test_doctor_repair_reports_missing_private_files_without_restoring_them(self):
         with temp_workspace() as td:
             target = Path(td) / "repair-private-templates"
             create_vivary.scaffold_workspace(
                 target, preset="coding", force=False, repo_root=ROOT
             )
-            expected = {
-                name: (target / name).read_text(encoding="utf-8")
-                for name in ("USER.md", "MEMORY.md")
-            }
-            for name in expected:
+            for name in ("USER.md", "MEMORY.md"):
                 (target / name).unlink()
+            before = snapshot_workspace(target)
 
-            run_doctor_json(target, "--repair", "--yes")
+            rc, out = run_doctor_json(target, "--repair", "--yes")
 
-            for name, original in expected.items():
-                self.assertEqual(
-                    (target / name).read_text(encoding="utf-8"),
-                    original,
-                    f"{name} must be restored from its canonical template, not a stub",
+            self.assertEqual(rc, 1, out)
+            self.assertEqual(out["repair"]["mode"], "report-only")
+            self.assertTrue(
+                all(
+                    any(a["kind"] == "placeholder" and a["path"] == name for a in out["repair"]["actions"])
+                    for name in ("USER.md", "MEMORY.md")
                 )
+            )
+            self.assertEqual(snapshot_workspace(target), before)
 
     # --- privacy matcher correctness cluster (see drafts/plans/2026-07-25-slice-01-
     # orchestrated-plan.md Step 2). These six are one indivisible fix: the wildmatch
@@ -2738,6 +2740,7 @@ class CreateVivaryTests(unittest.TestCase):
             rc, out = run_doctor_json(target, "--repair", "--yes")
 
             self.assertEqual(rc, 1)
+            self.assertEqual(out["repair"]["mode"], "report-only")
             refused = [
                 a for a in out["repair"]["actions"]
                 if a["path"] == ".gitignore" and a["status"] == "refused"
@@ -2768,6 +2771,7 @@ class CreateVivaryTests(unittest.TestCase):
             rc, out = run_doctor_json(target, "--repair", "--yes")
 
             self.assertEqual(rc, 1)
+            self.assertEqual(out["repair"]["mode"], "report-only")
             self.assertFalse(out["ok"])
             w220 = [a for a in out["repair"]["actions"] if a["kind"] == "tropo-w220"]
             self.assertEqual(len(w220), 1)
@@ -3064,7 +3068,8 @@ class CreateVivaryTests(unittest.TestCase):
 
             rc, out = run_doctor_json(target, "--repair", "--yes")
 
-            self.assertEqual(rc, 1)
+            self.assertEqual(rc, 0)
+            self.assertEqual(out["repair"]["mode"], "report-only")
             refused = [
                 a for a in out["repair"]["actions"]
                 if a["path"] == "memory/.gitkeep" and a["status"] == "refused"
@@ -3090,7 +3095,8 @@ class CreateVivaryTests(unittest.TestCase):
 
             rc, out = run_doctor_json(target, "--repair")
 
-            self.assertEqual(rc, 1)
+            self.assertEqual(rc, 0)
+            self.assertEqual(out["repair"]["mode"], "report-only")
             refused = [
                 a for a in out["repair"]["actions"]
                 if a["path"] == "USER.md" and a["status"] == "refused"
@@ -3169,7 +3175,7 @@ class CreateVivaryTests(unittest.TestCase):
 
             self.assertEqual(rc, 0, out)
             self.assertIsNone(out["trend"])
-            self.assertIn("repair dry-run", " ".join(out["warnings"]))
+            self.assertIn("repair is report-only", " ".join(out["warnings"]))
             self.assertFalse((target / ".vivary" / "doctor-state.json").exists())
 
 

@@ -27,7 +27,7 @@ The default payload limit is three Vivary-owned files.
 Confirm that the directory is the intended project.
 Confirm that no higher or lower directory is the correct root.
 
-Do not run `init --force` on a brownfield project.
+Do not run `init --force` on any nonempty workspace.
 Use `adopt` for all nonempty targets.
 
 ## 2. Preview the adoption
@@ -147,6 +147,19 @@ python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
   --recover sha256:<reported-plan-hash> \
   --json
 ```
+
+This command is a read-only recovery plan.
+Review its `recovery_plan_hash` and actions.
+
+```bash
+python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
+  --recover sha256:<reported-plan-hash> \
+  --yes \
+  --plan sha256:<approved-recovery-plan-hash> \
+  --json
+```
+
+The second command restores only the approved transaction-bound bytes.
 
 Do not guess a recovery hash.
 Do not start a new plan before recovery completes.
