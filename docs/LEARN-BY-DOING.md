@@ -1,74 +1,132 @@
-# Learn by doing
+# Vivary guide library
 
-This is the shortest evidence-led path through one Vivary loop. Complete
-[Getting started](GETTING-STARTED.md) for installation and preset choice; the
-[full walkthrough](WALKTHROUGH.md) owns the recorded public proof, and the
-[command reference](COMMANDS.md) owns exact flags, output envelopes, and exit
-codes. This page routes to those owners instead of replacing them.
+Use these guides to complete one real task at a time.
+The guides use STE100 style.
+Each procedure is concise, direct, and safe to copy.
 
-## Create a disposable workspace
+The complete guide set is thorough.
+Each guide keeps one task boundary.
+The command reference keeps exhaustive flags, schemas, limits, and exit codes.
 
-Run this in a directory you can discard:
+## Release boundary
 
-```bash
-create-vivary init demo-vivary-workspace --preset coding --no-wizard
-create-vivary doctor demo-vivary-workspace
-tropo check --root demo-vivary-workspace
-```
+The guide library describes the unpublished 0.4.0 source candidate.
+Registry `latest` still installs published 0.3.1.
+Use the [release-status table](../README.md#release-status) as the publication authority.
 
-The [recorded public fixture](WALKTHROUGH.md#1-scaffold-a-workspace) wrote 38
-files. Its [health run](WALKTHROUGH.md#2-prove-workspace-health) recorded
-`doctor`: 9 nodes, 28 edges, 0 broken refs; `memory`: disabled; and `tropo
-check`: 9 documents, 0 errors, 0 warnings. Those are fixture evidence, not a
-promised count for every workspace. Verified: 2026-08-09.
+The [historical proof](WALKTHROUGH.md) records the published 0.3.1 full layout.
+Do not use that 38-file fixture as the thin-workspace expectation.
 
-## Inspect the graph before changing it
+## Command route
+
+Before release, run each guide from the Vivary source checkout root.
+Use these source commands:
 
 ```bash
-ozone review --root demo-vivary-workspace
-exo board --root demo-vivary-workspace
-ozone impact human-gates --root demo-vivary-workspace
+python packages/create-vivary/create_vivary.py
+python packages/tropo/tropo.py
 ```
 
-In that same public fixture, the [review and board run](WALKTHROUGH.md#3-run-review-and-coordination)
-recorded 9 reviewed nodes with no Ozone warnings or notes and two Exo work
-items. The [impact run](WALKTHROUGH.md#4-name-impact-before-changing-things)
-found eight dependent nodes for `human-gates`. Treat those values as observed
-fixture output; your workspace's graph determines its own result. Verified:
-2026-08-09.
+The non-governed guide commands include these source paths.
+Replace each example workspace path with the intended absolute path.
 
-## Read findings before repairing them
+Governed capsule and record commands need an isolated candidate environment.
+Get approval before you create or change that environment.
 
-- `tropo check` validates document fields **and** resolves graph references. A
-  `W220` names a reference whose target document id is missing; it is not a
-  topology or coverage result. [The finding-code owner](COMMANDS.md#finding-codes)
-  and its [Tropo regression fixture](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py#L408-L429)
-  define that behavior. Verified: 2026-08-09.
-- `tropo fix` removes derived-noise fields reported as `W210`; it does **not**
-  remove an arbitrary unknown `type` field. Correct that field manually unless
-  the product behavior changes. [The `fix` regression](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py#L351-L368)
-  demonstrates the narrow de-noising contract. Verified: 2026-08-09.
-- `create-vivary doctor` already invokes Tropo analysis and promotes Tropo
-  findings into its health errors. Run `tropo check` when you need Tropo's own
-  finding report as well. [Doctor's graph-validation owner](https://github.com/vivary-dev/vivary/blob/dev/packages/create-vivary/create_vivary.py#L892-L909)
-  and the [command contract](COMMANDS.md#create-vivary--the-scaffolder) define
-  the two reporting surfaces. Verified: 2026-08-09.
-- Semantic memory is opt-in. `--auto` does not select local memory; when local
-  memory is intended, say so explicitly:
+Create the environment on Windows:
 
-  ```bash
-  create-vivary init my-workbench --preset knowledge-work --memory local
-  ```
+```powershell
+python -m venv C:/path/to/vivary-candidate
+C:/path/to/vivary-candidate/Scripts/python.exe -m pip install ./packages/core ./packages/tropo ./packages/create-vivary
+C:/path/to/vivary-candidate/Scripts/Activate.ps1
+```
 
-  [Getting started](GETTING-STARTED.md#2-create-a-workspace), the [scaffolder
-  command contract](COMMANDS.md#create-vivary--the-scaffolder), and the
-  [selection implementation](https://github.com/vivary-dev/vivary/blob/dev/packages/create-vivary/create_vivary.py#L3481-L3505)
-  record that default and explicit choice. Verified: 2026-08-09.
+Create the environment on macOS or Linux:
 
-## Continue with the right owner
+```bash
+python -m venv /path/to/vivary-candidate
+/path/to/vivary-candidate/bin/python -m pip install ./packages/core ./packages/tropo ./packages/create-vivary
+source /path/to/vivary-candidate/bin/activate
+```
 
-- Follow the [full walkthrough](WALKTHROUGH.md) for the complete recorded first
-  cycle and its public proof artifacts.
-- Use the [command reference](COMMANDS.md) for flags, JSON envelopes, exit
-  codes, repair boundaries, optional providers, and adoption.
-- For an existing repository or vault, use the [adoption path](GETTING-STARTED.md#adopt-an-existing-repo-or-vault): inspect `create-vivary adopt . --json` first and run `--yes` only after you approve the listed additions.
+Use that environment for every `--governed` or `record` command.
+Do not use the published 0.3.1 command for these candidate procedures.
+
+After 0.4.0 is published, use `create-vivary` and `tropo` directly.
+Do not use unversioned registry `latest` before publication.
+
+## Choose a guide
+
+| Task | Guide | Result |
+|---|---|---|
+| Start a new project | [Create a Vivary workspace](guides/create-workspace.md) | Create the five-file seed. |
+| Give an agent context | [Connect an agent to Vivary](guides/connect-agent.md) | Use the standard route or optional MCP. |
+| Retrieve evidence | [Get bounded context](guides/get-context.md) | Return task context or a Task Capsule. |
+| Preserve earned context | [Write one approved record](guides/write-record.md) | Apply one capsule-bound record. |
+| Add Vivary to a project | [Adopt an existing project](guides/adopt-project.md) | Apply a bounded brownfield plan. |
+| Prove health | [Verify and recover a workspace](guides/verify-recover.md) | Validate health and use explicit recovery. |
+
+## Use the guides in this order
+
+For a new project:
+
+1. Create the workspace.
+2. Verify the five-file seed.
+3. Connect the selected agent.
+4. Retrieve bounded context.
+5. Complete real work.
+6. Verify the result.
+7. Write one record only when the work earns it.
+
+For an existing project:
+
+1. Preview adoption.
+2. Review conflicts and privacy.
+3. Get approval for the exact plan hash.
+4. Apply the approved plan.
+5. Verify the adopted workspace.
+6. Connect the selected agent.
+
+## Shared guide format
+
+Each guide contains these parts:
+
+- result
+- agent contract
+- required input
+- exact procedure
+- expected output
+- files or state that can change
+- refusal conditions
+- verification
+- recovery
+- links to the canonical reference
+
+Humans and agents use the same canonical guide.
+The public site renders these Markdown files.
+The agent indexes expose the same content.
+
+Do not create a second agent manual.
+Do not copy guide text into workspace seeds.
+Do not add guide packs during init, adoption, MCP startup, or retrieval.
+
+## Authority summary
+
+Default retrieval is read-only.
+The `--receipt` option writes a local privacy-preserving receipt.
+MCP is read-only and optional.
+Plain Doctor is read-only.
+Init creates the approved new-workspace seed.
+Adoption needs an exact approved plan hash.
+Record apply needs a capsule and exact approved plan hash.
+Recovery needs the exact reported transaction hash.
+
+Publishing, external writes, destructive work, credentials, and authority expansion remain human gates.
+
+## Reference owners
+
+- [Getting started](GETTING-STARTED.md) owns installation and release boundaries.
+- [Command reference](COMMANDS.md) owns flags, output envelopes, limits, and exit codes.
+- [MCP reference](MCP.md) owns tool schemas, transport, limits, and authority.
+- [Architecture](ARCHITECTURE.md) owns package and module boundaries.
+- [Release workflow](RELEASE-WORKFLOW.md) owns build, publication, verification, and rollback gates.

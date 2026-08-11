@@ -86,6 +86,9 @@ jobs:
       - name: Run create-vivary release checks
         run: |
           python packages/create-vivary/tests/test_create_vivary.py
+          python packages/create-vivary/tests/test_init_thin.py
+          python packages/create-vivary/tests/test_record_workflow.py
+          python packages/create-vivary/tests/test_adopt.py
           python packages/create-vivary/tests/test_assets_parity.py
           node packages/create-vivary/tests/test_npm_launcher.js
 

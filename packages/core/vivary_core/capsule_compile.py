@@ -2278,6 +2278,157 @@ def public_task_capsule_json_schema():
     return deepcopy(_PUBLIC_TASK_CAPSULE_JSON_SCHEMA)
 
 
+def verify_public_task_capsule_integrity(capsule, *, checkout_path):
+    """Verify one bounded public capsule and its privacy-safe canonical body."""
+
+    digest = re.compile(r"sha256:[0-9a-f]{64}")
+    identifier = re.compile(r"[a-z][a-z0-9_]{0,63}")
+
+    def exact(value, keys):
+        return type(value) is dict and set(value) == set(keys)
+
+    def bounded_integer(value, *, minimum=0):
+        return (
+            type(value) is int
+            and minimum <= value <= MAX_LOSSLESS_INTEGER
+        )
+
+    def public_text(value, maximum):
+        return _public_capsule_text_is_safe(value, checkout_path, maximum)
+
+    if (
+        not is_canonical_absolute_path(checkout_path)
+        or normalize_path(checkout_path) != checkout_path
+        or not exact(
+            capsule,
+            {
+                "schema",
+                "capsule_id",
+                "workspace",
+                "claims",
+                "conflict_count",
+                "unknowns",
+                "omissions",
+                "required_checks",
+                "budget",
+                "complete",
+                "projection_omissions",
+                "fingerprint",
+            },
+        )
+        or capsule.get("schema") != PUBLIC_TASK_CAPSULE_SCHEMA
+        or re.fullmatch(r"capsule_[0-9a-f]{16}", capsule.get("capsule_id", "")) is None
+        or re.fullmatch(digest, capsule.get("fingerprint", "")) is None
+        or type(capsule.get("complete")) is not bool
+        or not bounded_integer(capsule.get("conflict_count"))
+    ):
+        return False
+
+    workspace = capsule.get("workspace")
+    if (
+        type(workspace) is not dict
+        or "fingerprint" not in workspace
+        or not set(workspace) <= {
+            "fingerprint",
+            "content_fingerprint",
+            "repair_topology_fingerprint",
+        }
+        or any(re.fullmatch(digest, value) is None for value in workspace.values())
+    ):
+        return False
+
+    claims = capsule.get("claims")
+    if (
+        type(claims) is not list
+        or len(claims) > MAX_PUBLIC_TASK_CAPSULE_CLAIMS
+        or any(
+            not exact(claim, {"fact", "claim", "status", "selection_reason"})
+            or re.fullmatch(identifier, claim.get("fact", "")) is None
+            or claim.get("status") != "known"
+            or not public_text(claim.get("claim"), 4096)
+            or not public_text(claim.get("selection_reason"), 4096)
+            for claim in claims
+        )
+    ):
+        return False
+
+    unknowns = capsule.get("unknowns")
+    if (
+        type(unknowns) is not list
+        or len(unknowns) > MAX_PUBLIC_TASK_CAPSULE_DETAILS
+        or any(
+            not exact(unknown, {"kind", "fact", "reason"})
+            or re.fullmatch(identifier, unknown.get("kind", "")) is None
+            or (
+                unknown.get("fact") is not None
+                and re.fullmatch(identifier, unknown.get("fact", "")) is None
+            )
+            or not public_text(unknown.get("reason"), 4096)
+            for unknown in unknowns
+        )
+    ):
+        return False
+
+    omissions = capsule.get("omissions")
+    if (
+        type(omissions) is not list
+        or len(omissions) > MAX_PUBLIC_TASK_CAPSULE_DETAILS
+        or any(
+            not exact(omission, {"kind", "reason", "count"})
+            or re.fullmatch(identifier, omission.get("kind", "")) is None
+            or not public_text(omission.get("reason"), 4096)
+            or not bounded_integer(omission.get("count"), minimum=1)
+            for omission in omissions
+        )
+    ):
+        return False
+
+    required_checks = capsule.get("required_checks")
+    if (
+        type(required_checks) is not list
+        or len(required_checks) > MAX_PUBLIC_TASK_CAPSULE_DETAILS
+        or any(
+            not exact(check, {"name"})
+            or not public_text(check.get("name"), 256)
+            for check in required_checks
+        )
+    ):
+        return False
+
+    budget = capsule.get("budget")
+    projection_omissions = capsule.get("projection_omissions")
+    projection_kinds = {
+        "claim",
+        "conflict",
+        "unknown",
+        "omission",
+        "required_check",
+    }
+    if (
+        not exact(budget, {"max_claims"})
+        or not bounded_integer(budget.get("max_claims"))
+        or type(projection_omissions) is not list
+        or len(projection_omissions) > len(projection_kinds)
+        or any(
+            not exact(row, {"kind", "reason", "count"})
+            or row.get("kind") not in projection_kinds
+            or row.get("reason") != "unsafe_for_public_projection"
+            or not bounded_integer(row.get("count"), minimum=1)
+            for row in projection_omissions
+        )
+        or len({row["kind"] for row in projection_omissions})
+        != len(projection_omissions)
+        or capsule["complete"] != (not projection_omissions)
+    ):
+        return False
+
+    body = {key: value for key, value in capsule.items() if key != "fingerprint"}
+    return (
+        is_canonical_body_value(body)
+        and capsule["fingerprint"] == fingerprint(body)
+    )
+
+
 def _public_capsule_text_is_safe(value, checkout_path, maximum):
     if (
         not isinstance(value, str)

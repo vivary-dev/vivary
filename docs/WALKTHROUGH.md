@@ -1,17 +1,22 @@
 # Getting started proof
 
+> **Historical published-line fixture.** This page records the public 0.3.1 full
+> scaffold and is retained as release evidence. Development-source 0.4.0 uses the
+> five-file thin contract described in [Getting started](GETTING-STARTED.md); it does
+> not reproduce this 38-file layout.
+
 This is a public, generic proof of the first Vivary work cycle. It uses a disposable
 workspace named `demo-vivary-workspace`; no private dogfood bundle, local project brain,
 API key, customer data, or internal transcript is part of this page.
 
-The point is simple: a user or agent can scaffold a workspace, prove it is healthy, see
+The historical proof shows that a user or agent could scaffold a workspace, prove it is healthy, see
 the typed graph, run review, see coordination state, and name blast radius before work.
 
 ## 1. Scaffold a workspace
 
 ![A terminal screenshot showing create-vivary writing a generic coding workspace.](assets/walkthrough/01-scaffold.svg)
 
-The scaffold creates the agent operating shell and the graph starter pack in one pass:
+The published 0.3.1 scaffold created the agent operating shell and graph starter pack:
 
 ```bash
 create-vivary init demo-vivary-workspace --preset coding --no-wizard

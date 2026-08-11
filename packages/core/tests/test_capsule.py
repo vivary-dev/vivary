@@ -65,6 +65,7 @@ from vivary_core.capsule_compile import (  # noqa: E402
     MAX_GRAPH_CONTEXT_CHECKOUTS,
     repair_topology_fingerprint,
     is_task_capsule_shape,
+    verify_public_task_capsule_integrity,
     verify_task_capsule_integrity,
 )
 from vivary_core.workspace_content import CONTENT_SCHEMA, observe_content  # noqa: E402
@@ -2770,6 +2771,7 @@ def test_public_capsule_projection_is_deterministic_bounded_and_private(graph, f
     second = project_public_task_capsule(capsule, checkout_path=root)
 
     assert first == second
+    assert verify_public_task_capsule_integrity(first, checkout_path=root)
     assert first["fingerprint"] == fingerprint(
         {key: value for key, value in first.items() if key != "fingerprint"}
     )
@@ -2789,6 +2791,10 @@ def test_public_capsule_projection_is_deterministic_bounded_and_private(graph, f
     }.intersection(_nested_keys(first))
     assert first["complete"] is False
     assert first["projection_omissions"]
+
+    tampered = json.loads(json.dumps(first))
+    tampered["capsule_id"] = "capsule_0000000000000000"
+    assert not verify_public_task_capsule_integrity(tampered, checkout_path=root)
 
 
 @pytest.mark.parametrize(

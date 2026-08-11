@@ -19,7 +19,8 @@ Usage:
   tropo find <text> [--budget N | --governed [--max-claims N]] [--json]
   tropo map [PATH | --root PATH] [--depth N] [--max-entries N] [--json]
 
-Config is TOML (tropo.toml, resolved by walking up). Content frontmatter is YAML.
+Config is TOML (`.vivary/workspace.toml` for thin-v0.3; legacy `tropo.toml`
+remains readable). Content frontmatter is YAML.
 Requires Python 3.11+ (for tomllib). Governed find uses vivary-core.
 Exit codes: 0 = clean, 1 = errors found, 2 = config/usage problem.
 """
@@ -626,18 +627,125 @@ def _read_pack(name, root, script_dir):
     raise ConfigError(f"pack {name!r} not found (looked in .tropo/packs and bundled packs)")
 
 
+THIN_CONFIG_REL = os.path.join(".vivary", "workspace.toml")
+THIN_WORKSPACE_CONTRACT = "thin-v0.3"
+THIN_ADAPTERS = {"agents", "claude"}
+THIN_CAPABILITIES = {"cocoindex-code"}
+
+
+def _workspace_relative_path(value, field):
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"workspace.{field} must be a non-empty relative path")
+    normalized = value.replace("\\", "/")
+    if (
+        normalized.startswith("/")
+        or re.match(r"^[A-Za-z]:", normalized)
+        or any(part in ("", ".", "..") for part in normalized.split("/"))
+    ):
+        raise ConfigError(f"workspace.{field} must stay inside the workspace")
+    return normalized.rstrip("/")
+
+
+def _validate_thin_workspace(raw, thin_path, root):
+    if os.path.islink(thin_path):
+        raise ConfigError(f"{thin_path}: thin workspace config cannot be a symlink")
+    root_real = os.path.realpath(root)
+    thin_real = os.path.realpath(thin_path)
+    try:
+        inside = os.path.commonpath([root_real, thin_real]) == root_real
+    except ValueError:
+        inside = False
+    if not inside:
+        raise ConfigError(f"{thin_path}: thin workspace config escapes its workspace")
+    if raw.get("version") != 1 or isinstance(raw.get("version"), bool):
+        raise ConfigError(f"{thin_path}: version must be 1")
+    workspace = raw.get("workspace")
+    if not isinstance(workspace, dict):
+        raise ConfigError(f"{thin_path}: missing [workspace] metadata")
+    if workspace.get("contract") != THIN_WORKSPACE_CONTRACT:
+        raise ConfigError(
+            f"{thin_path}: workspace.contract must be {THIN_WORKSPACE_CONTRACT!r}"
+        )
+    preset = workspace.get("preset")
+    if not isinstance(preset, str) or not preset:
+        raise ConfigError(f"{thin_path}: workspace.preset must be a non-empty string")
+    _workspace_relative_path(workspace.get("state"), "state")
+
+    protected = []
+    for field in ("private", "runtime"):
+        values = workspace.get(field)
+        if not isinstance(values, list) or not values:
+            raise ConfigError(f"{thin_path}: workspace.{field} must be a non-empty list")
+        protected.extend(_workspace_relative_path(value, field) for value in values)
+    adapters = workspace.get("adapters")
+    if (
+        not isinstance(adapters, list)
+        or any(not isinstance(adapter, str) or adapter not in THIN_ADAPTERS for adapter in adapters)
+        or len(set(adapters)) != len(adapters)
+    ):
+        raise ConfigError(
+            f"{thin_path}: workspace.adapters may contain agents and claude once each"
+        )
+    capabilities = workspace.get("capabilities", [])
+    if (
+        not isinstance(capabilities, list)
+        or any(
+            not isinstance(capability, str) or capability not in THIN_CAPABILITIES
+            for capability in capabilities
+        )
+        or len(set(capabilities)) != len(capabilities)
+    ):
+        raise ConfigError(
+            f"{thin_path}: workspace.capabilities may contain cocoindex-code once"
+        )
+
+    excludes = raw.get("exclude")
+    if not isinstance(excludes, list) or any(not isinstance(item, str) for item in excludes):
+        raise ConfigError(f"{thin_path}: exclude must be a list of paths")
+    normalized_excludes = {item.replace("\\", "/").strip("/") for item in excludes}
+    missing = [path for path in protected if path not in normalized_excludes]
+    if missing:
+        raise ConfigError(
+            f"{thin_path}: exclude must protect workspace private/runtime paths: "
+            + ", ".join(missing)
+        )
+
+
+def _competing_thin_ancestor(root):
+    current = os.path.dirname(os.path.abspath(root))
+    while True:
+        candidate = os.path.join(current, THIN_CONFIG_REL)
+        if os.path.isfile(candidate):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
+
 def find_root(start):
-    """Walk up from `start` to the nearest directory containing tropo.toml."""
+    """Walk up to the nearest legacy or thin-v0.3 workspace root."""
     d = os.path.abspath(start)
     if os.path.isfile(d):
         d = os.path.dirname(d)
+    thin_roots = []
+    nearest_legacy = None
     while True:
-        if os.path.isfile(os.path.join(d, CONFIG_NAME)):
-            return d
+        if os.path.isfile(os.path.join(d, THIN_CONFIG_REL)):
+            thin_roots.append(d)
+        if nearest_legacy is None and os.path.isfile(os.path.join(d, CONFIG_NAME)):
+            nearest_legacy = d
         parent = os.path.dirname(d)
         if parent == d:
-            return None
+            break
         d = parent
+    if len(thin_roots) > 1:
+        raise ConfigError(
+            "competing thin-v0.3 roots: " + ", ".join(thin_roots)
+        )
+    if thin_roots:
+        return thin_roots[0]
+    return nearest_legacy
 
 
 class Config:
@@ -677,11 +785,34 @@ class Config:
 
 
 def _compose(root, script_dir, config_path=None):
-    raw = _read_toml(config_path or os.path.join(root, CONFIG_NAME))
+    thin_path = os.path.join(root, THIN_CONFIG_REL)
+    selected_path = config_path or (
+        thin_path if os.path.isfile(thin_path) else os.path.join(root, CONFIG_NAME)
+    )
+    raw = _read_toml(selected_path)
+    if (
+        config_path is None
+        and os.path.normcase(os.path.abspath(selected_path))
+        == os.path.normcase(os.path.abspath(thin_path))
+    ):
+        ancestor = _competing_thin_ancestor(root)
+        if ancestor is not None:
+            raise ConfigError(
+                f"competing thin-v0.3 roots: {os.path.abspath(root)}, {ancestor}"
+            )
+        _validate_thin_workspace(raw, thin_path, root)
     composed = {"base": {}, "types": {}, "exclude": []}
     for pack in raw.get("packs", []):
         _merge_config(composed, _read_pack(pack, root, script_dir))
     _merge_config(composed, raw)  # _merge_config normalizes each type's raw `folder`
+    root_overlay = os.path.join(root, CONFIG_NAME)
+    if (
+        config_path is None
+        and os.path.normcase(os.path.abspath(selected_path))
+        == os.path.normcase(os.path.abspath(thin_path))
+        and os.path.isfile(root_overlay)
+    ):
+        _merge_config(composed, _read_toml(root_overlay))
     return composed
 
 
@@ -722,6 +853,9 @@ def _overlay_paths(dirpath, root):
     out, d = [], root_abs
     for part in rel.split(os.sep):
         d = os.path.join(d, part)
+        nested_thin = os.path.join(d, THIN_CONFIG_REL)
+        if os.path.isfile(nested_thin):
+            raise ConfigError(f"competing nested thin-v0.3 root: {d}")
         cfg = os.path.join(d, CONFIG_NAME)
         if os.path.isfile(cfg):
             out.append(cfg)
@@ -2557,27 +2691,52 @@ def _public_candidate_from_info(rel, kind, info, full_path=None):
     }, None
 
 
-def _public_root_config_candidate(root, omissions):
-    config_path = os.path.join(root, CONFIG_NAME)
-    try:
-        info = os.lstat(config_path)
-    except FileNotFoundError:
-        return None, True
-    except OSError:
-        _public_add_omission(omissions, "config", "unavailable")
-        return None, False
-    candidate, reason = _public_candidate_from_info(
-        CONFIG_NAME,
-        "config",
-        info,
-        config_path,
+def _public_root_config_candidates(root, omissions):
+    thin_rel = THIN_CONFIG_REL.replace(os.sep, "/")
+    thin_path = os.path.join(root, THIN_CONFIG_REL)
+    legacy_path = os.path.join(root, CONFIG_NAME)
+    thin_exists = os.path.lexists(thin_path)
+    legacy_exists = os.path.lexists(legacy_path)
+    if not thin_exists and not legacy_exists:
+        return [], True
+
+    # A root tropo.toml beside thin-v0.3 is an explicit tighten-only overlay,
+    # not an ambiguous second configuration. Both descriptors must enter the
+    # privacy-admitted candidate set and both fail closed if either changes or
+    # becomes unreadable. A legacy-only config retains its omission-compatible
+    # public behavior.
+    descriptors = (
+        [(thin_rel, thin_path, True)]
+        + ([(CONFIG_NAME, legacy_path, True)] if legacy_exists else [])
+        if thin_exists
+        else [(CONFIG_NAME, legacy_path, False)]
     )
-    if candidate is None:
-        if reason == "file_size_limit":
-            raise WorkLimitExceededError()
-        _public_add_omission(omissions, "config", reason)
-        return None, True
-    return candidate, True
+    candidates = []
+    complete = True
+    for config_rel, config_path, required in descriptors:
+        try:
+            info = os.lstat(config_path)
+        except OSError:
+            if required:
+                raise PrivacyPolicyUnavailableError() from None
+            _public_add_omission(omissions, "config", "unavailable")
+            complete = False
+            continue
+        candidate, reason = _public_candidate_from_info(
+            config_rel,
+            "config",
+            info,
+            config_path,
+        )
+        if candidate is None:
+            if required:
+                raise PrivacyPolicyUnavailableError()
+            if reason == "file_size_limit":
+                raise WorkLimitExceededError()
+            _public_add_omission(omissions, "config", reason)
+            continue
+        candidates.append(candidate)
+    return candidates, complete
 
 
 def _public_enumerate_markdown(root, omissions, cancelled=None):
@@ -2934,50 +3093,97 @@ def _public_default_config(root):
     return Config({"base": {}, "types": {}, "exclude": []}, root)
 
 
-def _public_config_from_candidate(
+def _public_config_from_candidates(
     root,
-    candidate,
+    candidates,
     allowed,
     omissions,
     cancelled=None,
 ):
-    """Use root TOML plus embedded packs only; overlays and local packs stay unopened."""
-    if candidate is None:
+    """Compose privacy-admitted thin/base TOML and a tighten-only root overlay."""
+    if not candidates:
         return _public_default_config(root), None, True
-    if candidate["rel"] not in allowed:
-        _public_add_omission(omissions, "config", "git_ignored")
-        return _public_default_config(root), None, False
-    data, reason = _public_read_candidate(root, candidate, cancelled)
-    if data is None:
-        if reason == "file_size_limit":
-            raise WorkLimitExceededError()
-        _public_add_omission(omissions, "config", reason)
-        return _public_default_config(root), None, False
-    text = data.decode("utf-8", errors="replace")
-    if _public_text_has_credential(text) or _public_contains_workspace_path(text, root):
-        _public_add_omission(omissions, "config", "sensitive_content")
-        return _public_default_config(root), None, False
+    thin_rel = THIN_CONFIG_REL.replace(os.sep, "/")
+    has_thin = candidates[0].get("rel") == thin_rel
+    parsed = []
     try:
-        raw = tomllib.loads(text.lstrip(UTF8_BOM))
-    except (TypeError, ValueError, tomllib.TOMLDecodeError):
-        _public_add_omission(omissions, "config", "invalid")
-        return _public_default_config(root), None, False
-    if not _public_config_shape_is_safe(raw):
-        _public_add_omission(omissions, "config", "unsupported")
-        return _public_default_config(root), None, False
-    try:
+        for candidate in candidates:
+            if candidate["rel"] not in allowed:
+                if has_thin:
+                    raise PrivacyPolicyUnavailableError()
+                _public_add_omission(omissions, "config", "git_ignored")
+                return _public_default_config(root), None, False
+            data, reason = _public_read_candidate(root, candidate, cancelled)
+            if data is None:
+                if reason == "file_size_limit":
+                    raise WorkLimitExceededError()
+                if has_thin:
+                    raise PrivacyPolicyUnavailableError()
+                _public_add_omission(omissions, "config", reason)
+                return _public_default_config(root), None, False
+            text = data.decode("utf-8", errors="replace")
+            if _public_text_has_credential(text) or _public_contains_workspace_path(text, root):
+                if has_thin:
+                    raise PrivacyPolicyUnavailableError()
+                _public_add_omission(omissions, "config", "sensitive_content")
+                return _public_default_config(root), None, False
+            try:
+                raw = tomllib.loads(text.lstrip(UTF8_BOM))
+            except (TypeError, ValueError, tomllib.TOMLDecodeError):
+                if has_thin:
+                    raise PrivacyPolicyUnavailableError() from None
+                _public_add_omission(omissions, "config", "invalid")
+                return _public_default_config(root), None, False
+            if not _public_config_shape_is_safe(raw):
+                if has_thin:
+                    raise PrivacyPolicyUnavailableError()
+                _public_add_omission(omissions, "config", "unsupported")
+                return _public_default_config(root), None, False
+            if candidate["rel"] == thin_rel:
+                _validate_thin_workspace(
+                    raw,
+                    os.path.join(root, THIN_CONFIG_REL),
+                    root,
+                )
+            parsed.append((candidate, raw, data))
+
         composed = {"base": {}, "types": {}, "exclude": []}
-        for pack in raw.get("packs", []):
+        base_raw = parsed[0][1]
+        for pack in base_raw.get("packs", []):
             if pack not in BUNDLED_PACKS:
                 _public_add_omission(omissions, "config", "local_pack_excluded")
                 continue
             _merge_config(composed, tomllib.loads(BUNDLED_PACKS[pack]))
-        _merge_config(composed, raw)
+        for _candidate, raw, _data in parsed:
+            _merge_config(composed, raw)
         config = Config(composed, root)
     except (AttributeError, ConfigError, TypeError, ValueError, tomllib.TOMLDecodeError):
+        if has_thin:
+            raise PrivacyPolicyUnavailableError() from None
         _public_add_omission(omissions, "config", "invalid")
         return _public_default_config(root), None, False
-    return config, hashlib.sha256(data).hexdigest(), True
+    if len(parsed) == 1:
+        # Preserve the established fingerprint for legacy-only and thin-only
+        # workspaces; only the newly supported two-file composition needs a
+        # composite identity.
+        digest = hashlib.sha256(parsed[0][2]).hexdigest()
+    else:
+        digest_payload = [
+            {
+                "path": candidate["rel"],
+                "sha256": hashlib.sha256(data).hexdigest(),
+            }
+            for candidate, _raw, data in parsed
+        ]
+        digest = hashlib.sha256(
+            json.dumps(
+                digest_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+    return config, digest, True
 
 
 def _public_derived_fields(full, body, info):
@@ -3145,13 +3351,13 @@ def _public_document_snapshot(
     _public_require_root(root, allowlist, core)
     _public_cancel_if_requested(cancelled)
     omissions = {}
-    config_candidate, config_candidate_complete = _public_root_config_candidate(root, omissions)
+    config_candidates, config_candidate_complete = _public_root_config_candidates(root, omissions)
     markdown, enumeration_complete = _public_enumerate_markdown(
         root,
         omissions,
         cancelled,
     )
-    candidates = ([] if config_candidate is None else [config_candidate]) + markdown
+    candidates = config_candidates + markdown
     candidates.sort(key=lambda candidate: _public_sort_key(candidate["rel"]))
     allowed, privacy_fingerprints, privacy_omissions = _public_apply_privacy_policy(
         root,
@@ -3161,18 +3367,19 @@ def _public_document_snapshot(
     )
     for (kind, reason), count in privacy_omissions.items():
         _public_add_omission(omissions, kind, reason, count)
-    config, config_digest, config_complete = _public_config_from_candidate(
+    config, config_digest, config_complete = _public_config_from_candidates(
         root,
-        config_candidate,
+        config_candidates,
         allowed,
         omissions,
         cancelled,
     )
     remaining_bytes = _PUBLIC_MAX_AGGREGATE_BYTES
-    if config_candidate is not None and config_candidate["rel"] in allowed:
-        # The config has already been descriptor-read above. Account for the
-        # descriptor-verified size even when it was intentionally discarded.
-        remaining_bytes -= config_candidate["size"]
+    for config_candidate in config_candidates:
+        if config_candidate["rel"] in allowed:
+            # Configs have already been descriptor-read above. Account for the
+            # descriptor-verified size even when a legacy config was omitted.
+            remaining_bytes -= config_candidate["size"]
     documents = []
     finding_state = {"emitted": 0, "suppressed": 0}
     complete = (

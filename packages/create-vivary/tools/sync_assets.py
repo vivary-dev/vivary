@@ -1,9 +1,8 @@
-"""Sync create-vivary's bundled scaffold assets from their canonical repo sources.
+"""Freeze create-vivary's source-only legacy assets from canonical repo sources.
 
-create-vivary must be self-contained when pip-installed, so it ships a copy of the
-strato templates/skills and the loops skill inside the `create_vivary_assets` data
-package. Those copies are the *only* duplication in the repo; this script regenerates
-them and `tests/test_assets_parity.py` fails if they ever drift from canonical.
+Thin-v0.3 wheels do not package these templates or skills. The archive remains in the
+checkout only so migration classification and legacy compatibility fixtures can
+recognize the old full scaffold without copying it into new adopters.
 
 Run from anywhere:  python packages/create-vivary/tools/sync_assets.py
 """

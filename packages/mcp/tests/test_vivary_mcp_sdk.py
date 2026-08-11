@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import json
 import os
 import sys
 import threading
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, redirect_stdout
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from typing import Any, Callable
@@ -47,10 +49,13 @@ if not _belongs_to_distribution(mcp, _MCP_DISTRIBUTION) or not _belongs_to_distr
 ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT.parent / "core"
 TROPO = ROOT.parent / "tropo"
-for package_root in (ROOT, CORE):
+CREATE = ROOT.parent / "create-vivary"
+REPO_ROOT = ROOT.parents[1]
+for package_root in (ROOT, CORE, CREATE):
     if str(package_root) not in sys.path:
         sys.path.insert(0, str(package_root))
 
+import create_vivary
 import vivary_mcp
 
 
@@ -414,3 +419,190 @@ async def test_official_stdio_client_observes_protocol_only_stdout(tmp_path) -> 
     assert vivary_mcp.PROTOCOL_VERSION in discovery.supported_versions
     assert tuple(tool.name for tool in listing.tools) == vivary_mcp._TOOL_NAMES
     assert diagnostic_text == ""
+
+
+@pytest.mark.anyio
+async def test_greenfield_stdio_capsule_to_approved_record_and_query_without_default_bloat(tmp_path) -> None:
+    workspace_root = tmp_path / "workspace"
+    create_vivary.scaffold_thin_workspace(
+        workspace_root,
+        preset="second-brain",
+        repo_root=REPO_ROOT,
+    )
+    seed = {
+        path.relative_to(workspace_root).as_posix(): path.read_bytes()
+        for path in workspace_root.rglob("*")
+        if path.is_file()
+    }
+    assert set(seed) == {
+        ".gitignore",
+        ".vivary/context.md",
+        ".vivary/workspace.toml",
+        "AGENTS.md",
+        "STATE.md",
+    }
+    assert not (workspace_root / ".vivary" / "records").exists()
+
+    # An operator-added root overlay is explicit growth, not seed content. MCP must
+    # compose it when it tightens privacy and still materialize nothing itself.
+    (workspace_root / "tropo.toml").write_text(
+        'exclude = ["hidden.md"]\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    (workspace_root / "hidden.md").write_text(
+        "# Hidden operator note\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    operator_workspace = {
+        path.relative_to(workspace_root).as_posix(): path.read_bytes()
+        for path in workspace_root.rglob("*")
+        if path.is_file()
+    }
+
+    pythonpath = os.pathsep.join(
+        (
+            str(ROOT),
+            str(CORE),
+            str(TROPO),
+            os.environ.get("PYTHONPATH", ""),
+        )
+    )
+    parameters = StdioServerParameters(
+        command=sys.executable,
+        args=[
+            str(ROOT / "vivary_mcp.py"),
+            "--workspace",
+            "project",
+            str(workspace_root.resolve()),
+            "--observability",
+            "off",
+        ],
+        env={"PYTHONPATH": pythonpath},
+        cwd=str(ROOT),
+    )
+    source = tmp_path / "earned-record.md"
+    source.write_text(
+        """---
+project: context
+status: done
+slice: greenfield MCP runtime proof
+---
+# Earned operational proof
+
+This record was created only after the exact capsule-bound plan was approved.
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
+    receipt = workspace_root / ".vivary" / "runtime" / "receipts.jsonl"
+
+    with anyio.fail_after(20):
+        async with stdio_client(parameters) as streams:
+            async with mcp.ClientSession(
+                *streams,
+                client_info=types.Implementation(
+                    name="vivary-greenfield-workflow-tests",
+                    version="2.0.0",
+                ),
+            ) as client:
+                discovery = await client.discover()
+                listing = await client.list_tools()
+                initial_query = await client.call_tool(
+                    "vivary_query",
+                    {"workspace": "project", "text": "governed context"},
+                )
+                hidden_query = await client.call_tool(
+                    "vivary_query",
+                    {"workspace": "project", "text": "hidden operator note"},
+                )
+                capsule_call = await client.call_tool(
+                    "vivary_capsule",
+                    {
+                        "workspace": "project",
+                        "question": "Record the verified greenfield MCP runtime proof",
+                    },
+                )
+
+                assert vivary_mcp.PROTOCOL_VERSION in discovery.supported_versions
+                assert tuple(tool.name for tool in listing.tools) == vivary_mcp._TOOL_NAMES
+                assert initial_query.is_error is False
+                assert initial_query.structured_content["status"] == "known"
+                assert hidden_query.is_error is False
+                assert hidden_query.structured_content["status"] == "known"
+                assert hidden_query.structured_content["result"]["results"] == []
+                assert capsule_call.is_error is False
+                public_capsule = capsule_call.structured_content["result"]
+                assert public_capsule["schema"] == "vivary.public-task-capsule/v0"
+                assert public_capsule["complete"] is True
+                assert {
+                    path.relative_to(workspace_root).as_posix(): path.read_bytes()
+                    for path in workspace_root.rglob("*")
+                    if path.is_file()
+                } == operator_workspace
+
+                capsule_source = tmp_path / "greenfield-public-capsule.json"
+                capsule_source.write_text(
+                    json.dumps(public_capsule),
+                    encoding="utf-8",
+                    newline="\n",
+                )
+
+                plan = create_vivary.plan_record(
+                    workspace_root,
+                    "changes/greenfield-mcp-proof.md",
+                    source=source,
+                    capsule=capsule_source,
+                    repo_root=REPO_ROOT,
+                )
+                assert not (workspace_root / ".vivary" / "records").exists()
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    rc = create_vivary.main(
+                        [
+                            "record",
+                            str(workspace_root),
+                            "changes/greenfield-mcp-proof.md",
+                            "--from",
+                            str(source),
+                            "--capsule",
+                            str(capsule_source),
+                            "--plan",
+                            plan["plan_hash"],
+                            "--yes",
+                            "--repo-root",
+                            str(REPO_ROOT),
+                            "--receipt",
+                            str(receipt),
+                            "--json",
+                        ]
+                    )
+                applied = json.loads(stdout.getvalue())
+                assert rc == 0
+                assert applied["applied"] is True
+                assert applied["doctor"]["ok"] is True
+
+                final_query = await client.call_tool(
+                    "vivary_query",
+                    {
+                        "workspace": "project",
+                        "text": "earned operational proof",
+                        "type_filters": ["change"],
+                    },
+                )
+
+    assert final_query.is_error is False
+    query_result = final_query.structured_content["result"]
+    assert [row["id"] for row in query_result["results"]] == ["greenfield-mcp-proof"]
+    record_files = {
+        path.relative_to(workspace_root).as_posix()
+        for path in (workspace_root / ".vivary" / "records").rglob("*")
+        if path.is_file()
+    }
+    assert record_files == {".vivary/records/changes/greenfield-mcp-proof.md"}
+    run_receipt = json.loads(receipt.read_text(encoding="utf-8"))
+    assert run_receipt["command"] == "record"
+    assert run_receipt["ok"] is True
+    assert not (workspace_root / "templates").exists()
+    assert not (workspace_root / "modules").exists()

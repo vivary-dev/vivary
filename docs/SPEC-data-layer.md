@@ -96,20 +96,21 @@ Exit codes are already uniform: `0` success · `1` findings/errors · `2` usage/
 
 | Flag | Meaning |
 |---|---|
-| `--yes` | Auto-confirm all prompts. Combined with `--json`, fully non-interactive. |
-| `--auto` | Agent picks the best option from explicit storage/privacy/size hints. No questions asked. |
-| `--size small\|medium\|large` | Hint for `--auto` decisions. Agents can inspect a codebase and pass this. |
-| `--privacy local\|cloud` | Hint for `--auto` storage decisions. |
+| `--yes` | Confirm the install or write selected by another explicit flag. Combined with `--json`, fully non-interactive. |
+| `--auto` | Skip all questions. Use explicit storage or cloud-locality choices. Otherwise, keep file storage. |
+| `--size small\|medium\|large` | Classify the workspace. Size never selects or installs a provider. |
+| `--privacy local\|cloud` | Local keeps file storage by default. Cloud can select cloud configuration. |
 
 ### Self-install
 
-When the wizard or `create-vivary init` decides it needs `vivary-tropo[embedded]`,
-it **installs it** during execution if not already present — `pip install
-vivary-tropo[embedded]` via subprocess. The agent does not have to know about pip
-extras. In `--json` mode the output reports `"installed": ["lancedb"]` so the agent
-knows what changed. `--dry-run` previews without writing or installing anything.
+When the user selects embedded storage, `create-vivary init` installs
+`vivary-tropo[embedded]` if required. It runs `pip install vivary-tropo[embedded]`
+through a subprocess. The agent does not have to know the extra name. In JSON mode,
+`"installed": ["lancedb"]` reports the added provider. `--dry-run` prevents all writes
+and installations.
 
-If `--yes` is not set and the install would be the first time a new dep is added, the command prompts for confirmation before calling pip. In `--yes` mode, install is automatic.
+Without `--yes`, the command asks for confirmation before the first provider install.
+`--yes` confirms an explicit embedded selection. It never selects embedded storage.
 
 ### Shipped command surface (0.2.0)
 
@@ -128,8 +129,8 @@ If `--yes` is not set and the install would be the first time a new dep is added
 ### Example: agent bootstrapping a workspace end-to-end
 
 ```bash
-# Agent inspects the repo, decides it's a large coding workspace, scaffolds and configures:
-create-vivary init . --preset coding --auto --size large --privacy local --yes --json
+# Agent inspects the repo and explicitly selects embedded storage:
+create-vivary init . --preset coding --auto --storage embedded --size large --privacy local --yes --json
 # → { "ok": true, "preset": "coding", "storage": "embedded", "provider": "lancedb",
 #     "installed": ["lancedb"], "config": ".vivary/storage.toml", "dry_run": false }
 
@@ -214,7 +215,7 @@ Full GraphRAG (Microsoft-style community summarization) is overkill for local wo
 
 ## Storage tier model
 
-Three tiers, one interface. Users never think about tiers — the wizard maps their answers.
+Three tiers use one interface. The wizard keeps file storage unless the user selects another tier.
 
 ```
 file (default)  →  tropo's existing file-system graph. No new deps. Works for small workspaces.
@@ -222,7 +223,7 @@ embedded        →  LanceDB. In-process, disk-file, zero server. Unlocks persis
 cloud           →  Qdrant Cloud (primary) or Astra DB (enterprise). Requires account + API key.
 ```
 
-`auto` = embedded (LanceDB at `.vivary/data/`). Recommended for anything beyond "just starting out."
+`auto` = file storage unless cloud locality is explicit. Embedded storage requires an exact choice.
 
 ### Why these choices
 
@@ -333,7 +334,7 @@ astra    = ["astrapy>=1.0"]
 [storage]
 backend = "auto"            # auto | file | embedded | cloud
 
-# For backend = "embedded" (or auto):
+# For backend = "embedded":
 [storage.embedded]
 path = ".vivary/data"
 provider = "lancedb"        # lancedb | sqlite-vec
@@ -372,10 +373,10 @@ create-vivary wizard          # reconfigure an existing workspace
 
 ### Agent mode (non-interactive)
 ```bash
-# Auto-pick best config, no questions asked:
+# Use safe file storage with no questions:
 create-vivary init my-workspace --auto
 
-# Agent provides context to influence auto-pick:
+# Classify the workspace without selecting or installing a provider:
 create-vivary init my-workspace --auto --size large --privacy local
 
 # Dry run — print what would be scaffolded, install nothing:
@@ -386,8 +387,8 @@ create-vivary init my-workspace --preset coding --storage embedded --no-wizard
 
 # Machine-readable output for agent consumption:
 create-vivary init my-workspace --auto --json
-# → { "ok": true, "preset": "coding", "storage": "embedded", "provider": "lancedb",
-#     "installed": ["lancedb"], "config": ".vivary/storage.toml", "dry_run": false }
+# → { "ok": true, "preset": "coding", "storage": "file", "provider": "lancedb",
+#     "installed": [], "config": null, "dry_run": false }
 ```
 
 **`--auto` decision logic (agent-callable, no human required):**
@@ -395,13 +396,13 @@ create-vivary init my-workspace --auto --json
 ```
 if explicit --storage is set and not "auto"     → that storage tier
 elif privacy = "cloud"                          → cloud config (backend future 0.3.x)
-elif size hint is "small"                       → file (no new deps)
-else                                            → embedded (LanceDB, local default)
+else                                            → file (no new dependencies)
 ```
 
 Agents inspecting a codebase can count files, detect languages, read existing
-`STRATO.md`, and pass explicit `--size` / `--privacy` flags. The wizard outputs JSON
-so the calling agent can read back what was decided.
+`STRATO.md`, and pass explicit `--size` and `--privacy` flags. Size alone never grants
+provider-install authority. The wizard outputs JSON so the calling agent can read the
+decision.
 
 **Human wizard question flow (plain English, no jargon):**
 
@@ -416,14 +417,14 @@ Welcome to Vivary! Let's set up your workspace.
 
   How large do you expect this to get?
   ❯ Just starting out                       → file (no new installs)
-    Growing — hundreds of files or notes    → smart search enabled locally
-    Large — huge codebase or years of notes → smart search enabled locally or cloud
-    Not sure                                → smart search enabled locally
+    Growing — hundreds of files or notes    → ask for a storage choice
+    Large — huge codebase or years of notes → ask for a storage choice
 
-  [If "large" selected:]
-  Where should your data live?
-  ❯ On this computer — private, no accounts needed
-    In the cloud — sync across machines, scales to any size
+  [If "growing" or "large" selected:]
+  How should Vivary store searchable context?
+  ❯ Project files only — local, no provider install
+    Embedded search — local, installs LanceDB
+    Cloud search — requires a separate provider
 
   [If "cloud" selected:]
   Which cloud service?

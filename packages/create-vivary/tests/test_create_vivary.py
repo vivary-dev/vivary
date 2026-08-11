@@ -1536,9 +1536,8 @@ class CreateVivaryTests(unittest.TestCase):
             finally:
                 restore()
 
-    def test_force_cleanup_failure_still_emits_json(self):
-        """The user-visible harm behind this finding: a raw OSError from cleanup
-        escapes `main`, so `--json` prints a traceback and no JSON at all."""
+    def test_force_init_refuses_legacy_cleanup_and_still_emits_json(self):
+        """Thin init never turns `--force` into unapproved legacy cleanup."""
         with temp_workspace() as td:
             target = Path(td) / "cleanup-json"
             create_vivary.scaffold_workspace(
@@ -1568,7 +1567,7 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertEqual(rc, 1)
             payload = json.loads(buf.getvalue())
             self.assertFalse(payload["ok"])
-            self.assertIn("stale scaffold path", payload["error"])
+            self.assertIn("cannot replace a legacy or brownfield workspace", payload["error"])
 
     @unittest.skipIf(os.name != "nt", "junctions are Windows-only")
     def test_force_cleanup_removes_stale_junction_without_touching_its_target(self):
@@ -1733,8 +1732,9 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertEqual(
                 report["compatibility"],
                 {
-                    "schema_version": 1,
-                    "workspace_contract": "indexed-v0.2+",
+                    "schema_version": 2,
+                    "workspace_contract": "legacy-full",
+                    "legacy_layout": "indexed-v0.2+",
                     "baseline_missing": [],
                     "contract_missing": [],
                     "declared_capability_problems": [],
@@ -1805,12 +1805,14 @@ class CreateVivaryTests(unittest.TestCase):
             ]
             guidance = (
                 "run create-vivary adopt <workspace> --preset writing "
-                "(dry-run: omit --yes) to review the indexed v0.2+ module contract"
+                "--json to review the thin-v0.3 contract; apply only the approved "
+                "plan with --yes --plan <plan_hash>"
             )
             self.assertTrue(report["ok"], report)
             self.assertEqual(report["errors"], [])
-            self.assertEqual(report["compatibility"]["schema_version"], 1)
-            self.assertEqual(report["compatibility"]["workspace_contract"], "legacy-v0.1")
+            self.assertEqual(report["compatibility"]["schema_version"], 2)
+            self.assertEqual(report["compatibility"]["workspace_contract"], "legacy-full")
+            self.assertEqual(report["compatibility"]["legacy_layout"], "legacy-v0.1")
             self.assertEqual(report["compatibility"]["baseline_missing"], [])
             self.assertEqual(report["compatibility"]["contract_missing"], [])
             self.assertEqual(report["compatibility"]["declared_capability_problems"], [])
@@ -1868,6 +1870,10 @@ class CreateVivaryTests(unittest.TestCase):
                     self.assertEqual(report["errors"], [])
                     self.assertEqual(
                         report["compatibility"]["workspace_contract"],
+                        "legacy-full",
+                    )
+                    self.assertEqual(
+                        report["compatibility"]["legacy_layout"],
                         "indexed-v0.2+",
                     )
                     for pattern in privacy_recommendations:
@@ -1938,7 +1944,8 @@ class CreateVivaryTests(unittest.TestCase):
             report = create_vivary.doctor_workspace(target, repo_root=ROOT)
 
             self.assertFalse(report["ok"], report)
-            self.assertEqual(report["compatibility"]["workspace_contract"], "indexed-v0.2+")
+            self.assertEqual(report["compatibility"]["workspace_contract"], "legacy-full")
+            self.assertEqual(report["compatibility"]["legacy_layout"], "indexed-v0.2+")
             self.assertEqual(
                 report["compatibility"]["contract_missing"], ["modules/index.md"]
             )
@@ -1963,15 +1970,21 @@ class CreateVivaryTests(unittest.TestCase):
             (target / "src" / "util.py").write_text(
                 "def helper():\n    return 1\n", encoding="utf-8"
             )
-            adopted = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
+            plan = create_vivary.plan_adopt(target, repo_root=ROOT)
+            adopted = create_vivary.adopt_workspace(
+                target,
+                repo_root=ROOT,
+                yes=True,
+                plan_hash=plan["plan_hash"],
+            )
             self.assertTrue(adopted["doctor"]["ok"], adopted["doctor"])
             before = snapshot_workspace(target)
 
             report = create_vivary.doctor_workspace(target, repo_root=ROOT)
 
             self.assertTrue(report["ok"], report)
-            self.assertEqual(report["compatibility"]["schema_version"], 1)
-            self.assertEqual(report["compatibility"]["workspace_contract"], "indexed-v0.2+")
+            self.assertEqual(report["compatibility"]["schema_version"], 2)
+            self.assertEqual(report["compatibility"]["workspace_contract"], "thin-v0.3")
             self.assertEqual(report["compatibility"]["baseline_missing"], [])
             self.assertEqual(report["compatibility"]["contract_missing"], [])
             self.assertEqual(report["compatibility"]["declared_capability_problems"], [])
@@ -3204,7 +3217,8 @@ class TestAgentFlags(unittest.TestCase):
             ensure.assert_not_called()
             out = json.loads(buf.getvalue())
             self.assertEqual(out["storage"], "file")
-            self.assertFalse((target / ".vivary").exists())
+            self.assertTrue((target / ".vivary" / "workspace.toml").is_file())
+            self.assertFalse((target / ".vivary" / "storage.toml").exists())
 
     def test_init_storage_file_does_not_write_vivary_dir(self):
         with temp_workspace() as td:
@@ -3338,9 +3352,10 @@ class TestAgentFlags(unittest.TestCase):
             self.assertEqual(rc, 0)
             out = json.loads(buf.getvalue())
             self.assertTrue(out["ok"])
-            # size=small → file backend → no .vivary/ dir
+            # size=small -> file backend -> no optional storage config.
             self.assertEqual(out["storage"], "file")
-            self.assertFalse((target / ".vivary").exists())
+            self.assertTrue((target / ".vivary" / "workspace.toml").is_file())
+            self.assertFalse((target / ".vivary" / "storage.toml").exists())
 
     def test_init_auto_cloud_config_does_not_install_backend(self):
         with temp_workspace() as td:

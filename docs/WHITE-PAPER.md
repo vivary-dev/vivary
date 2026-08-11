@@ -889,7 +889,7 @@ Install completion alone is not product success.
 | Vivary reduces token consumption | **Proposed or not yet measured** | benchmark pending |
 | Vivary reduces wrong-file opens and unsupported answers | **Proposed or not yet measured** | benchmark pending |
 | Vivary improves long-term project health or user retention | **Proposed or not yet measured** | longitudinal adoption evidence pending |
-| A read-only MCP adapter improves interoperability safely | **Specified but incomplete** | roadmap and boundary design; implementation deferred |
+| A local read-only-by-default MCP adapter exposes bounded governed context without creating workspace files | **Implemented and verified within the pinned local SDK boundary** | adapter, privacy, stdio, official-SDK, and greenfield end-to-end tests; named host conformance and comparative outcomes remain unproven |
 | Context-budget repair proposals save a predictable number of tokens | **Specified but incomplete** | reporting exists; calibrated outcome evidence pending |
 
 ### 9.2 What current tests establish
@@ -1331,26 +1331,22 @@ and stops at the point where human responsibility begins.
 
 ## Appendix A: minimal workspace contract
 
-A minimal implementation may use:
+A new Core workspace uses this exact small operational seed:
 
 ```text
-AGENTS.md                 small root routing and operating contract
-STATE.md                  one visible current-state surface
-USER.md                   private user context boundary
-MEMORY.md                 private durable-memory router
-modules/
-  index.md                module router
-  <module>/
-    index.md              scoped ownership and deeper links
-changes/                  typed active and historical changes
-decisions/                typed durable decisions
-gates/                    typed consequential approvals
-.vivary/                  local state, receipts, caches, provider policy
-tropo.toml                graph schema and packs
+AGENTS.md                    small startup routing and operating contract
+STATE.md                     one visible current-state surface
+.gitignore                   bounded private/runtime integration
+.vivary/context.md           first typed project-context capsule
+.vivary/workspace.toml       thin-v0.3 policy and type owner
 ```
 
-The exact filenames are less important than the invariants: small routes, one owner,
-typed relationships, explicit privacy, bounded retrieval, and gated consequence.
+No record directory, starter graph, templates, skills, or pre-populated second brain
+is created. Typed modules, changes, decisions, verification, and gate records appear
+under `.vivary/records/` only when actual work earns them through a governed action.
+Richer legacy or optional workspace modes remain explicit capabilities, never Core
+startup output. Brownfield adoption is more conservative still: at most the three
+Vivary payload files, with at most two bounded host integrations when needed.
 
 ## Appendix B: operational conformance checklist
 

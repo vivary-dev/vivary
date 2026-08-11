@@ -34,6 +34,8 @@ from vivary_core.capsule_compile import (
     project_public_task_capsule,
     public_task_capsule_json_schema,
     task_capsule_json_schema,
+    verify_public_task_capsule_integrity,
+    verify_task_capsule_integrity,
 )
 from vivary_core.receipt import EXECUTION_RECEIPT_FIELDS
 from vivary_core.workspace_content import observe_content
@@ -66,6 +68,8 @@ __all__ = [
     "project_public_task_capsule",
     "public_task_capsule_json_schema",
     "task_capsule_json_schema",
+    "verify_public_task_capsule_integrity",
+    "verify_task_capsule_integrity",
     "observe_checkouts",
     "ContentPrivacyPathRefusedError",
     "ContentPrivacyPolicyUnavailableError",

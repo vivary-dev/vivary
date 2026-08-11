@@ -6,7 +6,8 @@ Status: architecture note plus first optional Cognee adapter slice
 [#86](https://github.com/vivary-dev/vivary/issues/86) for semantic memory/Cognee,
 aligned with [#20](https://github.com/vivary-dev/vivary/issues/20). The setup slice
 landed `knowledge-work`, `create-vivary capabilities`, `--memory local|cognee`,
-`.vivary/memory.toml`, scaffolded policy docs, and doctor memory reporting. The first
+`.vivary/memory.toml`, and Doctor memory reporting. Thin init writes provider config
+only after an explicit selection; it does not seed policy records. The first
 runtime slice adds an optional `vivary-memory-cognee` package with `vivary-cognee`
 doctor/index/recall/forget commands.
 
@@ -46,20 +47,20 @@ Presets and capabilities are separate axes:
 
 | Axis | Examples | Job |
 |---|---|---|
-| Preset | `coding`, `second-brain`, `knowledge-work`, `writing` | Shape the starter graph, modules, first change, and verification path. |
+| Preset | `coding`, `second-brain`, `knowledge-work`, `writing` | Select compact workspace policy without seeding starter content. |
 | Capability | `storage:file`, `storage:embedded`, `memory:local`, `memory:cognee`, `active-context:cocoindex-code` | Add optional runtime power behind explicit install/config gates. |
 
 This keeps Cognee and database choices composable. A `writing` workspace can use no
 semantic memory, local semantic memory, or Cognee. A `knowledge-work` workspace can do
 the same. The preset should never imply a heavyweight provider.
 
-Recommended preset direction:
+Preset intent remains lightweight:
 
-| Preset | Purpose | Starter module | First verification |
-|---|---|---|---|
-| `second-brain` | Personal knowledge base: notes, sources, concepts, memory, retrieval routines. | `knowledge-base` | Retrieve a known note through the typed graph. |
-| `knowledge-work` | Agent-operable workbench for research, decisions, artifacts, proof, and publish/deploy readiness. This is the generic version of the local-gate-plus-proof pattern, not a personal vault. | `workbench` | Produce or locate one artifact and verify it with a local gate or proof check. |
-| `writing` | Drafts, research, editorial passes, publication gates, and release/publish copy. | `manuscript-system` | Review one draft against editorial criteria and linked sources. |
+| Preset | Purpose | First useful proof |
+|---|---|---|
+| `second-brain` | Personal knowledge base: notes, sources, concepts, memory, retrieval routines. | Retrieve one known note through typed context. |
+| `knowledge-work` | Workbench for research, decisions, artifacts, and proof. | Produce or locate one artifact and verify it locally. |
+| `writing` | Drafts, research, editorial passes, and publication gates. | Review one real draft against linked evidence. |
 
 `second-brain`, `knowledge-work`, and `writing` all receive the same optional memory
 capability path. `knowledge-work` is a generic workbench preset, not a renamed
@@ -384,9 +385,8 @@ create-vivary init my-work --preset knowledge-work --storage embedded --memory l
 create-vivary init my-book --preset writing --memory cognee --no-wizard --dry-run --json
 ```
 
-`--auto` must not silently choose Cognee. At most, `--auto --size large --privacy local`
-may choose local Vivary search, while Cognee requires an explicit provider flag or
-interactive answer.
+Plain `--auto` uses file storage and does not silently choose a search or memory provider.
+Embedded search and Cognee each require an explicit flag or interactive choice.
 
 Agent-mode discovery does not require the agent to know package names.
 `create-vivary capabilities --json` reports available capabilities:

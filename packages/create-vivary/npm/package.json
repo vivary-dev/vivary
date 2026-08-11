@@ -1,7 +1,7 @@
 {
   "name": "@vivary/create",
-  "version": "0.3.4",
-  "description": "Scaffold a normalized Vivary agent workspace with typed project context, visible state, and human gates. Runs the Python create-vivary via uv/pipx.",
+  "version": "0.4.0",
+  "description": "Add lightweight local-first governed context, evidence, verification, and human gates. Runs Python create-vivary via uv/pipx.",
   "bin": {
     "create-vivary": "index.js"
   },
