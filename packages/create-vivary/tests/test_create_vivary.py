@@ -1612,7 +1612,7 @@ class CreateVivaryTests(unittest.TestCase):
         """
         with temp_workspace() as td:
             target = Path(td) / "repair-mode"
-            create_vivary.scaffold_workspace(
+            create_vivary.scaffold_thin_workspace(
                 target, preset="coding", force=False, repo_root=ROOT
             )
             gitignore = target / ".gitignore"

@@ -472,7 +472,31 @@ def build_fixture(kind: str, root: Path) -> str:
     return _install_boundary(root)
 
 
-def _default_transports() -> tuple[CreateTransport, CreateTransport]:
+def _build_local_dependency_wheels(wheelhouse: Path) -> None:
+    wheelhouse.mkdir(parents=True, exist_ok=True)
+    completed = _run_text(
+        (
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--no-deps",
+            "--wheel-dir",
+            str(wheelhouse),
+            str(ROOT / "packages" / "core"),
+            str(TROPO_PACKAGE),
+        ),
+        cwd=ROOT,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise ProofFailure(f"local dependency wheel build failed: {detail[:240]}")
+    for distribution in ("vivary_core", "vivary_tropo"):
+        if not any(wheelhouse.glob(f"{distribution}-*.whl")):
+            raise ProofFailure(f"local dependency wheel is missing: {distribution}")
+
+
+def _default_transports(wheelhouse: Path) -> tuple[CreateTransport, CreateTransport]:
     node = shutil.which("node")
     uvx = shutil.which("uvx")
     if not node:
@@ -483,7 +507,10 @@ def _default_transports() -> tuple[CreateTransport, CreateTransport]:
     npm_transport = CreateTransport(
         "npm",
         (node, str(NPM_CLI)),
-        {"VIVARY_FROM": str(CREATE_PACKAGE.resolve())},
+        {
+            "VIVARY_FROM": str(CREATE_PACKAGE.resolve()),
+            "UV_FIND_LINKS": str(wheelhouse.resolve()),
+        },
     )
     return python_transport, npm_transport
 
@@ -969,7 +996,17 @@ def run_proof(
     unknown = sorted(set(fixture_kinds) - set(FIXTURE_KINDS))
     if unknown:
         raise ValueError(f"unknown fixtures: {', '.join(unknown)}")
-    python_transport, npm_transport = transports or _default_transports()
+    dependency_wheelhouse: tempfile.TemporaryDirectory[str] | None = None
+    if transports is None:
+        dependency_wheelhouse = tempfile.TemporaryDirectory(
+            prefix="vivary-orientation-wheels-",
+            ignore_cleanup_errors=True,
+        )
+        wheelhouse = Path(dependency_wheelhouse.name)
+        _build_local_dependency_wheels(wheelhouse)
+        python_transport, npm_transport = _default_transports(wheelhouse)
+    else:
+        python_transport, npm_transport = transports
     if strict_transports is None:
         strict_transports = transports is None
     receipt: dict = {
@@ -1069,6 +1106,8 @@ def run_proof(
             receipt["ok"] = False
             receipt["validation_error"] = str(exc)
         _write_receipt(receipt_path, receipt)
+    if dependency_wheelhouse is not None:
+        dependency_wheelhouse.cleanup()
     return receipt
 
 

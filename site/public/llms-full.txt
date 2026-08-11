@@ -6622,6 +6622,9 @@ contract.
 
 ### Changed
 
+- The GitHub Actions `graph review gate` now runs only for pull requests. The site
+  build runs only when site code, canonical docs, release surfaces, or its CI
+  definition changes; ordinary package-only changes skip the Astro build.
 - Default greenfield init now creates exactly three Vivary payload files
   (`.vivary/context.md`, `.vivary/workspace.toml`, and `STATE.md`) plus two bounded host
   integrations (`AGENTS.md` and `.gitignore`). It no longer copies templates, runtime
@@ -6650,6 +6653,11 @@ contract.
 
 ### Fixed
 
+- Doctor repair now recognizes a thin workspace even when its repairable `.gitignore`
+  policy is incomplete, and atomic repair preserves the existing file mode.
+- The strict orientation proof builds local Core and Tropo wheels before exercising
+  the real npm/uvx launcher, so unpublished source candidates do not depend on
+  already-existing PyPI releases.
 - Init now refuses every nonempty target even with `--force`, so it cannot replace
   user edits in an existing thin workspace. Existing workspaces route through the
   governed adoption plan.

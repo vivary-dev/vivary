@@ -619,7 +619,10 @@ class ThinAdoptApplyTests(unittest.TestCase):
                     pass
 
             self.assertTrue(attack["attempted"])
-            self.assertTrue(attack["blocked"] or not generated.exists())
+            if attack["blocked"]:
+                self.assertFalse(generated.exists())
+            else:
+                self.assertFalse((moved / "context.md").exists())
             self.assertEqual(victim.read_text(encoding="utf-8"), "outside stays unchanged\n")
         finally:
             link = target / ".vivary"

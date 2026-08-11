@@ -1398,6 +1398,11 @@ def _doctor_repair_actions(target: Path, root: Path) -> list[dict]:
 
 
 def _looks_like_vivary_workspace(target: Path) -> bool:
+    thin_markers = (
+        rel for rel in THIN_WORKSPACE_FILES if rel != ".gitignore"
+    )
+    if all((target / rel).is_file() for rel in thin_markers):
+        return True
     has_module_contract = any(
         (target / rel).is_file() for rel in REPAIR_MODULE_CONTRACT_MARKERS
     )
