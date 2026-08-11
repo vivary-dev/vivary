@@ -7,6 +7,18 @@ const roadmap = readFileSync(new URL('../src/pages/roadmap.astro', import.meta.u
 const astroConfig = readFileSync(new URL('../astro.config.mjs', import.meta.url), 'utf8');
 const syncScript = readFileSync(new URL('../scripts/sync-docs.mjs', import.meta.url), 'utf8');
 const whitePaper = readFileSync(new URL('../../docs/WHITE-PAPER.md', import.meta.url), 'utf8');
+const guideIndex = readFileSync(new URL('../../docs/LEARN-BY-DOING.md', import.meta.url), 'utf8');
+const guideSources = [
+  'create-workspace',
+  'connect-agent',
+  'get-context',
+  'write-record',
+  'adopt-project',
+  'verify-recover',
+].map((slug) => ({
+  slug,
+  source: readFileSync(new URL(`../../docs/guides/${slug}.md`, import.meta.url), 'utf8'),
+}));
 
 test('FAQ is a concise homepage section rather than a docs route', () => {
   assert.match(homepage, /<section class="faq band" id="faq"/);
@@ -68,9 +80,9 @@ test('white paper has the structure and evidence boundaries of a full technical 
   assert.match(whitePaper, /arxiv\.org\/abs\/2307\.03172/);
 });
 
-test('release-program docs are canonical-generated routes with deliberate navigation', () => {
+test('guide and release docs are canonical-generated routes with deliberate navigation', () => {
   const canonicalRoutes = [
-    ['LEARN-BY-DOING', 'learn-by-doing', 'Learn by doing'],
+    ['LEARN-BY-DOING', 'learn-by-doing', 'Guide library'],
     ['MIGRATION-STATUS', 'migration-status', 'Migration status'],
     ['DECISIONS', 'decisions', 'Decisions'],
   ];
@@ -85,6 +97,11 @@ test('release-program docs are canonical-generated routes with deliberate naviga
     assert.match(astroConfig, new RegExp(`label:\\s*'${label}',\\s*slug:\\s*'${slug}'`));
   }
 
+  for (const { slug } of guideSources) {
+    assert.match(syncScript, new RegExp(`\\['guides/${slug}',\\s*'guides/${slug}'`));
+    assert.match(astroConfig, new RegExp(`slug:\\s*'guides/${slug}'`));
+  }
+
   assert.match(syncScript, /const coreDocsList = pages/);
   assert.match(syncScript, /for \(const \[src, slug, title\] of pages\)/);
   assert.match(syncScript, /replaceAll\('\]\(LEARN-BY-DOING\.md\)', '\]\(\/learn-by-doing\/\)'\)/);
@@ -92,11 +109,54 @@ test('release-program docs are canonical-generated routes with deliberate naviga
   assert.match(syncScript, /replaceAll\('\]\(DECISIONS\.md\)', '\]\(\/decisions\/\)'\)/);
 });
 
+test('public and agent guides share one concise STE100 style source', () => {
+  assert.match(guideIndex, /The guides use STE100 style\./);
+  assert.doesNotMatch(guideIndex, /inspired/i);
+  assert.match(guideIndex, /Humans and agents use the same canonical guide\./);
+
+  for (const { slug, source } of guideSources) {
+    assert.match(source, /^# /);
+    assert.match(source, /## Result/);
+    assert.match(source, /## Agent contract/);
+    assert.doesNotMatch(source, /inspired/i, `${slug} must use the STE100 style label`);
+  }
+});
+
+test('guide prose keeps the STE100 procedure sentence limit', () => {
+  const files = [
+    { slug: 'guide-library', source: guideIndex },
+    ...guideSources,
+  ];
+
+  for (const { slug, source } of files) {
+    const prose = source.replace(/```[\s\S]*?```/g, '');
+    const lines = prose.split(/\r?\n/);
+
+    lines.forEach((line, index) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('|')) return;
+
+      const plain = trimmed
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/[`*_]/g, '');
+
+      for (const sentence of plain.split(/(?<=[.!?])\s+/)) {
+        const words = sentence.match(/[A-Za-z0-9][A-Za-z0-9'-]*/g) ?? [];
+        assert.ok(
+          words.length <= 20,
+          `${slug}:${index + 1} has ${words.length} words: ${sentence}`,
+        );
+      }
+    });
+  }
+});
+
 
 test('generated docs edit their canonical repo sources rather than generated copies', () => {
   assert.match(syncScript, /edit\/dev\/docs\/\$\{src\}\.md/);
   assert.match(syncScript, /edit\/dev\/CHANGELOG\.md/);
   assert.match(syncScript, /readCanonicalMarkdown\(docsDir, `\$\{src\}\.md`, `docs\/\$\{src\}\.md`\)/);
-  assert.match(syncScript, /fs\.writeFileSync\(path\.join\(outDir, `\$\{slug\}\.md`\), render\(raw, title, desc, editUrl\)\)/);
+  assert.match(syncScript, /const output = path\.join\(outDir, `\$\{slug\}\.md`\)/);
+  assert.match(syncScript, /fs\.writeFileSync\(output, render\(raw, title, desc, editUrl\)\)/);
   assert.doesNotMatch(syncScript, /readCanonicalMarkdown\(outDir,/);
 });

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import configparser
 import csv
+import hashlib
 import importlib
 import importlib.machinery
 import importlib.metadata as importlib_metadata
@@ -26,9 +28,10 @@ from datetime import date, datetime, timezone
 from email.parser import BytesParser
 from email.message import Message
 from pathlib import Path
+from typing import Callable
 
 
-__version__ = "0.3.4"
+__version__ = "0.4.0"
 
 PRESETS = ("coding", "second-brain", "knowledge-work", "writing")
 
@@ -36,18 +39,23 @@ ACTIVE_CONTEXTS = ("cocoindex-code",)
 
 MEMORY_MODES = ("none", "local", "cognee")
 
-SUBCOMMANDS = ("init", "doctor", "wizard", "capabilities", "adopt")
+SUBCOMMANDS = ("init", "doctor", "wizard", "capabilities", "adopt", "record")
 
 RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
 RECEIPT_SCHEMA = "vivary.run_receipt.v1"
 RECEIPT_VALUE_FLAGS = {
+    "--adapter",
     "--receipt",
     "--preset",
     "--active-context",
+    "--capsule",
+    "--from",
     "--repo-root",
     "--storage",
     "--provider",
+    "--recover",
     "--memory",
+    "--plan",
     "--size",
     "--privacy",
 }
@@ -106,6 +114,14 @@ REQUIRED_WORKSPACE_FILES = BASELINE_WORKSPACE_FILES
 INDEXED_WORKSPACE_FILES = (
     "modules/index.md",
     "modules/agent-workspace/index.md",
+)
+
+THIN_WORKSPACE_FILES = (
+    "AGENTS.md",
+    ".gitignore",
+    ".vivary/context.md",
+    ".vivary/workspace.toml",
+    "STATE.md",
 )
 
 # Private placeholders repair can regenerate, in report order. `USER.md` and `MEMORY.md`
@@ -183,9 +199,10 @@ REPAIR_MODULE_CONTRACT_MARKERS = (
 # Repair markers only identify targets that `doctor --repair` may safely plan
 # against. They deliberately do not set Doctor's compatibility severity.
 #
-WORKSPACE_COMPATIBILITY_SCHEMA_VERSION = 1
+WORKSPACE_COMPATIBILITY_SCHEMA_VERSION = 2
 LEGACY_WORKSPACE_CONTRACT = "legacy-v0.1"
 INDEXED_WORKSPACE_CONTRACT = "indexed-v0.2+"
+LEGACY_FULL_WORKSPACE_CONTRACT = "legacy-full"
 LEGACY_RECOMMENDED_WORKSPACE_FILES = INDEXED_WORKSPACE_FILES
 _WORKSPACE_PRESET_BYTE_LIMIT = 64 * 1024
 
@@ -522,10 +539,152 @@ def scaffold_workspace(
     return created
 
 
+def _validate_thin_init_target(target: Path, *, force: bool) -> None:
+    """Refuse brownfield or legacy targets before prompts, installs, or writes."""
+    if target.exists() and not target.is_dir():
+        raise ScaffoldError(f"init target is not a directory: {target}")
+    if target.exists():
+        try:
+            has_content = next(target.iterdir(), None) is not None
+        except OSError as exc:
+            raise ScaffoldError(f"cannot inspect init target: {exc}") from exc
+        if has_content:
+            is_thin = (target / ".vivary" / "workspace.toml").is_file()
+            if not force:
+                raise ScaffoldError(
+                    "init requires a new or empty directory; use create-vivary adopt "
+                    "for an existing project"
+                )
+            if not is_thin:
+                raise ScaffoldError(
+                    "thin init cannot replace a legacy or brownfield workspace; use "
+                    "governed adoption or an approved migration plan"
+                )
+
+
+def scaffold_thin_workspace(
+    target: str | Path,
+    *,
+    preset: str = "coding",
+    adapters: tuple[str, ...] | list[str] = (),
+    active_context: str | None = None,
+    force: bool = False,
+    repo_root: str | Path | None = None,
+    dry_run: bool = False,
+) -> list[Path]:
+    """Create a greenfield thin-v0.3 governed-context workspace.
+
+    This is the public `init` path. The older `scaffold_workspace` remains only
+    as a bounded legacy-fixture/read-compatibility helper while v0.1/v0.2
+    workspaces are still supported by Doctor.
+    """
+    if preset not in PRESETS:
+        raise ScaffoldError(
+            f"unknown preset {preset!r}; expected one of {', '.join(PRESETS)}"
+        )
+    selected_adapters = tuple(adapters)
+    unknown_adapters = sorted(set(selected_adapters) - set(_THIN_ADAPTER_PATHS))
+    if unknown_adapters:
+        raise ScaffoldError(
+            "unknown adapter(s): " + ", ".join(unknown_adapters)
+            + "; expected agents or claude"
+        )
+    if len(set(selected_adapters)) != len(selected_adapters):
+        raise ScaffoldError("each --adapter value may be selected only once")
+    if active_context is not None:
+        if active_context not in ACTIVE_CONTEXTS:
+            raise ScaffoldError(
+                f"unknown active context {active_context!r}; expected one of "
+                f"{', '.join(ACTIVE_CONTEXTS)}"
+            )
+        if preset != "coding":
+            raise ScaffoldError(
+                "active context 'cocoindex-code' currently requires the coding preset"
+            )
+
+    root = Path(repo_root) if repo_root is not None else default_repo_root()
+    root = root.resolve()
+    target = _resolve_scaffold_target(target)
+    _validate_thin_init_target(target, force=force)
+
+    project = target.name or "vivary-workspace"
+    writes: list[tuple[Path, str]] = [
+        (target / ".gitignore", _thin_gitignore_block(active_context=active_context)),
+        (target / ".vivary" / "context.md", _thin_context_doc(project, preset)),
+        (
+            target / ".vivary" / "workspace.toml",
+            _thin_workspace_toml(
+                preset,
+                selected_adapters,
+                active_context=active_context,
+            ),
+        ),
+        (target / "AGENTS.md", "# AGENTS.md\n\n" + _thin_agents_block()),
+        (target / "STATE.md", _thin_state_doc()),
+    ]
+    for adapter in sorted(selected_adapters):
+        text, _source_hash, _content_hash = _thin_adapter_doc(adapter)
+        writes.append((target / _THIN_ADAPTER_PATHS[adapter], text))
+    if active_context == "cocoindex-code":
+        writes.extend(_thin_active_context_writes(target))
+
+    paths = [path for path, _text in writes]
+    _ensure_safe_destinations(target, paths, force=force)
+    if dry_run:
+        return paths
+
+    actions = []
+    backups: dict[Path, bytes | None] = {}
+    for path, text in writes:
+        before = path.read_bytes() if path.exists() else None
+        backups[path] = before
+        actions.append(
+            {
+                "kind": "replace" if before is not None else "create",
+                "path": path,
+                "before_hash": _sha256_prefixed(before) if before is not None else None,
+                "after": text.encode("utf-8"),
+            }
+        )
+
+    try:
+        for action in actions:
+            _write_bytes_no_follow(target, action["path"], action["after"])
+        doctor = doctor_workspace(target, repo_root=root)
+        if not doctor["ok"]:
+            raise ScaffoldError(
+                "Doctor failed after init: " + "; ".join(doctor["errors"])
+            )
+    except Exception as exc:
+        try:
+            _rollback_adopt(target, actions, backups, cleanup_journal=False)
+        except ScaffoldError as rollback_exc:
+            raise ScaffoldError(f"{exc}; {rollback_exc}") from exc
+        for path in sorted(
+            {
+                parent
+                for path in paths
+                for parent in path.parents
+                if parent != target and target in parent.parents
+            },
+            key=lambda item: len(item.parts),
+            reverse=True,
+        ):
+            try:
+                path.rmdir()
+            except OSError:
+                pass
+        if isinstance(exc, ScaffoldError):
+            raise
+        raise ScaffoldError(f"init failed and rolled back: {exc}") from exc
+    return paths
+
+
 def _empty_workspace_compatibility() -> dict:
     return {
         "schema_version": WORKSPACE_COMPATIBILITY_SCHEMA_VERSION,
         "workspace_contract": None,
+        "legacy_layout": None,
         "baseline_missing": [],
         "contract_missing": [],
         "declared_capability_problems": [],
@@ -535,6 +694,22 @@ def _empty_workspace_compatibility() -> dict:
 
 def _workspace_declared_preset(target: Path) -> str:
     """Return a supported `Preset:` declaration or an explicit safe placeholder."""
+    thin_config = target / ".vivary" / "workspace.toml"
+    if thin_config.is_file() and not _is_symlink_or_junction(thin_config):
+        try:
+            import tomllib as _toml
+
+            data = _toml.loads(thin_config.read_text(encoding="utf-8-sig"))
+            workspace = data.get("workspace", {})
+            if (
+                isinstance(workspace, dict)
+                and workspace.get("contract") == THIN_WORKSPACE_CONTRACT
+                and workspace.get("preset") in PRESETS
+            ):
+                return workspace["preset"]
+        except (OSError, UnicodeError, _toml.TOMLDecodeError):
+            return "<preset>"
+
     readme_path = target / "README.md"
     descriptor = None
     try:
@@ -582,6 +757,8 @@ def _workspace_declared_preset(target: Path) -> str:
 
 def _workspace_contract(target: Path) -> tuple[str | None, list[str]]:
     """Classify a published module layout without inferring a new requirement."""
+    if (target / ".vivary" / "workspace.toml").exists():
+        return THIN_WORKSPACE_CONTRACT, []
     indexed_present = any((target / rel).exists() for rel in INDEXED_WORKSPACE_FILES)
     if indexed_present:
         return (
@@ -795,12 +972,23 @@ def _declared_memory_capability_problems(target: Path, memory_report: dict) -> l
 def _workspace_compatibility(target: Path, memory_report: dict) -> tuple[dict, str]:
     """Classify published workspace ownership; integrity and privacy stay strict."""
     compatibility = _empty_workspace_compatibility()
-    compatibility["baseline_missing"] = [
-        rel for rel in BASELINE_WORKSPACE_FILES if not (target / rel).exists()
-    ]
-
     contract, contract_missing = _workspace_contract(target)
-    compatibility["workspace_contract"] = contract
+    required_files = (
+        THIN_WORKSPACE_FILES if contract == THIN_WORKSPACE_CONTRACT else BASELINE_WORKSPACE_FILES
+    )
+    compatibility["baseline_missing"] = [
+        rel for rel in required_files if not (target / rel).exists()
+    ]
+    compatibility["workspace_contract"] = (
+        LEGACY_FULL_WORKSPACE_CONTRACT
+        if contract in (LEGACY_WORKSPACE_CONTRACT, INDEXED_WORKSPACE_CONTRACT)
+        else contract
+    )
+    compatibility["legacy_layout"] = (
+        contract
+        if contract in (LEGACY_WORKSPACE_CONTRACT, INDEXED_WORKSPACE_CONTRACT)
+        else None
+    )
     compatibility["contract_missing"] = contract_missing
     if contract == LEGACY_WORKSPACE_CONTRACT:
         compatibility["recommended_missing"] = [
@@ -811,8 +999,8 @@ def _workspace_compatibility(target: Path, memory_report: dict) -> tuple[dict, s
         preset = _workspace_declared_preset(target)
         compatibility["recommended_upgrade"] = (
             "run create-vivary adopt <workspace> "
-            f"--preset {preset} (dry-run: omit --yes) to review the indexed v0.2+ "
-            "module contract"
+            f"--preset {preset} --json to review the thin-v0.3 contract; apply only "
+            "the approved plan with --yes --plan <plan_hash>"
         )
 
     backend, storage_problems = _declared_storage_capability_problems(target)
@@ -823,7 +1011,12 @@ def _workspace_compatibility(target: Path, memory_report: dict) -> tuple[dict, s
     return compatibility, backend
 
 
-def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None) -> dict:
+def doctor_workspace(
+    target: str | Path,
+    *,
+    repo_root: str | Path | None = None,
+    _allow_adopt_journal: bool = False,
+) -> dict:
     """Validate that a directory looks like a usable Vivary agent workspace."""
     root = Path(repo_root) if repo_root is not None else default_repo_root()
     root = root.resolve()
@@ -843,6 +1036,35 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
     elif not target.is_dir():
         errors.append(f"workspace is not a directory: {target}")
 
+    if (
+        not errors
+        and not _allow_adopt_journal
+        and (target / ".vivary" / "runtime" / "adopt-journal.json").exists()
+    ):
+        errors.append(
+            "unfinished adoption journal exists; run create-vivary adopt <workspace> "
+            "--recover <plan-hash> before continuing"
+        )
+
+    if not errors and not _allow_adopt_journal:
+        gitignore = target / ".gitignore"
+        if gitignore.is_file() and not _is_symlink_or_junction(gitignore):
+            try:
+                gitignore_bytes = gitignore.read_bytes()
+            except OSError as exc:
+                errors.append(f"cannot inspect .gitignore for interrupted adoption: {exc}")
+            else:
+                prejournal = _prejournal_privacy_match(gitignore_bytes)
+                if prejournal is not None:
+                    interrupted_hash = prejournal.group(1).decode("ascii")
+                    errors.append(
+                        "unfinished pre-journal adoption privacy replacement exists; "
+                        "run create-vivary adopt <workspace> "
+                        f"--recover {interrupted_hash} before continuing"
+                    )
+                elif _ADOPT_PREJOURNAL_MARKER_PREFIX.encode("ascii") in gitignore_bytes:
+                    errors.append("malformed pre-journal adoption marker exists in .gitignore")
+
     if not errors:
         compatibility, backend_name = _workspace_compatibility(target, memory_report)
         errors.extend(
@@ -860,7 +1082,13 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
         if compatibility["recommended_upgrade"] is not None:
             warnings.append(compatibility["recommended_upgrade"])
 
-        if (target / ".gitignore").exists():
+        if compatibility["workspace_contract"] == THIN_WORKSPACE_CONTRACT:
+            if (target / ".gitignore").exists():
+                errors.extend(
+                    f"privacy ignore missing: {pattern}"
+                    for pattern in _missing_thin_privacy_ignores(target)
+                )
+        elif (target / ".gitignore").exists():
             missing = _missing_privacy_ignores(target)
             if memory_report["enabled"]:
                 required_missing = [
@@ -887,7 +1115,8 @@ def doctor_workspace(target: str | Path, *, repo_root: str | Path | None = None)
             errors.extend(
                 f"privacy ignore missing: {pattern}" for pattern in required_missing
             )
-        errors.extend(_module_index_errors(target))
+        if compatibility["workspace_contract"] != THIN_WORKSPACE_CONTRACT:
+            errors.extend(_module_index_errors(target))
 
     graph = {"nodes": 0, "edges": 0, "broken": 0}
     if not errors:
@@ -1572,7 +1801,8 @@ def _apply_w210_fix(
 # ---------------------------------------------------------------------------
 #
 # Read-only unless the caller opts in with --trend, which acts as the write
-# gate for a small, inspectable state file at .vivary/doctor-state.json. The
+# gate for a small, inspectable state file. Thin workspaces keep it under
+# .vivary/runtime/doctor-state.json; legacy workspaces retain the prior path. The
 # metrics reuse doctor's own graph summary and module-index scan rather than
 # inventing a second notion of "routing surface" or "context budget".
 
@@ -1605,6 +1835,8 @@ def _doctor_metrics_snapshot(report: dict, target: Path) -> dict:
 
 
 def _doctor_state_path(target: Path) -> Path:
+    if (target / ".vivary" / "workspace.toml").is_file():
+        return target / ".vivary" / "runtime" / _DOCTOR_STATE_NAME
     return target / _STORAGE_DIR / _DOCTOR_STATE_NAME
 
 
@@ -1659,8 +1891,8 @@ def _trend_deltas(prior: dict, current: dict) -> dict:
 
 def _apply_doctor_trend(report: dict, target: Path) -> dict:
     """Compute the --trend addendum: read prior state, snapshot current
-    metrics, write new state (the --trend flag is the only write gate for
-    .vivary/doctor-state.json), and return the JSON-mode trend payload plus
+    metrics, write new state (the --trend flag is the only write gate), and return
+    the JSON-mode trend payload plus
     any state-read warning (kept separate from report["warnings"] so a
     corrupt state file never inflates the stored warning_count)."""
     current_metrics = _doctor_metrics_snapshot(report, target)
@@ -1686,7 +1918,7 @@ def _format_doctor_trend(trend: dict, state_warning: str | None) -> list[str]:
         lines.append(f"warning: {state_warning}")
 
     if trend["prior"] is None:
-        lines.append("trend: first recorded run (no prior .vivary/doctor-state.json)")
+        lines.append("trend: first recorded run (no prior Doctor runtime snapshot)")
         return lines
 
     prior_date = trend["prior"]["date"]
@@ -1871,6 +2103,21 @@ def _missing_privacy_ignores(target: Path, *, include_nested: bool = True) -> li
             _probe_is_ignored(target, path, include_nested=include_nested)
             for path in paths
         )
+    ]
+
+
+_THIN_PRIVACY_PROBES = {
+    ".vivary/private/": (".vivary/private/secret.md",),
+    ".vivary/runtime/": (".vivary/runtime/adopt-journal.json",),
+    "*.vivary-tmp": (".vivary-output.vivary-tmp",),
+}
+
+
+def _missing_thin_privacy_ignores(target: Path) -> list[str]:
+    return [
+        required
+        for required, paths in _THIN_PRIVACY_PROBES.items()
+        if not all(_probe_is_ignored(target, path) for path in paths)
     ]
 
 
@@ -2344,6 +2591,28 @@ def _write_text_no_follow(target: Path, dst: Path, text: str) -> None:
                     os.fchmod(fh.fileno(), mode)
                 except OSError:
                     # A mode we cannot restore must not abort an otherwise good repair.
+                    pass
+        os.replace(tmp, dst)
+    finally:
+        if tmp.exists() or tmp.is_symlink():
+            tmp.unlink()
+
+
+def _write_bytes_no_follow(target: Path, dst: Path, data: bytes) -> None:
+    _ensure_safe_destinations(target, [dst], force=True)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    mode = _existing_regular_file_mode(dst)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{dst.name}.", suffix=".vivary-tmp", dir=dst.parent
+    )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            if mode is not None and hasattr(os, "fchmod"):
+                try:
+                    os.fchmod(fh.fileno(), mode)
+                except OSError:
                     pass
         os.replace(tmp, dst)
     finally:
@@ -3355,7 +3624,6 @@ _DECLARED_CONFIG_SCHEMAS = {
 def _auto_pick_storage(args) -> tuple[str, str]:
     """Return (storage_tier, provider) based on --auto signals."""
     privacy = getattr(args, "privacy", None)
-    size = getattr(args, "size", None)
     storage = getattr(args, "storage", None)
     provider = getattr(args, "provider", None)
 
@@ -3363,10 +3631,9 @@ def _auto_pick_storage(args) -> tuple[str, str]:
         return storage, provider or "lancedb"
     if privacy == "cloud":
         return "cloud", provider or "qdrant"
-    if size == "small":
-        return "file", provider or "lancedb"
-    # medium, large, or not-sure → embedded (safe local default)
-    return "embedded", provider or "lancedb"
+    # Size alone never grants provider-install authority. Embedded storage
+    # requires the explicit --storage embedded choice.
+    return "file", provider or "lancedb"
 
 
 def _is_importable(module: str) -> bool:
@@ -3489,6 +3756,17 @@ def _run_wizard(args) -> dict:
             provider = getattr(args, "provider", None) or "lancedb"
         return {"storage": storage, "provider": provider, "memory": requested_memory}
 
+    if (
+        getattr(args, "command", None) == "init"
+        and not sys.stdin.isatty()
+        and not getattr(args, "auto", False)
+        and all(
+            getattr(args, name, None) is None
+            for name in ("storage", "provider", "size", "privacy")
+        )
+    ):
+        return {"storage": "file", "provider": "lancedb", "memory": requested_memory}
+
     auto = getattr(args, "auto", False)
     explicit_agent_dry_run = (
         getattr(args, "dry_run", False)
@@ -3507,26 +3785,27 @@ def _run_wizard(args) -> dict:
     # Interactive flow — plain English, no jargon (all prompts to stderr so JSON stdout stays clean)
     print("\nWelcome to Vivary! Let's set up your workspace.\n", file=sys.stderr)
 
-    size_map = {"1": "small", "2": "medium", "3": "large", "": "medium"}
+    size_map = {"1": "small", "2": "medium", "3": "large", "": "small"}
     print("  How large do you expect this workspace to get?", file=sys.stderr)
     print("  1) Just starting out (a few files or notes)", file=sys.stderr)
     print("  2) Growing — hundreds of files (recommended)", file=sys.stderr)
     print("  3) Large — huge codebase or years of notes", file=sys.stderr)
     try:
-        sys.stderr.write("  Your choice [2]: ")
+        sys.stderr.write("  Your choice [1]: ")
         sys.stderr.flush()
         size_choice = sys.stdin.readline().strip()
     except EOFError:
         size_choice = ""
-    size = size_map.get(size_choice, "medium")
+    size = size_map.get(size_choice, "small")
 
     if size == "small":
         storage_decision = {"storage": "file", "provider": "lancedb"}
         return {**storage_decision, "memory": _prompt_memory_choice(requested_memory)}
 
-    print("\n  Where should your data live?", file=sys.stderr)
-    print("  1) On this computer — private, no accounts needed (recommended)", file=sys.stderr)
-    print("  2) In the cloud — sync across machines, scales to any size", file=sys.stderr)
+    print("\n  How should Vivary store searchable context?", file=sys.stderr)
+    print("  1) Project files only — local, no provider install (recommended)", file=sys.stderr)
+    print("  2) Embedded search — local, installs LanceDB", file=sys.stderr)
+    print("  3) Cloud search — requires a separate provider", file=sys.stderr)
     try:
         sys.stderr.write("  Your choice [1]: ")
         sys.stderr.flush()
@@ -3534,7 +3813,15 @@ def _run_wizard(args) -> dict:
     except EOFError:
         loc_choice = "1"
 
-    if loc_choice == "2":
+    if loc_choice in ("", "1"):
+        return {
+            "storage": "file",
+            "provider": "lancedb",
+            "installed": [],
+            "memory": _prompt_memory_choice(requested_memory),
+        }
+
+    if loc_choice == "3":
         print("\n  Which cloud service?", file=sys.stderr)
         print("  1) Qdrant — free tier, open source, easiest setup (recommended)", file=sys.stderr)
         print("  2) Astra DB — DataStax, enterprise scale", file=sys.stderr)
@@ -3551,7 +3838,15 @@ def _run_wizard(args) -> dict:
             return {"storage": "file", "provider": "lancedb", "installed": [], "memory": _prompt_memory_choice(requested_memory)}
         return {"storage": "cloud", "provider": "qdrant", "installed": [], "memory": _prompt_memory_choice(requested_memory)}
 
-    # User picked "on this computer" — install LanceDB now, wizard is the consent step.
+    if loc_choice != "2":
+        return {
+            "storage": "file",
+            "provider": "lancedb",
+            "installed": [],
+            "memory": _prompt_memory_choice(requested_memory),
+        }
+
+    # The explicit embedded-search choice is the provider-install consent step.
     if getattr(args, "dry_run", False):
         print("\n  Would set up LanceDB embedded storage (dry run).", file=sys.stderr)
         installed = []
@@ -3611,8 +3906,34 @@ def _write_memory_config(target: Path, memory: str, dry_run: bool, *, force: boo
 
 
 # ---------------------------------------------------------------------------
-# Adopt: bring Vivary to an existing repo/vault without touching its files
+# Legacy full-adoption planner retained only for source compatibility fixtures.
 # ---------------------------------------------------------------------------
+
+THIN_WORKSPACE_CONTRACT = "thin-v0.3"
+_THIN_AGENTS_BLOCK_START = "<!-- vivary:context:start -->"
+_THIN_AGENTS_BLOCK_END = "<!-- vivary:context:end -->"
+_THIN_GITIGNORE_BLOCK_START = "# >>> vivary private/runtime >>>"
+_THIN_GITIGNORE_BLOCK_END = "# <<< vivary private/runtime <<<"
+_THIN_PRIVATE_RULES = (
+    ".vivary/private/",
+    ".vivary/runtime/",
+    "*.vivary-tmp",
+)
+_THIN_ADAPTER_PATHS = {
+    "agents": ".agents/skills/vivary/SKILL.md",
+    "claude": ".claude/skills/vivary/SKILL.md",
+}
+_THIN_ADAPTER_MAX_BYTES = 1200
+_ADOPT_PREJOURNAL_MARKER_PREFIX = "# vivary-adopt-prejournal "
+_THIN_RECORD_FOLDERS = {
+    "modules": "module",
+    "changes": "change",
+    "decisions": "decision",
+    "verification": "verification",
+    "gates": "gate",
+}
+_THIN_RECORD_MAX_BYTES = 256 * 1024
+_THIN_RECORD_NAME_RE = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?\.md")
 
 _ADOPT_SKIP_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build",
@@ -3925,7 +4246,7 @@ def _adopt_gitignore_followups(target: Path) -> list[str]:
     return followups
 
 
-def plan_adopt(
+def _legacy_full_plan_adopt(
     target: str | Path,
     *,
     preset: str | None = None,
@@ -4090,12 +4411,1016 @@ def plan_adopt(
     }
 
 
+def _thin_agents_block() -> str:
+    return f"""{_THIN_AGENTS_BLOCK_START}
+## Vivary context
+
+Read `.vivary/context.md` before acting. It routes bounded project context,
+verification receipts, privacy, current state, and deliberate human gates.
+{_THIN_AGENTS_BLOCK_END}
+"""
+
+
+def _thin_gitignore_block(*, active_context: str | None = None) -> str:
+    rules = list(_THIN_PRIVATE_RULES)
+    if active_context == "cocoindex-code":
+        rules.append(".cocoindex_code/")
+    rules_text = "\n".join(rules)
+    return f"""{_THIN_GITIGNORE_BLOCK_START}
+{rules_text}
+{_THIN_GITIGNORE_BLOCK_END}
+"""
+
+
+def _thin_context_doc(project: str, preset: str) -> str:
+    return f"""---
+status: active
+preset: {preset}
+---
+# {project} context
+
+Vivary is this workspace's local-first governed-context layer. It gives agents
+bounded project evidence and task capsules; records provenance, verification, and
+receipts; and leaves consequential authority at explicit human gates.
+
+## Work loop
+
+Ask -> retrieve -> act -> verify -> learn -> gate. State what is known, inferred,
+or unknown. Retrieve only the evidence the task needs. Preserve conflicting truth
+instead of guessing. Treat a successful tool call as activity, not proof.
+
+## Routes
+
+- Use `tropo find --governed` for bounded graph-backed context when installed.
+- Optional MCP stays off until separately installed and explicitly enabled. A local
+  client can bind this root with `vivary-mcp --workspace project .`; its four tools
+  read and query only, and never authorize a write.
+- Read `STATE.md` only when current status affects the task. One orchestrator or
+  human owns it; workers return receipts instead of editing it concurrently.
+- Add one real record lazily only when work earns it. Bind the proposal to a Task
+  Capsule with `create-vivary record`, inspect its exact dry-run hash, and apply only
+  the human-approved plan. Never seed or bulk-load `.vivary/records/`.
+- Keep private material under `.vivary/private/` and runtime artifacts under
+  `.vivary/runtime/`; neither belongs in version control.
+
+## Gates
+
+Get deliberate human approval for publishing, external writes, destructive work,
+credentials, authority expansion, and any ambiguity the evidence cannot resolve.
+"""
+
+
+def _thin_workspace_toml(
+    preset: str,
+    adapters: tuple[str, ...] | list[str] = (),
+    *,
+    active_context: str | None = None,
+) -> str:
+    adapter_list = ", ".join(json.dumps(adapter) for adapter in sorted(adapters))
+    capability_list = json.dumps(active_context) if active_context is not None else ""
+    excludes = [".git", ".agents", ".vivary/private", ".vivary/runtime"]
+    if active_context == "cocoindex-code":
+        excludes.append(".cocoindex_code")
+    exclude_list = ", ".join(json.dumps(path) for path in excludes)
+    return f'''version = 1
+exclude = [{exclude_list}]
+
+[workspace]
+contract = "{THIN_WORKSPACE_CONTRACT}"
+preset = "{preset}"
+state = "STATE.md"
+private = [".vivary/private"]
+runtime = [".vivary/runtime"]
+adapters = [{adapter_list}]
+capabilities = [{capability_list}]
+
+[base]
+derive = ["id", "title"]
+allow_untyped = true
+optional = {{ tags = "string-list" }}
+
+[types.project]
+folder = [".vivary", "projects"]
+required = {{ status = "enum:idea|active|paused|shipped|archived" }}
+optional = {{ preset = "string", repo = "url", target_ship = "date" }}
+
+[types.module]
+folder = "modules"
+required = {{ project = "string", status = "enum:active|draft|blocked|archived", module_area = "string" }}
+optional = {{ related_modules = "ref-list", related_changes = "ref-list", verification = "ref-list", gates = "ref-list", source_files = "string-list", test_files = "string-list" }}
+
+[types.change]
+folder = "changes"
+required = {{ project = "string", status = "enum:planned|active|done|blocked|deferred", slice = "string" }}
+optional = {{ branch = "string", related_modules = "ref-list", related_changes = "ref-list", verification = "ref-list", gates = "ref-list" }}
+
+[types.decision]
+folder = "decisions"
+required = {{ project = "string", status = "enum:proposed|accepted|deferred|superseded", date = "date" }}
+optional = {{ supersedes = "ref", superseded_by = "ref", related_modules = "ref-list", related_changes = "ref-list", rationale = "string" }}
+
+[types.verification]
+folder = "verification"
+required = {{ project = "string", status = "enum:planned|passed|failed|blocked|deferred", target = "string" }}
+optional = {{ command = "string", evidence = "any", related_modules = "ref-list", related_changes = "ref-list" }}
+
+[types.gate]
+folder = "gates"
+required = {{ project = "string", status = "enum:open|approved|rejected|deferred", gate = "string" }}
+optional = {{ approver = "string", approved_at = "datetime", command_intent = "string", related_modules = "ref-list", related_changes = "ref-list" }}
+'''
+
+
+def _thin_state_doc() -> str:
+    return """# State
+
+Focus:
+
+Status:
+
+Next:
+
+Open decisions:
+
+Blockers:
+
+Checks:
+
+Updated:
+"""
+
+
+def _thin_active_context_writes(target: Path) -> list[tuple[Path, str]]:
+    docs = """# Active context: cocoindex-code
+
+This optional local sidecar may derive code context after an explicit human gate.
+Vivary's source files remain authoritative. Keep generated indexes outside governed
+records, respect `.gitignore` and `.vivary/private/`, and return source-linked
+verification receipts rather than treating retrieval as proof.
+"""
+    skill = """---
+name: active-context
+description: Use the optional local cocoindex-code sidecar without expanding authority.
+---
+# Active context
+
+Read `.vivary/context.md` first. Use the sidecar only when the task benefits from
+code retrieval and the human has approved any required install or indexing step.
+Fail closed on privacy uncertainty. Verify every candidate against its source file
+and return a receipt; never approve a gate or treat an index as source of truth.
+"""
+    if len(skill.encode("utf-8")) > _THIN_ADAPTER_MAX_BYTES:
+        raise ScaffoldError("generated active-context projection exceeds byte budget")
+    return [
+        (target / "docs" / "active-context.md", docs),
+        (target / ".agents" / "skills" / "active-context" / "SKILL.md", skill),
+    ]
+
+
+def _valid_existing_thin_contract(
+    target: Path,
+    *,
+    preset: str,
+    adapters: tuple[str, ...],
+    repo_root: Path,
+) -> tuple[bool, bool]:
+    """Validate user-extended v0.3 config and its project capsule read-only."""
+    config_path = target / ".vivary" / "workspace.toml"
+    context_path = target / ".vivary" / "context.md"
+    try:
+        if (
+            not config_path.is_file()
+            or _is_symlink_or_junction(config_path)
+            or config_path.stat().st_size > 1024 * 1024
+        ):
+            return False, False
+        import tomllib as _toml
+
+        raw = _toml.loads(config_path.read_text(encoding="utf-8-sig"))
+        workspace = raw.get("workspace")
+        if (
+            not isinstance(workspace, dict)
+            or workspace.get("contract") != THIN_WORKSPACE_CONTRACT
+            or workspace.get("preset") != preset
+            or sorted(workspace.get("adapters", [])) != sorted(adapters)
+        ):
+            return False, False
+        tropo = _load_tropo(repo_root)
+        resolver = tropo.ConfigResolver(str(target), str(Path(tropo.__file__).parent))
+    except Exception:
+        return False, False
+
+    try:
+        if (
+            not context_path.is_file()
+            or _is_symlink_or_junction(context_path)
+            or context_path.stat().st_size > 1024 * 1024
+        ):
+            return True, False
+        effective = resolver.for_dir(str(context_path.parent))
+        doc = tropo.analyze_file(
+            str(context_path),
+            ".vivary/context.md",
+            effective,
+            use_git_dates=False,
+        )
+    except Exception:
+        return True, False
+    return True, doc.type == "project" and not doc.findings
+
+
+def _thin_adapter_doc(adapter: str) -> tuple[str, str, str]:
+    source = (
+        f"{THIN_WORKSPACE_CONTRACT}:{adapter}:"
+        "route=.vivary/context.md;commands=tropo-find,tropo-check,create-vivary-doctor"
+    )
+    source_hash = _sha256_prefixed(source.encode("utf-8"))
+    body = f"""---
+name: vivary
+description: Route this agent runtime through the local Vivary context contract.
+---
+# Vivary
+
+Read `.vivary/context.md` first. Read `STATE.md` only when current state matters.
+Use `tropo find --governed` for bounded context, `tropo check` for graph integrity,
+and `create-vivary doctor .` for workspace health. Return verification receipts;
+do not approve gates, write private context, or expand authority.
+"""
+    content_hash = _sha256_prefixed(body.encode("utf-8"))
+    text = (
+        f"<!-- generated-by: create-vivary {__version__} -->\n"
+        f"<!-- adapter: {adapter} -->\n"
+        f"<!-- source-hash: {source_hash} -->\n"
+        f"<!-- content-hash: {content_hash} -->\n"
+        + body
+    )
+    if len(text.encode("utf-8")) > _THIN_ADAPTER_MAX_BYTES:
+        raise ScaffoldError(f"generated {adapter} adapter exceeds byte budget")
+    return text, source_hash, content_hash
+
+
+def _is_known_stale_thin_adapter(data: bytes, current_text: str) -> bool:
+    """Recognize only an exact generated adapter whose generator version is older.
+
+    The complete generated suffix, including source/content hashes and body, must
+    match today's allowlisted projection. Only the semver marker may differ, so
+    user-authored or edited content can never qualify for replacement.
+    """
+    first_line, separator, suffix = data.partition(b"\n")
+    if not separator:
+        return False
+    expected_first, _, expected_suffix = current_text.encode("utf-8").partition(b"\n")
+    match = re.fullmatch(
+        rb"<!-- generated-by: create-vivary ([0-9]+\.[0-9]+\.[0-9]+) -->",
+        first_line,
+    )
+    if match is None or suffix != expected_suffix:
+        return False
+    current_match = re.fullmatch(
+        rb"<!-- generated-by: create-vivary ([0-9]+\.[0-9]+\.[0-9]+) -->",
+        expected_first,
+    )
+    if current_match is None:
+        return False
+    generated_version = tuple(int(part) for part in match.group(1).split(b"."))
+    current_version = tuple(int(part) for part in current_match.group(1).split(b"."))
+    return generated_version < current_version
+
+
+def _sha256_prefixed(data: bytes) -> str:
+    return f"sha256:{hashlib.sha256(data).hexdigest()}"
+
+
+def _append_patch_text(existing: bytes, block: str) -> str:
+    if not existing:
+        return block
+    prefix = "\n" if existing.endswith((b"\n", b"\r")) else "\n\n"
+    return prefix + block
+
+
+def _thin_plan_hash(
+    target: Path,
+    *,
+    preset: str,
+    writes: list[tuple[Path, str]],
+    patches: list[dict],
+    adapter_replacements: list[dict],
+    kept_identities: list[dict],
+) -> str:
+    payload = {
+        "contract": THIN_WORKSPACE_CONTRACT,
+        "preset": preset,
+        "creates": [
+            {
+                "path": path.relative_to(target).as_posix(),
+                "content_hash": _sha256_prefixed(text.encode("utf-8")),
+            }
+            for path, text in sorted(writes)
+        ],
+        "patches": [
+            {
+                "path": patch["path"].relative_to(target).as_posix(),
+                "before_hash": patch["before_hash"],
+                "anchor": patch["anchor"],
+                "inserted_text": patch["inserted_text"],
+            }
+            for patch in sorted(patches, key=lambda item: item["path"])
+        ],
+        "adapter_replacements": [
+            {
+                "path": item["path"].relative_to(target).as_posix(),
+                "before_hash": item["before_hash"],
+                "content_hash": _sha256_prefixed(item["text"].encode("utf-8")),
+            }
+            for item in sorted(adapter_replacements, key=lambda row: row["path"])
+        ],
+        "kept": kept_identities,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return _sha256_prefixed(encoded)
+
+
+def plan_adopt(
+    target: str | Path,
+    *,
+    preset: str | None = None,
+    adapters: tuple[str, ...] | list[str] = (),
+    repo_root: str | Path | None = None,
+) -> dict:
+    """Return the deterministic, read-only thin-v0.3 brownfield adoption plan."""
+    root = Path(repo_root) if repo_root is not None else default_repo_root()
+    root = root.resolve()
+    target = _resolve_scaffold_target(target)
+    if not target.exists():
+        raise ScaffoldError(f"adopt target does not exist: {target}")
+    if not target.is_dir():
+        raise ScaffoldError(f"adopt target is not a directory: {target}")
+
+    inventory = BrownfieldInventory(target)
+    chosen_preset, preset_reason = inventory.choose_preset(preset)
+    if chosen_preset not in PRESETS:
+        raise ScaffoldError(
+            f"unknown preset {chosen_preset!r}; expected one of {', '.join(PRESETS)}"
+        )
+    selected_adapters = tuple(adapters)
+    unknown_adapters = sorted(set(selected_adapters) - set(_THIN_ADAPTER_PATHS))
+    if unknown_adapters:
+        raise ScaffoldError(
+            "unknown adapter(s): " + ", ".join(unknown_adapters)
+            + "; expected agents or claude"
+        )
+    if len(set(selected_adapters)) != len(selected_adapters):
+        raise ScaffoldError("each --adapter value may be selected only once")
+
+    valid_existing_config, valid_existing_context = _valid_existing_thin_contract(
+        target,
+        preset=chosen_preset,
+        adapters=selected_adapters,
+        repo_root=root,
+    )
+
+    project = target.name or "vivary-workspace"
+    desired = {
+        target / ".vivary" / "context.md": _thin_context_doc(project, chosen_preset),
+        target / ".vivary" / "workspace.toml": _thin_workspace_toml(
+            chosen_preset,
+            selected_adapters,
+        ),
+        target / "STATE.md": _thin_state_doc(),
+    }
+    writes: list[tuple[Path, str]] = []
+    projection_writes: list[tuple[Path, str]] = []
+    adapter_replacements: list[dict] = []
+    optional_projections: list[dict] = []
+    patches: list[dict] = []
+    kept: list[Path] = []
+    conflicts: list[dict] = []
+
+    vivary_dir = target / ".vivary"
+    invalid_vivary_dir = vivary_dir.exists() and (
+        not vivary_dir.is_dir() or _is_symlink_or_junction(vivary_dir)
+    )
+    if invalid_vivary_dir:
+        conflicts.append(
+            {"path": vivary_dir, "reason": ".vivary must be a regular directory"}
+        )
+
+    for path, text in desired.items():
+        if invalid_vivary_dir and path.parent == vivary_dir:
+            continue
+        if not path.exists():
+            writes.append((path, text))
+            continue
+        if _is_symlink_or_junction(path) or not path.is_file():
+            conflicts.append({"path": path, "reason": "destination is not a regular file"})
+            continue
+        if path.name == "STATE.md":
+            kept.append(path)
+            continue
+        if path == target / ".vivary" / "workspace.toml" and valid_existing_config:
+            kept.append(path)
+        elif path == target / ".vivary" / "context.md" and valid_existing_context:
+            kept.append(path)
+        else:
+            conflicts.append(
+                {"path": path, "reason": f"existing file is not {THIN_WORKSPACE_CONTRACT}"}
+            )
+
+    for adapter in sorted(selected_adapters):
+        rel = _THIN_ADAPTER_PATHS[adapter]
+        path = target / Path(rel)
+        text, source_hash, content_hash = _thin_adapter_doc(adapter)
+        projection = {
+            "adapter": adapter,
+            "path": path,
+            "bytes": len(text.encode("utf-8")),
+            "source_hash": source_hash,
+            "content_hash": content_hash,
+        }
+        if not path.exists():
+            projection["status"] = "create"
+            projection_writes.append((path, text))
+            optional_projections.append(projection)
+            continue
+        elif _is_symlink_or_junction(path) or not path.is_file():
+            projection["status"] = "conflict"
+            conflicts.append({"path": path, "reason": "adapter destination is not a regular file"})
+            optional_projections.append(projection)
+            continue
+
+        adapter_bytes = path.read_bytes()
+        if adapter_bytes == text.encode("utf-8"):
+            projection["status"] = "clean"
+            kept.append(path)
+        elif _is_known_stale_thin_adapter(adapter_bytes, text):
+            projection["status"] = "replace"
+            adapter_replacements.append(
+                {
+                    "path": path,
+                    "before_hash": _sha256_prefixed(adapter_bytes),
+                    "text": text,
+                }
+            )
+        else:
+            projection["status"] = "conflict"
+            conflicts.append({"path": path, "reason": "adapter content is user-owned"})
+        optional_projections.append(projection)
+
+    agents_path = target / "AGENTS.md"
+    agents_block = _thin_agents_block()
+    if not agents_path.exists():
+        writes.append((agents_path, "# AGENTS.md\n\n" + agents_block))
+    elif _is_symlink_or_junction(agents_path) or not agents_path.is_file():
+        conflicts.append({"path": agents_path, "reason": "AGENTS.md is not a regular file"})
+    else:
+        agents_bytes = agents_path.read_bytes()
+        try:
+            agents_text = agents_bytes.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            conflicts.append({"path": agents_path, "reason": "AGENTS.md is not UTF-8"})
+        else:
+            starts = agents_text.count(_THIN_AGENTS_BLOCK_START)
+            ends = agents_text.count(_THIN_AGENTS_BLOCK_END)
+            if starts == 1 and ends == 1 and agents_block.rstrip() in agents_text:
+                kept.append(agents_path)
+            elif starts or ends:
+                conflicts.append(
+                    {"path": agents_path, "reason": "duplicate or malformed Vivary block"}
+                )
+            else:
+                patches.append(
+                    {
+                        "path": agents_path,
+                        "before_hash": _sha256_prefixed(agents_bytes),
+                        "anchor": "eof",
+                        "inserted_text": _append_patch_text(agents_bytes, agents_block),
+                    }
+                )
+
+    gitignore_path = target / ".gitignore"
+    gitignore_block = _thin_gitignore_block()
+    if not gitignore_path.exists():
+        writes.append((gitignore_path, gitignore_block))
+        privacy_status = "planned"
+    elif _is_symlink_or_junction(gitignore_path) or not gitignore_path.is_file():
+        conflicts.append({"path": gitignore_path, "reason": ".gitignore is not a regular file"})
+        privacy_status = "conflict"
+    else:
+        gitignore_bytes = gitignore_path.read_bytes()
+        try:
+            gitignore_text = gitignore_bytes.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            conflicts.append({"path": gitignore_path, "reason": ".gitignore is not UTF-8"})
+            privacy_status = "conflict"
+        else:
+            prejournal = _prejournal_privacy_match(gitignore_bytes)
+            if prejournal is not None:
+                conflicts.append(
+                    {
+                        "path": gitignore_path,
+                        "reason": (
+                            "unfinished pre-journal adoption privacy replacement; "
+                            f"recover {prejournal.group(1).decode('ascii')}"
+                        ),
+                    }
+                )
+                privacy_status = "conflict"
+            elif _ADOPT_PREJOURNAL_MARKER_PREFIX in gitignore_text:
+                conflicts.append(
+                    {"path": gitignore_path, "reason": "malformed pre-journal adoption marker"}
+                )
+                privacy_status = "conflict"
+            else:
+                starts = gitignore_text.count(_THIN_GITIGNORE_BLOCK_START)
+                ends = gitignore_text.count(_THIN_GITIGNORE_BLOCK_END)
+                if starts == 1 and ends == 1 and gitignore_block.rstrip() in gitignore_text:
+                    kept.append(gitignore_path)
+                    privacy_status = "satisfied"
+                elif starts or ends:
+                    conflicts.append(
+                        {"path": gitignore_path, "reason": "duplicate or malformed Vivary block"}
+                    )
+                    privacy_status = "conflict"
+                else:
+                    patches.append(
+                        {
+                            "path": gitignore_path,
+                            "before_hash": _sha256_prefixed(gitignore_bytes),
+                            "anchor": "eof",
+                            "inserted_text": _append_patch_text(gitignore_bytes, gitignore_block),
+                        }
+                    )
+                    privacy_status = "planned"
+
+    if privacy_status != "conflict":
+        privacy_is_planned = any(path == gitignore_path for path, _ in writes) or any(
+            patch["path"] == gitignore_path for patch in patches
+        )
+        simulated_rules = (
+            tuple(
+                ("", parsed[0], parsed[1])
+                for line in gitignore_block.splitlines()
+                if (parsed := _parse_gitignore_line(line)) is not None
+            )
+            if privacy_is_planned
+            else ()
+        )
+        missing_privacy = [
+            pattern
+            for pattern, probes in _THIN_PRIVACY_PROBES.items()
+            if not all(
+                _probe_is_ignored(target, probe, extra_root_rules=simulated_rules)
+                for probe in probes
+            )
+        ]
+        if missing_privacy:
+            privacy_status = "conflict"
+            nested_conflicts: set[Path] = set()
+            for probes in _THIN_PRIVACY_PROBES.values():
+                for probe in probes:
+                    parts = Path(probe).parts
+                    for depth in range(1, len(parts)):
+                        nested = target.joinpath(*parts[:depth]) / ".gitignore"
+                        if nested.exists():
+                            nested_conflicts.add(nested)
+            if not nested_conflicts:
+                nested_conflicts.add(gitignore_path)
+            reason = (
+                "nested or contradictory .gitignore rules leave Vivary "
+                "private/runtime paths committable: " + ", ".join(missing_privacy)
+            )
+            conflicts.extend(
+                {"path": path, "reason": reason} for path in sorted(nested_conflicts)
+            )
+
+    writes.sort(key=lambda item: item[0])
+    projection_writes.sort(key=lambda item: item[0])
+    adapter_replacements.sort(key=lambda item: item["path"])
+    patches.sort(key=lambda item: item["path"])
+    kept = sorted(set(kept))
+    kept_identities = [
+        {
+            "path": path.relative_to(target).as_posix(),
+            "content_hash": _sha256_prefixed(path.read_bytes()),
+        }
+        for path in kept
+        if path.is_file() and not _is_symlink_or_junction(path)
+    ]
+    conflicts.sort(key=lambda item: item["path"])
+    creates = [path for path, _ in writes]
+    plan_hash = _thin_plan_hash(
+        target,
+        preset=chosen_preset,
+        writes=writes + projection_writes,
+        patches=patches,
+        adapter_replacements=adapter_replacements,
+        kept_identities=kept_identities,
+    )
+
+    return {
+        "contract": THIN_WORKSPACE_CONTRACT,
+        "target": target,
+        "preset": chosen_preset,
+        "preset_reason": preset_reason,
+        "inventory": inventory,
+        "creates": creates,
+        "patches": patches,
+        "optional_projections": optional_projections,
+        "adapter_replacements": adapter_replacements,
+        "kept": kept,
+        "kept_identities": kept_identities,
+        "conflicts": conflicts,
+        "privacy": {"status": privacy_status, "rules": list(_THIN_PRIVATE_RULES)},
+        "plan_hash": plan_hash,
+        # Transitional aliases keep report consumers readable during the
+        # following apply/Doctor slice; they contain only thin-v0.3 paths.
+        "would_create": creates,
+        "followups": [],
+        "gitignore_followups": [],
+        "excluded_pre_existing": [],
+        "skipped_module_collisions": [],
+        "writes": writes + projection_writes,
+        "copies": [],
+    }
+
+
+_ADOPT_JOURNAL_REL = Path(".vivary/runtime/adopt-journal.json")
+_ADOPT_JOURNAL_SCHEMA = "vivary.adopt-journal.v1"
+_ADOPT_PREJOURNAL_RE = re.compile(
+    rb"# vivary-adopt-prejournal "
+    rb"plan=(sha256:[0-9a-f]{64}) "
+    rb"existed=([01]) "
+    rb"before=(none|sha256:[0-9a-f]{64}) "
+    rb"size=([0-9]+)\n\Z"
+)
+
+
+def _adopt_actions(plan: dict) -> list[dict]:
+    target = plan["target"]
+    gitignore = target / ".gitignore"
+    actions: list[dict] = []
+    for path, text in plan["writes"]:
+        actions.append(
+            {
+                "kind": "create",
+                "path": path,
+                "after": text.encode("utf-8"),
+            }
+        )
+    for patch in plan["patches"]:
+        before = patch["path"].read_bytes()
+        actions.append(
+            {
+                "kind": "patch",
+                "path": patch["path"],
+                "before_hash": patch["before_hash"],
+                "after": before + patch["inserted_text"].encode("utf-8"),
+            }
+        )
+    for replacement in plan.get("adapter_replacements", []):
+        actions.append(
+            {
+                "kind": "replace",
+                "path": replacement["path"],
+                "before_hash": replacement["before_hash"],
+                "after": replacement["text"].encode("utf-8"),
+            }
+        )
+    return sorted(
+        actions,
+        key=lambda action: (
+            0 if action["path"] == gitignore else 1,
+            action["path"].relative_to(target).as_posix(),
+        ),
+    )
+
+
+def _adopt_backups(actions: list[dict]) -> dict[Path, bytes | None]:
+    return {
+        action["path"]: action["path"].read_bytes() if action["path"].exists() else None
+        for action in actions
+    }
+
+
+def _assert_adopt_kept_inputs(target: Path, plan: dict) -> None:
+    for identity in plan.get("kept_identities", []):
+        path = target / Path(identity["path"])
+        _ensure_within_target(target, [path])
+        if _is_symlink_or_junction(path) or not path.is_file():
+            raise ScaffoldError(f"approved plan input changed: {identity['path']}")
+        if _sha256_prefixed(path.read_bytes()) != identity["content_hash"]:
+            raise ScaffoldError(f"approved plan input changed: {identity['path']}")
+
+
+def _adopt_journal_payload(
+    target: Path,
+    plan_hash: str,
+    actions: list[dict],
+    backups: dict[Path, bytes | None],
+    *,
+    phase: str,
+    completed: int,
+) -> dict:
+    return {
+        "schema": _ADOPT_JOURNAL_SCHEMA,
+        "plan_hash": plan_hash,
+        "phase": phase,
+        "completed": completed,
+        "actions": [
+            {
+                "path": action["path"].relative_to(target).as_posix(),
+                "kind": action["kind"],
+                "existed": backups[action["path"]] is not None,
+                "before": (
+                    base64.b64encode(backups[action["path"]]).decode("ascii")
+                    if backups[action["path"]] is not None
+                    else None
+                ),
+                "before_hash": (
+                    _sha256_prefixed(backups[action["path"]])
+                    if backups[action["path"]] is not None
+                    else None
+                ),
+                "after_hash": _sha256_prefixed(action["after"]),
+                "transient_after_hash": (
+                    _sha256_prefixed(action["transient_after"])
+                    if action.get("transient_after") is not None
+                    else None
+                ),
+            }
+            for action in actions
+        ],
+    }
+
+
+def _write_adopt_journal(target: Path, payload: dict) -> None:
+    _write_text_no_follow(
+        target,
+        target / _ADOPT_JOURNAL_REL,
+        json.dumps(payload, sort_keys=True, indent=2) + "\n",
+    )
+
+
+def _remove_empty_adopt_dirs(target: Path) -> None:
+    for path in (target / ".vivary" / "runtime", target / ".vivary"):
+        try:
+            path.rmdir()
+        except OSError:
+            pass
+
+
+def _adopt_action_after_hashes(action: dict) -> set[str]:
+    hashes = {
+        action.get("after_hash") or _sha256_prefixed(action["after"]),
+    }
+    transient_hash = action.get("transient_after_hash")
+    if transient_hash is None and action.get("transient_after") is not None:
+        transient_hash = _sha256_prefixed(action["transient_after"])
+    if transient_hash is not None:
+        hashes.add(transient_hash)
+    return hashes
+
+
+def _rollback_adopt(
+    target: Path,
+    actions: list[dict],
+    backups: dict[Path, bytes | None],
+    *,
+    cleanup_journal: bool = True,
+) -> None:
+    failures: list[str] = []
+    for action in reversed(actions):
+        path = action["path"]
+        before = backups[path]
+        try:
+            if before is None:
+                if not path.exists():
+                    continue
+                if _is_symlink_or_junction(path) or not path.is_file():
+                    raise ScaffoldError("created destination changed type")
+                if _sha256_prefixed(path.read_bytes()) not in _adopt_action_after_hashes(action):
+                    raise ScaffoldError("created destination changed after apply")
+                path.unlink()
+            else:
+                if not path.exists() or _is_symlink_or_junction(path) or not path.is_file():
+                    raise ScaffoldError("modified destination is missing or unsafe")
+                current = path.read_bytes()
+                if current == before:
+                    continue
+                if _sha256_prefixed(current) not in _adopt_action_after_hashes(action):
+                    raise ScaffoldError("modified destination changed after apply")
+                _write_bytes_no_follow(target, path, before)
+        except (OSError, ScaffoldError) as exc:
+            failures.append(f"{path.relative_to(target).as_posix()}: {exc}")
+    if failures:
+        raise ScaffoldError("rollback failed: " + "; ".join(failures))
+    if cleanup_journal:
+        journal = target / _ADOPT_JOURNAL_REL
+        if journal.exists() and not _is_symlink_or_junction(journal):
+            journal.unlink()
+        _remove_empty_adopt_dirs(target)
+
+
+def _apply_adopt_action(target: Path, action: dict, *, after: bytes | None = None) -> None:
+    path = action["path"]
+    if action["kind"] == "create":
+        if path.exists() or _is_symlink_or_junction(path):
+            raise ScaffoldError(
+                f"planned create appeared before apply: {path.relative_to(target).as_posix()}"
+            )
+    else:
+        if not path.is_file() or _is_symlink_or_junction(path):
+            raise ScaffoldError(
+                f"planned patch became unsafe: {path.relative_to(target).as_posix()}"
+            )
+        if _sha256_prefixed(path.read_bytes()) != action["before_hash"]:
+            raise ScaffoldError(
+                f"planned patch input changed: {path.relative_to(target).as_posix()}"
+            )
+    _write_bytes_no_follow(target, path, action["after"] if after is None else after)
+
+
+def _prejournal_privacy_bytes(
+    action: dict,
+    before: bytes | None,
+    plan_hash: str,
+) -> bytes:
+    before_hash = _sha256_prefixed(before) if before is not None else "none"
+    marker = (
+        f"{_ADOPT_PREJOURNAL_MARKER_PREFIX}"
+        f"plan={plan_hash} "
+        f"existed={1 if before is not None else 0} "
+        f"before={before_hash} "
+        f"size={len(before or b'')}\n"
+    ).encode("ascii")
+    return action["after"] + marker
+
+
+def _prejournal_privacy_match(data: bytes) -> re.Match[bytes] | None:
+    return _ADOPT_PREJOURNAL_RE.search(data)
+
+
+def _recover_prejournal_privacy(target: Path, recover_hash: str) -> bool:
+    gitignore = target / ".gitignore"
+    if _is_symlink_or_junction(gitignore) or not gitignore.is_file():
+        return False
+    data = gitignore.read_bytes()
+    match = _prejournal_privacy_match(data)
+    if match is None:
+        if _ADOPT_PREJOURNAL_MARKER_PREFIX.encode("ascii") in data:
+            raise ScaffoldError("pre-journal adoption marker is malformed")
+        return False
+
+    marker_hash = match.group(1).decode("ascii")
+    if marker_hash != recover_hash:
+        raise ScaffoldError(
+            f"recovery hash mismatch: pre-journal {marker_hash}, requested {recover_hash}"
+        )
+    existed = match.group(2) == b"1"
+    before_hash = match.group(3).decode("ascii")
+    before_size = int(match.group(4))
+    clean_after = data[: match.start()]
+    if before_size > len(clean_after):
+        raise ScaffoldError("pre-journal adoption marker has an invalid input size")
+    before = clean_after[:before_size]
+    expected_before_hash = _sha256_prefixed(before) if existed else "none"
+    if expected_before_hash != before_hash or (not existed and before):
+        raise ScaffoldError("pre-journal adoption input hash does not match")
+    expected_after = (
+        before + _append_patch_text(before, _thin_gitignore_block()).encode("utf-8")
+        if existed
+        else _thin_gitignore_block().encode("utf-8")
+    )
+    if clean_after != expected_after:
+        raise ScaffoldError("pre-journal adoption privacy replacement changed unexpectedly")
+
+    if existed:
+        _write_bytes_no_follow(target, gitignore, before)
+    else:
+        gitignore.unlink()
+    _remove_empty_adopt_dirs(target)
+    return True
+
+
+def _recover_adopt(target: Path, recover_hash: str, *, repo_root: str | Path | None) -> dict:
+    journal_path = target / _ADOPT_JOURNAL_REL
+    if not journal_path.exists() and _recover_prejournal_privacy(target, recover_hash):
+        return {
+            "contract": THIN_WORKSPACE_CONTRACT,
+            "target": target,
+            "preset": _workspace_declared_preset(target),
+            "preset_reason": "recovered approved pre-journal privacy replacement",
+            "inventory": BrownfieldInventory(target),
+            "creates": [],
+            "patches": [],
+            "optional_projections": [],
+            "adapter_replacements": [],
+            "kept": [],
+            "conflicts": [],
+            "privacy": None,
+            "plan_hash": recover_hash,
+            "would_create": [],
+            "followups": [],
+            "gitignore_followups": [],
+            "excluded_pre_existing": [],
+            "skipped_module_collisions": [],
+            "writes": [],
+            "copies": [],
+            "applied": False,
+            "recovered": True,
+            "doctor": None,
+        }
+    if _is_symlink_or_junction(journal_path) or not journal_path.is_file():
+        raise ScaffoldError("no safe adoption journal exists to recover")
+    if journal_path.stat().st_size > 1024 * 1024:
+        raise ScaffoldError("adoption journal exceeds the recovery size limit")
+    try:
+        payload = json.loads(journal_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ScaffoldError(f"adoption journal is unreadable: {exc}") from exc
+    if payload.get("schema") != _ADOPT_JOURNAL_SCHEMA:
+        raise ScaffoldError("adoption journal schema is not supported")
+    if payload.get("plan_hash") != recover_hash:
+        raise ScaffoldError(
+            f"recovery hash mismatch: journal {payload.get('plan_hash')}, requested {recover_hash}"
+        )
+    raw_actions = payload.get("actions")
+    if not isinstance(raw_actions, list) or not raw_actions:
+        raise ScaffoldError("adoption journal has no recoverable actions")
+
+    actions: list[dict] = []
+    backups: dict[Path, bytes | None] = {}
+    for row in raw_actions:
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str):
+            raise ScaffoldError("adoption journal action is malformed")
+        path = target / Path(row["path"])
+        _ensure_within_target(target, [path])
+        before_text = row.get("before")
+        try:
+            before = base64.b64decode(before_text, validate=True) if before_text is not None else None
+        except (ValueError, TypeError) as exc:
+            raise ScaffoldError("adoption journal backup is malformed") from exc
+        if before is not None and _sha256_prefixed(before) != row.get("before_hash"):
+            raise ScaffoldError("adoption journal backup hash does not match")
+        after_hash = row.get("after_hash")
+        if not isinstance(after_hash, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", after_hash):
+            raise ScaffoldError("adoption journal destination hash is malformed")
+        transient_after_hash = row.get("transient_after_hash")
+        if transient_after_hash is not None and (
+            not isinstance(transient_after_hash, str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", transient_after_hash)
+        ):
+            raise ScaffoldError("adoption journal transient hash is malformed")
+        action = {
+            "kind": row.get("kind"),
+            "path": path,
+            "after_hash": after_hash,
+            "transient_after_hash": transient_after_hash,
+        }
+        actions.append(action)
+        backups[path] = before
+
+    _rollback_adopt(target, actions, backups)
+    return {
+        "contract": THIN_WORKSPACE_CONTRACT,
+        "target": target,
+        "preset": _workspace_declared_preset(target),
+        "preset_reason": "recovered approved interrupted transaction",
+        "inventory": BrownfieldInventory(target),
+        "creates": [],
+        "patches": [],
+        "optional_projections": [],
+        "adapter_replacements": [],
+        "kept": [],
+        "conflicts": [],
+        "privacy": None,
+        "plan_hash": recover_hash,
+        "would_create": [],
+        "followups": [],
+        "gitignore_followups": [],
+        "excluded_pre_existing": [],
+        "skipped_module_collisions": [],
+        "writes": [],
+        "copies": [],
+        "applied": False,
+        "recovered": True,
+        "doctor": None,
+    }
+
+
 def adopt_workspace(
     target: str | Path,
     *,
     preset: str | None = None,
+    adapters: tuple[str, ...] | list[str] = (),
     repo_root: str | Path | None = None,
     yes: bool = False,
+    plan_hash: str | None = None,
+    recover_hash: str | None = None,
+    _fault_after: int | None = None,
+    _crash_after: int | None = None,
+    _crash_before_journal: bool = False,
+    _before_apply: Callable[[], None] | None = None,
 ) -> dict:
     """Adopt Vivary onto an existing tree.
 
@@ -4105,43 +5430,649 @@ def adopt_workspace(
     the same symlink/out-of-root hardened write path as `init`. Existing files are
     never opened for writing, moved, renamed, or truncated.
     """
-    plan = plan_adopt(target, preset=preset, repo_root=repo_root)
+    resolved_target = _resolve_scaffold_target(target)
+    if recover_hash is not None:
+        return _recover_adopt(resolved_target, recover_hash, repo_root=repo_root)
+
+    plan = plan_adopt(resolved_target, preset=preset, adapters=adapters, repo_root=repo_root)
     target_path = plan["target"]
 
     if not yes:
         return {**plan, "applied": False, "doctor": None}
+    if plan_hash is None:
+        raise ScaffoldError("apply requires --plan <hash> from the approved dry-run")
+    if plan_hash != plan["plan_hash"]:
+        raise ScaffoldError(
+            f"plan hash mismatch: approved {plan_hash}, current {plan['plan_hash']}"
+        )
+    if plan["conflicts"]:
+        paths = ", ".join(
+            conflict["path"].relative_to(target_path).as_posix()
+            for conflict in plan["conflicts"]
+        )
+        raise ScaffoldError(f"adoption plan has conflicts: {paths}")
 
-    planned_paths = [dst for dst, _ in plan["writes"]] + [dst for _, dst in plan["copies"]]
-    _ensure_safe_destinations(target_path, planned_paths, force=False)
+    journal_path = target_path / _ADOPT_JOURNAL_REL
+    if journal_path.exists() or _is_symlink_or_junction(journal_path):
+        raise ScaffoldError(
+            "unfinished adoption journal exists; recover it before applying a new plan"
+        )
 
-    for dst, text in plan["writes"]:
-        _write_text_no_follow(target_path, dst, text)
-    for src, dst in plan["copies"]:
-        _copy_file_no_follow(target_path, src, dst)
+    if _before_apply is not None:
+        _before_apply()
+    verified_plan = plan_adopt(
+        resolved_target,
+        preset=preset,
+        adapters=adapters,
+        repo_root=repo_root,
+    )
+    if verified_plan["plan_hash"] != plan_hash:
+        raise ScaffoldError(
+            "approved plan input changed before writes: "
+            f"approved {plan_hash}, current {verified_plan['plan_hash']}"
+        )
+    if verified_plan["conflicts"]:
+        raise ScaffoldError("approved plan became conflicted before writes")
+    plan = verified_plan
+    target_path = plan["target"]
+    if journal_path.exists() or _is_symlink_or_junction(journal_path):
+        raise ScaffoldError(
+            "unfinished adoption journal exists; recover it before applying a new plan"
+        )
 
-    doctor = doctor_workspace(target_path, repo_root=repo_root)
-    return {**plan, "applied": True, "doctor": doctor}
+    create_paths = [dst for dst, _ in plan["writes"]]
+    patch_paths = [patch["path"] for patch in plan["patches"]]
+    replacement_paths = [item["path"] for item in plan.get("adapter_replacements", [])]
+    _ensure_safe_destinations(target_path, create_paths, force=False)
+    _ensure_safe_destinations(target_path, patch_paths, force=True)
+    _ensure_safe_destinations(target_path, replacement_paths, force=True)
+
+    gitignore_path = target_path / ".gitignore"
+    privacy_is_planned = gitignore_path in create_paths or gitignore_path in patch_paths
+    simulated_rules = (
+        tuple(
+            ("", parsed[0], parsed[1])
+            for line in _thin_gitignore_block().splitlines()
+            if (parsed := _parse_gitignore_line(line)) is not None
+        )
+        if privacy_is_planned
+        else ()
+    )
+    missing_after_plan = [
+        pattern
+        for pattern, probes in _THIN_PRIVACY_PROBES.items()
+        if not all(
+            _probe_is_ignored(target_path, probe, extra_root_rules=simulated_rules)
+            for probe in probes
+        )
+    ]
+    if missing_after_plan:
+        raise ScaffoldError(
+            "privacy preflight failed before writes: " + ", ".join(missing_after_plan)
+        )
+
+    _assert_adopt_kept_inputs(target_path, plan)
+    actions = _adopt_actions(plan)
+    backups = _adopt_backups(actions)
+    completed = 0
+    privacy_is_action = bool(actions and actions[0]["path"] == target_path / ".gitignore")
+    if privacy_is_action:
+        actions[0]["transient_after"] = _prejournal_privacy_bytes(
+            actions[0],
+            backups[actions[0]["path"]],
+            plan["plan_hash"],
+        )
+    journal = _adopt_journal_payload(
+        target_path,
+        plan["plan_hash"],
+        actions,
+        backups,
+        phase="planned",
+        completed=0,
+    )
+
+    try:
+        action_offset = 0
+        if privacy_is_action:
+            privacy_action = actions[0]
+            _apply_adopt_action(
+                target_path,
+                privacy_action,
+                after=privacy_action["transient_after"],
+            )
+            if _crash_before_journal:
+                raise KeyboardInterrupt("injected crash after privacy before journal")
+            _write_adopt_journal(target_path, journal)
+            current_privacy = privacy_action["path"].read_bytes()
+            if _sha256_prefixed(current_privacy) != _sha256_prefixed(
+                privacy_action["transient_after"]
+            ):
+                raise ScaffoldError("pre-journal privacy replacement changed unexpectedly")
+            _write_bytes_no_follow(
+                target_path,
+                privacy_action["path"],
+                privacy_action["after"],
+            )
+            completed = 1
+            journal["phase"] = "applying"
+            journal["completed"] = completed
+            _write_adopt_journal(target_path, journal)
+            if _crash_after is not None and completed == _crash_after:
+                raise KeyboardInterrupt(f"injected crash after replacement {completed}")
+            if _fault_after is not None and completed == _fault_after:
+                raise ScaffoldError(f"injected failure after replacement {completed}")
+            action_offset = 1
+        else:
+            _write_adopt_journal(target_path, journal)
+        for action in actions[action_offset:]:
+            _apply_adopt_action(target_path, action)
+            completed += 1
+            journal["phase"] = "applying"
+            journal["completed"] = completed
+            _write_adopt_journal(target_path, journal)
+            if _crash_after is not None and completed == _crash_after:
+                raise KeyboardInterrupt(f"injected crash after replacement {completed}")
+            if _fault_after is not None and completed == _fault_after:
+                raise ScaffoldError(f"injected failure after replacement {completed}")
+
+        doctor = doctor_workspace(
+            target_path,
+            repo_root=repo_root,
+            _allow_adopt_journal=True,
+        )
+        if not doctor["ok"]:
+            raise ScaffoldError(
+                "Doctor failed after apply: " + "; ".join(doctor["errors"])
+            )
+        journal_path.unlink()
+        return {**plan, "applied": True, "doctor": doctor}
+    except Exception as exc:
+        try:
+            _rollback_adopt(target_path, actions, backups)
+        except ScaffoldError as rollback_exc:
+            raise ScaffoldError(f"{exc}; {rollback_exc}") from exc
+        if isinstance(exc, ScaffoldError):
+            raise
+        raise ScaffoldError(f"adoption failed and rolled back: {exc}") from exc
+
+
+def _record_destination(target: Path, record: str) -> tuple[Path, str]:
+    if (
+        not isinstance(record, str)
+        or "\\" in record
+        or record.startswith("/")
+        or re.match(r"^[A-Za-z]:", record)
+    ):
+        raise ScaffoldError(
+            "record path must be <modules|changes|decisions|verification|gates>/<slug>.md"
+        )
+    parts = record.split("/")
+    if (
+        len(parts) != 2
+        or parts[0] not in _THIN_RECORD_FOLDERS
+        or not _THIN_RECORD_NAME_RE.fullmatch(parts[1])
+    ):
+        raise ScaffoldError(
+            "record path must be <modules|changes|decisions|verification|gates>/<slug>.md"
+        )
+    relative = f".vivary/records/{record}"
+    return target / Path(relative), relative
+
+
+def _read_record_source(source: str | Path) -> tuple[Path, bytes, str]:
+    requested = Path(source)
+    path = requested if requested.is_absolute() else Path.cwd() / requested
+    path = Path(os.path.abspath(path))
+    if _is_symlink_or_junction(path) or not path.is_file():
+        raise ScaffoldError("record source must be a regular non-symlink file")
+    try:
+        before = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ScaffoldError("record source could not be inspected") from exc
+    if not stat.S_ISREG(before.st_mode) or before.st_size > _THIN_RECORD_MAX_BYTES:
+        raise ScaffoldError(
+            f"record source must be a regular UTF-8 file no larger than {_THIN_RECORD_MAX_BYTES} bytes"
+        )
+    descriptor = None
+    try:
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        descriptor = os.open(path, flags)
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_size > _THIN_RECORD_MAX_BYTES
+            or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)
+        ):
+            raise ScaffoldError("record source changed or became unsafe while opening")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            data = handle.read(_THIN_RECORD_MAX_BYTES + 1)
+    except OSError as exc:
+        raise ScaffoldError("record source could not be read safely") from exc
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+    if len(data) > _THIN_RECORD_MAX_BYTES:
+        raise ScaffoldError(
+            f"record source must be no larger than {_THIN_RECORD_MAX_BYTES} bytes"
+        )
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ScaffoldError("record source must be UTF-8") from exc
+    if not text.strip() or "\x00" in text:
+        raise ScaffoldError("record source must contain nonempty UTF-8 Markdown")
+    return path, data, text
+
+
+def _record_capsule_binding(
+    target: Path,
+    capsule_source: str | Path,
+) -> dict[str, str]:
+    """Verify one complete governed/public capsule and bind current workspace state."""
+
+    try:
+        _path, _data, text = _read_record_source(capsule_source)
+    except ScaffoldError as exc:
+        message = str(exc).replace("record source", "record capsule")
+        raise ScaffoldError(message.replace("UTF-8 Markdown", "UTF-8 JSON")) from exc
+
+    def closed_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON object key")
+            result[key] = value
+        return result
+
+    try:
+        capsule = json.loads(text, object_pairs_hook=closed_object)
+    except (json.JSONDecodeError, RecursionError, UnicodeError, ValueError) as exc:
+        raise ScaffoldError("record capsule must be one bounded JSON object") from exc
+
+    try:
+        from vivary_core import (
+            normalize_path,
+            observe_checkouts,
+            project_workspace_graph,
+            verify_public_task_capsule_integrity,
+            verify_task_capsule_integrity,
+        )
+
+        workspace = normalize_path(os.path.realpath(os.path.abspath(target)))
+        schema = capsule.get("schema") if type(capsule) is dict else None
+        public_capsule = schema == "vivary.public-task-capsule/v0"
+        full_capsule = schema == "vivary.task-capsule/v0"
+        if public_capsule:
+            integrity_ok = verify_public_task_capsule_integrity(
+                capsule,
+                checkout_path=workspace,
+            )
+        elif full_capsule:
+            integrity_ok = (
+                verify_task_capsule_integrity(capsule)
+                and capsule.get("task", {}).get("scope") == [workspace]
+            )
+        else:
+            integrity_ok = False
+        if not integrity_ok:
+            raise ScaffoldError("record capsule integrity verification failed")
+        observation = observe_checkouts([workspace], allowlist=[workspace])
+        graph = project_workspace_graph(observation)
+        current_fingerprint = graph.get("workspace_fingerprint")
+    except ScaffoldError:
+        raise
+    except Exception as exc:
+        raise ScaffoldError("record capsule workspace binding could not be verified") from exc
+
+    capsule_workspace = capsule["workspace"]["fingerprint"]
+    if (
+        not isinstance(current_fingerprint, str)
+        or not re.fullmatch(r"sha256:[0-9a-f]{64}", current_fingerprint)
+        or capsule_workspace != current_fingerprint
+    ):
+        raise ScaffoldError(
+            "record capsule is stale or belongs to a different workspace state"
+        )
+    return {
+        "id": capsule["capsule_id"],
+        "fingerprint": capsule["fingerprint"],
+        "workspace_fingerprint": capsule_workspace,
+    }
+
+
+def _read_record_destination(path: Path) -> bytes:
+    """Read one existing record without following a swapped path identity."""
+    if _is_symlink_or_junction(path):
+        raise ScaffoldError("record destination must be a regular non-symlink file")
+    descriptor = None
+    try:
+        before = os.stat(path, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_size > _THIN_RECORD_MAX_BYTES
+        ):
+            raise ScaffoldError(
+                "record destination must be one regular single-link file no larger "
+                f"than {_THIN_RECORD_MAX_BYTES} bytes"
+            )
+        descriptor = os.open(
+            path,
+            os.O_RDONLY
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        opened = os.fstat(descriptor)
+        identity = (opened.st_dev, opened.st_ino, opened.st_size)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or opened.st_size > _THIN_RECORD_MAX_BYTES
+            or (before.st_dev, before.st_ino, before.st_size) != identity
+        ):
+            raise ScaffoldError("record destination changed or became unsafe while opening")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            data = handle.read(_THIN_RECORD_MAX_BYTES + 1)
+        after = os.fstat(descriptor)
+        if (
+            (after.st_dev, after.st_ino, after.st_size) != identity
+            or after.st_nlink != 1
+            or len(data) > _THIN_RECORD_MAX_BYTES
+        ):
+            raise ScaffoldError("record destination changed while reading")
+        return data
+    except FileNotFoundError as exc:
+        raise ScaffoldError("record destination changed before it could be read") from exc
+    except ScaffoldError:
+        raise
+    except OSError as exc:
+        raise ScaffoldError("record destination could not be read safely") from exc
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def _validate_record_candidate(
+    target: Path,
+    destination: Path,
+    relative: str,
+    text: str,
+    *,
+    repo_root: Path,
+) -> None:
+    tropo = _load_tropo(repo_root)
+    try:
+        resolver = tropo.ConfigResolver(str(target), str(Path(tropo.__file__).parent))
+        effective = resolver.for_dir(str(destination.parent))
+        with tempfile.TemporaryDirectory(prefix="vivary-record-validate-") as raw:
+            shadow = Path(raw) / destination.parent.name / destination.name
+            shadow.parent.mkdir(parents=True)
+            shadow.write_text(text, encoding="utf-8", newline="\n")
+            doc = tropo.analyze_file(
+                str(shadow),
+                relative,
+                effective,
+                use_git_dates=False,
+            )
+    except (OSError, UnicodeError, ValueError, tropo.ConfigError) as exc:
+        raise ScaffoldError("record source could not be validated against workspace policy") from exc
+    expected_type = _THIN_RECORD_FOLDERS[destination.parent.name]
+    findings = [finding.render() for finding in doc.findings]
+    if doc.type != expected_type or findings:
+        detail = "; ".join(findings[:5]) or (
+            f"expected type {expected_type!r}, resolved {doc.type!r}"
+        )
+        raise ScaffoldError(f"record source is not a valid typed record: {detail}")
+
+
+def plan_record(
+    target: str | Path,
+    record: str,
+    *,
+    source: str | Path,
+    capsule: str | Path,
+    repo_root: str | Path | None = None,
+) -> dict:
+    """Build a read-only exact plan for one record earned by real work."""
+    root = Path(repo_root) if repo_root is not None else default_repo_root()
+    root = root.resolve()
+    target_path = _resolve_scaffold_target(target)
+    if not target_path.is_dir():
+        raise ScaffoldError("record target must be an existing thin Vivary workspace")
+    doctor = doctor_workspace(target_path, repo_root=root)
+    if (
+        doctor.get("compatibility", {}).get("workspace_contract")
+        != THIN_WORKSPACE_CONTRACT
+    ):
+        raise ScaffoldError("record target must use the thin-v0.3 workspace contract")
+    if not doctor["ok"]:
+        raise ScaffoldError(
+            "record target must be healthy before planning a write: "
+            + "; ".join(doctor["errors"])
+        )
+
+    destination, relative = _record_destination(target_path, record)
+    capsule_binding = _record_capsule_binding(target_path, capsule)
+    source_path, after, text = _read_record_source(source)
+    try:
+        if source_path.samefile(destination):
+            raise ScaffoldError("record source and destination must be different files")
+    except FileNotFoundError:
+        pass
+
+    _ensure_safe_destinations(target_path, [destination], force=True)
+    if destination.exists():
+        before = _read_record_destination(destination)
+        action = "update"
+        if before == after:
+            raise ScaffoldError("record already matches the proposed content; no write is needed")
+    else:
+        before = None
+        action = "create"
+
+    _validate_record_candidate(
+        target_path,
+        destination,
+        relative,
+        text,
+        repo_root=root,
+    )
+    before_hash = _sha256_prefixed(before) if before is not None else None
+    after_hash = _sha256_prefixed(after)
+    plan_payload = {
+        "contract": THIN_WORKSPACE_CONTRACT,
+        "action": action,
+        "path": relative,
+        "before_hash": before_hash,
+        "after_hash": after_hash,
+        "capsule": capsule_binding,
+    }
+    encoded = json.dumps(plan_payload, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    return {
+        **plan_payload,
+        "target": target_path,
+        "source": source_path,
+        "plan_hash": _sha256_prefixed(encoded),
+    }
+
+
+def _remove_empty_record_dirs(target: Path, destination: Path) -> None:
+    records_root = target / ".vivary" / "records"
+    for path in (destination.parent, records_root):
+        try:
+            path.rmdir()
+        except OSError:
+            pass
+
+
+def record_workspace(
+    target: str | Path,
+    record: str,
+    *,
+    source: str | Path,
+    capsule: str | Path,
+    repo_root: str | Path | None = None,
+    yes: bool = False,
+    plan_hash: str | None = None,
+    _before_apply: Callable[[], None] | None = None,
+) -> dict:
+    """Create or update one typed record after exact capsule-bound approval."""
+    plan = plan_record(
+        target,
+        record,
+        source=source,
+        capsule=capsule,
+        repo_root=repo_root,
+    )
+    if not yes:
+        return {**plan, "applied": False, "doctor": None}
+    if plan_hash is None:
+        raise ScaffoldError("record apply requires --plan <hash> from the approved dry-run")
+    if plan_hash != plan["plan_hash"]:
+        raise ScaffoldError(
+            f"record plan hash mismatch: approved {plan_hash}, current {plan['plan_hash']}"
+        )
+
+    if _before_apply is not None:
+        _before_apply()
+    verified = plan_record(
+        target,
+        record,
+        source=source,
+        capsule=capsule,
+        repo_root=repo_root,
+    )
+    if verified["plan_hash"] != plan_hash:
+        raise ScaffoldError(
+            "approved plan input changed before writes: "
+            f"approved {plan_hash}, current {verified['plan_hash']}"
+        )
+
+    target_path = verified["target"]
+    destination = target_path / Path(verified["path"])
+    _source_path, after, _text = _read_record_source(source)
+    if _sha256_prefixed(after) != verified["after_hash"]:
+        raise ScaffoldError("approved record source changed before writes")
+    before = _read_record_destination(destination) if destination.exists() else None
+    current_hash = _sha256_prefixed(before) if before is not None else None
+    if current_hash != verified["before_hash"]:
+        raise ScaffoldError("approved record destination changed before writes")
+
+    action = {
+        "kind": "replace" if before is not None else "create",
+        "path": destination,
+        "before_hash": current_hash,
+        "after": after,
+    }
+    backups = {destination: before}
+    try:
+        _write_bytes_no_follow(target_path, destination, after)
+        doctor = doctor_workspace(target_path, repo_root=repo_root)
+        if not doctor["ok"]:
+            raise ScaffoldError(
+                "Doctor failed after record apply: " + "; ".join(doctor["errors"])
+            )
+    except Exception as exc:
+        try:
+            _rollback_adopt(
+                target_path,
+                [action],
+                backups,
+                cleanup_journal=False,
+            )
+            _remove_empty_record_dirs(target_path, destination)
+        except ScaffoldError as rollback_exc:
+            raise ScaffoldError(f"{exc}; {rollback_exc}") from exc
+        if isinstance(exc, ScaffoldError):
+            raise
+        raise ScaffoldError(f"record apply failed and rolled back: {exc}") from exc
+    return {**verified, "applied": True, "doctor": doctor}
+
+
+def _record_report_to_json(result: dict) -> dict:
+    payload = {
+        key: value
+        for key, value in result.items()
+        if key not in {"target", "source", "doctor"}
+    }
+    doctor = result.get("doctor")
+    payload["ok"] = bool(doctor.get("ok", True)) if isinstance(doctor, dict) else True
+    payload["root"] = str(result["target"])
+    payload["source"] = str(result["source"])
+    if result.get("doctor") is not None:
+        payload["doctor"] = result["doctor"]
+    return payload
+
+
+def _print_record_report(result: dict) -> None:
+    verb = "applied" if result["applied"] else "would apply"
+    print(f"create-vivary record: {verb} one {result['action']} to {result['path']}")
+    print(f"capsule: {result['capsule']['id']} ({result['capsule']['fingerprint']})")
+    print(f"source: {result['source']}")
+    print(f"before: {result['before_hash'] or 'absent'}")
+    print(f"after: {result['after_hash']}")
+    print(f"plan_hash: {result['plan_hash']}")
 
 
 def _adopt_report_to_json(result: dict, *, mode: str) -> dict:
     inventory: BrownfieldInventory = result["inventory"]
-    ok = True
-    if mode == "applied" and result.get("doctor") is not None:
+    ok = not result.get("conflicts")
+    if mode in ("applied", "recovered") and result.get("doctor") is not None:
         ok = bool(result["doctor"].get("ok"))
     payload = {
         "ok": ok,
         "mode": mode,
+        "recovered": bool(result.get("recovered")),
+        "contract": result.get("contract", THIN_WORKSPACE_CONTRACT),
         "root": str(result["target"]),
         "preset": result["preset"],
         "preset_reason": result["preset_reason"],
+        "creates": [p.relative_to(result["target"]).as_posix() for p in result.get("creates", [])],
+        "patches": [
+            {
+                **patch,
+                "path": patch["path"].relative_to(result["target"]).as_posix(),
+            }
+            for patch in result.get("patches", [])
+        ],
+        "optional_projections": [
+            {
+                **projection,
+                "path": projection["path"].relative_to(result["target"]).as_posix(),
+            }
+            for projection in result.get("optional_projections", [])
+        ],
         "would_create": [p.relative_to(result["target"]).as_posix() for p in result["would_create"]],
         "kept": [p.relative_to(result["target"]).as_posix() for p in result["kept"]],
+        "conflicts": [
+            {
+                **conflict,
+                "path": conflict["path"].relative_to(result["target"]).as_posix(),
+            }
+            for conflict in result.get("conflicts", [])
+        ],
+        "privacy": result.get("privacy"),
+        "plan_hash": result.get("plan_hash"),
         "followups": result["followups"],
         "candidate_modules": inventory.candidate_modules,
         "excluded_pre_existing": result["excluded_pre_existing"],
         "skipped_module_collisions": result["skipped_module_collisions"],
     }
-    if mode == "applied":
+    if mode in ("applied", "recovered") and result.get("doctor") is not None:
         payload["doctor"] = result["doctor"]
     return payload
 
@@ -5899,7 +7830,7 @@ def _add_receipt_argument(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="create-vivary",
-        description="Scaffold a complete Vivary agent workspace.",
+        description="Create a lightweight local-first Vivary context workspace.",
     )
     parser.add_argument("--version", action="version", version=f"create-vivary {__version__}")
     _add_receipt_argument(parser)
@@ -5909,10 +7840,18 @@ def build_parser() -> argparse.ArgumentParser:
     _add_receipt_argument(init)
     init.add_argument("target", help="directory to create or populate")
     init.add_argument("--preset", choices=PRESETS, default="coding")
-    init.add_argument("--force", action="store_true", help="overwrite scaffold files")
-    init.add_argument("--obsidian", action="store_true",
-                      help="also drop an optional Obsidian vault config (graph coloured "
-                           "by type); never required — see docs/OBSIDIAN.md")
+    init.add_argument(
+        "--adapter",
+        action="append",
+        choices=tuple(_THIN_ADAPTER_PATHS),
+        default=[],
+        help="add one bounded runtime projection; repeat for both supported adapters",
+    )
+    init.add_argument(
+        "--force",
+        action="store_true",
+        help="refresh generated files in an existing thin Vivary workspace",
+    )
     init.add_argument(
         "--active-context",
         choices=ACTIVE_CONTEXTS,
@@ -5935,7 +7874,7 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--no-wizard", action="store_true", dest="no_wizard",
                       help="skip wizard; use flag values or defaults directly")
     init.add_argument("--storage", choices=["auto", "file", "embedded", "cloud"], default=None,
-                      help="storage backend (auto=LanceDB locally)")
+                      help="storage backend (auto=file unless cloud locality is explicit)")
     init.add_argument("--provider", choices=["lancedb", "sqlite-vec", "qdrant", "astra"],
                       default=None, help="storage provider (default: lancedb)")
     init.add_argument("--memory", choices=MEMORY_MODES, default="none",
@@ -5978,8 +7917,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--trend",
         action="store_true",
         help=(
-            "compare this run against the prior one in .vivary/doctor-state.json "
-            "and report drift (write gate: only --trend writes this file)"
+            "compare this run against its prior local runtime snapshot and report "
+            "drift (write gate: only --trend writes this file)"
         ),
     )
     doctor.add_argument(
@@ -5994,16 +7933,78 @@ def build_parser() -> argparse.ArgumentParser:
     capabilities.add_argument("--json", action="store_true", help="print a JSON report")
 
     adopt = sub.add_parser(
-        "adopt", help="bring Vivary to an existing repo or vault without touching its files"
+        "adopt", help="plan and apply bounded governed context for an existing workspace"
     )
     _add_receipt_argument(adopt)
     adopt.add_argument("target", help="existing directory to adopt")
-    adopt.add_argument("--preset", choices=PRESETS, default=None,
-                       help="starter graph to seed; default is auto-detected from the tree")
+    adopt.add_argument(
+        "--preset",
+        choices=PRESETS,
+        default=None,
+        help="thin workspace policy; default is inferred from the tree",
+    )
     adopt.add_argument("--yes", action="store_true",
                        help="write the planned files (default is dry-run: plan only)")
+    adopt.add_argument(
+        "--plan",
+        default=None,
+        help="exact plan hash from the approved dry-run; required with --yes",
+    )
+    adopt.add_argument(
+        "--recover",
+        default=None,
+        metavar="PLAN_HASH",
+        help="roll back an interrupted transaction bound to this plan hash",
+    )
+    adopt.add_argument(
+        "--adapter",
+        action="append",
+        choices=tuple(_THIN_ADAPTER_PATHS),
+        default=[],
+        help="add one bounded runtime projection; repeat for both supported adapters",
+    )
     adopt.add_argument("--json", action="store_true", help="machine-readable output")
     adopt.add_argument(
+        "--repo-root",
+        default=None,
+        help="Vivary source checkout root (mainly for local development/tests)",
+    )
+
+    record = sub.add_parser(
+        "record",
+        help="plan and apply one capsule-bound record earned by real work",
+    )
+    _add_receipt_argument(record)
+    record.add_argument("target", help="existing thin Vivary workspace")
+    record.add_argument(
+        "record",
+        help="bounded record path such as changes/verified-slice.md",
+    )
+    record.add_argument(
+        "--from",
+        dest="source",
+        required=True,
+        metavar="PATH",
+        help="complete UTF-8 Markdown record to validate and propose",
+    )
+    record.add_argument(
+        "--capsule",
+        required=True,
+        metavar="PATH",
+        help="complete governed or public Task Capsule JSON returned by Tropo or vivary_capsule",
+    )
+    record.add_argument(
+        "--yes",
+        action="store_true",
+        help="apply the approved single-record plan (default is dry-run)",
+    )
+    record.add_argument(
+        "--plan",
+        default=None,
+        help="exact plan hash from the approved dry-run; required with --yes",
+    )
+    record.add_argument("--json", action="store_true", help="machine-readable output")
+    record.add_argument(
         "--repo-root",
         default=None,
         help="Vivary source checkout root (mainly for local development/tests)",
@@ -6228,6 +8229,29 @@ def _main(argv: list[str] | None = None) -> int:
                 print(f"- {cap['id']}: {cap['label']} ({marker})")
         return 0
 
+    if args.command == "record":
+        try:
+            result = record_workspace(
+                args.target,
+                args.record,
+                source=args.source,
+                capsule=args.capsule,
+                repo_root=args.repo_root,
+                yes=args.yes,
+                plan_hash=args.plan,
+            )
+        except ScaffoldError as exc:
+            if getattr(args, "json", False):
+                print(json.dumps({"ok": False, "error": str(exc)}))
+            else:
+                print(f"create-vivary record: {exc}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(_record_report_to_json(result), indent=2))
+        else:
+            _print_record_report(result)
+        return 0
+
     if args.command == "doctor":
         if getattr(args, "repair", False):
             report = doctor_repair_workspace(
@@ -6302,7 +8326,13 @@ def _main(argv: list[str] | None = None) -> int:
         yes = getattr(args, "yes", False)
         try:
             result = adopt_workspace(
-                args.target, preset=args.preset, repo_root=args.repo_root, yes=yes
+                args.target,
+                preset=args.preset,
+                adapters=tuple(args.adapter),
+                repo_root=args.repo_root,
+                yes=yes,
+                plan_hash=args.plan,
+                recover_hash=args.recover,
             )
         except ScaffoldError as exc:
             if getattr(args, "json", False):
@@ -6310,14 +8340,14 @@ def _main(argv: list[str] | None = None) -> int:
             else:
                 print(f"create-vivary adopt: {exc}", file=sys.stderr)
             return 1
-        mode = "applied" if yes else "dry-run"
+        mode = "recovered" if result.get("recovered") else ("applied" if yes else "dry-run")
         if args.json:
             print(json.dumps(_adopt_report_to_json(result, mode=mode), indent=2))
         else:
             _print_adopt_report(result, mode=mode)
-        if yes and not result["doctor"]["ok"]:
+        if mode == "applied" and not result["doctor"]["ok"]:
             return 1
-        return 0
+        return 0 if not result.get("conflicts") else 1
 
     if args.command == "wizard":
         try:
@@ -6390,6 +8420,8 @@ def _main(argv: list[str] | None = None) -> int:
     yes = getattr(args, "yes", False) or getattr(args, "auto", False)
 
     try:
+        target_path = _resolve_scaffold_target(args.target)
+        _validate_thin_init_target(target_path, force=args.force)
         # Determine storage configuration via wizard or flags
         decisions = _run_wizard(args)
         storage = decisions["storage"]
@@ -6404,18 +8436,34 @@ def _main(argv: list[str] | None = None) -> int:
             else _ensure_backend_installed(provider, yes)
         )
 
-        created = scaffold_workspace(
+        created = scaffold_thin_workspace(
             args.target,
             preset=args.preset,
-            force=args.force,
-            obsidian=args.obsidian,
+            adapters=tuple(args.adapter),
             active_context=args.active_context,
+            force=args.force,
             repo_root=args.repo_root,
-            storage=storage,
-            provider=provider,
-            memory=memory,
             dry_run=dry_run,
         )
+        if storage != "file":
+            created.extend(
+                _write_vivary_dir(
+                    target_path,
+                    storage,
+                    provider,
+                    dry_run,
+                    force=args.force,
+                )
+            )
+        if memory != "none":
+            created.extend(
+                _write_memory_config(
+                    target_path,
+                    memory,
+                    dry_run,
+                    force=args.force,
+                )
+            )
     except ScaffoldError as exc:
         if getattr(args, "json", False):
             print(json.dumps({"ok": False, "error": str(exc)}))
@@ -6439,7 +8487,9 @@ def _main(argv: list[str] | None = None) -> int:
         print(json.dumps({
             "ok": True,
             "root": str(root),
+            "contract": THIN_WORKSPACE_CONTRACT,
             "preset": args.preset,
+            "adapters": list(args.adapter),
             "storage": storage,
             "provider": provider,
             "memory": memory,

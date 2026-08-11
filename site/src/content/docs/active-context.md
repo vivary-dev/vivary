@@ -13,19 +13,19 @@ The baseline remains small and deterministic: `tropo` owns the typed graph, `str
 owns the agent loop, and no index, daemon, embedding model, or MCP server is enabled by
 default.
 
-For coding workspaces, `create-vivary` can scaffold a CocoIndex-code profile:
+For coding workspaces, `create-vivary` can add a bounded CocoIndex-code projection:
 
 ```bash
 create-vivary init my-workspace --preset coding --active-context cocoindex-code
 ```
 
-This writes:
+This writes exactly two files:
 
-- an `active-context` skill for Claude/Codex-style agents;
-- `docs/active-context.md` with the local policy;
-- graph nodes under `modules/active-context/index.md`, `decisions/`, and
-  `verification/`;
-- `.cocoindex_code/` in `.gitignore`.
+- `.agents/skills/active-context/SKILL.md`, a bounded agent projection;
+- `docs/active-context.md`, the local policy.
+
+The thin workspace contract already excludes `.cocoindex_code/` from governed scans.
+No graph node, starter record, Claude-specific duplicate, or framework router is added.
 
 It does **not** automatically install CocoIndex-code, initialize an index, run
 embeddings, enable MCP, or send source text anywhere. Those are explicit gates after

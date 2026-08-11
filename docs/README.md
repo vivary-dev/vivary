@@ -5,11 +5,12 @@ Start here.
 | Doc | What it covers |
 |---|---|
 | [GETTING-STARTED.md](GETTING-STARTED.md) | Install → create a workspace → run the loop. Begin here. |
-| [LEARN-BY-DOING.md](LEARN-BY-DOING.md) | Short, evidence-led first loop; routes to the full proof and exact command owners. |
-| [WALKTHROUGH.md](WALKTHROUGH.md) | Public, generic proof of the product loop: scaffold, health, review, coordination, impact. |
+| [LEARN-BY-DOING.md](LEARN-BY-DOING.md) | STE100 style guide library for people and agents; routes each real task to one concise procedure. |
+| [guides/](guides/) | Canonical task guides for creation, agent connection, retrieval, governed records, adoption, and recovery. |
+| [WALKTHROUGH.md](WALKTHROUGH.md) | Historical public 0.3.1 full-scaffold proof; retained as release evidence, not the 0.4.0 thin-init contract. |
 | [COMMANDS.md](COMMANDS.md) | Full CLI reference and governed machine-readable envelopes for the role packages and optional adapters. |
 | [MCP.md](MCP.md) | Optional local read-only MCP adapter contract, privacy boundary, installation, and verification. |
-| [HOWTO.md](HOWTO.md) | Task recipes: add a type, see blast radius, review, CI, multi-agent, … |
+| [HOWTO.md](HOWTO.md) | Advanced recipes for types, review, CI, coordination, storage, and optional providers. |
 | [SKILLS.md](SKILLS.md) | The agent skills: strato (bootstrap/heartbeat/self-improve), tropo, loops. |
 | [ACTIVE-CONTEXT.md](ACTIVE-CONTEXT.md) | Optional CocoIndex-code sidecar for active semantic code context. |
 | [LLM-ACTIVE-CONTEXT.md](LLM-ACTIVE-CONTEXT.md) | Copyable LLM instructions for graph-first CocoIndex-code retrieval. |
@@ -38,12 +39,10 @@ folder-as-type model), and each package's `README.md`.
 
 ## The one-paragraph mental model
 
-A Vivary workspace is a folder where **the filesystem is the schema**: a document's type
-is the folder it lives in (`tropo`), and typed frontmatter fields become a navigable
-graph. An agent operates it with a per-turn loop — *Ask → retrieve → act → verify →
-learn → gate* (`strato`) — retrieving from the graph, verifying with `tropo check` +
-`ozone review`, naming blast radius before risky changes, and stopping at human gates.
-`AGENTS.md` and module `index.md` files route progressively so durable detail lives
-once instead of being copied everywhere. When one agent becomes many, `exo` coordinates
-them. Everything is plain Markdown plus lightweight, provider-free CLIs — no editor,
-network service, vendor, or lock-in.
+A Vivary workspace is a thin local governed-context contract. `AGENTS.md` routes to one
+bounded `.vivary/context.md` capsule; `STATE.md` is loaded only when current state
+matters; real typed records are added lazily when work produces evidence. An agent runs
+*Ask → retrieve → act → verify → learn → gate*, preserves provenance and receipts, and
+stops at deliberate human gates. Tropo can compile those files into typed graph context;
+Ozone and Exo remain optional. Everything is plain Markdown/TOML plus lightweight local
+CLIs—no required editor, network service, provider, or lock-in.

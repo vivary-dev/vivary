@@ -10,7 +10,14 @@ Optional Python 3.11+ read-only MCP adapter for Vivary context.
   caller-directed processes
 - Status: development source candidate `0.1.1`, unpublished, disabled by default,
   external conformance unproven; requires `vivary-tropo>=0.5.2`.
-  Source: [`pyproject.toml`](pyproject.toml); verified: 2026-08-09.
+  Source: [`pyproject.toml`](pyproject.toml); verified: 2026-08-10.
+
+The read-only ceiling belongs to MCP, not to the whole Vivary workspace lifecycle.
+The adapter may return a complete public capsule envelope. Save that complete object:
+an id or fingerprint alone is not sufficient. An explicitly human-approved,
+exact-plan-hash `create-vivary record --capsule <path>` transaction can then create or
+update exactly one earned typed record outside MCP. MCP startup and calls never
+materialize records or packs.
 
 See the canonical [MCP adapter guide](../../docs/MCP.md) for installation, tool
 schemas, privacy boundaries, diagnostics, and verification.

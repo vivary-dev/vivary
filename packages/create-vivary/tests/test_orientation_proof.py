@@ -63,6 +63,7 @@ class OrientationProofTests(unittest.TestCase):
         self.assertTrue(fixture["adopt"]["dry_run_read_only"])
         self.assertTrue(fixture["adopt"]["applied"])
         self.assertTrue(fixture["adopt"]["idempotent"])
+        self.assertTrue(fixture["adopt"]["plan_hash_bound"])
         self.assertGreater(len(fixture["expected_mutations"]), 0)
         self.assertEqual(fixture["actual_mutations"]["created"], fixture["expected_mutations"])
         self.assertEqual(fixture["actual_mutations"]["changed"], [])
@@ -97,16 +98,17 @@ class OrientationProofTests(unittest.TestCase):
         fixtures = {fixture["kind"]: fixture for fixture in receipt["fixtures"]}
 
         self.assertTrue(fixtures["legacy"]["doctor"]["actual_ok"])
-        self.assertEqual(fixtures["legacy"]["doctor"]["compatibility_schema"], 1)
-        self.assertEqual(fixtures["legacy"]["doctor"]["workspace_contract"], "legacy-v0.1")
+        self.assertEqual(fixtures["legacy"]["doctor"]["compatibility_schema"], 2)
+        self.assertEqual(fixtures["legacy"]["doctor"]["workspace_contract"], "legacy-full")
         self.assertGreater(fixtures["legacy"]["doctor"]["warnings"], 0)
         self.assertTrue(fixtures["legacy"]["doctor"]["upgrade_guidance_present"])
         self.assertEqual(
             fixtures["legacy"]["expected_mutations"],
             [
-                "modules/agent-workspace/index.md",
-                "modules/codebase/index.md",
-                "modules/index.md",
+                ".gitignore",
+                ".vivary/context.md",
+                ".vivary/workspace.toml",
+                "AGENTS.md",
             ],
         )
         self.assertGreater(fixtures["legacy"]["find"]["results"], 0)

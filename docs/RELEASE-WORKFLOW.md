@@ -26,8 +26,9 @@ Work out which packages actually changed, then bump only those:
 | `packages/tropo/tropo.py` or its tests | `vivary-tropo` | README release line, COMMANDS if CLI changed |
 | `packages/ozone/ozone.py` | `vivary-ozone` | same |
 | `packages/exo/exo.py` | `vivary-exo` | same |
-| `packages/create-vivary/create_vivary.py` or `create_vivary_assets/` | `create-vivary` (PyPI) **and** `@vivary/create` (npm) — always in lockstep | same |
-| `packages/strato/` templates or skills | `create-vivary` + `@vivary/create` — templates still ride the scaffolder release train | same |
+| `packages/create-vivary/create_vivary.py` | `create-vivary` (PyPI) **and** `@vivary/create` (npm) — always in lockstep | same |
+| `packages/create-vivary/create_vivary_assets/` or legacy full-workspace fixtures | No user-facing package bump by themselves; these are repository-only compatibility archives and must remain excluded from wheels and source distributions | parity/packaging proof |
+| `packages/strato/` templates or skills | `vivary-strato` when its runtime/package surface changes; do not copy these assets into thin init/adopt output | same |
 | `packages/strato/strato.py`, its tests, or CLI contract | `vivary-strato` — bump the version, but keep it unpublished on `dev`; publish only in the final coordinated train with core and the other role packages | ARCHITECTURE seam section, COMMANDS, README surface row |
 | `packages/memory-cognee/vivary_cognee.py` | `vivary-memory-cognee` | same |
 | `packages/mcp/vivary_mcp.py` or its tests | `vivary-mcp` — keep optional and unpublished until its explicit train item; preserve the exact reviewed MCP SDK pin | MCP guide, package README, Tropo floor |
@@ -172,6 +173,9 @@ tests or docs before pushing:
   through the installed CLI path, add a CI smoke that installs the local packages and
   exercises the bridge. Use `--no-deps` only when the smoke is intentionally proving
   package/import boundaries without provider runtime or network calls.
+- **Inspect both package formats:** inventory every wheel and source distribution. A
+  clean wheel is insufficient if the sdist still carries retired templates, skills,
+  starter records, credentials, or local proof artifacts.
 - **No silent provider side effects:** optional providers must be explicit about
   network, API-key, telemetry, dotenv, cache, log, and state-directory behavior.
   Default to closed gates and workspace-scoped paths; add an explicit opt-in flag

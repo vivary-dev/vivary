@@ -1,5 +1,9 @@
-"""The bundled create_vivary_assets/ must stay byte-identical to their canonical
-sources. If this fails, run `python packages/create-vivary/tools/sync_assets.py`."""
+"""The repository-only legacy asset archive stays frozen for migration classification.
+
+Thin-v0.3 init generates its bounded capsule directly, and public wheels or source
+distributions must not ship the old full-scaffold prose, templates, placeholders,
+or dual skills.
+"""
 import json
 import sys
 import tomllib
@@ -52,10 +56,17 @@ def test_assets_cover_required_workspace_files():
         assert (ASSETS / "templates" / name).exists(), f"bundled template missing: {name}"
 
 
-def test_package_data_includes_template_gitignore():
+def test_package_data_excludes_the_legacy_full_scaffold():
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
-    package_data = pyproject["tool"]["setuptools"]["package-data"]["create_vivary_assets"]
-    assert "templates/.gitignore" in package_data
+    setuptools = pyproject["tool"]["setuptools"]
+    package_data = setuptools.get("package-data", {})
+    assert not package_data.get("create_vivary_assets")
+    assert "create_vivary_assets" not in setuptools.get("packages", [])
+    assert setuptools["py-modules"] == ["create_vivary"]
+    manifest = (Path(__file__).resolve().parents[1] / "MANIFEST.in").read_text(
+        encoding="utf-8"
+    )
+    assert manifest.splitlines() == ["prune create_vivary_assets"]
 
 
 def test_python_and_npm_create_versions_are_lockstep():

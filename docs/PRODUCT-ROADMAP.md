@@ -31,10 +31,11 @@ The current product line already proves the basic architecture:
 - `tropo find` returns bounded typed context packets;
 - `tropo query` provides graph-aware filtering and explain output;
 - `tropo map` inventories a large repo, vault, or docs tree read-only;
-- `create-vivary adopt` offers an additive brownfield path with dry-run first;
+- `create-vivary adopt` offers a deterministic thin brownfield plan with exact-hash apply;
 - `create-vivary doctor --trend` reports workspace-health drift;
 - Ozone includes graph-aware review and context-budget checks;
-- Strato scaffold, link-integrity, and Claude/Codex parity checks run in CI;
+- thin init/adoption, legacy read compatibility, link integrity, and runtime-projection
+  parity checks run in CI;
 - the optional Cognee adapter returns typed Vivary node hits rather than a second
   truth store;
 - optional embedded storage and stored-vector work remain explicit capabilities.
@@ -98,8 +99,9 @@ The map should produce a compact action-oriented summary: likely modules, missin
 routing surfaces, oversized files, ignored/private boundaries, and a bounded “open
 these first” list.
 
-**Stop rule:** adoption remains additive. Do not move, rename, rewrite, or
-auto-reorganize existing content in this phase.
+**Stop rule:** adoption may touch only its bounded generated blocks in `AGENTS.md` and
+`.gitignore`. Do not move, rename, rewrite arbitrary content, or auto-reorganize a host
+project in this phase.
 
 ### 3. Turn doctor into the return loop
 

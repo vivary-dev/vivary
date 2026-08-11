@@ -13,6 +13,7 @@ const outDir = path.resolve(here, '..', 'src', 'content', 'docs');
 const docsWalkthroughAssetsDir = path.join(docsDir, 'assets', 'walkthrough');
 const publicWalkthroughAssetsDir = path.resolve(here, '..', 'public', 'assets', 'walkthrough');
 const GH = 'https://github.com/vivary-dev/vivary/blob/dev';
+const noDelete = process.env.VIVARY_SYNC_NO_DELETE === '1';
 
 const normalizeForCompare = (p) => {
   const normalized = path.normalize(p);
@@ -25,14 +26,20 @@ const pages = [
   ['GETTING-STARTED', 'getting-started', 'Getting started', 'Install Vivary and run your first agent workspace.'],
   ['WALKTHROUGH', 'walkthrough', 'Getting started proof', 'A public, generic product walkthrough showing Vivary scaffold, health, review, coordination, and impact checks.'],
   ['COMMANDS', 'commands', 'Command reference', 'Every CLI across Vivary: tropo, strato, ozone, exo, create-vivary, and optional adapters.'],
-  ['LEARN-BY-DOING', 'learn-by-doing', 'Learn by doing', 'A concise, evidence-led path to inspecting Vivary, previewing additive adoption, and understanding governed context.'],
+  ['LEARN-BY-DOING', 'learn-by-doing', 'Guide library', 'Concise STE100 style guides for people and agents who operate Vivary.'],
+  ['guides/create-workspace', 'guides/create-workspace', 'Create a workspace', 'Create and verify the five-file Vivary seed for a new project.'],
+  ['guides/connect-agent', 'guides/connect-agent', 'Connect an agent', 'Connect an agent through the standard context route or optional local MCP.'],
+  ['guides/get-context', 'guides/get-context', 'Get bounded context', 'Retrieve bounded task context or save a complete Task Capsule.'],
+  ['guides/write-record', 'guides/write-record', 'Write one approved record', 'Plan, approve, apply, and verify one capsule-bound record.'],
+  ['guides/adopt-project', 'guides/adopt-project', 'Adopt an existing project', 'Preview and apply bounded brownfield adoption without project takeover.'],
+  ['guides/verify-recover', 'guides/verify-recover', 'Verify and recover', 'Validate workspace health and use explicit bounded recovery paths.'],
   ['MCP', 'mcp', 'MCP adapter', 'Optional local read-only MCP adapter contract, tools, privacy boundary, and verification.'],
   ['SKILLS', 'skills', 'Agent skills', 'The strato, tropo, and loops skills that operate a Vivary workspace.'],
   ['ACTIVE-CONTEXT', 'active-context', 'Active context', 'Optional CocoIndex-code sidecar guidance for semantic code retrieval.'],
   ['LLM-ACTIVE-CONTEXT', 'llm-active-context', 'LLM active-context guide', 'Copyable agent instructions for graph-first CocoIndex-code retrieval.'],
   ['SEMANTIC-MEMORY', 'semantic-memory', 'Optional semantic memory', 'Implemented contract for Tropo-backed semantic-memory adapters and their boundary from independent agent LTM.'],
   ['WHITE-PAPER', 'white-paper', 'White paper', 'The technical case for a minimal, portable standard for agent-native workspaces.'],
-  ['HOWTO', 'howto', 'How-to recipes', 'Task recipes: add a type, see blast radius, review, CI, multi-agent.'],
+  ['HOWTO', 'howto', 'Advanced recipes', 'Focused recipes for types, review, coordination, CI, storage, and optional providers.'],
   ['SIGNALS', 'signals', 'Public signals', 'Public npm, PyPI, and GitHub metrics snapshots.'],
   ['RELEASE-WORKFLOW', 'release-workflow', 'Release workflow', 'End-of-update checklist for Vivary release truth, docs, publishing, and post copy.'],
   ['ARCHITECTURE', 'architecture', 'Architecture', 'The four-layer model and the principles behind Vivary.'],
@@ -52,6 +59,28 @@ const rewrite = (s) =>
    .replaceAll('](WALKTHROUGH.md#', '](/walkthrough/#')
    .replaceAll('](LEARN-BY-DOING.md)', '](/learn-by-doing/)')
    .replaceAll('](LEARN-BY-DOING.md#', '](/learn-by-doing/#')
+   .replaceAll('](guides/create-workspace.md)', '](/guides/create-workspace/)')
+   .replaceAll('](guides/connect-agent.md)', '](/guides/connect-agent/)')
+   .replaceAll('](guides/get-context.md)', '](/guides/get-context/)')
+   .replaceAll('](guides/write-record.md)', '](/guides/write-record/)')
+   .replaceAll('](guides/adopt-project.md)', '](/guides/adopt-project/)')
+   .replaceAll('](guides/verify-recover.md)', '](/guides/verify-recover/)')
+   .replaceAll('](create-workspace.md)', '](/guides/create-workspace/)')
+   .replaceAll('](connect-agent.md)', '](/guides/connect-agent/)')
+   .replaceAll('](get-context.md)', '](/guides/get-context/)')
+   .replaceAll('](write-record.md)', '](/guides/write-record/)')
+   .replaceAll('](adopt-project.md)', '](/guides/adopt-project/)')
+   .replaceAll('](verify-recover.md)', '](/guides/verify-recover/)')
+    .replaceAll('](../GETTING-STARTED.md)', '](/getting-started/)')
+    .replaceAll('](../GETTING-STARTED.md#', '](/getting-started/#')
+    .replaceAll('](../LEARN-BY-DOING.md)', '](/learn-by-doing/)')
+    .replaceAll('](../LEARN-BY-DOING.md#', '](/learn-by-doing/#')
+    .replaceAll('](../COMMANDS.md)', '](/commands/)')
+   .replaceAll('](../COMMANDS.md#', '](/commands/#')
+   .replaceAll('](../MCP.md)', '](/mcp/)')
+   .replaceAll('](../MCP.md#', '](/mcp/#')
+   .replaceAll('](../WALKTHROUGH.md)', '](/walkthrough/)')
+   .replaceAll('](../WALKTHROUGH.md#', '](/walkthrough/#')
    .replaceAll('](COMMANDS.md#', '](/commands/#')
    .replaceAll('](COMMANDS.md)', '](/commands/)')
    .replaceAll('](MCP.md)', '](/mcp/)')
@@ -164,7 +193,18 @@ const copyRegularTree = (src, dest, label) => {
   if (!fs.existsSync(src)) return;
   assertRegularDirectory(src, label);
   assertInside(path.resolve(here, '..', 'public'), dest, `${label} output`);
-  fs.rmSync(dest, { recursive: true, force: true });
+  if (noDelete && fs.existsSync(dest)) {
+    assertRegularDirectory(dest, `${label} output`);
+    const sourceNames = new Set(fs.readdirSync(src));
+    const staleNames = fs.readdirSync(dest).filter((name) => !sourceNames.has(name));
+    if (staleNames.length > 0) {
+      throw new Error(
+        `${label} no-delete sync refuses stale outputs: ${staleNames.sort().join(', ')}`,
+      );
+    }
+  } else if (!noDelete) {
+    fs.rmSync(dest, { recursive: true, force: true });
+  }
   fs.mkdirSync(dest, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
     const from = path.join(src, entry.name);
@@ -197,6 +237,9 @@ fs.mkdirSync(outDir, { recursive: true });
 for (const slug of retiredGeneratedSlugs) {
   const stale = path.join(outDir, `${slug}.md`);
   if (fs.existsSync(stale)) {
+    if (noDelete) {
+      throw new Error(`no-delete sync refuses retired generated route ${slug}.md`);
+    }
     fs.rmSync(stale);
     console.log(`  removed retired generated route ${slug}.md`);
   }
@@ -204,7 +247,9 @@ for (const slug of retiredGeneratedSlugs) {
 for (const [src, slug, title, desc] of pages) {
   const raw = readCanonicalMarkdown(docsDir, `${src}.md`, `docs/${src}.md`);
   const editUrl = `https://github.com/vivary-dev/vivary/edit/dev/docs/${src}.md`;
-  fs.writeFileSync(path.join(outDir, `${slug}.md`), render(raw, title, desc, editUrl));
+  const output = path.join(outDir, `${slug}.md`);
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  fs.writeFileSync(output, render(raw, title, desc, editUrl));
   console.log(`  synced docs/${src}.md -> ${slug}.md`);
 }
 
@@ -254,33 +299,44 @@ const coreDocsList = pages
 
 const llmsText = `# Vivary
 
-Vivary is a standard and scaffolder for agent-native workspaces. It gives AI agents a
-small, inspectable workspace they can navigate and verify: typed project memory,
-visible state, reusable skills, private boundaries, and human gates.
+Vivary is a lightweight, local-first governed-context standard and scaffolder. The
+unpublished 0.4.0 source candidate creates five operational files: one context
+capsule, one visible state surface, workspace policy, startup routing, and bounded
+private/runtime ignores. It seeds no starter records, template pack, or second brain.
 
 Website: https://vivary.vercel.app/
 Repository: https://github.com/vivary-dev/vivary
 License: MIT
 Full Documentation: https://vivary.vercel.app/llms-full.txt
 
-## Current package surfaces
+## Published package surfaces
 
-- PyPI meta-package (installs the suite): \`vivary\`, via \`pip install vivary\`
+- PyPI meta-package (installs the published suite): \`vivary\`
 - npm scaffolder: \`@vivary/create\` ${createVivaryNpm}
 - PyPI scaffolder: \`create-vivary\` ${createVivaryPyPI}
 - PyPI knowledge graph CLI: \`vivary-tropo\` ${tropoVersion}, command \`tropo\`
 - PyPI review CLI: \`vivary-ozone\` ${ozoneVersion}, command \`ozone\`
 - PyPI coordination CLI: \`vivary-exo\` ${exoVersion}, command \`exo\`
-- Strato templates and skills remain bundled; the unpublished source package \`vivary-strato\` exposes experimental command \`strato decide --governed\`.
+- The unpublished source package \`vivary-strato\` exposes experimental command \`strato decide --governed\`; Core init does not copy skills or templates.
 - Optional Cognee adapter: \`vivary-memory-cognee\` ${cogneeVersion}, command \`vivary-cognee\`
+- Optional unpublished local stdio adapter: \`vivary-mcp\` 0.1.1; four read-only tools, disabled by default.
 - Versions are independent; do not call the whole project "Vivary ${createVivaryPyPI}".
 
-## Install
+The versions above are registry truth. The five-file behavior belongs to unpublished
+development source until the README release table lists \`create-vivary\` and
+\`@vivary/create\` 0.4.0.
+
+## Run the development-source candidate
 
 \`\`\`bash
-npm create @vivary@latest my-workspace
-pip install vivary
+python packages/create-vivary/create_vivary.py init my-workspace --preset coding --no-wizard
+python packages/create-vivary/create_vivary.py doctor my-workspace
+python packages/tropo/tropo.py check --root my-workspace
 \`\`\`
+
+Pin the previous published full-layout scaffolder only when that behavior is wanted:
+\`uvx --from create-vivary==0.3.1 create-vivary ...\` or
+\`npx @vivary/create@0.3.1 ...\`.
 
 ## Core docs
 
@@ -303,7 +359,7 @@ Optional active context:
 - The published scaffolder can write Cognee policy without installing or indexing.
 - The optional Cognee adapter indexes privacy-filtered typed Tropo node packets only
   after explicit install and index approval.
-- Vivary core does not install embeddings, start daemons, enable MCP, or send data
+- Vivary Core does not install embeddings, start daemons, enable MCP, or send data
   anywhere by default.
 
 LLM active-context guide: https://vivary.vercel.app/llm-active-context/

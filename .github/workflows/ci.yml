@@ -33,6 +33,10 @@ jobs:
         run: python packages/exo/tests/test_exo.py
       - name: create-vivary
         run: python packages/create-vivary/tests/test_create_vivary.py
+      - name: create-vivary thin init
+        run: python packages/create-vivary/tests/test_init_thin.py
+      - name: create-vivary governed record workflow
+        run: python packages/create-vivary/tests/test_record_workflow.py
       - name: create-vivary adopt
         run: python packages/create-vivary/tests/test_adopt.py
       - name: create-vivary orientation proof regressions
@@ -224,12 +228,12 @@ jobs:
           assert ozone_result["outcome"] == "sufficient"
           assert version("vivary-core") == "0.2.7"
           assert version("vivary-exo") == "0.3.0"
-          assert version("create-vivary") == "0.3.3"
-          assert version("vivary") == "0.1.6"
+          assert version("create-vivary") == "0.4.0"
+          assert version("vivary") == "0.1.8"
           assert "vivary-core>=0.2.5" in requires("vivary-exo")
           vivary_requirements = requires("vivary") or []
-          assert "create-vivary>=0.3.3" in vivary_requirements
-          assert "vivary-tropo>=0.5.1" in vivary_requirements
+          assert "create-vivary>=0.4.0" in vivary_requirements
+          assert "vivary-tropo>=0.5.2" in vivary_requirements
           assert "vivary-strato>=0.1.2" in vivary_requirements
           assert "vivary-exo>=0.3.0" in vivary_requirements
           assert not any(
@@ -258,13 +262,13 @@ jobs:
           from importlib.metadata import PackageNotFoundError, requires, version
           import create_vivary
 
-          assert version("vivary-mcp") == "0.1.0"
-          assert version("vivary-tropo") == "0.5.1"
+          assert version("vivary-mcp") == "0.1.1"
+          assert version("vivary-tropo") == "0.5.2"
           assert version("vivary-core") == "0.2.7"
           assert version("mcp") == "2.0.0"
           assert version("mcp-types") == "2.0.0"
           mcp_requirements = requires("vivary-mcp") or []
-          assert "vivary-tropo>=0.5.1" in mcp_requirements
+          assert "vivary-tropo>=0.5.2" in mcp_requirements
           assert "mcp==2.0.0" in mcp_requirements
           assert not any(
               requirement.startswith("vivary-core")
@@ -609,13 +613,13 @@ jobs:
           from importlib.metadata import PackageNotFoundError, requires, version
           import create_vivary
 
-          assert version("vivary-mcp") == "0.1.0"
-          assert version("vivary-tropo") == "0.5.1"
+          assert version("vivary-mcp") == "0.1.1"
+          assert version("vivary-tropo") == "0.5.2"
           assert version("vivary-core") == "0.2.7"
           assert version("mcp") == "2.0.0"
           assert version("mcp-types") == "2.0.0"
           mcp_requirements = requires("vivary-mcp") or []
-          assert "vivary-tropo>=0.5.1" in mcp_requirements
+          assert "vivary-tropo>=0.5.2" in mcp_requirements
           assert "mcp==2.0.0" in mcp_requirements
           assert not any(
               requirement.startswith("vivary-core")
@@ -661,6 +665,11 @@ jobs:
       - name: governed context adapter (Windows path contract)
         if: runner.os == 'Windows'
         run: python packages/tropo/tests/test_tropo.py
+      - name: thin workspace lifecycle (${{ matrix.os }})
+        run: |
+          python packages/create-vivary/tests/test_init_thin.py
+          python packages/create-vivary/tests/test_record_workflow.py
+          python packages/create-vivary/tests/test_adopt.py
       - name: run disposable orientation proof
         run: python packages/create-vivary/tests/orientation_proof.py --receipt orientation-proof.json
       - name: preserve orientation receipt

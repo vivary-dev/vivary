@@ -9,7 +9,7 @@ export default defineConfig({
 		starlight({
 			title: 'Vivary',
 			description:
-				'Typed memory and gates for AI-agent projects. Scaffold a workspace your agent can navigate, verify, and trust: typed project memory, visible state, reusable skills, private boundaries, and gates. Plain Markdown. Any editor. Any agent.',
+				'Lightweight local-first governed context for agent work. Create a five-file workspace, retrieve bounded evidence, verify work, and cross deliberate human gates.',
 			logo: { src: './src/assets/vivary-mark.png', alt: 'Vivary' },
 			favicon: '/favicon.png',
 			social: [
@@ -26,8 +26,7 @@ export default defineConfig({
 						{ label: 'Home', link: '/' },
 						{ label: 'What is Vivary?', slug: 'concepts' },
 						{ label: 'Getting started', slug: 'getting-started' },
-						{ label: 'Getting started proof', slug: 'walkthrough' },
-						{ label: 'Learn by doing', slug: 'learn-by-doing' },
+						{ label: 'Guide library', slug: 'learn-by-doing' },
 						{ label: 'White paper', slug: 'white-paper' },
 						{ label: 'Roadmap', link: '/roadmap/' },
 						{ label: 'Blog', link: '/blog/' },
@@ -36,7 +35,13 @@ export default defineConfig({
 				{
 					label: 'Guides',
 					items: [
-						{ label: 'How-to recipes', slug: 'howto' },
+						{ label: 'Create a workspace', slug: 'guides/create-workspace' },
+						{ label: 'Connect an agent', slug: 'guides/connect-agent' },
+						{ label: 'Get bounded context', slug: 'guides/get-context' },
+						{ label: 'Write one approved record', slug: 'guides/write-record' },
+						{ label: 'Adopt an existing project', slug: 'guides/adopt-project' },
+						{ label: 'Verify and recover', slug: 'guides/verify-recover' },
+						{ label: 'Advanced recipes', slug: 'howto' },
 						{ label: 'Agent skills', slug: 'skills' },
 						{ label: 'Active context', slug: 'active-context' },
 						{ label: 'LLM active-context guide', slug: 'llm-active-context' },
@@ -49,6 +54,7 @@ export default defineConfig({
 						{ label: 'Command reference', slug: 'commands' },
 						{ label: 'MCP adapter (optional)', slug: 'mcp' },
 						{ label: 'Architecture', slug: 'architecture' },
+						{ label: 'Historical proof (0.3.1)', slug: 'walkthrough' },
 						{ label: 'Obsidian (optional)', slug: 'obsidian' },
 						{ label: 'Migration status', slug: 'migration-status' },
 						{ label: 'Decisions', slug: 'decisions' },

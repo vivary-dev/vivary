@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "create-vivary"
-version = "0.3.4"
-description = "Scaffold a normalized Vivary agent workspace with typed project context, visible state, and human gates."
+version = "0.4.0"
+description = "Create a lightweight local-first governed-context workspace with evidence, receipts, verification, and human gates."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -32,11 +32,7 @@ create-vivary = "create_vivary:main"
 
 [tool.setuptools]
 py-modules = ["create_vivary"]
-packages = ["create_vivary_assets"]
 include-package-data = false
-
-[tool.setuptools.package-data]
-create_vivary_assets = ["*.md", "**/*.md", "templates/.gitignore"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

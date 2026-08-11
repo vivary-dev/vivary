@@ -1240,7 +1240,7 @@ class ContentPrivacyPathRefusedError(ValueError):
 
 
 class ContentPrivacyPolicyUnavailableError(RuntimeError):
-    """The checkout's effective Git privacy policy could not be established."""
+    """The checkout's effective privacy policy could not be established."""
 
     reason = "privacy_policy_unavailable"
 
@@ -1249,9 +1249,10 @@ class ContentPrivacyPolicyUnavailableError(RuntimeError):
 
 
 _CONTENT_PRIVACY_POLICY_SCHEMA = "vivary.content-privacy-policy/v0"
-# A producer needs one root configuration file in addition to its 5,000
-# Markdown candidates. This is a request-wide limit, before de-duplication.
-_MAX_CONTENT_PRIVACY_CANDIDATES = 5_001
+# A thin producer may need its base plus one tighten-only root overlay in
+# addition to 5,000 Markdown candidates. This is a request-wide limit, before
+# de-duplication.
+_MAX_CONTENT_PRIVACY_CANDIDATES = 5_002
 _MAX_CONTENT_PRIVACY_CANDIDATE_BYTES = 4 * 1024 * 1024
 _CONTENT_PRIVACY_SENSITIVE_PATH_PARTS = frozenset(
     {
@@ -1284,6 +1285,26 @@ _CONTENT_PRIVACY_PRIVATE_KEY_NAMES = frozenset(
     {"id_dsa", "id_ecdsa", "id_ed25519", "id_rsa"}
 )
 _CONTENT_PRIVACY_CREDENTIAL_SEGMENT_RE = re.compile(r"[^/@:\s]+:[^/@\s]+@")
+_THIN_LOCAL_PRIVACY_BLOCKS = frozenset(
+    {
+        (
+            "# >>> vivary private/runtime >>>\n"
+            ".vivary/private/\n"
+            ".vivary/runtime/\n"
+            "*.vivary-tmp\n"
+            "# <<< vivary private/runtime <<<\n"
+        ).encode("utf-8"),
+        (
+            "# >>> vivary private/runtime >>>\n"
+            ".vivary/private/\n"
+            ".vivary/runtime/\n"
+            "*.vivary-tmp\n"
+            ".cocoindex_code/\n"
+            "# <<< vivary private/runtime <<<\n"
+        ).encode("utf-8"),
+    }
+)
+_THIN_LOCAL_PRIVACY_MAX_BYTES = max(len(block) for block in _THIN_LOCAL_PRIVACY_BLOCKS)
 
 
 def _content_privacy_string_is_safe(value: str) -> bool:
@@ -1440,6 +1461,74 @@ def _git_toplevel_is_exact_checkout(result: Dict[str, Any], checkout_path: str) 
     )
 
 
+def _thin_local_privacy_policy(
+    checkout_path: str,
+    candidates: List[str],
+) -> Optional[set[str]]:
+    """Use only create-vivary's exact bounded block when no exact Git root exists.
+
+    This fallback makes a fresh thin workspace usable before ``git init`` without
+    interpreting arbitrary ignore syntax or weakening privacy. Any user-authored,
+    extended, missing, linked, or changing policy remains unavailable and fails
+    closed through the caller.
+    """
+
+    policy_path = os.path.join(checkout_path, ".gitignore")
+    if not _is_safe_content_privacy_candidate(checkout_path, ".gitignore"):
+        return None
+    descriptor = None
+    try:
+        before = os.stat(policy_path, follow_symlinks=False)
+        if before.st_size > _THIN_LOCAL_PRIVACY_MAX_BYTES:
+            return None
+        descriptor = os.open(
+            policy_path,
+            os.O_RDONLY
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or (before.st_dev, before.st_ino, before.st_size)
+            != (opened.st_dev, opened.st_ino, opened.st_size)
+        ):
+            return None
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            data = handle.read(_THIN_LOCAL_PRIVACY_MAX_BYTES + 1)
+        after = os.fstat(descriptor)
+        if (
+            (opened.st_dev, opened.st_ino, opened.st_size)
+            != (after.st_dev, after.st_ino, after.st_size)
+            or data not in _THIN_LOCAL_PRIVACY_BLOCKS
+        ):
+            return None
+    except (OSError, ValueError):
+        return None
+    finally:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+
+    active_context = b".cocoindex_code/\n" in data
+    return {
+        path
+        for path in candidates
+        if path.startswith(".vivary/private/")
+        or path.startswith(".vivary/runtime/")
+        or path.endswith(".vivary-tmp")
+        or (
+            active_context
+            and (
+                path == ".cocoindex_code"
+                or path.startswith(".cocoindex_code/")
+            )
+        )
+    }
+
+
 def content_privacy_policy(
     checkout_path: str,
     candidate_paths: List[str],
@@ -1450,9 +1539,10 @@ def content_privacy_policy(
     """Approve public, regular candidates under the effective Git ignore policy.
 
     Only a caller-owned, canonical checkout root may be queried. Candidates are
-    checked segment by segment without following links, then Git decides whether
-    a non-sensitive name is ignored. Returned names are relative POSIX paths;
-    every excluded class is represented only by a deterministic count.
+    checked segment by segment without following links. An exact Git worktree uses
+    Git ignore decisions; a fresh thin workspace may use only create-vivary's exact
+    bounded local policy. Returned names are relative POSIX paths; every excluded
+    class is represented only by a deterministic count.
     """
 
     checkout_path = _require_content_privacy_checkout(checkout_path, allowlist)
@@ -1484,16 +1574,18 @@ def content_privacy_policy(
             cancelled=cancelled,
         )
 
-    if not _git_toplevel_is_exact_checkout(
+    exact_git_root = _git_toplevel_is_exact_checkout(
         run_hardened_git(checkout_path, ["rev-parse", "--show-toplevel"]),
         checkout_path,
-    ):
-        raise ContentPrivacyPolicyUnavailableError()
-
-    ignored, _ = _ignored_paths(
-        checkout_path,
-        public_candidates,
-        run_hardened_git,
+    )
+    ignored = (
+        _ignored_paths(
+            checkout_path,
+            public_candidates,
+            run_hardened_git,
+        )[0]
+        if exact_git_root
+        else _thin_local_privacy_policy(checkout_path, public_candidates)
     )
     if ignored is None:
         raise ContentPrivacyPolicyUnavailableError()

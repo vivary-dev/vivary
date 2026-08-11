@@ -1289,3 +1289,30 @@ def test_capped_runner_cooperatively_cancels_and_kills_a_child():
     assert outcome["cancelled"] is True
     assert outcome["timed_out"] is False
     assert outcome["code"] is not None
+
+
+def test_public_privacy_budget_reserves_two_thin_config_candidates(monkeypatch):
+    from vivary_core import workspace_observe
+
+    monkeypatch.setattr(
+        workspace_observe,
+        "_is_safe_content_privacy_candidate",
+        lambda _root, _candidate: True,
+    )
+    candidates = [
+        ".vivary/workspace.toml",
+        "tropo.toml",
+        *(f"notes/{index}.md" for index in range(5_000)),
+    ]
+
+    admitted = workspace_observe._bounded_content_privacy_candidates(
+        "/workspace",
+        candidates,
+    )
+
+    assert len(admitted) == 5_002
+    with pytest.raises(workspace_observe.ContentPrivacyPathRefusedError):
+        workspace_observe._bounded_content_privacy_candidates(
+            "/workspace",
+            [*candidates, "notes/overflow.md"],
+        )
