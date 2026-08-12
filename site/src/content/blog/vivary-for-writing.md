@@ -4,8 +4,7 @@ description: "The writing preset's typed status field for drafts, editorial memo
 date: 2026-07-29
 author: "Jeff Kazzee"
 tags: ["writing", "content", "howto"]
-draft: true
----
+draft: false---
 
 Content work has its own version of the memory problem. Not "the agent
 forgot the codebase," but "did I already make this point in a post from
