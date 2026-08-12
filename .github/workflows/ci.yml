@@ -57,6 +57,10 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
+      - name: install Python test runner
+        run: python -m pip install pytest packaging
+      - name: CI workflow contract
+        run: python scripts/check_ci_workflow.py
       - run: mkdir -p sandboxes
       - name: tropo
         run: python packages/tropo/tests/test_tropo.py
@@ -87,9 +91,7 @@ jobs:
       - name: vivary meta CLI
         run: python packages/vivary/tests/test_vivary_cli.py
       - name: core (governed-context seam; suite is the ported reference tests)
-        run: |
-          python -m pip install pytest packaging
-          python -m pytest packages/core/tests/ -q
+        run: python -m pytest packages/core/tests/ -q
       - name: strato governed policy facade
         run: python -m pytest packages/strato/tests/ -q
       - name: packaged core and governed role bridges smoke

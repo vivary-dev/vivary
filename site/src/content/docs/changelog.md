@@ -83,6 +83,8 @@ contract.
 
 ### Fixed
 
+- The primary CI job now installs its shared Python test runner before the first
+  pytest suite, and a workflow contract guard prevents that ordering from regressing.
 - Doctor repair now recognizes a thin workspace even when its repairable `.gitignore`
   policy is incomplete, and atomic repair preserves the existing file mode.
 - The strict orientation proof builds local Core and Tropo wheels before exercising
