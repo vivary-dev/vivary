@@ -74,6 +74,11 @@ contract.
 - Replaced the single exercise page with a routed guide library. Each guide owns
   one task, keeps instructions below the STE100 sentence limits, and routes exhaustive
   flags, schemas, and exit codes to the command reference.
+- Retired the pre-release blog queue, its scheduled PR publisher, and the separate
+  content backlog. Public release content now begins only after registry and live-site
+  verification. The four existing published posts and reusable blog routes remain.
+- Strengthened the canonical guide page titles and descriptions, added direct task
+  routes to `llms.txt`, and made the site crawler policy explicit for OpenAI search.
 - Reframed the prior how-to page as advanced recipes. Its agent setup examples now
   preview file-backed Core before any optional provider installation or authority gate.
 

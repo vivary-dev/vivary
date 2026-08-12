@@ -1,10 +1,11 @@
 ---
-title: "Guide library"
-description: "Concise STE100 style guides for people and agents who operate Vivary."
+title: "Vivary guides"
+description: "Task-based Vivary guides for creating or adopting a workspace, connecting agents, retrieving context, writing records, and recovering safely."
 editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/LEARN-BY-DOING.md"
 ---
 
-Use these guides to complete one real task at a time.
+Use these Vivary guides to complete one governed workspace task at a time.
+Each page is the canonical human-and-agent procedure that the public site renders.
 The guides use STE100 style.
 Each procedure is concise, direct, and safe to copy.
 

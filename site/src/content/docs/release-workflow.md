@@ -300,6 +300,9 @@ than inventing an unowned suite semver.
 
 ## 8. Announce the release
 
+Create public release content only after registry and live-site verification pass.
+Do not keep prewritten release posts or a scheduled publisher in the public repo.
+
 Every release gets a coordinated public announcement on **Facebook, LinkedIn,
 X/Twitter, Bluesky, and Instagram** — each post with a generated image sized
 for the platform, conveying what the update means for users (not a changelog

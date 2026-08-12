@@ -1,6 +1,6 @@
 ---
-title: "Connect an agent"
-description: "Connect an agent through the standard context route or optional local MCP."
+title: "Connect an AI agent to Vivary"
+description: "Connect an AI coding or writing agent to Vivary through the standard context route or optional read-only MCP adapter."
 editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/guides/connect-agent.md"
 ---
 

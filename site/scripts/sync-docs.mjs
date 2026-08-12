@@ -26,13 +26,13 @@ const pages = [
   ['GETTING-STARTED', 'getting-started', 'Getting started', 'Install Vivary and run your first agent workspace.'],
   ['WALKTHROUGH', 'walkthrough', 'Getting started proof', 'A public, generic product walkthrough showing Vivary scaffold, health, review, coordination, and impact checks.'],
   ['COMMANDS', 'commands', 'Command reference', 'Every CLI across Vivary: tropo, strato, ozone, exo, create-vivary, and optional adapters.'],
-  ['LEARN-BY-DOING', 'learn-by-doing', 'Guide library', 'Concise STE100 style guides for people and agents who operate Vivary.'],
-  ['guides/create-workspace', 'guides/create-workspace', 'Create a workspace', 'Create and verify the five-file Vivary seed for a new project.'],
-  ['guides/connect-agent', 'guides/connect-agent', 'Connect an agent', 'Connect an agent through the standard context route or optional local MCP.'],
-  ['guides/get-context', 'guides/get-context', 'Get bounded context', 'Retrieve bounded task context or save a complete Task Capsule.'],
-  ['guides/write-record', 'guides/write-record', 'Write one approved record', 'Plan, approve, apply, and verify one capsule-bound record.'],
-  ['guides/adopt-project', 'guides/adopt-project', 'Adopt an existing project', 'Preview and apply bounded brownfield adoption without project takeover.'],
-  ['guides/verify-recover', 'guides/verify-recover', 'Verify and recover', 'Validate workspace health and use explicit bounded recovery paths.'],
+  ['LEARN-BY-DOING', 'learn-by-doing', 'Vivary guides', 'Task-based Vivary guides for creating or adopting a workspace, connecting agents, retrieving context, writing records, and recovering safely.'],
+  ['guides/create-workspace', 'guides/create-workspace', 'Create a Vivary workspace', 'Create and verify the five-file Vivary governed-context workspace for a new project without adding starter content.'],
+  ['guides/connect-agent', 'guides/connect-agent', 'Connect an AI agent to Vivary', 'Connect an AI coding or writing agent to Vivary through the standard context route or optional read-only MCP adapter.'],
+  ['guides/get-context', 'guides/get-context', 'Get bounded Vivary context', 'Retrieve privacy-filtered project evidence with Vivary or save a complete governed Task Capsule for approved work.'],
+  ['guides/write-record', 'guides/write-record', 'Write a governed Vivary record', 'Plan, approve, apply, and verify one capsule-bound Vivary record after completed work earns durable project context.'],
+  ['guides/adopt-project', 'guides/adopt-project', 'Adopt an existing project with Vivary', 'Add Vivary to an existing project with a bounded dry-run plan, exact approval hash, privacy checks, and no project takeover.'],
+  ['guides/verify-recover', 'guides/verify-recover', 'Verify and recover a Vivary workspace', 'Run Vivary Doctor and Tropo checks, interpret health findings, and use explicit bounded recovery for interrupted adoption.'],
   ['MCP', 'mcp', 'MCP adapter', 'Optional local read-only MCP adapter contract, tools, privacy boundary, and verification.'],
   ['SKILLS', 'skills', 'Agent skills', 'The strato, tropo, and loops skills that operate a Vivary workspace.'],
   ['ACTIVE-CONTEXT', 'active-context', 'Active context', 'Optional CocoIndex-code sidecar guidance for semantic code retrieval.'],
@@ -48,7 +48,7 @@ const pages = [
   ['OBSIDIAN', 'obsidian', 'Obsidian (optional)', 'Optional Obsidian setup for fans, never required.'],
 ];
 
-const retiredGeneratedSlugs = ['brand', 'content-roadmap', 'faq', 'product-roadmap'];
+const retiredGeneratedSlugs = ['brand', 'faq', 'product-roadmap'];
 
 // rewrite relative repo-doc links to site routes; off-site files to GitHub blobs
 const rewrite = (s) =>
@@ -93,7 +93,6 @@ const rewrite = (s) =>
    .replaceAll('](SEMANTIC-MEMORY.md#', '](/semantic-memory/#')
    .replaceAll('](WHITE-PAPER.md)', '](/white-paper/)')
    .replaceAll('](PRODUCT-ROADMAP.md)', '](/roadmap/)')
-   .replaceAll('](CONTENT-ROADMAP.md)', `](${GH}/docs/CONTENT-ROADMAP.md)`)
    .replaceAll('](HOWTO.md)', '](/howto/)')
    .replaceAll('](SIGNALS.md)', '](/signals/)')
    .replaceAll('](RELEASE-WORKFLOW.md)', '](/release-workflow/)')
@@ -290,7 +289,16 @@ const ozoneVersion = readPublishedVersion('vivary-ozone');
 const exoVersion = readPublishedVersion('vivary-exo');
 const cogneeVersion = readPublishedVersion('vivary-memory-cognee');
 
+const isGuidePage = ([, slug]) => slug === 'learn-by-doing' || slug.startsWith('guides/');
+
+const taskGuidesList = pages
+  .filter(isGuidePage)
+  .map(([, slug, title, description]) =>
+    `- ${title}: ${description} https://vivary.vercel.app/${slug}/`)
+  .join('\n');
+
 const coreDocsList = pages
+  .filter((page) => !isGuidePage(page))
   .map(([_, slug, title]) => `- ${title}: https://vivary.vercel.app/${slug}/`)
   .join('\n') +
   '\n- Product roadmap: https://vivary.vercel.app/roadmap/' +
@@ -307,6 +315,7 @@ private/runtime ignores. It seeds no starter records, template pack, or second b
 Website: https://vivary.vercel.app/
 Repository: https://github.com/vivary-dev/vivary
 License: MIT
+Release Status: https://github.com/vivary-dev/vivary#release-status
 Full Documentation: https://vivary.vercel.app/llms-full.txt
 
 ## Published package surfaces
@@ -337,6 +346,13 @@ python packages/tropo/tropo.py check --root my-workspace
 Pin the previous published full-layout scaffolder only when that behavior is wanted:
 \`uvx --from create-vivary==0.3.1 create-vivary ...\` or
 \`npx @vivary/create@0.3.1 ...\`.
+
+## Task guides
+
+Use the page that matches the task. These site documents and the repository Markdown
+sources are the same canonical procedures.
+
+${taskGuidesList}
 
 ## Core docs
 

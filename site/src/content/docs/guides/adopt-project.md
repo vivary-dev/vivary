@@ -1,6 +1,6 @@
 ---
-title: "Adopt an existing project"
-description: "Preview and apply bounded brownfield adoption without project takeover."
+title: "Adopt an existing project with Vivary"
+description: "Add Vivary to an existing project with a bounded dry-run plan, exact approval hash, privacy checks, and no project takeover."
 editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/guides/adopt-project.md"
 ---
 

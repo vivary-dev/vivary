@@ -34,10 +34,6 @@ LEGACY_LINE_ENDING_ALLOWLIST = {
     "packages/tropo/examples/vault/projects/tropo/decisions/0001-folder-as-type.md",
     "site/package-lock.json",
     "site/package.json",
-    "site/src/content/blog/adopt-dont-rebuild.md",
-    "site/src/content/blog/memory-that-doesnt-rot.md",
-    "site/src/content/blog/the-loop.md",
-    "site/src/content/blog/tropo-map-read-the-shape.md",
     "site/src/pages/index.astro",
 }
 

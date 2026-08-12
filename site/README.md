@@ -46,5 +46,6 @@ Docs routes are generated from `../docs/`; edit canonical docs and run
 
 The homepage FAQ and first-class roadmap page are marketing-site surfaces under
 `src/pages/`; they are intentionally not generated Starlight documentation. The
-canonical product and content roadmaps remain repo documents under `../docs/`, while
-only the product roadmap is summarized publicly at `/roadmap/`.
+canonical product roadmap remains a repo document under `../docs/` and is summarized
+publicly at `/roadmap/`. Release content begins only after the release workflow
+verifies the registries and live site.
