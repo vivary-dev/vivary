@@ -86,9 +86,10 @@ def _default_run_git(
     *,
     worktree_config: Optional[Dict[str, str]] = None,
     stdin_data: Optional[bytes] = None,
+    cancelled: Optional[Callable[[], bool]] = None,
 ) -> Dict[str, Any]:
     semantic_config = (
-        _worktree_semantic_config(checkout_path)
+        _worktree_semantic_config(checkout_path, cancelled=cancelled)
         if worktree_config is None
         else worktree_config
     )
@@ -106,6 +107,7 @@ def _default_run_git(
         _sanitized_git_env(semantic_config),
         _MAX_GIT_OUTPUT_BYTES,
         stdin_data,
+        cancelled,
     )
     if outcome["error"] is not None:
         return {
@@ -419,6 +421,29 @@ def _observe_one_content(raw_path: str, terms: List[str], run_git: RunGit) -> Di
             "omissions": [],
             "evidence": {"command": result["command"]},
         }
+    confirmed_fingerprint, confirmed_ignored, confirmed_command = (
+        _content_privacy_policy(
+            path,
+            revision,
+            run_git,
+        )
+    )
+    if (
+        confirmed_fingerprint is None
+        or confirmed_ignored is None
+        or confirmed_fingerprint != privacy_fingerprint
+        or confirmed_ignored != ignored
+    ):
+        return {
+            "raw_path": raw_path,
+            "path": path,
+            "status": "unknown",
+            "reason": "ignore_policy_unavailable",
+            "matches": [],
+            "omissions": [],
+            "evidence": {"command": confirmed_command},
+        }
+
 
     by_file = _parse_grep_lines(result["stdout"], terms, revision)
 
@@ -462,6 +487,7 @@ def observe_content(
     terms: Optional[List[Any]] = None,
     now: Optional[Callable[[], str]] = None,
     run_git: Optional[RunGit] = None,
+    cancelled: Optional[Callable[[], bool]] = None,
 ) -> Dict[str, Any]:
     """Bounded, read-only tracked-file content search over explicit checkout
     roots. Mirrors observe_checkouts' shape: injectable `run_git`, mandatory
@@ -488,12 +514,16 @@ def observe_content(
         ) -> Dict[str, Any]:
             key = normalize_path(path)
             if key not in worktree_config:
-                worktree_config[key] = _worktree_semantic_config(path)
+                worktree_config[key] = _worktree_semantic_config(
+                    path,
+                    cancelled=cancelled,
+                )
             return _default_run_git(
                 path,
                 args,
                 worktree_config=worktree_config[key],
                 stdin_data=stdin_data,
+                cancelled=cancelled,
             )
 
         run_git = run_default

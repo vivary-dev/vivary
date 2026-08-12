@@ -1,17 +1,21 @@
 ---
-title: "How-to recipes"
-description: "Task recipes: add a type, see blast radius, review, CI, multi-agent."
+title: "Advanced recipes"
+description: "Focused recipes for types, review, coordination, CI, storage, and optional providers."
 editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/HOWTO.md"
 ---
 
-Short, copy-paste recipes for common tasks. New to Vivary? Do the [getting started
-guide](/getting-started/) first, then use these when you hit a specific job.
+Use these recipes after the [guide library](/learn-by-doing/).
+Each recipe assumes that the basic workspace checks pass.
 
-Install the CLIs before you run a recipe: `pip install vivary-tropo vivary-ozone
-vivary-exo create-vivary==0.3.1`. You can also run each CLI through `uvx`. Run
-commands inside a workspace unless you use `--root`.
+Registry `latest` still installs the published 0.3.1 line.
+Use the approved 0.4.0 candidate route from [Getting started](/getting-started/).
+The [README release table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) owns publication truth.
+
+Run commands inside a workspace unless you use `--root`.
 
 ## Scaffold a new workspace
+
+Use [Create a Vivary workspace](/guides/create-workspace/) for the complete procedure.
 
 ```bash
 create-vivary init my-workspace --preset writing      # coding | second-brain | knowledge-work | writing
@@ -25,31 +29,27 @@ create-vivary doctor my-workspace --json
 ```
 
 Doctor is read-only in both human and JSON modes: it exits `0` when the report has no
-errors and `1` when it has any; warnings do not alter that result. In particular, a
-published v0.1 workspace with flat `modules/agent-workspace.md` is healthy without
-`modules/index.md` or `modules/agent-workspace/index.md`. Its JSON
-`compatibility.schema_version` is `1`, `workspace_contract` is `legacy-v0.1`, and the
-two modern paths are recommendations rather than errors. Published releases through
-v0.3.1 can also lack newer `heartbeat-reports/*` or `*.vivary-tmp` ignore rules.
+errors and `1` when it has any; warnings do not alter that result. Development-source
+Doctor uses `compatibility.schema_version = 2`. Thin workspaces report
+`workspace_contract = "thin-v0.3"`; older full workspaces report
+`workspace_contract = "legacy-full"` plus `legacy_layout = "legacy-v0.1"` or
+`"indexed-v0.2+"`. Legacy layouts remain readable without silent migration. Published
+releases through v0.3.1 can also lack newer privacy ignore rules.
 Without declared semantic memory, Doctor reports those gaps as warnings and names each
 line to add. A published semantic-memory profile keeps `heartbeat-reports/*` strict and
 leaves its newer `*.vivary-tmp` gap as an upgrade warning; a current semantic-memory
 profile keeps every privacy rule strict.
 
-Use the recommendation's preset-preserving command only to preview the newer indexed surface:
+Use adoption only to preview the new thin contract:
 
 ```bash
 create-vivary adopt my-workspace --preset writing
 ```
 
-`adopt` is already a dry run unless you add `--yes`; Doctor recommendations never
-write. It only adds files and does not migrate flat modules: a human must separately
-decide whether and how to remove or convert `modules/<id>.md` files before an indexed
-contract can pass. Current v0.2+ workspaces identify as `indexed-v0.2+`; if either
-modern index exists, both must exist. The shared v0.1 root contract and runtime skills
-remain strict for both shapes. If `.vivary/memory.toml` says `enabled = true`, it must
-name a real provider: `provider = "none"` is misconfigured. Use `--trend` only when
-you intend to write `.vivary/doctor-state.json`.
+`adopt` is a dry run unless `--yes --plan <plan_hash>` is supplied. It does not migrate
+or remove legacy modules, templates, or skills. If `.vivary/memory.toml` says
+`enabled = true`, it must name a real provider: `provider = "none"` is misconfigured.
+Use `--trend` only when you intend to write local Doctor runtime state.
 
 ## Bring an existing repo's docs under tropo
 
@@ -213,34 +213,38 @@ Use modes in this order:
 policy is absent. `semantic` is different: it requires a configured optional memory
 provider such as `vivary-memory-cognee`.
 
-## Agent self-configure a workspace
+## Let an agent prepare a workspace
 
-Agents can scaffold and configure a workspace without any human interaction:
+Let the agent preview each write.
+Keep provider installation and authority changes at a human gate.
 
 ```bash
-# Fully non-interactive: auto picks embedded storage, installs LanceDB, outputs JSON
-create-vivary init . --preset coding --auto --size large --yes --json
+# Preview the five-file seed.
+create-vivary init my-workspace --preset coding --no-wizard --dry-run --json
 
-# Discover optional pieces for a preset
+# Discover optional capabilities.
 create-vivary capabilities --preset knowledge-work --json
 
-# Dry run first (inspect without writing or installing anything)
-create-vivary init my-workspace --auto --dry-run --json
+# Create the approved file-backed seed.
+create-vivary init my-workspace --preset coding --no-wizard --json
 
-# Reconfigure storage on an existing workspace
-create-vivary wizard my-workspace --auto --storage embedded --yes --json
+# Preview an optional storage change.
+create-vivary wizard my-workspace --storage embedded --dry-run --json
 
-# Add semantic-memory policy without indexing or installing providers
-create-vivary init my-workspace --preset knowledge-work --memory local --yes
+# Preview optional semantic-memory policy.
+create-vivary init my-workspace --preset knowledge-work --memory local --dry-run --json
 create-vivary init my-notes --preset second-brain --memory cognee --no-wizard --dry-run --json
 ```
 
-The `--auto` flag picks storage from explicit `--storage`, `--size`, and `--privacy`
-hints (or defaults to `embedded` for medium/large). `--yes` auto-confirms installs.
-`--json` gives machine-readable output. Combine all three for zero-prompt agent use.
-Semantic memory stays separate from storage: `--memory local` writes local policy,
-and `--memory cognee` writes Cognee policy plus verification docs without installing
-Cognee, indexing content, enabling network access, or using an API key.
+`--json` gives machine-readable output.
+Plain `--auto` keeps file storage and installs no provider.
+Size and local privacy hints never select embedded storage.
+Use `--storage embedded` only after approval for the provider installation.
+Use `--yes` only after that explicit selection.
+
+Semantic memory stays separate from storage.
+`--memory local` writes local policy.
+`--memory cognee` writes Cognee policy without installing Cognee or indexing content.
 
 If you explicitly install the optional Cognee adapter, dry-run before provider writes:
 
@@ -292,14 +296,14 @@ jobs:
       - run: ozone review --strict --root .
 ```
 
-`create-vivary doctor . --json` validates the scaffold (required files, privacy
-ignores, module indexes, graph health, backend/memory status) and exits non-zero on
+`create-vivary doctor . --json` validates the workspace contract, privacy,
+startup reachability, graph health, backend/memory status, and transaction recovery; it exits non-zero on
 any error. `tropo check` validates each typed document; `ozone review --strict`
 checks relationships between them (broken edges, orphans, unverified changes) and
 fails the build on any warning. Add `--trend` to the doctor step once you want drift
-tracking; it writes `.vivary/doctor-state.json`, so commit that file (or cache it
-between runs) if you want deltas across CI runs rather than a "first recorded run"
-every time.
+tracking. Thin workspaces write `.vivary/runtime/doctor-state.json`, which is ignored;
+cache it explicitly if you want deltas across CI runs rather than a "first recorded
+run" every time.
 
 ## Pull logs without a GUI
 

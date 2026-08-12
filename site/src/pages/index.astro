@@ -1,6 +1,6 @@
 ---
 const repo = 'https://github.com/vivary-dev/vivary';
-const command = 'npm create @vivary@latest my-workspace';
+const command = 'python packages/create-vivary/create_vivary.py init my-workspace --preset coding --no-wizard';
 const supportEmail = 'support@vivary.dev';
 const supportSubject = 'Vivary support request';
 const supportIssueUrl = `${repo}/issues/new?template=bug.yml&labels=bug&title=${encodeURIComponent('[Bug]: Vivary problem report')}`;
@@ -30,7 +30,7 @@ const layers = [
   {
     name: 'strato',
     eyebrow: 'The operating layer',
-    body: 'Visible state, reusable skills, private boundaries, and a loop that learns without bloating active context.',
+    body: 'One visible state surface, private boundaries, and a governed loop that grows only when real work earns context.',
   },
   {
     name: 'ozone',
@@ -54,14 +54,14 @@ const adoption = [
   {
     step: '02',
     title: 'Adopt without wrecking it',
-    command: 'create-vivary adopt .',
-    body: 'Preview the additive workspace shell first. Existing files remain byte-identical.',
+    command: 'create-vivary adopt . --json',
+    body: 'Preview the exact hash first: at most three payload files and two bounded host integrations.',
   },
   {
     step: '03',
     title: 'Keep it healthy',
-    command: 'create-vivary doctor . --trend',
-    body: 'See graph, routing, and context-budget drift before the workspace quietly rots.',
+    command: 'create-vivary doctor .',
+    body: 'Verify the thin contract and privacy boundary without writing runtime trend state.',
   },
 ];
 
@@ -69,12 +69,12 @@ const faq = [
   {
     question: 'What is Vivary?',
     answer:
-      'Vivary is a plain-file standard and scaffolder for agent-native workspaces. It gives agents typed project memory, visible state, reusable skills, private boundaries, and explicit human gates.',
+      'Vivary is a local-first governed-context standard and scaffolder. Core starts with five small files: one context capsule, one visible state surface, policy, startup routing, and private/runtime ignores.',
   },
   {
     question: 'Can I use it with an existing project?',
     answer:
-      'Yes. The brownfield path starts read-only with tropo map, previews an additive workspace shell, and leaves existing files byte-identical until you approve a write.',
+      'Yes. Brownfield adoption starts with a deterministic dry-run, adds at most three Vivary payload files, and touches only bounded generated blocks in AGENTS.md and .gitignore after exact-hash approval.',
   },
   {
     question: 'Is Vivary an AI agent or model?',
@@ -84,7 +84,7 @@ const faq = [
   {
     question: 'Does it upload or index my files?',
     answer:
-      'Not by default. The core is local and dependency-light. Networked providers, semantic indexing, daemons, and MCP integrations are optional edges that require explicit installation and approval.',
+      'Not by default. Core is local and dependency-light. Optional MCP is local stdio and read-only; networked providers and semantic indexing require separate installation and approval.',
   },
   {
     question: 'Am I locked into Vivary?',
@@ -94,7 +94,7 @@ const faq = [
   {
     question: 'Is it open source and production-ready?',
     answer:
-      'Vivary is MIT licensed and its core packages are public. The architecture and basic adoption path work today; benchmark results, broader brownfield proof, and retention evidence are still active roadmap work.',
+      'Vivary is MIT licensed. The five-file 0.4.0 Core and MCP overhaul is an unpublished source candidate; registry latest remains 0.3.1. Benchmark, dogfood, remote CI, and publication are still gated.',
   },
 ];
 ---
@@ -107,12 +107,12 @@ const faq = [
     <title>Vivary — a world your agents can understand</title>
     <meta
       name="description"
-      content="Vivary gives AI agents typed memory, visible state, and human gates. Scaffold a new agent-native workspace or safely adopt the project you already have."
+      content="Vivary gives agents lightweight governed context, visible state, receipts, and human gates without seeding a second brain."
     />
     <meta property="og:title" content="Vivary — a world your agents can understand" />
     <meta
       property="og:description"
-      content="Typed memory, visible state, and human gates for agent-native workspaces."
+      content="Five small workspace files, earned context, receipts, and human gates."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://vivary.vercel.app/" />
@@ -126,7 +126,7 @@ const faq = [
     <meta name="twitter:title" content="Vivary — a world your agents can understand" />
     <meta
       name="twitter:description"
-      content="Typed memory, visible state, and human gates for agent-native workspaces."
+      content="Five small workspace files, earned context, receipts, and human gates."
     />
     <meta name="twitter:image" content="https://vivary.vercel.app/media/hero-living-strata.webp" />
     <link rel="canonical" href="https://vivary.vercel.app/" />
@@ -177,12 +177,12 @@ const faq = [
           fetchpriority="high"
         />
         <div class="hero-copy">
-          <p class="eyebrow">Typed memory · visible state · human gates</p>
-          <h1>Give your agents a world they can understand.</h1>
+          <p class="eyebrow">Small seed · earned context · human gates</p>
+          <h1>Give agents governed context without the file pack.</h1>
           <p class="hero-lede">
-            Vivary is a standard and scaffolder for agent-native workspaces. Start
-            clean or safely adopt the project you already have—without locking your
-            work into a platform.
+            Greenfield Core creates five operational files and no starter second
+            brain. Brownfield adoption stays capped and review-first. MCP reads and
+            supplies capsules; a separate exact-hash transaction writes one earned record.
           </p>
           <div class="hero-actions">
             <a class="button button-primary" href="/getting-started/">Start with an existing project</a>
@@ -193,10 +193,14 @@ const faq = [
             <button type="button" data-copy={command}>Copy command</button>
             <span class="copy-status" data-copy-status aria-live="polite"></span>
           </div>
+          <p class="release-truth">
+            0.4.0 source-review command. Registry latest remains the published 0.3.1
+            full layout until the <a href="/release-workflow/">human release gate</a> is complete.
+          </p>
           <ul class="hero-proof" aria-label="Vivary product facts">
-            <li>Plain Markdown + YAML</li>
-            <li>Claude Code + Codex</li>
-            <li>MIT licensed</li>
+            <li>Exactly five seed files</li>
+            <li>No starter records</li>
+            <li>Local-first + MIT</li>
           </ul>
         </div>
       </section>
@@ -232,23 +236,23 @@ const faq = [
       <section class="thesis band">
         <p class="section-label">The product thesis</p>
         <div>
-          <h2>Agents do better work when the workspace has a shape.</h2>
+          <h2>Agents do better work when context is small, typed, and earned.</h2>
           <p>
-            Flat memory files turn into junk drawers. Giant instruction files consume
-            the context they were supposed to protect. Vivary gives the project a
-            typed, navigable structure with one visible state surface and explicit
-            gates at the edges.
+            Pre-populated workspaces invent truth and consume the context they were
+            meant to protect. Vivary starts with one bounded context capsule and one
+            visible state surface. Real records arrive through verified work and a
+            deliberate write gate.
           </p>
         </div>
       </section>
 
       <section class="adoption band" aria-labelledby="adoption-title">
         <div class="section-heading">
-          <p class="section-label">No greenfield required</p>
-          <h2 id="adoption-title">Point Vivary at the mess you already have.</h2>
+          <p class="section-label">Brownfield without takeover</p>
+          <h2 id="adoption-title">Adopt the project you already have.</h2>
           <p>
-            The adoption path is deliberately read-first, additive, and gated. You
-            can feel the value before giving Vivary permission to write anything.
+            The adoption path is deliberately read-first, bounded, and exact-hash
+            gated. Existing project structure stays in charge.
           </p>
         </div>
         <ol class="adoption-flow">
@@ -822,6 +826,17 @@ const faq = [
 
       .command code span {
         margin-right: 0.75rem;
+        color: var(--mint);
+      }
+
+      .release-truth {
+        max-width: 650px;
+        margin: 0.85rem 0 0;
+        color: #9fb2ad;
+        font-size: 0.88rem;
+      }
+
+      .release-truth a {
         color: var(--mint);
       }
 

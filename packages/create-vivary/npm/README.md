@@ -1,95 +1,61 @@
 # @vivary/create
 
-**A scaffolder for normalized agent-native workspaces.** Create a Vivary workspace
-with a typed knowledge graph (tropo), agent OS (strato), starter graph, visible state,
-and human gates in one command. Generated modules use `modules/<id>/index.md` routers
-so agents load context progressively.
+`@vivary/create` is the npm launcher for Vivary's lightweight, local-first
+governed-context scaffolder. It forwards arguments unchanged to the Python
+`create-vivary` CLI; there is no second JavaScript implementation.
 
 Published and development version truth lives in the
 [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status).
-
-This development source remains in lockstep with the Python package. It forwards
-the governed capability and Doctor reports without adding a JavaScript
-implementation. `create-vivary adopt <path>` uses dry-run by default, and
-`doctor --trend` tracks graph and routing drift in `.vivary/doctor-state.json`.
-
-**Security hardening:** The 0.2.5 line validates active `.gitignore` rules for `USER.md`,
-`MEMORY.md`, `memory/*`, and `heartbeat-reports/*`; scaffolds private heartbeat report
-storage; and refuses symlinked or out-of-workspace scaffold, storage, and cleanup
-paths.
+The unpublished source candidates are `@vivary/create 0.4.0` and
+`create-vivary 0.4.0`; both require `vivary-tropo>=0.5.2`.
 
 ```bash
 npm create @vivary@latest my-workspace -- --preset coding
-npm create @vivary@latest my-workbench -- --preset knowledge-work --memory local
-npm create @vivary@latest my-codebase -- --preset coding --active-context cocoindex-code
-# or
-npx @vivary/create@latest my-workspace --preset coding
+npx @vivary/create@latest doctor my-workspace --json
 
-# Agent-mode (no prompts, machine-readable output):
-npx @vivary/create@latest init . --preset coding --auto --size large --yes --json
+# Existing repo: preview, inspect the plan hash, then apply that exact plan.
+npx @vivary/create@latest adopt . --json
+npx @vivary/create@latest adopt . --yes --plan sha256:<plan-hash> --json
 
-# Reconfigure storage on an existing workspace:
-npx @vivary/create@latest wizard my-workspace --auto --storage embedded --yes --json
-
-# Show optional preset capabilities:
-npx @vivary/create@latest capabilities --preset knowledge-work --json
-
-# Preview brownfield adoption without writing:
-npx @vivary/create@latest adopt .
-
-# Append a local debug receipt without polluting JSON stdout:
-npx @vivary/create@latest doctor my-workspace --json --receipt .vivary/receipts.jsonl
+# One earned record: preview, approve, then apply one capsule-bound plan.
+npx @vivary/create@latest record . changes/verified-slice.md --from ./verified-slice.md \
+  --capsule ./task-capsule.json --json
+npx @vivary/create@latest record . changes/verified-slice.md --from ./verified-slice.md \
+  --capsule ./task-capsule.json \
+  --yes --plan sha256:<plan-hash> --json
 ```
 
-Presets: `coding` · `second-brain` · `knowledge-work` · `writing`.
+A default new-workspace init creates three Vivary payload files plus the bounded host
+integrations `AGENTS.md` and `.gitignore`. Brownfield adoption remains capped at the
+same three payload creates and may separately create or patch only those two host
+integration surfaces. Neither path copies templates, runtime skills, placeholders,
+starter records, or framework prose.
 
-The npm launcher forwards argv unchanged to the Python CLI. Python is the sole owner
-of command recognition and the bare `<name>` → `init <name>` normalization; you can
-also pass `init` / `doctor` / `wizard` / `capabilities` / `adopt` explicitly (e.g.
-`npm create @vivary@latest adopt .`).
+`record` is not a pack installer. It validates the complete governed capsule and its
+current workspace binding, plans exactly one typed record, requires the exact approved
+hash before writing, reruns Doctor, and rolls back on failed verification. The npm
+package only forwards this command to the canonical Python implementation.
 
-For local debugging, pass `--receipt PATH` or set `VIVARY_RECEIPT_LOG=PATH` to append
-a dependency-free JSONL run receipt. Receipts stay local and record only command
-envelope data such as tool version, command, flag names, exit code, duration, Python,
-and platform; they do not capture stdout, stderr, file contents, preset values,
-target paths, or environment variables.
+Optional adapters are explicit:
 
-On a terminal that supports input, `init` runs a short wizard to pick a storage tier.
-For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use
-`--auto`; in human mode, the wizard asks and its answers drive storage. Semantic
-memory is separate: `--memory local` writes local-only policy, and `--memory cognee`
-writes Cognee policy and verification docs without installing Cognee or indexing
-content. Runtime Cognee recall lives in the optional `vivary-memory-cognee` Python
-package and still requires explicit install and index approval.
+```bash
+npx @vivary/create@latest init my-workspace --adapter agents --adapter claude
+npx @vivary/create@latest init my-codebase --active-context cocoindex-code
+```
 
-In source builds and the next package release, `doctor --repair --json` previews a
-guided repair plan without writing. After approval, `doctor --repair --yes`
-regenerates missing ignored private placeholders, appends missing privacy ignore
-lines, removes simple W210 redundant metadata, and reruns doctor. Non-workspace,
-symlinked, junctioned, hardlinked, non-file, or non-UTF-8 repair targets are refused
-or kept manual. Complex YAML W210 cases, broken refs, and exo conflicts stay manual
-guidance.
+Each agent adapter adds at most one bounded file. The active-context option keeps the
+five-file seed: it declares the capability and ignores its local index path. It does
+not copy guidance, install or run an indexer, enable MCP, or transmit source. Obsidian
+setup is separate from thin init.
 
-## How it works
+Doctor is read-only unless an explicit write mode such as `--trend` is selected. It
+recognizes both the new `thin-v0.3` contract and older `legacy-full` workspaces without
+silently migrating them.
 
-This package is a thin, shell-free transport: it forwards argv unchanged to the Python
-`create-vivary` scaffolder via [uv](https://docs.astral.sh/uv/) (`uvx`) or
-[pipx](https://pipx.pypa.io/), so the scaffolder stays one source of truth while you
-get a Node-native entry point. **Python 3.11+ and uv (or pipx) must already be installed.**
+The launcher uses [uv](https://docs.astral.sh/uv/) (`uvx`) or
+[pipx](https://pipx.pypa.io/) to run the matching Python package. Python 3.11+ and uv
+or pipx must already be installed.
 
-Prefer Python directly? `uvx create-vivary my-workspace --preset coding` — a bare
-target defaults to `init` there too (the PyPI `create-vivary` stays in lockstep with
-this launcher) — or `pip install create-vivary`.
+License: MIT.
 
-For coding workspaces, `--active-context cocoindex-code` scaffolds optional
-CocoIndex-code guidance and ignored sidecar state. It does not auto-install, index, or
-enable MCP; the generated docs give the approved `ccc init` / `ccc index` path, and the
-skill points agents to the canonical copyable LLM guide.
-
-## License
-
-MIT.
-
----
-
-Website & docs: <https://vivary.vercel.app/>
+Website and docs: <https://vivary.vercel.app/>

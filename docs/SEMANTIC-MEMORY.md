@@ -6,7 +6,8 @@ Status: architecture note plus first optional Cognee adapter slice
 [#86](https://github.com/vivary-dev/vivary/issues/86) for semantic memory/Cognee,
 aligned with [#20](https://github.com/vivary-dev/vivary/issues/20). The setup slice
 landed `knowledge-work`, `create-vivary capabilities`, `--memory local|cognee`,
-`.vivary/memory.toml`, scaffolded policy docs, and doctor memory reporting. The first
+`.vivary/memory.toml`, and Doctor memory reporting. Thin init writes provider config
+only after an explicit selection; it does not seed policy records. The first
 runtime slice adds an optional `vivary-memory-cognee` package with `vivary-cognee`
 doctor/index/recall/forget commands.
 
@@ -46,20 +47,20 @@ Presets and capabilities are separate axes:
 
 | Axis | Examples | Job |
 |---|---|---|
-| Preset | `coding`, `second-brain`, `knowledge-work`, `writing` | Shape the starter graph, modules, first change, and verification path. |
+| Preset | `coding`, `second-brain`, `knowledge-work`, `writing` | Select compact workspace policy without seeding starter content. |
 | Capability | `storage:file`, `storage:embedded`, `memory:local`, `memory:cognee`, `active-context:cocoindex-code` | Add optional runtime power behind explicit install/config gates. |
 
 This keeps Cognee and database choices composable. A `writing` workspace can use no
 semantic memory, local semantic memory, or Cognee. A `knowledge-work` workspace can do
 the same. The preset should never imply a heavyweight provider.
 
-Recommended preset direction:
+Preset intent remains lightweight:
 
-| Preset | Purpose | Starter module | First verification |
-|---|---|---|---|
-| `second-brain` | Personal knowledge base: notes, sources, concepts, memory, retrieval routines. | `knowledge-base` | Retrieve a known note through the typed graph. |
-| `knowledge-work` | Agent-operable workbench for research, decisions, artifacts, proof, and publish/deploy readiness. This is the generic version of the local-gate-plus-proof pattern, not a personal vault. | `workbench` | Produce or locate one artifact and verify it with a local gate or proof check. |
-| `writing` | Drafts, research, editorial passes, publication gates, and release/publish copy. | `manuscript-system` | Review one draft against editorial criteria and linked sources. |
+| Preset | Purpose | First useful proof |
+|---|---|---|
+| `second-brain` | Personal knowledge base: notes, sources, concepts, memory, retrieval routines. | Retrieve one known note through typed context. |
+| `knowledge-work` | Workbench for research, decisions, artifacts, and proof. | Produce or locate one artifact and verify it locally. |
+| `writing` | Drafts, research, editorial passes, and publication gates. | Review one real draft against linked evidence. |
 
 `second-brain`, `knowledge-work`, and `writing` all receive the same optional memory
 capability path. `knowledge-work` is a generic workbench preset, not a renamed
@@ -273,30 +274,30 @@ Current scaffold output diverges: it writes `enabled = true` with runtime gates 
 indexes nothing, and makes no provider call, but does not yet meet the approved
 disabled-policy contract.
 
-In the source checkout's unreleased `vivary-memory-cognee` 0.1.1 adapter, privacy
-filtering is owned by `build_snapshot`: built-in private patterns always apply, and
-Git ignore rules apply when `respect_gitignore` (default `true`) is enabled.
-`respect_vivary_private` and `fail_closed` are accepted and type-checked policy fields,
-but they are not current filtering switches. Before path filtering, snapshot
-construction refuses linked, out-of-root, hard-linked, or unstatable source files; it
-raises rather than silently skipping them.
+In the source checkout's unreleased `vivary-memory-cognee` 0.1.2 adapter, privacy
+filtering is owned by `build_snapshot`. Built-in private patterns and
+`memory.privacy.private_paths` always apply. When `respect_gitignore` is `true` (the
+default), the adapter passes only relative Markdown candidates through Core's
+fail-closed `content_privacy_policy` and analyzes only the admitted absolute paths.
+`respect_vivary_private` and `fail_closed` remain accepted and type-checked policy
+fields, not filtering switches. Snapshot construction refuses linked, out-of-root,
+hard-linked, or unstatable source files instead of silently skipping them. [Behavioral
+evidence](https://github.com/vivary-dev/vivary/blob/dev/packages/memory-cognee/tests/test_memory_cognee.py); verified: 2026-08-09.
 
 ### Privacy boundary
 
 The source checkout and next `vivary-memory-cognee` release include
-`.strato/private/**` in the built-in floor and compare privacy patterns
+`.strato/private/**` in the built-in floor and compare explicit privacy patterns
 case-insensitively on Windows. The currently published 0.1.0 package lacks that
 built-in `.strato/private/**` entry; its generated Vivary configuration lists the path
-in `memory.privacy.private_paths`, but hand-written or older configurations must add
-it explicitly before indexing.
+in `memory.privacy.private_paths`, but hand-written or older configuration must add it
+explicitly before indexing.
 
-The dependency-free `.gitignore` matcher is not fully Git-equivalent:
-backslash-escaped patterns and some complex `**` or anchored patterns can disagree
-with Git. Until [#236](https://github.com/vivary-dev/vivary/issues/236) lands, do not
-use `respect_gitignore` as the sole privacy boundary for such paths. Add each sensitive
-path to `memory.privacy.private_paths` as an unescaped workspace-relative literal or
-simple glob, and do not approve indexing when privacy depends on unsupported Git
-pattern syntax.
+Git-ignore privacy now uses Core's Git-equivalent policy rather than the adapter's
+former dependency-free approximation. Core executes bounded
+`git check-ignore --no-index` work at the canonical workspace root and fails closed
+when policy cannot be established. Built-in and explicit private paths remain the
+independent privacy floor even when `respect_gitignore` is `false`.
 
 Runtime/index state belongs under `.vivary/memory/` and should be ignored. The adapter
 binds Cognee's data, system, cache, and log roots to the configured `state_path`
@@ -384,9 +385,8 @@ create-vivary init my-work --preset knowledge-work --storage embedded --memory l
 create-vivary init my-book --preset writing --memory cognee --no-wizard --dry-run --json
 ```
 
-`--auto` must not silently choose Cognee. At most, `--auto --size large --privacy local`
-may choose local Vivary search, while Cognee requires an explicit provider flag or
-interactive answer.
+Plain `--auto` uses file storage and does not silently choose a search or memory provider.
+Embedded search and Cognee each require an explicit flag or interactive choice.
 
 Agent-mode discovery does not require the agent to know package names.
 `create-vivary capabilities --json` reports available capabilities:
@@ -431,11 +431,13 @@ availability without importing it, and, when Cognee is available, resolves and
 compares the manifest. It does not construct an adapter or make provider, embedding,
 or LLM calls.
 
-Package unavailability short-circuits manifest and `state_path` resolution. An
-`unavailable` report therefore confirms only that Cognee is configured and absent; it
-does **not** attest that the configured state path is safe. Live adapter operations
-always validate the path before use, and Doctor reports an unsafe path as
-`misconfigured` once Cognee is available.
+Doctor resolves and confines `state_path` before checking provider availability. An
+unsafe path is therefore `misconfigured` whether Cognee is installed or absent, and
+that refusal occurs before Cognee is imported, probed, or called. A safe
+`unavailable` report confirms both that the configured state path stays in the
+workspace and that the package is absent.
+[Doctor regressions](https://github.com/vivary-dev/vivary/blob/dev/packages/memory-cognee/tests/test_memory_cognee.py);
+verified: 2026-08-09.
 
 Its current states are:
 
@@ -443,8 +445,8 @@ Its current states are:
 |---|---|
 | `disabled` | semantic memory is disabled or its provider is `none` |
 | `not-cognee` | another enabled provider is configured; this adapter does not handle it |
-| `unavailable` | Cognee is configured but its package is not installed; manifest and state-path validation have not run |
-| `misconfigured` | root, config, or snapshot validation failed, or state-path validation failed while Cognee was available |
+| `unavailable` | Cognee is configured, its state path is confined to the workspace, and its package is not installed |
+| `misconfigured` | root, config, snapshot, or state-path validation failed |
 | `stale` | Cognee is available but the manifest is absent, unreadable, or does not match the current snapshot |
 | `healthy` | Cognee is available and the manifest matches the current snapshot |
 
@@ -498,8 +500,9 @@ Recommended retrieval order:
 Current adapter safeguards:
 
 - Recall mapping drops a provider item without a stable Vivary node marker or whose
-  node ID is absent from the rebuilt snapshot. A Git-ignored path admitted to the
-  snapshot because of the matcher limitation above is not recovered at this stage.
+  node ID is absent from the freshly rebuilt, privacy-filtered snapshot. Private and
+  Git-ignored documents are therefore ineligible for recall even if a stale provider
+  item names them.
 - If semantic score and graph edges disagree, prefer graph edges for truth and use the
   semantic hit as a lead to inspect.
 - `tropo query --mode semantic` is the shipped optional-provider bridge. It invokes

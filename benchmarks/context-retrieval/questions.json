@@ -1,0 +1,269 @@
+{
+  "schema_version": 1,
+  "corpus_sha": "cbbd340dbf0ffebfe17ad5257ecd93b83ab570de",
+  "verified": "2026-08-09",
+  "authorities": {
+    "release_status": {
+      "path": "README.md",
+      "role": "Owns current published and development version/publication truth via the release-status section."
+    },
+    "release_workflow": {
+      "path": "docs/RELEASE-WORKFLOW.md",
+      "role": "Owns the end-of-update release process, package bump rules, and review SOP."
+    }
+  },
+  "questions": [
+    {
+      "id": "q1_release_truth_owner",
+      "question": "where is release truth owned?",
+      "required_claim_ids": [
+        "release_status_owner",
+        "release_workflow_owner"
+      ],
+      "expected_claims": {
+        "release_status_owner": {
+          "value": "README.md#release-status",
+          "accepted_evidence": [
+            {
+              "path": "AGENTS.md",
+              "line": 95,
+              "line_hash": "a5444da53fd2b2208d41a86aa8b7a3d325bac809bc9243f251d393de90ba6cbf"
+            },
+            {
+              "path": "AGENTS.md",
+              "line": 96,
+              "line_hash": "a0c537c577474f94adaeda362ef04dca02cba1892ae6bf2e0bd2235aa756de27"
+            },
+            {
+              "path": "README.md",
+              "line": 22,
+              "line_hash": "678db2aadbb858225768ced8cdffc68640fee717d166f1f0fb7a18fe90b536d2"
+            },
+            {
+              "path": "README.md",
+              "line": 26,
+              "line_hash": "e3cdec62ad9de9d9b2487e3db4d0098239992d2ce51cfc4d4d87b9f6ff0ca875"
+            },
+            {
+              "path": "README.md",
+              "line": 27,
+              "line_hash": "e27a84bde23dad5f1ade35721f6d0dc0bfe236b564c89f835e6992b61bc464f4"
+            }
+          ]
+        },
+        "release_workflow_owner": {
+          "value": "docs/RELEASE-WORKFLOW.md",
+          "accepted_evidence": [
+            {
+              "path": "AGENTS.md",
+              "line": 101,
+              "line_hash": "9920a941433d713a8c27b3af488b4ec33471046630bf6dfb9299ffb4cb26b36c"
+            },
+            {
+              "path": "AGENTS.md",
+              "line": 102,
+              "line_hash": "dc6100a411dd708821e9de2c04052206fb6670075f83f0525aa48c05a9178a4b"
+            },
+            {
+              "path": "docs/RELEASE-WORKFLOW.md",
+              "line": 43,
+              "line_hash": "591f7d5cfe42e0d9d6682ddaeb46c816aeef4641daff140a35093ac615dc28a3"
+            },
+            {
+              "path": "docs/RELEASE-WORKFLOW.md",
+              "line": 1,
+              "line_hash": "f16f86559fe9a203ade05827db9c23216e4c38cef74e7fc61c1ebf9cdafdf73a"
+            }
+          ]
+        }
+      },
+      "accepted_evidence_paths": [
+        "AGENTS.md",
+        "README.md",
+        "docs/RELEASE-WORKFLOW.md"
+      ]
+    },
+    {
+      "id": "q2_module_dependencies",
+      "question": "what depends on this module or decision?",
+      "required_claim_ids": [
+        "dependency_direction_owner",
+        "package_bump_dependency_owner"
+      ],
+      "expected_claims": {
+        "dependency_direction_owner": {
+          "value": "docs/ARCHITECTURE.md",
+          "accepted_evidence": [
+            {
+              "path": "docs/ARCHITECTURE.md",
+              "line": 175,
+              "line_hash": "3fe3310d45e37847103926eb6cc1080d49492b1bd45ac66108cdecad3473dd15"
+            },
+            {
+              "path": "docs/ARCHITECTURE.md",
+              "line": 176,
+              "line_hash": "44d1423a8b78cd4b53886ea7ee4350a5261e29f51e0afb83f5b1e59c54187c4c"
+            },
+            {
+              "path": "docs/ARCHITECTURE.md",
+              "line": 177,
+              "line_hash": "7a4c293ec48fb241eec1a266cb17c6891ad2dc8f5e7964a1d6a3adc81d9af02c"
+            },
+            {
+              "path": "docs/ARCHITECTURE.md",
+              "line": 178,
+              "line_hash": "d32a59b626a4a4ffa3f98d9914a44ff98eaef82c6c3e5d487557011928d5c849"
+            },
+            {
+              "path": "docs/ARCHITECTURE.md",
+              "line": 180,
+              "line_hash": "caed0a80a9d0c03918fbfad79ee89855d06f3d0050fca1b6b473bbcb0ee5e5b8"
+            }
+          ]
+        },
+        "package_bump_dependency_owner": {
+          "value": "docs/RELEASE-WORKFLOW.md",
+          "accepted_evidence": [
+            {
+              "path": "docs/RELEASE-WORKFLOW.md",
+              "line": 18,
+              "line_hash": "1e561ffc40dca5be37ed4461d4e44b51a8c6d27cafe5ade7295e05bb13001ca3"
+            },
+            {
+              "path": "docs/RELEASE-WORKFLOW.md",
+              "line": 28,
+              "line_hash": "3b79119d5850a45af81efde4545299d8a7c08c9bff97f339765fa8d79557a58d"
+            },
+            {
+              "path": "docs/RELEASE-WORKFLOW.md",
+              "line": 38,
+              "line_hash": "22ce0a384339465f7858f7239cb48c563e54227f747714609f95ebd68e9406d1"
+            },
+            {
+              "path": "docs/RELEASE-WORKFLOW.md",
+              "line": 39,
+              "line_hash": "8b9fd46725305d5561587cbb96c18102a12eab9b317f97926e21eb0dab6cfd61"
+            }
+          ]
+        }
+      },
+      "accepted_evidence_paths": [
+        "docs/ARCHITECTURE.md",
+        "docs/RELEASE-WORKFLOW.md"
+      ]
+    },
+    {
+      "id": "q3_agent_entrypoint",
+      "question": "which file should an agent open first?",
+      "required_claim_ids": [
+        "agent_entrypoint",
+        "architecture_depth_pointer"
+      ],
+      "expected_claims": {
+        "agent_entrypoint": {
+          "value": "AGENTS.md",
+          "accepted_evidence": [
+            {
+              "path": "AGENTS.md",
+              "line": 1,
+              "line_hash": "8157387c40f646be993c73775f1b9384e5068b75922d337ce9ea37b1ca4ff7a2"
+            },
+            {
+              "path": "AGENTS.md",
+              "line": 3,
+              "line_hash": "105a6d820b9e45bfdc7eb3102ba06ad77de5b5c0f1182a0830bf21dffa1d20c3"
+            }
+          ]
+        },
+        "architecture_depth_pointer": {
+          "value": "docs/ARCHITECTURE.md",
+          "accepted_evidence": [
+            {
+              "path": "AGENTS.md",
+              "line": 4,
+              "line_hash": "aba8edb57ec6b3929c10a963f0e36a0006088bf104100267108a69bf99e7a62f"
+            },
+            {
+              "path": "AGENTS.md",
+              "line": 5,
+              "line_hash": "af599f62a133ad771a3c4f89b4d8b965f9b60f1f5f00da8d83ad5cb6f0cc6690"
+            }
+          ]
+        }
+      },
+      "accepted_evidence_paths": [
+        "AGENTS.md"
+      ]
+    },
+    {
+      "id": "q4_changes_and_review",
+      "question": "what changed and what must be reviewed?",
+      "required_claim_ids": [
+        "change_log_owner",
+        "review_sop_owner"
+      ],
+      "expected_claims": {
+        "change_log_owner": {
+          "value": "CHANGELOG.md",
+          "accepted_evidence": [
+            {
+              "path": "CHANGELOG.md",
+              "line": 1,
+              "line_hash": "3e79c4cafb504a21f8913e4e0e66f2ff7b1192a127c6f564aab379c8b5fa9bdd"
+            },
+            {
+              "path": "CHANGELOG.md",
+              "line": 3,
+              "line_hash": "303319f1eda77aa62dd06b548d8cc64d7deba1adaaa5954bb64323f8d2dc2ee2"
+            },
+            {
+              "path": "AGENTS.md",
+              "line": 120,
+              "line_hash": "323cb3d747225f00edabb8a2764de6c48188f556f03c69ef0cfa57226574c9b5"
+            },
+            {
+              "path": "docs/RELEASE-WORKFLOW.md",
+              "line": 56,
+              "line_hash": "84bc397a63ecb89eb11243d22d37f46625126f01c9fdc5e4055f5acb63a2414d"
+            },
+            {
+              "path": "docs/RELEASE-WORKFLOW.md",
+              "line": 57,
+              "line_hash": "33e9042476ed64cc2227be9e0ae6a7639173033905a9544c47f9b20410731be4"
+            }
+          ]
+        },
+        "review_sop_owner": {
+          "value": "docs/RELEASE-WORKFLOW.md#pre-pr-hardening-and-review-sop",
+          "accepted_evidence": [
+            {
+              "path": "docs/RELEASE-WORKFLOW.md",
+              "line": 108,
+              "line_hash": "e96963e5c3c14e609b9651d6723a2467f743f637bfa5a867c4c2e96b91910b8a"
+            },
+            {
+              "path": "docs/RELEASE-WORKFLOW.md",
+              "line": 110,
+              "line_hash": "c54c74b3fb1975c592c34f145acf566c07d7a75dc79a3fdc2082be64e938f6a6"
+            },
+            {
+              "path": "docs/RELEASE-WORKFLOW.md",
+              "line": 111,
+              "line_hash": "bb577976c8d1f6d4ee70ff6b20dfe6cad826462eb7764f3f1047f3e4ea90f0a3"
+            },
+            {
+              "path": "AGENTS.md",
+              "line": 90,
+              "line_hash": "4cfb8d42d3b6e4cb99d044d4616a10f689f56f431a83fae9c4a020e355c84873"
+            }
+          ]
+        }
+      },
+      "accepted_evidence_paths": [
+        "CHANGELOG.md",
+        "docs/RELEASE-WORKFLOW.md",
+        "AGENTS.md"
+      ]
+    }
+  ]
+}

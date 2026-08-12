@@ -4,10 +4,11 @@ This is the full, technical list of every command. If you're just starting, you 
 need a handful (`create-vivary init`, `doctor`, `tropo check`); the [getting started
 guide](/getting-started/) walks through those. Come back here for the details.
 
-Every CLI across the four atmospheric layers uses Python 3.11+ and no third-party
-runtime dependency; the optional governed paths compose the first-party `vivary-core`
+The four atmospheric layer CLIs use Python 3.11+ and no third-party runtime
+dependency; the optional governed paths compose the first-party `vivary-core`
 contract seam. Command names are `tropo` / `strato` / `ozone` / `exo`; the scaffolder
-remains `create-vivary`, regardless of installation method.
+remains `create-vivary`. The separate, optional `vivary-mcp` package pins its reviewed
+MCP SDK dependency.
 
 - **Install (PyPI):** `pip install vivary`
 - **Run without installing (uv):** `uvx --from vivary-tropo tropo check`, `uvx --from vivary-ozone ozone review`, …
@@ -18,9 +19,9 @@ Features called out as **unreleased** are present on the `dev` branch and genera
 site docs, but are not available from the current PyPI/npm packages until the next
 release-train PR bumps and publishes them.
 
-Exit codes are uniform: **`0`** success · **`1`** findings/errors · **`2`** usage/config
-error. Gate CI on the exit code; don't parse text. Every command takes `--json` for
-machine-readable output.
+For the four layer CLIs and the scaffolder, exit codes are uniform: **`0`** success ·
+**`1`** findings/errors · **`2`** usage/config error. Gate CI on the exit code; don't
+parse text. Those commands take `--json` for machine-readable output.
 
 ### Local run receipts are not telemetry
 
@@ -50,12 +51,34 @@ vivary logs email .vivary/receipts.jsonl --to support@example.com --out .vivary/
 `vivary logs email` writes a local `.eml` draft or prints a `mailto:` URL. It does not
 connect to SMTP, call an API, upload logs, or send mail by itself.
 
-**The CLI is the agent API.** Every command an agent needs to run Vivary is here — no
-MCP server, no special protocol. Commands that interact or install also accept `--yes`
-(auto-confirm all prompts), `--auto` (agent selects from explicit storage/privacy/size
-hints), and `--dry-run` (inspect without side effects). See
-[SPEC-data-layer.md](SPEC-data-layer.md) for the full agent CLI contract and the new
-storage/migration commands.
+**The CLI remains the baseline agent API.** Every baseline operation an agent needs is
+available without MCP or another special protocol. Commands that interact or install
+also accept `--yes` (auto-confirm all prompts), `--auto` (agent selects from explicit
+storage/privacy/size hints), and `--dry-run` (inspect without side effects). The
+optional MCP adapter exposes only four read-only context operations. See
+[SPEC-data-layer.md](SPEC-data-layer.md) for the agent CLI contract and
+[MCP.md](MCP.md) for that adapter's separate boundary.
+
+### Governed machine-readable envelopes (development source)
+
+This is the schema router; the command sections below own fields, limits, and exit
+behavior. A named request schema is a closed object: missing or unknown fields refuse
+rather than being ignored. Core artifacts carried through the envelopes use the
+[public vocabulary](SPEC-data-layer.md#public-governed-context-vocabulary).
+
+| Surface | Request | Success | Refusal / incomplete result | Contract evidence |
+|---|---|---|---|---|
+| `tropo find --governed --json` | CLI arguments plus an operator-selected root | `vivary.task-capsule/v0` | Structured CLI error; no partial capsule is presented as complete | [Tropo regressions](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py) |
+| `strato decide --governed --json` | `vivary.strato-decision-request/v0` | `vivary.strato-decision/v0` | `vivary.strato-decision-refusal/v0` | [Strato regressions](https://github.com/vivary-dev/vivary/blob/dev/packages/strato/tests/test_strato.py) |
+| `ozone verify --governed --json` | `vivary.ozone-verification-request/v0` | `vivary.ozone-verification/v0`, carrying Core receipt/gate verdicts and an optional repair proposal | `vivary.ozone-verification-refusal/v0` | [Ozone regressions](https://github.com/vivary-dev/vivary/blob/dev/packages/ozone/tests/test_ozone.py) |
+| `exo control --governed --json` | `vivary.exo-control-request/v0` | `vivary.exo-control-result/v0` | `vivary.exo-control-refusal/v0`; a Core refusal remains a typed `result` | [Exo regressions](https://github.com/vivary-dev/vivary/blob/dev/packages/exo/tests/test_exo.py) |
+| `vivary-mcp` tools | Closed per-tool Draft 2020-12 arguments | `vivary.mcp-tool-result/v0` with `status: "known"` | The same envelope with `unknown` or `refused`; oversized results refuse whole | [MCP regressions](https://github.com/vivary-dev/vivary/tree/dev/packages/mcp/tests) |
+
+An Execution Receipt is `vivary.execution-receipt/v0`; Ozone's nested Core outputs are
+`vivary.receipt-verdict/v0`, `vivary.gate-verdict/v0`, and
+`vivary.context-repair-proposal/v0`. Provider-neutral learning returns
+`vivary.recall-transition/v0` through the Core API, not a baseline CLI. Exact MCP
+argument and work bounds live only in [MCP.md](MCP.md#bounded-work).
 
 ---
 
@@ -81,6 +104,27 @@ summary.
 | `logs --json` | Return `{summary, records}` for agents and bug-report tooling. |
 | `logs email ... --out FILE` | Write a local `.eml` draft; directory targets, symlink targets, symlink/junction ancestors, and Windows device names are refused. |
 | `logs email ...` | Without `--out`, print a `mailto:` URL for the user's mail client. |
+
+## vivary-mcp — optional local read-only bridge
+
+```text
+vivary-mcp --workspace ALIAS PATH [--workspace ALIAS PATH ...]
+           [--observability off|errors|json]
+```
+
+This unreleased, optional package serves exactly `vivary_find`, `vivary_query`,
+`vivary_check`, and `vivary_capsule` over local standard input/output. Workspace
+roots are operator-bound at startup; tool callers cannot provide roots, executables,
+commands, transports, or endpoints. The adapter has no write, repair, network,
+provider, publication, deployment, or gate-approval path.
+
+Standard output is reserved for MCP JSON-RPC. `--observability` writes bounded,
+sanitized diagnostics to standard error: none in `off`, refusal/cancellation/timeout
+events in `errors`, or all bounded lifecycle events in `json`.
+
+The package pins protocol `2026-07-28` and official SDK `mcp==2.0.0`. External
+conformance remains unproven. [MCP.md](MCP.md) owns the tool schemas, privacy and
+process boundaries, passive Doctor report, and verification procedure.
 
 ## tropo — the typed knowledge graph
 
@@ -231,8 +275,11 @@ tropo query "release truth" --mode semantic --json
 
 ### Strictness (the `check` gate)
 
-`check` is **strict by default** — untyped docs, unknown fields, broken refs, and
-redundant frontmatter all fail it. Relax when you need to:
+`check` is **strict by default** — unknown fields on typed documents, broken refs, and
+redundant frontmatter fail it. Untyped documents are allowed only when
+`[base] allow_untyped = true`; that setting omits `W201`, validates declared base
+fields, and ignores undeclared fields because no type owns them. Relax emitted
+warnings when you need to:
 
 ```bash
 tropo check                 # strict: any warning fails (exit 1)
@@ -244,6 +291,10 @@ Or persistently per vault, in `tropo.toml`: `[base] strict = false`. `--strict` 
 it back on (overrides a lenient config). `strict` is *tighten-only* across nested
 configs — a sub-folder may turn it on, never off.
 
+`allow_untyped = false` emits `W201` as an error. Typed documents retain strict
+`W202` handling regardless of that setting.
+[Behavioral evidence](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py); verified: 2026-08-09.
+
 ### Finding codes
 
 | Code | Level | Meaning |
@@ -253,12 +304,12 @@ configs — a sub-folder may turn it on, never off.
 | `E101` | error | required field missing for the type |
 | `E102` | error | required field is empty |
 | `E103` | error | field value violates its type spec |
-| `W201` | warn | untyped document (no ancestor folder is a registered type) |
-| `W202` | warn | unknown field for the type (typo? add it to the schema) |
+| `W201` | error | untyped document when `base.allow_untyped = false`; omitted when permission is true |
+| `W202` | warn | unknown field on a typed document (typo? add it to the schema) |
 | `W210` | warn | field equals its derived value (noise — run `tropo fix`) |
 | `W220` | warn | ref points at no document id (broken edge) |
 
-(Under the default strict mode, every `W2xx` fails the check.)
+(Under the default strict mode, every emitted warning fails the check.)
 
 ### Filesystem map (`tropo map`)
 
@@ -333,7 +384,7 @@ Directories at depth 1-2 with >= 5 files (recursive) and no `index.md`/`README.m
 [base]
 derive       = ["id", "title", "created", "updated"]   # never required, never noise
 optional     = { tags = "string-list", status = "string" }   # any doc MAY carry these
-allow_untyped = true     # W201 instead of error for files outside any type root
+allow_untyped = true     # permit docs outside type roots; validate only declared base fields
 strict        = true     # warnings fail check (the opinionated default)
 timezone      = "local"
 
@@ -846,8 +897,8 @@ remain local under the [receipt policy](#local-run-receipts-are-not-telemetry).
 ## create-vivary — the scaffolder
 
 ```
-create-vivary init <target> [--preset coding|second-brain|knowledge-work|writing] [--force] [--obsidian]
-                           [--active-context cocoindex-code]
+create-vivary init <target> [--preset coding|second-brain|knowledge-work|writing] [--force]
+                           [--adapter agents|claude] [--active-context cocoindex-code]
                            [--storage auto|file|embedded|cloud] [--provider lancedb|sqlite-vec|qdrant|astra]
                            [--memory none|local|cognee]
                            [--auto] [--yes] [--dry-run] [--json]
@@ -857,40 +908,46 @@ create-vivary wizard <target> [--storage auto|file|embedded|cloud] [--provider l
 create-vivary capabilities [--preset coding|second-brain|knowledge-work|writing] [--json]
                             [--receipt PATH]
 create-vivary doctor <target> [--json] [--trend] [--repair] [--yes] [--receipt PATH]
-create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writing] [--yes] [--json]
-                           [--receipt PATH]
+create-vivary adopt <target> [--preset coding|second-brain|knowledge-work|writing]
+                           [--adapter agents|claude] [--yes --plan PLAN_HASH]
+                           [--recover PLAN_HASH] [--json] [--receipt PATH]
+create-vivary record <target> <modules|changes|decisions|verification|gates>/<slug>.md
+                            --from SOURCE --capsule CAPSULE_JSON
+                            [--yes --plan PLAN_HASH] [--json] [--receipt PATH]
 ```
 
 | Command | What it does |
 |---|---|
-| `init <target>` | Lay down a complete workspace: the agent contract, the strato shell (SOUL/USER/STATE/MEMORY), runtime skills, a `tropo.toml`, a starter typed graph, and optional storage or semantic-memory config based on flags/wizard answers. |
+| `init <target>` | Create the five-file `thin-v0.3` contract: three Vivary payload files plus bounded `AGENTS.md` and `.gitignore` host integrations. No templates, skills, placeholders, or starter records. |
 | `wizard <target>` | Re-run the setup wizard on an existing workspace to reconfigure storage and optional semantic-memory policy. |
 | `capabilities` | Report optional capabilities plus Core and all four governed role surfaces for the selected preset. |
-| `doctor <target>` | Validate the strict common workspace shell, the inferred published module contract, active privacy ignore rules, module directory indexes, tropo graph health, declared capability config, backend reachability, semantic-memory status, and the same governed capability envelope. |
-| `adopt <target>` | Bring Vivary to an existing repo or vault. Only adds files that don't already exist; never moves, renames, edits, or overwrites anything. Dry-run by default. |
+| `doctor <target>` | Validate thin metadata and context, startup reachability, privacy, optional adapters, Tropo health, declared capabilities, and pending transaction recovery; read older full workspaces without migrating them. |
+| `adopt <target>` | Produce a deterministic brownfield plan, then apply only its exact approved hash. Creates at most three payload files and may separately create or patch two bounded host-integration blocks. Dry-run by default. |
+| `record <target> <record>` | Validate and plan one typed record earned by real work, bound to one Task Capsule. Apply only the exact human-approved plan hash; never creates a pack or unrelated records. Dry-run by default. |
 
 | Flag | Effect |
 |---|---|
-| `--preset coding\|second-brain\|knowledge-work\|writing` | Which starter graph to seed (default `coding`). |
-| `--force` | Overwrite existing scaffold files and remove stale generated files, but still refuses symlinked destination parents or paths that resolve outside the target workspace. |
-| `--obsidian` | Also drop an opt-in Obsidian vault config (graph coloured by type). |
-| `--active-context cocoindex-code` | For `coding` workspaces, add CocoIndex-code sidecar profile (skill, docs, graph nodes, gitignore). Does not auto-install or enable MCP. |
-| `--storage auto\|file\|embedded\|cloud` | Storage backend to configure. `auto` = LanceDB locally. Default: `file` (no new deps). Cloud writes config only; the tropo cloud backend is future 0.3.x work. |
+| `--preset coding\|second-brain\|knowledge-work\|writing` | Select thin workspace policy (default `coding`); does not seed starter content. |
+| `--force` | Compatibility flag. Init still refuses every nonempty target, including an existing thin workspace. Use `adopt` for governed changes. |
+| `--adapter agents\|claude` | Add one bounded runtime projection; repeat for both. Each adapter owns one file of at most 1,200 bytes. |
+| `--active-context cocoindex-code` | For `coding` workspaces, declare the capability and ignore its local index path within the same five-file seed. Does not copy guidance, install, index, enable MCP, or transmit source. |
+| `--storage auto\|file\|embedded\|cloud` | Storage backend to configure. `auto` defaults to `file` with no new dependencies. Explicit cloud locality can select cloud configuration. Embedded storage always requires `--storage embedded` or the matching wizard choice. |
 | `--provider lancedb\|sqlite-vec\|qdrant\|astra` | Which implementation to use for the selected tier. `lancedb` is the shipped embedded provider. |
 | `--memory none\|local\|cognee` | Optional semantic-memory policy. Default: `none`. `local` writes local-only policy. `cognee` writes gated Cognee policy and graph docs, but does not install Cognee or index content. |
-| `--auto` | **Agent mode.** Skip all interactive prompts; pick the best option from explicit `--storage`, `--privacy`, and `--size` hints. |
-| `--yes` | Auto-confirm installs and confirmations. Safe to combine with `--auto` for fully non-interactive agent use. |
-| `--dry-run` | Print what would be scaffolded and installed; do not write, install, or clean stale files. |
-| `--json` | Machine-readable output. Reports `ok`, `root`, `preset`, `storage`, `provider`, `memory`, capability metadata, `installed`, `files`, config paths, and `dry_run`. |
-| `--size small\|medium\|large` | Hint for `--auto` storage decisions. Agents can pass this after inspecting the repo. |
-| `--privacy local\|cloud` | Hint for `--auto` storage decisions. |
-| `--repair` | Doctor-only. Include a conservative guided repair plan. Dry-run by default; writes nothing without `--yes`. |
-| `--yes` | With `doctor --repair`, apply deterministic safe repairs, rerun doctor, and keep a nonzero exit if the workspace is still invalid. |
+| `--auto` | **Agent mode.** Skip all interactive prompts. Use explicit storage and privacy choices. Otherwise, keep file storage. |
+| `--yes` | Confirm an install or write already selected by another explicit flag. It does not select a provider. |
+| `--dry-run` | Print what would be written or installed; do not mutate the workspace. |
+| `--json` | Machine-readable output. Init reports the thin contract and files; adoption reports the deterministic plan/apply envelope described below. |
+| `--size small\|medium\|large` | Workspace classification hint. Size never selects or installs a provider. |
+| `--privacy local\|cloud` | Local keeps file storage unless another tier is explicit. Cloud can select cloud configuration. |
+| `--repair` | Doctor-only. Include conservative repair diagnostics. Recognized legacy-full workspaces are always report-only. |
+| `--yes` | With `doctor --repair`, apply deterministic safe repairs only to supported non-legacy contracts. It never writes a legacy-full workspace. |
 
 ### Capability status (development source)
 
-The 0.3.2 development source reports a fixed Core-and-role inventory alongside the
-existing storage, semantic-memory, and preset sidecar rows:
+The 0.4.0 development source reports a fixed Core-and-role inventory and passive MCP
+interoperability status alongside the existing storage, semantic-memory, and preset
+sidecar rows:
 
 | Capability | Command | Authority |
 |---|---|---|
@@ -899,6 +956,7 @@ existing storage, semantic-memory, and preset sidecar rows:
 | `governed-policy:strato` | `strato decide --governed` | `decision-only` |
 | `governed-verification:ozone` | `ozone verify --governed` | `verification-and-proposal-only` |
 | `governed-control:exo` | `exo control --governed` | `projection-only` |
+| `interop:mcp` | `vivary-mcp` local stdio entry point | `read-only-context` |
 
 Each capability row has `installed`, `install_status`, `reason_codes`, and
 `missing_install`. Status is `installed`, `not-installed`, `incompatible`, or
@@ -911,6 +969,12 @@ The same status applies to an invalid exact console-script target, generated lau
 or competing import artifact.
 A bounded read or parse failure reports `capability_probe_failed`. Only `not-installed`
 rows include ordered install hints.
+
+The MCP row is optional and `not-installed` by default. A compatible row requires the
+recorded `vivary-mcp` entry point, its exact `mcp==2.0.0` dependency declaration, the
+matching SDK version, local standard-input/output transport, and the exact four tool
+names. Doctor reports external conformance as `unproven`; it does not import or start
+the adapter.
 
 The status reader considers the interpreter's canonical `purelib` and `platlib` roots,
 at most eight system-site candidates, and at most eight user-site candidates. It then
@@ -975,32 +1039,22 @@ requiring optional Cognee support to be installed.
 
 ### Doctor compatibility and declared configuration
 
-Doctor separates a **strict common baseline** from an **inferred workspace-contract
-shape**. The baseline is the exact 15 files shared by the published v0.1 workspace:
-`README.md`, `AGENTS.md`, `SOUL.md`, `STRATO.md`, `STATE.md`, `USER.md`, `MEMORY.md`,
-`bug-risk-playbook.md`, `tropo.toml`, `.gitignore`, `templates/AGENTS.md`, and the four
-runtime skill files under `.claude/skills/{strato,loops}/SKILL.md` and
-`.agents/skills/{strato,loops}/SKILL.md`. Missing any of these is an error for every
-supported workspace, including a legacy one.
+Doctor classifies a workspace before selecting its validation baseline. A valid
+`.vivary/workspace.toml` selects the three-file `thin-v0.3` payload baseline and then
+validates metadata version, relative paths, context, privacy/runtime exclusions,
+declared adapters and capabilities, startup reachability, and transaction recovery.
 
-`compatibility.workspace_contract` identifies `legacy-v0.1` when the workspace has the
-flat `modules/agent-workspace.md` layout and no modern index, or `indexed-v0.2+` when
-either modern index exists. An indexed workspace must have both `modules/index.md` and
-`modules/agent-workspace/index.md`; a partial indexed layout is an error. A legacy
-workspace is healthy without those two files: they appear only as recommendations,
-with the non-writing adopt preview `create-vivary adopt <workspace> --preset <preset>`
-(`adopt` is dry-run unless `--yes` is supplied). If `README.md` declares a supported
-`Preset:`, Doctor puts that preset in its recommendation; otherwise it uses the explicit
-`<preset>` placeholder. A workspace carrying neither published module signature is not
-silently upgraded into an error solely for that absence.
-It is only a preview: `adopt` never moves, converts, or removes a flat module, so any
-legacy-to-indexed conversion remains a separate human decision.
+Older full workspaces remain read-compatible. They report
+`workspace_contract = "legacy-full"` and preserve their detected
+`legacy_layout = "legacy-v0.1"` or `"indexed-v0.2+"`. Doctor does not migrate,
+regenerate, or silently normalize those files. Their existing strict baseline and
+declared storage/memory validation remain intact.
 
-The `compatibility` object is versioned with `"schema_version": 1`. It contains
-`workspace_contract`, `baseline_missing`, `contract_missing`,
+The compatibility object uses `schema_version = 2` and contains
+`workspace_contract`, `legacy_layout`, `baseline_missing`, `contract_missing`,
 `declared_capability_problems`, `recommended_missing`, and `recommended_upgrade`.
-`baseline_missing` is always the common v0.1 contract; `contract_missing` applies only
-after Doctor has inferred the indexed contract; recommendations never make `ok` false.
+Recommendations never make `ok` false. A workspace with neither a valid thin contract
+nor a recognized legacy signature is not silently claimed as healthy Vivary state.
 
 When a storage or semantic-memory config is declared, Doctor validates its recognized
 published or current profile. Embedded storage needs nonempty `path` and `provider`;
@@ -1027,104 +1081,126 @@ failing reports. It exits `0` exactly when `errors` is empty and `1` otherwise;
 warnings do not change the exit code. `doctor --trend` is the explicit state-write
 exception, and `doctor --repair --yes` is the explicit repair-write exception.
 
-`doctor --repair` is guided and conservative for both published module contracts.
-Plain `doctor` stays read-only.
-`doctor --repair --json` reports `repair.actions` without writing. Each action has
-`kind`, `status`, `path`, `summary`, and `applied`, with extra details when useful.
-`doctor --repair --yes --json` applies only deterministic safe repairs, then reruns
-doctor and returns that final report. Safe repairs are limited to regenerating missing
-ignored private/runtime placeholders (`USER.md`, `MEMORY.md`, `memory/.gitkeep`,
-`heartbeat-reports/.gitkeep`), appending missing privacy ignore lines, and removing
-simple single-line W210 redundant derived metadata. Non-workspace targets, symlinked,
-junctioned, hardlinked, non-file, and non-UTF-8 repair targets are refused or kept as
-manual guidance. Lower-level `.gitignore` negations that unignore private paths are
-reported as manual cleanup instead of being papered over by another root ignore block.
-Complex YAML W210 cases, broken refs (W220), exo active-work conflicts, and missing
-coordination-pack setup are manual guidance only; they are never auto-mutated.
+`doctor --repair --json` reports `repair.actions`. Each action has `kind`, `status`,
+`path`, `summary`, and `applied`, with extra details when useful. Recognized
+legacy-full workspaces always return `repair.mode: "report-only"`; `--yes` does not
+write them, and `--trend` does not create state during that report. Use a reviewed
+thin adoption plan for an approved legacy change.
 
-`doctor --trend` is opt-in and is the only thing that writes `.vivary/doctor-state.json`
-(plain `doctor` stays read-only). It compares this run's graph health, module-index
-count, and file count under `modules/` against the prior recorded run and reports
+For supported non-legacy contracts, `doctor --repair --yes --json` applies only
+deterministic safe actions, reruns Doctor, and remains nonzero while errors exist.
+Non-workspace targets, symlinked, junctioned, hardlinked, non-file, and non-UTF-8
+targets are refused or kept as manual guidance. Broken references, complex content,
+active-work conflicts, and missing coordination setup are never auto-mutated.
+
+Legacy-full diagnostics retain the published private-placeholder exceptions. These
+are compatibility rules, not thin-workspace output or permission to recreate files:
+
+```gitignore
+memory/*
+!memory/.gitkeep
+heartbeat-reports/*
+!heartbeat-reports/.gitkeep
+```
+
+`doctor --trend` is opt-in and is the only thing that writes Doctor trend state
+(`.vivary/runtime/doctor-state.json` for thin workspaces; the prior `.vivary` path for
+legacy workspaces). Plain `doctor` stays read-only. It compares this run's graph health,
+module-index count, and file count under `modules/` against the prior run and reports
 signed deltas — a short "trend vs `<date>`" section in human mode, or a `trend` object
 (`prior`/`current`/`deltas`) in `--json` mode. The first `--trend` run on a workspace
 has no prior state, so it reports "first recorded run" and just writes the baseline. A
 corrupt or unreadable state file is treated the same way — a warning, not a failure —
 and gets overwritten with a fresh one.
 
-When `--storage embedded` (or `auto`) is selected and `vivary-tropo[embedded]` is not yet installed, `init` installs it via `pip` before continuing unless `--dry-run` is set. In `--json` mode, `"installed": ["lancedb"]` reports what was added. Without `--yes`, a single confirmation prompt fires before any pip install. For scripted storage selection, pass `--no-wizard --storage embedded --yes` or use `--auto`; in human mode, the wizard asks and its answers drive storage. `--auto` never selects Cognee by itself.
+When `--storage embedded` is selected and `vivary-tropo[embedded]` is not installed, `init` installs it through `pip`. `--dry-run` prevents the install. In JSON mode, `"installed": ["lancedb"]` reports the added provider. Without `--yes`, one confirmation prompt appears before the install. For scripted embedded storage, pass `--no-wizard --storage embedded --yes` or `--auto --storage embedded --yes`. Plain `--auto` keeps file storage and never selects Cognee.
 
-### `adopt` — point Vivary at your mess
+### `adopt` — governed brownfield setup
 
-`adopt` brings the Vivary scaffold to a repo or vault that already exists, without
-disturbing anything already there.
+`adopt` inspects an existing repo or vault and returns a deterministic plan without
+writing. Its default payload ceiling is three files: `.vivary/context.md`,
+`.vivary/workspace.toml`, and `STATE.md` when absent. It may separately create or patch
+the bounded generated blocks in `AGENTS.md` and `.gitignore`.
 
 | Flag | Effect |
 |---|---|
-| `--preset coding\|second-brain\|knowledge-work\|writing` | Starter graph to seed. Default: auto-detected — `coding` for a code-file majority, `second-brain` for a markdown-file majority. `--json`/text output states the chosen preset and the reason. |
-| `--yes` | Write the planned files. Without it, `adopt` only analyzes and prints a plan (**dry-run is the default**, unlike `init`). |
-| `--json` | Machine-readable output: `{mode, root, preset, preset_reason, would_create, kept, followups, candidate_modules, excluded_pre_existing, skipped_module_collisions}`, plus `doctor` when `--yes` was passed. `mode` is `"dry-run"` or `"applied"`. |
+| `--preset coding\|second-brain\|knowledge-work\|writing` | Select thin workspace policy. Default is inferred from the file mix; no starter content is seeded. |
+| `--adapter agents\|claude` | Add one optional bounded projection; repeat for both. |
+| `--yes` | Apply a plan. Requires `--plan` from the reviewed dry-run. |
+| `--plan PLAN_HASH` | Bind apply to the exact deterministic plan. Inputs and kept files are revalidated before writes. |
+| `--recover PLAN_HASH` | Produce a read-only rollback plan for the interrupted transaction bound to that adoption hash. Apply only with `--yes --plan RECOVERY_PLAN_HASH`. |
+| `--json` | Report `mode`, `root`, `preset`, `contract`, `creates`, `patches`, `optional_projections`, `kept`, `conflicts`, `privacy`, and `plan_hash`; applied results also include Doctor proof. |
 
-`adopt` never moves, renames, edits, or overwrites any existing file. If a file it
-would create already exists, it is skipped and reported "exists, kept" — this
-includes `README.md`, `AGENTS.md`, `CLAUDE.md`, and any other file already at that
-path. If `.gitignore` already exists, `adopt` leaves it untouched and instead prints
-a manual follow-up listing the privacy lines it's missing, drawn from the same set
-`doctor` checks:
+The two host edits are managed blocks, not arbitrary rewrites. Existing user content
+outside those blocks is retained byte-for-byte. Exact older generated adapter content
+may be proposed for bounded replacement; newer, partial, or user-edited content is a
+conflict. Nested `.gitignore` rules that expose private/runtime paths also fail closed.
 
-```gitignore
-USER.md
-MEMORY.md
-memory/*
-!memory/.gitkeep
-heartbeat-reports/*
-!heartbeat-reports/.gitkeep
-.strato/private/
-*.vivary-tmp
-```
+Before writing, adoption rechecks the entire plan and privacy boundary. Apply then uses
+a plan-bound transaction marker, journal, and exact-byte backups. Ordinary exceptions
+roll back immediately. A process interruption at any replacement boundary is recovered
+only through the explicit matching `--recover` command.
 
-Only the missing lines are printed, so paste what you get rather than the whole
-block. One case is **not** fixable this way: if a lower-level `.gitignore` unignores
-a private path, Git gives the deeper rule precedence and no root-level line can
-override it. `adopt` reports those separately, naming the paths still exposed and
-telling you to remove the nested negations — adding more root-level rules would not
-help, and neither would answering a negation with another negation.
-
-The analyze phase does a light, read-only inventory of the tree (skipping `.git`,
-`node_modules`, `__pycache__`, `.venv`, `venv`, `dist`, `build`, `.astro`, `.next`,
-`target`, and dotdirs) and looks for **candidate modules**: depth 1-2 directories
-with 5 or more Markdown files and no `index.md`/`README.md` of their own. Each
-candidate gets a thin router at `modules/<name>/index.md` that links to the existing
-directory — the directory itself is never touched. If a candidate's name collides
-with a module the chosen preset already owns (for example a brownfield `codebase/`
-under the `coding` preset), no router is created for it and the collision is
-reported under `skipped_module_collisions`; the preset's own starter module doc is
-never overwritten by a router.
-
-Adopt uses the same symlink- and out-of-root-hardened write path as `init`, and an
-adopted workspace passes `create-vivary doctor` and `tropo check` (adopt writes a
-`tropo.toml` whose `exclude` list is widened to cover pre-existing brownfield
-content, so it isn't flagged as untyped noise).
-
-Pre-existing content inside Vivary's graph folders (`modules/`, `changes/`,
-`decisions/`, `verification/`, `gates/`) is handled the same way: each
-pre-existing Markdown file there is excluded from the typed graph by exact path
-(reported under `excluded_pre_existing` and as a manual follow-up), while
-everything adopt itself writes stays graph-visible. A pre-existing `modules/`
-sub-directory without an `index.md` additionally gets a thin router index (still
-only adding a file), because doctor requires every module directory to carry one.
-To bring an excluded file into the graph later, add the frontmatter its type
-needs and remove its exclude entry from `tropo.toml`.
+Adoption does not scan for candidate modules, copy routers, create graph records,
+generate templates or skills, or exclude arbitrary existing content. Pre-existing
+Vivary-looking files are either valid kept inputs or explicit conflicts.
 
 ```bash
-# See what adopt would do, without writing anything:
+# Preview; writes nothing.
 create-vivary adopt . --json
 
-# Apply it:
-create-vivary adopt . --yes
+# Apply the exact reviewed plan.
+create-vivary adopt . --yes --plan sha256:<plan-hash> --json
 
-# Force a preset instead of the auto-detected one:
-create-vivary adopt ~/notes --preset second-brain --yes
+# Plan recovery only after an interrupted transaction reports this adoption hash.
+create-vivary adopt . --recover sha256:<plan-hash> --json
+
+# Apply only the exact separately approved recovery plan.
+create-vivary adopt . --recover sha256:<plan-hash> \
+  --yes --plan sha256:<recovery-plan-hash> --json
 ```
+
+### record
+
+`record` is the bounded write seam for a healthy `thin-v0.3` workspace. It accepts one
+complete UTF-8 Markdown source, validates it against the workspace's actual Tropo type
+policy, and proposes one create or update under
+`.vivary/records/{modules,changes,decisions,verification,gates}/`. The source is capped
+at 256 KiB. The record path is exactly one folder plus one safe `.md` filename; nested
+paths, unknown folders, links, and hard-linked destinations are refused.
+
+Planning is read-only. The command accepts either the full JSON output of
+`tropo find --governed --json` or the complete public capsule object returned as the
+MCP `vivary_capsule` result. It verifies the capsule's canonical integrity, exact
+workspace scope or fingerprint, and current workspace state. The plan binds the
+action, destination, before and after hashes, capsule id/fingerprint/workspace
+fingerprint, and an exact `plan_hash`. Apply requires `--yes` and that reviewed hash,
+replans before writing, rejects changed source or destination bytes, writes atomically,
+and runs Doctor. A failed post-write Doctor restores the exact previous record or
+removes the newly created record tree.
+
+```bash
+# Save the complete governed capsule JSON, then prepare one typed Markdown file.
+tropo find "record the verified slice" --governed --json > task-capsule.json
+create-vivary record . changes/verified-slice.md \
+  --from ./verified-slice.md \
+  --capsule ./task-capsule.json \
+  --json
+
+# Inspect the one-record plan, then apply only the exact approved hash.
+create-vivary record . changes/verified-slice.md \
+  --from ./verified-slice.md \
+  --capsule ./task-capsule.json \
+  --yes --plan sha256:<plan-hash> \
+  --receipt .vivary/runtime/receipts.jsonl --json
+```
+
+`--receipt` is optional and uses the existing privacy-preserving local run envelope;
+it does not record target/source paths or capsule values. The record file itself is
+the durable typed artifact. This command deliberately has no batch, starter-pack, or
+automatic materialization mode. The optional MCP adapter still exposes exactly four
+read-only tools; a capsule returned over MCP supplies evidence binding, not write
+authority. The human-approved `record` transaction is a separate CLI action.
 
 ## vivary-cognee
 
@@ -1159,14 +1235,14 @@ or missing manifests so provider results cannot outrun Tropo graph truth. Datase
 names include a workspace path hash even when a label is configured. Tropo refuses
 workspace-local `vivary_cognee.py` adapter imports for semantic query mode; installed
 adapters must resolve outside the workspace and current working tree, and must expose
-the hardened `vivary-memory-cognee` `0.1.1+` adapter contract.
+the hardened `vivary-memory-cognee` `0.1.2+` adapter contract.
 
 ```bash
 # Human flow — interactive wizard:
 create-vivary init my-workspace
 
-# Agent flow — fully non-interactive:
-create-vivary init . --preset coding --auto --size large --privacy local --yes --json
+# Agent flow — fully non-interactive, file-backed, and dependency-free:
+create-vivary init . --preset coding --auto --size large --privacy local --json
 
 # Inspect available optional pieces for a preset:
 create-vivary capabilities --preset knowledge-work --json
@@ -1183,16 +1259,9 @@ create-vivary doctor my-workspace
 # expected for a plain coding workspace: doctor: ok (9 node(s), 28 edge(s), 0 broken)
 ```
 
-The four presets share the same agent-OS shell and differ only by starter graph. Each
-starter module is a directory index (`modules/<id>/index.md`) so AGENTS can route to a
-small surface before deeper context:
-
-| Preset | Module | First change | Verification |
-|---|---|---|---|
-| `coding` | `codebase` | `local-ci-baseline` | `local-checks` |
-| `second-brain` | `knowledge-base` | `capture-routine` | `retrieval-smoke` |
-| `knowledge-work` | `workbench` + `sources` | `workbench-first-artifact` | `workbench-proof` |
-| `writing` | `manuscript-system` | `draft-review-loop` | `editorial-review` |
+The four presets share the same five-file contract and differ only in compact policy
+metadata. They do not create preset-owned modules, tasks, decisions, or verification
+records. Real records are added lazily when work produces evidence.
 
 ---
 

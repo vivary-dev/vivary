@@ -1,231 +1,214 @@
 # Getting started with Vivary
 
-This page takes you from nothing to a working **agent-native workspace**: a project
-folder set up so an AI agent can navigate it, check its own work, and remember things
-between sessions. You don't need to be an expert. If a term is unfamiliar, the
-[concepts page](/concepts/) defines everything in plain language.
+Vivary is a lightweight, local-first governed-context layer for agent work. It gives a
+project one bounded context capsule, one visible state surface, provenance and
+verification hooks, and deliberate human gates. It does not require a particular
+editor, agent runtime, database, memory provider, or MCP client.
 
-What you'll end up with: a folder full of plain Markdown files (memory, state, skills,
-and gates) that any AI agent can operate.
+> **Release truth:** the five-file workflow on this page describes the
+> unpublished 0.4.0 development source. Registry `@latest` is still 0.3.1 and
+> creates the historical full layout. During release review, run the scaffolder
+> from a Vivary checkout or an isolated candidate artifact; do not substitute an
+> unpinned registry command. The [README release table](../README.md#release-status)
+> is the publication authority.
 
-## Set up with an agent (recommended)
+## Set up with an agent
 
-The fastest path: paste this to Claude Code, Codex, Cursor, or any coding agent. It
-decides greenfield vs brownfield with you and never writes without your approval.
+Paste this into Claude Code, Codex, Cursor, or another coding agent:
 
 ```text
-Set up Vivary (https://vivary.vercel.app) in this project.
+Set up Vivary in this project.
 
-1. Read https://vivary.vercel.app/getting-started/ and https://vivary.vercel.app/commands/ before running anything.
-2. You need Python 3.11+ and uv (or pipx). Tell me if something is missing before installing it.
-3. If this folder already has content, this is an adoption: run `uvx create-vivary adopt .`, show me the dry-run plan, and apply with `--yes` only after I approve. Adopt only adds files — it never touches existing ones.
-   If this folder is new or empty, it is a fresh workspace: ask me which preset fits (coding / second brain / knowledge work / writing), then run `uvx create-vivary init . --preset <choice>`.
-4. After an adoption, handle any `.gitignore` privacy follow-ups first: either add the listed lines yourself, or if your installed `create-vivary` supports guided repair, show me `uvx create-vivary doctor . --repair --json` and ask before applying `--repair --yes` for deterministic safe fixes. Then verify with `uvx create-vivary doctor .` and `uvx --from vivary-tropo tropo check --root .` — both must pass; show me the results.
-5. Read the generated AGENTS.md, then follow it for all future work here.
+1. Confirm Python 3.11+ and the Vivary 0.4.0 candidate command route described below are available. Do not install anything without approval or substitute registry latest while it remains 0.3.1.
+2. If this folder already has content, run `create-vivary adopt . --json`. Show me the exact creates, bounded patches, optional projections, kept files, conflicts, privacy result, and plan_hash. Stop on any conflict. Apply only the exact approved plan with `--yes --plan <plan_hash>`.
+3. If this folder is empty, ask which preset fits (coding, second-brain, knowledge-work, or writing), then run `create-vivary init . --preset <choice>`.
+4. Verify with `create-vivary doctor .` and `tropo check --root .`. Both must pass.
+5. Read AGENTS.md and .vivary/context.md. Read STATE.md only when current state matters.
 ```
-
-Prefer to run the commands yourself? The manual path below is equivalent.
 
 ## 1. Install
 
-You need **Python 3.11 or newer**. Pick whichever line fits how you like to work:
+You need Python 3.11 or newer. To inspect the 0.4.0 candidate from this repository
+without changing an installed tool, call its entry points directly:
 
 ```bash
-# A) install the command-line tools
-pip install vivary
-
-# B) run on demand with uv, nothing installed permanently
-uvx --from vivary-tropo tropo --version
-
-# C) scaffold with one npm command, pinned to the latest npm tag
-#    Requires Python 3.11+ and uv or pipx; no Python package install first.
-npm create @vivary@latest my-workspace # or: npx @vivary/create@latest my-workspace
+python packages/create-vivary/create_vivary.py --help
+python packages/tropo/tropo.py --help
 ```
 
-No special editor is required. Vivary is plain Markdown and YAML, so it works in Claude
-Code, Codex, vim, or nothing at all. (Prefer Obsidian? See [the optional
-setup](/obsidian/).)
+When operating on another folder, replace `create-vivary` and `tropo` in the
+examples below with those absolute source-script paths, or use an isolated release
+candidate environment. The optional MCP package has third-party runtime dependencies;
+verify its `vivary-mcp --help` entry point only inside the isolated candidate
+environment where its wheel is installed. Published 0.3.1 remains available for the previous layout
+with `uvx --from create-vivary==0.3.1 create-vivary ...` or
+`npx @vivary/create@0.3.1 ...`. Do not expect those pinned commands to produce the
+five-file seed.
 
-## 2. Create a workspace
+## 2. Create a new workspace
 
 ```bash
 create-vivary init my-workspace --preset coding
 cd my-workspace
 ```
 
-A **preset** just picks the starter content. Choose the one closest to your work:
+The preset selects configuration for `coding`, `second-brain`, `knowledge-work`, or
+`writing`. A preset changes thin policy only. In particular, `second-brain` does not
+install a pre-populated second brain, starter notes, or framework records.
 
-- **`coding`** — a software project.
-- **`second-brain`** — a personal knowledge base.
-- **`knowledge-work`** — a workbench for research, sources, artifacts, and proof.
-- **`writing`** — a manuscript or copy system.
+Default init creates exactly five files:
 
-They all share the same structure and differ only in the starter notes. The
-`knowledge-work` preset also includes a `sources` router so users can point agents at
-specific files, folders, and evidence surfaces without hiding that routing in a
-private config file.
+```text
+AGENTS.md                 bounded startup route
+STATE.md                  visible Focus / Status / Next surface
+.gitignore                bounded private/runtime ignore block
+.vivary/context.md        first governed context capsule
+.vivary/workspace.toml    thin workspace contract and policy
+```
 
-On a terminal that supports input, `init` runs a short wizard to ask about storage
-(how large your workspace will be, local vs cloud) and optional semantic memory. For
-scripted selection, pass `--no-wizard --storage embedded --memory local --yes` or use
-`--auto`; in human mode, the wizard asks and its answers drive storage and memory
-policy. Add `--obsidian` if you want an optional Obsidian vault config too. For coding
-workspaces, add `--active-context cocoindex-code` if you want the agent to ask when
-CocoIndex-code semantic search would help:
+No templates, skills, placeholders, starter records, or framework prose are copied.
+Records under `.vivary/records/` appear only when real work earns them. Private
+material belongs under `.vivary/private/` and runtime state under `.vivary/runtime/`;
+both are ignored.
+
+Optional runtime projections are explicit and bounded:
 
 ```bash
+create-vivary init my-workspace --preset coding --adapter agents
+create-vivary init my-workspace --preset coding --adapter claude
 create-vivary init my-codebase --preset coding --active-context cocoindex-code
 ```
 
-That option writes guidance and graph nodes only. It does not auto-install
-CocoIndex-code, build an index, enable MCP, or send source text anywhere. After the
-user approves active context, follow [Active context](/active-context/) for the
-verified `ccc init` / `ccc doctor` / `ccc index` path, or paste
-[the LLM active-context guide](/llm-active-context/) into an agent session.
+Each agent adapter adds one file of at most 1,200 bytes. Active context keeps the
+five-file seed and declares `cocoindex-code` in `.vivary/workspace.toml`. It also
+ignores `.cocoindex_code/`; it does not copy guidance, install an indexer, create an
+index, enable MCP, or send source text anywhere.
+Configure Obsidian or another editor separately after initialization.
 
-For second-brain, knowledge-work, and writing workspaces, semantic memory is a separate
-opt-in capability:
-
-```bash
-create-vivary capabilities --preset knowledge-work --json
-create-vivary init my-workbench --preset knowledge-work --memory local
-create-vivary init my-notes --preset second-brain --memory cognee --no-wizard --dry-run --json
-```
-
-`--memory local` writes local-only semantic-memory policy and graph nodes. `--memory
-cognee` writes Cognee policy and verification docs, but it does not install Cognee,
-index files, enable a server, use an API key, or send notes anywhere. Those remain
-explicit gates after setup. If you approve the runtime adapter later, install the
-optional `vivary-memory-cognee` package, review `vivary-cognee index --dry-run --json`,
-then set `memory.cognee.allow_network = true` and the chosen provider credentials before
-running `vivary-cognee index --yes`. Local no-key providers must be made explicit with
-`memory.cognee.allow_without_api_key = true`.
-
-You now have a complete workspace:
-
-```
-AGENTS.md          the contract the agent follows each turn (the loop and the gates)
-SOUL.md            the agent's personality and principles
-STATE.md           the one place that answers "where are we?" (Focus / Status / Next)
-USER.md  MEMORY.md  your private identity + durable memory (ignored by Git)
-memory/  heartbeat-reports/  private memory and heartbeat output (ignored by Git)
-STRATO.md          how the agent operating system works
-tropo.toml         the rules for the typed graph
-modules/index.md   the router that tells agents which module index to open
-modules/<id>/index.md  lightweight module routers; deep context lives behind links
-changes/ decisions/ verification/ gates/   the starter knowledge graph
-.claude/skills/  .agents/skills/   ready-made skills for Claude Code + Codex
-```
-
-With `--active-context cocoindex-code`, the workspace also includes
-`docs/active-context.md` and an `active-context` skill.
-With `--memory local` or `--memory cognee`, it includes `docs/semantic-memory.md`,
-`.vivary/memory.toml`, and semantic-memory graph nodes.
+Storage and semantic memory are separate opt-ins. A non-interactive init without
+explicit storage or memory options stays file-backed and writes no optional provider
+config. Provider installation, indexing, network access, and credentials remain later
+human gates.
 
 ### Adopt an existing repo or vault
 
-Already have a codebase or a notes folder? Point Vivary at it instead of starting
-from an empty directory:
+Brownfield adoption is dry-run first:
 
 ```bash
-create-vivary adopt . --json      # dry-run by default: prints the plan, writes nothing
-create-vivary adopt . --yes       # apply it
+create-vivary adopt . --json
+create-vivary adopt . --yes --plan sha256:<plan-hash> --json
 ```
 
-`adopt` only *adds* files — it never edits, renames, or overwrites anything already
-there (an existing `README.md` or `AGENTS.md` is reported "exists, kept"), and it
-auto-detects a preset from your file mix. Markdown-heavy directories it finds get a
-thin router under `modules/` instead of being touched directly. See
-[COMMANDS.md](COMMANDS.md#adopt--point-vivary-at-your-mess) for the full behavior.
+The plan is deterministic and reports `creates`, managed `patches`,
+`optional_projections`, `kept`, `conflicts`, privacy checks, and `plan_hash`. Apply
+accepts only the exact approved hash and revalidates the inputs before writing.
 
-## 3. Check that it's healthy
+Adoption creates at most three Vivary payload files:
 
-`doctor` confirms the workspace was created correctly, including that private context
-and heartbeat output are actively ignored by Git. The other three commands are your
-everyday checks:
+- `.vivary/context.md`
+- `.vivary/workspace.toml`
+- `STATE.md`, only when it is absent
+
+Separately, it may create or patch only the generated Vivary blocks in `AGENTS.md` and
+`.gitignore`. User-owned content outside those blocks is kept. Nested ignore rules
+that expose private paths, stale or divergent generated adapters, invalid thin
+contracts, and changed plan inputs are conflicts that fail closed.
+
+Apply is transactional. If a process is interrupted, the next run reports the bound
+adoption hash. Plan recovery before any rollback:
 
 ```bash
-create-vivary doctor my-workspace
-# doctor: ok (9 node(s), 28 edge(s), 0 broken)
-
-tropo check          # validates every note and the graph (strict: warnings fail too)
-ozone review         # reviews the relationships across the whole graph
-exo board            # lists work items by status
+create-vivary adopt . --recover sha256:<plan-hash> --json
 ```
 
-If `tropo check` complains, that's the point: it tells you exactly what's missing or
-mistyped so your agent's memory can't quietly go stale.
-
-## 4. See the graph
+Review `recovery_plan_hash` and its bounded actions. Apply only that separately
+approved recovery plan:
 
 ```bash
-tropo graph --json                 # the machine-readable view
-tropo view --out graph.html        # a self-contained visual graph; open it in any browser
-tropo blast human-gates            # everything that depends on the "human-gates" note
+create-vivary adopt . --recover sha256:<plan-hash> \
+  --yes --plan sha256:<recovery-plan-hash> --json
 ```
 
-That last one is **blast radius**: what a change to a note would touch. It's the kind
-of impact a plain text diff can't show you.
-
-## 5. Operate the loop
-
-Open the workspace in your agent (Claude Code reads `.claude/skills/`; Codex reads
-`AGENTS.md` and `.agents/`). The contract in `AGENTS.md` drives every turn:
-
-> **Ask → retrieve → act → verify → learn → gate.**
-> - *retrieve* with `tropo graph` / `tropo blast <id>`: the graph is the first source
->   of truth, notes second. Use `modules/index.md` to pick one module index instead of
->   loading the whole tree.
-> - *verify* with `tropo check` and `ozone review` before a gate.
-> - *gate*: name the blast radius (`ozone impact <id>`) for a risky change, and stop at
->   the human gates (memory writes, publishing, installs, git push/PR, destructive ops).
-
-The first time you open a fresh workspace, ask the agent to **bootstrap**. The strato
-skill interviews you and fills in SOUL / USER / STATE. See [agent skills](/skills/).
-
-When multiple agents share one workspace, opt into coordination fields:
-
-```toml
-packs = ["repo-graph", "coordination"]
-```
-
-Then claim work before editing:
+## 3. Verify
 
 ```bash
-exo claim local-ci-baseline --agent connie
-exo board
-exo conflicts
-tropo check
+create-vivary doctor .
+tropo check --root .
 ```
 
-## 6. Add your own work
+Doctor validates the thin contract, startup reachability, privacy, optional adapters,
+and pending adoption recovery. Plain Doctor is read-only. `doctor --trend` is the
+explicit mode that writes local runtime trend state.
 
-The graph is just typed folders. Add a module, a change, a decision by creating a file:
+Tropo reads `.vivary/workspace.toml` as the base policy and returns small typed context
+packets:
 
 ```bash
-mkdir -p modules
-mkdir -p modules/billing
-cat > modules/billing/index.md <<'EOF'
----
-project: my-workspace
-status: active
-module_area: payments
-related_changes: [add-stripe]
-EOF
-tropo check        # tells you exactly what's missing or mistyped
+tropo find "where is release truth owned" --root . --json
+tropo graph --root . --json
 ```
 
-`tropo check` is your guardrail. It's opinionated on purpose, so it'll tell you when the
-graph is wrong. Run `tropo fix` to clear redundant frontmatter.
+A root or nested `tropo.toml` can tighten thin policy but cannot expand its scope.
+Competing thin workspace roots fail closed.
+
+## 4. Operate the loop
+
+The compact operating loop is:
+
+> Ask → retrieve → act → verify → learn → gate.
+
+Start with `AGENTS.md` and `.vivary/context.md`; load `STATE.md` when the current focus
+or next action matters. Create a receipt or record only when it is evidence from real
+work. Stop at authority, privacy, destructive, publishing, credential, or deliberate
+human-approval gates.
+
+MCP is optional. The Vivary adapter uses local standard input/output and is read-only
+by default; every baseline workflow remains available through the CLI. Install and
+start it separately, binding the workspace at operator-controlled startup:
+
+```bash
+vivary-mcp --workspace project .
+```
+
+Its four tools can find, query, check, and return a public Task Capsule. Starting it or
+calling those tools does not create `.vivary/records/`, enable a provider, or authorize
+a write. A fresh non-Git thin workspace is readable only while its `.gitignore` is the
+exact generated private/runtime block; arbitrary or extended non-Git ignore policy
+fails closed. Once the folder is an exact Git worktree, Git's effective ignore policy
+is authoritative.
+
+When verified work earns a durable record, keep the read and write authorities
+separate:
+
+1. Save the complete JSON Task Capsule from `tropo find --governed --json`, or save
+   the complete public capsule object returned as the optional MCP `vivary_capsule`
+   result.
+2. Prepare one complete typed Markdown record outside the destination.
+3. Run `create-vivary record` without `--yes`, inspect its one-file plan and hash, and
+   get the deliberate human approval required for the write.
+4. Apply only that exact hash with `--yes --plan`; Doctor verifies the workspace and
+   the command rolls back the record if verification fails.
+
+```bash
+create-vivary record . changes/verified-slice.md \
+  --from ./verified-slice.md \
+  --capsule ./task-capsule.json \
+  --json
+
+create-vivary record . changes/verified-slice.md \
+  --from ./verified-slice.md \
+  --capsule ./task-capsule.json \
+  --yes --plan sha256:<approved-plan-hash> --json
+```
+
+This creates or updates exactly one record under `.vivary/records/`; it never expands
+the selected preset into a template pack or a pre-populated graph.
 
 ## Next
 
-- [Concepts](/concepts/) — what everything means, in plain language.
-- [Getting started proof](/walkthrough/) — a generic, public walkthrough of the product loop.
-- [Command reference](/commands/) — every CLI, flag, exit code, and data storage options.
-- [How-to recipes](/howto/) — review a change, multi-agent, CI, embedded storage, and more.
-- [Agent skills](/skills/) — bootstrap, heartbeat, self-improve, loops.
-- [Active context](/active-context/) — optional CocoIndex-code sidecar for code search.
-- [LLM active-context guide](/llm-active-context/) — copyable graph-first retrieval prompt.
-- [Architecture](/architecture/) — the layer model and the reasoning behind it.
-- [Homepage FAQ](https://vivary.vercel.app/#faq)
+- [Guide library](LEARN-BY-DOING.md) — complete one real task with a concise STE100 style procedure.
+- [Concepts](/concepts/) — the governed-context vocabulary.
+- [Command reference](/commands/) — commands, flags, outputs, and exit codes.
+- [Active context](/active-context/) — the optional code-retrieval projection.
+- [Architecture](/architecture/) — ownership and package boundaries.
+- [MCP](/mcp/) — the optional local read-only adapter.

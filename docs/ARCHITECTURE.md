@@ -5,14 +5,11 @@ plain-language overview, read [Concepts](/concepts/) first.
 
 ## 1. What Vivary is
 
-Vivary gives agents the right bounded project context, preserves conflicting truth
-instead of guessing, makes authority and gates explicit, and produces evidence a human
-can inspect. It is a standard for agent-native workspaces and a scaffolder that composes
-standalone modules into a normalized workspace — for a second brain, a coding project,
-or a writing project, on any agent runtime (Claude Code, Codex CLI, …) and any stack.
-
-The goal is **normalization**: today everyone hand-rolls their agent setup.
-Vivary makes the workspace a known, structured, portable thing.
+Vivary is a lightweight, local-first governed-context layer for agent work. It compiles
+bounded evidence and task capsules, preserves provenance and receipts, makes authority
+and gates explicit, and produces verification a human can inspect. The workspace
+contract is portable across coding, knowledge, and writing projects and across agent
+runtimes without normalizing the host project into a Vivary-owned framework.
 
 ## 2. The first-principles baseline
 
@@ -27,30 +24,31 @@ seen at two speeds:
 
 The irreducible core, true of any agent workspace regardless of stack or task:
 
-> **A self-improving loop running over a typed, navigable knowledge graph, with
-> one visible state surface and human gates.**
+> **Bounded evidence and task context, provenance and receipts, verification,
+> one visible state surface, and human gates.**
 
 **Design law (from throughline's minimalism hypothesis):** every always-on file
 competes with the user's task for context. The framework must cost almost nothing
 to load. Fewer files, fewer words, more room for the work. This is the constraint
 that keeps Vivary from bloating into a heavy harness.
 
-**DRY and progressive disclosure:** context management only works if it lowers the
-active load. `AGENTS.md`, `STATE.md`, and `modules/**/index.md` are routing surfaces;
-canonical detail lives once in the owning typed file or skill. Agents choose a module
-through `modules/index.md`, open that module's `index.md`, and follow deeper links only
-when the task proves they are relevant.
+**DRY and progressive disclosure:** context management only works if it lowers active
+load. `AGENTS.md` routes to `.vivary/context.md`; `STATE.md` is opened only when current
+state matters. Typed records under `.vivary/records/` are created lazily from real work,
+not seeded as framework content. Optional graph views can route deeper context when the
+project needs them.
 
 **No lock-in (corollary):** a workspace is plain Markdown + YAML plus a few
 lightweight Python CLIs. Governed Tropo composes the first-party `vivary-core` seam,
 but no CLI requires an editor, plugin, provider, network service, or single-vendor
 agent runtime. Workspaces operate in any editor or none, with Claude Code via
-`.claude/` or Codex via `AGENTS.md` + `.agents/`; tropo ignores `.obsidian/`,
+bounded opt-in `.claude/` or `.agents/` projections; tropo ignores `.obsidian/`,
 `.vscode/`, and similar tool state.
 
-**Active context is a sidecar.** For codebases, a workspace may opt into
-CocoIndex-code guidance (`--active-context cocoindex-code`) so agents can ask before
-using semantic code search. This does not move embeddings or indexing into the tropo
+**Active context is a sidecar.** For codebases, a workspace may declare
+CocoIndex-code (`--active-context cocoindex-code`) so agents can ask before using
+semantic code search. The declaration stays inside the five-file seed and copies no
+sidecar files. This does not move embeddings or indexing into the tropo
 core; it keeps the deterministic graph as truth and treats semantic search as
 candidate retrieval.
 
@@ -63,17 +61,36 @@ default preset path. See [Optional semantic memory](SEMANTIC-MEMORY.md).
 
 ## 3. The layer model
 
-A vertical column. Each layer is a standalone module that reads/writes the same graph
-and obeys the same convention. Published CLIs are thin. Strato's agent-OS templates
-remain bundled in generated workspaces, while its new Python facade is declared as the
-unpublished `vivary-strato` source package during development.
+The role packages share Core contracts but keep distinct authority. Strato's policy
+facade is declared as the unpublished `vivary-strato` package; its legacy template
+archive remains source-only compatibility material and is not shipped into new or
+adopted workspaces. Bellamente memory and MCP remain optional adapters outside the
+baseline.
 
+```mermaid
+flowchart TB
+    Core["vivary-core<br/>pure governed-context contracts"]
+    Tropo["Tropo<br/>observe · graph · retrieve"]
+    Strato["Strato<br/>decide · request gates"]
+    Ozone["Ozone<br/>verify · propose repairs"]
+    Exo["Exo<br/>project control state"]
+    Memory["Bellamente / memory-cognee<br/>recall candidates · caller-owned persistence"]
+    MCP["vivary-mcp<br/>four read-only local projections"]
+
+    Tropo -->|compile context| Core
+    Strato -->|evaluate policy| Core
+    Ozone -->|verify evidence| Core
+    Exo -->|derive transitions| Core
+    Memory -->|classify and propose| Core
+    Memory -->|consume typed nodes| Tropo
+    MCP -->|bounded public producers| Tropo
 ```
-        exo      ── multi-agent orchestration            (outermost, optional)
-       ozone     ── review: code + editorial / gates     (protective filter, optional)
-       strato    ── agent OS: state · memory · loop · gates · self-improvement   (BASELINE)
-       tropo     ── typed knowledge graph: what's true   (dense foundation, BASELINE)
-```
+
+Arrows mean “uses,” not “controls.” Core performs pure validation and projection;
+callers retain clocks, execution, persistence, and human approval. The behavior is
+covered by the [Core contract suite](https://github.com/vivary-dev/vivary/tree/dev/packages/core/tests),
+the [role suites](https://github.com/vivary-dev/vivary/tree/dev/packages), and the
+[MCP adapter suite](https://github.com/vivary-dev/vivary/tree/dev/packages/mcp/tests).
 
 - **tropo** (troposphere) — the dense, living foundation. Typed frontmatter →
   typed graph → search/navigation. Ground truth. *(ported from loam)*
@@ -99,11 +116,38 @@ that drift. Tropo, Strato, Ozone, and Exo use this seam in the development sourc
 It is a library, not a layer and not a CLI. Nothing about the baseline changes
 because it exists: you still install and run `tropo`, `strato`, `ozone`, `exo`.
 
+### Package dependency map
+
+This map shows direct source-manifest dependencies; omitted arrows are deliberately
+absent. In particular, the `vivary` meta-package receives Core transitively, while MCP
+and memory remain optional and outside that meta-package.
+
+```mermaid
+flowchart BT
+    core["vivary-core"]
+    tropo["vivary-tropo"] --> core
+    strato["vivary-strato"] --> core
+    ozone["vivary-ozone"] --> core
+    ozone --> tropo
+    exo["vivary-exo"] --> core
+    exo --> tropo
+    memory["vivary-memory-cognee"] --> core
+    memory --> tropo
+    mcp["vivary-mcp"] --> tropo
+    mcp --> sdk["official MCP SDK"]
+    create["create-vivary"] --> tropo
+    npm["@vivary/create"] -. installs / dispatches .-> create
+    suite["vivary meta-package"] --> create
+    suite --> tropo
+    suite --> strato
+    suite --> ozone
+    suite --> exo
 ```
-   exo · ozone · strato · tropo      ── the layers, each with its own CLI
-   ─────────────────────────────
-          vivary-core               ── the seam they share (library, no CLI)
-```
+
+Exact floors and source versions live only in the
+[package manifests](https://github.com/vivary-dev/vivary/tree/dev/packages); the
+[root release status](../README.md#release-status) distinguishes those source versions
+from registry truth. The map was checked against those manifests on **2026-08-09**.
 
 What it owns:
 
@@ -176,8 +220,17 @@ anything unproven is reported `unknown` rather than guessed.
 declares its own floor in the same commit. The `vivary` meta-package receives Core
 transitively through the role packages instead of declaring a duplicate Core edge.
 Tropo, Strato, Ozone, and Exo own their Core floors. The meta-package owns its five
-component floors, including `create-vivary>=0.3.2` and `vivary-strato>=0.1.2`. One
-owner per edge avoids version-pinning fights.
+component floors, including `create-vivary>=0.4.0`, `vivary-tropo>=0.5.2`, and
+`vivary-strato>=0.1.2`. One owner per edge avoids version-pinning fights.
+
+**Optional MCP boundary:** `vivary-mcp` is an interoperability adapter, not a layer
+or part of Core. Its dependency direction is `vivary-mcp → vivary-tropo →
+vivary-core`; it separately pins the official MCP SDK. The adapter exposes only
+bounded public Tropo/Core projections over operator-bound local roots. The baseline
+and `vivary` meta-package do not install or start it. A capsule returned through MCP
+may bind a later proposal, but the adapter never authorizes or performs that write.
+Thin workspace mutation crosses a separate human gate: `create-vivary record` plans
+and verifies one typed create or update at a time, with no batch or pack mode.
 
 **Installed-capability truth:** development-source `create-vivary capabilities`
 projects a fixed public inventory for Core and the four governed roles. A bounded
@@ -185,12 +238,15 @@ passive reader binds each credited module or console script to the exact distrib
 record under the active interpreter's canonical package roots. It neither imports
 optional packages nor dispatches ambient import or distribution hooks. Each row reports
 `installed`, `not-installed`, `incompatible`, or `probe-failed`. Optional absence and
-probe failure do not make the workspace unhealthy. Doctor embeds the same envelope.
+probe failure do not make the workspace unhealthy. Doctor embeds the same envelope
+and a separate passive `interop:mcp` row; neither probe imports or starts the adapter.
 
 **Status:** Tropo, Strato, Ozone, and Exo Core adapters are present in the development
-source and remain unpublished behind explicit `--governed` flags. Plain Tropo retrieval,
-Ozone review and impact, and legacy Exo graph coordination remain unchanged. Current
-versions and publication status live in [the root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status).
+source and remain unpublished behind explicit `--governed` flags. The optional
+read-only MCP adapter is also present only in development source and disabled by
+default. Plain Tropo retrieval, Ozone review and impact, and legacy Exo graph
+coordination remain unchanged. Current versions and publication status live in
+[the root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status).
 
 ## 4. The moat
 
@@ -202,7 +258,7 @@ Vivary's differentiators:
    after, visually, in a way a text diff cannot. (tropo's graph roadmap.)
 3. **Medium-agnostic** — code review and editorial review are the same layer
    (ozone) with different rule packs.
-4. **A standardized agent workspace** — uncovered ground.
+4. **A thin governed-context standard** that adopts a host project without taking it over.
 
 ## 5. Naming & namespace
 
@@ -218,12 +274,15 @@ The brand owns the namespace; current package truth is:
   earlier release line than its dependent roles; within that train, dependencies upload
   before dependents, so core uploads first.
 - `vivary-strato` is declared in-repo and remains unpublished during development.
-  Strato's templates and skills also remain bundled by `create-vivary`; the runtime
-  package adds the policy facade rather than replacing those workspace assets.
+  Its runtime package owns the policy facade. The legacy full-workspace assets remain
+  source-only compatibility fixtures and are excluded from the `create-vivary` wheel.
+- `vivary-mcp` is declared in-repo and remains unpublished during development. It is
+  an optional local standard-input/output adapter, not a `vivary` meta-package
+  dependency. [MCP.md](MCP.md) owns its contract.
 - GitHub: `vivary-dev/vivary` holds the public repo.
 
-Future packages can still use the Vivary namespace, but public docs should only name
-packages that are actually published.
+Future packages can still use the Vivary namespace. Release surfaces must distinguish
+published packages from declared, unpublished development source.
 
 ## 6. Module naming = atmosphere strata
 

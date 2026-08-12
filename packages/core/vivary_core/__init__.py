@@ -31,11 +31,21 @@ from vivary_core.capsule_compile import (
     capsule_compiler_omissions_require_graph,
     compile_task_capsule,
     content_context_work_is_bounded,
+    project_public_task_capsule,
+    public_task_capsule_json_schema,
+    task_capsule_json_schema,
+    verify_public_task_capsule_integrity,
+    verify_task_capsule_integrity,
 )
 from vivary_core.receipt import EXECUTION_RECEIPT_FIELDS
 from vivary_core.workspace_content import observe_content
 from vivary_core.workspace_model import project_workspace_graph
-from vivary_core.workspace_observe import observe_checkouts
+from vivary_core.workspace_observe import (
+    ContentPrivacyPathRefusedError,
+    ContentPrivacyPolicyUnavailableError,
+    content_privacy_policy,
+    observe_checkouts,
+)
 
 __all__ = [
     "canonicalize",
@@ -55,7 +65,15 @@ __all__ = [
     "capsule_compiler_omissions_require_graph",
     "content_context_work_is_bounded",
     "compile_task_capsule",
+    "project_public_task_capsule",
+    "public_task_capsule_json_schema",
+    "task_capsule_json_schema",
+    "verify_public_task_capsule_integrity",
+    "verify_task_capsule_integrity",
     "observe_checkouts",
+    "ContentPrivacyPathRefusedError",
+    "ContentPrivacyPolicyUnavailableError",
+    "content_privacy_policy",
     "observe_content",
     "project_workspace_graph",
 ]

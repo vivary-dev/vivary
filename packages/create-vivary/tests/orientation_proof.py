@@ -64,9 +64,9 @@ GOVERNED_CAPABILITY_IDS = {
 EXPECTED_FIXTURE_PRESETS = {
     "current": "coding",
     "legacy": "coding",
-    "brownfield": None,
-    "adopted": None,
-    "divergent-checkout": None,
+    "brownfield": "coding",
+    "adopted": "coding",
+    "divergent-checkout": "coding",
     "corrupt": "coding",
 }
 
@@ -112,10 +112,19 @@ def _require_capability_truth(
         "reason_codes",
         "missing_install",
     }
+    mcp_dynamic_fields = {
+        "package_present",
+        "entry_point_present",
+        "sdk_version",
+        "sdk_compatible",
+    }
     for row, expected in zip(available, expected_available):
         _require(
             isinstance(row, dict)
-            and set(row) == set(expected) | dynamic_fields
+            and set(row)
+            == set(expected)
+            | dynamic_fields
+            | (mcp_dynamic_fields if expected.get("id") == "interop:mcp" else set())
             and all(row.get(field) == value for field, value in expected.items()),
             f"{kind}: {transport} capability declaration is invalid",
         )
@@ -346,11 +355,11 @@ def _brownfield(root: Path) -> None:
 
 
 def _current(root: Path) -> None:
-    create_vivary.scaffold_workspace(root, preset="coding", repo_root=ROOT)
+    create_vivary.scaffold_thin_workspace(root, preset="coding", repo_root=ROOT)
 
 
 def _legacy(root: Path) -> None:
-    _current(root)
+    create_vivary.scaffold_workspace(root, preset="coding", repo_root=ROOT)
     _write(
         root / ".gitignore",
         "USER.md\nMEMORY.md\nmemory/*\n!memory/.gitkeep\n.strato/private/\n",
@@ -442,7 +451,16 @@ def build_fixture(kind: str, root: Path) -> str:
         _brownfield(root)
     elif kind == "adopted":
         _brownfield(root)
-        result = create_vivary.adopt_workspace(root, preset="coding", repo_root=ROOT, yes=True)
+        plan = create_vivary.adopt_workspace(
+            root, preset="coding", repo_root=ROOT, yes=False
+        )
+        result = create_vivary.adopt_workspace(
+            root,
+            preset="coding",
+            repo_root=ROOT,
+            yes=True,
+            plan_hash=plan["plan_hash"],
+        )
         _require(result["doctor"]["ok"], "adopted fixture construction failed Doctor")
     elif kind == "divergent-checkout":
         _divergent(root)
@@ -454,7 +472,31 @@ def build_fixture(kind: str, root: Path) -> str:
     return _install_boundary(root)
 
 
-def _default_transports() -> tuple[CreateTransport, CreateTransport]:
+def _build_local_dependency_wheels(wheelhouse: Path) -> None:
+    wheelhouse.mkdir(parents=True, exist_ok=True)
+    completed = _run_text(
+        (
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--no-deps",
+            "--wheel-dir",
+            str(wheelhouse),
+            str(ROOT / "packages" / "core"),
+            str(TROPO_PACKAGE),
+        ),
+        cwd=ROOT,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise ProofFailure(f"local dependency wheel build failed: {detail[:240]}")
+    for distribution in ("vivary_core", "vivary_tropo"):
+        if not any(wheelhouse.glob(f"{distribution}-*.whl")):
+            raise ProofFailure(f"local dependency wheel is missing: {distribution}")
+
+
+def _default_transports(wheelhouse: Path) -> tuple[CreateTransport, CreateTransport]:
     node = shutil.which("node")
     uvx = shutil.which("uvx")
     if not node:
@@ -465,7 +507,10 @@ def _default_transports() -> tuple[CreateTransport, CreateTransport]:
     npm_transport = CreateTransport(
         "npm",
         (node, str(NPM_CLI)),
-        {"VIVARY_FROM": str(CREATE_PACKAGE.resolve())},
+        {
+            "VIVARY_FROM": str(CREATE_PACKAGE.resolve()),
+            "UV_FIND_LINKS": str(wheelhouse.resolve()),
+        },
     )
     return python_transport, npm_transport
 
@@ -562,7 +607,9 @@ def _proof_fixture(
     _require(adopt_payload_equal, f"{kind}: npm/Python adopt JSON differs")
     _require(dry_run_read_only, f"{kind}: adopt dry-run wrote to the fixture")
     _require(py_adopt["mode"] == "dry-run", f"{kind}: adopt did not report dry-run mode")
-    expected = sorted(py_adopt["would_create"])
+    expected = sorted(
+        [*py_adopt["creates"], *(patch["path"] for patch in py_adopt["patches"])]
+    )
     progress["expected_mutations"] = expected
 
     actual = {"created": [], "changed": [], "deleted": []}
@@ -571,7 +618,15 @@ def _proof_fixture(
         apply_before = snapshot_tree(fixture)
         apply_rc, apply_payload = _run_json(
             python_transport.prefix,
-            _create_args("adopt", fixture, "--preset", "coding", "--yes"),
+            _create_args(
+                "adopt",
+                fixture,
+                "--preset",
+                "coding",
+                "--yes",
+                "--plan",
+                py_adopt["plan_hash"],
+            ),
             transport=python_transport.name,
             fixture=fixture,
             commands=commands,
@@ -604,7 +659,9 @@ def _proof_fixture(
             repeat_py_rc == repeat_npm_rc == 0
             and repeat_py == repeat_npm
             and repeat_py["mode"] == "dry-run"
-            and not repeat_py["would_create"]
+            and not repeat_py["creates"]
+            and not repeat_py["patches"]
+            and not repeat_py["optional_projections"]
             and repeat_before == repeat_after
         )
         _require(idempotent, f"{kind}: repeated adopt was not idempotent")
@@ -615,11 +672,12 @@ def _proof_fixture(
         _require(
             expected
             == [
-                "modules/agent-workspace/index.md",
-                "modules/codebase/index.md",
-                "modules/index.md",
+                ".gitignore",
+                ".vivary/context.md",
+                ".vivary/workspace.toml",
+                "AGENTS.md",
             ],
-            "legacy: adopt did not plan the exact indexed-layout additions",
+            "legacy: adopt did not plan the exact thin contract and host patches",
         )
     elif kind == "corrupt":
         _require(expected == ["AGENTS.md"], "corrupt: adopt did not plan exactly the missing contract file")
@@ -738,12 +796,11 @@ def _proof_fixture(
             )
     capability_reports_match_doctor = True
     compatibility = py_doctor["compatibility"]
-    expected_workspace_contract = "legacy-v0.1" if kind == "legacy" else "indexed-v0.2+"
-    _require(compatibility["schema_version"] == 1, f"{kind}: Doctor compatibility schema changed")
-    _require(
-        compatibility["workspace_contract"] == expected_workspace_contract,
-        f"{kind}: Doctor misclassified the workspace contract",
-    )
+    _require(compatibility["schema_version"] == 2, f"{kind}: Doctor compatibility schema changed")
+    expected_contract = "legacy-full" if kind == "legacy" else "thin-v0.3"
+    expected_legacy_layout = "legacy-v0.1" if kind == "legacy" else None
+    _require(compatibility["workspace_contract"] == expected_contract, f"{kind}: Doctor misclassified the workspace contract")
+    _require(compatibility["legacy_layout"] == expected_legacy_layout, f"{kind}: Doctor misclassified the legacy layout")
     upgrade_guidance_present: bool | None = None
     if kind == "legacy":
         upgrade_guidance_present = compatibility["recommended_upgrade"] in py_doctor["warnings"]
@@ -775,7 +832,10 @@ def _proof_fixture(
     _require(find_before == find_after, f"{kind}: tropo find mutated the fixture")
     _require(0 < len(find_payload["results"]) <= FIND_LIMIT, f"{kind}: find returned no bounded context")
     _require(find_payload["estimated_tokens"] <= FIND_BUDGET, f"{kind}: find exceeded budget")
-    _require(all(result.get("type") for result in find_payload["results"]), f"{kind}: find returned untyped context")
+    _require(
+        any(result.get("type") for result in find_payload["results"]),
+        f"{kind}: find omitted the governed typed context capsule",
+    )
     find_boundary_pruned = all(
         sentinel not in str(result["path"]).replace("\\", "/").split("/")
         for result in find_payload["results"]
@@ -808,6 +868,7 @@ def _proof_fixture(
             "dry_run_read_only": dry_run_read_only,
             "applied": kind in APPLY_KINDS,
             "idempotent": idempotent,
+            "plan_hash_bound": bool(py_adopt.get("plan_hash")),
         },
         "map": {
             "read_only": map_before == map_after,
@@ -846,7 +907,9 @@ def _proof_fixture(
         "find": {
             "contained_in_fixture": find_contained,
             "results": len(find_payload["results"]),
-            "types": sorted({result["type"] for result in find_payload["results"]}),
+            "types": sorted(
+                {result["type"] for result in find_payload["results"] if result.get("type")}
+            ),
             "estimated_tokens": find_payload["estimated_tokens"],
             "budget": FIND_BUDGET,
             "read_only": find_before == find_after,
@@ -933,7 +996,17 @@ def run_proof(
     unknown = sorted(set(fixture_kinds) - set(FIXTURE_KINDS))
     if unknown:
         raise ValueError(f"unknown fixtures: {', '.join(unknown)}")
-    python_transport, npm_transport = transports or _default_transports()
+    dependency_wheelhouse: tempfile.TemporaryDirectory[str] | None = None
+    if transports is None:
+        dependency_wheelhouse = tempfile.TemporaryDirectory(
+            prefix="vivary-orientation-wheels-",
+            ignore_cleanup_errors=True,
+        )
+        wheelhouse = Path(dependency_wheelhouse.name)
+        _build_local_dependency_wheels(wheelhouse)
+        python_transport, npm_transport = _default_transports(wheelhouse)
+    else:
+        python_transport, npm_transport = transports
     if strict_transports is None:
         strict_transports = transports is None
     receipt: dict = {
@@ -1033,6 +1106,8 @@ def run_proof(
             receipt["ok"] = False
             receipt["validation_error"] = str(exc)
         _write_receipt(receipt_path, receipt)
+    if dependency_wheelhouse is not None:
+        dependency_wheelhouse.cleanup()
     return receipt
 
 

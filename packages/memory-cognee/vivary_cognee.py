@@ -23,8 +23,15 @@ from pathlib import Path
 from contextlib import contextmanager, redirect_stdout
 from typing import Any
 
+from vivary_core import (
+    ContentPrivacyPathRefusedError,
+    ContentPrivacyPolicyUnavailableError,
+    content_privacy_policy,
+    normalize_path,
+)
 
-__version__ = "0.1.1"
+
+__version__ = "0.1.2"
 TROPO_SEMANTIC_ADAPTER_API = 1
 REQUIRES_EXPLICIT_PROVIDER_GATES = True
 MAX_RECALL_K = 250
@@ -126,41 +133,6 @@ def _pattern_matches(pattern: str, rel_path: str, base: str = "") -> bool:
     return fnmatchcase(rel_path, pattern) or rel_path.startswith(pattern + "/")
 
 
-def _gitignore_rules(root: Path) -> list[tuple[bool, str, str]]:
-    rules: list[tuple[bool, str, str]] = []
-    paths = sorted(
-        root.rglob(".gitignore"),
-        key=lambda path: (len(path.relative_to(root).parts), str(path.relative_to(root)).lower()),
-    )
-    for path in paths:
-        try:
-            resolved = path.resolve(strict=False)
-        except OSError:
-            continue
-        if not _inside_root(root, resolved):
-            continue
-        base = _norm(path.parent.relative_to(root))
-        if base == ".":
-            base = ""
-        if base and _ignored_by_gitignore(f"{base}/.vivary-gitignore-probe", rules):
-            continue
-        for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            negated = line.startswith("!")
-            pattern = line[1:] if negated else line
-            if pattern:
-                rules.append((negated, base, pattern))
-    return rules
-
-
-def _ignored_by_gitignore(rel_path: str, rules: list[tuple[bool, str, str]]) -> bool:
-    ignored = False
-    for negated, base, pattern in rules:
-        if _pattern_matches(pattern, rel_path, base):
-            ignored = not negated
-    return ignored
 
 
 def _resolve_workspace_root(target: str | Path) -> Path:
@@ -290,16 +262,8 @@ def _privacy_patterns(config: dict[str, Any]) -> list[str]:
     return patterns
 
 
-def _is_private_path(
-    rel_path: str,
-    *,
-    patterns: list[str],
-    gitignore_rules: list[tuple[bool, str, str]],
-    respect_gitignore: bool,
-) -> bool:
-    if any(_pattern_matches(pattern, rel_path) for pattern in patterns):
-        return True
-    return bool(respect_gitignore and _ignored_by_gitignore(rel_path, gitignore_rules))
+def _is_private_path(rel_path: str, *, patterns: list[str]) -> bool:
+    return any(_pattern_matches(pattern, rel_path) for pattern in patterns)
 
 
 def _import_tropo():
@@ -464,42 +428,91 @@ def _dataset_name(root: Path, config: dict[str, Any]) -> str:
 
 def build_snapshot(root: str | Path) -> MemorySnapshot:
     """Build privacy-filtered typed node packets from the Tropo graph."""
-    root_path = Path(root).resolve()
+    canonical_root = normalize_path(os.path.realpath(Path(root).resolve()))
+    root_path = Path(canonical_root)
     config = _load_memory_config(root_path)
     privacy = config.get("privacy", {})
     patterns = _privacy_patterns(config)
-    gitignore_rules = _gitignore_rules(root_path)
     respect_gitignore = privacy.get("respect_gitignore", True)
 
     try:
         tropo = _import_tropo()
         resolver = tropo.ConfigResolver(str(root_path), str(Path(tropo.__file__).parent))
-        docs = tropo.analyze(str(root_path), [], resolver)
-        graph_nodes, graph_edges = tropo.build_graph(docs)
+        safe_full_paths: dict[str, Path] = {}
+        candidates: list[str] = []
+        for full_path, relative_path in tropo.iter_markdown(
+            str(root_path),
+            [],
+            resolver.base.exclude,
+        ):
+            rel_path = _norm(relative_path)
+            safe_full = _resolve_public_file(root_path, full_path, rel_path)
+            if _is_private_path(rel_path, patterns=patterns):
+                continue
+            if rel_path not in safe_full_paths:
+                candidates.append(rel_path)
+                safe_full_paths[rel_path] = safe_full
+    except AdapterError:
+        raise
     except Exception as exc:
-        raise AdapterError(f"failed to build Tropo graph: {exc}") from exc
+        raise AdapterError(f"failed to enumerate Tropo documents: {exc}") from exc
+
+    candidates.sort()
+    if respect_gitignore:
+        try:
+            policy = content_privacy_policy(
+                canonical_root,
+                candidates,
+                allowlist=[canonical_root],
+            )
+        except (ContentPrivacyPathRefusedError, ContentPrivacyPolicyUnavailableError):
+            raise AdapterError("semantic memory privacy policy unavailable") from None
+        allowed_paths = policy.get("allowed_paths") if isinstance(policy, dict) else None
+        if (
+            not isinstance(allowed_paths, list)
+            or len(set(allowed_paths)) != len(allowed_paths)
+            or any(
+                not isinstance(path, str) or path not in safe_full_paths
+                for path in allowed_paths
+            )
+        ):
+            raise AdapterError("semantic memory privacy policy unavailable")
+    else:
+        allowed_paths = candidates
+
+    if allowed_paths:
+        analyze_paths = [
+            str(root_path.joinpath(*relative_path.split("/")))
+            for relative_path in allowed_paths
+        ]
+        try:
+            docs = tropo.analyze(str(root_path), analyze_paths, resolver)
+            graph_nodes, graph_edges = tropo.build_graph(docs)
+        except Exception as exc:
+            raise AdapterError(f"failed to build Tropo graph: {exc}") from exc
+    else:
+        docs = []
+        graph_nodes = {}
+        graph_edges = []
 
     public_ids: set[str] = set()
     by_id: dict[str, Any] = {}
-    safe_full_paths: dict[str, Path] = {}
+    safe_by_id: dict[str, Path] = {}
     for doc in docs:
         node_id = doc.derived.get("id")
         rel_path = _norm(doc.rel)
-        if not node_id:
+        if not node_id or rel_path not in safe_full_paths:
             continue
-        safe_full = _resolve_public_file(root_path, doc.full, rel_path)
-        if _is_private_path(
+        safe_full = _resolve_public_file(
+            root_path,
+            safe_full_paths[rel_path],
             rel_path,
-            patterns=patterns,
-            gitignore_rules=gitignore_rules,
-            respect_gitignore=respect_gitignore,
-        ):
-            continue
+        )
         if node_id not in graph_nodes:
             continue
         public_ids.add(node_id)
         by_id.setdefault(node_id, doc)
-        safe_full_paths.setdefault(node_id, safe_full)
+        safe_by_id.setdefault(node_id, safe_full)
 
     memory_edges = [
         MemoryEdge(source_id=edge["from"], field=edge["field"], target_id=edge["to"])
@@ -517,7 +530,7 @@ def build_snapshot(root: str | Path) -> MemorySnapshot:
             **{k: v for k, v in doc.derived.items() if k in {"title", "created", "updated"}},
             **dict(doc.declared),
         }
-        body = _read_body(tropo, safe_full_paths[node_id])
+        body = _read_body(tropo, safe_by_id[node_id])
         text = _node_text(
             node_id=node_id,
             node_type=graph_node.get("type"),
@@ -917,6 +930,15 @@ def doctor(root: str | Path) -> dict[str, Any]:
             "provider": config.get("provider"),
             "status": "not-cognee",
             "detail": "this adapter only handles provider='cognee'",
+        }
+    try:
+        _cognee_state_root(root_path, config)
+    except AdapterError as exc:
+        return {
+            "ok": False,
+            "provider": "cognee",
+            "status": "misconfigured",
+            "detail": str(exc),
         }
     try:
         snapshot = build_snapshot(root_path)

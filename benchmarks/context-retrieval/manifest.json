@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "benchmark_id": "context-retrieval",
+  "title": "Vivary context-retrieval benchmark protocol",
+  "verified": "2026-08-09",
+  "train_label": "Vivary Governed Context",
+  "status": "protocol_frozen",
+  "corpus": {
+    "public_sha": "cbbd340dbf0ffebfe17ad5257ecd93b83ab570de",
+    "description": "Immutable public Vivary corpus revision. Accepted evidence paths are original public source paths under this SHA."
+  },
+  "runtime_requirements": {
+    "when_results_present": [
+      "model_runtime_version",
+      "runtime_source_hash",
+      "runtime_package_hashes",
+      "runtime_wheel_hashes",
+      "adopted_corpus_tree_hash",
+      "settings_hash"
+    ],
+    "notes": "Before trials, add manifest.runtime with the candidate model runtime version, runtime/package-source/wheel hashes, adopted-corpus tree hash, and settings hash. results.json must repeat that object byte-for-byte. Absence of both runtime and results is valid and complete for this protocol freeze."
+  },
+  "model": {
+    "id": "openai-codex/gpt-5.6-sol",
+    "effort": "medium",
+    "sampling_overrides": null
+  },
+  "design": {
+    "questions": 4,
+    "arms": [
+      "baseline",
+      "vivary"
+    ],
+    "replicates_per_question_arm": 3,
+    "total_trials": 24,
+    "support_gate": "all_24_supported",
+    "support_rule": "Each question requires 3/3 supported replicates on every arm. supported is derived by the validator from claims/evidence; caller-supplied verdicts are rejected."
+  },
+  "prompt": {
+    "template": "Using only the frozen Vivary checkout, answer: {question}. Return JSON with claims [{claim_id, value, evidence [{path, line_hash}]}], unknowns, and a concise answer. Use only permitted tools; unsupported claims must be unknown.",
+    "byte_identical": true
+  },
+  "ceilings": {
+    "answer_words_max": 500,
+    "retrieval_calls_max": 8,
+    "files_opened_max": 6,
+    "lines_per_read_max": 200,
+    "cross_trial_memory": false
+  },
+  "arms": {
+    "baseline": {
+      "description": "Deterministic file listing/search and bounded reads only.",
+      "allowed_tools": [
+        "list",
+        "search",
+        "read"
+      ],
+      "denied": [
+        "mcp",
+        "network",
+        "prior_transcripts",
+        "arbitrary_shell",
+        "helper_agents",
+        "generated_answers",
+        "reads_outside_corpus"
+      ]
+    },
+    "vivary": {
+      "description": "One tropo find --governed call, then reads of only capsule-selected evidence.",
+      "allowed_tools": [
+        "tropo find --root <adopted-root> --governed --max-claims 8 --json",
+        "read"
+      ],
+      "max_governed_find_calls": 1,
+      "denied": [
+        "mcp",
+        "network",
+        "prior_transcripts",
+        "arbitrary_shell",
+        "helper_agents",
+        "generated_answers",
+        "reads_outside_corpus"
+      ]
+    }
+  },
+  "trial_row_schema": {
+    "required_fields": [
+      "question_id",
+      "arm",
+      "replicate",
+      "model",
+      "settings_hash",
+      "input_tokens",
+      "output_tokens",
+      "turns",
+      "retrieval_calls",
+      "files_opened",
+      "wrong_files_opened",
+      "supported",
+      "time_to_verified_answer_ms",
+      "claims",
+      "unknowns",
+      "raw_answer"
+    ],
+    "wrong_files_opened_definition": "Integer count of opened paths outside that question's accepted evidence set; validator-derived and cross-checked.",
+    "timing_definition": "Start immediately before first retrieval; stop after valid JSON is returned.",
+    "supported_definition": "Required output field, but never trusted: scripts/check_context_benchmark.py derives support from claim IDs/values and evidence line hashes against questions.json, rejects unknown verdict fields, and fails when the supplied boolean disagrees."
+  },
+  "statistics": {
+    "metrics": [
+      "input_tokens",
+      "output_tokens",
+      "total_tokens",
+      "turns",
+      "wrong_files_opened",
+      "time_to_verified_answer_ms"
+    ],
+    "summaries": [
+      "median",
+      "iqr",
+      "bootstrap_95ci"
+    ],
+    "bootstrap": {
+      "samples": 10000,
+      "seed": 20260809,
+      "method": "percentile"
+    },
+    "cohort_separation": "Summaries are emitted per arm and per question; arms are never pooled into one cohort.",
+    "publish_rule": "Publish median and per-question input/output/total-token deltas, turns, wrong-file counts, and elapsed time even if Vivary loses. Make only the exact savings claim the data supports."
+  },
+  "validator": {
+    "script": "scripts/check_context_benchmark.py",
+    "python": "3.11",
+    "dependencies": []
+  },
+  "line_hash": {
+    "algorithm": "sha256",
+    "encoding": "utf-8",
+    "input": "exact source line bytes including the trailing newline when present in the frozen blob"
+  },
+  "settings_hash": "94aa80d83b00a70bd1fb9c427cca9dbaf60b48dca5c867c06c79a4d232fbc2d3"
+}

@@ -8,6 +8,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import uuid
 from contextlib import contextmanager
@@ -407,8 +408,7 @@ def test_check_json_has_summary():
 # --- opinionated check: strict by default ----------------------------------
 
 def _bad_vault(td):
-    """A vault with one broken ref (W220), one unknown field (W202), and one
-    untyped doc (W201) — three warnings, no hard errors."""
+    """A vault with one broken ref (W220) and one typed unknown field (W202)."""
     Path(td, "tropo.toml").write_text(
         '[base]\nallow_untyped = true\n'
         '[types.module]\nfolder = "modules"\n'
@@ -427,6 +427,86 @@ def _check_rc(root, strict=False, lenient=False):
                               json=False, quiet=False)
     with contextlib.redirect_stdout(io.StringIO()):
         return tropo.cmd_check(args, res(root))
+
+def _write_brownfield_fixture(root, *, allow_untyped, typed=False):
+    type_config = (
+        '\n[types.scratch]\nfolder = "scratch"\n'
+        if typed
+        else ""
+    )
+    Path(root, "tropo.toml").write_text(
+        "[base]\n"
+        f"allow_untyped = {str(allow_untyped).lower()}\n"
+        'strict = true\n'
+        "[base.required]\n"
+        'status = "enum:active|inactive"\n'
+        f"{type_config}",
+        encoding="utf-8",
+    )
+    Path(root, "scratch").mkdir()
+    Path(root, "scratch", "example.md").write_text(
+        "---\n"
+        "type: foo\n"
+        "status: active\n"
+        "---\n"
+        "\n"
+        "# Example\n",
+        encoding="utf-8",
+    )
+
+
+def _legacy_findings(root):
+    return [
+        finding
+        for doc in tropo.analyze(str(root), [], res(str(root)))
+        for finding in doc.findings
+    ]
+
+
+def test_allow_untyped_true_permits_exact_brownfield_reproduction(tmp_path):
+    _write_brownfield_fixture(tmp_path, allow_untyped=True)
+    docs = tropo.analyze(str(tmp_path), [], res(str(tmp_path)))
+    assert len(docs) == 1
+    assert docs[0].declared["status"] == "active"
+    assert {finding.code for finding in docs[0].findings}.isdisjoint({"W201", "W202"})
+    assert _check_rc(str(tmp_path)) == 0
+
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    checked = tropo.check_workspace(root, allowlist=[root])
+    assert checked["complete"] is True
+    assert checked["findings"] == []
+    assert checked["errors"] == checked["warnings"] == 0
+
+
+def test_allow_untyped_false_retains_w201_error(tmp_path):
+    _write_brownfield_fixture(tmp_path, allow_untyped=False)
+    findings = _legacy_findings(tmp_path)
+    assert [(finding.level, finding.code) for finding in findings] == [
+        ("error", "W201")
+    ]
+
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    checked = tropo.check_workspace(root, allowlist=[root])
+    assert [(row["level"], row["code"]) for row in checked["findings"]] == [
+        ("error", "W201")
+    ]
+
+
+def test_typed_document_retains_w202_for_unknown_field(tmp_path):
+    _write_brownfield_fixture(tmp_path, allow_untyped=True, typed=True)
+    findings = _legacy_findings(tmp_path)
+    assert [(finding.level, finding.code) for finding in findings] == [
+        ("warning", "W202")
+    ]
+
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    checked = tropo.check_workspace(root, allowlist=[root])
+    assert [(row["level"], row["code"]) for row in checked["findings"]] == [
+        ("warning", "W202")
+    ]
 
 
 def test_check_is_strict_by_default():
@@ -452,7 +532,7 @@ def test_check_quiet_hides_warning_codes_after_strict_promotion():
         out = buf.getvalue()
         assert rc == 1
         assert "W201" not in out and "W202" not in out and "W220" not in out
-        assert "3 error(s)" in out
+        assert "2 error(s)" in out
 
 
 def test_check_strict_config_false_relaxes_and_flag_overrides():
@@ -474,6 +554,112 @@ def test_overlay_cannot_loosen_strict():
         try:
             tropo.ConfigResolver(str(td), SCRIPT_DIR).for_dir(str(sub))
             assert False, "expected ConfigError for strict false->true loosening"
+        except tropo.ConfigError:
+            pass
+
+
+def test_thin_workspace_config_is_the_base_and_root_tropo_is_tighten_only():
+    with temp_workspace() as td:
+        vivary = Path(td, ".vivary")
+        vivary.mkdir()
+        Path(vivary, "workspace.toml").write_text(
+            'version = 1\n'
+            'exclude = [".git", ".vivary/private", ".vivary/runtime"]\n'
+            '[workspace]\ncontract = "thin-v0.3"\n'
+            'preset = "coding"\nstate = "STATE.md"\n'
+            'private = [".vivary/private"]\nruntime = [".vivary/runtime"]\n'
+            'adapters = []\n'
+            '[base]\nallow_untyped = true\n'
+            '[types.project]\nfolder = [".vivary", "projects"]\n'
+            'required = { status = "enum:active|paused" }\n'
+            '[types.module]\nfolder = "modules"\n'
+            '[types.change]\nfolder = "changes"\n'
+            '[types.decision]\nfolder = "decisions"\n'
+            '[types.verification]\nfolder = "verification"\n'
+            '[types.gate]\nfolder = "gates"\n',
+            encoding="utf-8",
+        )
+        Path(td, "tropo.toml").write_text('[base]\nstrict = true\n', encoding="utf-8")
+        sub = Path(td, "src")
+        sub.mkdir()
+
+        assert tropo.find_root(sub) == str(Path(td))
+        resolver = tropo.ConfigResolver(str(td), SCRIPT_DIR)
+        assert resolver.base.strict is True
+        assert resolver.base.folder_map[".vivary"] == "project"
+        assert resolver.base.folder_map["projects"] == "project"
+        for folder, record_type in {
+            "modules": "module",
+            "changes": "change",
+            "decisions": "decision",
+            "verification": "verification",
+            "gates": "gate",
+        }.items():
+            assert resolver.base.folder_map[folder] == record_type
+
+        Path(td, "tropo.toml").write_text('[base]\nallow_untyped = true\n', encoding="utf-8")
+        Path(vivary, "workspace.toml").write_text(
+            Path(vivary, "workspace.toml")
+            .read_text(encoding="utf-8")
+            .replace("allow_untyped = true", "allow_untyped = false"),
+            encoding="utf-8",
+        )
+        try:
+            tropo.ConfigResolver(str(td), SCRIPT_DIR)
+            assert False, "expected ConfigError for root overlay loosening thin base"
+        except tropo.ConfigError:
+            pass
+
+
+def test_thin_workspace_metadata_fails_closed_and_competing_ancestors_are_rejected():
+    with temp_workspace() as td:
+        root = Path(td)
+        vivary = root / ".vivary"
+        vivary.mkdir()
+        valid = (
+            'version = 1\n'
+            'exclude = [".git", ".vivary/private", ".vivary/runtime"]\n'
+            '[workspace]\n'
+            'contract = "thin-v0.3"\n'
+            'preset = "coding"\n'
+            'state = "STATE.md"\n'
+            'private = [".vivary/private"]\n'
+            'runtime = [".vivary/runtime"]\n'
+            'adapters = []\n'
+            '[base]\nallow_untyped = true\n'
+            '[types.project]\nfolder = ".vivary"\n'
+            'required = { status = "enum:active|paused" }\n'
+        )
+
+        invalid_cases = {
+            "contract": valid.replace('contract = "thin-v0.3"', 'contract = "other"'),
+            "private escape": valid.replace(
+                'private = [".vivary/private"]', 'private = ["../private"]'
+            ),
+            "privacy exclude": valid.replace(', ".vivary/private"', ""),
+            "adapter": valid.replace("adapters = []", 'adapters = ["unknown"]'),
+            "capability privacy exclude": valid.replace(
+                "adapters = []",
+                'adapters = []\ncapabilities = ["cocoindex-code"]',
+            ),
+        }
+        for name, text in invalid_cases.items():
+            (vivary / "workspace.toml").write_text(text, encoding="utf-8")
+            try:
+                tropo.ConfigResolver(str(root), SCRIPT_DIR)
+                assert False, f"expected ConfigError for {name}"
+            except tropo.ConfigError:
+                pass
+
+        (vivary / "workspace.toml").write_text(valid, encoding="utf-8")
+        nested = root / "nested"
+        (nested / ".vivary").mkdir(parents=True)
+        (nested / ".vivary" / "workspace.toml").write_text(valid, encoding="utf-8")
+        deep = nested / "src"
+        deep.mkdir()
+        try:
+            tropo.find_root(deep)
+            assert False, "expected ConfigError for competing thin ancestor roots"
         except tropo.ConfigError:
             pass
 
@@ -2336,9 +2522,662 @@ def test_cmd_find_governed_maps_missing_core_to_install_error(tmp_path):
 
     assert rc == 2
     assert stderr.getvalue() == (
-        "tropo find --governed: vivary-core>=0.2.1 is required; "
+        "tropo find --governed: vivary-core>=0.2.7 is required; "
         "install Tropo with its declared dependencies\n"
     )
+
+def _public_workspace_root(path):
+    return normalize_path(os.path.realpath(path))
+
+
+def _assert_public_producer_unavailable(invoke):
+    try:
+        invoke()
+    except tropo.ProducerUnavailableError as error:
+        assert error.reason == "producer_unavailable"
+    else:
+        assert False, "expected ProducerUnavailableError"
+
+
+def test_public_context_producers_return_stable_shaped_snapshots(tmp_path):
+    _search_vault(tmp_path)
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    allowlist = [root]
+
+    query = tropo.query_context(
+        root,
+        "release workflow",
+        k=2,
+        type_filters=("decision",),
+        explain=True,
+        allowlist=allowlist,
+    )
+    query_again = tropo.query_context(
+        root,
+        "release workflow",
+        k=2,
+        type_filters=("decision",),
+        explain=True,
+        allowlist=allowlist,
+    )
+    found = tropo.find_context(
+        root,
+        "release workflow",
+        k=2,
+        budget=1_000,
+        type_filters=("decision",),
+        allowlist=allowlist,
+    )
+    checked = tropo.check_workspace(root, allowlist=allowlist)
+
+    assert set(query) == {
+        "schema",
+        "query",
+        "k",
+        "filters",
+        "results",
+        "complete",
+        "workspace_fingerprint",
+        "omissions",
+    }
+    assert query["schema"] == "vivary.query-result/v0"
+    assert query["query"] == "release workflow"
+    assert query["k"] == 2
+    assert query["filters"] == {"type": ["decision"], "path": [], "edge": []}
+    assert query["complete"] is True, query["omissions"]
+    assert [hit["path"] for hit in query["results"]] == [
+        "decisions/release-workflow.md"
+    ]
+    assert all(
+        set(hit) == {
+            "id",
+            "type",
+            "path",
+            "title",
+            "score",
+            "snippet",
+            "reasons",
+            "edges",
+        }
+        for hit in query["results"]
+    )
+
+    assert set(found) == {
+        "schema",
+        "query",
+        "k",
+        "budget",
+        "estimated_tokens",
+        "filters",
+        "results",
+        "complete",
+        "workspace_fingerprint",
+        "omissions",
+    }
+    assert found["schema"] == "vivary.find-result/v0"
+    assert found["query"] == "release workflow"
+    assert found["filters"] == query["filters"]
+    assert found["complete"] is True
+    assert 0 < found["estimated_tokens"] <= found["budget"]
+    assert [hit["path"] for hit in found["results"]] == [
+        "decisions/release-workflow.md"
+    ]
+    assert all(
+        set(hit) == {"id", "type", "path", "reason", "snippet", "edges"}
+        for hit in found["results"]
+    )
+
+    assert set(checked) == {
+        "schema",
+        "checked",
+        "clean",
+        "errors",
+        "warnings",
+        "findings",
+        "strict",
+        "complete",
+        "workspace_fingerprint",
+        "omissions",
+    }
+    assert checked["schema"] == "vivary.check-result/v0"
+    assert checked["checked"] == checked["clean"] == 3
+    assert checked["errors"] == checked["warnings"] == 0
+    assert checked["findings"] == []
+    assert checked["strict"] is True
+    assert checked["complete"] is True
+
+    fingerprints = {
+        query["workspace_fingerprint"],
+        query_again["workspace_fingerprint"],
+        found["workspace_fingerprint"],
+        checked["workspace_fingerprint"],
+    }
+    assert len(fingerprints) == 1
+    fingerprint = fingerprints.pop()
+    assert fingerprint.startswith("sha256:") and len(fingerprint) == 71
+
+
+def test_public_check_selected_path_resolves_refs_against_full_snapshot(tmp_path):
+    _search_vault(tmp_path)
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+
+    checked = tropo.check_workspace(
+        root,
+        paths=("decisions/release-workflow.md",),
+        allowlist=[root],
+    )
+
+    assert checked["checked"] == 1
+    assert checked["warnings"] == 0
+    assert checked["findings"] == []
+    assert checked["complete"] is True, checked["omissions"]
+
+    selected = tmp_path / "decisions" / "release-workflow.md"
+    selected.write_text(
+        selected.read_text(encoding="utf-8").replace(
+            "affects: agent-workspace",
+            "affects: missing-module",
+        ),
+        encoding="utf-8",
+    )
+    missing = tropo.check_workspace(
+        root,
+        paths=("decisions/release-workflow.md",),
+        allowlist=[root],
+    )
+
+    assert missing["checked"] == 1
+    assert missing["warnings"] == 1
+    assert [finding["code"] for finding in missing["findings"]] == ["W220"]
+
+
+def test_public_context_supports_a_thin_non_git_workspace_without_weakening_privacy(tmp_path):
+    vivary = tmp_path / ".vivary"
+    (vivary / "records" / "changes").mkdir(parents=True)
+    (vivary / "runtime").mkdir()
+    (vivary / "private").mkdir()
+    (tmp_path / ".gitignore").write_text(
+        "# >>> vivary private/runtime >>>\n"
+        ".vivary/private/\n"
+        ".vivary/runtime/\n"
+        "*.vivary-tmp\n"
+        "# <<< vivary private/runtime <<<\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (vivary / "workspace.toml").write_text(
+        'version = 1\n'
+        'exclude = [".git", ".agents", ".vivary/private", ".vivary/runtime"]\n'
+        '[workspace]\ncontract = "thin-v0.3"\n'
+        'preset = "coding"\nstate = "STATE.md"\n'
+        'private = [".vivary/private"]\nruntime = [".vivary/runtime"]\n'
+        'adapters = []\ncapabilities = []\n'
+        '[base]\nderive = ["id", "title"]\nallow_untyped = true\n'
+        '[types.project]\nfolder = [".vivary", "projects"]\n'
+        'required = { status = "enum:idea|active|paused|shipped|archived" }\n'
+        '[types.change]\nfolder = "changes"\n'
+        'required = { project = "string", status = "enum:planned|active|done|blocked|deferred", slice = "string" }\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    (vivary / "context.md").write_text(
+        "---\nstatus: active\n---\n# Project context\n",
+        encoding="utf-8",
+    )
+    (vivary / "records" / "changes" / "runtime-proof.md").write_text(
+        "---\nproject: context\nstatus: done\nslice: MCP runtime proof\n---\n"
+        "# Earned runtime proof\n",
+        encoding="utf-8",
+    )
+    (vivary / "runtime" / "cache.md").write_text(
+        "# Runtime only\nDO_NOT_READ_RUNTIME_MARKER\n",
+        encoding="utf-8",
+    )
+    (vivary / "private" / "note.md").write_text(
+        "# Private\nDO_NOT_READ_PRIVATE_MARKER\n",
+        encoding="utf-8",
+    )
+    root = _public_workspace_root(tmp_path)
+    read_paths = []
+    original_read = tropo._public_read_candidate
+
+    def record_read(workspace, candidate, *args, **kwargs):
+        read_paths.append(candidate["rel"])
+        return original_read(workspace, candidate, *args, **kwargs)
+
+    with mock.patch.object(tropo, "_public_read_candidate", side_effect=record_read):
+        query = tropo.query_context(
+            root,
+            "earned runtime proof",
+            type_filters=("change",),
+            allowlist=[root],
+        )
+
+    assert query["complete"] is True, query["omissions"]
+    assert [row["id"] for row in query["results"]] == ["runtime-proof"]
+    assert ".vivary/workspace.toml" in read_paths
+    assert ".vivary/runtime/cache.md" not in read_paths
+    assert ".vivary/private/note.md" not in read_paths
+    assert {
+        (row["kind"], row["reason"], row["count"])
+        for row in query["omissions"]
+    } >= {
+        ("privacy_excluded", "git_ignored", 1),
+        ("filesystem", "sensitive_name", 1),
+    }
+
+
+def test_public_context_non_git_fallback_refuses_unowned_ignore_policy(tmp_path):
+    (tmp_path / "note.md").write_text("# Note\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("*.md\n", encoding="utf-8")
+    root = _public_workspace_root(tmp_path)
+
+    try:
+        tropo.query_context(root, "note", allowlist=[root])
+    except tropo.PrivacyPolicyUnavailableError:
+        pass
+    else:
+        assert False, "expected non-Git fallback to refuse an unowned ignore policy"
+
+
+def _write_public_thin_config(root, *, strict=True, allow_untyped=True):
+    vivary = root / ".vivary"
+    vivary.mkdir(exist_ok=True)
+    (root / ".gitignore").write_text(
+        "# >>> vivary private/runtime >>>\n"
+        ".vivary/private/\n.vivary/runtime/\n*.vivary-tmp\n"
+        "# <<< vivary private/runtime <<<\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (vivary / "workspace.toml").write_text(
+        'version = 1\nexclude = [".vivary/private", ".vivary/runtime"]\n'
+        '[workspace]\ncontract = "thin-v0.3"\npreset = "coding"\n'
+        'state = "STATE.md"\nprivate = [".vivary/private"]\n'
+        'runtime = [".vivary/runtime"]\nadapters = []\ncapabilities = []\n'
+        f"[base]\nstrict = {str(strict).lower()}\n"
+        f"allow_untyped = {str(allow_untyped).lower()}\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+def test_public_context_refuses_an_invalid_thin_config(tmp_path):
+    vivary = tmp_path / ".vivary"
+    vivary.mkdir()
+    (tmp_path / ".gitignore").write_text(
+        "# >>> vivary private/runtime >>>\n"
+        ".vivary/private/\n.vivary/runtime/\n*.vivary-tmp\n"
+        "# <<< vivary private/runtime <<<\n",
+        encoding="utf-8",
+    )
+    (vivary / "workspace.toml").write_text(
+        'version = 1\n[workspace]\ncontract = "wrong"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "note.md").write_text("# Note\n", encoding="utf-8")
+    root = _public_workspace_root(tmp_path)
+
+    try:
+        tropo.query_context(root, "note", allowlist=[root])
+    except tropo.PrivacyPolicyUnavailableError:
+        pass
+    else:
+        assert False, "expected invalid thin config refusal"
+
+
+def test_public_context_applies_a_privacy_admitted_tighten_only_root_overlay(tmp_path):
+    _write_public_thin_config(tmp_path)
+    (tmp_path / "tropo.toml").write_text(
+        'exclude = ["hidden.md"]\n[base]\nallow_untyped = false\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "visible.md").write_text(
+        "# Visible overlay proof\n", encoding="utf-8"
+    )
+    (tmp_path / "hidden.md").write_text(
+        "# Hidden overlay proof\n", encoding="utf-8"
+    )
+    root = _public_workspace_root(tmp_path)
+
+    result = tropo.query_context(root, "overlay proof", allowlist=[root])
+
+    assert [row["id"] for row in result["results"]] == ["visible"]
+    assert {
+        (row["kind"], row["reason"], row["count"])
+        for row in result["omissions"]
+    } >= {("document", "config_excluded", 1)}
+
+
+def test_public_context_refuses_a_loosening_thin_root_overlay(tmp_path):
+    _write_public_thin_config(tmp_path, strict=True)
+    (tmp_path / "tropo.toml").write_text(
+        "[base]\nstrict = false\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "note.md").write_text("# Note\n", encoding="utf-8")
+    root = _public_workspace_root(tmp_path)
+
+    try:
+        tropo.query_context(root, "note", allowlist=[root])
+    except tropo.PrivacyPolicyUnavailableError:
+        pass
+    else:
+        assert False, "expected a loosening thin overlay to fail closed"
+
+
+def test_public_context_refuses_any_absolute_machine_path_in_query():
+    for absolute_path in (
+        "/usr/local/private.txt",
+        "/data/private.txt",
+        "see `/usr/local/private.txt`",
+        "source:/data/private.txt",
+    ):
+        try:
+            tropo.query_context(
+                "/workspace",
+                f"read {absolute_path}",
+                allowlist=["/workspace"],
+            )
+        except tropo.PathRefusedError:
+            pass
+        else:
+            assert False, f"expected absolute path refusal: {absolute_path}"
+
+
+def test_public_context_refuses_obfuscated_credentials_in_query():
+    for query in (
+        "password\u200b=do-not-disclose",
+        "ｐａｓｓｗｏｒｄ=do-not-disclose",
+    ):
+        try:
+            tropo.query_context(
+                "/workspace",
+                query,
+                allowlist=["/workspace"],
+            )
+        except tropo.PathRefusedError:
+            pass
+        else:
+            assert False, "expected obfuscated credential refusal"
+
+
+def test_public_context_policy_admits_before_any_candidate_byte_read(tmp_path):
+    _minimal_vault(tmp_path)
+    ignored = tmp_path / "notes" / "ignored.md"
+    ignored.write_text(
+        "# Ignored\nPRIVATE_IGNORED_CONTENT_MARKER\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".gitignore").write_text("notes/ignored.md\n", encoding="utf-8")
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    policy_candidates = []
+    read_candidates = []
+    original_policy = vivary_core.content_privacy_policy
+    original_read_candidate = tropo._public_read_candidate
+
+    def record_policy(checkout_path, candidates, **kwargs):
+        if not policy_candidates:
+            assert read_candidates == []
+        policy_candidates.append(tuple(candidates))
+        return original_policy(checkout_path, candidates, **kwargs)
+
+    def record_candidate_read(workspace, candidate, *args, **kwargs):
+        read_candidates.append(candidate["rel"])
+        return original_read_candidate(workspace, candidate, *args, **kwargs)
+
+    with (
+        mock.patch.object(
+            vivary_core,
+            "content_privacy_policy",
+            side_effect=record_policy,
+        ),
+        mock.patch.object(
+            tropo,
+            "_public_read_candidate",
+            side_effect=record_candidate_read,
+        ),
+    ):
+        result = tropo.query_context(
+            root,
+            "auth",
+            allowlist=[root],
+        )
+
+    assert len(policy_candidates) == 2
+    assert policy_candidates[0] == policy_candidates[1]
+    assert "notes/ignored.md" in policy_candidates[0]
+    assert "notes/ignored.md" not in read_candidates
+    assert {
+        "kind": "privacy_excluded",
+        "reason": "git_ignored",
+        "count": 1,
+    } in result["omissions"]
+    serialized = json.dumps(result, sort_keys=True)
+    assert "ignored.md" not in serialized
+    assert "PRIVATE_IGNORED_CONTENT_MARKER" not in serialized
+
+
+def test_public_candidate_refuses_same_size_rewrite_with_restored_mtime(tmp_path):
+    candidate_path = tmp_path / "note.md"
+    candidate_path.write_bytes(b"before")
+    original = os.lstat(candidate_path)
+    candidate, reason = tropo._public_candidate_from_info(
+        "note.md",
+        "markdown",
+        original,
+    )
+    assert reason is None
+    time.sleep(0.02)
+    candidate_path.write_bytes(b"after!")
+    os.utime(
+        candidate_path,
+        ns=(original.st_atime_ns, original.st_mtime_ns),
+    )
+
+    data, reason = tropo._public_read_candidate(
+        _public_workspace_root(tmp_path),
+        candidate,
+    )
+
+    assert data is None
+    assert reason == "changed"
+
+
+def test_public_context_refuses_changed_privacy_policy_after_reads(tmp_path):
+    _minimal_vault(tmp_path)
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    original_policy = vivary_core.content_privacy_policy
+    calls = {"count": 0}
+
+    def changing_policy(checkout_path, candidates, **kwargs):
+        result = original_policy(checkout_path, candidates, **kwargs)
+        calls["count"] += 1
+        if calls["count"] == 2:
+            result = {**result, "privacy_fingerprint": "sha256:" + "b" * 64}
+        return result
+
+    with mock.patch.object(
+        vivary_core,
+        "content_privacy_policy",
+        side_effect=changing_policy,
+    ):
+        try:
+            tropo.query_context(root, "auth", allowlist=[root])
+        except tropo.PrivacyPolicyUnavailableError as error:
+            assert error.reason == "privacy_policy_unavailable"
+        else:
+            assert False, "expected changed privacy policy to refuse the snapshot"
+
+    assert calls["count"] == 2
+
+
+def test_public_producer_cancellation_is_unavailable_for_every_facade(tmp_path):
+    _search_vault(tmp_path)
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    allowlist = [root]
+
+    for name, invoke in (
+        (
+            "query_context",
+            lambda: tropo.query_context(
+                root,
+                "release workflow",
+                allowlist=allowlist,
+                cancelled=lambda: True,
+            ),
+        ),
+        (
+            "find_context",
+            lambda: tropo.find_context(
+                root,
+                "release workflow",
+                allowlist=allowlist,
+                cancelled=lambda: True,
+            ),
+        ),
+        (
+            "check_workspace",
+            lambda: tropo.check_workspace(
+                root,
+                allowlist=allowlist,
+                cancelled=lambda: True,
+            ),
+        ),
+        (
+            "governed_find",
+            lambda: tropo.governed_find(
+                root,
+                "release workflow",
+                max_claims=24,
+                cancelled=lambda: True,
+            ),
+        ),
+    ):
+        try:
+            invoke()
+        except tropo.ProducerUnavailableError as error:
+            assert error.reason == "producer_unavailable", name
+        else:
+            assert False, f"{name} did not surface cancellation"
+
+
+def test_public_context_cancellation_interrupts_enumeration_and_ranking(tmp_path):
+    _search_vault(tmp_path)
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    allowlist = [root]
+
+    enumeration = {"requested": False, "calls": 0}
+    original_scandir = tropo.os.scandir
+
+    def cancel_after_scandir(*args, **kwargs):
+        enumeration["calls"] += 1
+        enumeration["requested"] = True
+        return original_scandir(*args, **kwargs)
+
+    with mock.patch.object(
+        tropo.os,
+        "scandir",
+        side_effect=cancel_after_scandir,
+    ):
+        _assert_public_producer_unavailable(
+            lambda: tropo.query_context(
+                root,
+                "release workflow",
+                allowlist=allowlist,
+                cancelled=lambda: enumeration["requested"],
+            )
+        )
+    assert enumeration["calls"] == 1
+
+    ranking = {"requested": False, "calls": 0}
+    original_rank = tropo._rank_search_records
+
+    def cancel_at_ranking(*args, **kwargs):
+        ranking["calls"] += 1
+        ranking["requested"] = True
+        return original_rank(*args, **kwargs)
+
+    with mock.patch.object(
+        tropo,
+        "_rank_search_records",
+        side_effect=cancel_at_ranking,
+    ):
+        _assert_public_producer_unavailable(
+            lambda: tropo.find_context(
+                root,
+                "release workflow",
+                allowlist=allowlist,
+                cancelled=lambda: ranking["requested"],
+            )
+        )
+    assert ranking["calls"] == 1
+
+
+def test_public_query_raises_work_limit_for_oversized_candidate(tmp_path):
+    _minimal_vault(tmp_path)
+    (tmp_path / "notes" / "over-limit.md").write_bytes(
+        b"# Over Limit\n" + b"x" * (1_048_576 + 1)
+    )
+    root = _public_workspace_root(tmp_path)
+
+    try:
+        tropo.query_context(root, "auth", allowlist=[root])
+    except tropo.WorkLimitExceededError as error:
+        assert error.reason == "work_limit_exceeded"
+    else:
+        assert False, "expected the public file-size work limit"
+
+
+def test_public_facades_leave_legacy_cli_output_and_receipts_unchanged(tmp_path):
+    _search_vault(tmp_path)
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    argv = [
+        "query",
+        "release workflow",
+        "--root",
+        str(tmp_path),
+        "--json",
+    ]
+
+    def run_legacy_query():
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with (
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = tropo.main(argv)
+        return rc, stdout.getvalue(), stderr.getvalue()
+
+    with mock.patch.dict(os.environ, {tropo.RECEIPT_ENV: ""}):
+        legacy_before = run_legacy_query()
+        unexpected_receipt = tmp_path / "unexpected-public-receipt.jsonl"
+        with (
+            mock.patch.dict(
+                os.environ,
+                {tropo.RECEIPT_ENV: str(unexpected_receipt)},
+            ),
+            mock.patch.object(
+                tropo,
+                "_append_run_receipt",
+                side_effect=AssertionError("public producer wrote a receipt"),
+            ),
+        ):
+            tropo.query_context(root, "release workflow", allowlist=[root])
+            tropo.find_context(root, "release workflow", allowlist=[root])
+            tropo.check_workspace(root, allowlist=[root])
+            tropo.governed_find(root, "release workflow", max_claims=24)
+
+        assert not unexpected_receipt.exists()
+        assert run_legacy_query() == legacy_before
 
 
 def test_cmd_query_no_results(tmp_path):

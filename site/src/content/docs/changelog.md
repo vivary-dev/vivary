@@ -14,6 +14,377 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: lightweight governed-context init and adoption] — 2026-08-10
+
+This slice advances unpublished `create-vivary` / `@vivary/create` to **0.4.0** and
+the `vivary` meta-package to **0.1.8**. It also changes the still-unpublished
+`vivary-core` **0.2.7**, `vivary-tropo` **0.5.2**, and `vivary-mcp` **0.1.1** source
+candidates. Published registry versions remain unchanged. The redesign replaces
+default full-workspace generation with a local-first `thin-v0.3` governed-context
+contract.
+
+### Added
+
+- Added deterministic brownfield planning with structured creates, bounded managed
+  patches, optional projections, kept inputs, conflicts, privacy results, and an exact
+  `plan_hash`. Apply requires that reviewed hash and revalidates the plan before writes.
+- Added privacy-first transactional apply with plan-bound recovery metadata,
+  exact-byte backups, rollback on ordinary failures, and explicit recovery after
+  process interruption.
+- Added thin Tropo root/config resolution. `.vivary/workspace.toml` owns the base scope;
+  root or nested legacy config may tighten it, while competing thin roots fail closed.
+- Added optional one-file `agents` and `claude` projections. Explicit
+  `cocoindex-code` selection stays inside the same five-file seed by declaring the
+  capability and excluding its private index path; it copies no sidecar files.
+- Added `create-vivary record`, a read-only plan plus exact-hash apply transaction for
+  one typed record earned by real work. It verifies a complete governed or public Task
+  Capsule envelope against the current workspace, then binds its id, capsule and
+  workspace fingerprints, destination, and before/after bytes. Apply reruns Doctor and
+  rolls back on failure. There is no batch, starter-pack, or automatic second-brain
+  materialization mode.
+- Added a fail-closed public context path for fresh non-Git thin workspaces. It admits
+  only the exact generated private/runtime ignore block and reads the validated thin
+  type policy. A privacy-admitted root `tropo.toml` may tighten the base; invalid,
+  loosening, ignored, or unreadable thin configuration refuses.
+- Added six canonical STE100 style guides for workspace creation, agent connection,
+  bounded retrieval, approved records, brownfield adoption, and recovery. People and
+  agents use the same Markdown sources; the public site and LLM surfaces are generated.
+
+### Changed
+
+- The GitHub Actions `graph review gate` now runs only for pull requests. The site
+  build runs only when site code, canonical docs, release surfaces, or its CI
+  definition changes; ordinary package-only changes skip the Astro build.
+- Default greenfield init now creates exactly three Vivary payload files
+  (`.vivary/context.md`, `.vivary/workspace.toml`, and `STATE.md`) plus two bounded host
+  integrations (`AGENTS.md` and `.gitignore`). It no longer copies templates, runtime
+  skills, placeholders, starter records, or framework prose.
+- Default interactive init and plain `--auto` use file storage and install no provider.
+  Embedded storage requires `--storage embedded` or the matching wizard choice. Size
+  and local privacy hints never grant provider-install authority.
+- Brownfield adoption is capped at the same three payload creates and may separately
+  create or patch only the generated blocks in `AGENTS.md` and `.gitignore`. Existing
+  user content is retained; divergent or unsafe state is an explicit conflict.
+- Doctor compatibility schema advances to **2**. Thin workspaces report
+  `workspace_contract = "thin-v0.3"`; prior full layouts remain read-compatible as
+  `workspace_contract = "legacy-full"` with a separate `legacy_layout` field.
+- The legacy full-scaffold asset archive remains available to repository compatibility
+  tests but is excluded from wheels and source distributions. Public CLI init/adopt
+  use only the thin contract. Obsidian/editor configuration is separate from thin init.
+- The `vivary` meta-package now requires `create-vivary>=0.4.0`.
+- The optional MCP adapter remains exactly four read-only tools. A capsule returned by
+  MCP can bind the separate human-approved one-record CLI transaction; MCP startup and
+  tool calls never create records, packs, providers, or a pre-populated second brain.
+- Replaced the single exercise page with a routed guide library. Each guide owns
+  one task, keeps instructions below the STE100 sentence limits, and routes exhaustive
+  flags, schemas, and exit codes to the command reference.
+- Reframed the prior how-to page as advanced recipes. Its agent setup examples now
+  preview file-backed Core before any optional provider installation or authority gate.
+
+### Fixed
+
+- Selected-path Tropo checks now resolve references against every document in the
+  bounded snapshot while still reporting findings only for the selected paths, so a
+  valid reference outside the selection no longer produces a false `W220`.
+- Active-context privacy now stays capability-bound through Tropo validation, Doctor,
+  adoption planning and apply, and authenticated recovery. Missing or negated
+  `.cocoindex_code/` policy fails closed, while adoption preserves or restores the
+  exact generated privacy block for a declared `cocoindex-code` workspace.
+- The optional MCP adapter now pins each configured workspace directory with a live
+  operating-system identity anchor. A replacement root fails closed even when Linux
+  immediately recycles the original directory's inode, while ordinary writes inside
+  the original workspace remain available.
+- The primary CI job now installs its shared Python test runner before the first
+  pytest suite, and a workflow contract guard prevents that ordering from regressing.
+- Doctor repair now recognizes a thin workspace even when its repairable `.gitignore`
+  policy is incomplete, and atomic repair preserves the existing file mode.
+- The strict orientation proof builds local Core and Tropo wheels before exercising
+  the real npm/uvx launcher, so unpublished source candidates do not depend on
+  already-existing PyPI releases.
+- Init now refuses every nonempty target even with `--force`, so it cannot replace
+  user edits in an existing thin workspace. Existing workspaces route through the
+  governed adoption plan.
+- Adoption approvals now bind the canonical workspace root, stable filesystem
+  identity, selected adapters, and exact planned inputs. An approval from an
+  identically shaped workspace cannot be replayed against another root.
+- Interrupted adoption recovery now authenticates the journal against its approved
+  plan and canonical action set. Recovery is read-only by default and requires a
+  separate exact recovery-plan hash plus `--yes` before rollback writes.
+- Generated-file writes now use verified directory identities and descriptor- or
+  handle-relative atomic replacement. Parent swaps fail closed without redirecting
+  content outside the intended workspace on Windows or POSIX.
+- Recognized legacy-full Doctor repair is now report-only. `--repair --yes` does not
+  recreate placeholders, alter privacy policy, or normalize legacy content.
+- Updated Linux and Windows installed-wheel CI assertions to the staged package
+  versions and dependency floors. Required CI and npm release checks now run thin init,
+  governed record, and brownfield adoption suites instead of leaving the new release
+  contract outside the gate.
+- The optional MCP wheel smoke now installs `mcp==2.0.0` first, then resolves every
+  Vivary artifact only from the local candidate wheelhouse. Registry packages cannot
+  mask a broken branch dependency.
+- Replaced the record command's caller-typed capsule id/hash pair with full-envelope
+  canonical integrity, exact scope or workspace fingerprint, and current-workspace
+  validation. Tampered and wrong-workspace capsules now fail before a plan exists.
+- Corrected the thin tutorial's legacy-only impact exercise and the white paper's stale
+  MCP and minimal-workspace descriptions.
+- Removed the retired full-scaffold templates and skill packs from the `create-vivary`
+  source distribution as well as its wheel; the repository-only archive remains for
+  legacy compatibility tests.
+- Synchronized canonical docs into the generated site, corrected the release-candidate
+  versus published-0.3.1 command boundary, and added one complete capsule-to-approved-
+  record exercise.
+
+### Verification
+
+```text
+python packages/tropo/tests/test_tropo.py
+python -m pytest packages/core/tests/ -q
+uv run --offline --with mcp==2.0.0 --with mcp-types==2.0.0 --with pytest -- python -m pytest packages/mcp/tests/ -q
+python packages/create-vivary/tests/test_create_vivary.py
+python packages/create-vivary/tests/test_init_thin.py
+# WSL/Linux
+python3 packages/create-vivary/tests/test_init_thin.py
+python packages/create-vivary/tests/test_record_workflow.py
+python packages/create-vivary/tests/test_adopt.py
+python packages/create-vivary/tests/test_orientation_proof.py
+python packages/create-vivary/tests/test_privacy_differential.py
+python packages/create-vivary/tests/test_assets_parity.py
+python packages/vivary/tests/test_vivary_cli.py
+python packages/ozone/tests/test_ozone.py
+python packages/exo/tests/test_exo.py
+python -m pytest packages/strato/tests/ -q
+python packages/memory-cognee/tests/test_memory_cognee.py
+python packages/tropo/tropo.py check --root packages/tropo/examples/vault
+python scripts/check_npm_trusted_publish_workflow.py
+python scripts/tests/test_package_docs_parity.py
+python scripts/check_line_endings.py
+git diff --check
+npm pack ./packages/create-vivary/npm --dry-run
+$env:VIVARY_SYNC_NO_DELETE = '1'; Push-Location site; node scripts/sync-docs.mjs; Pop-Location
+Push-Location site; & .\node_modules\.bin\astro.cmd build; Pop-Location
+cd site && node --test tests/*.test.mjs && node scripts/check-built-links.mjs
+```
+
+- Results: Tropo **191/191**, Core **801/801**, optional MCP **30/30**,
+  create-vivary **194 run** with 191 passed and 3 intentional skips, thin init
+  **13/13** on Windows and WSL/Linux, governed record **12/12**, thin adoption
+  **16/16** on Windows and WSL/Linux, orientation proof
+  **9/9**, privacy differential **2/2**, Vivary meta CLI **9/9**, Ozone **110/110**,
+  Exo **29/29**, Strato **48/48**, optional memory **54/54**, asset parity **5/5**,
+  and site contracts **11/11**. The built-link gate checked **2,678** local references
+  and **1,480** anchors across 33 pages with zero failures. Local browser review found
+  zero console warnings or errors across the guide index and all six task guides.
+- The current working tree built all nine wheels. A fresh isolated environment
+  installed `mcp==2.0.0`, then installed `vivary-mcp` and `create-vivary` with
+  `--no-index` from that wheelhouse; `pip check`, versions, and the MCP entry point
+  passed. npm dry-run produced a three-file, 2.6 kB `@vivary/create` **0.4.0** tarball.
+
+### Status
+
+- Publishing remains a manual human gate.
+- No package was published or site deployed. Generated mirrors were synchronized and
+  built locally, but brownfield benchmark and adoption dogfood were not performed.
+- Exact-commit clean-worktree artifact proof must be repeated after the reviewed
+  candidate is committed. Remote CI, PR, merge, and release-tag identity remain pending.
+
+## [Unreleased: Vivary Governed Context release truth and benchmark protocol (#149, #151, #210, #214)] — 2026-08-09
+
+This slice names the coordinated development train **Vivary Governed Context** and
+freezes its context-retrieval benchmark protocol. A train coordinates independently
+versioned artifacts; it is not a suite semver. Only `create-vivary` and
+`@vivary/create` remain version-lockstep. No package version changes in this slice,
+and no publication, graduation, benchmark result, or savings claim is made.
+
+### Added
+
+- Added the single migration-classification owner and the compact durable-decision
+  index. They route version truth to README, package edges and authority to
+  architecture, envelopes to COMMANDS, adapter ceilings to MCP, and release mechanics
+  to RELEASE-WORKFLOW.
+- Added current Mermaid maps for Core, the four roles, optional memory, MCP, and direct
+  package dependencies; added the six public governed-context vocabulary terms and a
+  compact schema-envelope index. Behavior claims link to source tests, fixtures, or
+  manifests; the retained retrieval-performance comparison is labeled as a hypothesis.
+- Added an evidence-led learn-by-doing route and generated-site navigation for the
+  tutorial, migration status, and decision index.
+- Froze the stdlib Python 3.11 context-retrieval protocol at public corpus
+  `cbbd340dbf0ffebfe17ad5257ecd93b83ab570de`: four roadmap questions, baseline
+  and governed-retrieval arms, three isolated replicates, exact model/effort/prompt
+  settings, fixed work ceilings, deterministic statistics, and strict source-line,
+  result-schema, support, runtime, and drift validation. The protocol-only state
+  deliberately contains no `results.json` or `docs/BENCHMARK.md`.
+
+### Changed
+
+- README now separates the held Vivary Governed Context source train from the registry table.
+- The release workflow now requires a dedicated clean release checkout/worktree and
+  defines the named-train lifecycle from planned through verified without aligning
+  unrelated package versions.
+- MCP now publishes its exact work, input, concurrency, timeout, response, and
+  diagnostic ceilings alongside its read-only authority boundary.
+
+### Status
+
+- Source and registry facts in this documentation snapshot: **verified: 2026-08-09**.
+- Benchmark validator regressions passed **22 tests** and the protocol-only guard
+  verified four questions with no results artifact. Create-version parity passed
+  **5 checks**; package-doc parity passed **10 tests** and its canonical check.
+- With pinned Node **22.23.2** and npm **10.9.8**, the site audit reported zero
+  vulnerabilities, **9 tests** passed, **27 pages** built, and the link check found
+  zero failures across **2,075 references** and **1,242 anchors**.
+- Publishing remains a manual human gate.
+
+## [Unreleased: brownfield and memory privacy blockers (#266, #235, #236)] — 2026-08-09
+
+This release-train slice advances unpublished `vivary-tropo` to **0.5.2**,
+`vivary-memory-cognee` to **0.1.2**, `vivary-mcp` to **0.1.1**,
+`create-vivary` / `@vivary/create` to **0.3.4**, and the `vivary` meta-package to
+**0.1.7**. `vivary-core` remains **0.2.7**; published registry versions remain
+unchanged.
+
+### Fixed
+
+- `base.allow_untyped = true` now permits untyped documents: Tropo omits `W201`,
+  validates declared base fields, and ignores fields with no owning type. Setting it
+  to `false` still emits `W201` as an error, and typed documents retain `W202`.
+  [Regression coverage](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py)
+- Cognee Doctor validates `memory.cognee.state_path` before testing provider
+  availability, so an escaping path is `misconfigured` even when Cognee is absent.
+  [Regression coverage](https://github.com/vivary-dev/vivary/blob/dev/packages/memory-cognee/tests/test_memory_cognee.py)
+- Memory snapshots now reuse Core's fail-closed Git-ignore privacy policy and pass
+  only admitted absolute Markdown paths to Tropo analysis. Built-in and configured
+  private paths remain the floor when Git-ignore matching is disabled.
+  [Differential privacy coverage](https://github.com/vivary-dev/vivary/blob/dev/packages/memory-cognee/tests/test_memory_cognee.py)
+
+### Security
+
+- The site CI job now runs blocking `npm audit --audit-level=high` immediately after
+  `npm ci`. HIGH and CRITICAL advisories block; MODERATE findings remain visible but
+  do not block. This threshold catches release-threatening dependency defects while
+  reducing unrelated advisory churn. If the live advisory database makes an unrelated
+  PR red, maintainers open a dependency-remediation slice and preserve the gate rather
+  than skipping, weakening, or marking it non-blocking.
+- Red control: the `7a43117^` lockfile pinned PostCSS 8.5.16 and SVGO 4.0.1; the
+  blocking audit exited 1 with four HIGH findings, including those two packages.
+  Green candidate: after reviewed transitive lock updates to `js-yaml` 4.3.1 and
+  `nanoid` 3.3.18, the same audit reported zero vulnerabilities. The site behavior
+  suite, production build, and link check then passed. [CI gate](https://github.com/vivary-dev/vivary/blob/dev/.github/workflows/ci.yml);
+  [decision record](https://github.com/vivary-dev/vivary/issues/232);
+  verified: 2026-08-09.
+
+### Changed
+
+- Direct floors are `vivary-tropo>=0.5.2` for MCP and create-vivary,
+  `vivary-core>=0.2.7` plus `vivary-tropo>=0.5.2` for memory-cognee, and
+  `create-vivary>=0.3.4` plus `vivary-tropo>=0.5.2` for the meta-package.
+- Publishing remains a manual human gate.
+
+## [Unreleased: optional read-only MCP adapter (#206)] — 2026-08-02
+
+Implements [#206](https://github.com/vivary-dev/vivary/issues/206) under the tool
+contract resolved by [#225](https://github.com/vivary-dev/vivary/issues/225). The
+[release-status section](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status)
+owns current published and development version truth.
+
+This slice adds unpublished `vivary-mcp` **0.1.0** and advances unpublished
+`vivary-core` to **0.2.7**, `vivary-tropo` to **0.5.1**, `create-vivary` and
+`@vivary/create` to **0.3.3**, and the `vivary` meta-package to **0.1.6**. Published
+versions stay unchanged.
+
+### Added
+
+- Added the optional Python 3.11+ `vivary-mcp` package with local standard-input/output
+  transport and exact official `mcp==2.0.0` dependency for protocol `2026-07-28`.
+- Added exactly `vivary_find`, `vivary_query`, `vivary_check`, and `vivary_capsule`.
+  Closed Draft 2020-12 schemas, typed omissions, bounded whole responses, immutable
+  operator-owned aliases, SDK-owned discovery, and one active producer bound every
+  call.
+- Added public Tropo find, query, check, and governed capsule producer contracts over
+  Core privacy admission. Public capsule projection excludes raw evidence, commands,
+  scope roots, machine paths, credentials, private content, and unsafe claim kinds.
+- Added passive `interop:mcp` capability and Doctor reporting. It reads installed
+  metadata and entry-point declarations without imports, process launch, or network
+  access. Optional absence is healthy; exact SDK mismatch is incompatible; external
+  conformance reports `unproven`.
+- Added fake-surface unit regressions and official-SDK wire regressions for discovery,
+  server/client metadata, schema validation, malformed requests, cancellation,
+  timeout, recovery, diagnostics, and exact tool identity.
+
+### Changed
+
+- Core's fixed Git subprocess runner now uses a bounded process scope: a new POSIX
+  session/process group or a Windows kill-on-close Job Object assigned before the
+  suspended child resumes. Timeout, cancellation, overflow, normal parent exit, and
+  read/write failure terminate descendants, reap the direct child, verify scope exit,
+  close pipes, and join helpers before returning. An unconfirmed scope stop
+  quarantines later process starts for the server lifetime.
+- Tropo now binds approved candidates to device, inode, size, nanosecond modification
+  and change times around descriptor reads. It rechecks Core's exact allowed paths and
+  privacy fingerprint after content processing. Core content search likewise rechecks
+  the effective tracked-tree ignore policy after fixed-literal Git search and discards
+  results if policy changed.
+- On Python 3.11 for Windows, public candidate snapshots now read NTFS change time
+  through an attribute-only handle instead of treating creation time as change time.
+  The [same-size rewrite regression](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py#L2569-L2592)
+  restores the documented race refusal on the package's lowest supported Python.
+- Public enumeration applies cancellation and hard entry ceilings while consuming
+  directory iterators, before sorting. Cancellation propagates through ranking,
+  validation, content search, graph projection, capsule compilation, and fixed Git
+  work.
+- MCP producers have one slot. A timed-out producer that ignores cooperative
+  cancellation keeps that slot until its thread exits, so later calls fail closed
+  instead of overlapping uncontrolled work.
+- The coordinated dependency floors are now `vivary-tropo>=0.5.1`,
+  `vivary-core>=0.2.7` from Tropo, and `create-vivary>=0.3.3` from the `vivary`
+  meta-package. MCP remains an optional edge: `vivary-mcp → vivary-tropo →
+  vivary-core`.
+- Canonical architecture, command, data-layer, roadmap, white-paper, package, and MCP
+  documentation now distinguish the baseline CLI from the optional read-only adapter.
+  No named-client or external-conformance claim is made.
+
+### Security
+
+- Tool callers cannot select a root, executable, shell command, process, transport,
+  endpoint, provider, or network destination. The adapter has no write, repair,
+  memory-promotion, check-execution, publishing, deployment, or gate-approval path.
+- Standard output is protocol-only. Bounded standard-error diagnostics exclude roots,
+  aliases, queries, filters, snippets, paths, identifiers, arguments, environment,
+  client identity, claims, evidence, credentials, exceptions, and stack traces.
+- Candidate bytes remain unopened until Core admits their public names. Changed file,
+  workspace, or privacy-policy identity refuses the result. Public capsules bind one
+  exact capsule scope root, reject Unicode format-control and normalized credential
+  obfuscation, and omit every absolute machine path. Exact JSON-escaped wire responses
+  refuse rather than truncate when a response or work ceiling is exceeded.
+- The npm trusted-publishing workflow now pins checkout, Python, and Node Actions to
+  reviewed immutable commit SHAs before granting publication identity. The
+  [workflow guard](https://github.com/vivary-dev/vivary/blob/dev/scripts/check_npm_trusted_publish_workflow.py) rejects those
+  Actions when referenced by mutable version tags.
+
+### Verification
+
+- All 15 Core test modules passed on Windows: **800 tests** across three bounded
+  `pytest` invocations. A WSL stdlib smoke also stopped an inherited-pipe descendant
+  process group in **0.12 seconds**.
+- `python packages/tropo/tests/test_tropo.py` — **181/181 passed** on Windows.
+- The four bounded `test_create_vivary.py` class runs passed **194 tests** with **3
+  skips**. The orientation proof passed **9 tests** and the npm launcher passed **11
+  checks**.
+- `python -m pytest packages/mcp/tests/ -q` — **28 passed** against official
+  `mcp==2.0.0` and `mcp-types==2.0.0`, including a real SDK stdio subprocess and a
+  noncooperative timeout quarantine.
+- Nine coordinated wheels built without test packages. A fresh offline `vivary`
+  install passed `pip check` and proved MCP absent by default. The optional Core,
+  Tropo, and MCP wheels also passed `pip check` and launched `vivary-mcp --help`
+  against the reviewed SDK closure.
+- Package-doc parity passed **10 tests** with three development-source allowlist
+  entries. The site passed **8 tests**, built **24 pages**, and checked **1,830 local
+  references** and **1,154 anchors** with zero failures.
+
+The pinned external harness documents URL-based HTTP server mode, not stdio server
+launch. It has not exercised this adapter, so external conformance remains
+`unproven`. Publication, deployment, and default enablement remain manual human
+gates.
+
 ## [Unreleased: governed installation and capability truth (#207)] (2026-08-02)
 
 Implements [#207](https://github.com/vivary-dev/vivary/issues/207). The

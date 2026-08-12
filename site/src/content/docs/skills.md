@@ -4,13 +4,10 @@ description: "The strato, tropo, and loops skills that operate a Vivary workspac
 editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/SKILLS.md"
 ---
 
-Vivary ships **agent skills**: load-on-demand procedures that tell an agent *how* to
-operate the workspace. They live next to the workspace (`.claude/skills/` for Claude
-Code, `.agents/skills/` for Codex) and load only when relevant, so they cost nothing
-until needed (the minimalism law). A generated workspace includes the **strato** and
-**loops** skills; the **tropo** skill ships with the tropo package. Coding workspaces
-created with `--active-context cocoindex-code` also include the optional
-**active-context** skill.
+Vivary packages include **agent skills**: load-on-demand procedures that tell an
+agent *how* to operate a capability. The five-file Core seed copies no skills. An
+explicit `--adapter` can add one bounded runtime projection; package and repository
+skills remain available at their documented install surfaces.
 
 Skills follow the same DRY/progressive-disclosure rule as module indexes: the skill is
 the procedure's source of truth, while `AGENTS.md` and `modules/**/index.md` only route
@@ -122,11 +119,14 @@ this order:
 where this is implemented", "search the codebase", or code work where grep is too
 thin/noisy.
 
-Generated only by:
+Declare the optional capability without copying this skill:
 
 ```bash
 create-vivary init my-codebase --preset coding --active-context cocoindex-code
 ```
+
+That command changes only the five-file seed policy. Use this canonical section or
+the LLM guide when a human later approves sidecar setup.
 
 ---
 

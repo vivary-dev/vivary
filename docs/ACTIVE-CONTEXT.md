@@ -9,21 +9,25 @@ The baseline remains small and deterministic: `tropo` owns the typed graph, `str
 owns the agent loop, and no index, daemon, embedding model, or MCP server is enabled by
 default.
 
-For coding workspaces, `create-vivary` can scaffold a CocoIndex-code profile:
+For coding workspaces, `create-vivary` can declare the CocoIndex-code capability:
 
 ```bash
 create-vivary init my-workspace --preset coding --active-context cocoindex-code
 ```
 
-This writes:
+This keeps the exact five-file Core seed. It changes only existing policy:
 
-- an `active-context` skill for Claude/Codex-style agents;
-- `docs/active-context.md` with the local policy;
-- graph nodes under `modules/active-context/index.md`, `decisions/`, and
-  `verification/`;
-- `.cocoindex_code/` in `.gitignore`.
+- `.vivary/workspace.toml` declares `cocoindex-code` and excludes its local index;
+- `.gitignore` ignores `.cocoindex_code/`.
 
-It does **not** automatically install CocoIndex-code, initialize an index, run
+Tropo and Doctor fail closed if either privacy rule is missing or negated. Brownfield
+adoption carries the declared capability through its exact plan hash and recovery
+journal, so a missing or host-owned `.gitignore` receives the same private-index rule.
+
+It does not copy a skill, guide, graph node, starter record, template, or framework
+router into the new workspace. Use this canonical guide when setup is later approved.
+
+The declaration does **not** install CocoIndex-code, initialize an index, run
 embeddings, enable MCP, or send source text anywhere. Those are explicit gates after
 the user approves active context. For copy/paste agent instructions, use
 [LLM-ACTIVE-CONTEXT.md](LLM-ACTIVE-CONTEXT.md).

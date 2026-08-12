@@ -47,17 +47,25 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PY_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, PY_ROOT)
 
-from vivary_core.canonical import MAX_LOSSLESS_INTEGER, fingerprint, normalize_path  # noqa: E402
+from vivary_core.canonical import (  # noqa: E402
+    MAX_LOSSLESS_INTEGER,
+    deterministic_id,
+    fingerprint,
+    normalize_path,
+)
 from vivary_core.capsule_compile import (  # noqa: E402
     CapsuleContentWorkLimitError,
     capsule_context_matches_graph,
     content_context_is_valid,
     compile_task_capsule,
+    project_public_task_capsule,
+    public_task_capsule_json_schema,
     MAX_TASK_SCOPE_ROOTS,
     MAX_CAPSULE_CANDIDATE_WORK,
     MAX_GRAPH_CONTEXT_CHECKOUTS,
     repair_topology_fingerprint,
     is_task_capsule_shape,
+    verify_public_task_capsule_integrity,
     verify_task_capsule_integrity,
 )
 from vivary_core.workspace_content import CONTENT_SCHEMA, observe_content  # noqa: E402
@@ -2722,3 +2730,219 @@ def test_entire_status_is_not_a_default_check(fx):
     )
     capsule = compile_task_capsule(task=TASK, graph=graph)
     assert not any("entire" in c["command"] for c in capsule["required_checks"])
+
+
+def _rehash_capsule(capsule):
+    body = {
+        key: value
+        for key, value in capsule.items()
+        if key not in {"capsule_id", "fingerprint"}
+    }
+    for claim in capsule["claims"]:
+        claim["id"] = deterministic_id(
+            "claim",
+            {
+                "subject": claim.get("subject"),
+                "fact": claim.get("fact"),
+                "claim": claim.get("claim"),
+            },
+        )
+    capsule["fingerprint"] = fingerprint(body)
+
+
+def _nested_keys(value):
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            yield key
+            yield from _nested_keys(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            yield from _nested_keys(nested)
+
+
+def test_public_capsule_projection_is_deterministic_bounded_and_private(graph, fx):
+    root = normalize_path(fx["paths"]["canonical"])
+    capsule = compile_task_capsule(
+        task={**TASK, "scope": [root]},
+        graph=graph,
+    )
+
+    first = project_public_task_capsule(capsule, checkout_path=root)
+    second = project_public_task_capsule(capsule, checkout_path=root)
+
+    assert first == second
+    assert verify_public_task_capsule_integrity(first, checkout_path=root)
+    assert first["fingerprint"] == fingerprint(
+        {key: value for key, value in first.items() if key != "fingerprint"}
+    )
+    assert len(first["claims"]) <= 24
+    assert all(len(first[field]) <= 64 for field in ("unknowns", "omissions", "required_checks"))
+    serialized = json.dumps(first, sort_keys=True)
+    assert root not in serialized
+    assert root.replace("/", "\\\\") not in serialized
+    assert not {
+        "command",
+        "cwd",
+        "evidence",
+        "observed_at",
+        "scope",
+        "subject_path",
+        "task",
+    }.intersection(_nested_keys(first))
+    assert first["complete"] is False
+    assert first["projection_omissions"]
+
+    tampered = json.loads(json.dumps(first))
+    tampered["capsule_id"] = "capsule_0000000000000000"
+    assert not verify_public_task_capsule_integrity(tampered, checkout_path=root)
+
+
+@pytest.mark.parametrize(
+    "unsafe_text",
+    [
+        "password=do-not-disclose",
+        "Authorization: Bearer-do-not-disclose",
+        "-----BEGIN OPENSSH PRIVATE KEY-----",
+        "https://user:credential@example.invalid/repository",
+        "password\u200b=do-not-disclose",
+        "ｐａｓｓｗｏｒｄ=do-not-disclose",
+        "/home/private/repository",
+        "/usr/local/private/repository",
+        "/data/private/repository",
+        r"\\server\share\repository",
+        "see `/usr/local/private/repository`",
+        "source:/data/private/repository",
+        "AKIA0123456789ABCDEF",
+        "ghp_0123456789abcdefghijkl",
+    ],
+)
+def test_public_capsule_projection_omits_credential_and_machine_material(
+    graph, fx, unsafe_text
+):
+    root = normalize_path(fx["paths"]["canonical"])
+    capsule = compile_task_capsule(
+        task={**TASK, "scope": [root]},
+        graph=graph,
+    )
+    capsule["claims"][0]["claim"] = unsafe_text
+    _rehash_capsule(capsule)
+    assert verify_task_capsule_integrity(capsule)
+
+    projected = project_public_task_capsule(
+        capsule,
+        checkout_path=normalize_path(fx["paths"]["canonical"]),
+    )
+
+    assert unsafe_text not in json.dumps(projected, ensure_ascii=False)
+    assert any(
+        row["kind"] == "claim" and row["reason"] == "unsafe_for_public_projection"
+        for row in projected["projection_omissions"]
+    )
+    assert projected["complete"] is False
+
+
+def test_public_capsule_projection_never_exposes_content_excerpts(fx):
+    paths = fx["paths"]
+    roots = [
+        paths["canonical"],
+        paths["staleNeighbor"],
+        paths["dirty"],
+        paths["noOrigin"],
+    ]
+    allowlist = list(roots)
+    content_graph = project_workspace_graph(
+        observe_checkouts(roots, allowlist=allowlist, now=NOW)
+    )
+    content = observe_content(
+        roots,
+        allowlist=allowlist,
+        terms=["original"],
+        now=NOW,
+    )
+    unscoped = compile_task_capsule(
+        task={"question": "What original files exist?"},
+        graph=content_graph,
+        content=content,
+    )
+    root = next(
+        claim["subject_path"]
+        for claim in unscoped["claims"]
+        if claim["fact"] == "content_match"
+    )
+    capsule = compile_task_capsule(
+        task={"question": "What original files exist?", "scope": [root]},
+        graph=content_graph,
+        content=content,
+    )
+    content_claim = next(
+        claim for claim in capsule["claims"] if claim["fact"] == "content_match"
+    )
+
+    projected = project_public_task_capsule(
+        capsule,
+        checkout_path=root,
+    )
+
+    assert content_claim["claim"] not in json.dumps(projected)
+    assert not any(claim["fact"] == "content_match" for claim in projected["claims"])
+
+
+def test_public_capsule_projection_refuses_unverified_or_noncanonical_input(graph, fx):
+    root = normalize_path(fx["paths"]["canonical"])
+    capsule = compile_task_capsule(
+        task={**TASK, "scope": [root]},
+        graph=graph,
+    )
+    capsule["claims"][0]["claim"] = "forged without updating integrity"
+
+    with pytest.raises(ValueError, match="projection refused"):
+        project_public_task_capsule(
+            capsule,
+            checkout_path=root,
+        )
+    with pytest.raises(ValueError, match="projection refused"):
+        project_public_task_capsule(
+            compile_task_capsule(
+                task={**TASK, "scope": [root]},
+                graph=graph,
+            ),
+            checkout_path="relative/root",
+        )
+
+
+def test_public_capsule_projection_requires_exact_single_root_scope(graph, fx):
+    root = normalize_path(fx["paths"]["canonical"])
+    other_root = normalize_path(fx["paths"]["staleNeighbor"])
+
+    for task, checkout_path in (
+        (TASK, root),
+        ({**TASK, "scope": [root]}, other_root),
+        ({**TASK, "scope": [root, other_root]}, root),
+    ):
+        capsule = compile_task_capsule(task=task, graph=graph)
+        with pytest.raises(ValueError, match="projection refused"):
+            project_public_task_capsule(
+                capsule,
+                checkout_path=checkout_path,
+            )
+
+
+def test_public_capsule_schema_is_closed_local_ref_only_and_fresh():
+    schema = public_task_capsule_json_schema()
+    assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+
+    def inspect(value):
+        if isinstance(value, dict):
+            if value.get("type") == "object":
+                assert value.get("additionalProperties") is False
+            if "$ref" in value:
+                assert value["$ref"].startswith("#/")
+            for nested in value.values():
+                inspect(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                inspect(nested)
+
+    inspect(schema)
+    schema["properties"].clear()
+    assert public_task_capsule_json_schema()["properties"]

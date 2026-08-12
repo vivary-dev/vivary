@@ -1,5 +1,10 @@
-"""The bundled create_vivary_assets/ must stay byte-identical to their canonical
-sources. If this fails, run `python packages/create-vivary/tools/sync_assets.py`."""
+"""The repository-only legacy asset archive stays frozen for migration classification.
+
+Thin-v0.3 init generates its bounded capsule directly, and public wheels or source
+distributions must not ship the old full-scaffold prose, templates, placeholders,
+or dual skills.
+"""
+import json
 import sys
 import tomllib
 from pathlib import Path
@@ -9,6 +14,16 @@ sys.path.insert(0, str(TOOLS))
 import sync_assets  # noqa: E402
 
 ASSETS = Path(__file__).resolve().parents[1] / "create_vivary_assets"
+
+REPOSITORY = Path(__file__).resolve().parents[3]
+
+
+def _project_version(path: Path) -> str:
+    return tomllib.loads(path.read_text())["project"]["version"]
+
+
+def _npm_version(path: Path) -> str:
+    return json.loads(path.read_text())["version"]
 
 
 def _files(root: Path):
@@ -41,10 +56,34 @@ def test_assets_cover_required_workspace_files():
         assert (ASSETS / "templates" / name).exists(), f"bundled template missing: {name}"
 
 
-def test_package_data_includes_template_gitignore():
+def test_package_data_excludes_the_legacy_full_scaffold():
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
-    package_data = pyproject["tool"]["setuptools"]["package-data"]["create_vivary_assets"]
-    assert "templates/.gitignore" in package_data
+    setuptools = pyproject["tool"]["setuptools"]
+    package_data = setuptools.get("package-data", {})
+    assert not package_data.get("create_vivary_assets")
+    assert "create_vivary_assets" not in setuptools.get("packages", [])
+    assert setuptools["py-modules"] == ["create_vivary"]
+    manifest = (Path(__file__).resolve().parents[1] / "MANIFEST.in").read_text(
+        encoding="utf-8"
+    )
+    assert manifest.splitlines() == ["prune create_vivary_assets"]
+
+
+def test_python_and_npm_create_versions_are_lockstep():
+    python_manifest = REPOSITORY / "packages" / "create-vivary" / "pyproject.toml"
+    npm_manifest = REPOSITORY / "packages" / "create-vivary" / "npm" / "package.json"
+
+    assert _project_version(python_manifest) == _npm_version(npm_manifest)
+
+
+def test_unrelated_vivary_packages_keep_independent_versions():
+    unrelated_versions = {
+        package: _project_version(REPOSITORY / "packages" / package / "pyproject.toml")
+        for package in ("core", "tropo", "strato", "ozone", "exo", "memory-cognee", "mcp", "vivary")
+    }
+
+    # The coordinated train is a label, not a repository-wide package version.
+    assert len(set(unrelated_versions.values())) > 1
 
 
 if __name__ == "__main__":

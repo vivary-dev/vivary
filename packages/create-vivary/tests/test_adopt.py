@@ -1,4 +1,4 @@
-"""Tests for `create-vivary adopt` (brownfield adopt, P1.2 first slice)."""
+"""Public-seam tests for thin-v0.3 brownfield adoption."""
 
 import contextlib
 import hashlib
@@ -9,19 +9,17 @@ import sys
 import unittest
 import uuid
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 PKG = ROOT / "packages" / "create-vivary"
-TROPO = ROOT / "packages" / "tropo"
 
 sys.path.insert(0, str(PKG))
-sys.path.insert(0, str(TROPO))
 
 import create_vivary  # noqa: E402
-import tropo  # noqa: E402
 
 
-def temp_dir():
+def temp_dir() -> Path:
     path = ROOT / "sandboxes" / f"test-adopt-{uuid.uuid4().hex}"
     path.mkdir(parents=True)
     return path
@@ -32,658 +30,978 @@ def write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
-def make_brownfield_fixture(root: Path) -> None:
-    """A repo with an existing README.md, CLAUDE.md, a docs/ tree with 6 markdown
-    files (a candidate module), and a couple of source files (so the tree is not
-    markdown-only)."""
-    write(root / "README.md", "# My existing project\n")
-    write(root / "CLAUDE.md", "# Claude guidance for this repo\n")
-    for i in range(6):
-        write(root / "docs" / f"topic-{i}.md", f"# Topic {i}\n")
-    write(root / "src" / "main.py", "print('hello')\n")
-    write(root / "src" / "util.py", "def helper():\n    return 1\n")
-
-
 def snapshot(root: Path) -> dict[str, str]:
-    """path -> sha256 for every file under root (relative, posix-normalized)."""
-    out = {}
-    for path in root.rglob("*"):
-        if path.is_file():
-            out[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
-    return out
+    return {
+        path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
 
 
 def run_cli(argv: list[str]) -> tuple[int, str]:
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
         rc = create_vivary.main(argv)
-    return rc, buf.getvalue()
+    return rc, output.getvalue()
 
 
-class AdoptDryRunTests(unittest.TestCase):
-    def test_dry_run_writes_nothing(self):
+class ThinAdoptPlanTests(unittest.TestCase):
+    def test_default_dry_run_has_the_exact_thin_footprint_for_host_file_matrix(self):
+        cases = {
+            "all-host-files": {
+                "host_files": ("AGENTS.md", ".gitignore", "STATE.md"),
+                "creates": (".vivary/context.md", ".vivary/workspace.toml"),
+                "patches": (".gitignore", "AGENTS.md"),
+            },
+            "state-missing": {
+                "host_files": ("AGENTS.md", ".gitignore"),
+                "creates": (".vivary/context.md", ".vivary/workspace.toml", "STATE.md"),
+                "patches": (".gitignore", "AGENTS.md"),
+            },
+            "agents-missing": {
+                "host_files": (".gitignore",),
+                "creates": (
+                    ".vivary/context.md",
+                    ".vivary/workspace.toml",
+                    "AGENTS.md",
+                    "STATE.md",
+                ),
+                "patches": (".gitignore",),
+            },
+            "startup-and-privacy-missing": {
+                "host_files": (),
+                "creates": (
+                    ".gitignore",
+                    ".vivary/context.md",
+                    ".vivary/workspace.toml",
+                    "AGENTS.md",
+                    "STATE.md",
+                ),
+                "patches": (),
+            },
+        }
+        prohibited_roots = {
+            ".agents",
+            ".claude",
+            "changes",
+            "decisions",
+            "gates",
+            "heartbeat-reports",
+            "memory",
+            "modules",
+            "templates",
+            "verification",
+        }
+        prohibited_files = {
+            "MEMORY.md",
+            "SOUL.md",
+            "STRATO.md",
+            "USER.md",
+            "bug-risk-playbook.md",
+            "tropo.toml",
+        }
+
+        for name, case in cases.items():
+            with self.subTest(name=name):
+                target = temp_dir()
+                try:
+                    for host_file in case["host_files"]:
+                        write(target / host_file, f"existing {host_file}\n")
+                    before = snapshot(target)
+
+                    rc, out = run_cli(
+                        [
+                            "adopt",
+                            str(target),
+                            "--preset",
+                            "coding",
+                            "--repo-root",
+                            str(ROOT),
+                            "--json",
+                        ]
+                    )
+
+                    self.assertEqual(rc, 0)
+                    self.assertEqual(snapshot(target), before, "dry-run must be read-only")
+                    payload = json.loads(out)
+                    self.assertEqual(payload["contract"], "thin-v0.3")
+                    self.assertEqual(tuple(payload["creates"]), case["creates"])
+                    self.assertEqual(
+                        tuple(patch["path"] for patch in payload["patches"]),
+                        case["patches"],
+                    )
+                    self.assertRegex(payload["plan_hash"], r"^sha256:[0-9a-f]{64}$")
+
+                    planned_paths = set(payload["creates"]) | {
+                        patch["path"] for patch in payload["patches"]
+                    }
+                    self.assertTrue(prohibited_files.isdisjoint(planned_paths))
+                    self.assertTrue(
+                        prohibited_roots.isdisjoint(
+                            {path.split("/", 1)[0] for path in planned_paths}
+                        )
+                    )
+                finally:
+                    shutil.rmtree(target)
+
+    def test_optional_adapters_are_closed_bounded_projections_not_default_payload(self):
         target = temp_dir()
         try:
-            make_brownfield_fixture(target)
             before = snapshot(target)
 
-            result = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=False)
-
-            after = snapshot(target)
-            self.assertEqual(before, after, "dry-run must not create, edit, or remove any file")
-            self.assertFalse(result["applied"])
-            self.assertIsNone(result["doctor"])
-            self.assertGreater(len(result["would_create"]), 0)
-        finally:
-            shutil.rmtree(target)
-
-    def test_dry_run_is_the_default_cli_mode(self):
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
-            before = snapshot(target)
-
-            rc, out = run_cli(["adopt", str(target), "--repo-root", str(ROOT), "--json"])
-
-            after = snapshot(target)
-            self.assertEqual(rc, 0)
-            self.assertEqual(before, after)
-            payload = json.loads(out)
-            self.assertEqual(payload["mode"], "dry-run")
-        finally:
-            shutil.rmtree(target)
-
-    def test_plan_is_deterministic_and_lists_docs_module_router(self):
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
-
-            first = create_vivary.plan_adopt(target, repo_root=ROOT)
-            second = create_vivary.plan_adopt(target, repo_root=ROOT)
-
-            first_rel = sorted(p.relative_to(target).as_posix() for p in first["would_create"])
-            second_rel = sorted(p.relative_to(target).as_posix() for p in second["would_create"])
-            self.assertEqual(first_rel, second_rel)
-
-            self.assertIn("modules/docs/index.md", first_rel)
-            router_write = next(
-                text for dst, text in first["writes"]
-                if dst == target / "modules" / "docs" / "index.md"
+            rc, out = run_cli(
+                [
+                    "adopt",
+                    str(target),
+                    "--preset",
+                    "coding",
+                    "--adapter",
+                    "agents",
+                    "--adapter",
+                    "claude",
+                    "--repo-root",
+                    str(ROOT),
+                    "--json",
+                ]
             )
-            self.assertIn("docs/", router_write)
-        finally:
-            shutil.rmtree(target)
 
-    def test_existing_readme_is_kept_not_overwritten(self):
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
-            original = (target / "README.md").read_text(encoding="utf-8")
-
-            result = create_vivary.plan_adopt(target, repo_root=ROOT)
-
-            kept_rel = {p.relative_to(target).as_posix() for p in result["kept"]}
-            self.assertIn("README.md", kept_rel)
-            self.assertEqual((target / "README.md").read_text(encoding="utf-8"), original)
-        finally:
-            shutil.rmtree(target)
-
-    def test_existing_agents_md_is_kept_and_reported(self):
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
-            write(target / "AGENTS.md", "existing contract, do not touch\n")
-
-            result = create_vivary.plan_adopt(target, repo_root=ROOT)
-
-            kept_rel = {p.relative_to(target).as_posix() for p in result["kept"]}
-            would_create_rel = {p.relative_to(target).as_posix() for p in result["would_create"]}
-            self.assertIn("AGENTS.md", kept_rel)
-            self.assertNotIn("AGENTS.md", would_create_rel)
+            self.assertEqual(rc, 0)
+            self.assertEqual(snapshot(target), before)
+            payload = json.loads(out)
             self.assertEqual(
-                (target / "AGENTS.md").read_text(encoding="utf-8"),
-                "existing contract, do not touch\n",
+                [item["path"] for item in payload["optional_projections"]],
+                [".agents/skills/vivary/SKILL.md", ".claude/skills/vivary/SKILL.md"],
             )
+            self.assertNotIn(".agents/skills/vivary/SKILL.md", payload["creates"])
+            self.assertNotIn(".claude/skills/vivary/SKILL.md", payload["creates"])
+            for projection in payload["optional_projections"]:
+                self.assertLessEqual(projection["bytes"], 1200)
+                self.assertRegex(projection["source_hash"], r"^sha256:[0-9a-f]{64}$")
+                self.assertRegex(projection["content_hash"], r"^sha256:[0-9a-f]{64}$")
         finally:
             shutil.rmtree(target)
 
-    def test_preset_defaults_to_second_brain_for_markdown_majority_tree(self):
+    def test_nested_gitignore_negation_is_a_read_only_privacy_conflict(self):
         target = temp_dir()
         try:
-            make_brownfield_fixture(target)  # 6 markdown vs 2 code files
-
-            result = create_vivary.plan_adopt(target, repo_root=ROOT)
-
-            self.assertEqual(result["preset"], "second-brain")
-            self.assertIn("markdown", result["preset_reason"])
-        finally:
-            shutil.rmtree(target)
-
-    def test_preset_defaults_to_coding_for_code_majority_tree(self):
-        target = temp_dir()
-        try:
-            write(target / "README.md", "# Code project\n")
-            for i in range(10):
-                write(target / "src" / f"mod{i}.py", "x = 1\n")
-            write(target / "docs" / "notes.md", "# just one note\n")
-
-            result = create_vivary.plan_adopt(target, repo_root=ROOT)
-
-            self.assertEqual(result["preset"], "coding")
-            self.assertIn("code", result["preset_reason"])
-        finally:
-            shutil.rmtree(target)
-
-    def test_explicit_preset_flag_overrides_heuristic(self):
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)  # would default to second-brain
-
-            result = create_vivary.plan_adopt(target, preset="writing", repo_root=ROOT)
-
-            self.assertEqual(result["preset"], "writing")
-            self.assertIn("explicit", result["preset_reason"])
-        finally:
-            shutil.rmtree(target)
-
-    def test_gitignore_present_is_untouched_and_followups_listed(self):
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
             write(target / ".gitignore", "node_modules/\n")
-
-            result = create_vivary.plan_adopt(target, repo_root=ROOT)
-
-            kept_rel = {p.relative_to(target).as_posix() for p in result["kept"]}
-            self.assertIn(".gitignore", kept_rel)
-            self.assertEqual((target / ".gitignore").read_text(encoding="utf-8"), "node_modules/\n")
-            self.assertTrue(result["followups"], "missing privacy lines should be reported")
-            joined = "\n".join(result["followups"])
-            self.assertIn("USER.md", joined)
-            self.assertIn("MEMORY.md", joined)
-            self.assertIn("memory/*", joined)
-            self.assertIn("heartbeat-reports/*", joined)
-        finally:
-            shutil.rmtree(target)
-
-    def test_nested_negation_gets_a_distinct_followup(self):
-        """A nested `.gitignore` negation cannot be fixed by pasting root-level lines.
-
-        Telling the user to add `memory/*` when a lower-level `!secret.md` is what
-        unignores the file advises a fix that provably will not work — and Git gives
-        the deeper rule precedence, so the second run fails identically. Doctor
-        already reports this as manual; adopt must say it too.
-        """
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
-            write(target / ".gitignore", "node_modules/\n")
-            (target / "memory").mkdir(exist_ok=True)
-            write(target / "memory" / ".gitignore", "!secret.md\n")
-
-            result = create_vivary.plan_adopt(target, repo_root=ROOT)
-
-            joined = "\n".join(result["followups"])
-            self.assertIn("lower-level", joined.lower())
-            self.assertIn("memory", joined)
-
-        finally:
-            shutil.rmtree(target)
-
-    def test_no_gitignore_means_no_followups(self):
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
-            self.assertFalse((target / ".gitignore").exists())
-
-            result = create_vivary.plan_adopt(target, repo_root=ROOT)
-
-            self.assertEqual(result["followups"], [])
-        finally:
-            shutil.rmtree(target)
-
-    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
-    def test_refuses_symlinked_target(self):
-        parent = temp_dir()
-        try:
-            outside = parent / "outside"
-            outside.mkdir()
-            target = parent / "adopt-me"
-            try:
-                target.symlink_to(outside, target_is_directory=True)
-            except OSError:
-                return
-
-            with self.assertRaisesRegex(create_vivary.ScaffoldError, "symlinked target"):
-                create_vivary.plan_adopt(target, repo_root=ROOT)
-
-            self.assertFalse((outside / "AGENTS.md").exists())
-        finally:
-            shutil.rmtree(parent)
-
-    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
-    def test_existing_symlinked_destination_is_kept_not_written_through(self):
-        """A destination that already exists (even as a symlink) is planned as
-        'exists, kept' and never opened for writing — adopt's only-add rule
-        already keeps this safe without needing a dedicated refusal path."""
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
-            outside = target.parent / f"{target.name}-outside"
-            outside.mkdir()
-            victim = outside / "victim.txt"
-            victim.write_text("keep me\n", encoding="utf-8")
-            (target / "SOUL.md").symlink_to(victim)
-
-            result = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
-
-            self.assertEqual(victim.read_text(encoding="utf-8"), "keep me\n")
-            kept_rel = {p.relative_to(target).as_posix() for p in result["kept"]}
-            self.assertIn("SOUL.md", kept_rel)
-        finally:
-            shutil.rmtree(target)
-            if outside.exists():
-                shutil.rmtree(outside)
-
-    @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
-    def test_yes_refuses_symlinked_destination_ancestor(self):
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
-            outside = target.parent / f"{target.name}-outside"
-            outside.mkdir()
-            (target / "modules").symlink_to(outside, target_is_directory=True)
-
-            with self.assertRaisesRegex(create_vivary.ScaffoldError, "symlinked|outside"):
-                create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
-
-            self.assertFalse((outside / "index.md").exists())
-        finally:
-            shutil.rmtree(target)
-            if outside.exists():
-                shutil.rmtree(outside)
-
-
-class AdoptApplyTests(unittest.TestCase):
-    def test_yes_creates_planned_files_and_keeps_existing_bytes_identical(self):
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
-            before_existing = {
-                "README.md": (target / "README.md").read_bytes(),
-                "CLAUDE.md": (target / "CLAUDE.md").read_bytes(),
-                "src/main.py": (target / "src" / "main.py").read_bytes(),
-                "src/util.py": (target / "src" / "util.py").read_bytes(),
-            }
-            for i in range(6):
-                before_existing[f"docs/topic-{i}.md"] = (target / "docs" / f"topic-{i}.md").read_bytes()
-
-            plan = create_vivary.plan_adopt(target, repo_root=ROOT)
-            planned_rel = sorted(p.relative_to(target).as_posix() for p in plan["would_create"])
-
-            result = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
-
-            self.assertTrue(result["applied"])
-            for rel, data in before_existing.items():
-                self.assertEqual((target / rel).read_bytes(), data, f"{rel} must be byte-identical")
-
-            for rel in planned_rel:
-                self.assertTrue((target / rel).exists(), f"planned file not created: {rel}")
-
-            self.assertTrue((target / "AGENTS.md").exists())
-            self.assertTrue((target / "tropo.toml").exists())
-            self.assertTrue((target / "modules" / "docs" / "index.md").exists())
-        finally:
-            shutil.rmtree(target)
-
-    def test_yes_reports_ok_doctor(self):
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
-
-            result = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
-
-            self.assertIsNotNone(result["doctor"])
-            self.assertTrue(result["doctor"]["ok"], result["doctor"]["errors"])
-        finally:
-            shutil.rmtree(target)
-
-    def test_yes_passes_tropo_check_including_candidate_module_router(self):
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
-
-            create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
-
-            resolver = tropo.ConfigResolver(str(target), str(TROPO))
-            docs = tropo.analyze(str(target), [], resolver)
-            findings = [f.render() for d in docs for f in d.findings]
-            self.assertEqual(findings, [])
-
-            nodes, edges = tropo.build_graph(docs)
-            self.assertIn("docs", nodes, "the docs/ candidate module router must be a real graph node")
-            self.assertTrue(all(not e["broken"] for e in edges))
-        finally:
-            shutil.rmtree(target)
-
-    def test_yes_depth_two_candidate_module_flattens_and_is_a_graph_node(self):
-        target = temp_dir()
-        try:
-            write(target / "README.md", "# repo\n")
-            for i in range(6):
-                write(target / "docs" / "guides" / f"g{i}.md", f"# guide {i}\n")
-            write(target / "src" / "main.py", "print(1)\n")
-
-            create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
-
-            resolver = tropo.ConfigResolver(str(target), str(TROPO))
-            docs = tropo.analyze(str(target), [], resolver)
-            self.assertEqual([f.render() for d in docs for f in d.findings], [])
-            nodes, edges = tropo.build_graph(docs)
-            self.assertIn("docs-guides", nodes)
-            self.assertTrue(all(not e["broken"] for e in edges))
-            self.assertTrue((target / "modules" / "docs-guides" / "index.md").exists())
-        finally:
-            shutil.rmtree(target)
-
-    def test_yes_does_not_overwrite_existing_agents_md(self):
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
-            write(target / "AGENTS.md", "pre-existing contract\n")
-
-            result = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
-
-            self.assertEqual((target / "AGENTS.md").read_text(encoding="utf-8"), "pre-existing contract\n")
-            kept_rel = {p.relative_to(target).as_posix() for p in result["kept"]}
-            self.assertIn("AGENTS.md", kept_rel)
-        finally:
-            shutil.rmtree(target)
-
-    def test_yes_leaves_existing_gitignore_untouched_with_followups(self):
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
-            write(target / ".gitignore", "node_modules/\n")
-
-            result = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
-
-            self.assertEqual((target / ".gitignore").read_text(encoding="utf-8"), "node_modules/\n")
-            self.assertTrue(result["followups"])
-            # doctor legitimately fails here: the human hasn't added the privacy
-            # lines yet. That's the point of surfacing followups instead of
-            # silently editing the file.
-            self.assertFalse(result["doctor"]["ok"])
-            self.assertTrue(
-                any("privacy ignore missing" in e for e in result["doctor"]["errors"])
+            write(
+                target / ".vivary" / ".gitignore",
+                "!private/\n!private/secret.md\n",
             )
-        finally:
-            shutil.rmtree(target)
+            before = snapshot(target)
 
-    def test_cli_yes_mode_json(self):
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
-
-            rc, out = run_cli(["adopt", str(target), "--repo-root", str(ROOT), "--yes", "--json"])
-
-            self.assertEqual(rc, 0)
-            payload = json.loads(out)
-            self.assertEqual(payload["mode"], "applied")
-            self.assertTrue(payload["ok"])
-            self.assertIn("doctor", payload)
-            self.assertTrue(payload["doctor"]["ok"])
-            self.assertIn("modules/docs/index.md", payload["would_create"])
-        finally:
-            shutil.rmtree(target)
-
-    def test_cli_yes_mode_json_reports_failed_doctor_as_not_ok(self):
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
-            write(target / ".gitignore", "node_modules/\n")
-
-            rc, out = run_cli(["adopt", str(target), "--repo-root", str(ROOT), "--yes", "--json"])
+            rc, out = run_cli(
+                ["adopt", str(target), "--preset", "coding", "--json"]
+            )
 
             self.assertEqual(rc, 1)
+            self.assertEqual(snapshot(target), before)
             payload = json.loads(out)
-            self.assertEqual(payload["mode"], "applied")
-            self.assertFalse(payload["ok"])
-            self.assertFalse(payload["doctor"]["ok"])
-            self.assertTrue(payload["followups"])
+            self.assertEqual(payload["privacy"]["status"], "conflict")
+            self.assertIn(
+                ".vivary/.gitignore",
+                [conflict["path"] for conflict in payload["conflicts"]],
+            )
             self.assertTrue(
-                any("privacy ignore missing" in e for e in payload["doctor"]["errors"])
+                any(
+                    "private/runtime" in conflict["reason"]
+                    for conflict in payload["conflicts"]
+                )
             )
         finally:
             shutil.rmtree(target)
 
-    def test_cli_dry_run_json_shape(self):
-        target = temp_dir()
+    def test_plan_hash_is_bound_to_the_exact_workspace_root(self):
+        parent_a = temp_dir()
+        parent_b = temp_dir()
+        target_a = parent_a / "project"
+        target_b = parent_b / "project"
         try:
-            make_brownfield_fixture(target)
+            for target in (target_a, target_b):
+                target.mkdir()
+                write(target / "AGENTS.md", "# Existing agent rules\n")
+                write(target / ".gitignore", "node_modules/\n")
+                write(target / "STATE.md", "# Existing state\n")
 
-            rc, out = run_cli(["adopt", str(target), "--repo-root", str(ROOT), "--json"])
+            plan_a = create_vivary.plan_adopt(target_a, preset="coding")
+            plan_b = create_vivary.plan_adopt(target_b, preset="coding")
 
-            self.assertEqual(rc, 0)
-            payload = json.loads(out)
-            self.assertEqual(payload["mode"], "dry-run")
-            self.assertNotIn("doctor", payload)
-            for key in (
-                "would_create", "kept", "followups", "preset", "preset_reason",
-                "excluded_pre_existing", "skipped_module_collisions",
-            ):
-                self.assertIn(key, payload)
+            self.assertNotEqual(plan_a["plan_hash"], plan_b["plan_hash"])
         finally:
-            shutil.rmtree(target)
+            shutil.rmtree(parent_a)
+            shutil.rmtree(parent_b)
 
-    def test_candidate_module_colliding_with_scaffold_module_name_is_skipped(self):
-        """A brownfield top-level dir named after a preset's own starter module
-        (e.g. `codebase/` under the `coding` preset) must not get a router that
-        clobbers the scaffold's typed starter module doc for that same path."""
+
+class ThinAdoptApplyTests(unittest.TestCase):
+    def test_apply_requires_the_exact_approved_plan_hash_before_any_write(self):
         target = temp_dir()
         try:
-            write(target / "README.md", "# repo\n")
-            for i in range(6):
-                write(target / "codebase" / f"c{i}.md", f"# c{i}\n")
-            write(target / "src" / "main.py", "print(1)\n")
-
-            plan = create_vivary.plan_adopt(target, preset="coding", repo_root=ROOT)
-            self.assertIn("codebase", plan["skipped_module_collisions"])
-
-            result = create_vivary.adopt_workspace(target, preset="coding", repo_root=ROOT, yes=True)
-
-            self.assertTrue(result["doctor"]["ok"], result["doctor"]["errors"])
-            module_doc = (target / "modules" / "codebase" / "index.md").read_text(encoding="utf-8")
-            self.assertIn("Code, docs, tests, and release gates", module_doc)
-            self.assertNotIn("Router for the existing", module_doc)
-
-            resolver = tropo.ConfigResolver(str(target), str(TROPO))
-            docs = tropo.analyze(str(target), [], resolver)
-            self.assertEqual([f.render() for d in docs for f in d.findings], [])
-            nodes, edges = tropo.build_graph(docs)
-            self.assertIn("local-ci-baseline", nodes)
-            related = {e["to"] for e in edges if e["from"] == "codebase"}
-            self.assertIn("local-ci-baseline", related)
-        finally:
-            shutil.rmtree(target)
-
-    def test_two_candidates_flattening_to_same_module_id_do_not_clobber_each_other(self):
-        """A top-level `docs-guides/` and a nested `docs/guides/` both flatten to
-        module id `docs-guides`. Only the first router write should land; the
-        second must be reported as skipped, not silently overwrite the first."""
-        target = temp_dir()
-        try:
-            write(target / "README.md", "# repo\n")
-            for i in range(6):
-                write(target / "docs" / "guides" / f"g{i}.md", f"# guide {i}\n")
-                write(target / "docs-guides" / f"h{i}.md", f"# h{i}\n")
-            write(target / "src" / "main.py", "print(1)\n")
-
-            plan = create_vivary.plan_adopt(target, repo_root=ROOT)
-            router_writes = [
-                dst for dst, _ in plan["writes"]
-                if dst == target / "modules" / "docs-guides" / "index.md"
-            ]
-            self.assertEqual(len(router_writes), 1, "only one router write should be planned")
-            self.assertEqual(len(plan["skipped_module_collisions"]), 1)
-
-            result = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
-            self.assertTrue(result["doctor"]["ok"], result["doctor"]["errors"])
-        finally:
-            shutil.rmtree(target)
-
-    def test_second_adopt_run_reports_everything_kept(self):
-        target = temp_dir()
-        try:
-            make_brownfield_fixture(target)
-            create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
-
-            second = create_vivary.plan_adopt(target, repo_root=ROOT)
-
-            self.assertEqual(second["would_create"], [])
-        finally:
-            shutil.rmtree(target)
-
-
-class AdoptManagedDirContentTests(unittest.TestCase):
-    """Pre-existing content inside Vivary's graph type folders (modules/,
-    changes/, decisions/, verification/, gates/) must not break the adopted
-    workspace — PR #104 adversarial review finding."""
-
-    def test_pre_existing_decisions_file_adopts_green(self):
-        """Reviewer's exact repro: an untyped decisions/random.md previously
-        failed tropo check with E101 and doctor ok:false after adopt --yes."""
-        target = temp_dir()
-        try:
-            write(target / "decisions" / "random.md", "# random notes, no frontmatter\n")
-            write(target / "src" / "main.py", "print('hello')\n")
-            before = hashlib.sha256((target / "decisions" / "random.md").read_bytes()).hexdigest()
-
-            rc, out = run_cli(["adopt", str(target), "--repo-root", str(ROOT), "--yes", "--json"])
-
-            self.assertEqual(rc, 0)
-            payload = json.loads(out)
-            self.assertTrue(payload["doctor"]["ok"], payload["doctor"]["errors"])
-            self.assertIn("decisions/random.md", payload["excluded_pre_existing"])
-
-            after = hashlib.sha256((target / "decisions" / "random.md").read_bytes()).hexdigest()
-            self.assertEqual(before, after, "pre-existing file must be byte-identical")
-
-            resolver = tropo.ConfigResolver(str(target), str(TROPO))
-            docs = tropo.analyze(str(target), [], resolver)
-            self.assertEqual([f.render() for d in docs for f in d.findings], [])
-        finally:
-            shutil.rmtree(target)
-
-    def test_pre_existing_modules_subdir_gets_router_and_stays_untouched(self):
-        """modules/legacy/notes.md variant: doctor's module-index check is a
-        filesystem check no exclude can satisfy, so adopt must add a thin
-        router index.md while excluding the pre-existing notes.md."""
-        target = temp_dir()
-        try:
-            write(target / "modules" / "legacy" / "notes.md", "# legacy notes, no frontmatter\n")
-            write(target / "src" / "main.py", "print('hello')\n")
-            before = hashlib.sha256((target / "modules" / "legacy" / "notes.md").read_bytes()).hexdigest()
-
-            result = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
-
-            self.assertTrue(result["doctor"]["ok"], result["doctor"]["errors"])
-            self.assertTrue((target / "modules" / "legacy" / "index.md").exists())
-            self.assertIn("modules/legacy/notes.md", result["excluded_pre_existing"])
-
-            after = hashlib.sha256((target / "modules" / "legacy" / "notes.md").read_bytes()).hexdigest()
-            self.assertEqual(before, after)
-
-            resolver = tropo.ConfigResolver(str(target), str(TROPO))
-            docs = tropo.analyze(str(target), [], resolver)
-            self.assertEqual([f.render() for d in docs for f in d.findings], [])
-            nodes, edges = tropo.build_graph(docs)
-            self.assertIn("legacy", nodes, "the new router must be a real graph node")
-            self.assertTrue(all(not e["broken"] for e in edges))
-        finally:
-            shutil.rmtree(target)
-
-    def test_adopts_own_docs_under_managed_dirs_stay_graph_visible(self):
-        """The widened excludes must only cover pre-existing files: everything
-        adopt itself writes under the graph folders stays in the graph."""
-        target = temp_dir()
-        try:
-            write(target / "decisions" / "random.md", "# random\n")
-            write(target / "changes" / "old-change.md", "# old\n")
-            write(target / "modules" / "legacy" / "notes.md", "# legacy\n")
-            for i in range(6):
-                write(target / "docs" / f"topic-{i}.md", f"# Topic {i}\n")
-            write(target / "src" / "main.py", "print(1)\n")
-
-            result = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
-
-            self.assertTrue(result["doctor"]["ok"], result["doctor"]["errors"])
-            resolver = tropo.ConfigResolver(str(target), str(TROPO))
-            docs = tropo.analyze(str(target), [], resolver)
-            self.assertEqual([f.render() for d in docs for f in d.findings], [])
-            nodes, _ = tropo.build_graph(docs)
-            for node in (
-                "modules", "agent-workspace", "scaffold-init",
-                "0001-vivary-baseline", "scaffold-smoke", "human-gates",
-                "docs", "legacy",
-            ):
-                self.assertIn(node, nodes, f"adopt-created doc missing from graph: {node}")
-            self.assertNotIn("random", nodes)
-            self.assertNotIn("old-change", nodes)
-            self.assertNotIn("notes", nodes)
-        finally:
-            shutil.rmtree(target)
-
-    def test_dry_run_reports_excluded_pre_existing_in_followups(self):
-        target = temp_dir()
-        try:
-            write(target / "decisions" / "random.md", "# random\n")
-            write(target / "src" / "main.py", "print(1)\n")
+            write(target / "README.md", "# Existing project\n")
             before = snapshot(target)
 
-            plan = create_vivary.plan_adopt(target, repo_root=ROOT)
+            rc, out = run_cli(
+                ["adopt", str(target), "--preset", "coding", "--yes", "--json"]
+            )
 
-            self.assertEqual(snapshot(target), before, "planning must stay read-only")
-            self.assertEqual(plan["excluded_pre_existing"], ["decisions/random.md"])
+            self.assertEqual(rc, 1)
+            self.assertEqual(snapshot(target), before)
+            payload = json.loads(out)
+            self.assertIn("--plan", payload["error"])
+        finally:
+            shutil.rmtree(target)
+
+    def test_apply_uses_the_approved_creates_and_bounded_host_patches(self):
+        target = temp_dir()
+        try:
+            write(target / "AGENTS.md", "# Existing agent rules\n")
+            write(target / ".gitignore", "node_modules/\n")
+            write(target / "STATE.md", "# User state\n")
+            original = {
+                path: (target / path).read_bytes()
+                for path in ("AGENTS.md", ".gitignore", "STATE.md")
+            }
+            dry_rc, dry_out = run_cli(
+                ["adopt", str(target), "--preset", "coding", "--json"]
+            )
+            self.assertEqual(dry_rc, 0)
+            dry = json.loads(dry_out)
+
+            rc, out = run_cli(
+                [
+                    "adopt",
+                    str(target),
+                    "--preset",
+                    "coding",
+                    "--yes",
+                    "--plan",
+                    dry["plan_hash"],
+                    "--json",
+                ]
+            )
+
+            self.assertEqual(rc, 0, out)
+            payload = json.loads(out)
+            self.assertTrue(payload["doctor"]["ok"], payload["doctor"]["errors"])
+            self.assertEqual((target / "STATE.md").read_bytes(), original["STATE.md"])
+            self.assertIn(
+                ".vivary/context.md",
+                (target / "AGENTS.md").read_text(encoding="utf-8"),
+            )
+            for patch in dry["patches"]:
+                path = target / patch["path"]
+                self.assertEqual(path.read_bytes(), original[patch["path"]] + patch["inserted_text"].encode())
+            self.assertTrue((target / ".vivary" / "context.md").is_file())
+            self.assertTrue((target / ".vivary" / "workspace.toml").is_file())
+            self.assertFalse((target / ".vivary" / "runtime" / "adopt-journal.json").exists())
+            self.assertFalse((target / "tropo.toml").exists())
+            self.assertFalse((target / "templates").exists())
+            self.assertFalse((target / "modules").exists())
+            self.assertFalse((target / ".vivary" / "records").exists())
+
+            applied_snapshot = snapshot(target)
+            second_plan = create_vivary.plan_adopt(target, preset="coding")
+            self.assertFalse(second_plan["creates"])
+            self.assertFalse(second_plan["patches"])
+            self.assertFalse(second_plan["conflicts"])
+            second = create_vivary.adopt_workspace(
+                target,
+                preset="coding",
+                yes=True,
+                plan_hash=second_plan["plan_hash"],
+            )
+            self.assertTrue(second["doctor"]["ok"])
+            self.assertEqual(snapshot(target), applied_snapshot)
+        finally:
+            shutil.rmtree(target)
+
+    def test_plan_is_clean_for_generated_active_context_workspace(self):
+        target = temp_dir()
+        try:
+            create_vivary.scaffold_thin_workspace(
+                target,
+                preset="coding",
+                active_context="cocoindex-code",
+                repo_root=ROOT,
+            )
+            before = snapshot(target)
+
+            plan = create_vivary.plan_adopt(
+                target,
+                preset="coding",
+                repo_root=ROOT,
+            )
+
+            self.assertFalse(plan["creates"])
+            self.assertFalse(plan["patches"])
+            self.assertFalse(plan["conflicts"])
+            self.assertIn(target / ".gitignore", plan["kept"])
+            self.assertEqual(snapshot(target), before)
+        finally:
+            shutil.rmtree(target)
+
+    def test_apply_restores_active_context_privacy_for_missing_or_host_gitignore(self):
+        for initial in (None, "node_modules/\n"):
+            with self.subTest(initial=initial):
+                target = temp_dir()
+                try:
+                    create_vivary.scaffold_thin_workspace(
+                        target,
+                        preset="coding",
+                        active_context="cocoindex-code",
+                        repo_root=ROOT,
+                    )
+                    gitignore = target / ".gitignore"
+                    if initial is None:
+                        gitignore.unlink()
+                    else:
+                        gitignore.write_text(initial, encoding="utf-8")
+
+                    plan = create_vivary.plan_adopt(
+                        target,
+                        preset="coding",
+                        repo_root=ROOT,
+                    )
+
+                    self.assertFalse(plan["conflicts"])
+                    self.assertEqual(plan["capabilities"], ["cocoindex-code"])
+                    self.assertIn(
+                        ".cocoindex_code/",
+                        plan["privacy"]["rules"],
+                    )
+                    applied = create_vivary.adopt_workspace(
+                        target,
+                        preset="coding",
+                        repo_root=ROOT,
+                        yes=True,
+                        plan_hash=plan["plan_hash"],
+                    )
+                    self.assertTrue(
+                        applied["doctor"]["ok"],
+                        applied["doctor"]["errors"],
+                    )
+                    text = gitignore.read_text(encoding="utf-8")
+                    if initial is not None:
+                        self.assertTrue(text.startswith(initial))
+                    self.assertIn(".cocoindex_code/", text)
+                finally:
+                    shutil.rmtree(target)
+
+    def test_ordinary_failure_rolls_back_exact_bytes_and_created_files(self):
+        probe = temp_dir()
+        try:
+            write(probe / "AGENTS.md", "# Existing agent rules\r\n")
+            write(probe / ".gitignore", "node_modules/\r\n")
+            write(probe / "STATE.md", "# Existing state\r\n")
+            boundaries = len(
+                create_vivary._adopt_actions(
+                    create_vivary.plan_adopt(probe, preset="coding")
+                )
+            )
+        finally:
+            shutil.rmtree(probe)
+
+        for boundary in range(1, boundaries + 1):
+            with self.subTest(boundary=boundary):
+                target = temp_dir()
+                try:
+                    write(target / "AGENTS.md", "# Existing agent rules\r\n")
+                    write(target / ".gitignore", "node_modules/\r\n")
+                    write(target / "STATE.md", "# Existing state\r\n")
+                    before = snapshot(target)
+                    plan = create_vivary.plan_adopt(target, preset="coding")
+
+                    with self.assertRaisesRegex(
+                        create_vivary.ScaffoldError, "injected failure"
+                    ):
+                        create_vivary.adopt_workspace(
+                            target,
+                            preset="coding",
+                            yes=True,
+                            plan_hash=plan["plan_hash"],
+                            _fault_after=boundary,
+                        )
+
+                    self.assertEqual(snapshot(target), before)
+                    self.assertFalse(
+                        (target / ".vivary" / "runtime" / "adopt-journal.json").exists()
+                    )
+                finally:
+                    shutil.rmtree(target)
+
+    def test_process_crash_requires_explicit_plan_bound_recovery(self):
+        probe = temp_dir()
+        try:
+            write(probe / "AGENTS.md", "# Existing agent rules\n")
+            write(probe / ".gitignore", "node_modules/\n")
+            write(probe / "STATE.md", "# Existing state\n")
+            boundaries = len(
+                create_vivary._adopt_actions(
+                    create_vivary.plan_adopt(probe, preset="coding")
+                )
+            )
+        finally:
+            shutil.rmtree(probe)
+
+        for boundary in range(1, boundaries + 1):
+            with self.subTest(boundary=boundary):
+                target = temp_dir()
+                try:
+                    write(target / "AGENTS.md", "# Existing agent rules\n")
+                    write(target / ".gitignore", "node_modules/\n")
+                    write(target / "STATE.md", "# Existing state\n")
+                    before = snapshot(target)
+                    plan = create_vivary.plan_adopt(target, preset="coding")
+
+                    with self.assertRaises(KeyboardInterrupt):
+                        create_vivary.adopt_workspace(
+                            target,
+                            preset="coding",
+                            yes=True,
+                            plan_hash=plan["plan_hash"],
+                            _crash_after=boundary,
+                        )
+
+                    journal = target / ".vivary" / "runtime" / "adopt-journal.json"
+                    self.assertTrue(journal.is_file())
+                    interrupted_doctor = create_vivary.doctor_workspace(
+                        target, repo_root=ROOT
+                    )
+                    self.assertFalse(interrupted_doctor["ok"])
+                    self.assertTrue(
+                        any(
+                            "adoption journal" in error
+                            for error in interrupted_doctor["errors"]
+                        )
+                    )
+                    interrupted = snapshot(target)
+
+                    rc, out = run_cli(
+                        [
+                            "adopt",
+                            str(target),
+                            "--recover",
+                            plan["plan_hash"],
+                            "--json",
+                        ]
+                    )
+
+                    self.assertEqual(rc, 0, out)
+                    payload = json.loads(out)
+                    self.assertEqual(payload["mode"], "recovery-dry-run")
+                    self.assertFalse(payload["recovered"])
+                    self.assertRegex(
+                        payload["recovery_plan_hash"],
+                        r"^sha256:[0-9a-f]{64}$",
+                    )
+                    self.assertEqual(snapshot(target), interrupted)
+
+                    apply_rc, apply_out = run_cli(
+                        [
+                            "adopt",
+                            str(target),
+                            "--recover",
+                            plan["plan_hash"],
+                            "--yes",
+                            "--plan",
+                            payload["recovery_plan_hash"],
+                            "--json",
+                        ]
+                    )
+
+                    self.assertEqual(apply_rc, 0, apply_out)
+                    self.assertEqual(snapshot(target), before)
+                    applied = json.loads(apply_out)
+                    self.assertEqual(applied["mode"], "recovered")
+                    self.assertTrue(applied["recovered"])
+                finally:
+                    shutil.rmtree(target)
+
+    def test_crash_after_privacy_before_journal_has_exact_plan_bound_recovery(self):
+        target = temp_dir()
+        try:
+            write(target / "AGENTS.md", "# Existing agent rules\r\n")
+            write(target / ".gitignore", "node_modules/\r\n")
+            write(target / "STATE.md", "# Existing state\r\n")
+            before = snapshot(target)
+            plan = create_vivary.plan_adopt(target, preset="coding")
+
+            with self.assertRaises(KeyboardInterrupt):
+                create_vivary.adopt_workspace(
+                    target,
+                    preset="coding",
+                    yes=True,
+                    plan_hash=plan["plan_hash"],
+                    _crash_before_journal=True,
+                )
+
+            journal = target / ".vivary" / "runtime" / "adopt-journal.json"
+            self.assertFalse(journal.exists())
+            self.assertIn(
+                "vivary-adopt-prejournal",
+                (target / ".gitignore").read_text(encoding="utf-8"),
+            )
+            interrupted_doctor = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            self.assertFalse(interrupted_doctor["ok"])
             self.assertTrue(
-                any("decisions/" in f and "excluded from the typed graph" in f for f in plan["followups"])
+                any("pre-journal" in error for error in interrupted_doctor["errors"])
+            )
+            interrupted = snapshot(target)
+
+            rc, out = run_cli(
+                [
+                    "adopt",
+                    str(target),
+                    "--recover",
+                    plan["plan_hash"],
+                    "--json",
+                ]
+            )
+
+            self.assertEqual(rc, 0, out)
+            payload = json.loads(out)
+            self.assertEqual(payload["mode"], "recovery-dry-run")
+            self.assertFalse(payload["recovered"])
+            self.assertEqual(snapshot(target), interrupted)
+
+            apply_rc, apply_out = run_cli(
+                [
+                    "adopt",
+                    str(target),
+                    "--recover",
+                    plan["plan_hash"],
+                    "--yes",
+                    "--plan",
+                    payload["recovery_plan_hash"],
+                    "--json",
+                ]
+            )
+
+            self.assertEqual(apply_rc, 0, apply_out)
+            self.assertEqual(snapshot(target), before)
+            self.assertTrue(json.loads(apply_out)["recovered"])
+        finally:
+            shutil.rmtree(target)
+
+    def test_active_context_prejournal_recovery_uses_capability_privacy_block(self):
+        target = temp_dir()
+        try:
+            create_vivary.scaffold_thin_workspace(
+                target,
+                preset="coding",
+                active_context="cocoindex-code",
+                repo_root=ROOT,
+            )
+            gitignore = target / ".gitignore"
+            gitignore.write_text("node_modules/\n", encoding="utf-8")
+            before = snapshot(target)
+            plan = create_vivary.plan_adopt(
+                target,
+                preset="coding",
+                repo_root=ROOT,
+            )
+
+            with self.assertRaises(KeyboardInterrupt):
+                create_vivary.adopt_workspace(
+                    target,
+                    preset="coding",
+                    repo_root=ROOT,
+                    yes=True,
+                    plan_hash=plan["plan_hash"],
+                    _crash_before_journal=True,
+                )
+
+            self.assertIn(
+                ".cocoindex_code/",
+                gitignore.read_text(encoding="utf-8"),
+            )
+            rc, out = run_cli(
+                [
+                    "adopt",
+                    str(target),
+                    "--recover",
+                    plan["plan_hash"],
+                    "--json",
+                ]
+            )
+            self.assertEqual(rc, 0, out)
+            recovery = json.loads(out)
+            apply_rc, apply_out = run_cli(
+                [
+                    "adopt",
+                    str(target),
+                    "--recover",
+                    plan["plan_hash"],
+                    "--yes",
+                    "--plan",
+                    recovery["recovery_plan_hash"],
+                    "--json",
+                ]
+            )
+            self.assertEqual(apply_rc, 0, apply_out)
+            self.assertEqual(snapshot(target), before)
+        finally:
+            shutil.rmtree(target)
+
+    def test_active_context_journal_recovery_validates_capability_privacy_block(self):
+        target = temp_dir()
+        try:
+            create_vivary.scaffold_thin_workspace(
+                target,
+                preset="coding",
+                active_context="cocoindex-code",
+                repo_root=ROOT,
+            )
+            (target / ".gitignore").write_text(
+                "node_modules/\n",
+                encoding="utf-8",
+            )
+            before = snapshot(target)
+            plan = create_vivary.plan_adopt(
+                target,
+                preset="coding",
+                repo_root=ROOT,
+            )
+
+            with self.assertRaises(KeyboardInterrupt):
+                create_vivary.adopt_workspace(
+                    target,
+                    preset="coding",
+                    repo_root=ROOT,
+                    yes=True,
+                    plan_hash=plan["plan_hash"],
+                    _crash_after=1,
+                )
+
+            journal = target / ".vivary" / "runtime" / "adopt-journal.json"
+            self.assertTrue(journal.is_file())
+            payload = json.loads(journal.read_text(encoding="utf-8"))
+            self.assertEqual(
+                payload["approval"]["capabilities"],
+                ["cocoindex-code"],
+            )
+            rc, out = run_cli(
+                [
+                    "adopt",
+                    str(target),
+                    "--recover",
+                    plan["plan_hash"],
+                    "--json",
+                ]
+            )
+            self.assertEqual(rc, 0, out)
+            recovery = json.loads(out)
+            apply_rc, apply_out = run_cli(
+                [
+                    "adopt",
+                    str(target),
+                    "--recover",
+                    plan["plan_hash"],
+                    "--yes",
+                    "--plan",
+                    recovery["recovery_plan_hash"],
+                    "--json",
+                ]
+            )
+            self.assertEqual(apply_rc, 0, apply_out)
+            self.assertEqual(snapshot(target), before)
+        finally:
+            shutil.rmtree(target)
+
+    def test_workspace_controlled_journal_cannot_delete_an_arbitrary_file(self):
+        target = temp_dir()
+        try:
+            victim = target / "README.md"
+            write(victim, "# User-owned project\n")
+            transaction_hash = "sha256:" + "a" * 64
+            journal = target / ".vivary" / "runtime" / "adopt-journal.json"
+            forged = {
+                "schema": create_vivary._ADOPT_JOURNAL_SCHEMA,
+                "plan_hash": transaction_hash,
+                "phase": "applying",
+                "completed": 1,
+                "actions": [
+                    {
+                        "path": "README.md",
+                        "kind": "create",
+                        "existed": False,
+                        "before": None,
+                        "before_hash": None,
+                        "after_hash": create_vivary._sha256_prefixed(victim.read_bytes()),
+                        "transient_after_hash": None,
+                    }
+                ],
+            }
+            write(journal, json.dumps(forged))
+
+            rc, out = run_cli(
+                [
+                    "adopt",
+                    str(target),
+                    "--recover",
+                    transaction_hash,
+                    "--json",
+                ]
+            )
+
+            self.assertEqual(rc, 1, out)
+            self.assertEqual(victim.read_text(encoding="utf-8"), "# User-owned project\n")
+        finally:
+            shutil.rmtree(target)
+
+    def test_rollback_delete_cannot_follow_a_swapped_parent(self):
+        target = temp_dir()
+        outside = target.with_name(target.name + "-outside")
+        moved = target.with_name(target.name + "-moved-vivary")
+        (outside / ".vivary").mkdir(parents=True)
+        victim = outside / ".vivary" / "context.md"
+        write(victim, "outside stays unchanged\n")
+        generated = target / ".vivary" / "context.md"
+        generated_bytes = b"generated context\n"
+        generated.parent.mkdir(parents=True)
+        generated.write_bytes(generated_bytes)
+        action = {
+            "path": generated,
+            "after": generated_bytes,
+            "after_hash": create_vivary._sha256_prefixed(generated_bytes),
+        }
+        attack = {"attempted": False, "blocked": False}
+        real_replace = create_vivary.os.replace
+
+        def swap_parent():
+            attack["attempted"] = True
+            try:
+                real_replace(target / ".vivary", moved)
+                (target / ".vivary").symlink_to(outside / ".vivary", target_is_directory=True)
+            except OSError:
+                attack["blocked"] = True
+
+        if create_vivary.os.name == "nt":
+            real_delete = create_vivary._windows_delete_open_file
+
+            def attempt_windows_swap(file_handle):
+                if not attack["attempted"]:
+                    swap_parent()
+                return real_delete(file_handle)
+
+            patcher = mock.patch.object(
+                create_vivary,
+                "_windows_delete_open_file",
+                side_effect=attempt_windows_swap,
+            )
+        else:
+            real_unlink = create_vivary.os.unlink
+
+            def attempt_posix_swap(path, *args, **kwargs):
+                if not attack["attempted"] and Path(path).name == "context.md":
+                    swap_parent()
+                return real_unlink(path, *args, **kwargs)
+
+            patcher = mock.patch.object(
+                create_vivary.os,
+                "unlink",
+                side_effect=attempt_posix_swap,
+            )
+
+        try:
+            with patcher:
+                try:
+                    create_vivary._rollback_adopt(
+                        target,
+                        [action],
+                        {generated: None},
+                        cleanup_journal=False,
+                    )
+                except create_vivary.ScaffoldError:
+                    pass
+
+            self.assertTrue(attack["attempted"])
+            if attack["blocked"]:
+                self.assertFalse(generated.exists())
+            else:
+                self.assertFalse((moved / "context.md").exists())
+            self.assertEqual(victim.read_text(encoding="utf-8"), "outside stays unchanged\n")
+        finally:
+            link = target / ".vivary"
+            if link.is_symlink():
+                link.unlink()
+            for path in (target, moved, outside):
+                if path.exists():
+                    shutil.rmtree(path)
+
+    def test_empty_directory_cleanup_does_not_use_pathname_rmdir(self):
+        target = temp_dir()
+        try:
+            (target / ".vivary" / "runtime").mkdir(parents=True)
+
+            with mock.patch.object(Path, "rmdir") as unsafe_rmdir:
+                create_vivary._remove_empty_adopt_dirs(target)
+
+            unsafe_rmdir.assert_not_called()
+            create_vivary._remove_empty_adopt_dirs(target)
+            self.assertFalse((target / ".vivary").exists())
+        finally:
+            shutil.rmtree(target)
+
+    def test_stale_known_generated_adapter_replacement_is_in_the_approved_plan(self):
+        target = temp_dir()
+        try:
+            current, _, _ = create_vivary._thin_adapter_doc("agents")
+            stale = current.replace(
+                f"create-vivary {create_vivary.__version__}",
+                "create-vivary 0.3.3",
+                1,
+            )
+            adapter = target / ".agents" / "skills" / "vivary" / "SKILL.md"
+            write(adapter, stale)
+
+            plan = create_vivary.plan_adopt(
+                target,
+                preset="coding",
+                adapters=("agents",),
+            )
+
+            self.assertFalse(plan["conflicts"])
+            self.assertEqual(plan["optional_projections"][0]["status"], "replace")
+            self.assertEqual(
+                [item["path"] for item in plan["adapter_replacements"]],
+                [adapter],
+            )
+            create_vivary.adopt_workspace(
+                target,
+                preset="coding",
+                adapters=("agents",),
+                yes=True,
+                plan_hash=plan["plan_hash"],
+            )
+            self.assertEqual(adapter.read_text(encoding="utf-8"), current)
+
+            future = current.replace(
+                f"create-vivary {create_vivary.__version__}",
+                "create-vivary 999.0.0",
+                1,
+            )
+            write(adapter, future)
+            future_plan = create_vivary.plan_adopt(
+                target,
+                preset="coding",
+                adapters=("agents",),
+            )
+            self.assertEqual(future_plan["optional_projections"][0]["status"], "conflict")
+            self.assertEqual(
+                [item["path"] for item in future_plan["conflicts"]],
+                [adapter],
             )
         finally:
             shutil.rmtree(target)
 
-    def test_rerun_on_adopted_workspace_is_idempotent(self):
-        """Re-adopting must not flip the detected preset (adopt's own root
-        contract files don't vote) and must not claim exclusions it will never
-        write (tropo.toml already exists and is kept)."""
+    def test_host_mutation_after_approval_is_revalidated_before_vivary_writes(self):
         target = temp_dir()
         try:
-            write(target / "decisions" / "random.md", "# random\n")
-            write(target / "src" / "main.py", "print(1)\n")
+            write(target / "AGENTS.md", "# Existing agent rules\n")
+            write(target / ".gitignore", "node_modules/\n")
+            write(target / "STATE.md", "# Existing state\n")
+            plan = create_vivary.plan_adopt(target, preset="coding")
+            agents_before = (target / "AGENTS.md").read_bytes()
+            gitignore_before = (target / ".gitignore").read_bytes()
 
-            first = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
-            self.assertEqual(first["preset"], "coding")
+            def mutate_kept_input() -> None:
+                write(target / "STATE.md", "# Externally changed state\n")
 
-            second = create_vivary.plan_adopt(target, repo_root=ROOT)
+            with self.assertRaisesRegex(create_vivary.ScaffoldError, "input changed"):
+                create_vivary.adopt_workspace(
+                    target,
+                    preset="coding",
+                    yes=True,
+                    plan_hash=plan["plan_hash"],
+                    _before_apply=mutate_kept_input,
+                )
 
-            self.assertEqual(second["preset"], "coding")
-            self.assertEqual(second["would_create"], [])
-            self.assertEqual(second["excluded_pre_existing"], [])
+            self.assertEqual((target / "AGENTS.md").read_bytes(), agents_before)
+            self.assertEqual((target / ".gitignore").read_bytes(), gitignore_before)
+            self.assertEqual(
+                (target / "STATE.md").read_text(encoding="utf-8"),
+                "# Externally changed state\n",
+            )
+            self.assertFalse((target / ".vivary" / "context.md").exists())
+            self.assertFalse(
+                (target / ".vivary" / "runtime" / "adopt-journal.json").exists()
+            )
         finally:
             shutil.rmtree(target)
 
-    def test_preset_tie_does_not_claim_majority(self):
+    def test_existing_noncontract_capsule_is_a_read_only_conflict(self):
         target = temp_dir()
         try:
-            write(target / "a.md", "# a\n")
-            write(target / "b.md", "# b\n")
-            write(target / "src" / "one.py", "x = 1\n")
-            write(target / "src" / "two.py", "y = 2\n")
+            write(target / ".vivary" / "context.md", "# user-owned context\n")
+            write(target / "STATE.md", "# Existing state\n")
+            before = snapshot(target)
 
-            result = create_vivary.plan_adopt(target, repo_root=ROOT)
+            rc, out = run_cli(
+                ["adopt", str(target), "--preset", "coding", "--json"]
+            )
 
-            self.assertEqual(result["preset"], "coding")
-            self.assertNotIn("majority tree", result["preset_reason"])
-            self.assertIn("no file-type majority", result["preset_reason"])
+            self.assertEqual(rc, 1)
+            self.assertEqual(snapshot(target), before)
+            payload = json.loads(out)
+            self.assertFalse(payload["ok"])
+            self.assertEqual(
+                [conflict["path"] for conflict in payload["conflicts"]],
+                [".vivary/context.md"],
+            )
+            self.assertIn("STATE.md", payload["kept"])
+        finally:
+            shutil.rmtree(target)
+
+    def test_valid_user_extended_v03_capsule_and_config_are_kept_byte_for_byte(self):
+        target = temp_dir()
+        try:
+            initial = create_vivary.plan_adopt(
+                target,
+                preset="coding",
+                repo_root=ROOT,
+            )
+            create_vivary.adopt_workspace(
+                target,
+                preset="coding",
+                repo_root=ROOT,
+                yes=True,
+                plan_hash=initial["plan_hash"],
+            )
+            context = target / ".vivary" / "context.md"
+            workspace = target / ".vivary" / "workspace.toml"
+            context.write_text(
+                context.read_text(encoding="utf-8")
+                + "\n## Project-specific route\n\nRead `docs/architecture.md` when structure matters.\n",
+                encoding="utf-8",
+            )
+            workspace.write_text(
+                workspace.read_text(encoding="utf-8")
+                + '\n[types.note]\nfolder = "notes"\noptional = { source = "string" }\n',
+                encoding="utf-8",
+            )
+            before = snapshot(target)
+
+            plan = create_vivary.plan_adopt(
+                target,
+                preset="coding",
+                repo_root=ROOT,
+            )
+
+            self.assertFalse(plan["conflicts"])
+            self.assertFalse(plan["creates"])
+            self.assertFalse(plan["patches"])
+            self.assertIn(context, plan["kept"])
+            self.assertIn(workspace, plan["kept"])
+            applied = create_vivary.adopt_workspace(
+                target,
+                preset="coding",
+                repo_root=ROOT,
+                yes=True,
+                plan_hash=plan["plan_hash"],
+            )
+            self.assertTrue(applied["doctor"]["ok"])
+            self.assertEqual(snapshot(target), before)
         finally:
             shutil.rmtree(target)
 

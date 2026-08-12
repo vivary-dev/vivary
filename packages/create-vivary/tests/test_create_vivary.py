@@ -662,7 +662,7 @@ class CreateVivaryTests(unittest.TestCase):
                 with mock.patch.object(
                     create_vivary.importlib_metadata,
                     "version",
-                    return_value="0.1.1",
+                    return_value="0.1.2",
                 ):
                     report = create_vivary.doctor_workspace(target, repo_root=ROOT)
             finally:
@@ -684,7 +684,7 @@ class CreateVivaryTests(unittest.TestCase):
             )
             fake_site = Path(td) / "fake-site"
             fake_site.mkdir()
-            (fake_site / "vivary_cognee.py").write_text('__version__ = "0.1.1"\n', encoding="utf-8")
+            (fake_site / "vivary_cognee.py").write_text('__version__ = "0.1.2"\n', encoding="utf-8")
             importlib.invalidate_caches()
             old_path = list(sys.path)
             old_module = sys.modules.pop("vivary_cognee", None)
@@ -693,7 +693,7 @@ class CreateVivaryTests(unittest.TestCase):
                 with mock.patch.object(
                     create_vivary.importlib_metadata,
                     "version",
-                    return_value="0.1.1",
+                    return_value="0.1.2",
                 ):
                     report = create_vivary.doctor_workspace(target, repo_root=ROOT)
             finally:
@@ -720,7 +720,7 @@ class CreateVivaryTests(unittest.TestCase):
             fake_site = Path(td) / "fake-site"
             fake_site.mkdir()
             (fake_site / "vivary_cognee.py").write_text(
-                '__version__ = "0.1.1"\n'
+                '__version__ = "0.1.2"\n'
                 "TROPO_SEMANTIC_ADAPTER_API = 1\n"
                 "REQUIRES_EXPLICIT_PROVIDER_GATES = True\n"
                 "CogneeMemoryAdapter = None\n",
@@ -734,7 +734,7 @@ class CreateVivaryTests(unittest.TestCase):
                 with mock.patch.object(
                     create_vivary.importlib_metadata,
                     "version",
-                    return_value="0.1.1",
+                    return_value="0.1.2",
                 ):
                     report = create_vivary.doctor_workspace(target, repo_root=ROOT)
             finally:
@@ -1536,9 +1536,8 @@ class CreateVivaryTests(unittest.TestCase):
             finally:
                 restore()
 
-    def test_force_cleanup_failure_still_emits_json(self):
-        """The user-visible harm behind this finding: a raw OSError from cleanup
-        escapes `main`, so `--json` prints a traceback and no JSON at all."""
+    def test_force_init_refuses_legacy_cleanup_and_still_emits_json(self):
+        """Thin init never turns `--force` into unapproved legacy cleanup."""
         with temp_workspace() as td:
             target = Path(td) / "cleanup-json"
             create_vivary.scaffold_workspace(
@@ -1568,7 +1567,7 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertEqual(rc, 1)
             payload = json.loads(buf.getvalue())
             self.assertFalse(payload["ok"])
-            self.assertIn("stale scaffold path", payload["error"])
+            self.assertIn("use create-vivary adopt", payload["error"])
 
     @unittest.skipIf(os.name != "nt", "junctions are Windows-only")
     def test_force_cleanup_removes_stale_junction_without_touching_its_target(self):
@@ -1613,7 +1612,7 @@ class CreateVivaryTests(unittest.TestCase):
         """
         with temp_workspace() as td:
             target = Path(td) / "repair-mode"
-            create_vivary.scaffold_workspace(
+            create_vivary.scaffold_thin_workspace(
                 target, preset="coding", force=False, repo_root=ROOT
             )
             gitignore = target / ".gitignore"
@@ -1711,9 +1710,21 @@ class CreateVivaryTests(unittest.TestCase):
             )
 
             self.assertEqual(rc, 0)
-            self.assertTrue((target / "docs" / "active-context.md").exists())
-            self.assertTrue(
-                (target / ".agents" / "skills" / "active-context" / "SKILL.md").exists()
+            config = (target / ".vivary" / "workspace.toml").read_text(encoding="utf-8")
+            self.assertIn('capabilities = ["cocoindex-code"]', config)
+            self.assertEqual(
+                sorted(
+                    path.relative_to(target).as_posix()
+                    for path in target.rglob("*")
+                    if path.is_file()
+                ),
+                [
+                    ".gitignore",
+                    ".vivary/context.md",
+                    ".vivary/workspace.toml",
+                    "AGENTS.md",
+                    "STATE.md",
+                ],
             )
 
     def test_doctor_accepts_generated_workspace(self):
@@ -1733,8 +1744,9 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertEqual(
                 report["compatibility"],
                 {
-                    "schema_version": 1,
-                    "workspace_contract": "indexed-v0.2+",
+                    "schema_version": 2,
+                    "workspace_contract": "legacy-full",
+                    "legacy_layout": "indexed-v0.2+",
                     "baseline_missing": [],
                     "contract_missing": [],
                     "declared_capability_problems": [],
@@ -1805,12 +1817,14 @@ class CreateVivaryTests(unittest.TestCase):
             ]
             guidance = (
                 "run create-vivary adopt <workspace> --preset writing "
-                "(dry-run: omit --yes) to review the indexed v0.2+ module contract"
+                "--json to review the thin-v0.3 contract; apply only the approved "
+                "plan with --yes --plan <plan_hash>"
             )
             self.assertTrue(report["ok"], report)
             self.assertEqual(report["errors"], [])
-            self.assertEqual(report["compatibility"]["schema_version"], 1)
-            self.assertEqual(report["compatibility"]["workspace_contract"], "legacy-v0.1")
+            self.assertEqual(report["compatibility"]["schema_version"], 2)
+            self.assertEqual(report["compatibility"]["workspace_contract"], "legacy-full")
+            self.assertEqual(report["compatibility"]["legacy_layout"], "legacy-v0.1")
             self.assertEqual(report["compatibility"]["baseline_missing"], [])
             self.assertEqual(report["compatibility"]["contract_missing"], [])
             self.assertEqual(report["compatibility"]["declared_capability_problems"], [])
@@ -1868,6 +1882,10 @@ class CreateVivaryTests(unittest.TestCase):
                     self.assertEqual(report["errors"], [])
                     self.assertEqual(
                         report["compatibility"]["workspace_contract"],
+                        "legacy-full",
+                    )
+                    self.assertEqual(
+                        report["compatibility"]["legacy_layout"],
                         "indexed-v0.2+",
                     )
                     for pattern in privacy_recommendations:
@@ -1897,7 +1915,7 @@ class CreateVivaryTests(unittest.TestCase):
                         )
                     self.assertEqual(snapshot_workspace(target), before)
 
-    def test_doctor_repair_recognizes_legacy_v01_module_contract(self):
+    def test_doctor_repair_is_report_only_for_legacy_full_workspaces(self):
         with temp_workspace() as td:
             target = Path(td) / "legacy-repair"
             create_vivary.scaffold_workspace(
@@ -1909,22 +1927,23 @@ class CreateVivaryTests(unittest.TestCase):
                 gitignore.read_text(encoding="utf-8").replace("USER.md\n", ""),
                 encoding="utf-8",
             )
+            before = snapshot_workspace(target)
 
             report = create_vivary.doctor_repair_workspace(
-                target, repo_root=ROOT, yes=False
+                target, repo_root=ROOT, yes=True
             )
 
-            actions = report["repair"]["actions"]
-            self.assertFalse(any(action["kind"] == "workspace" for action in actions))
-            self.assertTrue(
-                any(
-                    action["kind"] == "gitignore"
-                    and action["status"] == "safe"
-                    and action["path"] == ".gitignore"
-                    for action in actions
-                ),
-                actions,
+            self.assertEqual(report["compatibility"]["workspace_contract"], "legacy-full")
+            self.assertEqual(report["repair"]["mode"], "report-only")
+            self.assertTrue(report["repair"]["actions"])
+            self.assertFalse(
+                any(action["applied"] for action in report["repair"]["actions"])
             )
+            self.assertIn(
+                "legacy-full repair is unavailable",
+                " ".join(report["warnings"]),
+            )
+            self.assertEqual(snapshot_workspace(target), before)
 
     def test_doctor_rejects_partial_indexed_workspace_contract(self):
         with temp_workspace() as td:
@@ -1938,7 +1957,8 @@ class CreateVivaryTests(unittest.TestCase):
             report = create_vivary.doctor_workspace(target, repo_root=ROOT)
 
             self.assertFalse(report["ok"], report)
-            self.assertEqual(report["compatibility"]["workspace_contract"], "indexed-v0.2+")
+            self.assertEqual(report["compatibility"]["workspace_contract"], "legacy-full")
+            self.assertEqual(report["compatibility"]["legacy_layout"], "indexed-v0.2+")
             self.assertEqual(
                 report["compatibility"]["contract_missing"], ["modules/index.md"]
             )
@@ -1963,15 +1983,21 @@ class CreateVivaryTests(unittest.TestCase):
             (target / "src" / "util.py").write_text(
                 "def helper():\n    return 1\n", encoding="utf-8"
             )
-            adopted = create_vivary.adopt_workspace(target, repo_root=ROOT, yes=True)
+            plan = create_vivary.plan_adopt(target, repo_root=ROOT)
+            adopted = create_vivary.adopt_workspace(
+                target,
+                repo_root=ROOT,
+                yes=True,
+                plan_hash=plan["plan_hash"],
+            )
             self.assertTrue(adopted["doctor"]["ok"], adopted["doctor"])
             before = snapshot_workspace(target)
 
             report = create_vivary.doctor_workspace(target, repo_root=ROOT)
 
             self.assertTrue(report["ok"], report)
-            self.assertEqual(report["compatibility"]["schema_version"], 1)
-            self.assertEqual(report["compatibility"]["workspace_contract"], "indexed-v0.2+")
+            self.assertEqual(report["compatibility"]["schema_version"], 2)
+            self.assertEqual(report["compatibility"]["workspace_contract"], "thin-v0.3")
             self.assertEqual(report["compatibility"]["baseline_missing"], [])
             self.assertEqual(report["compatibility"]["contract_missing"], [])
             self.assertEqual(report["compatibility"]["declared_capability_problems"], [])
@@ -2288,7 +2314,7 @@ class CreateVivaryTests(unittest.TestCase):
 
             self.assertEqual(rc, 1)
             actions = out["repair"]["actions"]
-            self.assertEqual(out["repair"]["mode"], "dry-run")
+            self.assertEqual(out["repair"]["mode"], "report-only")
             self.assertTrue(any(a["kind"] == "placeholder" and a["path"] == "USER.md" for a in actions))
             self.assertTrue(any(a["kind"] == "gitignore" and a["status"] == "safe" for a in actions))
             self.assertTrue(any(a["kind"] == "tropo-w210" and a["status"] == "safe" for a in actions))
@@ -2301,7 +2327,7 @@ class CreateVivaryTests(unittest.TestCase):
             self.assertNotIn("USER.md", (target / ".gitignore").read_text(encoding="utf-8"))
             self.assertIn("title: Codebase", module.read_text(encoding="utf-8"))
 
-    def test_doctor_repair_yes_applies_safe_repairs_and_reruns_doctor(self):
+    def test_doctor_repair_yes_remains_report_only_for_legacy_full(self):
         with temp_workspace() as td:
             target = Path(td) / "repair-apply"
             create_vivary.scaffold_workspace(
@@ -2321,30 +2347,25 @@ class CreateVivaryTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            before = snapshot_workspace(target)
 
             rc, out = run_doctor_json(target, "--repair", "--yes", "--trend")
 
-            self.assertEqual(rc, 0, out)
-            self.assertTrue(out["ok"], out)
+            self.assertEqual(rc, 1, out)
+            self.assertFalse(out["ok"], out)
             actions = out["repair"]["actions"]
-            self.assertEqual(out["repair"]["mode"], "applied")
-            self.assertTrue(any(a["kind"] == "placeholder" and a["path"] == "MEMORY.md" and a["applied"] for a in actions))
-            self.assertTrue(any(a["kind"] == "placeholder" and a["path"] == "memory/.gitkeep" and a["applied"] for a in actions))
-            self.assertTrue(any(a["kind"] == "tropo-w210" and a["applied"] for a in actions))
+            self.assertEqual(out["repair"]["mode"], "report-only")
+            self.assertFalse(any(a["applied"] for a in actions))
             self.assertEqual((target / "USER.md").read_text(encoding="utf-8"), "existing private note\n")
-            self.assertTrue((target / "MEMORY.md").exists())
-            self.assertTrue((target / "memory" / ".gitkeep").exists())
-            gitignore = (target / ".gitignore").read_text(encoding="utf-8")
-            for pattern in (
-                "USER.md",
-                "MEMORY.md",
-                "memory/*",
-                "heartbeat-reports/*",
-                ".strato/private/",
-                "*.vivary-tmp",
-            ):
-                self.assertIn(pattern, gitignore)
-            self.assertNotIn("title: Codebase", module.read_text(encoding="utf-8"))
+            self.assertFalse((target / "MEMORY.md").exists())
+            self.assertFalse((target / "memory" / ".gitkeep").exists())
+            self.assertEqual(
+                (target / ".gitignore").read_text(encoding="utf-8"),
+                "node_modules/\n",
+            )
+            self.assertIn("title: Codebase", module.read_text(encoding="utf-8"))
+            self.assertIsNone(out["trend"])
+            self.assertEqual(snapshot_workspace(target), before)
 
     def test_doctor_repair_yes_does_not_mutate_non_vivary_directory(self):
         with temp_workspace() as td:
@@ -2383,7 +2404,7 @@ class CreateVivaryTests(unittest.TestCase):
             rc, out = run_doctor_json(target, "--repair")
 
             self.assertEqual(rc, 1)
-            self.assertEqual(out["repair"]["mode"], "dry-run")
+            self.assertEqual(out["repair"]["mode"], "report-only")
             actions = out["repair"]["actions"]
             self.assertFalse(any(action["kind"] == "workspace" for action in actions))
             self.assertTrue(
@@ -2460,33 +2481,27 @@ class CreateVivaryTests(unittest.TestCase):
                 rc, 1, "doctor must not pass while the nested negation still unignores"
             )
 
-    def test_doctor_repair_restores_private_files_from_canonical_templates(self):
-        """Repair must regenerate USER.md/MEMORY.md as scaffold would, not as stubs.
-
-        Regression for `PRIVATE_PLACEHOLDER_TEXT` carrying a second, hardcoded definition
-        of these files: doctor passed on a workspace stripped of its identity, privacy,
-        decision and open-loop prompts, and template changes never reached the copy.
-        """
+    def test_doctor_repair_reports_missing_private_files_without_restoring_them(self):
         with temp_workspace() as td:
             target = Path(td) / "repair-private-templates"
             create_vivary.scaffold_workspace(
                 target, preset="coding", force=False, repo_root=ROOT
             )
-            expected = {
-                name: (target / name).read_text(encoding="utf-8")
-                for name in ("USER.md", "MEMORY.md")
-            }
-            for name in expected:
+            for name in ("USER.md", "MEMORY.md"):
                 (target / name).unlink()
+            before = snapshot_workspace(target)
 
-            run_doctor_json(target, "--repair", "--yes")
+            rc, out = run_doctor_json(target, "--repair", "--yes")
 
-            for name, original in expected.items():
-                self.assertEqual(
-                    (target / name).read_text(encoding="utf-8"),
-                    original,
-                    f"{name} must be restored from its canonical template, not a stub",
+            self.assertEqual(rc, 1, out)
+            self.assertEqual(out["repair"]["mode"], "report-only")
+            self.assertTrue(
+                all(
+                    any(a["kind"] == "placeholder" and a["path"] == name for a in out["repair"]["actions"])
+                    for name in ("USER.md", "MEMORY.md")
                 )
+            )
+            self.assertEqual(snapshot_workspace(target), before)
 
     # --- privacy matcher correctness cluster (see drafts/plans/2026-07-25-slice-01-
     # orchestrated-plan.md Step 2). These six are one indivisible fix: the wildmatch
@@ -2725,6 +2740,7 @@ class CreateVivaryTests(unittest.TestCase):
             rc, out = run_doctor_json(target, "--repair", "--yes")
 
             self.assertEqual(rc, 1)
+            self.assertEqual(out["repair"]["mode"], "report-only")
             refused = [
                 a for a in out["repair"]["actions"]
                 if a["path"] == ".gitignore" and a["status"] == "refused"
@@ -2755,6 +2771,7 @@ class CreateVivaryTests(unittest.TestCase):
             rc, out = run_doctor_json(target, "--repair", "--yes")
 
             self.assertEqual(rc, 1)
+            self.assertEqual(out["repair"]["mode"], "report-only")
             self.assertFalse(out["ok"])
             w220 = [a for a in out["repair"]["actions"] if a["kind"] == "tropo-w220"]
             self.assertEqual(len(w220), 1)
@@ -3051,7 +3068,8 @@ class CreateVivaryTests(unittest.TestCase):
 
             rc, out = run_doctor_json(target, "--repair", "--yes")
 
-            self.assertEqual(rc, 1)
+            self.assertEqual(rc, 0)
+            self.assertEqual(out["repair"]["mode"], "report-only")
             refused = [
                 a for a in out["repair"]["actions"]
                 if a["path"] == "memory/.gitkeep" and a["status"] == "refused"
@@ -3077,7 +3095,8 @@ class CreateVivaryTests(unittest.TestCase):
 
             rc, out = run_doctor_json(target, "--repair")
 
-            self.assertEqual(rc, 1)
+            self.assertEqual(rc, 0)
+            self.assertEqual(out["repair"]["mode"], "report-only")
             refused = [
                 a for a in out["repair"]["actions"]
                 if a["path"] == "USER.md" and a["status"] == "refused"
@@ -3156,7 +3175,7 @@ class CreateVivaryTests(unittest.TestCase):
 
             self.assertEqual(rc, 0, out)
             self.assertIsNone(out["trend"])
-            self.assertIn("repair dry-run", " ".join(out["warnings"]))
+            self.assertIn("repair is report-only", " ".join(out["warnings"]))
             self.assertFalse((target / ".vivary" / "doctor-state.json").exists())
 
 
@@ -3204,7 +3223,8 @@ class TestAgentFlags(unittest.TestCase):
             ensure.assert_not_called()
             out = json.loads(buf.getvalue())
             self.assertEqual(out["storage"], "file")
-            self.assertFalse((target / ".vivary").exists())
+            self.assertTrue((target / ".vivary" / "workspace.toml").is_file())
+            self.assertFalse((target / ".vivary" / "storage.toml").exists())
 
     def test_init_storage_file_does_not_write_vivary_dir(self):
         with temp_workspace() as td:
@@ -3338,9 +3358,10 @@ class TestAgentFlags(unittest.TestCase):
             self.assertEqual(rc, 0)
             out = json.loads(buf.getvalue())
             self.assertTrue(out["ok"])
-            # size=small → file backend → no .vivary/ dir
+            # size=small -> file backend -> no optional storage config.
             self.assertEqual(out["storage"], "file")
-            self.assertFalse((target / ".vivary").exists())
+            self.assertTrue((target / ".vivary" / "workspace.toml").is_file())
+            self.assertFalse((target / ".vivary" / "storage.toml").exists())
 
     def test_init_auto_cloud_config_does_not_install_backend(self):
         with temp_workspace() as td:
@@ -3796,6 +3817,10 @@ class VersionParityTests(unittest.TestCase):
         )
         npm = json.loads((root / "npm" / "package.json").read_text(encoding="utf-8"))
         self.assertEqual(npm["version"], declared, "npm package.json must stay in lockstep")
+        manifest = tomllib.loads(
+            (root / "pyproject.toml").read_text(encoding="utf-8")
+        )["project"]
+        self.assertIn("vivary-tropo>=0.5.2", manifest["dependencies"])
 
     def test_governed_install_hints_match_role_manifests(self):
         import tomllib
@@ -3804,7 +3829,7 @@ class VersionParityTests(unittest.TestCase):
             "governed-context:tropo": (
                 "tropo",
                 ["vivary-tropo", "vivary-core"],
-                ("vivary-core>=0.2.1",),
+                ("vivary-core>=0.2.7",),
             ),
             "governed-policy:strato": (
                 "strato",
@@ -3943,15 +3968,15 @@ class GovernedContextCapabilityTests(unittest.TestCase):
 
     def _write_governed_install(self, root: Path) -> None:
         self._write_distribution(
-            root, "vivary-core", "0.2.6", "vivary_core", package=True
+            root, "vivary-core", "0.2.7", "vivary_core", package=True
         )
         self._write_distribution(
             root,
             "vivary-tropo",
-            "0.5.0",
+            "0.5.2",
             "tropo",
             requirements=(
-                "vivary-core>=0.2.1",
+                "vivary-core>=0.2.7",
                 'lancedb>=0.14.0; extra == "embedded"',
             ),
             script="tropo",
@@ -3979,6 +4004,42 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             "exo",
             requirements=("vivary-tropo>=0.2.3", "vivary-core>=0.2.5"),
             script="exo",
+        )
+
+    def _write_mcp_install(
+        self,
+        root: Path,
+        *,
+        include_mcp: bool = True,
+        sdk_version: str = "2.0.0",
+    ) -> None:
+        self._write_distribution(
+            root, "vivary-core", "0.2.7", "vivary_core", package=True
+        )
+        self._write_distribution(
+            root,
+            "vivary-tropo",
+            "0.5.2",
+            "tropo",
+            requirements=("vivary-core>=0.2.7",),
+            script="tropo",
+        )
+        if include_mcp:
+            self._write_distribution(
+                root,
+                "mcp",
+                sdk_version,
+                "mcp",
+                package=True,
+            )
+        self._write_distribution(
+            root,
+            "vivary-mcp",
+            "0.1.1",
+            "vivary_mcp",
+            requirements=("vivary-tropo>=0.5.2", "mcp==2.0.0"),
+            script="vivary-mcp",
+            package=True,
         )
 
     def _write_cocoindex_full_install(
@@ -4074,6 +4135,166 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             )
         self.assertTrue(by_id["storage:file"]["installed"])
 
+    def test_mcp_capability_is_passively_detected_without_default_enablement(self):
+        class ExplodingFinder:
+            def find_spec(self, fullname, path=None, target=None):
+                raise AssertionError(f"ambient finder called for {fullname}")
+
+            def find_distributions(self, context=None):
+                raise AssertionError("ambient distribution finder called")
+
+        with temp_workspace() as root:
+            self._write_mcp_install(root)
+            with (
+                mock.patch.object(
+                    create_vivary,
+                    "_capability_install_roots",
+                    return_value=(root,),
+                ),
+                mock.patch.object(sys, "meta_path", [ExplodingFinder(), *sys.meta_path]),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        interop = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "interop:mcp"
+        )
+        self.assertEqual(
+            report["default_capabilities"], ["storage:file", "memory:none"]
+        )
+        self.assertNotIn("interop:mcp", report["default_capabilities"])
+        self.assertEqual(interop["authority"], "read-only-context")
+        self.assertFalse(interop["default"])
+        self.assertFalse(interop["requires_approval"])
+        self.assertFalse(interop["network"])
+        self.assertEqual(
+            interop["requires_install"], ["vivary-mcp", "vivary-tropo", "mcp"]
+        )
+        self.assertTrue(interop["installed"])
+        self.assertEqual(interop["install_status"], "installed")
+        self.assertEqual(interop["reason_codes"], [])
+        self.assertEqual(interop["missing_install"], [])
+        self.assertNotIn("versioned", interop)
+        self.assertTrue(interop["package_present"])
+        self.assertTrue(interop["entry_point_present"])
+        self.assertEqual(interop["sdk_version"], "2.0.0")
+        self.assertTrue(interop["sdk_compatible"])
+        self.assertEqual(interop["protocol_revision"], "2026-07-28")
+        self.assertTrue(interop["transport_stdio"])
+        self.assertEqual(
+            interop["tool_names"],
+            ["vivary_find", "vivary_query", "vivary_check", "vivary_capsule"],
+        )
+        self.assertEqual(interop["extensions"], [])
+        self.assertEqual(interop["conformance_status"], "unproven")
+
+    def test_mcp_capability_requires_the_exact_reviewed_sdk_version(self):
+        with temp_workspace() as root:
+            self._write_mcp_install(root, sdk_version="2.0.1")
+            with mock.patch.object(
+                create_vivary,
+                "_capability_install_roots",
+                return_value=(root,),
+            ):
+                report = create_vivary.capability_report("coding")
+
+        interop = next(
+            item
+            for item in report["available_capabilities"]
+            if item["id"] == "interop:mcp"
+        )
+        self.assertEqual(interop["install_status"], "incompatible")
+        self.assertEqual(
+            interop["reason_codes"],
+            ["capability_contract_incompatible"],
+        )
+        self.assertTrue(interop["package_present"])
+        self.assertTrue(interop["entry_point_present"])
+        self.assertEqual(interop["sdk_version"], "2.0.1")
+        self.assertFalse(interop["sdk_compatible"])
+
+    def test_text_doctor_reports_optional_mcp_interoperability(self):
+        output = io.StringIO()
+        report = {
+            "ok": True,
+            "graph": {"nodes": 0, "edges": 0, "broken": 0},
+            "memory": {},
+            "capabilities": {
+                "available_capabilities": [
+                    {
+                        "id": "interop:mcp",
+                        "install_status": "not-installed",
+                    }
+                ]
+            },
+            "warnings": [],
+            "errors": [],
+        }
+
+        with redirect_stdout(output):
+            create_vivary._print_doctor_report(report)
+
+        self.assertIn(
+            "capability: interop:mcp (not-installed)",
+            output.getvalue(),
+        )
+
+    def test_mcp_capability_reports_missing_incompatible_and_probe_failed_dependencies(self):
+        def report_for(root: Path) -> dict:
+            with mock.patch.object(
+                create_vivary, "_capability_install_roots", return_value=(root,)
+            ):
+                return create_vivary.capability_report("coding")
+
+        with self.subTest(status="not-installed"), temp_workspace() as root:
+            self._write_mcp_install(root, include_mcp=False)
+            interop = next(
+                item
+                for item in report_for(root)["available_capabilities"]
+                if item["id"] == "interop:mcp"
+            )
+            self.assertEqual(interop["install_status"], "not-installed")
+            self.assertEqual(
+                interop["reason_codes"], ["capability_dependency_missing"]
+            )
+            self.assertEqual(interop["missing_install"], ["mcp"])
+
+        with self.subTest(status="incompatible"), temp_workspace() as root:
+            self._write_mcp_install(root)
+            metadata = next(root.glob("vivary_mcp-*.dist-info/METADATA"))
+            metadata.write_text(
+                metadata.read_text(encoding="utf-8").replace(
+                    "Requires-Dist: mcp==2.0.0\n", ""
+                ),
+                encoding="utf-8",
+            )
+            interop = next(
+                item
+                for item in report_for(root)["available_capabilities"]
+                if item["id"] == "interop:mcp"
+            )
+            self.assertEqual(interop["install_status"], "incompatible")
+            self.assertEqual(
+                interop["reason_codes"], ["capability_contract_incompatible"]
+            )
+            self.assertEqual(interop["missing_install"], [])
+
+        with self.subTest(status="probe-failed"), temp_workspace() as root:
+            self._write_mcp_install(root)
+            record = next(root.glob("mcp-*.dist-info/RECORD"))
+            record.write_text("not-a-record-row\n", encoding="utf-8")
+            interop = next(
+                item
+                for item in report_for(root)["available_capabilities"]
+                if item["id"] == "interop:mcp"
+            )
+            self.assertEqual(interop["install_status"], "probe-failed")
+            self.assertEqual(
+                interop["reason_codes"], ["capability_probe_failed"]
+            )
+            self.assertEqual(interop["missing_install"], [])
+
     def test_command_capability_requires_recorded_launcher(self):
         for mutation in ("missing", "unrecorded"):
             with self.subTest(mutation=mutation), temp_workspace() as root:
@@ -4084,7 +4305,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
                 if mutation == "missing":
                     launcher.unlink()
                 else:
-                    record = root / "vivary_tropo-0.5.0.dist-info" / "RECORD"
+                    record = root / "vivary_tropo-0.5.2.dist-info" / "RECORD"
                     record.write_text(
                         "".join(
                             line
@@ -4119,7 +4340,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
     def test_posix_launcher_record_does_not_treat_backslash_as_separator(self):
         with temp_workspace() as root:
             self._write_governed_install(root)
-            record = root / "vivary_tropo-0.5.0.dist-info" / "RECORD"
+            record = root / "vivary_tropo-0.5.2.dist-info" / "RECORD"
             record.write_text(
                 record.read_text(encoding="utf-8").replace(
                     ".scripts/tropo,",
@@ -4149,7 +4370,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         for mutation in ("one-column", "vertical-tab"):
             with self.subTest(mutation=mutation), temp_workspace() as root:
                 self._write_governed_install(root)
-                record = root / "vivary_tropo-0.5.0.dist-info" / "RECORD"
+                record = root / "vivary_tropo-0.5.2.dist-info" / "RECORD"
                 content = record.read_text(encoding="utf-8")
                 if mutation == "one-column":
                     first, *remaining = content.splitlines()
@@ -4210,9 +4431,9 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             self._write_distribution(
                 root,
                 "vivary-tropo",
-                "0.5.0",
+                "0.5.2",
                 "tropo",
-                requirements=("vivary-core>=0.2.1",),
+                requirements=("vivary-core>=0.2.7",),
                 script="tropo",
             )
             with mock.patch.object(
@@ -4221,13 +4442,13 @@ class GovernedContextCapabilityTests(unittest.TestCase):
                 missing = create_vivary.capability_report("coding")
 
             self._write_distribution(
-                root, "vivary-core", "0.2.6", "vivary_core", package=True
+                root, "vivary-core", "0.2.7", "vivary_core", package=True
             )
             tropo_metadata = next(root.glob("vivary_tropo-*.dist-info/METADATA"))
             tropo_metadata.write_text(
                 "Metadata-Version: 2.3\n"
                 "Name: vivary-tropo\n"
-                "Version: 0.5.0\n"
+                "Version: 0.5.2\n"
                 "Requires-Python: >=3.11\n",
                 encoding="utf-8",
             )
@@ -5081,7 +5302,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             metadata.write_bytes(
                 b"Metadata-Version: 2.3\n"
                 b"Name: vivary-core\n"
-                b"Version: 0.2.6\n"
+                b"Version: 0.2.7\n"
                 b"Requires-Python: >=3.11\n"
                 b"broken metadata header\n"
             )
@@ -5243,7 +5464,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         with temp_workspace() as root:
             self._write_governed_install(root)
             original = next(root.glob("vivary_core-*.dist-info"))
-            renamed = root / original.name.replace("0.2.6", "9.9.9")
+            renamed = root / original.name.replace("0.2.7", "9.9.9")
             original.rename(renamed)
             record = renamed / "RECORD"
             record.write_text(
@@ -5676,13 +5897,13 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             create_vivary._parse_capability_metadata(
                 b"Metadata-Version: \n"
                 b"Name: vivary-core\n"
-                b"Version: 0.2.6\n"
+                b"Version: 0.2.7\n"
                 b"Requires-Python: >=3.11\n"
             )
 
         with temp_workspace() as root, temp_workspace() as outside:
             self._write_distribution(
-                outside, "vivary-core", "0.2.6", "vivary_core", package=True
+                outside, "vivary-core", "0.2.7", "vivary_core", package=True
             )
             external = next(outside.glob("vivary_core-*.dist-info"))
             try:
@@ -5732,6 +5953,16 @@ class GovernedContextCapabilityTests(unittest.TestCase):
 
             self.assertTrue(report["ok"], report)
             self.assertEqual(report["capabilities"], create_vivary.capability_report("coding"))
+            interop = next(
+                item
+                for item in report["capabilities"]["available_capabilities"]
+                if item["id"] == "interop:mcp"
+            )
+            self.assertFalse(interop["default"])
+            self.assertNotIn(
+                "interop:mcp", report["capabilities"]["default_capabilities"]
+            )
+            self.assertNotIn("vivary-mcp", json.dumps(report["errors"]))
             self.assertNotIn("vivary-core", json.dumps(report["errors"]))
 
             readme = target / "README.md"

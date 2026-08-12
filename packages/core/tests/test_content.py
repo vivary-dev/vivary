@@ -37,6 +37,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import threading
 from datetime import datetime, timezone
 
@@ -532,7 +533,57 @@ def test_ignore_filter_fails_closed_on_untrusted_output_or_missing_exit_code(
     assert checkout["matches"] == []
 
 
-def test_capped_runner_returns_when_inherited_stderr_handle_stays_open(
+def test_content_observation_refuses_when_privacy_policy_changes_after_grep():
+    policy_checks = 0
+    calls = []
+    revision = "a" * 40
+
+    def run_git(_path, args, **_kwargs):
+        nonlocal policy_checks
+        calls.append(args)
+        command = "git " + " ".join(args)
+        if args == ["rev-parse", "HEAD"]:
+            return {"ok": True, "stdout": revision + "\n", "code": 0, "command": command}
+        if args == ["ls-tree", "-r", "-z", "--name-only", revision]:
+            return {"ok": True, "stdout": "visible.md\0", "code": 0, "command": command}
+        if "check-ignore" in args:
+            policy_checks += 1
+            if policy_checks == 1:
+                return {"ok": False, "stdout": "", "code": 1, "command": command}
+            return {
+                "ok": True,
+                "stdout": "./visible.md\0",
+                "code": 0,
+                "command": command,
+            }
+        if args[0] == "grep":
+            return {
+                "ok": True,
+                "stdout": "visible.md\0" + "1\0needle\n",
+                "code": 0,
+                "command": command,
+            }
+        raise AssertionError(f"unexpected git command: {args}")
+
+    result = observe_content(
+        ["C:/fake"],
+        allowlist=["C:/fake"],
+        terms=["needle"],
+        now=NOW,
+        run_git=run_git,
+    )
+
+    checkout = result["checkouts"][0]
+    assert policy_checks == 2
+    assert calls.index(next(args for args in calls if args[0] == "grep")) < len(calls) - 1
+    assert checkout["status"] == "unknown"
+    assert checkout["reason"] == "ignore_policy_unavailable"
+    assert checkout["matches"] == []
+
+
+
+
+def test_capped_runner_releases_inherited_stderr_scope_and_closes_helpers(
     monkeypatch,
 ):
     from vivary_core import workspace_observe
@@ -551,13 +602,25 @@ def test_capped_runner_returns_when_inherited_stderr_handle_stays_open(
         def __init__(self):
             super().__init__()
             self.release = threading.Event()
+            self.reader_returned = threading.Event()
 
         def read(self, _size):
             self.release.wait()
+            self.reader_returned.set()
             return b""
 
-    class InheritedHandlePopen:
-        def __init__(self, *_args, **_kwargs):
+    class InputPipe(EofPipe):
+        def __init__(self):
+            super().__init__()
+            self.written = threading.Event()
+
+        def write(self, _data):
+            self.written.set()
+            return len(_data)
+
+    class InheritedHandleChild:
+        def __init__(self):
+            self.stdin = InputPipe()
             self.stdout = EofPipe()
             self.stderr = HeldPipe()
             self.returncode = 0
@@ -566,18 +629,238 @@ def test_capped_runner_returns_when_inherited_stderr_handle_stays_open(
             self.returncode = -9
 
         def wait(self, timeout=None):
+            assert self.stdin.written.wait(timeout or 0.5)
             return self.returncode
 
-    child = InheritedHandlePopen()
-    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: child)
-    monkeypatch.setattr(workspace_observe, "_SUBPROCESS_CLEANUP_TIMEOUT", 0.05)
+    class ContainedScope:
+        def __init__(self, proc):
+            self.proc = proc
+            self.termination_calls = 0
+            self.dispose_calls = 0
 
-    outcome = workspace_observe._capped_run(["fake-producer"], {}, limit=64)
+        def terminate(self):
+            self.termination_calls += 1
+            self.proc.stderr.release.set()
 
-    assert outcome["error"] == "stderr drain timed out"
+        def wait_stopped(self, _deadline):
+            assert self.proc.stderr.release.is_set()
+
+        def dispose(self):
+            self.dispose_calls += 1
+            self.proc.stderr.release.set()
+
+    child = InheritedHandleChild()
+    scope = ContainedScope(child)
+    monkeypatch.setattr(
+        workspace_observe,
+        "_open_process_scope",
+        lambda *_args, **_kwargs: scope,
+    )
+
+    outcome = workspace_observe._capped_run(
+        ["fake-producer"],
+        {},
+        limit=64,
+        stdin_data=b"input",
+    )
+
+    assert outcome["error"] is None
+    assert outcome["code"] == 0
+    assert scope.termination_calls == 1
+    assert scope.dispose_calls == 1
+    assert child.stdin.written.is_set()
+    assert child.stderr.reader_returned.is_set()
+    assert child.stdin.closed is True
     assert child.stdout.closed is True
-    assert child.stderr.closed is False
-    child.stderr.release.set()
+    assert child.stderr.closed is True
+
+
+@pytest.mark.parametrize("terminal_path", ("normal", "timeout", "cancelled", "overflow"))
+def test_capped_runner_disposes_process_scope_for_each_terminal_path(
+    monkeypatch,
+    terminal_path,
+):
+    from vivary_core import workspace_observe
+
+    class Pipe:
+        def __init__(self, chunks=()):
+            self.chunks = list(chunks)
+            self.closed = False
+
+        def read(self, _size):
+            return self.chunks.pop(0) if self.chunks else b""
+
+        def write(self, data):
+            return len(data)
+
+        def close(self):
+            self.closed = True
+
+    class Child:
+        def __init__(self, returncode, stdout_chunks=()):
+            self.stdin = Pipe()
+            self.stdout = Pipe(stdout_chunks)
+            self.stderr = Pipe()
+            self.returncode = returncode
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            if self.returncode is None:
+                raise subprocess.TimeoutExpired("fake-producer", timeout)
+            return self.returncode
+
+    class Scope:
+        def __init__(self, proc):
+            self.proc = proc
+            self.termination_calls = 0
+            self.dispose_calls = 0
+
+        def terminate(self):
+            self.termination_calls += 1
+            if self.proc.returncode is None:
+                self.proc.returncode = -9
+
+        def wait_stopped(self, _deadline):
+            assert self.proc.returncode is not None
+
+        def dispose(self):
+            self.dispose_calls += 1
+
+    if terminal_path == "normal":
+        child = Child(0)
+        kwargs = {}
+    elif terminal_path == "timeout":
+        child = Child(None)
+        kwargs = {"timeout_seconds": 0.0}
+    elif terminal_path == "cancelled":
+        child = Child(None)
+        probes = iter((False, True))
+        kwargs = {"cancelled": lambda: next(probes)}
+    else:
+        child = Child(None, stdout_chunks=(b"x" * 65,))
+        kwargs = {"timeout_seconds": 1.0}
+
+    scope = Scope(child)
+    monkeypatch.setattr(
+        workspace_observe,
+        "_open_process_scope",
+        lambda *_args, **_kwargs: scope,
+    )
+    outcome = workspace_observe._capped_run(
+        ["fake-producer"],
+        {},
+        limit=64,
+        stdin_data=b"input",
+        **kwargs,
+    )
+
+    assert scope.termination_calls == 1
+    assert scope.dispose_calls == 1
+    assert child.stdin.closed is True
+    assert child.stdout.closed is True
+    assert child.stderr.closed is True
+    assert outcome["code"] is not None
+    if terminal_path == "normal":
+        assert outcome["error"] is None
+    elif terminal_path == "timeout":
+        assert outcome["error"] == "subprocess timed out"
+    elif terminal_path == "cancelled":
+        assert outcome["error"] == "operation cancelled"
+    else:
+        assert outcome["error"] is None
+        assert outcome["exceeded"] is True
+
+
+def test_capped_runner_quarantines_future_processes_when_scope_stop_is_unconfirmed(
+    monkeypatch,
+):
+    from vivary_core import workspace_observe
+
+    class UnconfirmedScope:
+        def __init__(self):
+            self.proc = subprocess.Popen(
+                [sys.executable, "-c", "pass"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        def terminate(self):
+            if self.proc.poll() is None:
+                self.proc.kill()
+
+        def wait_stopped(self, _deadline):
+            raise TimeoutError("descendants still active")
+
+        def dispose(self):
+            return None
+
+    scope = UnconfirmedScope()
+    monkeypatch.setattr(workspace_observe, "_PROCESS_SCOPE_QUARANTINED", False)
+    monkeypatch.setattr(
+        workspace_observe,
+        "_open_process_scope",
+        lambda *_args, **_kwargs: scope,
+    )
+
+    first = workspace_observe._capped_run(
+        ["fake-producer"],
+        {},
+        limit=64,
+    )
+    second = workspace_observe._capped_run(
+        ["must-not-start"],
+        {},
+        limit=64,
+    )
+
+    assert "process scope cleanup failed" in first["error"]
+    assert second == {
+        "error": "process execution quarantined after unconfirmed cleanup",
+        "stdout": b"",
+        "stderr": b"",
+        "code": None,
+        "exceeded": False,
+        "cancelled": False,
+        "timed_out": False,
+    }
+
+
+def test_capped_runner_rechecks_quarantine_atomically_at_process_launch(monkeypatch):
+    from vivary_core import workspace_observe
+
+    monkeypatch.setattr(workspace_observe, "_PROCESS_SCOPE_QUARANTINED", False)
+
+    def quarantine_after_fast_check():
+        workspace_observe._quarantine_process_scope()
+        return False
+
+    monkeypatch.setattr(
+        workspace_observe,
+        "_process_scope_is_quarantined",
+        quarantine_after_fast_check,
+    )
+    monkeypatch.setattr(
+        workspace_observe,
+        "_open_process_scope",
+        lambda *_args, **_kwargs: pytest.fail("quarantined process must not start"),
+    )
+
+    assert workspace_observe._capped_run(
+        ["must-not-start"],
+        {},
+        limit=64,
+    ) == {
+        "error": "process execution quarantined after unconfirmed cleanup",
+        "stdout": b"",
+        "stderr": b"",
+        "code": None,
+        "exceeded": False,
+        "cancelled": False,
+        "timed_out": False,
+    }
 
 
 def test_tracked_uncommitted_working_tree_edit_is_not_searched(fx, allowlist):
@@ -868,6 +1151,7 @@ def test_capped_runner_survives_a_stderr_flood_from_a_real_child(monkeypatch):
 
 def test_capped_runner_drains_stdout_and_stderr_concurrently(monkeypatch):
     """A child that fills stderr before stdout must not deadlock the runner."""
+    from vivary_core import workspace_observe
     from vivary_core.workspace_content import _capped_run
 
     class CoordinatedPipe:
@@ -888,8 +1172,8 @@ def test_capped_runner_drains_stdout_and_stderr_concurrently(monkeypatch):
         def close(self):
             self.closed = True
 
-    class FullDuplexPopen:
-        def __init__(self, *_args, **_kwargs):
+    class FullDuplexChild:
+        def __init__(self):
             self.stdout = CoordinatedPipe(b"stdout")
             self.stderr = CoordinatedPipe(b"stderr")
             self.stdout.peer = self.stderr
@@ -902,10 +1186,28 @@ def test_capped_runner_drains_stdout_and_stderr_concurrently(monkeypatch):
         def wait(self, timeout=None):
             return self.returncode
 
-        def communicate(self):
-            return b"", b""
+    class Scope:
+        def __init__(self, proc):
+            self.proc = proc
+            self.termination_calls = 0
+            self.dispose_calls = 0
 
-    monkeypatch.setattr(subprocess, "Popen", FullDuplexPopen)
+        def terminate(self):
+            self.termination_calls += 1
+
+        def wait_stopped(self, _deadline):
+            return None
+
+        def dispose(self):
+            self.dispose_calls += 1
+
+    child = FullDuplexChild()
+    scope = Scope(child)
+    monkeypatch.setattr(
+        workspace_observe,
+        "_open_process_scope",
+        lambda *_args, **_kwargs: scope,
+    )
 
     outcome = _capped_run(["fake-producer"], {}, limit=64)
 
@@ -915,4 +1217,102 @@ def test_capped_runner_drains_stdout_and_stderr_concurrently(monkeypatch):
         "stderr": b"stderr",
         "code": 0,
         "exceeded": False,
+        "cancelled": False,
+        "timed_out": False,
     }
+    assert scope.termination_calls == 1
+    assert scope.dispose_calls == 1
+
+
+def test_capped_runner_stops_inherited_pipe_descendant_after_parent_exit():
+    from vivary_core.workspace_content import _capped_run
+
+    parent = [
+        sys.executable,
+        "-c",
+        (
+            "import subprocess, sys; "
+            "subprocess.Popen([sys.executable, '-c', "
+            "\"import time; time.sleep(30)\"]); "
+            "print('parent-exit', flush=True)"
+        ),
+    ]
+
+    started = time.monotonic()
+    outcome = _capped_run(
+        parent,
+        dict(os.environ),
+        limit=64,
+        timeout_seconds=1.0,
+    )
+
+    assert time.monotonic() - started < 2.5
+    assert outcome["error"] is None
+    assert outcome["stdout"].strip() == b"parent-exit"
+    assert outcome["code"] == 0
+
+
+def test_capped_runner_kills_a_child_at_its_deadline():
+    from vivary_core.workspace_content import _capped_run
+
+    outcome = _capped_run(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        dict(os.environ),
+        limit=64,
+        timeout_seconds=0.05,
+    )
+
+    assert outcome["error"] == "subprocess timed out"
+    assert outcome["timed_out"] is True
+    assert outcome["cancelled"] is False
+    assert outcome["code"] is not None
+
+
+def test_capped_runner_cooperatively_cancels_and_kills_a_child():
+    from vivary_core.workspace_content import _capped_run
+
+    probes = 0
+
+    def cancelled():
+        nonlocal probes
+        probes += 1
+        return probes > 1
+
+    outcome = _capped_run(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        dict(os.environ),
+        limit=64,
+        cancelled=cancelled,
+    )
+
+    assert outcome["error"] == "operation cancelled"
+    assert outcome["cancelled"] is True
+    assert outcome["timed_out"] is False
+    assert outcome["code"] is not None
+
+
+def test_public_privacy_budget_reserves_two_thin_config_candidates(monkeypatch):
+    from vivary_core import workspace_observe
+
+    monkeypatch.setattr(
+        workspace_observe,
+        "_is_safe_content_privacy_candidate",
+        lambda _root, _candidate: True,
+    )
+    candidates = [
+        ".vivary/workspace.toml",
+        "tropo.toml",
+        *(f"notes/{index}.md" for index in range(5_000)),
+    ]
+
+    admitted = workspace_observe._bounded_content_privacy_candidates(
+        "/workspace",
+        candidates,
+    )
+
+    assert len(admitted) == 5_002
+    with pytest.raises(workspace_observe.ContentPrivacyPathRefusedError):
+        workspace_observe._bounded_content_privacy_candidates(
+            "/workspace",
+            [*candidates, "notes/overflow.md"],
+        )

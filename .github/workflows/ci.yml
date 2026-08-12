@@ -10,6 +10,39 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      site: ${{ steps.scope.outputs.site }}
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
+      - name: detect site inputs
+        id: scope
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -z "$BASE_SHA" ] || [[ "$BASE_SHA" =~ ^0+$ ]]; then
+            echo "site=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"; then
+            echo "site=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if printf '%s\n' "$changed" | grep -Eq \
+            '^(site/|docs/|README\.md$|CHANGELOG\.md$|\.github/workflows/ci\.yml$)'; then
+            echo "site=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "site=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: tests + checks
     runs-on: ubuntu-latest
@@ -24,6 +57,10 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
+      - name: install Python test runner
+        run: python -m pip install pytest packaging
+      - name: CI workflow contract
+        run: python scripts/check_ci_workflow.py
       - run: mkdir -p sandboxes
       - name: tropo
         run: python packages/tropo/tests/test_tropo.py
@@ -33,6 +70,10 @@ jobs:
         run: python packages/exo/tests/test_exo.py
       - name: create-vivary
         run: python packages/create-vivary/tests/test_create_vivary.py
+      - name: create-vivary thin init
+        run: python packages/create-vivary/tests/test_init_thin.py
+      - name: create-vivary governed record workflow
+        run: python packages/create-vivary/tests/test_record_workflow.py
       - name: create-vivary adopt
         run: python packages/create-vivary/tests/test_adopt.py
       - name: create-vivary orientation proof regressions
@@ -43,12 +84,14 @@ jobs:
         run: python packages/create-vivary/tests/test_strato_integrity.py
       - name: memory-cognee
         run: python packages/memory-cognee/tests/test_memory_cognee.py
+      - name: mcp read-only adapter
+        run: |
+          python -m pip install "mcp==2.0.0"
+          python -m pytest packages/mcp/tests/ -q
       - name: vivary meta CLI
         run: python packages/vivary/tests/test_vivary_cli.py
       - name: core (governed-context seam; suite is the ported reference tests)
-        run: |
-          python -m pip install pytest packaging
-          python -m pytest packages/core/tests/ -q
+        run: python -m pytest packages/core/tests/ -q
       - name: strato governed policy facade
         run: python -m pytest packages/strato/tests/ -q
       - name: packaged core and governed role bridges smoke
@@ -65,7 +108,8 @@ jobs:
             ./packages/exo \
             ./packages/create-vivary \
             ./packages/vivary \
-            ./packages/memory-cognee
+            ./packages/memory-cognee \
+            ./packages/mcp
           python -m venv "$smoke/venv"
           venv_python="$smoke/venv/bin/python"
           export PATH="$smoke/venv/bin:$PATH"
@@ -217,13 +261,14 @@ jobs:
           assert strato_result["reason_codes"] == ["gate_required"]
           assert ozone_result["schema"] == "vivary.ozone-verification/v0"
           assert ozone_result["outcome"] == "sufficient"
-          assert version("vivary-core") == "0.2.6"
+          assert version("vivary-core") == "0.2.7"
           assert version("vivary-exo") == "0.3.0"
-          assert version("create-vivary") == "0.3.2"
-          assert version("vivary") == "0.1.5"
+          assert version("create-vivary") == "0.4.0"
+          assert version("vivary") == "0.1.8"
           assert "vivary-core>=0.2.5" in requires("vivary-exo")
           vivary_requirements = requires("vivary") or []
-          assert "create-vivary>=0.3.2" in vivary_requirements
+          assert "create-vivary>=0.4.0" in vivary_requirements
+          assert "vivary-tropo>=0.5.2" in vivary_requirements
           assert "vivary-strato>=0.1.2" in vivary_requirements
           assert "vivary-exo>=0.3.0" in vivary_requirements
           assert not any(
@@ -241,6 +286,46 @@ jobs:
               capability["install_status"] == "installed"
               for capability in governed
           )
+          PY
+          mcp_venv="$smoke/mcp-venv"
+          python -m venv "$mcp_venv"
+          mcp_python="$mcp_venv/bin/python"
+          "$mcp_python" -m pip install "mcp==2.0.0"
+          "$mcp_python" -m pip install --no-index --find-links "$wheelhouse" vivary-mcp create-vivary
+          "$mcp_python" -m pip check
+          "$mcp_venv/bin/vivary-mcp" --help > /dev/null
+          "$mcp_python" - <<'PY'
+          from importlib.metadata import PackageNotFoundError, requires, version
+          import create_vivary
+
+          assert version("vivary-mcp") == "0.1.1"
+          assert version("vivary-tropo") == "0.5.2"
+          assert version("vivary-core") == "0.2.7"
+          assert version("mcp") == "2.0.0"
+          assert version("mcp-types") == "2.0.0"
+          mcp_requirements = requires("vivary-mcp") or []
+          assert "vivary-tropo>=0.5.2" in mcp_requirements
+          assert "mcp==2.0.0" in mcp_requirements
+          assert not any(
+              requirement.startswith("vivary-core")
+              for requirement in mcp_requirements
+          )
+          report = create_vivary.capability_report("coding")
+          interop = next(
+              row
+              for row in report["available_capabilities"]
+              if row["id"] == "interop:mcp"
+          )
+          assert interop["installed"] is True
+          assert interop["install_status"] == "installed"
+          assert interop["sdk_version"] == "2.0.0"
+          assert interop["conformance_status"] == "unproven"
+          try:
+              version("vivary")
+          except PackageNotFoundError:
+              pass
+          else:
+              raise AssertionError("optional MCP install pulled the vivary meta-package")
           PY
           "$venv_python" -m pip install --no-index --find-links "$wheelhouse" --no-deps \
             vivary-memory-cognee
@@ -513,7 +598,8 @@ jobs:
             ./packages/exo `
             ./packages/create-vivary `
             ./packages/vivary `
-            ./packages/memory-cognee
+            ./packages/memory-cognee `
+            ./packages/mcp
           if ($LASTEXITCODE -ne 0) { throw "wheel build failed" }
           python -m venv (Join-Path $smoke "venv")
           if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
@@ -548,6 +634,53 @@ jobs:
             & (Join-Path $scripts "$command.exe") --help | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "$command entrypoint failed" }
           }
+          $mcpVenv = Join-Path $smoke "mcp-venv"
+          python -m venv $mcpVenv
+          if ($LASTEXITCODE -ne 0) { throw "MCP venv creation failed" }
+          $mcpScripts = Join-Path $mcpVenv "Scripts"
+          $mcpPython = Join-Path $mcpScripts "python.exe"
+          & $mcpPython -m pip install "mcp==2.0.0"
+          if ($LASTEXITCODE -ne 0) { throw "MCP dependency install failed" }
+          & $mcpPython -m pip install --no-index --find-links $wheelhouse vivary-mcp create-vivary
+          if ($LASTEXITCODE -ne 0) { throw "optional MCP install failed" }
+          & $mcpPython -m pip check
+          if ($LASTEXITCODE -ne 0) { throw "optional MCP pip check failed" }
+          & (Join-Path $mcpScripts "vivary-mcp.exe") --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "vivary-mcp entrypoint failed" }
+          @'
+          from importlib.metadata import PackageNotFoundError, requires, version
+          import create_vivary
+
+          assert version("vivary-mcp") == "0.1.1"
+          assert version("vivary-tropo") == "0.5.2"
+          assert version("vivary-core") == "0.2.7"
+          assert version("mcp") == "2.0.0"
+          assert version("mcp-types") == "2.0.0"
+          mcp_requirements = requires("vivary-mcp") or []
+          assert "vivary-tropo>=0.5.2" in mcp_requirements
+          assert "mcp==2.0.0" in mcp_requirements
+          assert not any(
+              requirement.startswith("vivary-core")
+              for requirement in mcp_requirements
+          )
+          report = create_vivary.capability_report("coding")
+          interop = next(
+              row
+              for row in report["available_capabilities"]
+              if row["id"] == "interop:mcp"
+          )
+          assert interop["installed"] is True
+          assert interop["install_status"] == "installed"
+          assert interop["sdk_version"] == "2.0.0"
+          assert interop["conformance_status"] == "unproven"
+          try:
+              version("vivary")
+          except PackageNotFoundError:
+              pass
+          else:
+              raise AssertionError("optional MCP install pulled the vivary meta-package")
+          '@ | & $mcpPython -
+          if ($LASTEXITCODE -ne 0) { throw "optional MCP identity proof failed" }
 
   orientation-proof:
     name: orientation proof (${{ matrix.os }})
@@ -570,6 +703,11 @@ jobs:
       - name: governed context adapter (Windows path contract)
         if: runner.os == 'Windows'
         run: python packages/tropo/tests/test_tropo.py
+      - name: thin workspace lifecycle (${{ matrix.os }})
+        run: |
+          python packages/create-vivary/tests/test_init_thin.py
+          python packages/create-vivary/tests/test_record_workflow.py
+          python packages/create-vivary/tests/test_adopt.py
       - name: run disposable orientation proof
         run: python packages/create-vivary/tests/orientation_proof.py --receipt orientation-proof.json
       - name: preserve orientation receipt
@@ -582,6 +720,7 @@ jobs:
 
   review:
     name: graph review gate
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -601,6 +740,8 @@ jobs:
 
   site:
     name: site build
+    needs: changes
+    if: needs.changes.outputs.site == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -612,6 +753,9 @@ jobs:
           cache-dependency-path: site/package-lock.json
       - name: install
         run: npm ci
+        working-directory: site
+      - name: audit high and critical site dependencies
+        run: npm audit --audit-level=high
         working-directory: site
       - name: site behavior and information architecture tests
         run: npm run test:site

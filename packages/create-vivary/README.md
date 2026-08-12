@@ -1,146 +1,133 @@
 # create-vivary
 
-Scaffold a complete Vivary agent workspace: tropo config, strato workspace files,
-runtime skills, private-memory boundaries, progressive module indexes, and a starter
-typed graph.
+`create-vivary` installs Vivary's lightweight, local-first governed-context contract.
+It gives agents one visible state surface, a bounded context capsule, provenance and
+verification hooks, and deliberate human gates without copying a framework into the
+workspace.
 
 Published and development version truth lives in the
 [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status).
+The unpublished source candidates are `create-vivary 0.4.0` and
+`@vivary/create 0.4.0`; both require `vivary-tropo>=0.5.2`.
 
-This development source adds distribution-bound governed capability reporting to
-`capabilities` and Doctor. Brownfield `create-vivary adopt <path>` brings Vivary
-into an existing repo or vault without touching existing files (dry-run by default,
-`--yes` to write), and `doctor --trend` tracks graph and routing drift across runs
-in `.vivary/doctor-state.json`.
-
-**Security hardening:** The 0.2.5 line validates active `.gitignore` rules for `USER.md`,
-`MEMORY.md`, `memory/*`, and `heartbeat-reports/*`; scaffolds private heartbeat report
-storage; and refuses symlinked or out-of-workspace scaffold, storage, and cleanup
-paths.
-
-## Install & scaffold
+## New workspaces
 
 ```bash
-pip install create-vivary                     # or: uvx create-vivary ...
-create-vivary my-workspace --preset coding    # interactive wizard on a TTY
-create-vivary my-workbench --preset knowledge-work --memory local
-create-vivary my-codebase --preset coding --active-context cocoindex-code
-create-vivary capabilities --preset second-brain --json
-create-vivary doctor my-workspace
-create-vivary doctor my-workspace --receipt .vivary/receipts.jsonl
-
-# Agent-mode (no prompts, machine-readable output):
-create-vivary init . --preset coding --auto --size large --yes --json
-
-# Reconfigure storage on an existing workspace:
-create-vivary wizard my-workspace --auto --storage embedded --yes --json
-
-# Preview brownfield adoption without writing:
-create-vivary adopt .
+uvx create-vivary init my-workspace --preset coding
+create-vivary doctor my-workspace --json
+tropo check --root my-workspace
 ```
 
-`create-vivary <name>` is shorthand for `create-vivary init <name>`; pass `init` /
-`doctor` / `wizard` / `capabilities` / `adopt` explicitly whenever you prefer. The
-`@vivary/create` npm launcher forwards argv unchanged to this Python CLI, which owns
-that command recognition and normalization; both packages are versioned in lockstep.
+A default greenfield init creates exactly five files:
 
-Presets share the same agent OS shell, then seed a different starter graph. Each
-starter module is generated as `modules/<id>/index.md` so agents route through a small
-module index before opening deeper context:
+- Vivary payload: `.vivary/context.md`, `.vivary/workspace.toml`, and `STATE.md`.
+- Host integration: `AGENTS.md` and `.gitignore`.
 
-| Preset | Module | First slice | Verification |
-|---|---|---|---|
-| `coding` | `codebase` | `local-ci-baseline` | `local-checks` |
-| `second-brain` | `knowledge-base` | `capture-routine` | `retrieval-smoke` |
-| `knowledge-work` | `workbench` + `sources` | `workbench-first-artifact` | `workbench-proof` |
-| `writing` | `manuscript-system` | `draft-review-loop` | `editorial-review` |
+It does not copy templates, runtime skills, placeholders, starter records, or
+framework prose. `--adapter agents` and `--adapter claude` add at most one bounded
+adapter file each. `--active-context cocoindex-code` is also explicit but keeps the
+five-file seed: it declares the capability and ignores `.cocoindex_code/`. It does not
+copy guidance, install CocoIndex-code, create an index, enable MCP, or send source.
 
-The command is local-only. With `--storage embedded` or `--auto` on a large workspace, it
-self-installs `vivary-tropo[embedded]` (LanceDB) with a confirmation prompt, or silently
-with `--yes`. Scaffold writes, storage config writes, and stale generated cleanup
-refuse symlinked destination parents, including when `--force` is used, so output
-stays inside the selected target. Use `--dry-run` to simulate without writing,
-installing, or cleaning stale files. For scripted storage selection, pass
-`--no-wizard --storage embedded --yes` or use `--auto`;
-in human mode, the wizard asks and its answers drive storage.
+Storage and semantic-memory config remain explicit options. Non-interactive init
+without those options stays file-backed and writes no optional provider config.
+Obsidian setup is no longer scaffolded by thin init; configure the editor separately.
 
-For local debugging, pass `--receipt PATH` or set `VIVARY_RECEIPT_LOG=PATH` to append
-a dependency-free JSONL run receipt. Receipts stay local and record only command
-envelope data such as tool version, command, flag names, exit code, duration, Python,
-and platform; they do not capture stdout, stderr, file contents, preset values,
-target paths, or environment variables.
+## Existing repositories and vaults
 
-Semantic memory is a separate optional capability. `--memory local` writes local-only
-policy and graph nodes; `--memory cognee` writes Cognee policy and verification docs.
-Neither option indexes content or sends data during scaffold, and Cognee is not
-installed by default. The optional `vivary-memory-cognee` adapter can run
-`vivary-cognee doctor`, `index`, `recall`, and `forget` after an explicit install and
-index approval.
-
-In development source, `create-vivary capabilities --preset <name> --json` reports
-storage, memory, active-context, Core, and all four governed role surfaces. Each row
-includes `installed`, `install_status`, deterministic `reason_codes`, and
-`missing_install`. A missing optional package is nonfatal. A pre-governed or
-incompatible role is explicit rather than treated as installed.
-
-For coding workspaces, `--active-context cocoindex-code` adds an optional
-CocoIndex-code sidecar profile: active-context skills for Claude/Codex-style agents,
-local policy docs, graph nodes, and `.cocoindex_code/` in `.gitignore`. It does not
-auto-install CocoIndex-code, create an index, or enable MCP; the generated docs give
-the approved `ccc init` / `ccc index` path, and the skill points agents to the
-canonical copyable LLM guide.
-
-`doctor` validates the generated shell, active privacy ignore rules, module directory
-indexes, semantic-memory status, and typed graph:
+Adoption is a deterministic dry-run/apply transaction:
 
 ```bash
-python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo --json
-python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo --repair --json
+create-vivary adopt . --json
+create-vivary adopt . --yes --plan sha256:<plan-hash> --json
+# After an interrupted transaction only:
+create-vivary adopt . --recover sha256:<plan-hash> --json
+create-vivary adopt . --recover sha256:<plan-hash> \
+  --yes --plan sha256:<recovery-plan-hash> --json
 ```
 
-Development-source Doctor embeds the same capability envelope as `capabilities`.
-Installed-state probes read bounded distribution records from the active interpreter's
-canonical package roots. They do not import role or provider modules, execute commands,
-or consult ambient import hooks. Optional absence and probe failure do not change
-workspace health.
+The preview reports `creates`, managed `patches`, `optional_projections`, `kept`,
+`conflicts`, privacy checks, and `plan_hash`. Apply accepts only that exact plan and
+revalidates kept files before writing.
+The first recovery command is read-only. It returns the exact recovery plan hash that
+must receive separate approval before the second command rolls the transaction back.
 
-In source builds and the next package release, `doctor --repair --json` previews a
-guided repair plan without writing. After approval, `doctor --repair --yes`
-regenerates missing ignored private placeholders, appends missing privacy ignore
-lines, removes simple W210 redundant metadata, and reruns doctor. Non-workspace,
-symlinked, junctioned, hardlinked, non-file, or non-UTF-8 repair targets are refused
-or kept manual. Complex YAML W210 cases, broken refs, and exo conflicts stay manual
-guidance.
+Brownfield adoption is capped at three Vivary payload creates: `.vivary/context.md`,
+`.vivary/workspace.toml`, and `STATE.md` when it is absent. Independently, adoption may
+create or patch the bounded Vivary blocks in `AGENTS.md` and `.gitignore`. It never
+copies templates, skills, starter graph records, or placeholders, and it never
+overwrites arbitrary user content. Conflicts fail closed.
 
-Doctor recognizes both published workspace contracts without performing a migration.
-The 15 common v0.1 root/template/runtime-skill paths remain strict for every workspace.
-A flat `modules/agent-workspace.md` workspace is reported as
-`compatibility.workspace_contract = "legacy-v0.1"` and receives only recommendations
-for the two newer module indexes; Doctor includes the declared `Preset:` in an `adopt`
-dry-run suggestion when it can read one. If either modern index is present, the
-workspace is `indexed-v0.2+` and both `modules/index.md` and
-`modules/agent-workspace/index.md` are required. Published releases through v0.3.1 can
-lack newer `heartbeat-reports/*` or `*.vivary-tmp` ignore rules. Doctor reports those
-as actionable warnings when they predate the declared profile. Current semantic-memory
-profiles keep every current privacy rule strict, including `*.vivary-tmp`.
+Privacy is checked before payload writes. Apply uses a local transaction journal and
+exact-byte backups so an ordinary failure rolls back and an interrupted transaction
+can be recovered explicitly.
 
-`compatibility.schema_version` is `1`; its stable fields distinguish common
-`baseline_missing`, inferred `contract_missing`, declared capability problems, and
-non-failing recommendations. Plain `doctor`, including `--json`, never writes and exits
-`0` only when there are no errors (`1` otherwise); `--trend` and `--repair --yes` are
-the explicit write modes. Declared storage and memory configs are checked against both
-the published v0.3.1 and current profiles: unknown cloud providers and
-`memory.enabled = true` with `memory.provider = "none"` are errors, while a malformed
-optional-memory declaration does not discard Doctor's graph metrics.
+## Doctor and compatibility
 
-## Developing from source
+`doctor` validates thin workspace metadata, the context capsule, startup reachability,
+privacy rules, optional adapters, and pending adoption recovery. Plain Doctor is
+read-only; `--trend` is the explicit mode that writes runtime trend state.
+
+Doctor also reads older full Vivary workspaces without migrating or regenerating
+them. Its versioned compatibility report uses `schema_version = 2`: new workspaces
+report `workspace_contract = "thin-v0.3"`; old workspaces report
+`workspace_contract = "legacy-full"` plus their detected legacy layout.
+
+Tropo resolves `.vivary/workspace.toml` as the thin base policy. A root or nested
+`tropo.toml` may tighten that policy but may not expand its scope. Competing thin roots
+fail closed.
+
+MCP is optional. When selected, it is local stdio and read-only by default.
+
+## One earned record
+
+Vivary can maintain the minimal workspace without turning MCP into a write surface.
+After governed Tropo returns a full Task Capsule JSON—or the optional
+`vivary_capsule` MCP tool returns its public projection—save that complete capsule
+object, prepare one typed Markdown file, and preview a capsule-bound plan:
 
 ```bash
-python packages/create-vivary/create_vivary.py init sandboxes/coding-demo --preset coding
-python packages/create-vivary/create_vivary.py doctor sandboxes/coding-demo
-python packages/tropo/tropo.py check --root sandboxes/coding-demo
+create-vivary record . changes/verified-slice.md \
+  --from ./verified-slice.md \
+  --capsule ./task-capsule.json \
+  --json
+
+create-vivary record . changes/verified-slice.md \
+  --from ./verified-slice.md \
+  --capsule ./task-capsule.json \
+  --yes --plan sha256:<approved-plan-hash> --json
 ```
 
----
+The first call is read-only and verifies the capsule's canonical integrity, exact
+workspace scope or fingerprint, and current workspace state. The second creates or
+updates exactly one validated record
+under `.vivary/records/`, reruns Doctor, and rolls back on failure. There is no batch,
+starter-pack, or automatic second-brain materialization mode. An optional
+`--receipt .vivary/runtime/receipts.jsonl` records only privacy-preserving command
+metadata.
 
-Website & docs: <https://vivary.vercel.app/>
+## Other commands
+
+```bash
+create-vivary capabilities --preset coding --json
+create-vivary doctor . --receipt .vivary/receipts.jsonl
+create-vivary wizard . --storage embedded --yes --json
+```
+
+Local receipts contain command-envelope metadata only. They do not capture stdout,
+stderr, file contents, target paths, preset values, or environment variables.
+
+The `@vivary/create` npm package is a shell-free launcher that forwards arguments to
+this Python implementation. Python 3.11+ is required.
+
+## Development
+
+```bash
+python packages/create-vivary/tests/test_adopt.py
+python packages/create-vivary/tests/test_init_thin.py
+python packages/create-vivary/tests/test_record_workflow.py
+python packages/create-vivary/tests/test_create_vivary.py
+python packages/tropo/tropo.py check --root <workspace>
+```
+
+Website and docs: <https://vivary.vercel.app/>

@@ -22,15 +22,14 @@ That is the canonical Vivary graph visual. Use it anywhere.
 
 ## If you love Obsidian
 
-Open the workspace folder as a vault. Two things worth knowing:
+Initialize Vivary first, then open the workspace folder as a vault. Thin init does not
+write `.obsidian/` or advertise an editor flag; editor configuration is user-owned and
+separate from the governed-context contract.
 
-1. **Opt-in starter config.** Scaffold with `--obsidian` and create-vivary drops a
-   minimal `.obsidian/` (graph nodes pre-coloured by Vivary type: modules, changes,
-   decisions, verification, gates). Obsidian's own ephemeral UI state is gitignored.
+Two things worth knowing:
 
-   ```bash
-   create-vivary init my-workspace --preset coding --obsidian
-   ```
+1. **Keep editor state separate.** Let Obsidian create its own config, then decide
+   which UI files belong in version control. Vivary will not copy or overwrite them.
 
 2. **Edges in Obsidian's graph.** Obsidian's native graph draws `[[wikilinks]]` and
    tags. Vivary's edges live in **typed frontmatter** (`related_modules: [codebase]`)
