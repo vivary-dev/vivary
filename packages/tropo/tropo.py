@@ -698,6 +698,8 @@ def _validate_thin_workspace(raw, thin_path, root):
         raise ConfigError(
             f"{thin_path}: workspace.capabilities may contain cocoindex-code once"
         )
+    if "cocoindex-code" in capabilities:
+        protected.append(".cocoindex_code")
 
     excludes = raw.get("exclude")
     if not isinstance(excludes, list) or any(not isinstance(item, str) for item in excludes):
@@ -706,7 +708,7 @@ def _validate_thin_workspace(raw, thin_path, root):
     missing = [path for path in protected if path not in normalized_excludes]
     if missing:
         raise ConfigError(
-            f"{thin_path}: exclude must protect workspace private/runtime paths: "
+            f"{thin_path}: exclude must protect workspace private/runtime/capability paths: "
             + ", ".join(missing)
         )
 
@@ -3458,7 +3460,7 @@ def _public_document_snapshot(
             record for record in documents
             if _public_path_selected(record["doc"].rel, validation_paths)
         ]
-        ids = {record["doc"].derived.get("id") for record in selected}
+        ids = {record["doc"].derived.get("id") for record in documents}
         for record in selected:
             doc = record["doc"]
             for _key, target, line in doc.refs:

@@ -261,6 +261,33 @@ class ThinInitTests(unittest.TestCase):
             self.assertTrue(
                 create_vivary.doctor_workspace(target, repo_root=ROOT)["ok"]
             )
+
+            gitignore = target / ".gitignore"
+            generated_gitignore = gitignore.read_text(encoding="utf-8")
+            gitignore.write_text(
+                generated_gitignore.replace(
+                    ".cocoindex_code/\n",
+                    "",
+                ),
+                encoding="utf-8",
+            )
+            report = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            self.assertFalse(report["ok"])
+            self.assertIn(
+                "privacy ignore missing: .cocoindex_code/",
+                report["errors"],
+            )
+
+            gitignore.write_text(
+                generated_gitignore + "!.cocoindex_code/\n",
+                encoding="utf-8",
+            )
+            negated = create_vivary.doctor_workspace(target, repo_root=ROOT)
+            self.assertFalse(negated["ok"])
+            self.assertIn(
+                "privacy ignore missing: .cocoindex_code/",
+                negated["errors"],
+            )
         finally:
             if target.exists():
                 shutil.rmtree(target)

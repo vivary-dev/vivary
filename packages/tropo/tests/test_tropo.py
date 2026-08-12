@@ -638,6 +638,10 @@ def test_thin_workspace_metadata_fails_closed_and_competing_ancestors_are_reject
             ),
             "privacy exclude": valid.replace(', ".vivary/private"', ""),
             "adapter": valid.replace("adapters = []", 'adapters = ["unknown"]'),
+            "capability privacy exclude": valid.replace(
+                "adapters = []",
+                'adapters = []\ncapabilities = ["cocoindex-code"]',
+            ),
         }
         for name, text in invalid_cases.items():
             (vivary / "workspace.toml").write_text(text, encoding="utf-8")
@@ -2652,6 +2656,41 @@ def test_public_context_producers_return_stable_shaped_snapshots(tmp_path):
     assert len(fingerprints) == 1
     fingerprint = fingerprints.pop()
     assert fingerprint.startswith("sha256:") and len(fingerprint) == 71
+
+
+def test_public_check_selected_path_resolves_refs_against_full_snapshot(tmp_path):
+    _search_vault(tmp_path)
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+
+    checked = tropo.check_workspace(
+        root,
+        paths=("decisions/release-workflow.md",),
+        allowlist=[root],
+    )
+
+    assert checked["checked"] == 1
+    assert checked["warnings"] == 0
+    assert checked["findings"] == []
+    assert checked["complete"] is True, checked["omissions"]
+
+    selected = tmp_path / "decisions" / "release-workflow.md"
+    selected.write_text(
+        selected.read_text(encoding="utf-8").replace(
+            "affects: agent-workspace",
+            "affects: missing-module",
+        ),
+        encoding="utf-8",
+    )
+    missing = tropo.check_workspace(
+        root,
+        paths=("decisions/release-workflow.md",),
+        allowlist=[root],
+    )
+
+    assert missing["checked"] == 1
+    assert missing["warnings"] == 1
+    assert [finding["code"] for finding in missing["findings"]] == ["W220"]
 
 
 def test_public_context_supports_a_thin_non_git_workspace_without_weakening_privacy(tmp_path):

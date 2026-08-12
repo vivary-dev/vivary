@@ -315,6 +315,78 @@ class ThinAdoptApplyTests(unittest.TestCase):
         finally:
             shutil.rmtree(target)
 
+    def test_plan_is_clean_for_generated_active_context_workspace(self):
+        target = temp_dir()
+        try:
+            create_vivary.scaffold_thin_workspace(
+                target,
+                preset="coding",
+                active_context="cocoindex-code",
+                repo_root=ROOT,
+            )
+            before = snapshot(target)
+
+            plan = create_vivary.plan_adopt(
+                target,
+                preset="coding",
+                repo_root=ROOT,
+            )
+
+            self.assertFalse(plan["creates"])
+            self.assertFalse(plan["patches"])
+            self.assertFalse(plan["conflicts"])
+            self.assertIn(target / ".gitignore", plan["kept"])
+            self.assertEqual(snapshot(target), before)
+        finally:
+            shutil.rmtree(target)
+
+    def test_apply_restores_active_context_privacy_for_missing_or_host_gitignore(self):
+        for initial in (None, "node_modules/\n"):
+            with self.subTest(initial=initial):
+                target = temp_dir()
+                try:
+                    create_vivary.scaffold_thin_workspace(
+                        target,
+                        preset="coding",
+                        active_context="cocoindex-code",
+                        repo_root=ROOT,
+                    )
+                    gitignore = target / ".gitignore"
+                    if initial is None:
+                        gitignore.unlink()
+                    else:
+                        gitignore.write_text(initial, encoding="utf-8")
+
+                    plan = create_vivary.plan_adopt(
+                        target,
+                        preset="coding",
+                        repo_root=ROOT,
+                    )
+
+                    self.assertFalse(plan["conflicts"])
+                    self.assertEqual(plan["capabilities"], ["cocoindex-code"])
+                    self.assertIn(
+                        ".cocoindex_code/",
+                        plan["privacy"]["rules"],
+                    )
+                    applied = create_vivary.adopt_workspace(
+                        target,
+                        preset="coding",
+                        repo_root=ROOT,
+                        yes=True,
+                        plan_hash=plan["plan_hash"],
+                    )
+                    self.assertTrue(
+                        applied["doctor"]["ok"],
+                        applied["doctor"]["errors"],
+                    )
+                    text = gitignore.read_text(encoding="utf-8")
+                    if initial is not None:
+                        self.assertTrue(text.startswith(initial))
+                    self.assertIn(".cocoindex_code/", text)
+                finally:
+                    shutil.rmtree(target)
+
     def test_ordinary_failure_rolls_back_exact_bytes_and_created_files(self):
         probe = temp_dir()
         try:
@@ -508,6 +580,131 @@ class ThinAdoptApplyTests(unittest.TestCase):
             self.assertEqual(apply_rc, 0, apply_out)
             self.assertEqual(snapshot(target), before)
             self.assertTrue(json.loads(apply_out)["recovered"])
+        finally:
+            shutil.rmtree(target)
+
+    def test_active_context_prejournal_recovery_uses_capability_privacy_block(self):
+        target = temp_dir()
+        try:
+            create_vivary.scaffold_thin_workspace(
+                target,
+                preset="coding",
+                active_context="cocoindex-code",
+                repo_root=ROOT,
+            )
+            gitignore = target / ".gitignore"
+            gitignore.write_text("node_modules/\n", encoding="utf-8")
+            before = snapshot(target)
+            plan = create_vivary.plan_adopt(
+                target,
+                preset="coding",
+                repo_root=ROOT,
+            )
+
+            with self.assertRaises(KeyboardInterrupt):
+                create_vivary.adopt_workspace(
+                    target,
+                    preset="coding",
+                    repo_root=ROOT,
+                    yes=True,
+                    plan_hash=plan["plan_hash"],
+                    _crash_before_journal=True,
+                )
+
+            self.assertIn(
+                ".cocoindex_code/",
+                gitignore.read_text(encoding="utf-8"),
+            )
+            rc, out = run_cli(
+                [
+                    "adopt",
+                    str(target),
+                    "--recover",
+                    plan["plan_hash"],
+                    "--json",
+                ]
+            )
+            self.assertEqual(rc, 0, out)
+            recovery = json.loads(out)
+            apply_rc, apply_out = run_cli(
+                [
+                    "adopt",
+                    str(target),
+                    "--recover",
+                    plan["plan_hash"],
+                    "--yes",
+                    "--plan",
+                    recovery["recovery_plan_hash"],
+                    "--json",
+                ]
+            )
+            self.assertEqual(apply_rc, 0, apply_out)
+            self.assertEqual(snapshot(target), before)
+        finally:
+            shutil.rmtree(target)
+
+    def test_active_context_journal_recovery_validates_capability_privacy_block(self):
+        target = temp_dir()
+        try:
+            create_vivary.scaffold_thin_workspace(
+                target,
+                preset="coding",
+                active_context="cocoindex-code",
+                repo_root=ROOT,
+            )
+            (target / ".gitignore").write_text(
+                "node_modules/\n",
+                encoding="utf-8",
+            )
+            before = snapshot(target)
+            plan = create_vivary.plan_adopt(
+                target,
+                preset="coding",
+                repo_root=ROOT,
+            )
+
+            with self.assertRaises(KeyboardInterrupt):
+                create_vivary.adopt_workspace(
+                    target,
+                    preset="coding",
+                    repo_root=ROOT,
+                    yes=True,
+                    plan_hash=plan["plan_hash"],
+                    _crash_after=1,
+                )
+
+            journal = target / ".vivary" / "runtime" / "adopt-journal.json"
+            self.assertTrue(journal.is_file())
+            payload = json.loads(journal.read_text(encoding="utf-8"))
+            self.assertEqual(
+                payload["approval"]["capabilities"],
+                ["cocoindex-code"],
+            )
+            rc, out = run_cli(
+                [
+                    "adopt",
+                    str(target),
+                    "--recover",
+                    plan["plan_hash"],
+                    "--json",
+                ]
+            )
+            self.assertEqual(rc, 0, out)
+            recovery = json.loads(out)
+            apply_rc, apply_out = run_cli(
+                [
+                    "adopt",
+                    str(target),
+                    "--recover",
+                    plan["plan_hash"],
+                    "--yes",
+                    "--plan",
+                    recovery["recovery_plan_hash"],
+                    "--json",
+                ]
+            )
+            self.assertEqual(apply_rc, 0, apply_out)
+            self.assertEqual(snapshot(target), before)
         finally:
             shutil.rmtree(target)
 

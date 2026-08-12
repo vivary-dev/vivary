@@ -20,6 +20,10 @@ This keeps the exact five-file Core seed. It changes only existing policy:
 - `.vivary/workspace.toml` declares `cocoindex-code` and excludes its local index;
 - `.gitignore` ignores `.cocoindex_code/`.
 
+Tropo and Doctor fail closed if either privacy rule is missing or negated. Brownfield
+adoption carries the declared capability through its exact plan hash and recovery
+journal, so a missing or host-owned `.gitignore` receives the same private-index rule.
+
 It does not copy a skill, guide, graph node, starter record, template, or framework
 router into the new workspace. Use this canonical guide when setup is later approved.
 

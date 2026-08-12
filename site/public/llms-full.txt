@@ -3235,6 +3235,10 @@ This keeps the exact five-file Core seed. It changes only existing policy:
 - `.vivary/workspace.toml` declares `cocoindex-code` and excludes its local index;
 - `.gitignore` ignores `.cocoindex_code/`.
 
+Tropo and Doctor fail closed if either privacy rule is missing or negated. Brownfield
+adoption carries the declared capability through its exact plan hash and recovery
+journal, so a missing or host-owned `.gitignore` receives the same private-index rule.
+
 It does not copy a skill, guide, graph node, starter record, template, or framework
 router into the new workspace. Use this canonical guide when setup is later approved.
 
@@ -6656,6 +6660,13 @@ contract.
 
 ### Fixed
 
+- Selected-path Tropo checks now resolve references against every document in the
+  bounded snapshot while still reporting findings only for the selected paths, so a
+  valid reference outside the selection no longer produces a false `W220`.
+- Active-context privacy now stays capability-bound through Tropo validation, Doctor,
+  adoption planning and apply, and authenticated recovery. Missing or negated
+  `.cocoindex_code/` policy fails closed, while adoption preserves or restores the
+  exact generated privacy block for a declared `cocoindex-code` workspace.
 - The optional MCP adapter now pins each configured workspace directory with a live
   operating-system identity anchor. A replacement root fails closed even when Linux
   immediately recycles the original directory's inode, while ordinary writes inside

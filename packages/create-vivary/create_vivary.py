@@ -849,6 +849,33 @@ def _workspace_declared_preset(target: Path) -> str:
     return preset if preset in PRESETS else "<preset>"
 
 
+def _workspace_declared_active_context(target: Path) -> str | None:
+    """Return the one supported active-context declaration, if structurally valid."""
+    thin_config = target / ".vivary" / "workspace.toml"
+    try:
+        if (
+            not thin_config.is_file()
+            or _is_symlink_or_junction(thin_config)
+            or thin_config.stat().st_size > 1024 * 1024
+        ):
+            return None
+        import tomllib as _toml
+
+        data = _toml.loads(thin_config.read_text(encoding="utf-8-sig"))
+        workspace = data.get("workspace")
+    except (OSError, UnicodeError, _toml.TOMLDecodeError):
+        return None
+    if not isinstance(workspace, dict):
+        return None
+    capabilities = workspace.get("capabilities", [])
+    if (
+        workspace.get("contract") == THIN_WORKSPACE_CONTRACT
+        and capabilities == ["cocoindex-code"]
+    ):
+        return "cocoindex-code"
+    return None
+
+
 def _workspace_contract(target: Path) -> tuple[str | None, list[str]]:
     """Classify a published module layout without inferring a new requirement."""
     if (target / ".vivary" / "workspace.toml").exists():
@@ -2220,12 +2247,24 @@ _THIN_PRIVACY_PROBES = {
     ".vivary/runtime/": (".vivary/runtime/adopt-journal.json",),
     "*.vivary-tmp": (".vivary-output.vivary-tmp",),
 }
+_THIN_ACTIVE_CONTEXT_PRIVACY_PROBES = {
+    ".cocoindex_code/": (".cocoindex_code/private-index.db",),
+}
+
+
+def _thin_privacy_probes(active_context: str | None = None) -> dict[str, tuple[str, ...]]:
+    probes = dict(_THIN_PRIVACY_PROBES)
+    if active_context == "cocoindex-code":
+        probes.update(_THIN_ACTIVE_CONTEXT_PRIVACY_PROBES)
+    return probes
 
 
 def _missing_thin_privacy_ignores(target: Path) -> list[str]:
     return [
         required
-        for required, paths in _THIN_PRIVACY_PROBES.items()
+        for required, paths in _thin_privacy_probes(
+            _workspace_declared_active_context(target)
+        ).items()
         if not all(_probe_is_ignored(target, path) for path in paths)
     ]
 
@@ -5118,7 +5157,7 @@ def _valid_existing_thin_contract(
     preset: str,
     adapters: tuple[str, ...],
     repo_root: Path,
-) -> tuple[bool, bool]:
+) -> tuple[bool, bool, str | None]:
     """Validate user-extended v0.3 config and its project capsule read-only."""
     config_path = target / ".vivary" / "workspace.toml"
     context_path = target / ".vivary" / "context.md"
@@ -5128,7 +5167,7 @@ def _valid_existing_thin_contract(
             or _is_symlink_or_junction(config_path)
             or config_path.stat().st_size > 1024 * 1024
         ):
-            return False, False
+            return False, False, None
         import tomllib as _toml
 
         raw = _toml.loads(config_path.read_text(encoding="utf-8-sig"))
@@ -5139,11 +5178,16 @@ def _valid_existing_thin_contract(
             or workspace.get("preset") != preset
             or sorted(workspace.get("adapters", [])) != sorted(adapters)
         ):
-            return False, False
+            return False, False, None
+        active_context = (
+            "cocoindex-code"
+            if workspace.get("capabilities", []) == ["cocoindex-code"]
+            else None
+        )
         tropo = _load_tropo(repo_root)
         resolver = tropo.ConfigResolver(str(target), str(Path(tropo.__file__).parent))
     except Exception:
-        return False, False
+        return False, False, None
 
     try:
         if (
@@ -5151,7 +5195,7 @@ def _valid_existing_thin_contract(
             or _is_symlink_or_junction(context_path)
             or context_path.stat().st_size > 1024 * 1024
         ):
-            return True, False
+            return True, False, active_context
         effective = resolver.for_dir(str(context_path.parent))
         doc = tropo.analyze_file(
             str(context_path),
@@ -5160,8 +5204,8 @@ def _valid_existing_thin_contract(
             use_git_dates=False,
         )
     except Exception:
-        return True, False
-    return True, doc.type == "project" and not doc.findings
+        return True, False, active_context
+    return True, doc.type == "project" and not doc.findings, active_context
 
 
 def _thin_adapter_doc(adapter: str) -> tuple[str, str, str]:
@@ -5254,6 +5298,7 @@ def _thin_plan_payload(
     *,
     preset: str,
     adapters: tuple[str, ...] | list[str],
+    capabilities: tuple[str, ...] | list[str],
     writes: list[tuple[Path, str]],
     patches: list[dict],
     adapter_replacements: list[dict],
@@ -5264,6 +5309,7 @@ def _thin_plan_payload(
         "target": _thin_target_identity(target),
         "preset": preset,
         "adapters": sorted(adapters),
+        "capabilities": sorted(capabilities),
         "creates": [
             {
                 "path": path.relative_to(target).as_posix(),
@@ -5329,7 +5375,11 @@ def plan_adopt(
     if len(set(selected_adapters)) != len(selected_adapters):
         raise ScaffoldError("each --adapter value may be selected only once")
 
-    valid_existing_config, valid_existing_context = _valid_existing_thin_contract(
+    (
+        valid_existing_config,
+        valid_existing_context,
+        active_context,
+    ) = _valid_existing_thin_contract(
         target,
         preset=chosen_preset,
         adapters=selected_adapters,
@@ -5455,7 +5505,12 @@ def plan_adopt(
                 )
 
     gitignore_path = target / ".gitignore"
-    gitignore_block = _thin_gitignore_block()
+    gitignore_block = _thin_gitignore_block(active_context=active_context)
+    accepted_gitignore_blocks = (gitignore_block,)
+    if active_context is None:
+        accepted_gitignore_blocks += (
+            _thin_gitignore_block(active_context="cocoindex-code"),
+        )
     if not gitignore_path.exists():
         writes.append((gitignore_path, gitignore_block))
         privacy_status = "planned"
@@ -5490,7 +5545,14 @@ def plan_adopt(
             else:
                 starts = gitignore_text.count(_THIN_GITIGNORE_BLOCK_START)
                 ends = gitignore_text.count(_THIN_GITIGNORE_BLOCK_END)
-                if starts == 1 and ends == 1 and gitignore_block.rstrip() in gitignore_text:
+                if (
+                    starts == 1
+                    and ends == 1
+                    and any(
+                        block.rstrip() in gitignore_text
+                        for block in accepted_gitignore_blocks
+                    )
+                ):
                     kept.append(gitignore_path)
                     privacy_status = "satisfied"
                 elif starts or ends:
@@ -5524,7 +5586,7 @@ def plan_adopt(
         )
         missing_privacy = [
             pattern
-            for pattern, probes in _THIN_PRIVACY_PROBES.items()
+            for pattern, probes in _thin_privacy_probes(active_context).items()
             if not all(
                 _probe_is_ignored(target, probe, extra_root_rules=simulated_rules)
                 for probe in probes
@@ -5533,7 +5595,7 @@ def plan_adopt(
         if missing_privacy:
             privacy_status = "conflict"
             nested_conflicts: set[Path] = set()
-            for probes in _THIN_PRIVACY_PROBES.values():
+            for probes in _thin_privacy_probes(active_context).values():
                 for probe in probes:
                     parts = Path(probe).parts
                     for depth in range(1, len(parts)):
@@ -5569,6 +5631,7 @@ def plan_adopt(
         target,
         preset=chosen_preset,
         adapters=selected_adapters,
+        capabilities=(active_context,) if active_context is not None else (),
         writes=writes + projection_writes,
         patches=patches,
         adapter_replacements=adapter_replacements,
@@ -5581,6 +5644,7 @@ def plan_adopt(
         "target": target,
         "preset": chosen_preset,
         "preset_reason": preset_reason,
+        "capabilities": [active_context] if active_context is not None else [],
         "inventory": inventory,
         "creates": creates,
         "patches": patches,
@@ -5589,7 +5653,10 @@ def plan_adopt(
         "kept": kept,
         "kept_identities": kept_identities,
         "conflicts": conflicts,
-        "privacy": {"status": privacy_status, "rules": list(_THIN_PRIVATE_RULES)},
+        "privacy": {
+            "status": privacy_status,
+            "rules": list(_thin_privacy_probes(active_context)),
+        },
         "plan_hash": plan_hash,
         "approval_payload": approval_payload,
         # Transitional aliases keep report consumers readable during the
@@ -5605,7 +5672,7 @@ def plan_adopt(
 
 
 _ADOPT_JOURNAL_REL = Path(".vivary/runtime/adopt-journal.json")
-_ADOPT_JOURNAL_SCHEMA = "vivary.adopt-journal.v2"
+_ADOPT_JOURNAL_SCHEMA = "vivary.adopt-journal.v3"
 _ADOPT_RECOVERY_PLAN_SCHEMA = "vivary.adopt-recovery-plan.v1"
 _ADOPT_PREJOURNAL_RE = re.compile(
     rb"# vivary-adopt-prejournal "
@@ -5855,10 +5922,13 @@ def _prejournal_recovery_state(
     expected_before_hash = _sha256_prefixed(before) if existed else "none"
     if expected_before_hash != before_hash or (not existed and before):
         raise ScaffoldError("pre-journal adoption input hash does not match")
+    gitignore_block = _thin_gitignore_block(
+        active_context=_workspace_declared_active_context(target)
+    )
     expected_after = (
-        before + _append_patch_text(before, _thin_gitignore_block()).encode("utf-8")
+        before + _append_patch_text(before, gitignore_block).encode("utf-8")
         if existed
-        else _thin_gitignore_block().encode("utf-8")
+        else gitignore_block.encode("utf-8")
     )
     if clean_after != expected_after:
         raise ScaffoldError("pre-journal adoption privacy replacement changed unexpectedly")
@@ -5880,12 +5950,19 @@ def _adopt_expected_generated_bytes(
     target: Path,
     preset: str,
     adapters: tuple[str, ...],
+    active_context: str | None,
 ) -> dict[str, bytes]:
     project = target.name or "vivary-workspace"
     expected = {
-        ".gitignore": _thin_gitignore_block().encode("utf-8"),
+        ".gitignore": _thin_gitignore_block(
+            active_context=active_context
+        ).encode("utf-8"),
         ".vivary/context.md": _thin_context_doc(project, preset).encode("utf-8"),
-        ".vivary/workspace.toml": _thin_workspace_toml(preset, adapters).encode("utf-8"),
+        ".vivary/workspace.toml": _thin_workspace_toml(
+            preset,
+            adapters,
+            active_context=active_context,
+        ).encode("utf-8"),
         "AGENTS.md": ("# AGENTS.md\n\n" + _thin_agents_block()).encode("utf-8"),
         "STATE.md": _thin_state_doc().encode("utf-8"),
     }
@@ -5913,6 +5990,7 @@ def _validated_journal_state(
         "target",
         "preset",
         "adapters",
+        "capabilities",
         "creates",
         "patches",
         "adapter_replacements",
@@ -5929,7 +6007,12 @@ def _validated_journal_state(
 
     preset = approval["preset"]
     raw_adapters = approval["adapters"]
-    if preset not in PRESETS or not isinstance(raw_adapters, list):
+    raw_capabilities = approval["capabilities"]
+    if (
+        preset not in PRESETS
+        or not isinstance(raw_adapters, list)
+        or not isinstance(raw_capabilities, list)
+    ):
         raise ScaffoldError("adoption journal approval policy is malformed")
     if (
         any(not isinstance(adapter, str) for adapter in raw_adapters)
@@ -5937,8 +6020,16 @@ def _validated_journal_state(
         or set(raw_adapters) - set(_THIN_ADAPTER_PATHS)
     ):
         raise ScaffoldError("adoption journal approval adapters are malformed")
+    if raw_capabilities not in ([], ["cocoindex-code"]):
+        raise ScaffoldError("adoption journal approval capabilities are malformed")
     adapters = tuple(raw_adapters)
-    expected_bytes = _adopt_expected_generated_bytes(target, preset, adapters)
+    active_context = raw_capabilities[0] if raw_capabilities else None
+    expected_bytes = _adopt_expected_generated_bytes(
+        target,
+        preset,
+        adapters,
+        active_context,
+    )
     allowed_paths = set(expected_bytes)
     expected_actions: dict[str, dict] = {}
 
@@ -5969,7 +6060,7 @@ def _validated_journal_state(
 
     patch_blocks = {
         "AGENTS.md": _thin_agents_block(),
-        ".gitignore": _thin_gitignore_block(),
+        ".gitignore": _thin_gitignore_block(active_context=active_context),
     }
     for row in patches:
         if not isinstance(row, dict) or set(row) != {
@@ -6159,10 +6250,12 @@ def _recovery_result(
     *,
     recovered: bool,
 ) -> dict:
+    active_context = _workspace_declared_active_context(target)
     return {
         "contract": THIN_WORKSPACE_CONTRACT,
         "target": target,
         "preset": _workspace_declared_preset(target),
+        "capabilities": [active_context] if active_context is not None else [],
         "preset_reason": "approved interrupted-transaction recovery",
         "inventory": BrownfieldInventory(target),
         "creates": [],
@@ -6332,11 +6425,15 @@ def adopt_workspace(
     _ensure_safe_destinations(target_path, replacement_paths, force=True)
 
     gitignore_path = target_path / ".gitignore"
+    active_context = (
+        plan["capabilities"][0] if plan.get("capabilities") else None
+    )
+    gitignore_block = _thin_gitignore_block(active_context=active_context)
     privacy_is_planned = gitignore_path in create_paths or gitignore_path in patch_paths
     simulated_rules = (
         tuple(
             ("", parsed[0], parsed[1])
-            for line in _thin_gitignore_block().splitlines()
+            for line in gitignore_block.splitlines()
             if (parsed := _parse_gitignore_line(line)) is not None
         )
         if privacy_is_planned
@@ -6344,7 +6441,7 @@ def adopt_workspace(
     )
     missing_after_plan = [
         pattern
-        for pattern, probes in _THIN_PRIVACY_PROBES.items()
+        for pattern, probes in _thin_privacy_probes(active_context).items()
         if not all(
             _probe_is_ignored(target_path, probe, extra_root_rules=simulated_rules)
             for probe in probes

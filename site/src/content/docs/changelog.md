@@ -83,6 +83,13 @@ contract.
 
 ### Fixed
 
+- Selected-path Tropo checks now resolve references against every document in the
+  bounded snapshot while still reporting findings only for the selected paths, so a
+  valid reference outside the selection no longer produces a false `W220`.
+- Active-context privacy now stays capability-bound through Tropo validation, Doctor,
+  adoption planning and apply, and authenticated recovery. Missing or negated
+  `.cocoindex_code/` policy fails closed, while adoption preserves or restores the
+  exact generated privacy block for a declared `cocoindex-code` workspace.
 - The optional MCP adapter now pins each configured workspace directory with a live
   operating-system identity anchor. A replacement root fails closed even when Linux
   immediately recycles the original directory's inode, while ordinary writes inside
