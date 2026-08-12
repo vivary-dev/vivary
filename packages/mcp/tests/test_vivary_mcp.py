@@ -176,11 +176,53 @@ def test_workspace_registry_requires_unique_aliases_and_roots(adapter, tmp_path)
 def test_workspace_identity_change_fails_closed(adapter, tmp_path):
     root = tmp_path / "workspace"
     root.mkdir()
-    workspace = adapter.workspace_registry((("workspace", str(root)),))["workspace"]
+    registry = adapter.workspace_registry((("workspace", str(root)),))
+    workspace = registry["workspace"]
     assert adapter._workspace_available(workspace)
-    root.rmdir()
+    note = root / "note.md"
+    note.write_text("ordinary workspace writes stay allowed\n", encoding="utf-8")
+    assert adapter._workspace_available(workspace)
+    note.unlink()
+    if os.name == "nt":
+        root.rename(tmp_path / "original-workspace")
+    else:
+        root.rmdir()
     root.mkdir()
     assert not adapter._workspace_available(workspace)
+    registry.close()
+    registry.close()
+    assert not adapter._workspace_available(workspace)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows FILE_ID_INFO only")
+def test_windows_registration_refuses_zero_file_id(adapter, tmp_path):
+    root = tmp_path / "workspace"
+    root.mkdir()
+
+    with patch.object(adapter, "_WINDOWS_GET_FILE_INFO_EX", return_value=True):
+        with pytest.raises(ValueError, match="workspace path refused"):
+            adapter.workspace_registry((("workspace", str(root)),))
+
+
+def test_servers_own_independent_workspace_anchors(adapter, tmp_path):
+    root = tmp_path / "workspace"
+    root.mkdir()
+    registry = adapter.workspace_registry((("docs", str(root)),))
+
+    with patch.object(adapter, "_build_tools", return_value=()):
+        first = adapter.VivaryMcpServer(registry)
+        second = adapter.VivaryMcpServer(registry)
+
+    registry.close()
+    assert adapter._workspace_available(first._workspaces["docs"])
+    assert adapter._workspace_available(second._workspaces["docs"])
+
+    first.close()
+    assert not adapter._workspace_available(first._workspaces["docs"])
+    assert adapter._workspace_available(second._workspaces["docs"])
+
+    second.close()
+    assert not adapter._workspace_available(second._workspaces["docs"])
 
 
 def test_tool_argument_validation_is_strict_and_bounded(adapter):
@@ -653,6 +695,7 @@ def test_workspace_identity_is_revalidated_after_production(adapter, tmp_path):
 
     assert result == (None, "workspace_unavailable", "refused")
     assert application._active is False
+    application.close()
 
 
 def test_diagnostics_modes_emit_only_safe_bounded_stderr_fields(adapter):

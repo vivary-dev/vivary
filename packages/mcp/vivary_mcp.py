@@ -13,7 +13,7 @@ import threading
 import time
 import unicodedata
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import TextIOWrapper
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
@@ -31,6 +31,110 @@ from mcp.types import (
     Tool,
     ToolAnnotations,
 )
+
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
+
+    class _WindowsDirectoryInformation(ctypes.Structure):
+        _fields_ = [
+            ("file_attributes", wintypes.DWORD),
+            ("creation_time", wintypes.FILETIME),
+            ("last_access_time", wintypes.FILETIME),
+            ("last_write_time", wintypes.FILETIME),
+            ("volume_serial_number", wintypes.DWORD),
+            ("file_size_high", wintypes.DWORD),
+            ("file_size_low", wintypes.DWORD),
+            ("number_of_links", wintypes.DWORD),
+            ("file_index_high", wintypes.DWORD),
+            ("file_index_low", wintypes.DWORD),
+        ]
+
+    class _WindowsFileId128(ctypes.Structure):
+        _fields_ = [("identifier", ctypes.c_ubyte * 16)]
+
+    class _WindowsFileIdInformation(ctypes.Structure):
+        _fields_ = [
+            ("volume_serial_number", ctypes.c_ulonglong),
+            ("file_id", _WindowsFileId128),
+        ]
+
+    _WINDOWS_KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _WINDOWS_CREATE_FILE = _WINDOWS_KERNEL32.CreateFileW
+    _WINDOWS_CREATE_FILE.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    _WINDOWS_CREATE_FILE.restype = wintypes.HANDLE
+    _WINDOWS_GET_FILE_INFO = _WINDOWS_KERNEL32.GetFileInformationByHandle
+    _WINDOWS_GET_FILE_INFO.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(_WindowsDirectoryInformation),
+    ]
+    _WINDOWS_GET_FILE_INFO.restype = wintypes.BOOL
+    _WINDOWS_GET_FILE_INFO_EX = _WINDOWS_KERNEL32.GetFileInformationByHandleEx
+    _WINDOWS_GET_FILE_INFO_EX.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+    ]
+    _WINDOWS_GET_FILE_INFO_EX.restype = wintypes.BOOL
+    _WINDOWS_CLOSE_HANDLE = _WINDOWS_KERNEL32.CloseHandle
+    _WINDOWS_CLOSE_HANDLE.argtypes = [wintypes.HANDLE]
+    _WINDOWS_CLOSE_HANDLE.restype = wintypes.BOOL
+    _WINDOWS_INVALID_HANDLE = ctypes.c_void_p(-1).value
+    _WINDOWS_FILE_READ_ATTRIBUTES = 0x00000080
+    _WINDOWS_FILE_SHARE_ALL = 0x00000001 | 0x00000002 | 0x00000004
+    _WINDOWS_OPEN_EXISTING = 3
+    _WINDOWS_FILE_ATTRIBUTE_DIRECTORY = 0x00000010
+    _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
+    _WINDOWS_FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+    _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+    _WINDOWS_FILE_ID_INFO_CLASS = 18
+
+    def _open_windows_directory(root: str) -> tuple[Any, tuple[int, int]]:
+        handle = _WINDOWS_CREATE_FILE(
+            root,
+            _WINDOWS_FILE_READ_ATTRIBUTES,
+            _WINDOWS_FILE_SHARE_ALL,
+            None,
+            _WINDOWS_OPEN_EXISTING,
+            _WINDOWS_FILE_FLAG_BACKUP_SEMANTICS
+            | _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
+            None,
+        )
+        if handle == _WINDOWS_INVALID_HANDLE:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            basic = _WindowsDirectoryInformation()
+            identity = _WindowsFileIdInformation()
+            if not _WINDOWS_GET_FILE_INFO(handle, ctypes.byref(basic)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if not _WINDOWS_GET_FILE_INFO_EX(
+                handle,
+                _WINDOWS_FILE_ID_INFO_CLASS,
+                ctypes.byref(identity),
+                ctypes.sizeof(identity),
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if (
+                not basic.file_attributes & _WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                or basic.file_attributes & _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT
+            ):
+                raise OSError("workspace path is not a regular directory")
+            file_id = int.from_bytes(bytes(identity.file_id.identifier), "little")
+            if file_id == 0:
+                raise OSError("workspace directory has no stable file identity")
+            return handle, (int(identity.volume_serial_number), file_id)
+        except BaseException:
+            _WINDOWS_CLOSE_HANDLE(handle)
+            raise
 
 __version__ = "0.1.1"
 
@@ -102,12 +206,98 @@ class _InvalidArguments(ValueError):
     pass
 
 
+class _DirectoryAnchor:
+    """A live reference to the directory registered for one workspace alias."""
+
+    __slots__ = ("_handle", "device", "inode")
+
+    def __init__(self, handle: Any, identity: tuple[int, int]):
+        self._handle = handle
+        self.device, self.inode = identity
+
+    @classmethod
+    def open(cls, root: str) -> _DirectoryAnchor:
+        if os.name == "nt":
+            handle, identity = _open_windows_directory(root)
+            return cls(handle, identity)
+
+        flags = os.O_RDONLY
+        for flag_name in ("O_CLOEXEC", "O_DIRECTORY", "O_NOFOLLOW"):
+            flags |= getattr(os, flag_name, 0)
+        descriptor = os.open(root, flags)
+        try:
+            anchored = os.fstat(descriptor)
+            current = os.lstat(root)
+            if (
+                not stat.S_ISDIR(anchored.st_mode)
+                or not stat.S_ISDIR(current.st_mode)
+                or getattr(current, "st_reparse_tag", 0)
+                or (current.st_dev, current.st_ino)
+                != (anchored.st_dev, anchored.st_ino)
+            ):
+                raise OSError("workspace identity changed during registration")
+        except BaseException:
+            os.close(descriptor)
+            raise
+        return cls(descriptor, (anchored.st_dev, anchored.st_ino))
+
+    def matches(self, root: str) -> bool:
+        if self._handle is None:
+            return False
+        if os.name == "nt":
+            try:
+                handle, identity = _open_windows_directory(root)
+            except OSError:
+                return False
+            try:
+                return identity == (self.device, self.inode)
+            finally:
+                _WINDOWS_CLOSE_HANDLE(handle)
+        try:
+            current = os.lstat(root)
+        except OSError:
+            return False
+        return (
+            stat.S_ISDIR(current.st_mode)
+            and not getattr(current, "st_reparse_tag", 0)
+            and (current.st_dev, current.st_ino) == (self.device, self.inode)
+        )
+
+    def close(self) -> None:
+        handle = self._handle
+        if handle is None:
+            return
+        self._handle = None
+        if os.name == "nt":
+            _WINDOWS_CLOSE_HANDLE(handle)
+        else:
+            with suppress(OSError):
+                os.close(handle)
+
+    def __del__(self) -> None:
+        with suppress(Exception):
+            self.close()
+
+
 @dataclass(frozen=True, slots=True)
 class Workspace:
     alias: str
     root: str
     device: int
     inode: int
+    _anchor: _DirectoryAnchor = field(repr=False, compare=False)
+
+
+class _WorkspaceRegistry(dict[str, Workspace]):
+    def close(self) -> None:
+        for workspace in reversed(tuple(self.values())):
+            workspace._anchor.close()
+
+    def __enter__(self) -> _WorkspaceRegistry:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
 
 
 def _closed_object(properties: Mapping[str, Any], required: Sequence[str]) -> dict[str, Any]:
@@ -306,35 +496,63 @@ def _canonical_workspace(alias: str, raw_path: str) -> Workspace:
         or getattr(info, "st_reparse_tag", 0)
     ):
         raise ValueError("workspace path refused")
-    return Workspace(alias=alias, root=root, device=info.st_dev, inode=info.st_ino)
+    try:
+        anchor = _DirectoryAnchor.open(root)
+    except OSError:
+        raise ValueError("workspace path refused") from None
+    return Workspace(
+        alias=alias,
+        root=root,
+        device=anchor.device,
+        inode=anchor.inode,
+        _anchor=anchor,
+    )
 
 
-def workspace_registry(rows: Sequence[Sequence[str]]) -> dict[str, Workspace]:
+def workspace_registry(rows: Sequence[Sequence[str]]) -> _WorkspaceRegistry:
     if not rows or len(rows) > MAX_WORKSPACES:
         raise ValueError("one through sixteen workspaces are required")
-    registry: dict[str, Workspace] = {}
+    registry = _WorkspaceRegistry()
     identities: set[tuple[int, int]] = set()
-    for row in rows:
-        if len(row) != 2:
-            raise ValueError("each workspace requires an alias and path")
-        workspace = _canonical_workspace(row[0], row[1])
-        identity = (workspace.device, workspace.inode)
-        if workspace.alias in registry or identity in identities:
-            raise ValueError("workspace aliases and roots must be unique")
-        registry[workspace.alias] = workspace
-        identities.add(identity)
-    return registry
+    try:
+        for row in rows:
+            if len(row) != 2:
+                raise ValueError("each workspace requires an alias and path")
+            workspace = _canonical_workspace(row[0], row[1])
+            identity = (workspace.device, workspace.inode)
+            if workspace.alias in registry or identity in identities:
+                workspace._anchor.close()
+                raise ValueError("workspace aliases and roots must be unique")
+            registry[workspace.alias] = workspace
+            identities.add(identity)
+        return registry
+    except BaseException:
+        registry.close()
+        raise
 
 
 def _workspace_available(workspace: Workspace) -> bool:
+    return workspace._anchor.matches(workspace.root)
+
+
+def _clone_workspace(workspace: Workspace) -> Workspace:
     try:
-        info = os.lstat(workspace.root)
+        anchor = _DirectoryAnchor.open(workspace.root)
     except OSError:
-        return False
-    return (
-        stat.S_ISDIR(info.st_mode)
-        and not getattr(info, "st_reparse_tag", 0)
-        and (info.st_dev, info.st_ino) == (workspace.device, workspace.inode)
+        raise ValueError("workspace path refused") from None
+    identity = (anchor.device, anchor.inode)
+    if (
+        identity != (workspace.device, workspace.inode)
+        or not workspace._anchor.matches(workspace.root)
+    ):
+        anchor.close()
+        raise ValueError("workspace path refused")
+    return Workspace(
+        alias=workspace.alias,
+        root=workspace.root,
+        device=anchor.device,
+        inode=anchor.inode,
+        _anchor=anchor,
     )
 
 
@@ -778,21 +996,30 @@ class VivaryMcpServer:
         observability: str = "errors",
         diagnostic_stream: Any | None = None,
     ):
-        self._workspaces = dict(workspaces)
-        self._tools = _build_tools()
-        self._active = False
-        self._active_lock = threading.Lock()
-        self._diagnostics = _Diagnostics(observability, diagnostic_stream)
-        self.server = Server(
-            "vivary",
-            version=__version__,
-            instructions=(
-                "Read-only local context. Workspace aliases are operator configured; "
-                "no tool can mutate state, run a caller command, or expand authority."
-            ),
-            on_list_tools=self._list_tools,
-            on_call_tool=self._call_tool,
-        )
+        owned_workspaces = _WorkspaceRegistry()
+        try:
+            for alias, workspace in workspaces.items():
+                if alias != workspace.alias:
+                    raise ValueError("workspace registry is inconsistent")
+                owned_workspaces[alias] = _clone_workspace(workspace)
+            self._workspaces = owned_workspaces
+            self._tools = _build_tools()
+            self._active = False
+            self._active_lock = threading.Lock()
+            self._diagnostics = _Diagnostics(observability, diagnostic_stream)
+            self.server = Server(
+                "vivary",
+                version=__version__,
+                instructions=(
+                    "Read-only local context. Workspace aliases are operator configured; "
+                    "no tool can mutate state, run a caller command, or expand authority."
+                ),
+                on_list_tools=self._list_tools,
+                on_call_tool=self._call_tool,
+            )
+        except BaseException:
+            owned_workspaces.close()
+            raise
 
     async def _list_tools(
         self,
@@ -814,6 +1041,9 @@ class VivaryMcpServer:
     def _end_call(self) -> None:
         with self._active_lock:
             self._active = False
+
+    def close(self) -> None:
+        self._workspaces.close()
 
     async def _run_producer(
         self,
@@ -1011,7 +1241,10 @@ class VivaryMcpServer:
                         self.server.create_initialization_options(),
                     )
         finally:
-            self._diagnostics.emit("server_stopped", outcome="known")
+            try:
+                self._diagnostics.emit("server_stopped", outcome="known")
+            finally:
+                self.close()
 
 
 class _BoundedStdin:
@@ -1123,15 +1356,23 @@ def build_argument_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_argument_parser()
     args = parser.parse_args(argv)
+    registry: _WorkspaceRegistry | None = None
     try:
         registry = workspace_registry(args.workspace)
         application = VivaryMcpServer(
             registry,
             observability=args.observability,
         )
+        registry.close()
+        registry = None
     except (ImportError, ValueError):
+        if registry is not None:
+            registry.close()
         parser.error("workspace or producer contract unavailable")
-    anyio.run(application.run_stdio, backend="asyncio")
+    try:
+        anyio.run(application.run_stdio, backend="asyncio")
+    finally:
+        application.close()
     return 0
 
 

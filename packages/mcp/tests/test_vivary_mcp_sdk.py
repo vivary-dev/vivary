@@ -105,6 +105,7 @@ async def _connected_adapter(
     monkeypatch.setattr(vivary_mcp, "_load_producer_schemas", _producer_schemas)
     monkeypatch.setattr(vivary_mcp, "_produce", producer)
     application = vivary_mcp.VivaryMcpServer(registry, observability="off")
+    registry.close()
 
     client_write, server_read = anyio.create_memory_object_stream(0)
     server_write, client_read = anyio.create_memory_object_stream(0)
@@ -130,9 +131,12 @@ async def _connected_adapter(
             ) as client:
                 yield application, client
         finally:
-            await client_write.aclose()
-            with anyio.fail_after(_WIRE_TIMEOUT_SECONDS):
-                await server_stopped.wait()
+            try:
+                await client_write.aclose()
+                with anyio.fail_after(_WIRE_TIMEOUT_SECONDS):
+                    await server_stopped.wait()
+            finally:
+                application.close()
             await client_read.aclose()
 
 

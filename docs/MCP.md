@@ -50,7 +50,10 @@ vivary-mcp --workspace docs /absolute/path/to/workspace
 Repeat `--workspace ALIAS PATH` to expose more than one root. An alias may use letters,
 numbers, `.`, `_`, or `-`. It must begin with a letter or number and contain at most
 64 characters. Startup normalizes each root and requires distinct canonical
-directories. Tool calls cannot supply or change them.
+directories. It retains an operating-system identity anchor for each root until the
+server stops. Ordinary writes inside that directory remain valid, but replacing the
+root path makes subsequent calls refuse with `workspace_unavailable`. Tool calls
+cannot supply or change aliases or roots.
 
 For a generated `thin-v0.3` workspace, the public producer reads
 `.vivary/workspace.toml` as its type policy. Before `git init`, Core accepts only the

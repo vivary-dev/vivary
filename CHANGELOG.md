@@ -79,6 +79,10 @@ contract.
 
 ### Fixed
 
+- The optional MCP adapter now pins each configured workspace directory with a live
+  operating-system identity anchor. A replacement root fails closed even when Linux
+  immediately recycles the original directory's inode, while ordinary writes inside
+  the original workspace remain available.
 - The primary CI job now installs its shared Python test runner before the first
   pytest suite, and a workflow contract guard prevents that ordering from regressing.
 - Doctor repair now recognizes a thin workspace even when its repairable `.gitignore`
