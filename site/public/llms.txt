@@ -8,6 +8,7 @@ private/runtime ignores. It seeds no starter records, template pack, or second b
 Website: https://vivary.vercel.app/
 Repository: https://github.com/vivary-dev/vivary
 License: MIT
+Release Status: https://github.com/vivary-dev/vivary#release-status
 Full Documentation: https://vivary.vercel.app/llms-full.txt
 
 ## Published package surfaces
@@ -39,19 +40,25 @@ Pin the previous published full-layout scaffolder only when that behavior is wan
 `uvx --from create-vivary==0.3.1 create-vivary ...` or
 `npx @vivary/create@0.3.1 ...`.
 
+## Task guides
+
+Use the page that matches the task. These site documents and the repository Markdown
+sources are the same canonical procedures.
+
+- Vivary guides: Task-based Vivary guides for creating or adopting a workspace, connecting agents, retrieving context, writing records, and recovering safely. https://vivary.vercel.app/learn-by-doing/
+- Create a Vivary workspace: Create and verify the five-file Vivary governed-context workspace for a new project without adding starter content. https://vivary.vercel.app/guides/create-workspace/
+- Connect an AI agent to Vivary: Connect an AI coding or writing agent to Vivary through the standard context route or optional read-only MCP adapter. https://vivary.vercel.app/guides/connect-agent/
+- Get bounded Vivary context: Retrieve privacy-filtered project evidence with Vivary or save a complete governed Task Capsule for approved work. https://vivary.vercel.app/guides/get-context/
+- Write a governed Vivary record: Plan, approve, apply, and verify one capsule-bound Vivary record after completed work earns durable project context. https://vivary.vercel.app/guides/write-record/
+- Adopt an existing project with Vivary: Add Vivary to an existing project with a bounded dry-run plan, exact approval hash, privacy checks, and no project takeover. https://vivary.vercel.app/guides/adopt-project/
+- Verify and recover a Vivary workspace: Run Vivary Doctor and Tropo checks, interpret health findings, and use explicit bounded recovery for interrupted adoption. https://vivary.vercel.app/guides/verify-recover/
+
 ## Core docs
 
 - What is Vivary?: https://vivary.vercel.app/concepts/
 - Getting started: https://vivary.vercel.app/getting-started/
 - Getting started proof: https://vivary.vercel.app/walkthrough/
 - Command reference: https://vivary.vercel.app/commands/
-- Guide library: https://vivary.vercel.app/learn-by-doing/
-- Create a workspace: https://vivary.vercel.app/guides/create-workspace/
-- Connect an agent: https://vivary.vercel.app/guides/connect-agent/
-- Get bounded context: https://vivary.vercel.app/guides/get-context/
-- Write one approved record: https://vivary.vercel.app/guides/write-record/
-- Adopt an existing project: https://vivary.vercel.app/guides/adopt-project/
-- Verify and recover: https://vivary.vercel.app/guides/verify-recover/
 - MCP adapter: https://vivary.vercel.app/mcp/
 - Agent skills: https://vivary.vercel.app/skills/
 - Active context: https://vivary.vercel.app/active-context/

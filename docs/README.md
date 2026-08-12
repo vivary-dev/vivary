@@ -32,7 +32,6 @@ Starlight guides.
 |---|---|
 | [bellamente-memory/](bellamente-memory/) | Reconciled contract for optional Bellamente agent LTM and its typed Vivary boundary. |
 | [PRODUCT-ROADMAP.md](PRODUCT-ROADMAP.md) | Canonical outcome map behind the public [roadmap page](https://vivary.vercel.app/roadmap/). |
-| [CONTENT-ROADMAP.md](CONTENT-ROADMAP.md) | Internal proof-led content and publishing plan. |
 
 Deeper, per-package: [tropo SPEC](../packages/tropo/SPEC.md) (the normative
 folder-as-type model), and each package's `README.md`.

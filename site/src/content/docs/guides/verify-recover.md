@@ -1,6 +1,6 @@
 ---
-title: "Verify and recover"
-description: "Validate workspace health and use explicit bounded recovery paths."
+title: "Verify and recover a Vivary workspace"
+description: "Run Vivary Doctor and Tropo checks, interpret health findings, and use explicit bounded recovery for interrupted adoption."
 editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/guides/verify-recover.md"
 ---
 

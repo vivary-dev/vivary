@@ -1,6 +1,6 @@
 ---
-title: "Create a workspace"
-description: "Create and verify the five-file Vivary seed for a new project."
+title: "Create a Vivary workspace"
+description: "Create and verify the five-file Vivary governed-context workspace for a new project without adding starter content."
 editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/guides/create-workspace.md"
 ---
 

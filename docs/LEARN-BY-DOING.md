@@ -1,6 +1,7 @@
-# Vivary guide library
+# Vivary guides
 
-Use these guides to complete one real task at a time.
+Use these Vivary guides to complete one governed workspace task at a time.
+Each page is the canonical human-and-agent procedure that the public site renders.
 The guides use STE100 style.
 Each procedure is concise, direct, and safe to copy.
 
