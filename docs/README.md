@@ -7,7 +7,7 @@ Start here.
 | [GETTING-STARTED.md](GETTING-STARTED.md) | Install → create a workspace → run the loop. Begin here. |
 | [LEARN-BY-DOING.md](LEARN-BY-DOING.md) | STE100 style guide library for people and agents; routes each real task to one concise procedure. |
 | [guides/](guides/) | Canonical task guides for creation, agent connection, retrieval, governed records, adoption, and recovery. |
-| [WALKTHROUGH.md](WALKTHROUGH.md) | Historical public 0.3.1 full-scaffold proof; retained as release evidence, not the 0.4.0 thin-init contract. |
+| [WALKTHROUGH.md](WALKTHROUGH.md) | Historical public 0.3.1 full-scaffold proof; retained as release evidence, not the 0.4.1 thin-init contract. |
 | [COMMANDS.md](COMMANDS.md) | Full CLI reference and governed machine-readable envelopes for the role packages and optional adapters. |
 | [MCP.md](MCP.md) | Optional local read-only MCP adapter contract, privacy boundary, installation, and verification. |
 | [HOWTO.md](HOWTO.md) | Advanced recipes for types, review, CI, coordination, storage, and optional providers. |

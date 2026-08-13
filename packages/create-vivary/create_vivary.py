@@ -129,7 +129,7 @@ if os.name == "nt":
     _WINDOWS_FILE_DISPOSITION_INFO_CLASS = 4
 
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 PRESETS = ("coding", "second-brain", "knowledge-work", "writing")
 

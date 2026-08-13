@@ -14,6 +14,71 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: preserve host-owned derived metadata (#24)] — 2026-08-13
+
+This slice advances unpublished `vivary-tropo` to **0.5.3**,
+`create-vivary` / `@vivary/create` to **0.4.1**, optional `vivary-mcp` to
+**0.1.2**, and the `vivary` meta-package to **0.1.9**. Published registry
+versions remain unchanged.
+
+### Fixed
+
+- Permitted untyped documents no longer classify matching derived frontmatter as
+  W210 noise. Host-required metadata such as Astro's `title` now survives
+  `tropo check`, `tropo fix`, and thin-adoption Doctor validation.
+- The legacy analyzer and governed public analyzer share the same boundary:
+  typed documents and untyped documents disallowed by policy still emit W210.
+
+### Changed
+
+- `create-vivary` now requires `vivary-tropo>=0.5.3`; optional `vivary-mcp`
+  requires the same floor because its bounded adapter calls Tropo's public
+  workspace check.
+- The `vivary` meta-package floors move to `create-vivary>=0.4.1` and
+  `vivary-tropo>=0.5.3`.
+- The Tropo specification and command reference now distinguish host-owned
+  metadata in permitted untyped documents from Tropo-owned derived noise.
+
+### Verification
+
+- `python packages/tropo/tests/test_tropo.py` — 193/193 passed.
+- `python packages/create-vivary/tests/test_create_vivary.py` — 194 tests
+  completed, including 3 platform/optional-path skips.
+- `python -m pytest packages/mcp/tests/ -q` — 23 passed, 1 Windows-only skip.
+- `python -m pytest packages/vivary/tests/ -q` — 9 passed.
+- `python packages/create-vivary/tests/orientation_proof.py --receipt
+  sandboxes/b12-orientation-proof.json` — current, legacy, brownfield, adopted,
+  divergent-checkout, and corrupt fixtures passed.
+- `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
+  4 documents, 0 errors, 0 warnings.
+- The approved exact website-adoption plan applied transactionally in a disposable
+  fixture. Doctor passed with 34 nodes and no findings, `tropo fix --dry-run`
+  proposed no removals, required Astro titles remained present, and the second
+  adoption preview was idempotent.
+- `npm audit --offline=false --audit-level=high` from `site/` — 0 vulnerabilities.
+- `npm run sync-docs`, `npm run build`, `npm run test:site`, and
+  `npm run test:links` from `site/` — 33 pages built, 13 tests passed, and 2,705
+  local references plus 1,507 anchors checked with zero failures.
+- `python scripts/check_ci_workflow.py` and
+  `python scripts/tests/test_ci_workflow.py` — contract passed; 14/14 mutation
+  tests passed.
+- `python scripts/check_package_docs_parity.py` and
+  `python scripts/tests/test_package_docs_parity.py` — package/docs contract
+  passed; 10/10 mutation tests passed.
+- Downstream CI suites passed: Core 801, Strato 48, Ozone 110, Exo 29,
+  Memory Cognee 54, thin-init 13, adopt 20, governed record 12, orientation
+  regression 9, privacy differential 2, and Strato integrity 7 tests.
+- Repository-automation contract and tests passed: 11/11 contract cases and
+  18 stats/steward behavior tests.
+- Local candidate builds produced wheel and source distributions for the four
+  changed Python packages plus the three-file `@vivary/create` 0.4.1 tarball.
+  Inventory inspection confirmed license text in the Tropo and create-vivary
+  archives and confirmed the previously identified MCP, meta-package, and npm
+  license omissions remain separate prepublication blockers.
+
+Issue #24 remains open for the complete website dogfood workflow. Publishing
+remains a later, separate human gate.
+
 ## [Unreleased: bounded repository stewardship (#159, #212)] — 2026-08-13
 
 No package version changes. This slice makes repository health fail closed on stale

@@ -113,7 +113,7 @@ if os.name == "nt":
     _PUBLIC_FILE_SHARE_ALL = 0x00000001 | 0x00000002 | 0x00000004
     _PUBLIC_OPEN_EXISTING = 3
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
 RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
 RECEIPT_SCHEMA = "vivary.run_receipt.v1"
 COMMANDS = (
@@ -1117,7 +1117,10 @@ def analyze_file(full, rel, config, *, text=None, use_git_dates=True):
 
     for key, value in fields.items():
         if key in config.derive:
-            if value == doc.derived.get(key):
+            if (
+                value == doc.derived.get(key)
+                and (doc.type is not None or not config.allow_untyped)
+            ):
                 doc.noise.append(key)
                 doc.findings.append(Finding(rel, line_of(key), "warning", "W210",
                                             f"field {key!r} equals its derived value (noise)"))
@@ -3283,7 +3286,10 @@ def _public_analyze_document(full, rel, config, text, info, *, collect, finding_
             _public_add_finding(doc, state, finding_state, "error", "E102", line_of(key))
     for key, value in fields.items():
         if key in config.derive:
-            if value == doc.derived.get(key):
+            if (
+                value == doc.derived.get(key)
+                and (doc.type is not None or not config.allow_untyped)
+            ):
                 doc.noise.append(key)
                 _public_add_finding(doc, state, finding_state, "warning", "W210", line_of(key))
             continue

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "create-vivary"
-version = "0.4.0"
+version = "0.4.1"
 description = "Create a lightweight local-first governed-context workspace with evidence, receipts, verification, and human gates."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,7 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Software Development :: Code Generators",
 ]
-dependencies = ["vivary-tropo>=0.5.2"]
+dependencies = ["vivary-tropo>=0.5.3"]
 
 [project.urls]
 Homepage = "https://vivary.vercel.app/"

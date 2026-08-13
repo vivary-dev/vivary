@@ -8,7 +8,7 @@ Use these recipes after the [guide library](/learn-by-doing/).
 Each recipe assumes that the basic workspace checks pass.
 
 Registry `latest` still installs the published 0.3.1 line.
-Use the approved 0.4.0 candidate route from [Getting started](/getting-started/).
+Use the approved 0.4.1 candidate route from [Getting started](/getting-started/).
 The [README release table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) owns publication truth.
 
 Run commands inside a workspace unless you use `--root`.
@@ -82,8 +82,10 @@ EOF
 tropo check decisions/0002-pick-postgres.md
 ```
 
-A field that just repeats what tropo derives (id, title, dates) is **noise** — `tropo
-fix` removes it.
+In a typed document, or an untyped document disallowed by policy, a field that just
+repeats what Tropo derives (id, title, dates) is **noise** — `tropo fix` removes it.
+Permitted untyped documents retain matching fields because their host format may
+require that metadata.
 
 ## Add or change a type
 

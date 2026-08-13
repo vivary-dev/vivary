@@ -11,7 +11,7 @@ The command reference keeps exhaustive flags, schemas, limits, and exit codes.
 
 ## Release boundary
 
-The guide library describes the unpublished 0.4.0 source candidate.
+The guide library describes the unpublished 0.4.1 source candidate.
 Registry `latest` still installs published 0.3.1.
 Use the [release-status table](../README.md#release-status) as the publication authority.
 
@@ -53,7 +53,7 @@ source /path/to/vivary-candidate/bin/activate
 Use that environment for every `--governed` or `record` command.
 Do not use the published 0.3.1 command for these candidate procedures.
 
-After 0.4.0 is published, use `create-vivary` and `tropo` directly.
+After 0.4.1 is published, use `create-vivary` and `tropo` directly.
 Do not use unversioned registry `latest` before publication.
 
 ## Choose a guide

@@ -308,12 +308,12 @@ jobs:
           assert ozone_result["outcome"] == "sufficient"
           assert version("vivary-core") == "0.2.7"
           assert version("vivary-exo") == "0.3.0"
-          assert version("create-vivary") == "0.4.0"
-          assert version("vivary") == "0.1.8"
+          assert version("create-vivary") == "0.4.1"
+          assert version("vivary") == "0.1.9"
           assert "vivary-core>=0.2.5" in requires("vivary-exo")
           vivary_requirements = requires("vivary") or []
-          assert "create-vivary>=0.4.0" in vivary_requirements
-          assert "vivary-tropo>=0.5.2" in vivary_requirements
+          assert "create-vivary>=0.4.1" in vivary_requirements
+          assert "vivary-tropo>=0.5.3" in vivary_requirements
           assert "vivary-strato>=0.1.2" in vivary_requirements
           assert "vivary-exo>=0.3.0" in vivary_requirements
           assert not any(
@@ -343,13 +343,13 @@ jobs:
           from importlib.metadata import PackageNotFoundError, requires, version
           import create_vivary
 
-          assert version("vivary-mcp") == "0.1.1"
-          assert version("vivary-tropo") == "0.5.2"
+          assert version("vivary-mcp") == "0.1.2"
+          assert version("vivary-tropo") == "0.5.3"
           assert version("vivary-core") == "0.2.7"
           assert version("mcp") == "2.0.0"
           assert version("mcp-types") == "2.0.0"
           mcp_requirements = requires("vivary-mcp") or []
-          assert "vivary-tropo>=0.5.2" in mcp_requirements
+          assert "vivary-tropo>=0.5.3" in mcp_requirements
           assert "mcp==2.0.0" in mcp_requirements
           assert not any(
               requirement.startswith("vivary-core")
@@ -697,13 +697,13 @@ jobs:
           from importlib.metadata import PackageNotFoundError, requires, version
           import create_vivary
 
-          assert version("vivary-mcp") == "0.1.1"
-          assert version("vivary-tropo") == "0.5.2"
+          assert version("vivary-mcp") == "0.1.2"
+          assert version("vivary-tropo") == "0.5.3"
           assert version("vivary-core") == "0.2.7"
           assert version("mcp") == "2.0.0"
           assert version("mcp-types") == "2.0.0"
           mcp_requirements = requires("vivary-mcp") or []
-          assert "vivary-tropo>=0.5.2" in mcp_requirements
+          assert "vivary-tropo>=0.5.3" in mcp_requirements
           assert "mcp==2.0.0" in mcp_requirements
           assert not any(
               requirement.startswith("vivary-core")

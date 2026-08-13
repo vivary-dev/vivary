@@ -56,8 +56,11 @@ Consequences, by design:
 
 ## 3. Derivation
 
-Derived fields are computed on demand and are **never** valid in frontmatter
-unless explicitly overriding the derived value. The base derivations:
+Derived fields are computed on demand. In typed documents, and in untyped
+documents that are not permitted by `base.allow_untyped`, they are **never** valid
+in frontmatter unless explicitly overriding the derived value. A permitted untyped
+document may retain a matching derived field when an external host format requires
+that metadata. The base derivations:
 
 | Field     | Source (in order of preference)                                   |
 |-----------|-------------------------------------------------------------------|
@@ -77,7 +80,9 @@ Rules:
 
 - An author **MAY** override a derived field by writing it in frontmatter; the
   written value wins and the engine **MUST NOT** flag it as redundant unless it
-  exactly equals the derived value (then warn — it is noise).
+  exactly equals the derived value (then warn — it is noise). The exception is a
+  permitted untyped document: because no Tropo type owns its host schema, a matching
+  derived field is retained without `W210` or a `tropo fix` proposal.
 - If a derivation source is unavailable (e.g. no git history), the engine falls
   through the preference list. `created`/`updated` therefore always resolve.
 - Derived dates use `YYYY-MM-DD` in the local timezone of the run unless the
@@ -122,7 +127,7 @@ prefer `string` or `any` over the strict type.
 | E120 | error   | overlay/pack attempts to **loosen** an inherited rule (forbidden) |
 | W201 | warning | untyped document (no ancestor type root) — allowed unless `base.allow_untyped = false` |
 | W202 | warning | unknown field for this type                                  |
-| W210 | warning | declared field exactly equals its derived value (pure noise) |
+| W210 | warning | declared field exactly equals its derived value on a typed or disallowed-untyped document (pure noise) |
 | W220 | warning | broken `ref` — target `id` not found in the tree             |
 
 A document with **no frontmatter at all is valid** if its type has no required
