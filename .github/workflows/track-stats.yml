@@ -6,8 +6,13 @@ on:
   workflow_dispatch:        # Also runnable manually
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
+
+concurrency:
+  group: track-stats
+  cancel-in-progress: false
 
 jobs:
   snapshot:
@@ -20,6 +25,8 @@ jobs:
           persist-credentials: false
 
       - name: fetch and record
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python3 tools/update_stats.py
 
       - name: verify stats snapshot
@@ -48,14 +55,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Self-heal: close any stats PR left open from a previous day (its data
-          # is superseded by today's snapshot) and delete its branch.
-          TODAY=$(date -u +%Y-%m-%d)
-          gh pr list --state open --json number,headRefName \
-            --jq '.[] | select(.headRefName | startswith("chore/stats-")) | select(.headRefName | contains("'"$TODAY"'") | not) | .number' \
-            | while read -r STALE; do
-              gh pr close "$STALE" --comment "Superseded by today's snapshot." --delete-branch || true
-            done
           git add stats/ site/public/usage-snapshot.svg
           if git diff --staged --quiet; then
             echo "no changes to commit"
@@ -66,8 +65,24 @@ jobs:
             PACKAGE=$(python3 -c "import json; d=json.load(open('stats/latest.json')); print(d['totals']['package_weekly'])")
             STARS=$(python3 -c "import json; d=json.load(open('stats/latest.json')); print(d['github_stars'])")
             STATUS=$(python3 -c "import json; d=json.load(open('stats/latest.json')); print(d['status'])")
+            LABELS=$(gh label list --limit 1000 --json name --jq '.[].name')
+            for REQUIRED_LABEL in automated-current blocked; do
+              grep -Fxq "$REQUIRED_LABEL" <<< "$LABELS" || {
+                echo "missing required lifecycle label: $REQUIRED_LABEL"
+                exit 1
+              }
+            done
+            if python3 tools/steward_health.py \
+              --snapshot stats/latest.json \
+              --today "$DATE" \
+              --fail-on-findings; then
+              LIFECYCLE="automated-current"
+            else
+              LIFECYCLE="blocked"
+            fi
             BRANCH="chore/stats-$DATE"
             BODY="Automated daily stats snapshot.\n\n- npm weekly downloads: $NPM\n- PyPI weekly downloads: $PYPI\n- all package weekly downloads: $PACKAGE\n- GitHub stars: $STARS\n- snapshot status: $STATUS"
+            BASE_SHA=$(git rev-parse HEAD)
             if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
               BRANCH="chore/stats-$DATE-${GITHUB_RUN_ID}"
             fi
@@ -84,11 +99,32 @@ jobs:
                 --base dev \
                 --head "$BRANCH" \
                 --title "chore(stats): $DATE snapshot" \
-                --body "$BODY"
+                --body "$BODY" \
+                --label "$LIFECYCLE"
             fi
-            # Merge hands-free once the required checks pass. Requires the repo
-            # settings "allow auto-merge" and "Actions can create PRs"; if either
-            # is off, leave the PR open rather than failing the run.
-            gh pr merge "$BRANCH" --auto --merge \
-              || echo "auto-merge unavailable; PR left open for manual merge"
+            PR_NUMBER=$(gh pr view "$BRANCH" --json number --jq .number)
+            HEAD_SHA=$(git rev-parse HEAD)
+
+            # GITHUB_TOKEN-created pull_request runs require approval. Every generated
+            # PR therefore receives a trusted dispatch bound to its live head and base.
+            gh workflow run ci.yml --ref "$BRANCH" \
+              -f head_sha="$HEAD_SHA" \
+              -f base_sha="$BASE_SHA" \
+              -f pull_request_number="$PR_NUMBER"
+
+            if [ "$LIFECYCLE" = "automated-current" ]; then
+              gh pr merge "$BRANCH" --auto --merge \
+                || echo "auto-merge unavailable; PR left open for manual merge"
+
+              # A serialized, healthy, newer PR is valid replacement evidence.
+              # Branch deletion remains a separately approved destructive action.
+              gh pr list --state open --limit 1000 --json number,headRefName \
+                --jq '.[] | select(.headRefName | startswith("chore/stats-")) | select(.number < '"$PR_NUMBER"') | .number' \
+                | while read -r STALE; do
+                  gh pr close "$STALE" \
+                    --comment "Superseded by healthy stats PR #$PR_NUMBER at $HEAD_SHA." || true
+                done
+            else
+              echo "snapshot is stale; PR dispatched for inspection without auto-merge"
+            fi
           fi

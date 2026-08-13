@@ -4,34 +4,58 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 2
+    labels:
+      - "dependencies"
+      - "automated-current"
+    groups:
+      actions-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      actions-security:
+        applies-to: "security-updates"
+        patterns: ["*"]
 
   - package-ecosystem: "npm"
     directory: "/site"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 2
+    labels:
+      - "dependencies"
+      - "automated-current"
+    groups:
+      site-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      site-security:
+        applies-to: "security-updates"
+        patterns: ["*"]
 
   - package-ecosystem: "pip"
-    directory: "/packages/create-vivary"
+    directories:
+      - "/packages/create-vivary"
+      - "/packages/tropo"
+      - "/packages/ozone"
+      - "/packages/exo"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
-
-  - package-ecosystem: "pip"
-    directory: "/packages/tropo"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-
-  - package-ecosystem: "pip"
-    directory: "/packages/ozone"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-
-  - package-ecosystem: "pip"
-    directory: "/packages/exo"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 2
+    versioning-strategy: "increase-if-necessary"
+    labels:
+      - "dependencies"
+      - "automated-current"
+    groups:
+      python-minor-patch:
+        group-by: "dependency-name"
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      python-security:
+        applies-to: "security-updates"
+        patterns: ["*"]

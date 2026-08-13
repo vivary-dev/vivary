@@ -352,9 +352,11 @@ dump).
 
 - Confirm the live site (https://vivary.vercel.app/) shows the new versions and
   command surface — it deploys from `dev`, so this is a read-check, not a step.
-- Stats: the daily `track-stats` workflow will pick up the new versions; make
-  sure recent `chore/stats-*` snapshot PRs are being merged so
-  `stats/history.csv` and the README chart stay current.
+- Stats: the daily `track-stats` workflow picks up the new versions. Every stats PR
+  receives exact-head CI, while only warning-free, non-stale output may request
+  auto-merge or supersede an older proposal. Stale output stays open as `blocked` for
+  inspection. Confirm `stats/history.csv` and the README
+  chart advanced before treating public signals as current.
 - Keep private agent communications outside the repo: handoffs, launch/social
   drafts, and private release packets stay in ignored local storage such as
   `.release/private/` — never in the public repo.

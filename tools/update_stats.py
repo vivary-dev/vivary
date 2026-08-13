@@ -8,6 +8,7 @@ import json
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
@@ -45,28 +46,68 @@ def write_text_lf(path: Path, text: str) -> None:
         handle.write(text)
 
 
-def fetch_json(url: str, *, attempts: int = 3) -> dict[str, Any]:
+def headers_for_url(
+    url: str,
+    *,
+    github_token: str | None = None,
+) -> dict[str, str]:
+    """Return public-API headers without forwarding GitHub credentials elsewhere."""
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "vivary-stats/2.0 (+https://github.com/vivary-dev/vivary)",
+    }
+    token = github_token or os.environ.get("GITHUB_TOKEN")
+    if urllib.parse.urlsplit(url).hostname == "api.github.com" and token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def retry_delay(
+    error: Exception,
+    fallback: float,
+    *,
+    maximum: float = 30.0,
+) -> float:
+    """Honor numeric Retry-After while keeping every wait bounded."""
+    retry_after = None
+    if isinstance(error, urllib.error.HTTPError) and error.headers is not None:
+        retry_after = error.headers.get("Retry-After")
+    try:
+        requested = float(retry_after) if retry_after is not None else fallback
+    except (TypeError, ValueError):
+        requested = fallback
+    return max(0.0, min(requested, maximum))
+
+
+def fetch_json(
+    url: str,
+    *,
+    attempts: int = 3,
+    opener=urllib.request.urlopen,
+    sleeper=time.sleep,
+    github_token: str | None = None,
+) -> dict[str, Any]:
     delay = 2.0
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
             request = urllib.request.Request(
                 url,
-                headers={
-                    "Accept": "application/json",
-                    "User-Agent": "vivary-stats/2.0 (+https://github.com/vivary-dev/vivary)",
-                },
+                headers=headers_for_url(url, github_token=github_token),
             )
-            with urllib.request.urlopen(request, timeout=20) as response:
+            with opener(request, timeout=20) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             last_error = exc
-            if exc.code not in {429, 500, 502, 503, 504}:
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            if exc.code not in {429, 500, 502, 503, 504} and not (
+                exc.code == 403 and retry_after is not None
+            ):
                 break
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
             last_error = exc
         if attempt < attempts:
-            time.sleep(delay)
+            sleeper(retry_delay(last_error or FetchError(url), delay))
             delay *= 2
     raise FetchError(f"{url} -> {last_error}")
 

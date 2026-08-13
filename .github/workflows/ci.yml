@@ -5,9 +5,24 @@ on:
   pull_request:
   push:
     branches: [dev]
+  workflow_dispatch:
+    inputs:
+      head_sha:
+        description: Exact pull-request head SHA to verify
+        required: true
+        type: string
+      base_sha:
+        description: Exact pull-request base SHA to compare
+        required: true
+        type: string
+      pull_request_number:
+        description: Pull request whose live head and base must match
+        required: true
+        type: string
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   changes:
@@ -19,12 +34,29 @@ jobs:
       - uses: actions/checkout@v7.0.0
         with:
           fetch-depth: 0
+      - name: validate dispatched pull request
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          PR_NUMBER: ${{ inputs.pull_request_number }}
+        run: |
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          test "$GITHUB_SHA" = "$HEAD_SHA"
+          LIVE_HEAD=$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)
+          LIVE_BASE=$(gh pr view "$PR_NUMBER" --json baseRefOid --jq .baseRefOid)
+          test "$LIVE_HEAD" = "$HEAD_SHA"
+          test "$LIVE_BASE" = "$BASE_SHA"
       - name: detect site inputs
         id: scope
         shell: bash
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}
         run: |
           if [ -z "$BASE_SHA" ] || [[ "$BASE_SHA" =~ ^0+$ ]]; then
             echo "site=true" >> "$GITHUB_OUTPUT"
@@ -45,9 +77,14 @@ jobs:
 
   test:
     name: tests + checks
+    needs: changes
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: require changed-path and dispatch validation
+        if: needs.changes.result != 'success'
+        run: exit 1
       - uses: actions/checkout@v7.0.0
         with:
           fetch-depth: 0
@@ -63,6 +100,12 @@ jobs:
         run: python scripts/check_ci_workflow.py
       - name: CI workflow contract tests
         run: python scripts/tests/test_ci_workflow.py
+      - name: repository automation contract
+        run: python scripts/check_repository_automation.py
+      - name: repository automation contract tests
+        run: python scripts/tests/test_repository_automation.py
+      - name: repository automation behavior tests
+        run: python -m pytest scripts/tests/test_update_stats.py scripts/tests/test_steward_health.py -q
       - run: mkdir -p sandboxes
       - name: tropo
         run: python packages/tropo/tests/test_tropo.py
@@ -566,11 +609,12 @@ jobs:
         run: python scripts/check_line_endings.py
       - name: diff hygiene
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}
         run: git diff --check "$BASE_SHA...HEAD"
 
   governed-platform-proof:
     name: governed verification (Windows)
+    needs: changes
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -686,6 +730,7 @@ jobs:
 
   orientation-proof:
     name: orientation proof (${{ matrix.os }})
+    needs: changes
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -722,7 +767,8 @@ jobs:
 
   review:
     name: graph review gate
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
