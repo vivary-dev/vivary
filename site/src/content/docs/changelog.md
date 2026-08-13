@@ -101,6 +101,10 @@ contract.
   the original workspace remain available.
 - The primary CI job now installs its shared Python test runner before the first
   pytest suite, and a workflow contract guard prevents that ordering from regressing.
+- The CI workflow contract now also pins the site dependency audit to
+  `npm audit --audit-level=high` in `site/` after `npm ci`. Its regression suite
+  rejects a missing, misplaced, or reordered gate, and the release workflow owns the
+  live-advisory response for [#232](https://github.com/vivary-dev/vivary/issues/232).
 - Doctor repair now recognizes a thin workspace even when its repairable `.gitignore`
   policy is incomplete, and atomic repair preserves the existing file mode.
 - The strict orientation proof builds local Core and Tropo wheels before exercising
@@ -160,6 +164,9 @@ python packages/exo/tests/test_exo.py
 python -m pytest packages/strato/tests/ -q
 python packages/memory-cognee/tests/test_memory_cognee.py
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault
+python scripts/check_ci_workflow.py
+python scripts/tests/test_ci_workflow.py
+python -m pytest scripts/tests/test_ci_workflow.py -q
 python scripts/check_npm_trusted_publish_workflow.py
 python scripts/tests/test_package_docs_parity.py
 python scripts/check_line_endings.py
@@ -168,6 +175,8 @@ npm pack ./packages/create-vivary/npm --dry-run
 $env:VIVARY_SYNC_NO_DELETE = '1'; Push-Location site; node scripts/sync-docs.mjs; Pop-Location
 Push-Location site; & .\node_modules\.bin\astro.cmd build; Pop-Location
 cd site && node --test tests/*.test.mjs && node scripts/check-built-links.mjs
+cd site && npm audit --offline=false --audit-level=high
+cd site && npm run test:site && npm run build && npm run test:links
 ```
 
 - Results: Tropo **191/191**, Core **801/801**, optional MCP **30/30**,
@@ -176,8 +185,11 @@ cd site && node --test tests/*.test.mjs && node scripts/check-built-links.mjs
   **16/16** on Windows and WSL/Linux, orientation proof
   **9/9**, privacy differential **2/2**, Vivary meta CLI **9/9**, Ozone **110/110**,
   Exo **29/29**, Strato **48/48**, optional memory **54/54**, asset parity **5/5**,
-  and site contracts **11/11**. The built-link gate checked **2,678** local references
-  and **1,480** anchors across 33 pages with zero failures. Local browser review found
+  and site contracts **13/13**. The CI workflow contract passed **6/6** tests:
+  one real-workflow check and five negative regressions. The online audit control exited **1** with
+  four HIGH findings against archived lockfile `68dbee59`, then exited **0** with zero
+  vulnerabilities against `b68eef73`. The built-link gate checked **2,681** local
+  references and **1,483** anchors across 33 pages with zero failures. Local browser review found
   zero console warnings or errors across the guide index and all six task guides.
 - The current working tree built all nine wheels. A fresh isolated environment
   installed `mcp==2.0.0`, then installed `vivary-mcp` and `create-vivary` with
