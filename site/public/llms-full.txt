@@ -5,7 +5,7 @@ This file contains the complete documentation suite for Vivary.
 # Vivary
 
 Vivary is a lightweight, local-first governed-context standard and scaffolder. The
-unpublished 0.4.0 source candidate creates five operational files: one context
+unpublished 0.4.1 source candidate creates five operational files: one context
 capsule, one visible state surface, workspace policy, startup routing, and bounded
 private/runtime ignores. It seeds no starter records, template pack, or second brain.
 
@@ -25,12 +25,12 @@ Full Documentation: https://vivary.vercel.app/llms-full.txt
 - PyPI coordination CLI: `vivary-exo` 0.2.2, command `exo`
 - The unpublished source package `vivary-strato` exposes experimental command `strato decide --governed`; Core init does not copy skills or templates.
 - Optional Cognee adapter: `vivary-memory-cognee` 0.1.0, command `vivary-cognee`
-- Optional unpublished local stdio adapter: `vivary-mcp` 0.1.1; four read-only tools, disabled by default.
+- Optional unpublished local stdio adapter: `vivary-mcp` 0.1.2; four read-only tools, disabled by default.
 - Versions are independent; do not call the whole project "Vivary 0.3.1".
 
 The versions above are registry truth. The five-file behavior belongs to unpublished
 development source until the README release table lists `create-vivary` and
-`@vivary/create` 0.4.0.
+`@vivary/create` 0.4.1.
 
 ## Run the development-source candidate
 
@@ -212,7 +212,7 @@ verification hooks, and deliberate human gates. It does not require a particular
 editor, agent runtime, database, memory provider, or MCP client.
 
 > **Release truth:** the five-file workflow on this page describes the
-> unpublished 0.4.0 development source. Registry `@latest` is still 0.3.1 and
+> unpublished 0.4.1 development source. Registry `@latest` is still 0.3.1 and
 > creates the historical full layout. During release review, run the scaffolder
 > from a Vivary checkout or an isolated candidate artifact; do not substitute an
 > unpinned registry command. The [README release table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status)
@@ -225,7 +225,7 @@ Paste this into Claude Code, Codex, Cursor, or another coding agent:
 ```text
 Set up Vivary in this project.
 
-1. Confirm Python 3.11+ and the Vivary 0.4.0 candidate command route described below are available. Do not install anything without approval or substitute registry latest while it remains 0.3.1.
+1. Confirm Python 3.11+ and the Vivary 0.4.1 candidate command route described below are available. Do not install anything without approval or substitute registry latest while it remains 0.3.1.
 2. If this folder already has content, run `create-vivary adopt . --json`. Show me the exact creates, bounded patches, optional projections, kept files, conflicts, privacy result, and plan_hash. Stop on any conflict. Apply only the exact approved plan with `--yes --plan <plan_hash>`.
 3. If this folder is empty, ask which preset fits (coding, second-brain, knowledge-work, or writing), then run `create-vivary init . --preset <choice>`.
 4. Verify with `create-vivary doctor .` and `tropo check --root .`. Both must pass.
@@ -234,7 +234,7 @@ Set up Vivary in this project.
 
 ## 1. Install
 
-You need Python 3.11 or newer. To inspect the 0.4.0 candidate from this repository
+You need Python 3.11 or newer. To inspect the 0.4.1 candidate from this repository
 without changing an installed tool, call its entry points directly:
 
 ```bash
@@ -425,7 +425,7 @@ the selected preset into a template pack or a pre-populated graph.
 # Getting started proof
 
 > **Historical published-line fixture.** This page records the public 0.3.1 full
-> scaffold and is retained as release evidence. Development-source 0.4.0 uses the
+> scaffold and is retained as release evidence. Development-source 0.4.1 uses the
 > five-file thin contract described in [Getting started](https://vivary.vercel.app/getting-started/); it does
 > not reproduce this 38-file layout.
 
@@ -806,8 +806,9 @@ tropo query "release truth" --mode semantic --json
 `check` is **strict by default** — unknown fields on typed documents, broken refs, and
 redundant frontmatter fail it. Untyped documents are allowed only when
 `[base] allow_untyped = true`; that setting omits `W201`, validates declared base
-fields, and ignores undeclared fields because no type owns them. Relax emitted
-warnings when you need to:
+fields, and ignores undeclared fields because no type owns them. A matching derived
+field on such a permitted untyped document is also retained without `W210` because an
+external host schema may require it. Relax emitted warnings when you need to:
 
 ```bash
 tropo check                 # strict: any warning fails (exit 1)
@@ -820,8 +821,9 @@ it back on (overrides a lenient config). `strict` is *tighten-only* across neste
 configs — a sub-folder may turn it on, never off.
 
 `allow_untyped = false` emits `W201` as an error. Typed documents retain strict
-`W202` handling regardless of that setting.
-[Behavioral evidence](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py); verified: 2026-08-09.
+`W202` and `W210` handling regardless of that setting. Disallowed-untyped documents
+also retain `W210` for redundant derived fields.
+[Behavioral evidence](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py); verified: 2026-08-13.
 
 ### Finding codes
 
@@ -834,7 +836,7 @@ configs — a sub-folder may turn it on, never off.
 | `E103` | error | field value violates its type spec |
 | `W201` | error | untyped document when `base.allow_untyped = false`; omitted when permission is true |
 | `W202` | warn | unknown field on a typed document (typo? add it to the schema) |
-| `W210` | warn | field equals its derived value (noise — run `tropo fix`) |
+| `W210` | warn | field equals its derived value on a typed or disallowed-untyped document (noise — run `tropo fix`) |
 | `W220` | warn | ref points at no document id (broken edge) |
 
 (Under the default strict mode, every emitted warning fails the check.)
@@ -1473,7 +1475,7 @@ create-vivary record <target> <modules|changes|decisions|verification|gates>/<sl
 
 ### Capability status (development source)
 
-The 0.4.0 development source reports a fixed Core-and-role inventory and passive MCP
+The 0.4.1 development source reports a fixed Core-and-role inventory and passive MCP
 interoperability status alongside the existing storage, semantic-memory, and preset
 sidecar rows:
 
@@ -1813,7 +1815,7 @@ The command reference keeps exhaustive flags, schemas, limits, and exit codes.
 
 ## Release boundary
 
-The guide library describes the unpublished 0.4.0 source candidate.
+The guide library describes the unpublished 0.4.1 source candidate.
 Registry `latest` still installs published 0.3.1.
 Use the [release-status table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) as the publication authority.
 
@@ -1855,7 +1857,7 @@ source /path/to/vivary-candidate/bin/activate
 Use that environment for every `--governed` or `record` command.
 Do not use the published 0.3.1 command for these candidate procedures.
 
-After 0.4.0 is published, use `create-vivary` and `tropo` directly.
+After 0.4.1 is published, use `create-vivary` and `tropo` directly.
 Do not use unversioned registry `latest` before publication.
 
 ## Choose a guide
@@ -1948,7 +1950,7 @@ The workspace contains no starter records, templates, skills, or second-brain co
 
 ## Release boundary
 
-These commands describe the unpublished 0.4.0 source candidate.
+These commands describe the unpublished 0.4.1 source candidate.
 Registry `latest` still installs published 0.3.1 and creates the historical full layout.
 Run these commands from the Vivary source checkout root.
 
@@ -5437,7 +5439,7 @@ Use these recipes after the [guide library](https://vivary.vercel.app/learn-by-d
 Each recipe assumes that the basic workspace checks pass.
 
 Registry `latest` still installs the published 0.3.1 line.
-Use the approved 0.4.0 candidate route from [Getting started](https://vivary.vercel.app/getting-started/).
+Use the approved 0.4.1 candidate route from [Getting started](https://vivary.vercel.app/getting-started/).
 The [README release table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) owns publication truth.
 
 Run commands inside a workspace unless you use `--root`.
@@ -5511,8 +5513,10 @@ EOF
 tropo check decisions/0002-pick-postgres.md
 ```
 
-A field that just repeats what tropo derives (id, title, dates) is **noise** — `tropo
-fix` removes it.
+In a typed document, or an untyped document disallowed by policy, a field that just
+repeats what Tropo derives (id, title, dates) is **noise** — `tropo fix` removes it.
+Permitted untyped documents retain matching fields because their host format may
+require that metadata.
 
 ## Add or change a type
 
@@ -6439,7 +6443,7 @@ anything unproven is reported `unknown` rather than guessed.
 declares its own floor in the same commit. The `vivary` meta-package receives Core
 transitively through the role packages instead of declaring a duplicate Core edge.
 Tropo, Strato, Ozone, and Exo own their Core floors. The meta-package owns its five
-component floors, including `create-vivary>=0.4.0`, `vivary-tropo>=0.5.2`, and
+component floors, including `create-vivary>=0.4.1`, `vivary-tropo>=0.5.3`, and
 `vivary-strato>=0.1.2`. One owner per edge avoids version-pinning fights.
 
 **Optional MCP boundary:** `vivary-mcp` is an interoperability adapter, not a layer
@@ -6526,7 +6530,7 @@ against the linked manifests, contracts, and registry pages on **2026-08-10**.
 |---|---|---|---|
 | **Stable** | Published and supported; this is not a promise of post-1.0 API stability. | The registry versions and their baseline CLI/workspace behavior listed in the [release-status table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status). | Registry links live in that table; baseline regressions live with [Tropo](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py), [Ozone](https://github.com/vivary-dev/vivary/blob/dev/packages/ozone/tests/test_ozone.py), [Exo](https://github.com/vivary-dev/vivary/blob/dev/packages/exo/tests/test_exo.py), and [create-vivary](https://github.com/vivary-dev/vivary/blob/dev/packages/create-vivary/tests/test_create_vivary.py). |
 | **Optional** | Installed, configured, or invoked only by explicit choice; optional is independent of maturity. | Ozone and Exo beyond the Tropo + Strato baseline; storage and semantic-memory capabilities including `vivary-memory-cognee`; Obsidian and active-context integrations; and `vivary-mcp` (also experimental while unpublished). | [Architecture boundaries](https://vivary.vercel.app/architecture/#2-the-first-principles-baseline), [semantic-memory gates](https://vivary.vercel.app/semantic-memory/#non-negotiables), [active-context gates](https://vivary.vercel.app/active-context/), and the [MCP install boundary](https://vivary.vercel.app/mcp/#install-boundary). |
-| **Experimental** | Implemented in development source, opt-in where callable, and not registry-available at the source versions. | The `thin-v0.3` init/adoption contract in `create-vivary 0.4.0`; `vivary-core`; governed Tropo, Strato, Ozone, and Exo paths; the provider-neutral recall firewall; and the optional read-only `vivary-mcp` adapter. | [Thin adoption regressions](https://github.com/vivary-dev/vivary/tree/dev/packages/create-vivary/tests), [Core contract tests](https://github.com/vivary-dev/vivary/tree/dev/packages/core/tests), [role envelopes](https://vivary.vercel.app/commands/#governed-machine-readable-envelopes-development-source), and [MCP contract tests](https://github.com/vivary-dev/vivary/tree/dev/packages/mcp/tests). |
+| **Experimental** | Implemented in development source, opt-in where callable, and not registry-available at the source versions. | The `thin-v0.3` init/adoption contract in `create-vivary 0.4.1`; `vivary-core`; governed Tropo, Strato, Ozone, and Exo paths; the provider-neutral recall firewall; and the optional read-only `vivary-mcp` adapter. | [Thin adoption regressions](https://github.com/vivary-dev/vivary/tree/dev/packages/create-vivary/tests), [Core contract tests](https://github.com/vivary-dev/vivary/tree/dev/packages/core/tests), [role envelopes](https://vivary.vercel.app/commands/#governed-machine-readable-envelopes-development-source), and [MCP contract tests](https://github.com/vivary-dev/vivary/tree/dev/packages/mcp/tests). |
 | **Held** | Complete or partial source work that must not be described as published, graduated, or default-enabled. | Publication of the named **Vivary Governed Context** train, including every unpublished source version in the root release status. | The release policy resolved by [#149](https://github.com/vivary-dev/vivary/issues/149), the documentation acceptance completed by [#210](https://github.com/vivary-dev/vivary/issues/210), and the remaining per-item human gates in the [release workflow](https://vivary.vercel.app/release-workflow/#gates). |
 | **Deprecated** | Formally discouraged with a documented replacement and removal policy. | **None.** Legacy full workspace layouts and legacy Exo graph commands remain read-compatible surfaces, not deprecations. New init/adopt no longer generate the full layout. | [Doctor compatibility contract](https://vivary.vercel.app/commands/#doctor-compatibility-and-declared-configuration) and [legacy Exo commands](https://vivary.vercel.app/commands/#legacy-graph-coordination). |
 | **Planned** | Described intent with no shipped behavior claim. | Cloud storage adapters and non-file/cloud migration targets; any broader MCP transport or named-client compatibility. | [Data-layer future work](https://github.com/vivary-dev/vivary/blob/dev/docs/SPEC-data-layer.md#future--cloud-adapters-03x); MCP external conformance remains explicitly [unproven](https://vivary.vercel.app/mcp/#contract). These are plans or hypotheses until implementation evidence exists. |
@@ -6648,6 +6652,71 @@ the `v0.1.0` line.
 `vivary-memory-cognee` **0.1.0** · `vivary-tropo` **0.4.1** · `vivary-ozone`
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
+
+## [Unreleased: preserve host-owned derived metadata (#24)] — 2026-08-13
+
+This slice advances unpublished `vivary-tropo` to **0.5.3**,
+`create-vivary` / `@vivary/create` to **0.4.1**, optional `vivary-mcp` to
+**0.1.2**, and the `vivary` meta-package to **0.1.9**. Published registry
+versions remain unchanged.
+
+### Fixed
+
+- Permitted untyped documents no longer classify matching derived frontmatter as
+  W210 noise. Host-required metadata such as Astro's `title` now survives
+  `tropo check`, `tropo fix`, and thin-adoption Doctor validation.
+- The legacy analyzer and governed public analyzer share the same boundary:
+  typed documents and untyped documents disallowed by policy still emit W210.
+
+### Changed
+
+- `create-vivary` now requires `vivary-tropo>=0.5.3`; optional `vivary-mcp`
+  requires the same floor because its bounded adapter calls Tropo's public
+  workspace check.
+- The `vivary` meta-package floors move to `create-vivary>=0.4.1` and
+  `vivary-tropo>=0.5.3`.
+- The Tropo specification and command reference now distinguish host-owned
+  metadata in permitted untyped documents from Tropo-owned derived noise.
+
+### Verification
+
+- `python packages/tropo/tests/test_tropo.py` — 193/193 passed.
+- `python packages/create-vivary/tests/test_create_vivary.py` — 194 tests
+  completed, including 3 platform/optional-path skips.
+- `python -m pytest packages/mcp/tests/ -q` — 23 passed, 1 Windows-only skip.
+- `python -m pytest packages/vivary/tests/ -q` — 9 passed.
+- `python packages/create-vivary/tests/orientation_proof.py --receipt
+  sandboxes/b12-orientation-proof.json` — current, legacy, brownfield, adopted,
+  divergent-checkout, and corrupt fixtures passed.
+- `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` —
+  4 documents, 0 errors, 0 warnings.
+- The approved exact website-adoption plan applied transactionally in a disposable
+  fixture. Doctor passed with 34 nodes and no findings, `tropo fix --dry-run`
+  proposed no removals, required Astro titles remained present, and the second
+  adoption preview was idempotent.
+- `npm audit --offline=false --audit-level=high` from `site/` — 0 vulnerabilities.
+- `npm run sync-docs`, `npm run build`, `npm run test:site`, and
+  `npm run test:links` from `site/` — 33 pages built, 13 tests passed, and 2,705
+  local references plus 1,507 anchors checked with zero failures.
+- `python scripts/check_ci_workflow.py` and
+  `python scripts/tests/test_ci_workflow.py` — contract passed; 14/14 mutation
+  tests passed.
+- `python scripts/check_package_docs_parity.py` and
+  `python scripts/tests/test_package_docs_parity.py` — package/docs contract
+  passed; 10/10 mutation tests passed.
+- Downstream CI suites passed: Core 801, Strato 48, Ozone 110, Exo 29,
+  Memory Cognee 54, thin-init 13, adopt 20, governed record 12, orientation
+  regression 9, privacy differential 2, and Strato integrity 7 tests.
+- Repository-automation contract and tests passed: 11/11 contract cases and
+  18 stats/steward behavior tests.
+- Local candidate builds produced wheel and source distributions for the four
+  changed Python packages plus the three-file `@vivary/create` 0.4.1 tarball.
+  Inventory inspection confirmed license text in the Tropo and create-vivary
+  archives and confirmed the previously identified MCP, meta-package, and npm
+  license omissions remain separate prepublication blockers.
+
+Issue #24 remains open for the complete website dogfood workflow. Publishing
+remains a later, separate human gate.
 
 ## [Unreleased: bounded repository stewardship (#159, #212)] — 2026-08-13
 

@@ -278,8 +278,9 @@ tropo query "release truth" --mode semantic --json
 `check` is **strict by default** — unknown fields on typed documents, broken refs, and
 redundant frontmatter fail it. Untyped documents are allowed only when
 `[base] allow_untyped = true`; that setting omits `W201`, validates declared base
-fields, and ignores undeclared fields because no type owns them. Relax emitted
-warnings when you need to:
+fields, and ignores undeclared fields because no type owns them. A matching derived
+field on such a permitted untyped document is also retained without `W210` because an
+external host schema may require it. Relax emitted warnings when you need to:
 
 ```bash
 tropo check                 # strict: any warning fails (exit 1)
@@ -292,8 +293,9 @@ it back on (overrides a lenient config). `strict` is *tighten-only* across neste
 configs — a sub-folder may turn it on, never off.
 
 `allow_untyped = false` emits `W201` as an error. Typed documents retain strict
-`W202` handling regardless of that setting.
-[Behavioral evidence](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py); verified: 2026-08-09.
+`W202` and `W210` handling regardless of that setting. Disallowed-untyped documents
+also retain `W210` for redundant derived fields.
+[Behavioral evidence](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py); verified: 2026-08-13.
 
 ### Finding codes
 
@@ -306,7 +308,7 @@ configs — a sub-folder may turn it on, never off.
 | `E103` | error | field value violates its type spec |
 | `W201` | error | untyped document when `base.allow_untyped = false`; omitted when permission is true |
 | `W202` | warn | unknown field on a typed document (typo? add it to the schema) |
-| `W210` | warn | field equals its derived value (noise — run `tropo fix`) |
+| `W210` | warn | field equals its derived value on a typed or disallowed-untyped document (noise — run `tropo fix`) |
 | `W220` | warn | ref points at no document id (broken edge) |
 
 (Under the default strict mode, every emitted warning fails the check.)
@@ -945,7 +947,7 @@ create-vivary record <target> <modules|changes|decisions|verification|gates>/<sl
 
 ### Capability status (development source)
 
-The 0.4.0 development source reports a fixed Core-and-role inventory and passive MCP
+The 0.4.1 development source reports a fixed Core-and-role inventory and passive MCP
 interoperability status alongside the existing storage, semantic-memory, and preset
 sidecar rows:
 

@@ -10,7 +10,7 @@ model made every file pay a ceremony tax — `type:`, `created:`, `updated:`,
 write down only the irreducible signal. A clean note can have **zero
 frontmatter** and still be fully typed and valid.
 
-> Status: **working engine (unpublished source candidate v0.5.2).** `tropo.py` implements spec v1 end-to-end —
+> Status: **working engine (unpublished source candidate v0.5.3).** `tropo.py` implements spec v1 end-to-end —
 > folder-as-type resolution, derivation, validation, packs, **overlays**, the
 > `signal` report, **`fix`** (de-noise), **`init`**, the graph layer
 > (`graph`/`blast`/`view`/`plan`), typed retrieval (`find`/`query`), read-only
@@ -18,7 +18,7 @@ frontmatter** and still be fully typed and valid.
 > migration). Cloud adapters are future work. An agent can drive the whole thing
 > via [.claude/skills/tropo/SKILL.md](.claude/skills/tropo/SKILL.md).
 >
-> Source: [`pyproject.toml`](pyproject.toml); verified: 2026-08-09.
+> Source: [`pyproject.toml`](pyproject.toml); verified: 2026-08-13.
 > See [SPEC.md](SPEC.md).
 
 ## Quickstart

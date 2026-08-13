@@ -120,8 +120,8 @@ def test_package_identity_matches_candidate_manifest(adapter):
     manifest = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
         "project"
     ]
-    assert adapter.__version__ == manifest["version"] == "0.1.1"
-    assert "vivary-tropo>=0.5.2" in manifest["dependencies"]
+    assert adapter.__version__ == manifest["version"] == "0.1.2"
+    assert "vivary-tropo>=0.5.3" in manifest["dependencies"]
 
 
 def test_all_input_schemas_are_closed_local_draft_2020_12_objects(adapter):

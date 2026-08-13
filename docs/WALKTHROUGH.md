@@ -1,7 +1,7 @@
 # Getting started proof
 
 > **Historical published-line fixture.** This page records the public 0.3.1 full
-> scaffold and is retained as release evidence. Development-source 0.4.0 uses the
+> scaffold and is retained as release evidence. Development-source 0.4.1 uses the
 > five-file thin contract described in [Getting started](GETTING-STARTED.md); it does
 > not reproduce this 38-file layout.
 

@@ -43,14 +43,14 @@ merged, tagged, documented, or grouped into the train. Registry status was verif
 | `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
 | `vivary-memory-cognee` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-memory-cognee/) |
 
-**Unpublished development source:** `create-vivary` and `@vivary/create` **0.4.0**,
-`vivary-core` **0.2.7**, `vivary-tropo` **0.5.2**, `vivary-strato` **0.1.2**,
+**Unpublished development source:** `create-vivary` and `@vivary/create` **0.4.1**,
+`vivary-core` **0.2.7**, `vivary-tropo` **0.5.3**, `vivary-strato` **0.1.2**,
 `vivary-ozone` **0.3.1**, `vivary-exo` **0.3.0**, `vivary-memory-cognee`
-**0.1.2**, `vivary-mcp` **0.1.1**, and the `vivary` meta-package **0.1.8**. The
+**0.1.2**, `vivary-mcp` **0.1.2**, and the `vivary` meta-package **0.1.9**. The
 package manifests own role-to-Core floors. The
 [meta-package manifest](packages/vivary/pyproject.toml)
-owns its component floors, including `create-vivary>=0.4.0`,
-`vivary-tropo>=0.5.2`, and `vivary-strato>=0.1.2`. It receives Core transitively.
+owns its component floors, including `create-vivary>=0.4.1`,
+`vivary-tropo>=0.5.3`, and `vivary-strato>=0.1.2`. It receives Core transitively.
 
 No development source version above was published, deployed, or enabled by default.
 The Vivary Governed Context train remains held at a later, separate human publication gate.
@@ -60,7 +60,7 @@ classifications; [decisions](docs/DECISIONS.md) routes the durable policy.
 
 Users who need the previously published full-layout behavior can pin it explicitly:
 `uvx --from create-vivary==0.3.1 create-vivary ...` or
-`npx @vivary/create@0.3.1 ...`. The 0.4.0 source does not silently migrate or rewrite
+`npx @vivary/create@0.3.1 ...`. The 0.4.1 source does not silently migrate or rewrite
 those legacy workspaces; Doctor keeps them read-compatible.
 
 ## Public Signals
@@ -104,7 +104,7 @@ by itself.
 
 ## Quickstart
 
-The five-file workflow below belongs to the **unpublished 0.4.0 development
+The five-file workflow below belongs to the **unpublished 0.4.1 development
 source**. Registry `@latest` still resolves to published 0.3.1 and creates the
 historical full layout; do not use it to evaluate this release candidate. From a
 Vivary checkout, run the candidate directly with Python 3.11+:
@@ -116,7 +116,7 @@ python packages/tropo/tropo.py check --root my-workspace
 ```
 
 The ordinary public launchers become the thin path only after the
-[release-status table](#release-status) lists 0.4.0. Until then, pin 0.3.1 only
+[release-status table](#release-status) lists 0.4.1. Until then, pin 0.3.1 only
 when you deliberately want the previous full-layout behavior:
 
 ```bash

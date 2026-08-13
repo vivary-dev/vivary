@@ -311,7 +311,9 @@ def test_missing_required_field(tmp_path):
 
 
 def test_derived_value_in_frontmatter_is_noise(tmp_path):
-    (tmp_path / "tropo.toml").write_text("[base]\nderive=['id','title']\n")
+    (tmp_path / "tropo.toml").write_text(
+        "[base]\nallow_untyped=false\nderive=['id','title']\n"
+    )
     (tmp_path / "n.md").write_text("---\nid: n\n---\n# N\n")
     docs = tropo.analyze(str(tmp_path), [], res(str(tmp_path)))
     codes = {f.code for d in docs for f in d.findings}
@@ -351,7 +353,9 @@ def test_overlay_tightens_only_its_subtree(tmp_path):
 # --- fix (de-noise) ---------------------------------------------------------
 
 def test_fix_removes_derived_noise_keeps_real(tmp_path):
-    (tmp_path / "tropo.toml").write_text("[base]\nderive=['id','title']\noptional={tags='string-list'}\n")
+    (tmp_path / "tropo.toml").write_text(
+        "[base]\nallow_untyped=false\nderive=['id','title']\noptional={tags='string-list'}\n"
+    )
     f = tmp_path / "n.md"
     f.write_text("---\nid: n\ntags: [a]\n---\n# N\n")
     tropo.cmd_fix(argparse.Namespace(paths=[], dry_run=False, json=False), res(str(tmp_path)))
@@ -360,7 +364,9 @@ def test_fix_removes_derived_noise_keeps_real(tmp_path):
 
 
 def test_fix_removes_empty_block(tmp_path):
-    (tmp_path / "tropo.toml").write_text("[base]\nderive=['id','title']\n")
+    (tmp_path / "tropo.toml").write_text(
+        "[base]\nallow_untyped=false\nderive=['id','title']\n"
+    )
     f = tmp_path / "n.md"
     f.write_text("---\nid: n\n---\n# N\n")
     tropo.cmd_fix(argparse.Namespace(paths=[], dry_run=False, json=False), res(str(tmp_path)))
@@ -369,7 +375,9 @@ def test_fix_removes_empty_block(tmp_path):
 
 
 def test_fix_dry_run_writes_nothing(tmp_path):
-    (tmp_path / "tropo.toml").write_text("[base]\nderive=['id','title']\n")
+    (tmp_path / "tropo.toml").write_text(
+        "[base]\nallow_untyped=false\nderive=['id','title']\n"
+    )
     f = tmp_path / "n.md"
     f.write_text("---\nid: n\n---\n# N\n")
     tropo.cmd_fix(argparse.Namespace(paths=[], dry_run=True, json=False), res(str(tmp_path)))
@@ -428,16 +436,25 @@ def _check_rc(root, strict=False, lenient=False):
     with contextlib.redirect_stdout(io.StringIO()):
         return tropo.cmd_check(args, res(root))
 
-def _write_brownfield_fixture(root, *, allow_untyped, typed=False):
+def _write_brownfield_fixture(
+    root,
+    *,
+    allow_untyped,
+    typed=False,
+    derived_title=False,
+):
     type_config = (
         '\n[types.scratch]\nfolder = "scratch"\n'
         if typed
         else ""
     )
+    derive_config = 'derive = ["title"]\n' if derived_title else ""
+    title_field = 'title: "Example"\n' if derived_title else ""
     Path(root, "tropo.toml").write_text(
         "[base]\n"
         f"allow_untyped = {str(allow_untyped).lower()}\n"
         'strict = true\n'
+        f"{derive_config}"
         "[base.required]\n"
         'status = "enum:active|inactive"\n'
         f"{type_config}",
@@ -448,6 +465,7 @@ def _write_brownfield_fixture(root, *, allow_untyped, typed=False):
         "---\n"
         "type: foo\n"
         "status: active\n"
+        f"{title_field}"
         "---\n"
         "\n"
         "# Example\n",
@@ -479,33 +497,65 @@ def test_allow_untyped_true_permits_exact_brownfield_reproduction(tmp_path):
     assert checked["errors"] == checked["warnings"] == 0
 
 
+def test_allow_untyped_true_permits_required_derived_title_frontmatter(tmp_path):
+    _write_brownfield_fixture(
+        tmp_path,
+        allow_untyped=True,
+        derived_title=True,
+    )
+    docs = tropo.analyze(str(tmp_path), [], res(str(tmp_path)))
+    assert [finding for doc in docs for finding in doc.findings] == []
+    assert docs[0].noise == []
+    assert _check_rc(str(tmp_path)) == 0
+
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    checked = tropo.check_workspace(root, allowlist=[root])
+    assert checked["complete"] is True
+    assert checked["findings"] == []
+    assert checked["errors"] == checked["warnings"] == 0
+
+
 def test_allow_untyped_false_retains_w201_error(tmp_path):
-    _write_brownfield_fixture(tmp_path, allow_untyped=False)
+    _write_brownfield_fixture(
+        tmp_path,
+        allow_untyped=False,
+        derived_title=True,
+    )
     findings = _legacy_findings(tmp_path)
     assert [(finding.level, finding.code) for finding in findings] == [
-        ("error", "W201")
+        ("error", "W201"),
+        ("warning", "W210"),
     ]
 
     _init_git_repo(tmp_path)
     root = _public_workspace_root(tmp_path)
     checked = tropo.check_workspace(root, allowlist=[root])
     assert [(row["level"], row["code"]) for row in checked["findings"]] == [
-        ("error", "W201")
+        ("error", "W201"),
+        ("warning", "W210"),
     ]
 
 
 def test_typed_document_retains_w202_for_unknown_field(tmp_path):
-    _write_brownfield_fixture(tmp_path, allow_untyped=True, typed=True)
+    _write_brownfield_fixture(
+        tmp_path,
+        allow_untyped=True,
+        typed=True,
+        derived_title=True,
+    )
     findings = _legacy_findings(tmp_path)
     assert [(finding.level, finding.code) for finding in findings] == [
-        ("warning", "W202")
+        ("warning", "W202"),
+        ("warning", "W210"),
     ]
 
     _init_git_repo(tmp_path)
     root = _public_workspace_root(tmp_path)
     checked = tropo.check_workspace(root, allowlist=[root])
     assert [(row["level"], row["code"]) for row in checked["findings"]] == [
-        ("warning", "W202")
+        ("warning", "W202"),
+        ("warning", "W210"),
     ]
 
 
