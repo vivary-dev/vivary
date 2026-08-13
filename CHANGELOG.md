@@ -10,6 +10,37 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: bounded repository stewardship (#159, #212)] — 2026-08-13
+
+No package version changes. This slice makes repository health fail closed on stale
+signals, unclassified PRs, and unrecoverable local cleanup.
+
+### Added
+
+- Added testable stats and steward health seams covering authenticated GitHub access,
+  bounded registry retry, stale-source propagation, and exact PR lifecycle classes.
+- Added machine-neutral checkout, recovery, and worktree lifecycle guidance.
+
+### Changed
+
+- Healthy bot-created stats PRs dispatch exact-head CI with live head/base validation;
+  stale snapshots remain inspectable and cannot enable auto-merge.
+- Dependabot now has three weekly ecosystem queues, a seven-day version cooldown,
+  grouped updates, a six-PR version-update ceiling, and Python's
+  `increase-if-necessary` minimum-floor policy.
+- Steward now requires fresh warning-free stats and one lifecycle classification per
+  open PR instead of treating age alone as evidence for closure.
+
+### Verification
+
+- `python scripts/check_ci_workflow.py`
+- `python scripts/tests/test_ci_workflow.py`
+- `python scripts/check_repository_automation.py`
+- `python scripts/tests/test_repository_automation.py`
+- `python -m pytest scripts/tests/test_update_stats.py scripts/tests/test_steward_health.py -q`
+
+Publishing remains a later, separate human gate.
+
 ## [Unreleased: lightweight governed-context init and adoption] — 2026-08-10
 
 This slice advances unpublished `create-vivary` / `@vivary/create` to **0.4.0** and

@@ -30,10 +30,30 @@ The workflow opens a PR against `dev`; it does not write directly to `dev` or `p
 If the normal daily stats branch already exists, the workflow creates a unique branch
 for that run instead of force-pushing over it.
 
-The updater retries transient registry failures. If a source fails but a previous
-value exists, the snapshot is marked `stale` and records the warning in
-`stats/latest.json` and `stats/history.csv`. If a source fails with no previous value,
-the workflow fails instead of writing fake zeroes.
+The updater authenticates only requests to `api.github.com` with the workflow's
+short-lived repository token. That credential is never forwarded to npm or PyPI.
+Transient registry failures use bounded exponential retry and honor numeric
+`Retry-After` values up to 30 seconds. If a source fails but a previous value exists,
+the snapshot is marked `stale` and records the warning in `stats/latest.json` and
+`stats/history.csv`. If a source fails with no previous value, the workflow fails
+instead of writing fake zeroes.
+
+Every generated snapshot remains inspectable in a PR and receives an exact-head CI
+dispatch. Because a PR created with the repository token otherwise receives
+approval-required checks, the workflow explicitly dispatches `ci.yml` against the
+stats branch. CI verifies the named PR's live head and base SHAs before running the
+normal tests, graph review, and conditional site build. Only an `ok`, warning-free,
+non-stale snapshot receives `automated-current` and enables auto-merge. A stale
+snapshot receives `blocked`, remains open without auto-merge, and cannot supersede an
+older healthy proposal.
+
+The daily steward checks more than age: the checked-in snapshot must be fresh, `ok`,
+warning-free, and free of nested stale-source flags. Every open PR must also carry
+exactly one lifecycle label defined in
+[Contributing](https://github.com/vivary-dev/vivary/blob/dev/CONTRIBUTING.md#pull-requests).
+Automated proposals with a merge conflict or failing check remain findings and must be
+reclassified `blocked`. Serialized healthy stats runs may close only older stats PRs,
+with a replacement receipt; branch deletion remains a separate destructive gate.
 
 ## How to read the chart
 

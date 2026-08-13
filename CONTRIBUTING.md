@@ -9,8 +9,27 @@ keep the implementation narrow enough that the tests and docs can move with it.
   (Vercel's production branch is `dev`).
 - `prod` is a legacy branch from an earlier cut model; it lags `dev` and nothing
   deploys from it. Don't target it.
-- Feature work happens on short-lived `feat/*` branches cut from `dev`.
+- Work happens on short-lived typed branches such as `feat/*`, `fix/*`, `docs/*`, or
+  `chore/*`, cut from current `origin/dev`.
 - Do not push directly to `dev` or `prod`; open a PR and let CI plus review gates run.
+
+### Checkout and worktree lifecycle
+
+Treat `origin/dev` as the integration authority; a local `dev` branch can be stale. Keep
+an existing dirty checkout in place and create an isolated task worktree when clean
+state is required:
+
+```bash
+git fetch origin dev
+git worktree add -b <typed-branch> <new-path> origin/dev
+```
+
+Before removing a worktree or branch, record its path, HEAD, upstream, tracked changes,
+untracked files, and relevant ignored evidence. Prove that every commit is reachable
+from a durable ref or bundle. Preserve dirty work as a binary patch plus an allowlisted
+archive, and verify restoration in a disposable clone. Only then request separate
+approval for each `git worktree remove`, local or remote branch deletion, and
+`git worktree prune`. Never reset or clean a checkout to make it appear disposable.
 
 ## Before You Change Code
 
@@ -19,6 +38,18 @@ code changes, add or update focused tests first when there is a clear seam; for 
 or repo-surface changes, name the exact verification commands in the PR.
 
 ## Pull Requests
+
+Every open PR carries exactly one stewardship lifecycle label:
+
+- `active` — maintained work that can proceed;
+- `automated-current` — a current proposal authored by an approved bot;
+- `blocked` — valid work with a named unmet dependency or failing gate;
+- `superseded` — replaced by identified newer evidence;
+- `close-with-receipt` — not proceeding, with the exact reason preserved before close;
+- `needs-human-decision` — evidence is complete but project judgment remains.
+
+The final four classifications remain repository-health findings until their named
+disposition occurs. Age alone never makes a PR stale or safe to close.
 
 Every PR should include:
 

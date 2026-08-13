@@ -31,28 +31,19 @@ jobs:
             echo "- track-stats latest run: $STATS" >> findings.txt
           fi
 
-          # 2. Is the stats snapshot fresh (within 2 days)?
-          python3 - <<'PY'
-          import json
-          from datetime import date
-          from pathlib import Path
-          latest = json.loads(Path("stats/latest.json").read_text(encoding="utf-8"))
-          y, m, d = map(int, latest["date"].split("-"))
-          age = (date.today() - date(y, m, d)).days
-          if age > 2:
-              with open("findings.txt", "a", encoding="utf-8") as fh:
-                  fh.write(f"- stats/latest.json is {age} days old ({latest['date']})\n")
-          PY
-
-          # 3. Is CI on dev green?
+          # 2. Is CI on dev green?
           CI=$(gh run list --workflow ci.yml --branch dev --limit 1 --json conclusion --jq '.[0].conclusion')
           if [ "$CI" != "success" ]; then
             echo "- ci.yml latest run on dev: $CI" >> findings.txt
           fi
 
-          # 4. Open PRs sitting idle (dependabot or bot PRs older than 3 days).
-          gh pr list --state open --json number,title,createdAt \
-            --jq '.[] | select((now - (.createdAt | fromdateiso8601)) > 259200) | "- stale open PR #\(.number): \(.title)"' \
+          # 3. Snapshot health and the PR lifecycle are one testable clean-state seam.
+          gh pr list --state open --limit 1000 \
+            --json number,title,author,labels,mergeStateStatus,statusCheckRollup \
+            > open-prs.json
+          python3 tools/steward_health.py \
+            --snapshot stats/latest.json \
+            --prs open-prs.json \
             >> findings.txt
 
       - name: report

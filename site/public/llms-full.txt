@@ -5799,10 +5799,30 @@ The workflow opens a PR against `dev`; it does not write directly to `dev` or `p
 If the normal daily stats branch already exists, the workflow creates a unique branch
 for that run instead of force-pushing over it.
 
-The updater retries transient registry failures. If a source fails but a previous
-value exists, the snapshot is marked `stale` and records the warning in
-`stats/latest.json` and `stats/history.csv`. If a source fails with no previous value,
-the workflow fails instead of writing fake zeroes.
+The updater authenticates only requests to `api.github.com` with the workflow's
+short-lived repository token. That credential is never forwarded to npm or PyPI.
+Transient registry failures use bounded exponential retry and honor numeric
+`Retry-After` values up to 30 seconds. If a source fails but a previous value exists,
+the snapshot is marked `stale` and records the warning in `stats/latest.json` and
+`stats/history.csv`. If a source fails with no previous value, the workflow fails
+instead of writing fake zeroes.
+
+Every generated snapshot remains inspectable in a PR and receives an exact-head CI
+dispatch. Because a PR created with the repository token otherwise receives
+approval-required checks, the workflow explicitly dispatches `ci.yml` against the
+stats branch. CI verifies the named PR's live head and base SHAs before running the
+normal tests, graph review, and conditional site build. Only an `ok`, warning-free,
+non-stale snapshot receives `automated-current` and enables auto-merge. A stale
+snapshot receives `blocked`, remains open without auto-merge, and cannot supersede an
+older healthy proposal.
+
+The daily steward checks more than age: the checked-in snapshot must be fresh, `ok`,
+warning-free, and free of nested stale-source flags. Every open PR must also carry
+exactly one lifecycle label defined in
+[Contributing](https://github.com/vivary-dev/vivary/blob/dev/CONTRIBUTING.md#pull-requests).
+Automated proposals with a merge conflict or failing check remain findings and must be
+reclassified `blocked`. Serialized healthy stats runs may close only older stats PRs,
+with a replacement receipt; branch deletion remains a separate destructive gate.
 
 ## How to read the chart
 
@@ -6169,9 +6189,11 @@ dump).
 
 - Confirm the live site (https://vivary.vercel.app/) shows the new versions and
   command surface — it deploys from `dev`, so this is a read-check, not a step.
-- Stats: the daily `track-stats` workflow will pick up the new versions; make
-  sure recent `chore/stats-*` snapshot PRs are being merged so
-  `stats/history.csv` and the README chart stay current.
+- Stats: the daily `track-stats` workflow picks up the new versions. Every stats PR
+  receives exact-head CI, while only warning-free, non-stale output may request
+  auto-merge or supersede an older proposal. Stale output stays open as `blocked` for
+  inspection. Confirm `stats/history.csv` and the README
+  chart advanced before treating public signals as current.
 - Keep private agent communications outside the repo: handoffs, launch/social
   drafts, and private release packets stay in ignored local storage such as
   `.release/private/` — never in the public repo.
@@ -6505,7 +6527,7 @@ against the linked manifests, contracts, and registry pages on **2026-08-10**.
 | **Stable** | Published and supported; this is not a promise of post-1.0 API stability. | The registry versions and their baseline CLI/workspace behavior listed in the [release-status table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status). | Registry links live in that table; baseline regressions live with [Tropo](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py), [Ozone](https://github.com/vivary-dev/vivary/blob/dev/packages/ozone/tests/test_ozone.py), [Exo](https://github.com/vivary-dev/vivary/blob/dev/packages/exo/tests/test_exo.py), and [create-vivary](https://github.com/vivary-dev/vivary/blob/dev/packages/create-vivary/tests/test_create_vivary.py). |
 | **Optional** | Installed, configured, or invoked only by explicit choice; optional is independent of maturity. | Ozone and Exo beyond the Tropo + Strato baseline; storage and semantic-memory capabilities including `vivary-memory-cognee`; Obsidian and active-context integrations; and `vivary-mcp` (also experimental while unpublished). | [Architecture boundaries](https://vivary.vercel.app/architecture/#2-the-first-principles-baseline), [semantic-memory gates](https://vivary.vercel.app/semantic-memory/#non-negotiables), [active-context gates](https://vivary.vercel.app/active-context/), and the [MCP install boundary](https://vivary.vercel.app/mcp/#install-boundary). |
 | **Experimental** | Implemented in development source, opt-in where callable, and not registry-available at the source versions. | The `thin-v0.3` init/adoption contract in `create-vivary 0.4.0`; `vivary-core`; governed Tropo, Strato, Ozone, and Exo paths; the provider-neutral recall firewall; and the optional read-only `vivary-mcp` adapter. | [Thin adoption regressions](https://github.com/vivary-dev/vivary/tree/dev/packages/create-vivary/tests), [Core contract tests](https://github.com/vivary-dev/vivary/tree/dev/packages/core/tests), [role envelopes](https://vivary.vercel.app/commands/#governed-machine-readable-envelopes-development-source), and [MCP contract tests](https://github.com/vivary-dev/vivary/tree/dev/packages/mcp/tests). |
-| **Held** | Complete or partial source work that must not be described as published, graduated, or default-enabled. | Publication of the named **Vivary Governed Context** train, including every unpublished source version in the root release status. | Open release policy [#149](https://github.com/vivary-dev/vivary/issues/149), documentation program [#210](https://github.com/vivary-dev/vivary/issues/210), and the per-item human gates in the [release workflow](https://vivary.vercel.app/release-workflow/#gates). |
+| **Held** | Complete or partial source work that must not be described as published, graduated, or default-enabled. | Publication of the named **Vivary Governed Context** train, including every unpublished source version in the root release status. | The release policy resolved by [#149](https://github.com/vivary-dev/vivary/issues/149), the documentation acceptance completed by [#210](https://github.com/vivary-dev/vivary/issues/210), and the remaining per-item human gates in the [release workflow](https://vivary.vercel.app/release-workflow/#gates). |
 | **Deprecated** | Formally discouraged with a documented replacement and removal policy. | **None.** Legacy full workspace layouts and legacy Exo graph commands remain read-compatible surfaces, not deprecations. New init/adopt no longer generate the full layout. | [Doctor compatibility contract](https://vivary.vercel.app/commands/#doctor-compatibility-and-declared-configuration) and [legacy Exo commands](https://vivary.vercel.app/commands/#legacy-graph-coordination). |
 | **Planned** | Described intent with no shipped behavior claim. | Cloud storage adapters and non-file/cloud migration targets; any broader MCP transport or named-client compatibility. | [Data-layer future work](https://github.com/vivary-dev/vivary/blob/dev/docs/SPEC-data-layer.md#future--cloud-adapters-03x); MCP external conformance remains explicitly [unproven](https://vivary.vercel.app/mcp/#contract). These are plans or hypotheses until implementation evidence exists. |
 
@@ -6626,6 +6648,37 @@ the `v0.1.0` line.
 `vivary-memory-cognee` **0.1.0** · `vivary-tropo` **0.4.1** · `vivary-ozone`
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
+
+## [Unreleased: bounded repository stewardship (#159, #212)] — 2026-08-13
+
+No package version changes. This slice makes repository health fail closed on stale
+signals, unclassified PRs, and unrecoverable local cleanup.
+
+### Added
+
+- Added testable stats and steward health seams covering authenticated GitHub access,
+  bounded registry retry, stale-source propagation, and exact PR lifecycle classes.
+- Added machine-neutral checkout, recovery, and worktree lifecycle guidance.
+
+### Changed
+
+- Healthy bot-created stats PRs dispatch exact-head CI with live head/base validation;
+  stale snapshots remain inspectable and cannot enable auto-merge.
+- Dependabot now has three weekly ecosystem queues, a seven-day version cooldown,
+  grouped updates, a six-PR version-update ceiling, and Python's
+  `increase-if-necessary` minimum-floor policy.
+- Steward now requires fresh warning-free stats and one lifecycle classification per
+  open PR instead of treating age alone as evidence for closure.
+
+### Verification
+
+- `python scripts/check_ci_workflow.py`
+- `python scripts/tests/test_ci_workflow.py`
+- `python scripts/check_repository_automation.py`
+- `python scripts/tests/test_repository_automation.py`
+- `python -m pytest scripts/tests/test_update_stats.py scripts/tests/test_steward_health.py -q`
+
+Publishing remains a later, separate human gate.
 
 ## [Unreleased: lightweight governed-context init and adoption] — 2026-08-10
 
