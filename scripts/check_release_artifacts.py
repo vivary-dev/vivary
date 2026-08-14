@@ -5,12 +5,19 @@ import json
 import tarfile
 import tomllib
 import zipfile
+from email.parser import Parser
 from pathlib import Path
 
 
 PYTHON_CANDIDATES = (
-    ("create-vivary", "create-vivary"),
+    ("core", "vivary-core"),
+    ("tropo", "vivary-tropo"),
+    ("strato", "vivary-strato"),
+    ("ozone", "vivary-ozone"),
+    ("exo", "vivary-exo"),
+    ("memory-cognee", "vivary-memory-cognee"),
     ("mcp", "vivary-mcp"),
+    ("create-vivary", "create-vivary"),
     ("vivary", "vivary"),
 )
 
@@ -42,16 +49,42 @@ def verify_python_artifacts(
         require(sdist.is_file(), f"missing release artifact: {sdist}")
 
         wheel_license = f"{normalized}-{version}.dist-info/licenses/LICENSE"
+        wheel_metadata = f"{normalized}-{version}.dist-info/METADATA"
         with zipfile.ZipFile(wheel) as archive:
-            require(wheel_license in archive.namelist(), f"{wheel}: missing {wheel_license}")
+            names = archive.namelist()
+            require(wheel_license in names, f"{wheel}: missing {wheel_license}")
+            require(wheel_metadata in names, f"{wheel}: missing {wheel_metadata}")
+            for name in names:
+                require(
+                    "tests" not in {part.lower() for part in name.split("/")},
+                    f"{wheel}: wheel contains {name}",
+                )
             require(
                 archive.read(wheel_license) == license_bytes,
                 f"{wheel}: packaged LICENSE does not match repository LICENSE",
             )
+            metadata = Parser().parsestr(archive.read(wheel_metadata).decode("utf-8"))
+            require(
+                metadata["Name"] == distribution and metadata["Version"] == version,
+                f"{wheel}: package metadata identity mismatch",
+            )
 
         sdist_license = f"{normalized}-{version}/LICENSE"
         with tarfile.open(sdist, "r:gz") as archive:
-            member = archive.getmember(sdist_license) if sdist_license in archive.getnames() else None
+            names = archive.getnames()
+            distribution_root = f"{normalized}-{version}"
+            for name in names:
+                parts = name.split("/")
+                require(
+                    (name == distribution_root or name.startswith(f"{distribution_root}/"))
+                    and ".." not in parts,
+                    f"{sdist}: path escapes distribution root: {name}",
+                )
+                require(
+                    ".release" not in {part.lower() for part in parts},
+                    f"{sdist}: sdist contains private release payload: {name}",
+                )
+            member = archive.getmember(sdist_license) if sdist_license in names else None
             require(member is not None, f"{sdist}: missing {sdist_license}")
             stream = archive.extractfile(member)
             require(stream is not None, f"{sdist}: cannot read {sdist_license}")
@@ -85,11 +118,21 @@ def verify_npm_artifact(repository: Path, artifacts: Path, license_bytes: bytes)
         packed = json.load(manifest_stream)
         require(packed.get("name") == package["name"], f"{archive_path}: package name mismatch")
         require(packed.get("version") == version, f"{archive_path}: package version mismatch")
+        expected_names = {
+            "package/LICENSE",
+            "package/README.md",
+            "package/index.js",
+            "package/package.json",
+        }
+        require(
+            set(names) == expected_names,
+            f"{archive_path}: unexpected package contents: {sorted(set(names) - expected_names)}",
+        )
     return 1
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Verify license inclusion in release artifacts.")
+    parser = argparse.ArgumentParser(description="Verify Vivary release artifact identity and contents.")
     parser.add_argument("--repository", type=Path, default=Path.cwd())
     parser.add_argument("--artifacts", type=Path, required=True)
     parser.add_argument("--scope", choices=("all", "npm"), default="all")
@@ -105,11 +148,32 @@ def main() -> None:
     require(artifacts.is_dir(), f"missing artifact directory: {artifacts}")
     license_bytes = license_path.read_bytes()
 
+    npm_manifest = repository / "packages" / "create-vivary" / "npm" / "package.json"
+    npm_version = json.loads(npm_manifest.read_text(encoding="utf-8"))["version"]
+    expected_artifacts = {f"vivary-create-{npm_version}.tgz"}
+    if args.scope == "all":
+        for package, distribution in PYTHON_CANDIDATES:
+            version = project_version(repository, package, distribution)
+            normalized = distribution.replace("-", "_")
+            expected_artifacts.update(
+                {
+                    f"{normalized}-{version}-py3-none-any.whl",
+                    f"{normalized}-{version}.tar.gz",
+                }
+            )
+        actual_artifacts = {
+            path.name
+            for path in artifacts.iterdir()
+            if path.is_file() and path.name != ".gitignore"
+        }
+        unexpected = sorted(actual_artifacts - expected_artifacts)
+        require(not unexpected, f"unexpected release artifacts: {', '.join(unexpected)}")
+
     verified = 0
     if args.scope == "all":
         verified += verify_python_artifacts(repository, artifacts, license_bytes)
     verified += verify_npm_artifact(repository, artifacts, license_bytes)
-    print(f"{verified} release artifacts passed license verification")
+    print(f"{verified} release artifacts passed artifact verification")
 
 
 if __name__ == "__main__":

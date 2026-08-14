@@ -6077,6 +6077,17 @@ tests or docs before pushing:
 
 Publishing is deliberate. Each publish below is its own explicit gate.
 
+Before the first publish, the main CI release-artifact gate builds all nine Python
+wheels and source distributions plus the `@vivary/create` tarball into one fresh
+directory. The checker requires that exact 19-artifact set, validates package identity
+and exact MIT license bytes, rejects test payloads in wheels, private release evidence
+or root escapes in source distributions, and any extra npm payload beyond its four
+public files. CI then installs the `vivary` dependency graph from those wheels with the
+registry disabled, rebuilds and installs the same graph from the source distributions
+with the reviewed `setuptools==84.0.0` backend, and installs and executes the packed npm
+tarball against the exact local `create-vivary` wheel. A source-tree import, a wheel-only
+check, or an unexecuted npm tarball is not release-candidate proof.
+
 PyPI, per changed package:
 
 ```bash
@@ -6652,6 +6663,51 @@ the `v0.1.0` line.
 `vivary-memory-cognee` **0.1.0** · `vivary-tropo` **0.4.1** · `vivary-ozone`
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
+
+## [Unreleased: full-train artifact proof] — 2026-08-13
+
+Published registry versions and the staged package versions remain unchanged.
+
+### Added
+
+- Main CI now builds the complete coordinated train: nine Python wheels, nine source
+  distributions, and the `@vivary/create` tarball. The gate rejects missing or extra
+  artifacts, package identity drift, license drift, tests inside wheels, private
+  release evidence or root escapes inside source distributions, and unexpected npm
+  payloads.
+- The exact candidate wheel graph is installed with the registry disabled. The same
+  graph is then rebuilt and installed from source distributions with the reviewed
+  `setuptools==84.0.0` backend, and the packed npm tarball is installed and executed
+  against the exact local `create-vivary` wheel.
+- CI contract mutations now fail when any distribution build, archive inspection,
+  install smoke, dependency check, packed-launcher execution, or required ordering is
+  removed.
+
+### Changed
+
+- The root verification router no longer copies volatile test counts; exit status is
+  the durable contract and current evidence remains in the changelog and CI.
+
+### Verification
+
+- `python scripts/tests/test_release_artifacts.py` — 14 positive and mutation cases
+  passed.
+- `python scripts/check_ci_workflow.py` and
+  `python scripts/tests/test_ci_workflow.py` — contract passed; 16/16 cases passed.
+- `python scripts/check_release_artifacts.py --repository . --artifacts
+  <candidate-artifacts>` — all 19 candidate archives passed full-train inspection.
+- An isolated Python 3.11 environment installed the `vivary==0.1.10` graph from the
+  candidate source distributions with the registry disabled, source archives forced,
+  and build isolation disabled, then passed `uv pip check` and exact version assertions.
+- `python scripts/check_package_docs_parity.py`, its 10-case regression suite, the
+  repository automation guard and its 11-case suite, the npm trusted-publish guard,
+  the line-ending guard, and `git diff --check` passed.
+- From `site/`, `npm ci` audited 360 packages with zero vulnerabilities; `npm run
+  build` generated 33 pages, the 14 site behavior tests passed, and the link checker
+  validated 2,729 local references plus 1,531 anchors with zero failures.
+
+Publishing remains a manual human gate. Benchmark, website dogfood, registry setup,
+tagging, and publication remain outside this slice.
 
 ## [Unreleased: release artifact license hardening] — 2026-08-13
 

@@ -146,17 +146,37 @@ def main() -> None:
             test_job.count(command) == 1,
             f"tests job must run {command} exactly once",
         )
-    for command in (
-        "python -m pip install uv==0.11.21",
+    release_commands = (
+        "python -m pip install uv==0.11.21 setuptools==84.0.0",
         artifact_test,
+        'uv build --out-dir "$artifacts" packages/core',
+        'uv build --out-dir "$artifacts" packages/tropo',
+        'uv build --out-dir "$artifacts" packages/strato',
+        'uv build --out-dir "$artifacts" packages/ozone',
+        'uv build --out-dir "$artifacts" packages/exo',
+        'uv build --out-dir "$artifacts" packages/memory-cognee',
         'uv build --out-dir "$artifacts" packages/create-vivary',
         'uv build --out-dir "$artifacts" packages/mcp',
         'uv build --out-dir "$artifacts" packages/vivary',
         'npm pack packages/create-vivary/npm --pack-destination "$artifacts"',
         artifact_check,
-    ):
+        'uv pip install --python "$wheel_python" --no-index --find-links "$artifacts" "vivary==0.1.10"',
+        'uv pip check --python "$wheel_python"',
+        '"$wheel_smoke/venv/bin/vivary" --version',
+        'uv pip install --python "$sdist_python" "setuptools==84.0.0"',
+        'uv pip install --python "$sdist_python" --no-index --find-links "$artifacts" --no-binary :all: --no-build-isolation "vivary==0.1.10"',
+        'uv pip check --python "$sdist_python"',
+        'npm install --prefix "$npm_smoke" --offline --ignore-scripts --no-audit --no-fund "$artifacts/vivary-create-0.4.2.tgz"',
+        'VIVARY_FROM="$artifacts/create_vivary-0.4.2-py3-none-any.whl" UV_FIND_LINKS="$artifacts" UV_OFFLINE=1 UV_PYTHON_DOWNLOADS=never "$npm_smoke/node_modules/.bin/create-vivary" --version',
+    )
+    for command in release_commands:
         require(command in test_job, f"tests job must run {command}")
         require(test_job.count(command) == 1, f"tests job must run {command} exactly once")
+    require(
+        [test_job.index(command) for command in release_commands]
+        == sorted(test_job.index(command) for command in release_commands),
+        "release artifact proof must build, inspect, install, and execute in order",
+    )
     require(
         test_job.index(artifact_test) < test_job.index(artifact_check),
         "artifact contract tests must precede the real archive check",

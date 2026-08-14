@@ -94,17 +94,39 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "      - name: repository automation behavior tests\n"
         "        run: python -m pytest scripts/tests/test_update_stats.py scripts/tests/test_steward_health.py -q\n"
         "      - name: install release build frontend\n"
-        "        run: python -m pip install uv==0.11.21\n"
+        "        run: python -m pip install uv==0.11.21 setuptools==84.0.0\n"
         "      - name: release artifact contract tests\n"
         "        run: python scripts/tests/test_release_artifacts.py\n"
         "      - name: release artifact license contract\n"
         "        run: |\n"
         "          artifacts=\"$(mktemp -d)\"\n"
+        "          uv build --out-dir \"$artifacts\" packages/core\n"
+        "          uv build --out-dir \"$artifacts\" packages/tropo\n"
+        "          uv build --out-dir \"$artifacts\" packages/strato\n"
+        "          uv build --out-dir \"$artifacts\" packages/ozone\n"
+        "          uv build --out-dir \"$artifacts\" packages/exo\n"
+        "          uv build --out-dir \"$artifacts\" packages/memory-cognee\n"
         "          uv build --out-dir \"$artifacts\" packages/create-vivary\n"
         "          uv build --out-dir \"$artifacts\" packages/mcp\n"
         "          uv build --out-dir \"$artifacts\" packages/vivary\n"
         "          npm pack packages/create-vivary/npm --pack-destination \"$artifacts\"\n"
         "          python scripts/check_release_artifacts.py --repository . --artifacts \"$artifacts\"\n"
+        "          wheel_smoke=\"$(mktemp -d)\"\n"
+        "          python -m venv \"$wheel_smoke/venv\"\n"
+        "          wheel_python=\"$wheel_smoke/venv/bin/python\"\n"
+        "          unset PYTHONPATH\n"
+        "          uv pip install --python \"$wheel_python\" --no-index --find-links \"$artifacts\" \"vivary==0.1.10\"\n"
+        "          uv pip check --python \"$wheel_python\"\n"
+        "          \"$wheel_smoke/venv/bin/vivary\" --version\n"
+        "          sdist_smoke=\"$(mktemp -d)\"\n"
+        "          python -m venv \"$sdist_smoke/venv\"\n"
+        "          sdist_python=\"$sdist_smoke/venv/bin/python\"\n"
+        "          uv pip install --python \"$sdist_python\" \"setuptools==84.0.0\"\n"
+        "          uv pip install --python \"$sdist_python\" --no-index --find-links \"$artifacts\" --no-binary :all: --no-build-isolation \"vivary==0.1.10\"\n"
+        "          uv pip check --python \"$sdist_python\"\n"
+        "          npm_smoke=\"$(mktemp -d)\"\n"
+        "          npm install --prefix \"$npm_smoke\" --offline --ignore-scripts --no-audit --no-fund \"$artifacts/vivary-create-0.4.2.tgz\"\n"
+        "          VIVARY_FROM=\"$artifacts/create_vivary-0.4.2-py3-none-any.whl\" UV_FIND_LINKS=\"$artifacts\" UV_OFFLINE=1 UV_PYTHON_DOWNLOADS=never \"$npm_smoke/node_modules/.bin/create-vivary\" --version\n"
         "      - name: core\n"
         "        run: python -m pytest packages/core/tests/ -q\n"
         "      - name: diff hygiene\n"
@@ -193,17 +215,43 @@ def test_repository_automation_behavior_tests_must_run():
 def test_release_artifact_contract_and_real_archives_must_run():
     workflow = _workflow(INSTALL + AUDIT)
     for command in (
-        "python -m pip install uv==0.11.21",
+        "python -m pip install uv==0.11.21 setuptools==84.0.0",
         ARTIFACT_TEST_COMMAND,
+        'uv build --out-dir "$artifacts" packages/core',
+        'uv build --out-dir "$artifacts" packages/tropo',
+        'uv build --out-dir "$artifacts" packages/strato',
+        'uv build --out-dir "$artifacts" packages/ozone',
+        'uv build --out-dir "$artifacts" packages/exo',
+        'uv build --out-dir "$artifacts" packages/memory-cognee',
         'uv build --out-dir "$artifacts" packages/create-vivary',
         'uv build --out-dir "$artifacts" packages/mcp',
         'uv build --out-dir "$artifacts" packages/vivary',
         'npm pack packages/create-vivary/npm --pack-destination "$artifacts"',
         ARTIFACT_CHECK_COMMAND,
+        'uv pip install --python "$wheel_python" --no-index --find-links "$artifacts" "vivary==0.1.10"',
+        'uv pip check --python "$wheel_python"',
+        '"$wheel_smoke/venv/bin/vivary" --version',
+        'uv pip install --python "$sdist_python" "setuptools==84.0.0"',
+        'uv pip install --python "$sdist_python" --no-index --find-links "$artifacts" --no-binary :all: --no-build-isolation "vivary==0.1.10"',
+        'uv pip check --python "$sdist_python"',
+        'npm install --prefix "$npm_smoke" --offline --ignore-scripts --no-audit --no-fund "$artifacts/vivary-create-0.4.2.tgz"',
+        'VIVARY_FROM="$artifacts/create_vivary-0.4.2-py3-none-any.whl" UV_FIND_LINKS="$artifacts" UV_OFFLINE=1 UV_PYTHON_DOWNLOADS=never "$npm_smoke/node_modules/.bin/create-vivary" --version',
     ):
         message = _run(workflow.replace(command, "echo artifact proof skipped", 1))
         assert message, f"CI must execute {command}"
         assert command in message
+
+
+def test_release_artifact_proof_order_is_fail_closed():
+    workflow = _workflow(INSTALL + AUDIT).replace(
+        '          npm pack packages/create-vivary/npm --pack-destination "$artifacts"\n'
+        '          python scripts/check_release_artifacts.py --repository . --artifacts "$artifacts"\n',
+        '          python scripts/check_release_artifacts.py --repository . --artifacts "$artifacts"\n'
+        '          npm pack packages/create-vivary/npm --pack-destination "$artifacts"\n',
+    )
+    message = _run(workflow)
+    assert message, "archive inspection must follow every candidate build"
+    assert "release artifact" in message.lower()
 
 
 def test_missing_site_audit_gate_fails():

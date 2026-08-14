@@ -108,12 +108,12 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
 ## Verify
 
 ```bash
-python packages/tropo/tests/test_tropo.py                  # 171/171
-python packages/ozone/tests/test_ozone.py                  # 110/110
-python packages/exo/tests/test_exo.py                      # 29/29
-python packages/create-vivary/tests/test_create_vivary.py  # OK (exit 0)
-python -m pytest packages/core/tests/ -q                   # 771 Windows; 770 + 1 skip Linux
-python -m pytest packages/strato/tests/ -q                 # 48/48
+python packages/tropo/tests/test_tropo.py
+python packages/ozone/tests/test_ozone.py
+python packages/exo/tests/test_exo.py
+python packages/create-vivary/tests/test_create_vivary.py
+python -m pytest packages/core/tests/ -q
+python -m pytest packages/strato/tests/ -q
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # clean
 ```
 

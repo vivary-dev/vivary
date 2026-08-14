@@ -236,6 +236,17 @@ tests or docs before pushing:
 
 Publishing is deliberate. Each publish below is its own explicit gate.
 
+Before the first publish, the main CI release-artifact gate builds all nine Python
+wheels and source distributions plus the `@vivary/create` tarball into one fresh
+directory. The checker requires that exact 19-artifact set, validates package identity
+and exact MIT license bytes, rejects test payloads in wheels, private release evidence
+or root escapes in source distributions, and any extra npm payload beyond its four
+public files. CI then installs the `vivary` dependency graph from those wheels with the
+registry disabled, rebuilds and installs the same graph from the source distributions
+with the reviewed `setuptools==84.0.0` backend, and installs and executes the packed npm
+tarball against the exact local `create-vivary` wheel. A source-tree import, a wheel-only
+check, or an unexecuted npm tarball is not release-candidate proof.
+
 PyPI, per changed package:
 
 ```bash
