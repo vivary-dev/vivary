@@ -94,7 +94,10 @@ jobs:
 
       - name: Verify npm package contents
         working-directory: packages/create-vivary/npm
-        run: npm pack --dry-run
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm-candidate"
+          npm pack --pack-destination "$RUNNER_TEMP/npm-candidate"
+          python ../../../scripts/check_release_artifacts.py --repository ../../.. --artifacts "$RUNNER_TEMP/npm-candidate" --scope npm
 
       - name: Stop before publish unless explicitly enabled
         if: ${{ !inputs.publish }}
@@ -170,7 +173,10 @@ jobs:
 
       - name: Re-verify npm package contents
         working-directory: packages/create-vivary/npm
-        run: npm pack --dry-run
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm-candidate"
+          npm pack --pack-destination "$RUNNER_TEMP/npm-candidate"
+          python ../../../scripts/check_release_artifacts.py --repository ../../.. --artifacts "$RUNNER_TEMP/npm-candidate" --scope npm
 
       - name: Publish @vivary/create with npm trusted publishing
         working-directory: packages/create-vivary/npm

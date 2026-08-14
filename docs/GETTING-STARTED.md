@@ -6,7 +6,7 @@ verification hooks, and deliberate human gates. It does not require a particular
 editor, agent runtime, database, memory provider, or MCP client.
 
 > **Release truth:** the five-file workflow on this page describes the
-> unpublished 0.4.1 development source. Registry `@latest` is still 0.3.1 and
+> unpublished 0.4.2 development source. Registry `@latest` is still 0.3.1 and
 > creates the historical full layout. During release review, run the scaffolder
 > from a Vivary checkout or an isolated candidate artifact; do not substitute an
 > unpinned registry command. The [README release table](../README.md#release-status)
@@ -19,7 +19,7 @@ Paste this into Claude Code, Codex, Cursor, or another coding agent:
 ```text
 Set up Vivary in this project.
 
-1. Confirm Python 3.11+ and the Vivary 0.4.1 candidate command route described below are available. Do not install anything without approval or substitute registry latest while it remains 0.3.1.
+1. Confirm Python 3.11+ and the Vivary 0.4.2 candidate command route described below are available. Do not install anything without approval or substitute registry latest while it remains 0.3.1.
 2. If this folder already has content, run `create-vivary adopt . --json`. Show me the exact creates, bounded patches, optional projections, kept files, conflicts, privacy result, and plan_hash. Stop on any conflict. Apply only the exact approved plan with `--yes --plan <plan_hash>`.
 3. If this folder is empty, ask which preset fits (coding, second-brain, knowledge-work, or writing), then run `create-vivary init . --preset <choice>`.
 4. Verify with `create-vivary doctor .` and `tropo check --root .`. Both must pass.
@@ -28,7 +28,7 @@ Set up Vivary in this project.
 
 ## 1. Install
 
-You need Python 3.11 or newer. To inspect the 0.4.1 candidate from this repository
+You need Python 3.11 or newer. To inspect the 0.4.2 candidate from this repository
 without changing an installed tool, call its entry points directly:
 
 ```bash

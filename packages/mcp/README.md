@@ -8,7 +8,7 @@ Optional Python 3.11+ read-only MCP adapter for Vivary context.
 - Tools: `vivary_find`, `vivary_query`, `vivary_check`, `vivary_capsule`
 - Authority: operator-bound local roots; no writes, network calls, providers, or
   caller-directed processes
-- Status: development source candidate `0.1.2`, unpublished, disabled by default,
+- Status: development source candidate `0.1.3`, unpublished, disabled by default,
   external conformance unproven; requires `vivary-tropo>=0.5.3`.
   Source: [`pyproject.toml`](pyproject.toml); verified: 2026-08-13.
 

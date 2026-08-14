@@ -8,7 +8,7 @@ Use these recipes after the [guide library](/learn-by-doing/).
 Each recipe assumes that the basic workspace checks pass.
 
 Registry `latest` still installs the published 0.3.1 line.
-Use the approved 0.4.1 candidate route from [Getting started](/getting-started/).
+Use the approved 0.4.2 candidate route from [Getting started](/getting-started/).
 The [README release table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) owns publication truth.
 
 Run commands inside a workspace unless you use `--root`.

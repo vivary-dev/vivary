@@ -1,7 +1,7 @@
 # Vivary
 
 Vivary is a lightweight, local-first governed-context standard and scaffolder. The
-unpublished 0.4.1 source candidate creates five operational files: one context
+unpublished 0.4.2 source candidate creates five operational files: one context
 capsule, one visible state surface, workspace policy, startup routing, and bounded
 private/runtime ignores. It seeds no starter records, template pack, or second brain.
 
@@ -21,12 +21,12 @@ Full Documentation: https://vivary.vercel.app/llms-full.txt
 - PyPI coordination CLI: `vivary-exo` 0.2.2, command `exo`
 - The unpublished source package `vivary-strato` exposes experimental command `strato decide --governed`; Core init does not copy skills or templates.
 - Optional Cognee adapter: `vivary-memory-cognee` 0.1.0, command `vivary-cognee`
-- Optional unpublished local stdio adapter: `vivary-mcp` 0.1.2; four read-only tools, disabled by default.
+- Optional unpublished local stdio adapter: `vivary-mcp` 0.1.3; four read-only tools, disabled by default.
 - Versions are independent; do not call the whole project "Vivary 0.3.1".
 
 The versions above are registry truth. The five-file behavior belongs to unpublished
 development source until the README release table lists `create-vivary` and
-`@vivary/create` 0.4.1.
+`@vivary/create` 0.4.2.
 
 ## Run the development-source candidate
 

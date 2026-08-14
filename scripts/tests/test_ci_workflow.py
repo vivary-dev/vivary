@@ -93,6 +93,18 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "        run: python scripts/tests/test_repository_automation.py\n"
         "      - name: repository automation behavior tests\n"
         "        run: python -m pytest scripts/tests/test_update_stats.py scripts/tests/test_steward_health.py -q\n"
+        "      - name: install release build frontend\n"
+        "        run: python -m pip install uv==0.11.21\n"
+        "      - name: release artifact contract tests\n"
+        "        run: python scripts/tests/test_release_artifacts.py\n"
+        "      - name: release artifact license contract\n"
+        "        run: |\n"
+        "          artifacts=\"$(mktemp -d)\"\n"
+        "          uv build --out-dir \"$artifacts\" packages/create-vivary\n"
+        "          uv build --out-dir \"$artifacts\" packages/mcp\n"
+        "          uv build --out-dir \"$artifacts\" packages/vivary\n"
+        "          npm pack packages/create-vivary/npm --pack-destination \"$artifacts\"\n"
+        "          python scripts/check_release_artifacts.py --repository . --artifacts \"$artifacts\"\n"
         "      - name: core\n"
         "        run: python -m pytest packages/core/tests/ -q\n"
         "      - name: diff hygiene\n"
@@ -138,6 +150,10 @@ AUTOMATION_BEHAVIOR_COMMAND = (
     "python -m pytest scripts/tests/test_update_stats.py "
     "scripts/tests/test_steward_health.py -q"
 )
+ARTIFACT_TEST_COMMAND = "python scripts/tests/test_release_artifacts.py"
+ARTIFACT_CHECK_COMMAND = (
+    'python scripts/check_release_artifacts.py --repository . --artifacts "$artifacts"'
+)
 
 
 def test_real_workflow_passes_and_is_not_modified():
@@ -172,6 +188,22 @@ def test_repository_automation_behavior_tests_must_run():
     message = _run(workflow)
     assert message
     assert "test_update_stats.py" in message
+
+
+def test_release_artifact_contract_and_real_archives_must_run():
+    workflow = _workflow(INSTALL + AUDIT)
+    for command in (
+        "python -m pip install uv==0.11.21",
+        ARTIFACT_TEST_COMMAND,
+        'uv build --out-dir "$artifacts" packages/create-vivary',
+        'uv build --out-dir "$artifacts" packages/mcp',
+        'uv build --out-dir "$artifacts" packages/vivary',
+        'npm pack packages/create-vivary/npm --pack-destination "$artifacts"',
+        ARTIFACT_CHECK_COMMAND,
+    ):
+        message = _run(workflow.replace(command, "echo artifact proof skipped", 1))
+        assert message, f"CI must execute {command}"
+        assert command in message
 
 
 def test_missing_site_audit_gate_fails():

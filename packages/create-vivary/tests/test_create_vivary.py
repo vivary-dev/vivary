@@ -4035,7 +4035,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         self._write_distribution(
             root,
             "vivary-mcp",
-            "0.1.2",
+            "0.1.3",
             "vivary_mcp",
             requirements=("vivary-tropo>=0.5.3", "mcp==2.0.0"),
             script="vivary-mcp",

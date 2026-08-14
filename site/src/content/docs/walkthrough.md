@@ -5,7 +5,7 @@ editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/WALKTHROUGH.md"
 ---
 
 > **Historical published-line fixture.** This page records the public 0.3.1 full
-> scaffold and is retained as release evidence. Development-source 0.4.1 uses the
+> scaffold and is retained as release evidence. Development-source 0.4.2 uses the
 > five-file thin contract described in [Getting started](/getting-started/); it does
 > not reproduce this 38-file layout.
 

@@ -38,7 +38,9 @@ def main() -> None:
         "packages/create-vivary/tests/test_adopt.py",
         "packages/create-vivary/tests/test_assets_parity.py",
         "packages/create-vivary/tests/test_npm_launcher.js",
-        "npm pack --dry-run",
+        'npm pack --pack-destination "$RUNNER_TEMP/npm-candidate"',
+        "python ../../../scripts/check_release_artifacts.py --repository ../../.. "
+        '--artifacts "$RUNNER_TEMP/npm-candidate" --scope npm',
         "npm publish",
         "packages/create-vivary/npm",
         "persist-credentials: false",
@@ -47,12 +49,24 @@ def main() -> None:
     for snippet in required_snippets:
         require(snippet in text, f"{WORKFLOW}: missing required snippet: {snippet}")
 
+    for snippet in (
+        'mkdir -p "$RUNNER_TEMP/npm-candidate"',
+        'npm pack --pack-destination "$RUNNER_TEMP/npm-candidate"',
+        "python ../../../scripts/check_release_artifacts.py --repository ../../.. "
+        '--artifacts "$RUNNER_TEMP/npm-candidate" --scope npm',
+    ):
+        require(
+            text.count(snippet) == 2,
+            f"{WORKFLOW}: verify and publish jobs must each run: {snippet}",
+        )
+
     forbidden_snippets = [
         "NPM_TOKEN",
         "NODE_AUTH_TOKEN",
         "_authToken",
         "always-auth",
         "npm publish --otp",
+        "npm pack --dry-run",
         "--auth-type",
     ]
 

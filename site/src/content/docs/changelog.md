@@ -14,6 +14,62 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: release artifact license hardening] — 2026-08-13
+
+This slice advances unpublished `create-vivary` / `@vivary/create` to **0.4.2**,
+optional `vivary-mcp` to **0.1.3**, and the `vivary` meta-package to **0.1.10**.
+Published registry versions remain unchanged.
+
+### Fixed
+
+- The `@vivary/create` npm tarball and the `vivary-mcp` and `vivary` wheel/source
+  distributions now carry the repository's exact MIT license text.
+- The meta-package floor moves to `create-vivary>=0.4.2`; Python and npm scaffolder
+  versions remain in lockstep.
+
+### Added
+
+- Added a release-artifact contract that inspects the exact wheel, source archive,
+  and npm tarball paths and fails on missing artifacts, missing license payloads,
+  license drift, or npm identity drift.
+- Main CI now builds and inspects the seven affected candidate archives. The npm
+  trusted-publish workflow performs the same tarball check before either its dry-run
+  stop or the separately approved publish step.
+
+### Verification
+
+- `uv build --out-dir sandboxes/release-license-green packages/create-vivary`,
+  `uv build --out-dir sandboxes/release-license-green packages/mcp`, and
+  `uv build --out-dir sandboxes/release-license-green packages/vivary` — six wheel
+  and source archives built.
+- `npm pack packages/create-vivary/npm --pack-destination
+  sandboxes/release-license-green` — the four-file npm tarball built.
+- `python scripts/check_release_artifacts.py --repository . --artifacts
+  sandboxes/release-license-green` — seven artifacts passed exact license-byte,
+  filename, version, and npm identity inspection.
+- `python scripts/tests/test_release_artifacts.py` — 7/7 positive and mutation
+  cases passed.
+- `python scripts/check_ci_workflow.py` and
+  `python scripts/tests/test_ci_workflow.py` — contract passed; 15/15 cases passed.
+- `python scripts/check_npm_trusted_publish_workflow.py` — trusted-publish guard
+  passed.
+- `python packages/create-vivary/tests/test_create_vivary.py` — 194 tests passed,
+  including 3 optional/platform skips.
+- `python packages/create-vivary/tests/test_assets_parity.py` — 5/5 passed.
+- `node packages/create-vivary/tests/test_npm_launcher.js` — 10/10 passed.
+- `python -m pytest packages/mcp/tests/ -q` — 23 passed, 1 Windows-only skip.
+- `python packages/vivary/tests/test_vivary_cli.py` — 9/9 passed.
+- `python scripts/check_package_docs_parity.py` and
+  `python scripts/tests/test_package_docs_parity.py` — contract passed; 10/10 cases
+  passed.
+- `npm audit --audit-level=high` from `site/` — 0 vulnerabilities.
+- With checksum-verified Node 22.23.2, `npm run sync-docs`, `npm run build`,
+  `npm run test:site`, and `npm run test:links` from `site/` — generated mirrors
+  refreshed, 33 pages built, 14/14 source tests passed, and 2,717 local references
+  plus 1,519 anchors passed.
+
+Publishing remains a manual human gate.
+
 ## [Unreleased: preserve host-owned derived metadata (#24)] — 2026-08-13
 
 This slice advances unpublished `vivary-tropo` to **0.5.3**,

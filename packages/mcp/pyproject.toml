@@ -4,11 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vivary-mcp"
-version = "0.1.2"
+version = "0.1.3"
 description = "Optional read-only MCP adapter for governed Vivary context."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Jeff Kazzee" }]
 keywords = ["agents", "context", "mcp", "vivary"]
 classifiers = [

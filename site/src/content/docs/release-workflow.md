@@ -266,9 +266,9 @@ npm trust github @vivary/create --repo vivary-dev/vivary --file npm-trusted-publ
 Keep the GitHub `npm-publish` environment protected with required reviewers.
 The workflow is manually dispatched, checks out the explicit release tag, verifies
 the tag/version match, verifies PyPI/npm `create-vivary` version lockstep, runs
-the create-vivary release checks, and runs `npm pack --dry-run`. Leave
-`publish=false` for the dry-run gate; rerun with `publish=true` only after the
-npm publish gate is approved.
+the create-vivary release checks, builds the npm tarball, and verifies its package
+identity plus exact MIT license payload. Leave `publish=false` for the verification-only
+gate; rerun with `publish=true` only after the npm publish gate is approved.
 
 Order when multiple packages ship: dependencies first. Publish `vivary-core` before
 every package that depends on it. Publish `vivary-tropo` next; then the eligible
