@@ -120,7 +120,7 @@ def test_package_identity_matches_candidate_manifest(adapter):
     manifest = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
         "project"
     ]
-    assert adapter.__version__ == manifest["version"] == "0.1.2"
+    assert adapter.__version__ == manifest["version"] == "0.1.3"
     assert "vivary-tropo>=0.5.3" in manifest["dependencies"]
 
 

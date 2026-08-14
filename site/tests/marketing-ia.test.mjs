@@ -32,6 +32,16 @@ const blogPosts = readdirSync(blogDir)
     source: readFileSync(new URL(name, blogDir), 'utf8'),
   }));
 
+const sourceVersion = (packageDirectory) => {
+  const manifest = readFileSync(
+    new URL(`../../packages/${packageDirectory}/pyproject.toml`, import.meta.url),
+    'utf8',
+  );
+  const match = manifest.match(/^version\s*=\s*"(\d+\.\d+\.\d+)"\s*$/m);
+  assert.ok(match, `${packageDirectory} must declare a source version`);
+  return match[1];
+};
+
 test('FAQ is a concise homepage section rather than a docs route', () => {
   assert.match(homepage, /<section class="faq band" id="faq"/);
   assert.match(homepage, /<details>/);
@@ -170,6 +180,16 @@ test('guide documents expose distinct search metadata and agent task routes', ()
 
   assert.match(robots, /User-agent: OAI-SearchBot\r?\nAllow: \//);
   assert.match(robots, /Sitemap: https:\/\/vivary\.vercel\.app\/sitemap-index\.xml/);
+});
+
+test('agent search surfaces derive development versions from package manifests', () => {
+  const createVersion = sourceVersion('create-vivary');
+  const mcpVersion = sourceVersion('mcp');
+
+  assert.match(syncScript, /const readSourceVersion =/);
+  assert.match(llmsText, new RegExp(`unpublished ${createVersion.replaceAll('.', '\\.')} source candidate`));
+  assert.equal(llmsText.includes(`\`vivary-mcp\` ${mcpVersion}`), true);
+  assert.equal(llmsText.includes(`\`@vivary/create\` ${createVersion}`), true);
 });
 
 test('public and agent guides share one concise STE100 style source', () => {

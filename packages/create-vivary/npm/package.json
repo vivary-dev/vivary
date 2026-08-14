@@ -1,6 +1,6 @@
 {
   "name": "@vivary/create",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Add lightweight local-first governed context, evidence, verification, and human gates. Runs Python create-vivary via uv/pipx.",
   "bin": {
     "create-vivary": "index.js"
@@ -33,6 +33,7 @@
   },
   "files": [
     "index.js",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ]
 }

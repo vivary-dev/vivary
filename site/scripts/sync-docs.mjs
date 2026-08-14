@@ -282,12 +282,26 @@ const readPublishedVersion = (surface) => {
   return version;
 };
 
+const readSourceVersion = (packageDirectory) => {
+  const manifest = fs.readFileSync(
+    path.join(repoRoot, 'packages', packageDirectory, 'pyproject.toml'),
+    'utf8',
+  );
+  const match = manifest.match(/^version\s*=\s*"(\d+\.\d+\.\d+)"\s*$/m);
+  if (!match) {
+    throw new Error(`Could not find source version for ${packageDirectory}/pyproject.toml`);
+  }
+  return match[1];
+};
+
 const createVivaryPyPI = readPublishedVersion('create-vivary');
 const createVivaryNpm = readPublishedVersion('@vivary/create');
 const tropoVersion = readPublishedVersion('vivary-tropo');
 const ozoneVersion = readPublishedVersion('vivary-ozone');
 const exoVersion = readPublishedVersion('vivary-exo');
 const cogneeVersion = readPublishedVersion('vivary-memory-cognee');
+const createVivarySource = readSourceVersion('create-vivary');
+const mcpSource = readSourceVersion('mcp');
 
 const isGuidePage = ([, slug]) => slug === 'learn-by-doing' || slug.startsWith('guides/');
 
@@ -308,7 +322,7 @@ const coreDocsList = pages
 const llmsText = `# Vivary
 
 Vivary is a lightweight, local-first governed-context standard and scaffolder. The
-unpublished 0.4.1 source candidate creates five operational files: one context
+unpublished ${createVivarySource} source candidate creates five operational files: one context
 capsule, one visible state surface, workspace policy, startup routing, and bounded
 private/runtime ignores. It seeds no starter records, template pack, or second brain.
 
@@ -328,12 +342,12 @@ Full Documentation: https://vivary.vercel.app/llms-full.txt
 - PyPI coordination CLI: \`vivary-exo\` ${exoVersion}, command \`exo\`
 - The unpublished source package \`vivary-strato\` exposes experimental command \`strato decide --governed\`; Core init does not copy skills or templates.
 - Optional Cognee adapter: \`vivary-memory-cognee\` ${cogneeVersion}, command \`vivary-cognee\`
-- Optional unpublished local stdio adapter: \`vivary-mcp\` 0.1.2; four read-only tools, disabled by default.
+- Optional unpublished local stdio adapter: \`vivary-mcp\` ${mcpSource}; four read-only tools, disabled by default.
 - Versions are independent; do not call the whole project "Vivary ${createVivaryPyPI}".
 
 The versions above are registry truth. The five-file behavior belongs to unpublished
 development source until the README release table lists \`create-vivary\` and
-\`@vivary/create\` 0.4.1.
+\`@vivary/create\` ${createVivarySource}.
 
 ## Run the development-source candidate
 

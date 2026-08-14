@@ -951,7 +951,7 @@ create-vivary record <target> <modules|changes|decisions|verification|gates>/<sl
 
 ### Capability status (development source)
 
-The 0.4.1 development source reports a fixed Core-and-role inventory and passive MCP
+The 0.4.2 development source reports a fixed Core-and-role inventory and passive MCP
 interoperability status alongside the existing storage, semantic-memory, and preset
 sidecar rows:
 

@@ -96,6 +96,8 @@ jobs:
           node-version: "22"
       - name: install Python test runner
         run: python -m pip install pytest packaging
+      - name: install release build frontend
+        run: python -m pip install uv==0.11.21
       - name: CI workflow contract
         run: python scripts/check_ci_workflow.py
       - name: CI workflow contract tests
@@ -135,6 +137,17 @@ jobs:
           python -m pytest packages/mcp/tests/ -q
       - name: vivary meta CLI
         run: python packages/vivary/tests/test_vivary_cli.py
+      - name: release artifact contract tests
+        run: python scripts/tests/test_release_artifacts.py
+      - name: release artifact license contract
+        shell: bash
+        run: |
+          artifacts="$(mktemp -d)"
+          uv build --out-dir "$artifacts" packages/create-vivary
+          uv build --out-dir "$artifacts" packages/mcp
+          uv build --out-dir "$artifacts" packages/vivary
+          npm pack packages/create-vivary/npm --pack-destination "$artifacts"
+          python scripts/check_release_artifacts.py --repository . --artifacts "$artifacts"
       - name: core (governed-context seam; suite is the ported reference tests)
         run: python -m pytest packages/core/tests/ -q
       - name: strato governed policy facade
@@ -308,11 +321,11 @@ jobs:
           assert ozone_result["outcome"] == "sufficient"
           assert version("vivary-core") == "0.2.7"
           assert version("vivary-exo") == "0.3.0"
-          assert version("create-vivary") == "0.4.1"
-          assert version("vivary") == "0.1.9"
+          assert version("create-vivary") == "0.4.2"
+          assert version("vivary") == "0.1.10"
           assert "vivary-core>=0.2.5" in requires("vivary-exo")
           vivary_requirements = requires("vivary") or []
-          assert "create-vivary>=0.4.1" in vivary_requirements
+          assert "create-vivary>=0.4.2" in vivary_requirements
           assert "vivary-tropo>=0.5.3" in vivary_requirements
           assert "vivary-strato>=0.1.2" in vivary_requirements
           assert "vivary-exo>=0.3.0" in vivary_requirements
@@ -343,7 +356,7 @@ jobs:
           from importlib.metadata import PackageNotFoundError, requires, version
           import create_vivary
 
-          assert version("vivary-mcp") == "0.1.2"
+          assert version("vivary-mcp") == "0.1.3"
           assert version("vivary-tropo") == "0.5.3"
           assert version("vivary-core") == "0.2.7"
           assert version("mcp") == "2.0.0"
@@ -697,7 +710,7 @@ jobs:
           from importlib.metadata import PackageNotFoundError, requires, version
           import create_vivary
 
-          assert version("vivary-mcp") == "0.1.2"
+          assert version("vivary-mcp") == "0.1.3"
           assert version("vivary-tropo") == "0.5.3"
           assert version("vivary-core") == "0.2.7"
           assert version("mcp") == "2.0.0"

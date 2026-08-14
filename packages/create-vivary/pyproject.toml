@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "create-vivary"
-version = "0.4.1"
+version = "0.4.2"
 description = "Create a lightweight local-first governed-context workspace with evidence, receipts, verification, and human gates."
 readme = "README.md"
 requires-python = ">=3.11"

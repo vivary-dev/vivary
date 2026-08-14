@@ -13,7 +13,7 @@ The workspace contains no starter records, templates, skills, or second-brain co
 
 ## Release boundary
 
-These commands describe the unpublished 0.4.1 source candidate.
+These commands describe the unpublished 0.4.2 source candidate.
 Registry `latest` still installs published 0.3.1 and creates the historical full layout.
 Run these commands from the Vivary source checkout root.
 

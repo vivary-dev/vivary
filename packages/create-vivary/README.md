@@ -7,8 +7,8 @@ workspace.
 
 Published and development version truth lives in the
 [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status).
-The unpublished source candidates are `create-vivary 0.4.1` and
-`@vivary/create 0.4.1`; both require `vivary-tropo>=0.5.3`.
+The unpublished source candidates are `create-vivary 0.4.2` and
+`@vivary/create 0.4.2`; both require `vivary-tropo>=0.5.3`.
 
 ## New workspaces
 

@@ -43,6 +43,10 @@ def main() -> None:
         "python -m pytest scripts/tests/test_update_stats.py "
         "scripts/tests/test_steward_health.py -q"
     )
+    artifact_test = "python scripts/tests/test_release_artifacts.py"
+    artifact_check = (
+        'python scripts/check_release_artifacts.py --repository . --artifacts "$artifacts"'
+    )
     site_install = "        run: npm ci\n        working-directory: site"
     site_audit = (
         "        run: npm audit --audit-level=high\n"
@@ -142,6 +146,21 @@ def main() -> None:
             test_job.count(command) == 1,
             f"tests job must run {command} exactly once",
         )
+    for command in (
+        "python -m pip install uv==0.11.21",
+        artifact_test,
+        'uv build --out-dir "$artifacts" packages/create-vivary',
+        'uv build --out-dir "$artifacts" packages/mcp',
+        'uv build --out-dir "$artifacts" packages/vivary',
+        'npm pack packages/create-vivary/npm --pack-destination "$artifacts"',
+        artifact_check,
+    ):
+        require(command in test_job, f"tests job must run {command}")
+        require(test_job.count(command) == 1, f"tests job must run {command} exactly once")
+    require(
+        test_job.index(artifact_test) < test_job.index(artifact_check),
+        "artifact contract tests must precede the real archive check",
+    )
     require(
         site_install in site_job,
         "site job must run npm ci with working-directory: site",

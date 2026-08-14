@@ -1,6 +1,6 @@
 # vivary
 
-The unpublished `vivary 0.1.9` source manifest provides one install for the Vivary CLI
+The unpublished `vivary 0.1.10` source manifest provides one install for the Vivary CLI
 suite. Release verification builds local wheels and proves their composition without
 consulting a registry:
 
@@ -14,7 +14,7 @@ install to verify this development line.
 
 The source install includes:
 
-- `create-vivary>=0.4.1`: thin greenfield init and deterministic brownfield adoption.
+- `create-vivary>=0.4.2`: thin greenfield init and deterministic brownfield adoption.
 - `vivary-tropo>=0.5.3`: typed governed context and local retrieval.
 - `vivary-strato>=0.1.2`: policy and deliberate human gates.
 - `vivary-ozone>=0.3.1`: review and evidence verification.
