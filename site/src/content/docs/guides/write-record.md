@@ -4,6 +4,10 @@ description: "Plan, approve, apply, and verify one capsule-bound Vivary record a
 editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/guides/write-record.md"
 ---
 
+> **Unpublished 0.4.2.** `create-vivary record` is not on the registry.
+> Strangers should stop at [Getting started](/getting-started/) with published
+> 0.3.1. Run this guide only from a Vivary checkout or an isolated candidate.
+
 Use this guide after verified work earns durable context.
 
 ## Result

@@ -14,6 +14,28 @@ the `v0.1.0` line.
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
 
+## [Unreleased: stranger docs freeze to published 0.3.1] — 2026-08-15
+
+Docs and site copy only. No package bump. Stranger-facing install, getting-started,
+guides, package READMEs, and the homepage now pin published `create-vivary` /
+`@vivary/create` **0.3.1** and describe the full-layout scaffold. Unpublished 0.4.2
+five-file, `record`, exact-hash adopt apply, and MCP stay labeled as development
+source. Registry versions are unchanged.
+
+### Changed
+
+- Getting started, README quickstart, agent paste prompts, create/adopt guides,
+  command-reference install lines, and homepage hero/install command pin 0.3.1.
+- Walkthrough is the published 0.3.1 proof, not a historical aside to a five-file
+  stranger path.
+
+### Verification
+
+- `node site/scripts/sync-docs.mjs` regenerates site mirrors.
+- Manual grep: stranger install examples pin `0.3.1` and do not present unpinned
+  `@latest` or checkout `python packages/create-vivary/create_vivary.py` as the
+  default install.
+
 ## [Unreleased: release artifact license hardening] — 2026-08-13
 
 This slice advances unpublished `create-vivary` / `@vivary/create` to **0.4.2**,

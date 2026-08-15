@@ -4,24 +4,24 @@ Use this guide for a new project or an empty directory.
 
 ## Result
 
-Vivary creates a five-file governed workspace.
-The workspace contains no starter records, templates, skills, or second-brain content.
+Vivary creates the published 0.3.1 full-layout scaffold.
+The workspace includes agent operating files, a starter typed graph, and skill
+surfaces.
 
 ## Release boundary
 
-These commands describe the unpublished 0.4.2 source candidate.
-Registry `latest` still installs published 0.3.1 and creates the historical full layout.
-Run these commands from the Vivary source checkout root.
+These commands pin **published 0.3.1**.
+Do not use unpinned `latest`.
+Do not use a checkout script unless you are inspecting unpublished 0.4.2.
 
 ## Agent contract
 
 | Field | Value |
 |---|---|
-| Goal | Create one minimal governed workspace. |
+| Goal | Create one published 0.3.1 workspace. |
 | Required input | Target directory and preset. |
-| Default authority | Create the five-file seed. |
-| Optional authority | Add only the selected bounded adapter or sidecar. |
-| Prohibited action | Do not install providers, create records, or copy starter packs. |
+| Default authority | Create the full-layout scaffold. |
+| Prohibited action | Do not install unpublished 0.4.2. Do not copy a checkout path. |
 | Proof | Doctor and Tropo checks pass. |
 
 ## 1. Check the target
@@ -32,8 +32,6 @@ If the target contains project files, use [Adopt an existing project](adopt-proj
 ## 2. Select a preset
 
 Select one preset that matches the work.
-Each preset creates the same five files.
-A preset changes policy labels only.
 
 | Preset | Use |
 |---|---|
@@ -42,97 +40,40 @@ A preset changes policy labels only.
 | `knowledge-work` | Research, decisions, artifacts, and proof. |
 | `writing` | Drafts, research, reviews, and publication gates. |
 
-The `second-brain` preset does not create notes or a pre-populated second brain.
-
-## 3. Preview the workspace
-
-Run a dry-run before the first write.
+## 3. Create the workspace
 
 ```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-project --preset coding --no-wizard --dry-run --json
+uvx --from create-vivary==0.3.1 create-vivary init C:/path/to/my-project --preset coding --no-wizard
 ```
 
-Confirm the target, preset, contract, and five planned files.
-Stop if the target contains work that Vivary can overwrite.
-
-## 4. Create the workspace
-
-Run the same command without `--dry-run`.
+Or from npm:
 
 ```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-project --preset coding --no-wizard --json
+npx --yes @vivary/create@0.3.1 C:/path/to/my-project -- --preset coding --no-wizard
 ```
 
-Vivary creates this tree:
+Published 0.3.1 writes the full-layout scaffold.
+A coding proof run wrote 38 files: `AGENTS.md`, `STATE.md`, `SOUL.md`, `tropo.toml`,
+starter graph folders, and Claude/Codex skill surfaces.
+See the [published 0.3.1 proof](../WALKTHROUGH.md).
 
-```text
-my-project/
-├── .gitignore
-├── AGENTS.md
-├── STATE.md
-└── .vivary/
-    ├── context.md
-    └── workspace.toml
-```
+This is not the unpublished five-file 0.4.2 seed.
 
-`AGENTS.md` routes the agent to governed context.
-`STATE.md` shows the current focus, status, and next action.
-`.gitignore` protects private and runtime paths.
-`.vivary/context.md` defines the work loop and gates.
-`.vivary/workspace.toml` defines the thin contract and type policy.
-
-## 5. Verify the workspace
-
-Run Doctor.
-Then run Tropo validation.
+## 4. Verify the workspace
 
 ```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/my-project
-python packages/tropo/tropo.py check --root C:/path/to/my-project
+uvx --from create-vivary==0.3.1 create-vivary doctor C:/path/to/my-project
+uvx --from vivary-tropo==0.4.1 tropo check --root C:/path/to/my-project
 ```
 
 Both commands must exit with code `0`.
 Fix each error before an agent uses the workspace.
-
-## Optional second-brain example
-
-Preview the policy before creation.
-
-```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-notes --preset second-brain --no-wizard --dry-run --json
-python packages/create-vivary/create_vivary.py init C:/path/to/my-notes --preset second-brain --no-wizard --json
-```
-
-The result is still the five-file seed.
-Real notes must come from later work.
-
-## Optional additions
-
-Include an adapter in the initial command only when the runtime needs it.
-
-```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-agent-project --preset coding --adapter agents --no-wizard
-python packages/create-vivary/create_vivary.py init C:/path/to/my-claude-project --preset coding --adapter claude --no-wizard
-```
-
-Each adapter adds one bounded runtime file.
-Use `--adapter` twice when both adapters are required.
-
-Include active code context only after explicit selection.
-
-```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-code-project --preset coding --active-context cocoindex-code --no-wizard
-```
-
-This option keeps the five-file seed.
-It declares the capability and ignores its local index path.
-It does not copy guidance, install an indexer, or create an index.
 
 ## Stop conditions
 
 Stop when the target is nonempty.
 Stop when a planned file can replace user content.
 Stop when provider installation needs approval.
-Stop when privacy policy is missing or invalid.
 
-Use the [command reference](../COMMANDS.md#create-vivary--the-scaffolder) for all flags and output fields.
+Use [Getting started](../GETTING-STARTED.md) for the install pins.
+Use the [command reference](../COMMANDS.md) for flags and output fields.

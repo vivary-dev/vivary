@@ -4,6 +4,10 @@ description: "Connect an AI coding or writing agent to Vivary through the standa
 editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/guides/connect-agent.md"
 ---
 
+> **Mixed line.** The AGENTS.md route works on published 0.3.1.
+> Optional MCP is unpublished. Pin Doctor with
+> `uvx --from create-vivary==0.3.1 create-vivary doctor`.
+
 Use this guide after Vivary creates or adopts a workspace.
 
 ## Result
@@ -27,7 +31,7 @@ The connection does not grant write authority.
 Run Doctor before the connection.
 
 ```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/project
+uvx --from create-vivary==0.3.1 create-vivary doctor C:/path/to/project
 ```
 
 Stop if Doctor reports an error.

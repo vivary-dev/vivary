@@ -7,9 +7,10 @@ editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/HOWTO.md"
 Use these recipes after the [guide library](/learn-by-doing/).
 Each recipe assumes that the basic workspace checks pass.
 
-Registry `latest` still installs the published 0.3.1 line.
-Use the approved 0.4.2 candidate route from [Getting started](/getting-started/).
+Registry `@latest` still installs the published 0.3.1 line.
+Pin that version. See [Getting started](/getting-started/).
 The [README release table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) owns publication truth.
+Unpublished 0.4.2 recipes below are marked where they need a checkout.
 
 Run commands inside a workspace unless you use `--root`.
 
@@ -18,14 +19,14 @@ Run commands inside a workspace unless you use `--root`.
 Use [Create a Vivary workspace](/guides/create-workspace/) for the complete procedure.
 
 ```bash
-create-vivary init my-workspace --preset writing      # coding | second-brain | knowledge-work | writing
-create-vivary doctor my-workspace                      # validate it
+uvx --from create-vivary==0.3.1 create-vivary init my-workspace --preset writing
+uvx --from create-vivary==0.3.1 create-vivary doctor my-workspace
 ```
 
 ## Check a legacy or current workspace without changing it
 
 ```bash
-create-vivary doctor my-workspace --json
+uvx --from create-vivary==0.3.1 create-vivary doctor my-workspace --json
 ```
 
 Doctor is read-only in both human and JSON modes: it exits `0` when the report has no
@@ -40,15 +41,16 @@ line to add. A published semantic-memory profile keeps `heartbeat-reports/*` str
 leaves its newer `*.vivary-tmp` gap as an upgrade warning; a current semantic-memory
 profile keeps every privacy rule strict.
 
-Use adoption only to preview the new thin contract:
+Use adoption to add published 0.3.1 files to an existing project:
 
 ```bash
-create-vivary adopt my-workspace --preset writing
+uvx --from create-vivary==0.3.1 create-vivary adopt my-workspace --preset writing --json
 ```
 
-`adopt` is a dry run unless `--yes --plan <plan_hash>` is supplied. It does not migrate
-or remove legacy modules, templates, or skills. If `.vivary/memory.toml` says
-`enabled = true`, it must name a real provider: `provider = "none"` is misconfigured.
+Published adopt is a dry run unless `--yes` is supplied. It only adds files.
+Existing content stays byte-identical. Do not use `--plan <plan_hash>` with 0.3.1.
+That apply path is unpublished 0.4.2. If `.vivary/memory.toml` says `enabled = true`,
+it must name a real provider: `provider = "none"` is misconfigured.
 Use `--trend` only when you intend to write local Doctor runtime state.
 
 ## Bring an existing repo's docs under tropo

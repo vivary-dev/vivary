@@ -1,5 +1,9 @@
 # Write one approved record
 
+> **Unpublished 0.4.2.** `create-vivary record` is not on the registry.
+> Strangers should stop at [Getting started](../GETTING-STARTED.md) with published
+> 0.3.1. Run this guide only from a Vivary checkout or an isolated candidate.
+
 Use this guide after verified work earns durable context.
 
 ## Result

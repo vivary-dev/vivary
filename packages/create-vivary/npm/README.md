@@ -9,38 +9,23 @@ Published and development version truth lives in the
 The unpublished source candidates are `@vivary/create 0.4.2` and
 `create-vivary 0.4.2`; both require `vivary-tropo>=0.5.3`.
 
+Published registry commands pin **0.3.1**. Do not use unpinned `@latest` while
+unpublished 0.4.2 remains off the registry.
+
 ```bash
-npm create @vivary@latest my-workspace -- --preset coding
-npx @vivary/create@latest doctor my-workspace --json
+npx --yes @vivary/create@0.3.1 my-workspace -- --preset coding --no-wizard
+npx --yes @vivary/create@0.3.1 doctor my-workspace --json
 
-# Existing repo: preview, inspect the plan hash, then apply that exact plan.
-npx @vivary/create@latest adopt . --json
-npx @vivary/create@latest adopt . --yes --plan sha256:<plan-hash> --json
-
-# One earned record: preview, approve, then apply one capsule-bound plan.
-npx @vivary/create@latest record . changes/verified-slice.md --from ./verified-slice.md \
-  --capsule ./task-capsule.json --json
-npx @vivary/create@latest record . changes/verified-slice.md --from ./verified-slice.md \
-  --capsule ./task-capsule.json \
-  --yes --plan sha256:<plan-hash> --json
+# Existing repo: preview, then apply with --yes. Exact-hash --plan is unpublished 0.4.2.
+npx --yes @vivary/create@0.3.1 adopt . --json
+npx --yes @vivary/create@0.3.1 adopt . --yes
 ```
 
-A default new-workspace init creates three Vivary payload files plus the bounded host
-integrations `AGENTS.md` and `.gitignore`. Brownfield adoption remains capped at the
-same three payload creates and may separately create or patch only those two host
-integration surfaces. Neither path copies templates, runtime skills, placeholders,
-starter records, or framework prose.
-
-`record` is not a pack installer. It validates the complete governed capsule and its
-current workspace binding, plans exactly one typed record, requires the exact approved
-hash before writing, reruns Doctor, and rolls back on failed verification. The npm
-package only forwards this command to the canonical Python implementation.
-
-Optional adapters are explicit:
+Published 0.3.1 writes the full-layout scaffold. The five-file payload, `record`,
+and exact-hash `--plan` apply below are unpublished 0.4.2.
 
 ```bash
-npx @vivary/create@latest init my-workspace --adapter agents --adapter claude
-npx @vivary/create@latest init my-codebase --active-context cocoindex-code
+npx --yes @vivary/create@0.3.1 init my-workspace --adapter agents
 ```
 
 Each agent adapter adds at most one bounded file. The active-context option keeps the

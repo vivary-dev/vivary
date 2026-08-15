@@ -10,10 +10,10 @@ contract seam. Command names are `tropo` / `strato` / `ozone` / `exo`; the scaff
 remains `create-vivary`. The separate, optional `vivary-mcp` package pins its reviewed
 MCP SDK dependency.
 
-- **Install (PyPI):** `pip install vivary`
-- **Run without installing (uv):** `uvx --from vivary-tropo tropo check`, `uvx --from vivary-ozone ozone review`, …
-- **Scaffold (npm):** `npm create @vivary@latest my-workspace` / `npx @vivary/create@latest my-workspace`
-- **From a repo checkout:** `python packages/tropo/tropo.py check`, etc.
+- **Install (PyPI):** `pip install create-vivary==0.3.1` (or `pip install vivary==0.1.0` for the published suite)
+- **Run without installing (uv):** `uvx --from create-vivary==0.3.1 create-vivary doctor`, `uvx --from vivary-tropo==0.4.1 tropo check`, `uvx --from vivary-ozone==0.2.0 ozone review`
+- **Scaffold (npm):** `npx --yes @vivary/create@0.3.1 my-workspace` (do not use unpinned `@latest`)
+- **From a repo checkout:** `python packages/tropo/tropo.py check` (unpublished 0.4.2 source)
 
 Features called out as **unreleased** are present on the `dev` branch and generated
 site docs, but are not available from the current PyPI/npm packages until the next

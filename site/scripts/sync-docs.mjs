@@ -23,11 +23,11 @@ const normalizeForCompare = (p) => {
 // canonical doc -> [route slug, page title, meta description]
 const pages = [
   ['CONCEPTS', 'concepts', 'What is Vivary?', 'Plain-language intro: what Vivary is, the core ideas, and a glossary. Start here.'],
-  ['GETTING-STARTED', 'getting-started', 'Getting started', 'Install Vivary and run your first agent workspace.'],
+  ['GETTING-STARTED', 'getting-started', 'Getting started', 'Install published Vivary 0.3.1 and run your first agent workspace.'],
   ['WALKTHROUGH', 'walkthrough', 'Getting started proof', 'A public, generic product walkthrough showing Vivary scaffold, health, review, coordination, and impact checks.'],
   ['COMMANDS', 'commands', 'Command reference', 'Every CLI across Vivary: tropo, strato, ozone, exo, create-vivary, and optional adapters.'],
   ['LEARN-BY-DOING', 'learn-by-doing', 'Vivary guides', 'Task-based Vivary guides for creating or adopting a workspace, connecting agents, retrieving context, writing records, and recovering safely.'],
-  ['guides/create-workspace', 'guides/create-workspace', 'Create a Vivary workspace', 'Create and verify the five-file Vivary governed-context workspace for a new project without adding starter content.'],
+  ['guides/create-workspace', 'guides/create-workspace', 'Create a Vivary workspace', 'Create and verify the published 0.3.1 full-layout Vivary scaffold.'],
   ['guides/connect-agent', 'guides/connect-agent', 'Connect an AI agent to Vivary', 'Connect an AI coding or writing agent to Vivary through the standard context route or optional read-only MCP adapter.'],
   ['guides/get-context', 'guides/get-context', 'Get bounded Vivary context', 'Retrieve privacy-filtered project evidence with Vivary or save a complete governed Task Capsule for approved work.'],
   ['guides/write-record', 'guides/write-record', 'Write a governed Vivary record', 'Plan, approve, apply, and verify one capsule-bound Vivary record after completed work earns durable project context.'],

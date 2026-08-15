@@ -1,6 +1,6 @@
 ---
 const repo = 'https://github.com/vivary-dev/vivary';
-const command = 'python packages/create-vivary/create_vivary.py init my-workspace --preset coding --no-wizard';
+const command = 'npx --yes @vivary/create@0.3.1 my-workspace';
 const supportEmail = 'support@vivary.dev';
 const supportSubject = 'Vivary support request';
 const supportIssueUrl = `${repo}/issues/new?template=bug.yml&labels=bug&title=${encodeURIComponent('[Bug]: Vivary problem report')}`;
@@ -48,20 +48,20 @@ const adoption = [
   {
     step: '01',
     title: 'Map the terrain',
-    command: 'tropo map --root .',
+    command: 'uvx --from vivary-tropo==0.4.1 tropo map --root .',
     body: 'Read a large repo, vault, or docs tree without opening everything. No config and no writes.',
   },
   {
     step: '02',
     title: 'Adopt without wrecking it',
-    command: 'create-vivary adopt . --json',
-    body: 'Preview the exact hash first: at most three payload files and two bounded host integrations.',
+    command: 'uvx --from create-vivary==0.3.1 create-vivary adopt . --json',
+    body: 'Dry-run first. Published 0.3.1 only adds files. Existing content stays byte-identical.',
   },
   {
     step: '03',
     title: 'Keep it healthy',
-    command: 'create-vivary doctor .',
-    body: 'Verify the thin contract and privacy boundary without writing runtime trend state.',
+    command: 'uvx --from create-vivary==0.3.1 create-vivary doctor .',
+    body: 'Verify the workspace and graph without writing runtime trend state.',
   },
 ];
 
@@ -69,12 +69,12 @@ const faq = [
   {
     question: 'What is Vivary?',
     answer:
-      'Vivary is a local-first governed-context standard and scaffolder. Core starts with five small files: one context capsule, one visible state surface, policy, startup routing, and private/runtime ignores.',
+      'Vivary is a local-first governed-context standard and scaffolder. Published 0.3.1 scaffolds a full local workspace with a typed knowledge graph, visible state, and human gates. The five-file 0.4.2 contract is unpublished source.',
   },
   {
     question: 'Can I use it with an existing project?',
     answer:
-      'Yes. Brownfield adoption starts with a deterministic dry-run, adds at most three Vivary payload files, and touches only bounded generated blocks in AGENTS.md and .gitignore after exact-hash approval.',
+      'Yes. Brownfield adoption starts with a dry-run. Published 0.3.1 only adds files and keeps existing content byte-identical. Apply with --yes after you approve the add list.',
   },
   {
     question: 'Is Vivary an AI agent or model?',
@@ -107,12 +107,12 @@ const faq = [
     <title>Vivary — a world your agents can understand</title>
     <meta
       name="description"
-      content="Vivary gives agents lightweight governed context, visible state, receipts, and human gates without seeding a second brain."
+      content="Vivary gives agents a typed knowledge graph, a dry-run adopt plan, visible state, and human gates."
     />
     <meta property="og:title" content="Vivary — a world your agents can understand" />
     <meta
       property="og:description"
-      content="Five small workspace files, earned context, receipts, and human gates."
+      content="Published Vivary 0.3.1: typed knowledge graph, dry-run adopt, receipts, and human gates."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://vivary.vercel.app/" />
@@ -126,7 +126,7 @@ const faq = [
     <meta name="twitter:title" content="Vivary — a world your agents can understand" />
     <meta
       name="twitter:description"
-      content="Five small workspace files, earned context, receipts, and human gates."
+      content="Published Vivary 0.3.1: typed knowledge graph, dry-run adopt, receipts, and human gates."
     />
     <meta name="twitter:image" content="https://vivary.vercel.app/media/hero-living-strata.webp" />
     <link rel="canonical" href="https://vivary.vercel.app/" />
@@ -177,12 +177,12 @@ const faq = [
           fetchpriority="high"
         />
         <div class="hero-copy">
-          <p class="eyebrow">Small seed · earned context · human gates</p>
-          <h1>Give agents governed context without the file pack.</h1>
+          <p class="eyebrow">Published 0.3.1 · typed graph · human gates</p>
+          <h1>Give agents a typed graph and a dry-run adopt plan.</h1>
           <p class="hero-lede">
-            Greenfield Core creates five operational files and no starter second
-            brain. Brownfield adoption stays capped and review-first. MCP reads and
-            supplies capsules; a separate exact-hash transaction writes one earned record.
+            Published 0.3.1 scaffolds a full local workspace with a typed knowledge
+            graph. Adoption is dry-run first and only adds files. The five-file
+            0.4.2 contract is unpublished development source.
           </p>
           <div class="hero-actions">
             <a class="button button-primary" href="/getting-started/">Start with an existing project</a>
@@ -194,12 +194,13 @@ const faq = [
             <span class="copy-status" data-copy-status aria-live="polite"></span>
           </div>
           <p class="release-truth">
-            0.4.2 source-review command. Registry latest remains the published 0.3.1
-            full layout until the <a href="/release-workflow/">human release gate</a> is complete.
+            Pin published 0.3.1. Registry latest is 0.3.1 today, but do not use an
+            unpinned command. Unpublished 0.4.2 stays behind the
+            <a href="/release-workflow/">human release gate</a>.
           </p>
           <ul class="hero-proof" aria-label="Vivary product facts">
-            <li>Exactly five seed files</li>
-            <li>No starter records</li>
+            <li>Published 0.3.1 full scaffold</li>
+            <li>Dry-run adopt, add-only</li>
             <li>Local-first + MIT</li>
           </ul>
         </div>

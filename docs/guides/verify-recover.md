@@ -1,5 +1,9 @@
 # Verify and recover a workspace
 
+> **Mixed line.** Plain Doctor and Tropo check exist on published 0.3.1 / tropo 0.4.1.
+> Exact-hash adoption recovery is unpublished 0.4.2. Pin
+> `uvx --from create-vivary==0.3.1 create-vivary doctor` for the published path.
+
 Use this guide after setup, adoption, or an approved record write.
 
 ## Result

@@ -10,15 +10,25 @@ Published and development version truth lives in the
 The unpublished source candidates are `create-vivary 0.4.2` and
 `@vivary/create 0.4.2`; both require `vivary-tropo>=0.5.3`.
 
+Published registry commands pin **0.3.1**. Unpinned `uvx create-vivary` is not a
+stranger install path while unpublished 0.4.2 remains off the registry.
+
 ## New workspaces
 
 ```bash
-uvx create-vivary init my-workspace --preset coding
-create-vivary doctor my-workspace --json
-tropo check --root my-workspace
+uvx --from create-vivary==0.3.1 create-vivary init my-workspace --preset coding --no-wizard
+uvx --from create-vivary==0.3.1 create-vivary doctor my-workspace --json
+uvx --from vivary-tropo==0.4.1 tropo check --root my-workspace
 ```
 
-A default greenfield init creates exactly five files:
+Published 0.3.1 writes the full-layout scaffold, not the unpublished five-file seed.
+
+## Unpublished 0.4.2 source
+
+The rest of this package README describes checkout behavior. It is not what
+registry 0.3.1 writes.
+
+A default greenfield 0.4.2 init creates exactly five files:
 
 - Vivary payload: `.vivary/context.md`, `.vivary/workspace.toml`, and `STATE.md`.
 - Host integration: `AGENTS.md` and `.gitignore`.

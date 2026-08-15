@@ -50,7 +50,7 @@ Use the page that matches the task. These site documents and the repository Mark
 sources are the same canonical procedures.
 
 - Vivary guides: Task-based Vivary guides for creating or adopting a workspace, connecting agents, retrieving context, writing records, and recovering safely. https://vivary.vercel.app/learn-by-doing/
-- Create a Vivary workspace: Create and verify the five-file Vivary governed-context workspace for a new project without adding starter content. https://vivary.vercel.app/guides/create-workspace/
+- Create a Vivary workspace: Create and verify the published 0.3.1 full-layout Vivary scaffold. https://vivary.vercel.app/guides/create-workspace/
 - Connect an AI agent to Vivary: Connect an AI coding or writing agent to Vivary through the standard context route or optional read-only MCP adapter. https://vivary.vercel.app/guides/connect-agent/
 - Get bounded Vivary context: Retrieve privacy-filtered project evidence with Vivary or save a complete governed Task Capsule for approved work. https://vivary.vercel.app/guides/get-context/
 - Write a governed Vivary record: Plan, approve, apply, and verify one capsule-bound Vivary record after completed work earns durable project context. https://vivary.vercel.app/guides/write-record/
@@ -206,228 +206,168 @@ are even named for the layers of the sky.
 
 # Getting started with Vivary
 
-Vivary is a lightweight, local-first governed-context layer for agent work. It gives a
-project one bounded context capsule, one visible state surface, provenance and
-verification hooks, and deliberate human gates. It does not require a particular
-editor, agent runtime, database, memory provider, or MCP client.
+Vivary is a local-first governed-context layer for agent work. It gives a project a
+typed knowledge graph, a visible state surface, verification hooks, and human gates.
+It does not require a particular editor, agent runtime, database, memory provider, or
+MCP client.
 
-> **Release truth:** the five-file workflow on this page describes the
-> unpublished 0.4.2 development source. Registry `@latest` is still 0.3.1 and
-> creates the historical full layout. During release review, run the scaffolder
-> from a Vivary checkout or an isolated candidate artifact; do not substitute an
-> unpinned registry command. The [README release table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status)
-> is the publication authority.
+> **Release truth:** this page describes **published 0.3.1**. Pin that version.
+> Registry `@latest` is 0.3.1 today, but do not rely on an unpinned command. The
+> unpublished 0.4.2 five-file contract lives in development source only. The
+> [README release table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) is the publication authority.
 
 ## Set up with an agent
 
 Paste this into Claude Code, Codex, Cursor, or another coding agent:
 
 ```text
-Set up Vivary in this project.
+Set up published Vivary 0.3.1 in this project.
 
-1. Confirm Python 3.11+ and the Vivary 0.4.2 candidate command route described below are available. Do not install anything without approval or substitute registry latest while it remains 0.3.1.
-2. If this folder already has content, run `create-vivary adopt . --json`. Show me the exact creates, bounded patches, optional projections, kept files, conflicts, privacy result, and plan_hash. Stop on any conflict. Apply only the exact approved plan with `--yes --plan <plan_hash>`.
-3. If this folder is empty, ask which preset fits (coding, second-brain, knowledge-work, or writing), then run `create-vivary init . --preset <choice>`.
-4. Verify with `create-vivary doctor .` and `tropo check --root .`. Both must pass.
-5. Read AGENTS.md and .vivary/context.md. Read STATE.md only when current state matters.
+1. Confirm Python 3.11+ is available. Do not install anything without approval.
+2. Pin the scaffolder. Use `uvx --from create-vivary==0.3.1 create-vivary` or `npx --yes @vivary/create@0.3.1`. Do not use unpinned latest. Do not use a checkout command unless I say so.
+3. If this folder already has content, run `uvx --from create-vivary==0.3.1 create-vivary adopt . --json`. Show me every file it would add. Existing files must stay byte-identical. Stop on collisions. Apply only after I approve, with `--yes`.
+4. If this folder is empty, ask which preset fits (coding, second-brain, knowledge-work, or writing), then run `uvx --from create-vivary==0.3.1 create-vivary init . --preset <choice> --no-wizard`.
+5. Verify with `uvx --from create-vivary==0.3.1 create-vivary doctor .` and `uvx --from vivary-tropo==0.4.1 tropo check --root .`. Both must pass.
+6. Read AGENTS.md, then follow it.
 ```
 
 ## 1. Install
 
-You need Python 3.11 or newer. To inspect the 0.4.2 candidate from this repository
-without changing an installed tool, call its entry points directly:
+You need Python 3.11 or newer.
+
+Pin the published scaffolder:
+
+```bash
+uvx --from create-vivary==0.3.1 create-vivary --help
+npx --yes @vivary/create@0.3.1 --help
+```
+
+Pin Tropo the same way:
+
+```bash
+uvx --from vivary-tropo==0.4.1 tropo --help
+```
+
+Optional published tools:
+
+```bash
+uvx --from vivary-ozone==0.2.0 ozone --help
+uvx --from vivary-exo==0.2.2 exo --help
+```
+
+Do not use `uvx create-vivary` or `npx @vivary/create@latest` without a version pin.
+Those commands follow whatever the registry calls latest.
+
+## 2. Create a new workspace
+
+```bash
+uvx --from create-vivary==0.3.1 create-vivary init my-workspace --preset coding --no-wizard
+cd my-workspace
+```
+
+Or from npm:
+
+```bash
+npx --yes @vivary/create@0.3.1 my-workspace -- --preset coding --no-wizard
+cd my-workspace
+```
+
+The preset selects `coding`, `second-brain`, `knowledge-work`, or `writing`.
+
+Published 0.3.1 writes the full-layout scaffold: agent operating files, a starter
+typed graph, and skill surfaces. A coding proof run wrote 38 files. Those files are
+plain Markdown, TOML, and agent skill files. See the
+[published 0.3.1 proof](https://vivary.vercel.app/walkthrough/).
+
+This is not the unpublished five-file 0.4.2 seed. Do not expect five files from a
+registry install.
+
+## 3. Adopt an existing repo or vault
+
+Published adopt is dry-run first. It only adds files. Existing content stays
+byte-identical.
+
+```bash
+uvx --from create-vivary==0.3.1 create-vivary adopt . --json
+```
+
+Read the planned creates and any collisions. Stop on a collision. Apply only after
+you approve the add list:
+
+```bash
+uvx --from create-vivary==0.3.1 create-vivary adopt . --yes
+```
+
+An adopted workspace must pass Doctor and Tropo check. Adopt does not rewrite
+existing files.
+
+The unpublished 0.4.2 `--plan <hash>` apply path is not on the registry. Do not use
+it with 0.3.1.
+
+## 4. Verify
+
+```bash
+uvx --from create-vivary==0.3.1 create-vivary doctor .
+uvx --from vivary-tropo==0.4.1 tropo check --root .
+```
+
+Both commands must exit `0`.
+
+Optional review and coordination:
+
+```bash
+uvx --from vivary-ozone==0.2.0 ozone review --root .
+uvx --from vivary-ozone==0.2.0 ozone impact <node-id> --root .
+uvx --from vivary-exo==0.2.2 exo board --root .
+```
+
+Tropo can inventory a tree without a workspace config:
+
+```bash
+uvx --from vivary-tropo==0.4.1 tropo map --root .
+```
+
+## 5. Operate the loop
+
+The compact operating loop is:
+
+> Ask → retrieve → act → verify → learn → gate.
+
+Start with `AGENTS.md`. Load `STATE.md` when the current focus or next action
+matters. Stop at authority, privacy, destructive, publishing, credential, or
+deliberate human-approval gates.
+
+## Unpublished 0.4.2 source
+
+The five-file thin contract, `create-vivary record`, exact-hash adopt apply, and
+optional `vivary-mcp` are development source. They are not on the registry.
+
+To inspect that candidate from a checkout:
 
 ```bash
 python packages/create-vivary/create_vivary.py --help
 python packages/tropo/tropo.py --help
 ```
 
-When operating on another folder, replace `create-vivary` and `tropo` in the
-examples below with those absolute source-script paths, or use an isolated release
-candidate environment. The optional MCP package has third-party runtime dependencies;
-verify its `vivary-mcp --help` entry point only inside the isolated candidate
-environment where its wheel is installed. Published 0.3.1 remains available for the previous layout
-with `uvx --from create-vivary==0.3.1 create-vivary ...` or
-`npx @vivary/create@0.3.1 ...`. Do not expect those pinned commands to produce the
-five-file seed.
-
-## 2. Create a new workspace
-
-```bash
-create-vivary init my-workspace --preset coding
-cd my-workspace
-```
-
-The preset selects configuration for `coding`, `second-brain`, `knowledge-work`, or
-`writing`. A preset changes thin policy only. In particular, `second-brain` does not
-install a pre-populated second brain, starter notes, or framework records.
-
-Default init creates exactly five files:
-
-```text
-AGENTS.md                 bounded startup route
-STATE.md                  visible Focus / Status / Next surface
-.gitignore                bounded private/runtime ignore block
-.vivary/context.md        first governed context capsule
-.vivary/workspace.toml    thin workspace contract and policy
-```
-
-No templates, skills, placeholders, starter records, or framework prose are copied.
-Records under `.vivary/records/` appear only when real work earns them. Private
-material belongs under `.vivary/private/` and runtime state under `.vivary/runtime/`;
-both are ignored.
-
-Optional runtime projections are explicit and bounded:
-
-```bash
-create-vivary init my-workspace --preset coding --adapter agents
-create-vivary init my-workspace --preset coding --adapter claude
-create-vivary init my-codebase --preset coding --active-context cocoindex-code
-```
-
-Each agent adapter adds one file of at most 1,200 bytes. Active context keeps the
-five-file seed and declares `cocoindex-code` in `.vivary/workspace.toml`. It also
-ignores `.cocoindex_code/`; it does not copy guidance, install an indexer, create an
-index, enable MCP, or send source text anywhere.
-Configure Obsidian or another editor separately after initialization.
-
-Storage and semantic memory are separate opt-ins. A non-interactive init without
-explicit storage or memory options stays file-backed and writes no optional provider
-config. Provider installation, indexing, network access, and credentials remain later
-human gates.
-
-### Adopt an existing repo or vault
-
-Brownfield adoption is dry-run first:
-
-```bash
-create-vivary adopt . --json
-create-vivary adopt . --yes --plan sha256:<plan-hash> --json
-```
-
-The plan is deterministic and reports `creates`, managed `patches`,
-`optional_projections`, `kept`, `conflicts`, privacy checks, and `plan_hash`. Apply
-accepts only the exact approved hash and revalidates the inputs before writing.
-
-Adoption creates at most three Vivary payload files:
-
-- `.vivary/context.md`
-- `.vivary/workspace.toml`
-- `STATE.md`, only when it is absent
-
-Separately, it may create or patch only the generated Vivary blocks in `AGENTS.md` and
-`.gitignore`. User-owned content outside those blocks is kept. Nested ignore rules
-that expose private paths, stale or divergent generated adapters, invalid thin
-contracts, and changed plan inputs are conflicts that fail closed.
-
-Apply is transactional. If a process is interrupted, the next run reports the bound
-adoption hash. Plan recovery before any rollback:
-
-```bash
-create-vivary adopt . --recover sha256:<plan-hash> --json
-```
-
-Review `recovery_plan_hash` and its bounded actions. Apply only that separately
-approved recovery plan:
-
-```bash
-create-vivary adopt . --recover sha256:<plan-hash> \
-  --yes --plan sha256:<recovery-plan-hash> --json
-```
-
-## 3. Verify
-
-```bash
-create-vivary doctor .
-tropo check --root .
-```
-
-Doctor validates the thin contract, startup reachability, privacy, optional adapters,
-and pending adoption recovery. Plain Doctor is read-only. `doctor --trend` is the
-explicit mode that writes local runtime trend state.
-
-Tropo reads `.vivary/workspace.toml` as the base policy and returns small typed context
-packets:
-
-```bash
-tropo find "where is release truth owned" --root . --json
-tropo graph --root . --json
-```
-
-A root or nested `tropo.toml` can tighten thin policy but cannot expand its scope.
-Competing thin workspace roots fail closed.
-
-## 4. Operate the loop
-
-The compact operating loop is:
-
-> Ask → retrieve → act → verify → learn → gate.
-
-Start with `AGENTS.md` and `.vivary/context.md`; load `STATE.md` when the current focus
-or next action matters. Create a receipt or record only when it is evidence from real
-work. Stop at authority, privacy, destructive, publishing, credential, or deliberate
-human-approval gates.
-
-MCP is optional. The Vivary adapter uses local standard input/output and is read-only
-by default; every baseline workflow remains available through the CLI. Install and
-start it separately, binding the workspace at operator-controlled startup:
-
-```bash
-vivary-mcp --workspace project .
-```
-
-Its four tools can find, query, check, and return a public Task Capsule. Starting it or
-calling those tools does not create `.vivary/records/`, enable a provider, or authorize
-a write. A fresh non-Git thin workspace is readable only while its `.gitignore` is the
-exact generated private/runtime block; arbitrary or extended non-Git ignore policy
-fails closed. Once the folder is an exact Git worktree, Git's effective ignore policy
-is authoritative.
-
-When verified work earns a durable record, keep the read and write authorities
-separate:
-
-1. Save the complete JSON Task Capsule from `tropo find --governed --json`, or save
-   the complete public capsule object returned as the optional MCP `vivary_capsule`
-   result.
-2. Prepare one complete typed Markdown record outside the destination.
-3. Run `create-vivary record` without `--yes`, inspect its one-file plan and hash, and
-   get the deliberate human approval required for the write.
-4. Apply only that exact hash with `--yes --plan`; Doctor verifies the workspace and
-   the command rolls back the record if verification fails.
-
-```bash
-create-vivary record . changes/verified-slice.md \
-  --from ./verified-slice.md \
-  --capsule ./task-capsule.json \
-  --json
-
-create-vivary record . changes/verified-slice.md \
-  --from ./verified-slice.md \
-  --capsule ./task-capsule.json \
-  --yes --plan sha256:<approved-plan-hash> --json
-```
-
-This creates or updates exactly one record under `.vivary/records/`; it never expands
-the selected preset into a template pack or a pre-populated graph.
+Do not substitute those commands for a stranger install. Do not describe them as
+published.
 
 ## Next
 
-- [Guide library](https://vivary.vercel.app/learn-by-doing/) — complete one real task with a concise STE100 style procedure.
-- [Concepts](https://vivary.vercel.app/concepts/) — the governed-context vocabulary.
-- [Command reference](https://vivary.vercel.app/commands/) — commands, flags, outputs, and exit codes.
-- [Active context](https://vivary.vercel.app/active-context/) — the optional code-retrieval projection.
-- [Architecture](https://vivary.vercel.app/architecture/) — ownership and package boundaries.
-- [MCP](https://vivary.vercel.app/mcp/) — the optional local read-only adapter.
+- [Published 0.3.1 proof](https://vivary.vercel.app/walkthrough/): scaffold, doctor, review, blast radius.
+- [Guide library](https://vivary.vercel.app/learn-by-doing/): one task at a time. Published guides pin 0.3.1.
+- [Command reference](https://vivary.vercel.app/commands/): flags, outputs, and exit codes. Unreleased
+  commands are marked.
+- [Architecture](https://vivary.vercel.app/architecture/): ownership and package boundaries.
 
 
 ---
 
 # Getting started proof
 
-> **Historical published-line fixture.** This page records the public 0.3.1 full
-> scaffold and is retained as release evidence. Development-source 0.4.2 uses the
-> five-file thin contract described in [Getting started](https://vivary.vercel.app/getting-started/); it does
-> not reproduce this 38-file layout.
+> **Published 0.3.1 proof.** This page records the public 0.3.1 full scaffold.
+> Pin `create-vivary==0.3.1`. The unpublished 0.4.2 five-file contract is not on
+> this page. See [Getting started](https://vivary.vercel.app/getting-started/) for the stranger install path.
 
 This is a public, generic proof of the first Vivary work cycle. It uses a disposable
 workspace named `demo-vivary-workspace`; no private dogfood bundle, local project brain,
@@ -443,7 +383,7 @@ the typed graph, run review, see coordination state, and name blast radius befor
 The published 0.3.1 scaffold created the agent operating shell and graph starter pack:
 
 ```bash
-create-vivary init demo-vivary-workspace --preset coding --no-wizard
+uvx --from create-vivary==0.3.1 create-vivary init demo-vivary-workspace --preset coding --no-wizard
 ```
 
 In the proof run, the scaffold wrote 38 files. Those files are plain Markdown, TOML, and
@@ -538,10 +478,10 @@ contract seam. Command names are `tropo` / `strato` / `ozone` / `exo`; the scaff
 remains `create-vivary`. The separate, optional `vivary-mcp` package pins its reviewed
 MCP SDK dependency.
 
-- **Install (PyPI):** `pip install vivary`
-- **Run without installing (uv):** `uvx --from vivary-tropo tropo check`, `uvx --from vivary-ozone ozone review`, …
-- **Scaffold (npm):** `npm create @vivary@latest my-workspace` / `npx @vivary/create@latest my-workspace`
-- **From a repo checkout:** `python packages/tropo/tropo.py check`, etc.
+- **Install (PyPI):** `pip install create-vivary==0.3.1` (or `pip install vivary==0.1.0` for the published suite)
+- **Run without installing (uv):** `uvx --from create-vivary==0.3.1 create-vivary doctor`, `uvx --from vivary-tropo==0.4.1 tropo check`, `uvx --from vivary-ozone==0.2.0 ozone review`
+- **Scaffold (npm):** `npx --yes @vivary/create@0.3.1 my-workspace` (do not use unpinned `@latest`)
+- **From a repo checkout:** `python packages/tropo/tropo.py check` (unpublished 0.4.2 source)
 
 Features called out as **unreleased** are present on the `dev` branch and generated
 site docs, but are not available from the current PyPI/npm packages until the next
@@ -1815,82 +1755,58 @@ The command reference keeps exhaustive flags, schemas, limits, and exit codes.
 
 ## Release boundary
 
-The guide library describes the unpublished 0.4.2 source candidate.
-Registry `latest` still installs published 0.3.1.
+The default guides pin **published 0.3.1**.
 Use the [release-status table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) as the publication authority.
+The [published 0.3.1 proof](https://vivary.vercel.app/walkthrough/) shows the full-layout scaffold.
 
-The [historical proof](https://vivary.vercel.app/walkthrough/) records the published 0.3.1 full layout.
-Do not use that 38-file fixture as the thin-workspace expectation.
+Guides that need `record`, exact-hash adopt apply, `--governed`, or MCP are
+unpublished 0.4.2. Those pages say so at the top. Do not run them with registry
+0.3.1.
 
 ## Command route
 
-Before release, run each guide from the Vivary source checkout root.
-Use these source commands:
+For published 0.3.1 tasks, pin the registry commands:
 
 ```bash
-python packages/create-vivary/create_vivary.py
-python packages/tropo/tropo.py
+uvx --from create-vivary==0.3.1 create-vivary
+uvx --from vivary-tropo==0.4.1 tropo
 ```
 
-The non-governed guide commands include these source paths.
 Replace each example workspace path with the intended absolute path.
+Do not use unversioned registry `latest`.
 
-Governed capsule and record commands need an isolated candidate environment.
-Get approval before you create or change that environment.
-
-Create the environment on Windows:
-
-```powershell
-python -m venv C:/path/to/vivary-candidate
-C:/path/to/vivary-candidate/Scripts/python.exe -m pip install ./packages/core ./packages/tropo ./packages/create-vivary
-C:/path/to/vivary-candidate/Scripts/Activate.ps1
-```
-
-Create the environment on macOS or Linux:
-
-```bash
-python -m venv /path/to/vivary-candidate
-/path/to/vivary-candidate/bin/python -m pip install ./packages/core ./packages/tropo ./packages/create-vivary
-source /path/to/vivary-candidate/bin/activate
-```
-
-Use that environment for every `--governed` or `record` command.
-Do not use the published 0.3.1 command for these candidate procedures.
-
-After 0.4.2 is published, use `create-vivary` and `tropo` directly.
-Do not use unversioned registry `latest` before publication.
+Unpublished 0.4.2 guides run from a Vivary checkout or an isolated candidate
+environment. Get approval before you create that environment.
 
 ## Choose a guide
 
-| Task | Guide | Result |
-|---|---|---|
-| Start a new project | [Create a Vivary workspace](https://vivary.vercel.app/guides/create-workspace/) | Create the five-file seed. |
-| Give an agent context | [Connect an agent to Vivary](https://vivary.vercel.app/guides/connect-agent/) | Use the standard route or optional MCP. |
-| Retrieve evidence | [Get bounded context](https://vivary.vercel.app/guides/get-context/) | Return task context or a Task Capsule. |
-| Preserve earned context | [Write one approved record](https://vivary.vercel.app/guides/write-record/) | Apply one capsule-bound record. |
-| Add Vivary to a project | [Adopt an existing project](https://vivary.vercel.app/guides/adopt-project/) | Apply a bounded brownfield plan. |
-| Prove health | [Verify and recover a workspace](https://vivary.vercel.app/guides/verify-recover/) | Validate health and use explicit recovery. |
+| Task | Guide | Result | Line |
+|---|---|---|---|
+| Start a new project | [Create a Vivary workspace](https://vivary.vercel.app/guides/create-workspace/) | Create the published 0.3.1 full-layout scaffold. | Published 0.3.1 |
+| Add Vivary to a project | [Adopt an existing project](https://vivary.vercel.app/guides/adopt-project/) | Dry-run, then add files only. | Published 0.3.1 |
+| Prove health | [Verify and recover a workspace](https://vivary.vercel.app/guides/verify-recover/) | Validate health. Recovery hashes are 0.4.2. | Mixed |
+| Give an agent context | [Connect an agent to Vivary](https://vivary.vercel.app/guides/connect-agent/) | Use the standard route. MCP is unpublished. | Mixed |
+| Retrieve evidence | [Get bounded context](https://vivary.vercel.app/guides/get-context/) | Return task context. Task Capsule path is 0.4.2. | Mixed |
+| Preserve earned context | [Write one approved record](https://vivary.vercel.app/guides/write-record/) | Apply one capsule-bound record. | Unpublished 0.4.2 |
 
 ## Use the guides in this order
 
 For a new project:
 
-1. Create the workspace.
-2. Verify the five-file seed.
-3. Connect the selected agent.
-4. Retrieve bounded context.
+1. Create the workspace with published 0.3.1.
+2. Verify with Doctor and Tropo check.
+3. Connect the selected agent through AGENTS.md.
+4. Retrieve bounded context with Tropo.
 5. Complete real work.
 6. Verify the result.
-7. Write one record only when the work earns it.
 
 For an existing project:
 
-1. Preview adoption.
-2. Review conflicts and privacy.
-3. Get approval for the exact plan hash.
-4. Apply the approved plan.
-5. Verify the adopted workspace.
-6. Connect the selected agent.
+1. Preview adoption with published 0.3.1.
+2. Review the add list and collisions.
+3. Approve the add list, then apply with `--yes`.
+4. Verify the adopted workspace.
+5. Connect the selected agent.
 
 ## Shared guide format
 
@@ -1918,13 +1834,10 @@ Do not add guide packs during init, adoption, MCP startup, or retrieval.
 ## Authority summary
 
 Default retrieval is read-only.
-The `--receipt` option writes a local privacy-preserving receipt.
-MCP is read-only and optional.
 Plain Doctor is read-only.
-Init creates the approved new-workspace seed.
-Adoption needs an exact approved plan hash.
-Record apply needs a capsule and exact approved plan hash.
-Recovery needs the exact reported transaction hash.
+Published 0.3.1 init creates the full-layout scaffold.
+Published 0.3.1 adoption adds files only after `--yes`.
+`record`, exact-hash apply, MCP, and `--governed` are unpublished 0.4.2.
 
 Publishing, external writes, destructive work, credentials, and authority expansion remain human gates.
 
@@ -1945,24 +1858,24 @@ Use this guide for a new project or an empty directory.
 
 ## Result
 
-Vivary creates a five-file governed workspace.
-The workspace contains no starter records, templates, skills, or second-brain content.
+Vivary creates the published 0.3.1 full-layout scaffold.
+The workspace includes agent operating files, a starter typed graph, and skill
+surfaces.
 
 ## Release boundary
 
-These commands describe the unpublished 0.4.2 source candidate.
-Registry `latest` still installs published 0.3.1 and creates the historical full layout.
-Run these commands from the Vivary source checkout root.
+These commands pin **published 0.3.1**.
+Do not use unpinned `latest`.
+Do not use a checkout script unless you are inspecting unpublished 0.4.2.
 
 ## Agent contract
 
 | Field | Value |
 |---|---|
-| Goal | Create one minimal governed workspace. |
+| Goal | Create one published 0.3.1 workspace. |
 | Required input | Target directory and preset. |
-| Default authority | Create the five-file seed. |
-| Optional authority | Add only the selected bounded adapter or sidecar. |
-| Prohibited action | Do not install providers, create records, or copy starter packs. |
+| Default authority | Create the full-layout scaffold. |
+| Prohibited action | Do not install unpublished 0.4.2. Do not copy a checkout path. |
 | Proof | Doctor and Tropo checks pass. |
 
 ## 1. Check the target
@@ -1973,8 +1886,6 @@ If the target contains project files, use [Adopt an existing project](https://vi
 ## 2. Select a preset
 
 Select one preset that matches the work.
-Each preset creates the same five files.
-A preset changes policy labels only.
 
 | Preset | Use |
 |---|---|
@@ -1983,105 +1894,52 @@ A preset changes policy labels only.
 | `knowledge-work` | Research, decisions, artifacts, and proof. |
 | `writing` | Drafts, research, reviews, and publication gates. |
 
-The `second-brain` preset does not create notes or a pre-populated second brain.
-
-## 3. Preview the workspace
-
-Run a dry-run before the first write.
+## 3. Create the workspace
 
 ```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-project --preset coding --no-wizard --dry-run --json
+uvx --from create-vivary==0.3.1 create-vivary init C:/path/to/my-project --preset coding --no-wizard
 ```
 
-Confirm the target, preset, contract, and five planned files.
-Stop if the target contains work that Vivary can overwrite.
-
-## 4. Create the workspace
-
-Run the same command without `--dry-run`.
+Or from npm:
 
 ```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-project --preset coding --no-wizard --json
+npx --yes @vivary/create@0.3.1 C:/path/to/my-project -- --preset coding --no-wizard
 ```
 
-Vivary creates this tree:
+Published 0.3.1 writes the full-layout scaffold.
+A coding proof run wrote 38 files: `AGENTS.md`, `STATE.md`, `SOUL.md`, `tropo.toml`,
+starter graph folders, and Claude/Codex skill surfaces.
+See the [published 0.3.1 proof](https://vivary.vercel.app/walkthrough/).
 
-```text
-my-project/
-├── .gitignore
-├── AGENTS.md
-├── STATE.md
-└── .vivary/
-    ├── context.md
-    └── workspace.toml
-```
+This is not the unpublished five-file 0.4.2 seed.
 
-`AGENTS.md` routes the agent to governed context.
-`STATE.md` shows the current focus, status, and next action.
-`.gitignore` protects private and runtime paths.
-`.vivary/context.md` defines the work loop and gates.
-`.vivary/workspace.toml` defines the thin contract and type policy.
-
-## 5. Verify the workspace
-
-Run Doctor.
-Then run Tropo validation.
+## 4. Verify the workspace
 
 ```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/my-project
-python packages/tropo/tropo.py check --root C:/path/to/my-project
+uvx --from create-vivary==0.3.1 create-vivary doctor C:/path/to/my-project
+uvx --from vivary-tropo==0.4.1 tropo check --root C:/path/to/my-project
 ```
 
 Both commands must exit with code `0`.
 Fix each error before an agent uses the workspace.
-
-## Optional second-brain example
-
-Preview the policy before creation.
-
-```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-notes --preset second-brain --no-wizard --dry-run --json
-python packages/create-vivary/create_vivary.py init C:/path/to/my-notes --preset second-brain --no-wizard --json
-```
-
-The result is still the five-file seed.
-Real notes must come from later work.
-
-## Optional additions
-
-Include an adapter in the initial command only when the runtime needs it.
-
-```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-agent-project --preset coding --adapter agents --no-wizard
-python packages/create-vivary/create_vivary.py init C:/path/to/my-claude-project --preset coding --adapter claude --no-wizard
-```
-
-Each adapter adds one bounded runtime file.
-Use `--adapter` twice when both adapters are required.
-
-Include active code context only after explicit selection.
-
-```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-code-project --preset coding --active-context cocoindex-code --no-wizard
-```
-
-This option keeps the five-file seed.
-It declares the capability and ignores its local index path.
-It does not copy guidance, install an indexer, or create an index.
 
 ## Stop conditions
 
 Stop when the target is nonempty.
 Stop when a planned file can replace user content.
 Stop when provider installation needs approval.
-Stop when privacy policy is missing or invalid.
 
-Use the [command reference](https://vivary.vercel.app/commands/#create-vivary--the-scaffolder) for all flags and output fields.
+Use [Getting started](https://vivary.vercel.app/getting-started/) for the install pins.
+Use the [command reference](https://vivary.vercel.app/commands/) for flags and output fields.
 
 
 ---
 
 # Connect an agent to Vivary
+
+> **Mixed line.** The AGENTS.md route works on published 0.3.1.
+> Optional MCP is unpublished. Pin Doctor with
+> `uvx --from create-vivary==0.3.1 create-vivary doctor`.
 
 Use this guide after Vivary creates or adopts a workspace.
 
@@ -2106,7 +1964,7 @@ The connection does not grant write authority.
 Run Doctor before the connection.
 
 ```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/project
+uvx --from create-vivary==0.3.1 create-vivary doctor C:/path/to/project
 ```
 
 Stop if Doctor reports an error.
@@ -2203,6 +2061,10 @@ Use the [MCP reference](https://vivary.vercel.app/mcp/) for schemas, limits, dia
 ---
 
 # Get bounded context
+
+> **Mixed line.** Plain Tropo find and check exist on published tropo 0.4.1.
+> `--governed` Task Capsules and MCP `vivary_capsule` are unpublished 0.4.2.
+> Pin `uvx --from vivary-tropo==0.4.1 tropo` for the published path.
 
 Use this guide before an agent changes the workspace.
 
@@ -2345,6 +2207,10 @@ Use [Write one approved record](https://vivary.vercel.app/guides/write-record/) 
 ---
 
 # Write one approved record
+
+> **Unpublished 0.4.2.** `create-vivary record` is not on the registry.
+> Strangers should stop at [Getting started](https://vivary.vercel.app/getting-started/) with published
+> 0.3.1. Run this guide only from a Vivary checkout or an isolated candidate.
 
 Use this guide after verified work earns durable context.
 
@@ -2525,19 +2391,25 @@ Use this guide when the target already contains project files.
 
 ## Result
 
-Vivary adds bounded governed context without taking over the project.
-The default payload limit is three Vivary-owned files.
+Vivary adds the published 0.3.1 scaffold files without rewriting existing content.
+Adopt is dry-run first. It only adds files.
+
+## Release boundary
+
+These commands pin **published 0.3.1**.
+Do not use `--plan <hash>`. That apply path is unpublished 0.4.2.
+Do not expect the three-file thin payload. That contract is unpublished 0.4.2.
 
 ## Agent contract
 
 | Field | Value |
 |---|---|
-| Goal | Add minimal governed context to one existing project. |
+| Goal | Add published Vivary files to one existing project. |
 | Required input | Existing directory and approved preset. |
-| Planning authority | Inspect and produce one deterministic plan. |
-| Apply authority | Apply only the exact human-approved plan. |
-| Prohibited action | Do not copy templates, skills, records, or framework prose. |
-| Proof | Apply reports Doctor proof and preserves user content. |
+| Planning authority | Inspect and list files that would be added. |
+| Apply authority | Write only after explicit `--yes`. |
+| Prohibited action | Do not rewrite existing files. Do not use unpublished exact-hash apply. |
+| Proof | Adopt reports the add list. Doctor and Tropo checks pass. |
 
 ## 1. Identify the project root
 
@@ -2549,152 +2421,49 @@ Use `adopt` for all nonempty targets.
 
 ## 2. Preview the adoption
 
-Run the default dry-run.
-
 ```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project --json
+uvx --from create-vivary==0.3.1 create-vivary adopt C:/path/to/project --json
 ```
 
 The command writes nothing.
-The command returns a deterministic plan.
+Read every planned create.
+Stop on a collision.
+Existing files must stay byte-identical.
 
-Inspect these fields:
-
-- `creates`
-- `patches`
-- `optional_projections`
-- `kept`
-- `conflicts`
-- `privacy`
-- `plan_hash`
-
-Stop when `conflicts` is not empty.
-Stop when the privacy result is not healthy.
-
-## 3. Check the default file limit
-
-Adoption can create these three payload files:
-
-```text
-.vivary/context.md
-.vivary/workspace.toml
-STATE.md
-```
-
-Adoption creates `STATE.md` only when the file is absent.
-
-Adoption can also create or patch two managed blocks:
-
-```text
-AGENTS.md
-.gitignore
-```
-
-Vivary keeps all user content outside those blocks.
-Vivary does not rewrite an entire host file.
-
-## 4. Select optional adapters only when required
-
-Request an adapter explicitly.
+## 3. Apply after approval
 
 ```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project --adapter agents --json
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project --adapter claude --json
+uvx --from create-vivary==0.3.1 create-vivary adopt C:/path/to/project --yes
 ```
 
-Each adapter is a separate optional projection.
-Each adapter adds one bounded runtime file.
+Apply only after a human approves the add list.
 
-Do not request an adapter for an unused runtime.
-
-## 5. Approve the exact plan
-
-Show the complete plan to the project owner.
-Ask for approval of the exact `plan_hash`.
-
-Replan after any project file changes.
-Replan after any preset or adapter changes.
-
-## 6. Apply the approved plan
-
-Use the exact approved hash.
+## 4. Verify
 
 ```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
-  --yes --plan sha256:<approved-plan-hash> \
-  --json
+uvx --from create-vivary==0.3.1 create-vivary doctor C:/path/to/project
+uvx --from vivary-tropo==0.4.1 tropo check --root C:/path/to/project
 ```
 
-Apply rechecks every planned input.
-Apply uses exact-byte backups and a transaction journal.
-Apply rolls back ordinary failures.
+Both commands must exit with code `0`.
 
-## 7. Verify the project
+## Stop conditions
 
-Run Doctor after apply.
-Then run Tropo validation.
+Stop when a planned create collides with an existing file.
+Stop when existing content would change.
+Stop when the add list is not approved.
 
-```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/project
-python packages/tropo/tropo.py check --root C:/path/to/project
-```
-
-Confirm that user-owned files keep their original content.
-Confirm that no starter record or template exists.
-
-## Conflict conditions
-
-Vivary reports a conflict for divergent managed blocks.
-Vivary reports a conflict for an invalid thin contract.
-Vivary reports a conflict for changed plan inputs.
-Vivary reports a conflict when nested ignore rules expose private paths.
-Vivary reports a conflict for unsafe linked or non-regular targets.
-
-Do not bypass a conflict with `--force`.
-Resolve the owner decision.
-Run a new dry-run.
-
-## Interrupted transaction
-
-Use recovery only when adoption reports an interrupted transaction.
-Use the exact reported plan hash.
-
-```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
-  --recover sha256:<reported-plan-hash> \
-  --json
-```
-
-This command is a read-only recovery plan.
-Review its `recovery_plan_hash` and actions.
-
-```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
-  --recover sha256:<reported-plan-hash> \
-  --yes \
-  --plan sha256:<approved-recovery-plan-hash> \
-  --json
-```
-
-The second command restores only the approved transaction-bound bytes.
-
-Do not guess a recovery hash.
-Do not start a new plan before recovery completes.
-
-## What adoption never does
-
-Adoption does not scan for candidate modules.
-Adoption does not create graph records.
-Adoption does not copy routers, skills, or templates.
-Adoption does not exclude arbitrary existing content.
-Adoption does not enable MCP, memory, indexing, or network access.
-
-Use the [adoption reference](https://vivary.vercel.app/commands/#adopt--governed-brownfield-setup) for the complete transaction contract.
+Use [Getting started](https://vivary.vercel.app/getting-started/) for the install pins.
+Use the [command reference](https://vivary.vercel.app/commands/) for flags and output fields.
 
 
 ---
 
 # Verify and recover a workspace
+
+> **Mixed line.** Plain Doctor and Tropo check exist on published 0.3.1 / tropo 0.4.1.
+> Exact-hash adoption recovery is unpublished 0.4.2. Pin
+> `uvx --from create-vivary==0.3.1 create-vivary doctor` for the published path.
 
 Use this guide after setup, adoption, or an approved record write.
 
@@ -4828,7 +4597,7 @@ The gate is therefore part of the operating protocol, not a decorative confirmat
 A new workspace can be created with:
 
 ```bash
-npm create @vivary@latest my-workspace
+npx --yes @vivary/create@0.3.1 my-workspace
 ```
 
 Presets currently cover coding, second-brain, knowledge-work, and writing shapes.
@@ -5438,9 +5207,10 @@ This checklist is a design aid, not a certification.
 Use these recipes after the [guide library](https://vivary.vercel.app/learn-by-doing/).
 Each recipe assumes that the basic workspace checks pass.
 
-Registry `latest` still installs the published 0.3.1 line.
-Use the approved 0.4.2 candidate route from [Getting started](https://vivary.vercel.app/getting-started/).
+Registry `@latest` still installs the published 0.3.1 line.
+Pin that version. See [Getting started](https://vivary.vercel.app/getting-started/).
 The [README release table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) owns publication truth.
+Unpublished 0.4.2 recipes below are marked where they need a checkout.
 
 Run commands inside a workspace unless you use `--root`.
 
@@ -5449,14 +5219,14 @@ Run commands inside a workspace unless you use `--root`.
 Use [Create a Vivary workspace](https://vivary.vercel.app/guides/create-workspace/) for the complete procedure.
 
 ```bash
-create-vivary init my-workspace --preset writing      # coding | second-brain | knowledge-work | writing
-create-vivary doctor my-workspace                      # validate it
+uvx --from create-vivary==0.3.1 create-vivary init my-workspace --preset writing
+uvx --from create-vivary==0.3.1 create-vivary doctor my-workspace
 ```
 
 ## Check a legacy or current workspace without changing it
 
 ```bash
-create-vivary doctor my-workspace --json
+uvx --from create-vivary==0.3.1 create-vivary doctor my-workspace --json
 ```
 
 Doctor is read-only in both human and JSON modes: it exits `0` when the report has no
@@ -5471,15 +5241,16 @@ line to add. A published semantic-memory profile keeps `heartbeat-reports/*` str
 leaves its newer `*.vivary-tmp` gap as an upgrade warning; a current semantic-memory
 profile keeps every privacy rule strict.
 
-Use adoption only to preview the new thin contract:
+Use adoption to add published 0.3.1 files to an existing project:
 
 ```bash
-create-vivary adopt my-workspace --preset writing
+uvx --from create-vivary==0.3.1 create-vivary adopt my-workspace --preset writing --json
 ```
 
-`adopt` is a dry run unless `--yes --plan <plan_hash>` is supplied. It does not migrate
-or remove legacy modules, templates, or skills. If `.vivary/memory.toml` says
-`enabled = true`, it must name a real provider: `provider = "none"` is misconfigured.
+Published adopt is a dry run unless `--yes` is supplied. It only adds files.
+Existing content stays byte-identical. Do not use `--plan <plan_hash>` with 0.3.1.
+That apply path is unpublished 0.4.2. If `.vivary/memory.toml` says `enabled = true`,
+it must name a real provider: `provider = "none"` is misconfigured.
 Use `--trend` only when you intend to write local Doctor runtime state.
 
 ## Bring an existing repo's docs under tropo
@@ -6652,6 +6423,28 @@ the `v0.1.0` line.
 `vivary-memory-cognee` **0.1.0** · `vivary-tropo` **0.4.1** · `vivary-ozone`
 **0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
 "Vivary 0.4.1" release.
+
+## [Unreleased: stranger docs freeze to published 0.3.1] — 2026-08-15
+
+Docs and site copy only. No package bump. Stranger-facing install, getting-started,
+guides, package READMEs, and the homepage now pin published `create-vivary` /
+`@vivary/create` **0.3.1** and describe the full-layout scaffold. Unpublished 0.4.2
+five-file, `record`, exact-hash adopt apply, and MCP stay labeled as development
+source. Registry versions are unchanged.
+
+### Changed
+
+- Getting started, README quickstart, agent paste prompts, create/adopt guides,
+  command-reference install lines, and homepage hero/install command pin 0.3.1.
+- Walkthrough is the published 0.3.1 proof, not a historical aside to a five-file
+  stranger path.
+
+### Verification
+
+- `node site/scripts/sync-docs.mjs` regenerates site mirrors.
+- Manual grep: stranger install examples pin `0.3.1` and do not present unpinned
+  `@latest` or checkout `python packages/create-vivary/create_vivary.py` as the
+  default install.
 
 ## [Unreleased: release artifact license hardening] — 2026-08-13
 

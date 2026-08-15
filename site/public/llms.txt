@@ -46,7 +46,7 @@ Use the page that matches the task. These site documents and the repository Mark
 sources are the same canonical procedures.
 
 - Vivary guides: Task-based Vivary guides for creating or adopting a workspace, connecting agents, retrieving context, writing records, and recovering safely. https://vivary.vercel.app/learn-by-doing/
-- Create a Vivary workspace: Create and verify the five-file Vivary governed-context workspace for a new project without adding starter content. https://vivary.vercel.app/guides/create-workspace/
+- Create a Vivary workspace: Create and verify the published 0.3.1 full-layout Vivary scaffold. https://vivary.vercel.app/guides/create-workspace/
 - Connect an AI agent to Vivary: Connect an AI coding or writing agent to Vivary through the standard context route or optional read-only MCP adapter. https://vivary.vercel.app/guides/connect-agent/
 - Get bounded Vivary context: Retrieve privacy-filtered project evidence with Vivary or save a complete governed Task Capsule for approved work. https://vivary.vercel.app/guides/get-context/
 - Write a governed Vivary record: Plan, approve, apply, and verify one capsule-bound Vivary record after completed work earns durable project context. https://vivary.vercel.app/guides/write-record/

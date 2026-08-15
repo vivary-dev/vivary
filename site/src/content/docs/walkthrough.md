@@ -4,10 +4,9 @@ description: "A public, generic product walkthrough showing Vivary scaffold, hea
 editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/WALKTHROUGH.md"
 ---
 
-> **Historical published-line fixture.** This page records the public 0.3.1 full
-> scaffold and is retained as release evidence. Development-source 0.4.2 uses the
-> five-file thin contract described in [Getting started](/getting-started/); it does
-> not reproduce this 38-file layout.
+> **Published 0.3.1 proof.** This page records the public 0.3.1 full scaffold.
+> Pin `create-vivary==0.3.1`. The unpublished 0.4.2 five-file contract is not on
+> this page. See [Getting started](/getting-started/) for the stranger install path.
 
 This is a public, generic proof of the first Vivary work cycle. It uses a disposable
 workspace named `demo-vivary-workspace`; no private dogfood bundle, local project brain,
@@ -23,7 +22,7 @@ the typed graph, run review, see coordination state, and name blast radius befor
 The published 0.3.1 scaffold created the agent operating shell and graph starter pack:
 
 ```bash
-create-vivary init demo-vivary-workspace --preset coding --no-wizard
+uvx --from create-vivary==0.3.1 create-vivary init demo-vivary-workspace --preset coding --no-wizard
 ```
 
 In the proof run, the scaffold wrote 38 files. Those files are plain Markdown, TOML, and

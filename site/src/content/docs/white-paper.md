@@ -810,7 +810,7 @@ The gate is therefore part of the operating protocol, not a decorative confirmat
 A new workspace can be created with:
 
 ```bash
-npm create @vivary@latest my-workspace
+npx --yes @vivary/create@0.3.1 my-workspace
 ```
 
 Presets currently cover coding, second-brain, knowledge-work, and writing shapes.

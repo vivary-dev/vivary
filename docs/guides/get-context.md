@@ -1,5 +1,9 @@
 # Get bounded context
 
+> **Mixed line.** Plain Tropo find and check exist on published tropo 0.4.1.
+> `--governed` Task Capsules and MCP `vivary_capsule` are unpublished 0.4.2.
+> Pin `uvx --from vivary-tropo==0.4.1 tropo` for the published path.
+
 Use this guide before an agent changes the workspace.
 
 ## Result

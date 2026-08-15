@@ -37,8 +37,8 @@ runs your local model with the same tools it always had.
 **3. A workspace.** Scaffold one the usual way:
 
 ```bash
-npm create @vivary@latest my-workspace # or: create-vivary init my-workspace --preset coding
-create-vivary doctor my-workspace      # verify it's healthy
+npx --yes @vivary/create@0.3.1 my-workspace
+uvx --from create-vivary==0.3.1 create-vivary doctor my-workspace
 ```
 
 That's it. The agent now operates a real workspace using a model running on your own
