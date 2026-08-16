@@ -288,7 +288,7 @@ evidence](https://github.com/vivary-dev/vivary/blob/dev/packages/memory-cognee/t
 
 The source checkout and next `vivary-memory-cognee` release include
 `.strato/private/**` in the built-in floor and compare explicit privacy patterns
-case-insensitively on Windows. The currently published 0.1.0 package lacks that
+case-insensitively on Windows. The earlier 0.1.0 release lacks that
 built-in `.strato/private/**` entry; its generated Vivary configuration lists the path
 in `memory.privacy.private_paths`, but hand-written or older configuration must add it
 explicitly before indexing.

@@ -8,17 +8,15 @@ Use this at the end of every Vivary update that changes behavior, packaging,
 public docs, install commands, release status, or package versions.
 
 **The rule: merging to `dev` is not a release, and development slices do not publish
-early.** For the current comprehensive update, no package publishes until core and role
-integration, trustworthy brownfield setup, MCP, dogfood, the benchmark, the tutorial,
-documentation, package/version truth, and release verification are complete and
-separately approved. At that final gate, core and all dependent packages publish as one
-coordinated train, and the website copy updates with them.
+early.** A coordinated train publishes only after every held item on it is complete and
+separately approved. At that final gate, core and all dependent packages publish
+together, and the website copy updates with them.
 
-The current coordinated development train is named **Vivary Governed Context**. The name is a
-planning and release label, not a suite version and not evidence that any artifact has
-published. Exact current source and registry versions live in the
-[root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status); maturity lives in
-[MIGRATION-STATUS.md](/migration-status/).
+The **Vivary Governed Context** train published and was verified on **2026-08-15**. A
+train name is a planning and release label, not a suite version, and it is never
+evidence that a given artifact reached a registry. Exact current source and registry
+versions live in the [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status); maturity lives
+in [MIGRATION-STATUS.md](/migration-status/).
 
 ## 1. Name the train and decide the release scope
 
@@ -33,10 +31,10 @@ Work out which packages actually changed, then bump only those:
 | `packages/create-vivary/create_vivary.py` | `create-vivary` (PyPI) **and** `@vivary/create` (npm) — always in lockstep | same |
 | `packages/create-vivary/create_vivary_assets/` or legacy full-workspace fixtures | No user-facing package bump by themselves; these are repository-only compatibility archives and must remain excluded from wheels and source distributions | parity/packaging proof |
 | `packages/strato/` templates or skills | `vivary-strato` when its runtime/package surface changes; do not copy these assets into thin init/adopt output | same |
-| `packages/strato/strato.py`, its tests, or CLI contract | `vivary-strato` — bump the version, but keep it unpublished on `dev`; publish only in the final coordinated train with core and the other role packages | ARCHITECTURE seam section, COMMANDS, README surface row |
+| `packages/strato/strato.py`, its tests, or CLI contract | `vivary-strato` — bump the version and publish it in the next coordinated train alongside core and the other role packages | ARCHITECTURE seam section, COMMANDS, README surface row |
 | `packages/memory-cognee/vivary_cognee.py` | `vivary-memory-cognee` | same |
-| `packages/mcp/vivary_mcp.py` or its tests | `vivary-mcp` — keep optional and unpublished until its explicit train item; preserve the exact reviewed MCP SDK pin | MCP guide, package README, Tropo floor |
-| `packages/core/` modules or tests | `vivary-core` — bump the version, but keep it unpublished on `dev`; publish it only in the final coordinated train with every dependent role package | ARCHITECTURE seam section, README surface row |
+| `packages/mcp/vivary_mcp.py` or its tests | `vivary-mcp` — keep it optional and off by default; preserve the exact reviewed MCP SDK pin | MCP guide, package README, Tropo floor |
+| `packages/core/` modules or tests | `vivary-core` — bump the version and publish it in the next coordinated train, always before every dependent role package | ARCHITECTURE seam section, README surface row |
 | dependency floors in `packages/vivary/pyproject.toml` | `vivary` (meta) — bump its floors and patch version when component minimums move | README table |
 | `docs/`, `site/`, root README only | **no package bump** — site redeploys from `dev` via Vercel automatically | keep docs/site sync (step 3) |
 | repo CI / stats / tests only | no bump, no site work | — |

@@ -10,12 +10,16 @@ launcher; a generated workspace can be scaffolded and checked in minutes.
 
 - **Live site:** https://vivary.vercel.app/
 - **GitHub:** https://github.com/vivary-dev/vivary (public · MIT)
-- **PyPI:** [`create-vivary`](https://pypi.org/project/create-vivary/) 0.3.1 ·
-  [`vivary-tropo`](https://pypi.org/project/vivary-tropo/) 0.4.1 ·
-  [`vivary-ozone`](https://pypi.org/project/vivary-ozone/) 0.2.0 ·
-  [`vivary-exo`](https://pypi.org/project/vivary-exo/) 0.2.2 ·
-  [`vivary-memory-cognee`](https://pypi.org/project/vivary-memory-cognee/) 0.1.0
-- **npm:** [`@vivary/create`](https://www.npmjs.com/package/@vivary/create) 0.3.1
+- **PyPI:** [`vivary`](https://pypi.org/project/vivary/) 0.1.10 ·
+  [`create-vivary`](https://pypi.org/project/create-vivary/) 0.4.2 ·
+  [`vivary-core`](https://pypi.org/project/vivary-core/) 0.2.7 ·
+  [`vivary-tropo`](https://pypi.org/project/vivary-tropo/) 0.5.3 ·
+  [`vivary-strato`](https://pypi.org/project/vivary-strato/) 0.1.2 ·
+  [`vivary-ozone`](https://pypi.org/project/vivary-ozone/) 0.3.1 ·
+  [`vivary-exo`](https://pypi.org/project/vivary-exo/) 0.3.0 ·
+  [`vivary-memory-cognee`](https://pypi.org/project/vivary-memory-cognee/) 0.1.2 ·
+  [`vivary-mcp`](https://pypi.org/project/vivary-mcp/) 0.1.3
+- **npm:** [`@vivary/create`](https://www.npmjs.com/package/@vivary/create) 0.4.2
 
 ## Proof
 
@@ -46,12 +50,12 @@ Mobile:
 - **Restraint:** no third-party dependencies; the framework costs almost nothing
   to load. Plain Markdown, any editor, Claude Code *and* Codex.
 
-> Current release line: `create-vivary` 0.3.1 (PyPI), `@vivary/create` 0.3.1 (npm),
-> optional `vivary-memory-cognee` 0.1.0, `vivary-tropo` 0.4.1, `vivary-ozone` 0.2.0,
-> `vivary-exo` 0.2.2. Versions are independent; there is no single "Vivary 0.4.1".
-> This line adds `tropo map` (read-only filesystem inventory), brownfield
-> `create-vivary adopt`, `doctor --trend` drift tracking, and strato integrity gates
-> in CI.
+> Current release line: `create-vivary` / `@vivary/create` 0.4.2, `vivary-core` 0.2.7,
+> `vivary-tropo` 0.5.3, `vivary-strato` 0.1.2, `vivary-ozone` 0.3.1, `vivary-exo`
+> 0.3.0, `vivary` 0.1.10, plus optional `vivary-memory-cognee` 0.1.2 and `vivary-mcp`
+> 0.1.3. Versions are independent; there is no single "Vivary 0.4.2". This line ships
+> the thin five-file init contract, exact-hash brownfield `create-vivary adopt`, the
+> `vivary-core` governed-context seam, and the optional read-only MCP adapter.
 
 > Context-compression release proof, refreshed 2026-06-27: `tropo find` and
 > graph-aware `tropo query` passed 68 tropo tests; Ozone context-budget passed 16 ozone

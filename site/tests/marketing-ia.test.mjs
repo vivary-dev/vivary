@@ -34,16 +34,6 @@ const blogPosts = readdirSync(blogDir)
 
 const rootReadme = readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
 
-const sourceVersion = (packageDirectory) => {
-  const manifest = readFileSync(
-    new URL(`../../packages/${packageDirectory}/pyproject.toml`, import.meta.url),
-    'utf8',
-  );
-  const match = manifest.match(/^version\s*=\s*"(\d+\.\d+\.\d+)"\s*$/m);
-  assert.ok(match, `${packageDirectory} must declare a source version`);
-  return match[1];
-};
-
 const publishedVersion = (surface) => {
   const row = rootReadme
     .split(/\r?\n/)
@@ -206,9 +196,9 @@ test('agent search surfaces derive published versions from the root release tabl
   assert.equal(llmsText.includes(`\`vivary-mcp\` ${mcpVersion}`), true);
   assert.equal(llmsText.includes(`\`@vivary/create\` ${publishedVersion('@vivary/create')}`), true);
 
-  // The manifests must not have moved past the published train without a new release.
-  assert.equal(sourceVersion('create-vivary'), createVersion);
-  assert.equal(sourceVersion('mcp'), mcpVersion);
+  // Deliberately no manifest-equals-registry assertion. The Staged lifecycle step in
+  // docs/RELEASE-WORKFLOW.md requires the manifest to advance while the release table
+  // still shows the old published version, so equality is wrong for most of a cycle.
 });
 
 test('public and agent guides share one concise STE100 style source', () => {

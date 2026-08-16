@@ -1842,27 +1842,25 @@ Replace each example workspace path with the intended absolute path.
 Install the tools first if you prefer bare `create-vivary` and `tropo` commands.
 Get approval before you install anything into a shared environment.
 
-Create the environment on Windows:
+Install into an environment on Windows:
 
 ```powershell
-python -m venv C:/path/to/vivary-candidate
-C:/path/to/vivary-candidate/Scripts/python.exe -m pip install ./packages/core ./packages/tropo ./packages/create-vivary
-C:/path/to/vivary-candidate/Scripts/Activate.ps1
+python -m venv C:/path/to/vivary-env
+C:/path/to/vivary-env/Scripts/python.exe -m pip install vivary
+C:/path/to/vivary-env/Scripts/Activate.ps1
 ```
 
-Create the environment on macOS or Linux:
+Install into an environment on macOS or Linux:
 
 ```bash
-python -m venv /path/to/vivary-candidate
-/path/to/vivary-candidate/bin/python -m pip install ./packages/core ./packages/tropo ./packages/create-vivary
-source /path/to/vivary-candidate/bin/activate
+python -m venv /path/to/vivary-env
+/path/to/vivary-env/bin/python -m pip install vivary
+source /path/to/vivary-env/bin/activate
 ```
 
-Use that environment for every `--governed` or `record` command.
-Do not use the published 0.3.1 command for these candidate procedures.
-
-After 0.4.2 is published, use `create-vivary` and `tropo` directly.
-Do not use unversioned registry `latest` before publication.
+The `vivary` meta package installs the CLI suite.
+Use it for every `--governed` or `record` command.
+Pin `create-vivary==0.3.1` only to get the historical full layout.
 
 ## Choose a guide
 
@@ -3701,7 +3699,7 @@ evidence](https://github.com/vivary-dev/vivary/blob/dev/packages/memory-cognee/t
 
 The source checkout and next `vivary-memory-cognee` release include
 `.strato/private/**` in the built-in floor and compare explicit privacy patterns
-case-insensitively on Windows. The currently published 0.1.0 package lacks that
+case-insensitively on Windows. The earlier 0.1.0 release lacks that
 built-in `.strato/private/**` entry; its generated Vivary configuration lists the path
 in `memory.privacy.private_paths`, but hand-written or older configuration must add it
 explicitly before indexing.
@@ -5448,8 +5446,8 @@ This checklist is a design aid, not a certification.
 Use these recipes after the [guide library](https://vivary.vercel.app/learn-by-doing/).
 Each recipe assumes that the basic workspace checks pass.
 
-Registry `latest` still installs the published 0.3.1 line.
-Use the approved 0.4.2 candidate route from [Getting started](https://vivary.vercel.app/getting-started/).
+Registry `latest` installs the published 0.4.2 line.
+Install it with the public launchers from [Getting started](https://vivary.vercel.app/getting-started/).
 The [README release table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) owns publication truth.
 
 Run commands inside a workspace unless you use `--root`.
@@ -5859,17 +5857,15 @@ Use this at the end of every Vivary update that changes behavior, packaging,
 public docs, install commands, release status, or package versions.
 
 **The rule: merging to `dev` is not a release, and development slices do not publish
-early.** For the current comprehensive update, no package publishes until core and role
-integration, trustworthy brownfield setup, MCP, dogfood, the benchmark, the tutorial,
-documentation, package/version truth, and release verification are complete and
-separately approved. At that final gate, core and all dependent packages publish as one
-coordinated train, and the website copy updates with them.
+early.** A coordinated train publishes only after every held item on it is complete and
+separately approved. At that final gate, core and all dependent packages publish
+together, and the website copy updates with them.
 
-The current coordinated development train is named **Vivary Governed Context**. The name is a
-planning and release label, not a suite version and not evidence that any artifact has
-published. Exact current source and registry versions live in the
-[root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status); maturity lives in
-[MIGRATION-STATUS.md](https://vivary.vercel.app/migration-status/).
+The **Vivary Governed Context** train published and was verified on **2026-08-15**. A
+train name is a planning and release label, not a suite version, and it is never
+evidence that a given artifact reached a registry. Exact current source and registry
+versions live in the [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status); maturity lives
+in [MIGRATION-STATUS.md](https://vivary.vercel.app/migration-status/).
 
 ## 1. Name the train and decide the release scope
 
@@ -5884,10 +5880,10 @@ Work out which packages actually changed, then bump only those:
 | `packages/create-vivary/create_vivary.py` | `create-vivary` (PyPI) **and** `@vivary/create` (npm) — always in lockstep | same |
 | `packages/create-vivary/create_vivary_assets/` or legacy full-workspace fixtures | No user-facing package bump by themselves; these are repository-only compatibility archives and must remain excluded from wheels and source distributions | parity/packaging proof |
 | `packages/strato/` templates or skills | `vivary-strato` when its runtime/package surface changes; do not copy these assets into thin init/adopt output | same |
-| `packages/strato/strato.py`, its tests, or CLI contract | `vivary-strato` — bump the version, but keep it unpublished on `dev`; publish only in the final coordinated train with core and the other role packages | ARCHITECTURE seam section, COMMANDS, README surface row |
+| `packages/strato/strato.py`, its tests, or CLI contract | `vivary-strato` — bump the version and publish it in the next coordinated train alongside core and the other role packages | ARCHITECTURE seam section, COMMANDS, README surface row |
 | `packages/memory-cognee/vivary_cognee.py` | `vivary-memory-cognee` | same |
-| `packages/mcp/vivary_mcp.py` or its tests | `vivary-mcp` — keep optional and unpublished until its explicit train item; preserve the exact reviewed MCP SDK pin | MCP guide, package README, Tropo floor |
-| `packages/core/` modules or tests | `vivary-core` — bump the version, but keep it unpublished on `dev`; publish it only in the final coordinated train with every dependent role package | ARCHITECTURE seam section, README surface row |
+| `packages/mcp/vivary_mcp.py` or its tests | `vivary-mcp` — keep it optional and off by default; preserve the exact reviewed MCP SDK pin | MCP guide, package README, Tropo floor |
+| `packages/core/` modules or tests | `vivary-core` — bump the version and publish it in the next coordinated train, always before every dependent role package | ARCHITECTURE seam section, README surface row |
 | dependency floors in `packages/vivary/pyproject.toml` | `vivary` (meta) — bump its floors and patch version when component minimums move | README table |
 | `docs/`, `site/`, root README only | **no package bump** — site redeploys from `dev` via Vercel automatically | keep docs/site sync (step 3) |
 | repo CI / stats / tests only | no bump, no site work | — |

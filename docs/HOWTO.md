@@ -3,8 +3,8 @@
 Use these recipes after the [guide library](LEARN-BY-DOING.md).
 Each recipe assumes that the basic workspace checks pass.
 
-Registry `latest` still installs the published 0.3.1 line.
-Use the approved 0.4.2 candidate route from [Getting started](GETTING-STARTED.md).
+Registry `latest` installs the published 0.4.2 line.
+Install it with the public launchers from [Getting started](GETTING-STARTED.md).
 The [README release table](../README.md#release-status) owns publication truth.
 
 Run commands inside a workspace unless you use `--root`.
