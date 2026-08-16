@@ -22,10 +22,11 @@ PACKAGES = Path("packages")
 ARCHITECTURE = Path("docs/ARCHITECTURE.md")
 PYPI_BULLET = "- PyPI:"
 
-# Distributions that deliberately have no PyPI release yet. These stay unpublished
-# during development and ship only in the final comprehensive coordinated release
-# train, together with every dependent role package.
-UNPUBLISHED = {"vivary-core", "vivary-mcp", "vivary-strato"}
+# Distributions that deliberately have no PyPI release yet. The Vivary Governed
+# Context train published every declared distribution on 2026-08-15, so the allowlist
+# is empty and the PyPI list must name all of them. A future in-repo distribution that
+# is not published yet goes here, and publishing it means taking it back out.
+UNPUBLISHED: set[str] = set()
 
 
 def require(condition: bool, message: str) -> None:

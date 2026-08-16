@@ -65,12 +65,19 @@ skill (`.claude/skills/loops/`).
 
 ## Versioning
 
-The `vivary-strato` Python distribution is at unpublished source version **0.1.2** and
-requires `vivary-core>=0.2.4`. Both remain unpublished during development and ship only
-through the final coordinated release gate. The templates and skills remain
-bundled by `create-vivary`; the runtime package does not duplicate or replace them.
+The `vivary-strato` Python distribution is published at version **0.1.2** and requires
+`vivary-core>=0.2.4`. Both shipped in the Vivary Governed Context train. The templates
+and skills remain bundled by `create-vivary`, and the runtime package does not
+duplicate or replace them.
 
-From this checkout, install the unpublished pair without consulting a registry:
+Install from the public index:
+
+```console
+python -m pip install vivary-strato
+```
+
+To test a local change instead, install the pair from this checkout without consulting
+a registry:
 
 ```console
 python -m pip install --no-deps ./packages/core ./packages/strato

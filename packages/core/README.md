@@ -149,7 +149,7 @@ adapts this surface. It does not define a second lifecycle model.
 - Completion changes only a task's control status. `task_integrity_view` always returns
   failed execution evidence for the task's capsule.
 
-The [Exo command reference](../../docs/COMMANDS.md#governed-control-development-source)
+The [Exo command reference](../../docs/COMMANDS.md#governed-control)
 owns the request-file envelope and CLI exit behavior.
 
 ## Governed recall firewall
@@ -186,7 +186,7 @@ remains independently installable and disabled by default.
 
 Zero runtime dependencies. Python 3.11+.
 
-This package is unpublished development source. [The root release status](../../README.md#release-status)
+This package is published on PyPI. [The root release status](../../README.md#release-status)
 owns version and publication truth.
 
 ## Provenance and proof

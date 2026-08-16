@@ -8,11 +8,14 @@ target the current public release line:
 | Package | Supported line |
 |---|---|
 | `vivary` | `0.1.x` |
-| `create-vivary` / `@vivary/create` | `0.3.x` |
-| `vivary-tropo` | `0.4.x` |
-| `vivary-ozone` | `0.2.x` |
-| `vivary-exo` | `0.2.x` |
+| `create-vivary` / `@vivary/create` | `0.4.x` |
+| `vivary-core` | `0.2.x` |
+| `vivary-tropo` | `0.5.x` |
+| `vivary-strato` | `0.1.x` |
+| `vivary-ozone` | `0.3.x` |
+| `vivary-exo` | `0.3.x` |
 | `vivary-memory-cognee` | `0.1.x` |
+| `vivary-mcp` | `0.1.x` |
 
 Older versions may receive a note in the changelog, but fixes are expected to land in
 the current line.

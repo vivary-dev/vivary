@@ -25,8 +25,8 @@ create-vivary doctor my-workspace --json
 ```
 
 Doctor is read-only in both human and JSON modes: it exits `0` when the report has no
-errors and `1` when it has any; warnings do not alter that result. Development-source
-Doctor uses `compatibility.schema_version = 2`. Thin workspaces report
+errors and `1` when it has any; warnings do not alter that result. Doctor 0.4.2 uses
+`compatibility.schema_version = 2`. Thin workspaces report
 `workspace_contract = "thin-v0.3"`; older full workspaces report
 `workspace_contract = "legacy-full"` plus `legacy_layout = "legacy-v0.1"` or
 `"indexed-v0.2+"`. Legacy layouts remain readable without silent migration. Published

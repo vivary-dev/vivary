@@ -4,10 +4,10 @@
 governed-context scaffolder. It forwards arguments unchanged to the Python
 `create-vivary` CLI; there is no second JavaScript implementation.
 
-Published and development version truth lives in the
+Published version truth lives in the
 [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status).
-The unpublished source candidates are `@vivary/create 0.4.2` and
-`create-vivary 0.4.2`; both require `vivary-tropo>=0.5.3`.
+`@vivary/create 0.4.2` and `create-vivary 0.4.2` are published and require
+`vivary-tropo>=0.5.3`.
 
 ```bash
 npm create @vivary@latest my-workspace -- --preset coding

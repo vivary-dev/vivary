@@ -1,18 +1,23 @@
 # vivary
 
-The unpublished `vivary 0.1.10` source manifest provides one install for the Vivary CLI
-suite. Release verification builds local wheels and proves their composition without
+`vivary 0.1.10` is published and provides one install for the Vivary CLI suite:
+
+```bash
+python -m pip install vivary
+```
+
+Release verification builds local wheels and proves their composition without
 consulting a registry:
 
 ```bash
 python -m pip install --no-index --find-links <wheelhouse> vivary
 ```
 
-Published and source versions live in the
-[root release status](../../README.md#release-status). Do not use an unpinned registry
-install to verify this development line.
+Published versions live in the
+[root release status](../../README.md#release-status). Pin an exact version when you
+need to reproduce a specific composition.
 
-The source install includes:
+The install includes:
 
 - `create-vivary>=0.4.2`: thin greenfield init and deterministic brownfield adoption.
 - `vivary-tropo>=0.5.3`: typed governed context and local retrieval.

@@ -5,10 +5,65 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current release line:** `create-vivary` / `@vivary/create` **0.3.1** · optional
-`vivary-memory-cognee` **0.1.0** · `vivary-tropo` **0.4.1** · `vivary-ozone`
-**0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
-"Vivary 0.4.1" release.
+**Current release line:** `create-vivary` / `@vivary/create` **0.4.2** · `vivary-core`
+**0.2.7** · `vivary-tropo` **0.5.3** · `vivary-strato` **0.1.2** · `vivary-ozone`
+**0.3.1** · `vivary-exo` **0.3.0** · `vivary` **0.1.10** · optional
+`vivary-memory-cognee` **0.1.2** · optional `vivary-mcp` **0.1.3**. Versions are
+independent. There is no single "Vivary 0.4.2" release.
+
+## [Published and verified: Vivary Governed Context] — 2026-08-15
+
+The coordinated train published to PyPI and npm from the approved commit
+`7fc1920`. A train is a release label, not a suite version. Each package keeps its
+own semver, and the only lockstep pair is the scaffolder on PyPI and npm.
+
+### Published
+
+| Surface | Version | Registry |
+|---|---:|---|
+| `vivary` (meta) | 0.1.10 | PyPI |
+| `create-vivary` | 0.4.2 | PyPI |
+| `@vivary/create` | 0.4.2 | npm |
+| `vivary-core` | 0.2.7 | PyPI (first release) |
+| `vivary-tropo` | 0.5.3 | PyPI |
+| `vivary-strato` | 0.1.2 | PyPI (first release) |
+| `vivary-ozone` | 0.3.1 | PyPI |
+| `vivary-exo` | 0.3.0 | PyPI |
+| `vivary-memory-cognee` | 0.1.2 | PyPI (optional) |
+| `vivary-mcp` | 0.1.3 | PyPI (optional, off by default) |
+
+`vivary-core`, `vivary-strato`, and `vivary-mcp` reach a registry for the first time.
+The optional memory and MCP packages ride the train without becoming meta-package
+dependencies. Tag `v0.4.2` points at `7fc1920`.
+
+The published 0.4.2 scaffolder writes the five-file thin contract. Users who want the
+previous full-layout behavior pin `create-vivary==0.3.1` or `@vivary/create@0.3.1`.
+
+`@vivary/create` published through GitHub Actions Trusted Publishing with the
+`npm-trusted-publish.yml` workflow and the `npm-publish` environment. No stored npm
+token was used.
+
+### Verification
+
+Cache-resistant installs from the public index, one per artifact, each asserting the
+exact installed distribution version:
+
+```bash
+uv run --isolated --no-project --no-cache --index-url https://pypi.org/simple \
+  --with <dist>==<version> python -c \
+  "from importlib.metadata import version; assert version('<dist>') == '<version>'"
+```
+
+- `vivary-core==0.2.7`, `vivary-tropo==0.5.3`, `vivary-strato==0.1.2`,
+  `vivary-ozone==0.3.1`, `vivary-exo==0.3.0`, `vivary-memory-cognee==0.1.2`,
+  `vivary-mcp==0.1.3`, `create-vivary==0.4.2`, and `vivary==0.1.10` each resolved
+  from PyPI and reported the expected version.
+- `npm view @vivary/create version` returned `0.4.2`.
+- `npx --yes @vivary/create@0.4.2 capabilities --preset coding --json` returned
+  `ok: true`.
+
+No other release verification was run for this entry. The GitHub release remains a
+separate human gate.
 
 ## [Unreleased: release artifact license hardening] — 2026-08-13
 

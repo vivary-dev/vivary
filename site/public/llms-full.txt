@@ -5,7 +5,7 @@ This file contains the complete documentation suite for Vivary.
 # Vivary
 
 Vivary is a lightweight, local-first governed-context standard and scaffolder. The
-unpublished 0.4.2 source candidate creates five operational files: one context
+published 0.4.2 scaffolder creates five operational files: one context
 capsule, one visible state surface, workspace policy, startup routing, and bounded
 private/runtime ignores. It seeds no starter records, template pack, or second brain.
 
@@ -18,26 +18,26 @@ Full Documentation: https://vivary.vercel.app/llms-full.txt
 ## Published package surfaces
 
 - PyPI meta-package (installs the published suite): `vivary`
-- npm scaffolder: `@vivary/create` 0.3.1
-- PyPI scaffolder: `create-vivary` 0.3.1
-- PyPI knowledge graph CLI: `vivary-tropo` 0.4.1, command `tropo`
-- PyPI review CLI: `vivary-ozone` 0.2.0, command `ozone`
-- PyPI coordination CLI: `vivary-exo` 0.2.2, command `exo`
-- The unpublished source package `vivary-strato` exposes experimental command `strato decide --governed`; Core init does not copy skills or templates.
-- Optional Cognee adapter: `vivary-memory-cognee` 0.1.0, command `vivary-cognee`
-- Optional unpublished local stdio adapter: `vivary-mcp` 0.1.3; four read-only tools, disabled by default.
-- Versions are independent; do not call the whole project "Vivary 0.3.1".
+- npm scaffolder: `@vivary/create` 0.4.2
+- PyPI scaffolder: `create-vivary` 0.4.2
+- PyPI knowledge graph CLI: `vivary-tropo` 0.5.3, command `tropo`
+- PyPI review CLI: `vivary-ozone` 0.3.1, command `ozone`
+- PyPI coordination CLI: `vivary-exo` 0.3.0, command `exo`
+- PyPI policy facade: `vivary-strato` 0.1.2, experimental command `strato decide --governed`; Core init does not copy skills or templates.
+- PyPI governed-context seam: `vivary-core` 0.2.7, library only.
+- Optional Cognee adapter: `vivary-memory-cognee` 0.1.2, command `vivary-cognee`
+- Optional local stdio adapter: `vivary-mcp` 0.1.3; four read-only tools, disabled by default.
+- Versions are independent; do not call the whole project "Vivary 0.4.2".
 
-The versions above are registry truth. The five-file behavior belongs to unpublished
-development source until the README release table lists `create-vivary` and
-`@vivary/create` 0.4.2.
+The versions above are registry truth. The five-file behavior is the published
+`create-vivary` and `@vivary/create` 0.4.2 scaffolder.
 
-## Run the development-source candidate
+## Run the published scaffolder
 
 ```bash
-python packages/create-vivary/create_vivary.py init my-workspace --preset coding --no-wizard
-python packages/create-vivary/create_vivary.py doctor my-workspace
-python packages/tropo/tropo.py check --root my-workspace
+uvx create-vivary init my-workspace --preset coding --no-wizard
+uvx create-vivary doctor my-workspace
+uvx --from vivary-tropo tropo check --root my-workspace
 ```
 
 Pin the previous published full-layout scaffolder only when that behavior is wanted:
@@ -211,12 +211,11 @@ project one bounded context capsule, one visible state surface, provenance and
 verification hooks, and deliberate human gates. It does not require a particular
 editor, agent runtime, database, memory provider, or MCP client.
 
-> **Release truth:** the five-file workflow on this page describes the
-> unpublished 0.4.2 development source. Registry `@latest` is still 0.3.1 and
-> creates the historical full layout. During release review, run the scaffolder
-> from a Vivary checkout or an isolated candidate artifact; do not substitute an
-> unpinned registry command. The [README release table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status)
-> is the publication authority.
+> **Release truth:** the five-file workflow on this page is published 0.4.2
+> behavior, verified on the public registries on 2026-08-15. The
+> [README release table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) is the publication authority.
+> Pin `create-vivary==0.3.1` or `@vivary/create@0.3.1` only to get the historical
+> full layout.
 
 ## Set up with an agent
 
@@ -225,7 +224,7 @@ Paste this into Claude Code, Codex, Cursor, or another coding agent:
 ```text
 Set up Vivary in this project.
 
-1. Confirm Python 3.11+ and the Vivary 0.4.2 candidate command route described below are available. Do not install anything without approval or substitute registry latest while it remains 0.3.1.
+1. Confirm Python 3.11+ and either uv or pipx are available. Do not install anything without my approval.
 2. If this folder already has content, run `create-vivary adopt . --json`. Show me the exact creates, bounded patches, optional projections, kept files, conflicts, privacy result, and plan_hash. Stop on any conflict. Apply only the exact approved plan with `--yes --plan <plan_hash>`.
 3. If this folder is empty, ask which preset fits (coding, second-brain, knowledge-work, or writing), then run `create-vivary init . --preset <choice>`.
 4. Verify with `create-vivary doctor .` and `tropo check --root .`. Both must pass.
@@ -234,20 +233,25 @@ Set up Vivary in this project.
 
 ## 1. Install
 
-You need Python 3.11 or newer. To inspect the 0.4.2 candidate from this repository
-without changing an installed tool, call its entry points directly:
+You need Python 3.11 or newer. Run the published scaffolder from the public index
+with no permanent install:
 
 ```bash
-python packages/create-vivary/create_vivary.py --help
-python packages/tropo/tropo.py --help
+uvx create-vivary --help
+uvx --from vivary-tropo tropo --help
 ```
 
-When operating on another folder, replace `create-vivary` and `tropo` in the
-examples below with those absolute source-script paths, or use an isolated release
-candidate environment. The optional MCP package has third-party runtime dependencies;
-verify its `vivary-mcp --help` entry point only inside the isolated candidate
-environment where its wheel is installed. Published 0.3.1 remains available for the previous layout
-with `uvx --from create-vivary==0.3.1 create-vivary ...` or
+The npm launcher runs the same PyPI scaffolder:
+
+```bash
+npx @vivary/create@0.4.2 --help
+```
+
+The examples below write `create-vivary` and `tropo` as bare commands. Keep the
+`uvx` prefix if you have not installed the tools. The optional MCP package carries
+third-party runtime dependencies, so install `vivary-mcp` explicitly before you
+check its `vivary-mcp --help` entry point. Version 0.3.1 remains available for the
+previous layout with `uvx --from create-vivary==0.3.1 create-vivary ...` or
 `npx @vivary/create@0.3.1 ...`. Do not expect those pinned commands to produce the
 five-file seed.
 
@@ -425,7 +429,7 @@ the selected preset into a template pack or a pre-populated graph.
 # Getting started proof
 
 > **Historical published-line fixture.** This page records the public 0.3.1 full
-> scaffold and is retained as release evidence. Development-source 0.4.2 uses the
+> scaffold and is retained as release evidence. Published 0.4.2 uses the
 > five-file thin contract described in [Getting started](https://vivary.vercel.app/getting-started/); it does
 > not reproduce this 38-file layout.
 
@@ -543,9 +547,9 @@ MCP SDK dependency.
 - **Scaffold (npm):** `npm create @vivary@latest my-workspace` / `npx @vivary/create@latest my-workspace`
 - **From a repo checkout:** `python packages/tropo/tropo.py check`, etc.
 
-Features called out as **unreleased** are present on the `dev` branch and generated
-site docs, but are not available from the current PyPI/npm packages until the next
-release-train PR bumps and publishes them.
+Every command on this page is available from the published PyPI and npm packages
+listed in the [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status). Governed paths stay
+behind an explicit `--governed` flag and are opt-in, not default behavior.
 
 For the four layer CLIs and the scaffolder, exit codes are uniform: **`0`** success ·
 **`1`** findings/errors · **`2`** usage/config error. Gate CI on the exit code; don't
@@ -587,7 +591,7 @@ optional MCP adapter exposes only four read-only context operations. See
 [SPEC-data-layer.md](https://github.com/vivary-dev/vivary/blob/dev/docs/SPEC-data-layer.md) for the agent CLI contract and
 [MCP.md](https://vivary.vercel.app/mcp/) for that adapter's separate boundary.
 
-### Governed machine-readable envelopes (development source)
+### Governed machine-readable envelopes
 
 This is the schema router; the command sections below own fields, limits, and exit
 behavior. A named request schema is a closed object: missing or unknown fields refuse
@@ -640,7 +644,7 @@ vivary-mcp --workspace ALIAS PATH [--workspace ALIAS PATH ...]
            [--observability off|errors|json]
 ```
 
-This unreleased, optional package serves exactly `vivary_find`, `vivary_query`,
+This optional package serves exactly `vivary_find`, `vivary_query`,
 `vivary_check`, and `vivary_capsule` over local standard input/output. Workspace
 roots are operator-bound at startup; tool callers cannot provide roots, executables,
 commands, transports, or endpoints. The adapter has no write, repair, network,
@@ -726,8 +730,8 @@ explicit omissions instead of aborting the capsule. Question extraction preserve
 order, deduplicates terms, and searches at most the first `16`; core then caps matched
 bytes, lines per file, claims, and omission detail.
 `tropo query` is the lower-level filtered search primitive. By default both are
-graph/text retrieval, not the CocoIndex active-context sidecar. On the unreleased
-`dev` branch, `tropo query --mode vector` is a dependency-free typed-vector mode:
+graph/text retrieval, not the CocoIndex active-context sidecar.
+`tropo query --mode vector` is a dependency-free typed-vector mode:
 it preserves type/path/edge filters and returns typed Vivary node ids without
 installing an embedding provider. Enable it explicitly in `.vivary/storage.toml`:
 
@@ -788,14 +792,14 @@ Useful retrieval flags:
 | `--explain` | Include stable match reasons such as title/id, frontmatter, path, body, or edge context. |
 | `--mode text\|vector\|semantic` | `query` only: use dependency-free graph/text search, dependency-free local typed-vector search, or call the configured optional semantic-memory provider. |
 | `--budget N` | `find` only: approximate token budget for the returned context packet. |
-| `--governed` | `find` only, unreleased source: opt into the experimental Tropo scan → `vivary-core` evidence graph → bounded Task Capsule path. |
-| `--max-claims N` | `find --governed` only, unreleased source: maximum capsule claims; must be a non-negative integer (default `24`). |
+| `--governed` | `find` only: opt into the experimental Tropo scan → `vivary-core` evidence graph → bounded Task Capsule path. |
+| `--max-claims N` | `find --governed` only: maximum capsule claims; must be a non-negative integer (default `24`). |
 
 ```bash
 tropo find "where is release truth owned" --root . --budget 800 --json
 tropo query "release truth" --type decision --path "decisions/*" --explain --json
 tropo query "agent workspace" --edge affects:agent-workspace
-# Unreleased dev branch until the next package publish:
+# Opt-in governed and vector paths:
 tropo find "where is release truth owned" --root . --governed --max-claims 12 --json
 tropo query "release truth" --mode vector --json
 tropo query "release truth" --mode semantic --json
@@ -1308,7 +1312,7 @@ accepts an optional leading `@` in an agent handle, writes no undeclared field, 
 refuses symlinked or out-of-workspace work item targets. For a hard-linked work item,
 it replaces the workspace link without changing the other linked file.
 
-### Governed control (development source)
+### Governed control
 
 ```
 exo control REQUEST --governed [--json] [--strict]
@@ -1473,9 +1477,9 @@ create-vivary record <target> <modules|changes|decisions|verification|gates>/<sl
 | `--repair` | Doctor-only. Include conservative repair diagnostics. Recognized legacy-full workspaces are always report-only. |
 | `--yes` | With `doctor --repair`, apply deterministic safe repairs only to supported non-legacy contracts. It never writes a legacy-full workspace. |
 
-### Capability status (development source)
+### Capability status
 
-The 0.4.2 development source reports a fixed Core-and-role inventory and passive MCP
+Version 0.4.2 reports a fixed Core-and-role inventory and passive MCP
 interoperability status alongside the existing storage, semantic-memory, and preset
 sidecar rows:
 
@@ -1815,8 +1819,8 @@ The command reference keeps exhaustive flags, schemas, limits, and exit codes.
 
 ## Release boundary
 
-The guide library describes the unpublished 0.4.2 source candidate.
-Registry `latest` still installs published 0.3.1.
+The guide library describes published 0.4.2.
+Registry `latest` installs it.
 Use the [release-status table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) as the publication authority.
 
 The [historical proof](https://vivary.vercel.app/walkthrough/) records the published 0.3.1 full layout.
@@ -1824,19 +1828,19 @@ Do not use that 38-file fixture as the thin-workspace expectation.
 
 ## Command route
 
-Before release, run each guide from the Vivary source checkout root.
-Use these source commands:
+Run each guide with the published launchers.
+Use these commands:
 
 ```bash
-python packages/create-vivary/create_vivary.py
-python packages/tropo/tropo.py
+uvx create-vivary
+uvx --from vivary-tropo tropo
 ```
 
-The non-governed guide commands include these source paths.
+The guide commands use these launchers.
 Replace each example workspace path with the intended absolute path.
 
-Governed capsule and record commands need an isolated candidate environment.
-Get approval before you create or change that environment.
+Install the tools first if you prefer bare `create-vivary` and `tropo` commands.
+Get approval before you install anything into a shared environment.
 
 Create the environment on Windows:
 
@@ -1950,9 +1954,9 @@ The workspace contains no starter records, templates, skills, or second-brain co
 
 ## Release boundary
 
-These commands describe the unpublished 0.4.2 source candidate.
-Registry `latest` still installs published 0.3.1 and creates the historical full layout.
-Run these commands from the Vivary source checkout root.
+These commands describe published 0.4.2.
+Registry `latest` installs it and creates the five-file layout.
+Pin `create-vivary==0.3.1` only to get the historical full layout.
 
 ## Agent contract
 
@@ -1990,7 +1994,7 @@ The `second-brain` preset does not create notes or a pre-populated second brain.
 Run a dry-run before the first write.
 
 ```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-project --preset coding --no-wizard --dry-run --json
+uvx create-vivary init C:/path/to/my-project --preset coding --no-wizard --dry-run --json
 ```
 
 Confirm the target, preset, contract, and five planned files.
@@ -2001,7 +2005,7 @@ Stop if the target contains work that Vivary can overwrite.
 Run the same command without `--dry-run`.
 
 ```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-project --preset coding --no-wizard --json
+uvx create-vivary init C:/path/to/my-project --preset coding --no-wizard --json
 ```
 
 Vivary creates this tree:
@@ -2028,8 +2032,8 @@ Run Doctor.
 Then run Tropo validation.
 
 ```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/my-project
-python packages/tropo/tropo.py check --root C:/path/to/my-project
+uvx create-vivary doctor C:/path/to/my-project
+uvx --from vivary-tropo tropo check --root C:/path/to/my-project
 ```
 
 Both commands must exit with code `0`.
@@ -2040,8 +2044,8 @@ Fix each error before an agent uses the workspace.
 Preview the policy before creation.
 
 ```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-notes --preset second-brain --no-wizard --dry-run --json
-python packages/create-vivary/create_vivary.py init C:/path/to/my-notes --preset second-brain --no-wizard --json
+uvx create-vivary init C:/path/to/my-notes --preset second-brain --no-wizard --dry-run --json
+uvx create-vivary init C:/path/to/my-notes --preset second-brain --no-wizard --json
 ```
 
 The result is still the five-file seed.
@@ -2052,8 +2056,8 @@ Real notes must come from later work.
 Include an adapter in the initial command only when the runtime needs it.
 
 ```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-agent-project --preset coding --adapter agents --no-wizard
-python packages/create-vivary/create_vivary.py init C:/path/to/my-claude-project --preset coding --adapter claude --no-wizard
+uvx create-vivary init C:/path/to/my-agent-project --preset coding --adapter agents --no-wizard
+uvx create-vivary init C:/path/to/my-claude-project --preset coding --adapter claude --no-wizard
 ```
 
 Each adapter adds one bounded runtime file.
@@ -2062,7 +2066,7 @@ Use `--adapter` twice when both adapters are required.
 Include active code context only after explicit selection.
 
 ```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-code-project --preset coding --active-context cocoindex-code --no-wizard
+uvx create-vivary init C:/path/to/my-code-project --preset coding --active-context cocoindex-code --no-wizard
 ```
 
 This option keeps the five-file seed.
@@ -2106,7 +2110,7 @@ The connection does not grant write authority.
 Run Doctor before the connection.
 
 ```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/project
+uvx create-vivary doctor C:/path/to/project
 ```
 
 Stop if Doctor reports an error.
@@ -2151,7 +2155,7 @@ Get approval before the installation.
 Use an operator-selected alias and an absolute path.
 
 ```bash
-python packages/mcp/vivary_mcp.py --workspace project C:/path/to/project
+vivary-mcp --workspace project C:/path/to/project
 ```
 
 The process uses local standard input and output.
@@ -2245,7 +2249,7 @@ Tell me everything.
 Run `find` for normal task context.
 
 ```bash
-python packages/tropo/tropo.py find "where is release truth owned" --root C:/path/to/project --budget 1200 --json
+uvx --from vivary-tropo tropo find "where is release truth owned" --root C:/path/to/project --budget 1200 --json
 ```
 
 The default budget is 1,200 approximate tokens.
@@ -2267,7 +2271,7 @@ State that the result is unknown when evidence is missing.
 Use `query` when you need typed or filtered matches.
 
 ```bash
-python packages/tropo/tropo.py query "release status" --root C:/path/to/project --type project --json
+uvx --from vivary-tropo tropo query "release status" --root C:/path/to/project --type project --json
 ```
 
 Use `--path` to limit paths.
@@ -2279,7 +2283,7 @@ The [command reference](https://vivary.vercel.app/commands/#tropo--the-typed-kno
 ## 4. Create a governed capsule
 
 Create a capsule only when later work needs evidence binding.
-Activate the approved candidate environment from the [guide library](https://vivary.vercel.app/learn-by-doing/#command-route).
+Use the published launchers from the [guide library](https://vivary.vercel.app/learn-by-doing/#command-route).
 
 ```bash
 tropo find "record the verified release change" --root C:/path/to/project --governed --json > C:/path/to/task-capsule.json
@@ -2332,7 +2336,7 @@ A loosening or invalid overlay fails closed.
 Add `--receipt` when the operator needs a local run receipt.
 
 ```bash
-python packages/tropo/tropo.py find "where is release truth owned" --root C:/path/to/project --json \
+uvx --from vivary-tropo tropo find "where is release truth owned" --root C:/path/to/project --json \
   --receipt C:/path/to/project/.vivary/runtime/receipts.jsonl
 ```
 
@@ -2364,11 +2368,11 @@ The transaction uses one complete Task Capsule and one approved plan hash.
 | Prohibited action | Do not batch records, create packs, or infer approval. |
 | Proof | Doctor passes and Tropo reads the record. |
 
-## Candidate prerequisite
+## Install prerequisite
 
-Activate the approved candidate environment from the [guide library](https://vivary.vercel.app/learn-by-doing/#command-route).
-The environment must contain local Core, Tropo, and Create packages.
-Do not use the published 0.3.1 command for this procedure.
+Use the published launchers from the [guide library](https://vivary.vercel.app/learn-by-doing/#command-route).
+The environment must provide `vivary-core`, `vivary-tropo`, and `create-vivary` 0.4.2.
+Do not use the pinned 0.3.1 command for this procedure.
 
 ## 1. Confirm that the work earned a record
 
@@ -2552,7 +2556,7 @@ Use `adopt` for all nonempty targets.
 Run the default dry-run.
 
 ```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project --json
+uvx create-vivary adopt C:/path/to/project --json
 ```
 
 The command writes nothing.
@@ -2598,8 +2602,8 @@ Vivary does not rewrite an entire host file.
 Request an adapter explicitly.
 
 ```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project --adapter agents --json
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project --adapter claude --json
+uvx create-vivary adopt C:/path/to/project --adapter agents --json
+uvx create-vivary adopt C:/path/to/project --adapter claude --json
 ```
 
 Each adapter is a separate optional projection.
@@ -2620,7 +2624,7 @@ Replan after any preset or adapter changes.
 Use the exact approved hash.
 
 ```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
+uvx create-vivary adopt C:/path/to/project \
   --yes --plan sha256:<approved-plan-hash> \
   --json
 ```
@@ -2635,8 +2639,8 @@ Run Doctor after apply.
 Then run Tropo validation.
 
 ```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/project
-python packages/tropo/tropo.py check --root C:/path/to/project
+uvx create-vivary doctor C:/path/to/project
+uvx --from vivary-tropo tropo check --root C:/path/to/project
 ```
 
 Confirm that user-owned files keep their original content.
@@ -2660,7 +2664,7 @@ Use recovery only when adoption reports an interrupted transaction.
 Use the exact reported plan hash.
 
 ```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
+uvx create-vivary adopt C:/path/to/project \
   --recover sha256:<reported-plan-hash> \
   --json
 ```
@@ -2669,7 +2673,7 @@ This command is a read-only recovery plan.
 Review its `recovery_plan_hash` and actions.
 
 ```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
+uvx create-vivary adopt C:/path/to/project \
   --recover sha256:<reported-plan-hash> \
   --yes \
   --plan sha256:<approved-recovery-plan-hash> \
@@ -2719,7 +2723,7 @@ You can select a bounded recovery action without changing unrelated files.
 Run Doctor first.
 
 ```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/project
+uvx create-vivary doctor C:/path/to/project
 ```
 
 Plain Doctor is read-only.
@@ -2730,7 +2734,7 @@ Warnings do not change the exit code.
 Use JSON when an agent must inspect fields.
 
 ```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/project --json
+uvx create-vivary doctor C:/path/to/project --json
 ```
 
 Review the contract, privacy, capability, and recovery sections.
@@ -2740,7 +2744,7 @@ Review the contract, privacy, capability, and recovery sections.
 Run the strict graph check.
 
 ```bash
-python packages/tropo/tropo.py check --root C:/path/to/project
+uvx --from vivary-tropo tropo check --root C:/path/to/project
 ```
 
 Strict mode is the default.
@@ -2749,7 +2753,7 @@ Warnings fail the strict check.
 Use lenient mode only for an approved diagnostic reason.
 
 ```bash
-python packages/tropo/tropo.py check --root C:/path/to/project --lenient
+uvx --from vivary-tropo tropo check --root C:/path/to/project --lenient
 ```
 
 Do not report a lenient result as strict proof.
@@ -2777,7 +2781,7 @@ Use recovery only when Doctor or adoption reports the transaction.
 Copy the exact reported hash.
 
 ```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
+uvx create-vivary adopt C:/path/to/project \
   --recover sha256:<reported-plan-hash> \
   --json
 ```
@@ -2789,7 +2793,7 @@ Review that exact plan.
 Apply the separately approved recovery hash.
 
 ```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
+uvx create-vivary adopt C:/path/to/project \
   --recover sha256:<reported-plan-hash> \
   --yes \
   --plan sha256:<approved-recovery-plan-hash> \
@@ -2817,7 +2821,7 @@ Use repair mode only for a recognized legacy full workspace.
 Request the report.
 
 ```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/project --repair --json
+uvx create-vivary doctor C:/path/to/project --repair --json
 ```
 
 The report writes nothing.
@@ -2836,7 +2840,7 @@ Plain Doctor does not write runtime state.
 `doctor --trend` writes a local trend snapshot.
 
 ```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/project --trend --json
+uvx create-vivary doctor C:/path/to/project --trend --json
 ```
 
 Get approval before this write.
@@ -2858,8 +2862,8 @@ Run Doctor again.
 Then run Tropo validation.
 
 ```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/project
-python packages/tropo/tropo.py check --root C:/path/to/project
+uvx create-vivary doctor C:/path/to/project
+uvx --from vivary-tropo tropo check --root C:/path/to/project
 ```
 
 Record the exact commands and results.
@@ -2894,8 +2898,8 @@ its workspace. Vivary Core and its CLI workflow can create governed records when
 operation has evidence binding and explicit human approval; MCP never grants that
 approval or silently escalates into a write tool.
 
-The project has not published this development-source package or enabled it by
-default.
+`vivary-mcp` 0.1.3 is published on PyPI. It stays optional and off by default. No
+Vivary install starts it for you.
 
 ## Contract
 
@@ -2913,16 +2917,22 @@ Doctor therefore reports `conformance_status: unproven`.
 
 ## Install boundary
 
-From a checkout, install the optional package explicitly:
+Install the optional package explicitly from the public index:
+
+```bash
+python -m pip install vivary-mcp
+```
+
+That resolution pulls `vivary-core` and `vivary-tropo` from their declared floors and
+installs the exact reviewed MCP SDK dependency. The normal `vivary` and
+`create-vivary` installs do not include or start the adapter.
+
+To test a local change instead, install the three distributions together from a
+checkout so pip does not mix source and registry versions:
 
 ```bash
 python -m pip install ./packages/core ./packages/tropo ./packages/mcp
 ```
-
-Supplying all three local distributions in one resolution keeps pip from looking for
-the unpublished Core or Tropo development versions on the package index. It also
-installs the exact reviewed MCP SDK dependency. The normal `vivary` and `create-vivary`
-installs do not include or start the adapter.
 
 ## Start the local server
 
@@ -3514,7 +3524,7 @@ approved source files. If provider state and source files disagree, source files
   Bellamente candidate, normalization must supply typed evidence and either a known
   stable Tropo node ID or the explicit unresolved-identity marker defined by the
   [Bellamente contract](https://github.com/vivary-dev/vivary/blob/dev/docs/bellamente-memory/SPEC-bellamente-memory.md#6-candidaterecallprovider-contract).
-  The unreleased `vivary_core.recall` surface then classifies the candidate and can
+  The `vivary_core.recall` surface then classifies the candidate and can
   project a caller-persisted transition. Learned memory never silently becomes
   authored truth.
 
@@ -3677,7 +3687,7 @@ Current scaffold output diverges: it writes `enabled = true` with runtime gates 
 indexes nothing, and makes no provider call, but does not yet meet the approved
 disabled-policy contract.
 
-In the source checkout's unreleased `vivary-memory-cognee` 0.1.2 adapter, privacy
+In the published `vivary-memory-cognee` 0.1.2 adapter, privacy
 filtering is owned by `build_snapshot`. Built-in private patterns and
 `memory.privacy.private_paths` always apply. When `respect_gitignore` is `true` (the
 default), the adapter passes only relative Markdown candidates through Core's
@@ -4570,7 +4580,7 @@ Optional capabilities include:
 - embedded file or vector storage;
 - semantic memory providers;
 - source-code retrieval sidecars;
-- the development-source read-only MCP adapter;
+- the optional read-only MCP adapter;
 - provider-specific caches and indexes.
 
 Each capability has four required boundaries:
@@ -4584,7 +4594,7 @@ Each capability has four required boundaries:
 MCP's published architecture separates host, client, and server responsibilities and
 places authorization and consent at explicit components [5]. Vivary treats MCP as an
 optional interoperability surface, not as the canonical project model. The current
-development-source slice uses local standard input/output, exposes exactly four
+adapter slice uses local standard input/output, exposes exactly four
 read-only tools over operator-bound roots, and adds no baseline or Core dependency.
 Named-client compatibility and external conformance remain unproven. The canonical
 [MCP adapter guide](https://vivary.vercel.app/mcp/) owns its data, authority, failure, and install boundaries.
@@ -5460,8 +5470,8 @@ create-vivary doctor my-workspace --json
 ```
 
 Doctor is read-only in both human and JSON modes: it exits `0` when the report has no
-errors and `1` when it has any; warnings do not alter that result. Development-source
-Doctor uses `compatibility.schema_version = 2`. Thin workspaces report
+errors and `1` when it has any; warnings do not alter that result. Doctor 0.4.2 uses
+`compatibility.schema_version = 2`. Thin workspaces report
 `workspace_contract = "thin-v0.3"`; older full workspaces report
 `workspace_contract = "legacy-full"` plus `legacy_layout = "legacy-v0.1"` or
 `"indexed-v0.2+"`. Legacy layouts remain readable without silent migration. Published
@@ -6285,10 +6295,9 @@ default preset path. See [Optional semantic memory](https://vivary.vercel.app/se
 ## 3. The layer model
 
 The role packages share Core contracts but keep distinct authority. Strato's policy
-facade is declared as the unpublished `vivary-strato` package; its legacy template
-archive remains source-only compatibility material and is not shipped into new or
-adopted workspaces. Bellamente memory and MCP remain optional adapters outside the
-baseline.
+facade ships in the `vivary-strato` package. Its legacy template archive remains
+source-only compatibility material and is not shipped into new or adopted
+workspaces. Bellamente memory and MCP remain optional adapters outside the baseline.
 
 ```mermaid
 flowchart TB
@@ -6334,7 +6343,7 @@ Baseline = **tropo + strato** (knowledge + the self-improving loop over it).
 The four layers above are the *vertical* column. `vivary-core` forms the horizontal
 seam beneath them. Each role package speaks through these governed-context primitives,
 so "what is true, and how do we know" has exactly one implementation rather than four
-that drift. Tropo, Strato, Ozone, and Exo use this seam in the development source.
+that drift. Tropo, Strato, Ozone, and Exo all use this seam.
 
 It is a library, not a layer and not a CLI. Nothing about the baseline changes
 because it exists: you still install and run `tropo`, `strato`, `ozone`, `exo`.
@@ -6423,7 +6432,7 @@ What it owns:
   - **Exo (`control_*`)** exposes Core's
     [control lifecycle](https://github.com/vivary-dev/vivary/blob/dev/packages/core/README.md#governed-exo-control) through one
     bounded request/response adapter. The caller owns and persists every state value.
-    [The command reference](https://github.com/vivary-dev/vivary/blob/dev/docs/COMMANDS.md#governed-control-development-source) owns the
+    [The command reference](https://github.com/vivary-dev/vivary/blob/dev/docs/COMMANDS.md#governed-control) owns the
     transport envelope.
   - **Bellamente (`recall_*`)** applies the
     [SPEC-owned candidate-recall firewall](https://github.com/vivary-dev/vivary/blob/dev/docs/bellamente-memory/SPEC-bellamente-memory.md#6-candidaterecallprovider-contract).
@@ -6455,7 +6464,7 @@ may bind a later proposal, but the adapter never authorizes or performs that wri
 Thin workspace mutation crosses a separate human gate: `create-vivary record` plans
 and verifies one typed create or update at a time, with no batch or pack mode.
 
-**Installed-capability truth:** development-source `create-vivary capabilities`
+**Installed-capability truth:** `create-vivary capabilities`
 projects a fixed public inventory for Core and the four governed roles. A bounded
 passive reader binds each credited module or console script to the exact distribution
 record under the active interpreter's canonical package roots. It neither imports
@@ -6464,11 +6473,11 @@ optional packages nor dispatches ambient import or distribution hooks. Each row 
 probe failure do not make the workspace unhealthy. Doctor embeds the same envelope
 and a separate passive `interop:mcp` row; neither probe imports or starts the adapter.
 
-**Status:** Tropo, Strato, Ozone, and Exo Core adapters are present in the development
-source and remain unpublished behind explicit `--governed` flags. The optional
-read-only MCP adapter is also present only in development source and disabled by
-default. Plain Tropo retrieval, Ozone review and impact, and legacy Exo graph
-coordination remain unchanged. Current versions and publication status live in
+**Status:** the Tropo, Strato, Ozone, and Exo Core adapters are published and stay
+behind explicit `--governed` flags. The optional read-only MCP adapter is published
+as `vivary-mcp` and remains disabled by default. Plain Tropo retrieval, Ozone review
+and impact, and legacy Exo graph coordination remain unchanged. Current versions and
+publication status live in
 [the root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status).
 
 ## 4. The moat
@@ -6489,23 +6498,22 @@ The brand owns the namespace; current package truth is:
 
 <!-- The PyPI bullet below is parsed by scripts/check_package_docs_parity.py; keep only distribution names backticked. -->
 - npm: `@vivary/create` — the launcher for the scaffolder.
-- PyPI: `vivary` (the meta package that installs the suite), `vivary-tropo`,
-  `vivary-ozone`, `vivary-exo`, `create-vivary`, and the optional
-  `vivary-memory-cognee`.
-- `vivary-core` is declared in-repo and remains unpublished during development. It
-  ships only as part of the final comprehensive coordinated release train, never in an
-  earlier release line than its dependent roles; within that train, dependencies upload
-  before dependents, so core uploads first.
-- `vivary-strato` is declared in-repo and remains unpublished during development.
-  Its runtime package owns the policy facade. The legacy full-workspace assets remain
-  source-only compatibility fixtures and are excluded from the `create-vivary` wheel.
-- `vivary-mcp` is declared in-repo and remains unpublished during development. It is
-  an optional local standard-input/output adapter, not a `vivary` meta-package
-  dependency. [MCP.md](https://vivary.vercel.app/mcp/) owns its contract.
+- PyPI: `vivary` (the meta package that installs the suite), `vivary-core`,
+  `vivary-tropo`, `vivary-strato`, `vivary-ozone`, `vivary-exo`, `create-vivary`,
+  and the optional `vivary-memory-cognee` and `vivary-mcp`.
+- `vivary-core` publishes inside the coordinated train, never in an earlier release
+  line than its dependent roles. Within that train, dependencies upload before
+  dependents, so core uploads first.
+- `vivary-strato` owns the policy facade in its runtime package. The legacy
+  full-workspace assets remain source-only compatibility fixtures and are excluded
+  from the `create-vivary` wheel.
+- `vivary-mcp` is an optional local standard-input/output adapter. It is not a
+  `vivary` meta-package dependency and stays off by default. [MCP.md](https://vivary.vercel.app/mcp/) owns
+  its contract.
 - GitHub: `vivary-dev/vivary` holds the public repo.
 
-Future packages can still use the Vivary namespace. Release surfaces must distinguish
-published packages from declared, unpublished development source.
+Future packages can still use the Vivary namespace. Release surfaces must name the
+exact published version of each distribution rather than infer it from source.
 
 ## 6. Module naming = atmosphere strata
 
@@ -6522,16 +6530,16 @@ so the metaphor nests cleanly: the world (Vivary) and its layers (the strata).
 This page is the canonical classification of public and development surfaces. The
 [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) owns exact source and registry
 versions; [DECISIONS.md](https://vivary.vercel.app/decisions/) routes durable choices. Status was reconciled
-against the linked manifests, contracts, and registry pages on **2026-08-10**.
+against the linked manifests, contracts, and registry pages on **2026-08-15**.
 
 ## Classification
 
 | Status | Meaning | Current surfaces | Evidence or next gate |
 |---|---|---|---|
 | **Stable** | Published and supported; this is not a promise of post-1.0 API stability. | The registry versions and their baseline CLI/workspace behavior listed in the [release-status table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status). | Registry links live in that table; baseline regressions live with [Tropo](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py), [Ozone](https://github.com/vivary-dev/vivary/blob/dev/packages/ozone/tests/test_ozone.py), [Exo](https://github.com/vivary-dev/vivary/blob/dev/packages/exo/tests/test_exo.py), and [create-vivary](https://github.com/vivary-dev/vivary/blob/dev/packages/create-vivary/tests/test_create_vivary.py). |
-| **Optional** | Installed, configured, or invoked only by explicit choice; optional is independent of maturity. | Ozone and Exo beyond the Tropo + Strato baseline; storage and semantic-memory capabilities including `vivary-memory-cognee`; Obsidian and active-context integrations; and `vivary-mcp` (also experimental while unpublished). | [Architecture boundaries](https://vivary.vercel.app/architecture/#2-the-first-principles-baseline), [semantic-memory gates](https://vivary.vercel.app/semantic-memory/#non-negotiables), [active-context gates](https://vivary.vercel.app/active-context/), and the [MCP install boundary](https://vivary.vercel.app/mcp/#install-boundary). |
-| **Experimental** | Implemented in development source, opt-in where callable, and not registry-available at the source versions. | The `thin-v0.3` init/adoption contract in the `create-vivary` development source; `vivary-core`; governed Tropo, Strato, Ozone, and Exo paths; the provider-neutral recall firewall; and the optional read-only `vivary-mcp` adapter. | [Thin adoption regressions](https://github.com/vivary-dev/vivary/tree/dev/packages/create-vivary/tests), [Core contract tests](https://github.com/vivary-dev/vivary/tree/dev/packages/core/tests), [role envelopes](https://vivary.vercel.app/commands/#governed-machine-readable-envelopes-development-source), and [MCP contract tests](https://github.com/vivary-dev/vivary/tree/dev/packages/mcp/tests). |
-| **Held** | Complete or partial source work that must not be described as published, graduated, or default-enabled. | Publication of the named **Vivary Governed Context** train, including every unpublished source version in the root release status. | The release policy resolved by [#149](https://github.com/vivary-dev/vivary/issues/149), the documentation acceptance completed by [#210](https://github.com/vivary-dev/vivary/issues/210), and the remaining per-item human gates in the [release workflow](https://vivary.vercel.app/release-workflow/#gates). |
+| **Optional** | Installed, configured, or invoked only by explicit choice; optional is independent of maturity. | Ozone and Exo beyond the Tropo + Strato baseline; storage and semantic-memory capabilities including `vivary-memory-cognee`; Obsidian and active-context integrations; and the published but experimental `vivary-mcp`. | [Architecture boundaries](https://vivary.vercel.app/architecture/#2-the-first-principles-baseline), [semantic-memory gates](https://vivary.vercel.app/semantic-memory/#non-negotiables), [active-context gates](https://vivary.vercel.app/active-context/), and the [MCP install boundary](https://vivary.vercel.app/mcp/#install-boundary). |
+| **Experimental** | Published and opt-in where callable, with contracts that may still change before 1.0. | The `thin-v0.3` init/adoption contract in `create-vivary`; `vivary-core`; governed Tropo, Strato, Ozone, and Exo paths; the provider-neutral recall firewall; and the optional read-only `vivary-mcp` adapter. | [Thin adoption regressions](https://github.com/vivary-dev/vivary/tree/dev/packages/create-vivary/tests), [Core contract tests](https://github.com/vivary-dev/vivary/tree/dev/packages/core/tests), [role envelopes](https://vivary.vercel.app/commands/#governed-machine-readable-envelopes), and [MCP contract tests](https://github.com/vivary-dev/vivary/tree/dev/packages/mcp/tests). |
+| **Held** | Complete or partial source work that must not be described as published, graduated, or default-enabled. | **None.** The named **Vivary Governed Context** train published and was verified on 2026-08-15, so every version in the root release status is registry truth. | The release policy resolved by [#149](https://github.com/vivary-dev/vivary/issues/149), the documentation acceptance completed by [#210](https://github.com/vivary-dev/vivary/issues/210), and the per-item human gates in the [release workflow](https://vivary.vercel.app/release-workflow/#gates). |
 | **Deprecated** | Formally discouraged with a documented replacement and removal policy. | **None.** Legacy full workspace layouts and legacy Exo graph commands remain read-compatible surfaces, not deprecations. New init/adopt no longer generate the full layout. | [Doctor compatibility contract](https://vivary.vercel.app/commands/#doctor-compatibility-and-declared-configuration) and [legacy Exo commands](https://vivary.vercel.app/commands/#legacy-graph-coordination). |
 | **Planned** | Described intent with no shipped behavior claim. | Cloud storage adapters and non-file/cloud migration targets; any broader MCP transport or named-client compatibility. | [Data-layer future work](https://github.com/vivary-dev/vivary/blob/dev/docs/SPEC-data-layer.md#future--cloud-adapters-03x); MCP external conformance remains explicitly [unproven](https://vivary.vercel.app/mcp/#contract). These are plans or hypotheses until implementation evidence exists. |
 
@@ -6545,11 +6553,10 @@ lockstep. The policy and lifecycle are owned by the
 [release workflow](https://vivary.vercel.app/release-workflow/#train-and-version-lifecycle), resolving the
 choice requested by [#149](https://github.com/vivary-dev/vivary/issues/149).
 
-Until the held train is separately approved, published install commands resolve the
-registry versions in the root table. Development-source users must install from one
-explicit checkout and should not infer publication from a manifest version. After a
-train is verified, the same root table changes from old registry truth to new registry
-truth; this page changes only if a surface's classification changes.
+Published install commands resolve the registry versions in the root table. Do not
+infer publication from a manifest version. When a train is verified, the root table
+changes from old registry truth to new registry truth. This page changes only if a
+surface's classification changes.
 
 
 ---
@@ -6648,10 +6655,65 @@ packages, so each entry names the package(s) it affects. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the initial suite release is
 the `v0.1.0` line.
 
-**Current release line:** `create-vivary` / `@vivary/create` **0.3.1** · optional
-`vivary-memory-cognee` **0.1.0** · `vivary-tropo` **0.4.1** · `vivary-ozone`
-**0.2.0** · `vivary-exo` **0.2.2**. Versions are independent; there is no single
-"Vivary 0.4.1" release.
+**Current release line:** `create-vivary` / `@vivary/create` **0.4.2** · `vivary-core`
+**0.2.7** · `vivary-tropo` **0.5.3** · `vivary-strato` **0.1.2** · `vivary-ozone`
+**0.3.1** · `vivary-exo` **0.3.0** · `vivary` **0.1.10** · optional
+`vivary-memory-cognee` **0.1.2** · optional `vivary-mcp` **0.1.3**. Versions are
+independent. There is no single "Vivary 0.4.2" release.
+
+## [Published and verified: Vivary Governed Context] — 2026-08-15
+
+The coordinated train published to PyPI and npm from the approved commit
+`7fc1920`. A train is a release label, not a suite version. Each package keeps its
+own semver, and the only lockstep pair is the scaffolder on PyPI and npm.
+
+### Published
+
+| Surface | Version | Registry |
+|---|---:|---|
+| `vivary` (meta) | 0.1.10 | PyPI |
+| `create-vivary` | 0.4.2 | PyPI |
+| `@vivary/create` | 0.4.2 | npm |
+| `vivary-core` | 0.2.7 | PyPI (first release) |
+| `vivary-tropo` | 0.5.3 | PyPI |
+| `vivary-strato` | 0.1.2 | PyPI (first release) |
+| `vivary-ozone` | 0.3.1 | PyPI |
+| `vivary-exo` | 0.3.0 | PyPI |
+| `vivary-memory-cognee` | 0.1.2 | PyPI (optional) |
+| `vivary-mcp` | 0.1.3 | PyPI (optional, off by default) |
+
+`vivary-core`, `vivary-strato`, and `vivary-mcp` reach a registry for the first time.
+The optional memory and MCP packages ride the train without becoming meta-package
+dependencies. Tag `v0.4.2` points at `7fc1920`.
+
+The published 0.4.2 scaffolder writes the five-file thin contract. Users who want the
+previous full-layout behavior pin `create-vivary==0.3.1` or `@vivary/create@0.3.1`.
+
+`@vivary/create` published through GitHub Actions Trusted Publishing with the
+`npm-trusted-publish.yml` workflow and the `npm-publish` environment. No stored npm
+token was used.
+
+### Verification
+
+Cache-resistant installs from the public index, one per artifact, each asserting the
+exact installed distribution version:
+
+```bash
+uv run --isolated --no-project --no-cache --index-url https://pypi.org/simple \
+  --with <dist>==<version> python -c \
+  "from importlib.metadata import version; assert version('<dist>') == '<version>'"
+```
+
+- `vivary-core==0.2.7`, `vivary-tropo==0.5.3`, `vivary-strato==0.1.2`,
+  `vivary-ozone==0.3.1`, `vivary-exo==0.3.0`, `vivary-memory-cognee==0.1.2`,
+  `vivary-mcp==0.1.3`, `create-vivary==0.4.2`, and `vivary==0.1.10` each resolved
+  from PyPI and reported the expected version.
+- `npm view @vivary/create version` returned `0.4.2`.
+- `npx --yes @vivary/create@0.4.2 capabilities --preset coding --json` returned
+  `ok: true`.
+
+No other release verification was run for this entry. The GitHub release remains a
+separate human gate.
 
 ## [Unreleased: release artifact license hardening] — 2026-08-13
 

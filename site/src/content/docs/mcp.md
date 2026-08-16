@@ -13,8 +13,8 @@ its workspace. Vivary Core and its CLI workflow can create governed records when
 operation has evidence binding and explicit human approval; MCP never grants that
 approval or silently escalates into a write tool.
 
-The project has not published this development-source package or enabled it by
-default.
+`vivary-mcp` 0.1.3 is published on PyPI. It stays optional and off by default. No
+Vivary install starts it for you.
 
 ## Contract
 
@@ -32,16 +32,22 @@ Doctor therefore reports `conformance_status: unproven`.
 
 ## Install boundary
 
-From a checkout, install the optional package explicitly:
+Install the optional package explicitly from the public index:
+
+```bash
+python -m pip install vivary-mcp
+```
+
+That resolution pulls `vivary-core` and `vivary-tropo` from their declared floors and
+installs the exact reviewed MCP SDK dependency. The normal `vivary` and
+`create-vivary` installs do not include or start the adapter.
+
+To test a local change instead, install the three distributions together from a
+checkout so pip does not mix source and registry versions:
 
 ```bash
 python -m pip install ./packages/core ./packages/tropo ./packages/mcp
 ```
-
-Supplying all three local distributions in one resolution keeps pip from looking for
-the unpublished Core or Tropo development versions on the package index. It also
-installs the exact reviewed MCP SDK dependency. The normal `vivary` and `create-vivary`
-installs do not include or start the adapter.
 
 ## Start the local server
 

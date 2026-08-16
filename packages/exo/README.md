@@ -1,7 +1,7 @@
 # vivary-exo
 
 > Release status: [root release status](../../README.md#release-status).
-> `exo control` is unpublished development source.
+> `exo control` is published and stays behind the explicit `--governed` flag.
 
 `exo` is the optional outer coordination layer. It has two separate surfaces:
 
@@ -44,7 +44,7 @@ exo control REQUEST --governed [--json] [--strict]
 
 This command sends one complete request to Core. It does not persist the request,
 result, claim ledger, task list, or execution log. The
-[command reference](../../docs/COMMANDS.md#governed-control-development-source) owns
+[command reference](../../docs/COMMANDS.md#governed-control) owns
 the exact request envelope, operation list, runnable examples, and strict exits. The
 [Core control contract](../core/README.md#governed-exo-control) owns lifecycle
 semantics.

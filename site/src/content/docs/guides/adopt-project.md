@@ -35,7 +35,7 @@ Use `adopt` for all nonempty targets.
 Run the default dry-run.
 
 ```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project --json
+uvx create-vivary adopt C:/path/to/project --json
 ```
 
 The command writes nothing.
@@ -81,8 +81,8 @@ Vivary does not rewrite an entire host file.
 Request an adapter explicitly.
 
 ```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project --adapter agents --json
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project --adapter claude --json
+uvx create-vivary adopt C:/path/to/project --adapter agents --json
+uvx create-vivary adopt C:/path/to/project --adapter claude --json
 ```
 
 Each adapter is a separate optional projection.
@@ -103,7 +103,7 @@ Replan after any preset or adapter changes.
 Use the exact approved hash.
 
 ```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
+uvx create-vivary adopt C:/path/to/project \
   --yes --plan sha256:<approved-plan-hash> \
   --json
 ```
@@ -118,8 +118,8 @@ Run Doctor after apply.
 Then run Tropo validation.
 
 ```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/project
-python packages/tropo/tropo.py check --root C:/path/to/project
+uvx create-vivary doctor C:/path/to/project
+uvx --from vivary-tropo tropo check --root C:/path/to/project
 ```
 
 Confirm that user-owned files keep their original content.
@@ -143,7 +143,7 @@ Use recovery only when adoption reports an interrupted transaction.
 Use the exact reported plan hash.
 
 ```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
+uvx create-vivary adopt C:/path/to/project \
   --recover sha256:<reported-plan-hash> \
   --json
 ```
@@ -152,7 +152,7 @@ This command is a read-only recovery plan.
 Review its `recovery_plan_hash` and actions.
 
 ```bash
-python packages/create-vivary/create_vivary.py adopt C:/path/to/project \
+uvx create-vivary adopt C:/path/to/project \
   --recover sha256:<reported-plan-hash> \
   --yes \
   --plan sha256:<approved-recovery-plan-hash> \

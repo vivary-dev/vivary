@@ -22,11 +22,11 @@ The transaction uses one complete Task Capsule and one approved plan hash.
 | Prohibited action | Do not batch records, create packs, or infer approval. |
 | Proof | Doctor passes and Tropo reads the record. |
 
-## Candidate prerequisite
+## Install prerequisite
 
-Activate the approved candidate environment from the [guide library](/learn-by-doing/#command-route).
-The environment must contain local Core, Tropo, and Create packages.
-Do not use the published 0.3.1 command for this procedure.
+Use the published launchers from the [guide library](/learn-by-doing/#command-route).
+The environment must provide `vivary-core`, `vivary-tropo`, and `create-vivary` 0.4.2.
+Do not use the pinned 0.3.1 command for this procedure.
 
 ## 1. Confirm that the work earned a record
 

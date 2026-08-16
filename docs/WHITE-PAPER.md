@@ -548,7 +548,7 @@ Optional capabilities include:
 - embedded file or vector storage;
 - semantic memory providers;
 - source-code retrieval sidecars;
-- the development-source read-only MCP adapter;
+- the optional read-only MCP adapter;
 - provider-specific caches and indexes.
 
 Each capability has four required boundaries:
@@ -562,7 +562,7 @@ Each capability has four required boundaries:
 MCP's published architecture separates host, client, and server responsibilities and
 places authorization and consent at explicit components [5]. Vivary treats MCP as an
 optional interoperability surface, not as the canonical project model. The current
-development-source slice uses local standard input/output, exposes exactly four
+adapter slice uses local standard input/output, exposes exactly four
 read-only tools over operator-bound roots, and adds no baseline or Core dependency.
 Named-client compatibility and external conformance remain unproven. The canonical
 [MCP adapter guide](MCP.md) owns its data, authority, failure, and install boundaries.

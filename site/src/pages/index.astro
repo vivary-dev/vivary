@@ -1,6 +1,6 @@
 ---
 const repo = 'https://github.com/vivary-dev/vivary';
-const command = 'python packages/create-vivary/create_vivary.py init my-workspace --preset coding --no-wizard';
+const command = 'uvx create-vivary init my-workspace --preset coding --no-wizard';
 const supportEmail = 'support@vivary.dev';
 const supportSubject = 'Vivary support request';
 const supportIssueUrl = `${repo}/issues/new?template=bug.yml&labels=bug&title=${encodeURIComponent('[Bug]: Vivary problem report')}`;
@@ -94,7 +94,7 @@ const faq = [
   {
     question: 'Is it open source and production-ready?',
     answer:
-      'Vivary is MIT licensed. The five-file 0.4.2 scaffolder, governed roles, and optional MCP adapter are unpublished source candidates; registry latest remains 0.3.1. Complete website dogfood, benchmark, and package publication remain gated.',
+      'Vivary is MIT licensed. The five-file 0.4.2 scaffolder, the governed roles, and the optional MCP adapter are published on PyPI and npm, and each version was verified from the public registries on 2026-08-15. Vivary is pre-1.0, so treat it as production-ready for local governed context and read the release status before you pin a version.',
   },
 ];
 ---
@@ -194,8 +194,9 @@ const faq = [
             <span class="copy-status" data-copy-status aria-live="polite"></span>
           </div>
           <p class="release-truth">
-            0.4.2 source-review command. Registry latest remains the published 0.3.1
-            full layout until the <a href="/release-workflow/">human release gate</a> is complete.
+            Published 0.4.2 on PyPI and npm, verified from the public registries on
+            2026-08-15. See the <a href="/release-workflow/">release workflow</a> for how
+            that status is set.
           </p>
           <ul class="hero-proof" aria-label="Vivary product facts">
             <li>Exactly five seed files</li>

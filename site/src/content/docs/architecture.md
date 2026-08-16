@@ -66,10 +66,9 @@ default preset path. See [Optional semantic memory](/semantic-memory/).
 ## 3. The layer model
 
 The role packages share Core contracts but keep distinct authority. Strato's policy
-facade is declared as the unpublished `vivary-strato` package; its legacy template
-archive remains source-only compatibility material and is not shipped into new or
-adopted workspaces. Bellamente memory and MCP remain optional adapters outside the
-baseline.
+facade ships in the `vivary-strato` package. Its legacy template archive remains
+source-only compatibility material and is not shipped into new or adopted
+workspaces. Bellamente memory and MCP remain optional adapters outside the baseline.
 
 ```mermaid
 flowchart TB
@@ -115,7 +114,7 @@ Baseline = **tropo + strato** (knowledge + the self-improving loop over it).
 The four layers above are the *vertical* column. `vivary-core` forms the horizontal
 seam beneath them. Each role package speaks through these governed-context primitives,
 so "what is true, and how do we know" has exactly one implementation rather than four
-that drift. Tropo, Strato, Ozone, and Exo use this seam in the development source.
+that drift. Tropo, Strato, Ozone, and Exo all use this seam.
 
 It is a library, not a layer and not a CLI. Nothing about the baseline changes
 because it exists: you still install and run `tropo`, `strato`, `ozone`, `exo`.
@@ -204,7 +203,7 @@ What it owns:
   - **Exo (`control_*`)** exposes Core's
     [control lifecycle](https://github.com/vivary-dev/vivary/blob/dev/packages/core/README.md#governed-exo-control) through one
     bounded request/response adapter. The caller owns and persists every state value.
-    [The command reference](https://github.com/vivary-dev/vivary/blob/dev/docs/COMMANDS.md#governed-control-development-source) owns the
+    [The command reference](https://github.com/vivary-dev/vivary/blob/dev/docs/COMMANDS.md#governed-control) owns the
     transport envelope.
   - **Bellamente (`recall_*`)** applies the
     [SPEC-owned candidate-recall firewall](https://github.com/vivary-dev/vivary/blob/dev/docs/bellamente-memory/SPEC-bellamente-memory.md#6-candidaterecallprovider-contract).
@@ -236,7 +235,7 @@ may bind a later proposal, but the adapter never authorizes or performs that wri
 Thin workspace mutation crosses a separate human gate: `create-vivary record` plans
 and verifies one typed create or update at a time, with no batch or pack mode.
 
-**Installed-capability truth:** development-source `create-vivary capabilities`
+**Installed-capability truth:** `create-vivary capabilities`
 projects a fixed public inventory for Core and the four governed roles. A bounded
 passive reader binds each credited module or console script to the exact distribution
 record under the active interpreter's canonical package roots. It neither imports
@@ -245,11 +244,11 @@ optional packages nor dispatches ambient import or distribution hooks. Each row 
 probe failure do not make the workspace unhealthy. Doctor embeds the same envelope
 and a separate passive `interop:mcp` row; neither probe imports or starts the adapter.
 
-**Status:** Tropo, Strato, Ozone, and Exo Core adapters are present in the development
-source and remain unpublished behind explicit `--governed` flags. The optional
-read-only MCP adapter is also present only in development source and disabled by
-default. Plain Tropo retrieval, Ozone review and impact, and legacy Exo graph
-coordination remain unchanged. Current versions and publication status live in
+**Status:** the Tropo, Strato, Ozone, and Exo Core adapters are published and stay
+behind explicit `--governed` flags. The optional read-only MCP adapter is published
+as `vivary-mcp` and remains disabled by default. Plain Tropo retrieval, Ozone review
+and impact, and legacy Exo graph coordination remain unchanged. Current versions and
+publication status live in
 [the root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status).
 
 ## 4. The moat
@@ -270,23 +269,22 @@ The brand owns the namespace; current package truth is:
 
 <!-- The PyPI bullet below is parsed by scripts/check_package_docs_parity.py; keep only distribution names backticked. -->
 - npm: `@vivary/create` — the launcher for the scaffolder.
-- PyPI: `vivary` (the meta package that installs the suite), `vivary-tropo`,
-  `vivary-ozone`, `vivary-exo`, `create-vivary`, and the optional
-  `vivary-memory-cognee`.
-- `vivary-core` is declared in-repo and remains unpublished during development. It
-  ships only as part of the final comprehensive coordinated release train, never in an
-  earlier release line than its dependent roles; within that train, dependencies upload
-  before dependents, so core uploads first.
-- `vivary-strato` is declared in-repo and remains unpublished during development.
-  Its runtime package owns the policy facade. The legacy full-workspace assets remain
-  source-only compatibility fixtures and are excluded from the `create-vivary` wheel.
-- `vivary-mcp` is declared in-repo and remains unpublished during development. It is
-  an optional local standard-input/output adapter, not a `vivary` meta-package
-  dependency. [MCP.md](/mcp/) owns its contract.
+- PyPI: `vivary` (the meta package that installs the suite), `vivary-core`,
+  `vivary-tropo`, `vivary-strato`, `vivary-ozone`, `vivary-exo`, `create-vivary`,
+  and the optional `vivary-memory-cognee` and `vivary-mcp`.
+- `vivary-core` publishes inside the coordinated train, never in an earlier release
+  line than its dependent roles. Within that train, dependencies upload before
+  dependents, so core uploads first.
+- `vivary-strato` owns the policy facade in its runtime package. The legacy
+  full-workspace assets remain source-only compatibility fixtures and are excluded
+  from the `create-vivary` wheel.
+- `vivary-mcp` is an optional local standard-input/output adapter. It is not a
+  `vivary` meta-package dependency and stays off by default. [MCP.md](/mcp/) owns
+  its contract.
 - GitHub: `vivary-dev/vivary` holds the public repo.
 
-Future packages can still use the Vivary namespace. Release surfaces must distinguish
-published packages from declared, unpublished development source.
+Future packages can still use the Vivary namespace. Release surfaces must name the
+exact published version of each distribution rather than infer it from source.
 
 ## 6. Module naming = atmosphere strata
 

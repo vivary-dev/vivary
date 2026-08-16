@@ -200,11 +200,11 @@ Ship copyable, verified workflows for:
 Each workflow must name the input, verifier, stop rule, and gate. Prefer five strong
 workflows to twenty superficial presets.
 
-## Development source: meet agents on existing rails
+## Optional adapters: meet agents on existing rails
 
 ### 9. Read-only `vivary-mcp`
 
-**Development-source outcome:** MCP `2026-07-28` clients can request bounded Vivary
+**Outcome:** MCP `2026-07-28` clients can request bounded Vivary
 context over local standard input/output without adding MCP to the baseline or Core.
 Compatibility with a named client and external conformance remain unproven until
 tested directly.
