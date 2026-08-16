@@ -19,9 +19,9 @@ MCP SDK dependency.
 - **Scaffold (npm):** `npm create @vivary@latest my-workspace` / `npx @vivary/create@latest my-workspace`
 - **From a repo checkout:** `python packages/tropo/tropo.py check`, etc.
 
-Features called out as **unreleased** are present on the `dev` branch and generated
-site docs, but are not available from the current PyPI/npm packages until the next
-release-train PR bumps and publishes them.
+Every command on this page is available from the published PyPI and npm packages
+listed in the [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status). Governed paths stay
+behind an explicit `--governed` flag and are opt-in, not default behavior.
 
 For the four layer CLIs and the scaffolder, exit codes are uniform: **`0`** success ·
 **`1`** findings/errors · **`2`** usage/config error. Gate CI on the exit code; don't
@@ -63,7 +63,7 @@ optional MCP adapter exposes only four read-only context operations. See
 [SPEC-data-layer.md](https://github.com/vivary-dev/vivary/blob/dev/docs/SPEC-data-layer.md) for the agent CLI contract and
 [MCP.md](/mcp/) for that adapter's separate boundary.
 
-### Governed machine-readable envelopes (development source)
+### Governed machine-readable envelopes
 
 This is the schema router; the command sections below own fields, limits, and exit
 behavior. A named request schema is a closed object: missing or unknown fields refuse
@@ -116,7 +116,7 @@ vivary-mcp --workspace ALIAS PATH [--workspace ALIAS PATH ...]
            [--observability off|errors|json]
 ```
 
-This unreleased, optional package serves exactly `vivary_find`, `vivary_query`,
+This optional package serves exactly `vivary_find`, `vivary_query`,
 `vivary_check`, and `vivary_capsule` over local standard input/output. Workspace
 roots are operator-bound at startup; tool callers cannot provide roots, executables,
 commands, transports, or endpoints. The adapter has no write, repair, network,
@@ -202,8 +202,8 @@ explicit omissions instead of aborting the capsule. Question extraction preserve
 order, deduplicates terms, and searches at most the first `16`; core then caps matched
 bytes, lines per file, claims, and omission detail.
 `tropo query` is the lower-level filtered search primitive. By default both are
-graph/text retrieval, not the CocoIndex active-context sidecar. On the unreleased
-`dev` branch, `tropo query --mode vector` is a dependency-free typed-vector mode:
+graph/text retrieval, not the CocoIndex active-context sidecar.
+`tropo query --mode vector` is a dependency-free typed-vector mode:
 it preserves type/path/edge filters and returns typed Vivary node ids without
 installing an embedding provider. Enable it explicitly in `.vivary/storage.toml`:
 
@@ -264,14 +264,14 @@ Useful retrieval flags:
 | `--explain` | Include stable match reasons such as title/id, frontmatter, path, body, or edge context. |
 | `--mode text\|vector\|semantic` | `query` only: use dependency-free graph/text search, dependency-free local typed-vector search, or call the configured optional semantic-memory provider. |
 | `--budget N` | `find` only: approximate token budget for the returned context packet. |
-| `--governed` | `find` only, unreleased source: opt into the experimental Tropo scan → `vivary-core` evidence graph → bounded Task Capsule path. |
-| `--max-claims N` | `find --governed` only, unreleased source: maximum capsule claims; must be a non-negative integer (default `24`). |
+| `--governed` | `find` only: opt into the experimental Tropo scan → `vivary-core` evidence graph → bounded Task Capsule path. |
+| `--max-claims N` | `find --governed` only: maximum capsule claims; must be a non-negative integer (default `24`). |
 
 ```bash
 tropo find "where is release truth owned" --root . --budget 800 --json
 tropo query "release truth" --type decision --path "decisions/*" --explain --json
 tropo query "agent workspace" --edge affects:agent-workspace
-# Unreleased dev branch until the next package publish:
+# Opt-in governed and vector paths:
 tropo find "where is release truth owned" --root . --governed --max-claims 12 --json
 tropo query "release truth" --mode vector --json
 tropo query "release truth" --mode semantic --json
@@ -784,7 +784,7 @@ accepts an optional leading `@` in an agent handle, writes no undeclared field, 
 refuses symlinked or out-of-workspace work item targets. For a hard-linked work item,
 it replaces the workspace link without changing the other linked file.
 
-### Governed control (development source)
+### Governed control
 
 ```
 exo control REQUEST --governed [--json] [--strict]
@@ -949,9 +949,9 @@ create-vivary record <target> <modules|changes|decisions|verification|gates>/<sl
 | `--repair` | Doctor-only. Include conservative repair diagnostics. Recognized legacy-full workspaces are always report-only. |
 | `--yes` | With `doctor --repair`, apply deterministic safe repairs only to supported non-legacy contracts. It never writes a legacy-full workspace. |
 
-### Capability status (development source)
+### Capability status
 
-The 0.4.2 development source reports a fixed Core-and-role inventory and passive MCP
+Version 0.4.2 reports a fixed Core-and-role inventory and passive MCP
 interoperability status alongside the existing storage, semantic-memory, and preset
 sidecar rows:
 

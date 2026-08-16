@@ -7,8 +7,8 @@ editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/HOWTO.md"
 Use these recipes after the [guide library](/learn-by-doing/).
 Each recipe assumes that the basic workspace checks pass.
 
-Registry `latest` still installs the published 0.3.1 line.
-Use the approved 0.4.2 candidate route from [Getting started](/getting-started/).
+Registry `latest` installs the published 0.4.2 line.
+Install it with the public launchers from [Getting started](/getting-started/).
 The [README release table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) owns publication truth.
 
 Run commands inside a workspace unless you use `--root`.
@@ -29,8 +29,8 @@ create-vivary doctor my-workspace --json
 ```
 
 Doctor is read-only in both human and JSON modes: it exits `0` when the report has no
-errors and `1` when it has any; warnings do not alter that result. Development-source
-Doctor uses `compatibility.schema_version = 2`. Thin workspaces report
+errors and `1` when it has any; warnings do not alter that result. Doctor 0.4.2 uses
+`compatibility.schema_version = 2`. Thin workspaces report
 `workspace_contract = "thin-v0.3"`; older full workspaces report
 `workspace_contract = "legacy-full"` plus `legacy_layout = "legacy-v0.1"` or
 `"indexed-v0.2+"`. Legacy layouts remain readable without silent migration. Published

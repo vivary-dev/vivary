@@ -102,14 +102,17 @@ def test_wrapped_bullet_is_read_in_full():
 
 
 def test_listing_an_unpublished_distribution_fails():
+    # Every declared distribution is published today, so the real allowlist is empty.
+    # Inject one entry to keep this failure branch covered for the next in-repo
+    # distribution that ships before it publishes.
     module = _load()
-    unpublished = sorted(module.UNPUBLISHED)
-    assert unpublished, "UNPUBLISHED must be non-empty for this test to mean anything"
+    held = "vivary-mcp"
+    assert held in module.declared_distributions(), "the injected name needs a manifest"
 
-    message = _run(_doc(_one_line(_published() + unpublished)))
+    message = _run(_doc(_one_line(_published())), unpublished={held})
     assert message, "listing an unpublished distribution must fail"
     assert "unpublished distributions" in message, message
-    assert unpublished[0] in message, message
+    assert held in message, message
 
 
 def test_dropping_a_published_distribution_fails():
@@ -150,12 +153,17 @@ def test_stale_unpublished_allowlist_fails():
     assert "vivary-ghost" in message, message
 
 
-def test_development_packages_are_allowlisted_as_unpublished():
-    # Pins the release gate: Core, MCP, and Strato stay unpublished during development.
-    # Publishing one means removing it here deliberately, which then requires the
-    # architecture doc to name the published distribution.
+def test_train_packages_are_published_and_documented():
+    # Pins the 2026-08-15 Vivary Governed Context release: Core, Strato, and MCP left
+    # the allowlist when they reached PyPI, so they must stay off it and must appear
+    # on the architecture PyPI list. Putting one back would be a publication claim
+    # reversal, not a docs tweak.
     module = _load()
-    assert {"vivary-core", "vivary-mcp", "vivary-strato"} <= module.UNPUBLISHED
+    train = {"vivary-core", "vivary-mcp", "vivary-strato"}
+
+    assert train <= module.declared_distributions(), "each train package needs a manifest"
+    assert not (train & module.UNPUBLISHED), "published packages must not be allowlisted"
+    assert train <= module.documented_distributions(), "the PyPI list must name all three"
 
 
 if __name__ == "__main__":

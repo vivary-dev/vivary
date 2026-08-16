@@ -1,7 +1,7 @@
 # Vivary
 
 Vivary is a lightweight, local-first governed-context standard and scaffolder. The
-unpublished 0.4.2 source candidate creates five operational files: one context
+published 0.4.2 scaffolder creates five operational files: one context
 capsule, one visible state surface, workspace policy, startup routing, and bounded
 private/runtime ignores. It seeds no starter records, template pack, or second brain.
 
@@ -14,26 +14,26 @@ Full Documentation: https://vivary.vercel.app/llms-full.txt
 ## Published package surfaces
 
 - PyPI meta-package (installs the published suite): `vivary`
-- npm scaffolder: `@vivary/create` 0.3.1
-- PyPI scaffolder: `create-vivary` 0.3.1
-- PyPI knowledge graph CLI: `vivary-tropo` 0.4.1, command `tropo`
-- PyPI review CLI: `vivary-ozone` 0.2.0, command `ozone`
-- PyPI coordination CLI: `vivary-exo` 0.2.2, command `exo`
-- The unpublished source package `vivary-strato` exposes experimental command `strato decide --governed`; Core init does not copy skills or templates.
-- Optional Cognee adapter: `vivary-memory-cognee` 0.1.0, command `vivary-cognee`
-- Optional unpublished local stdio adapter: `vivary-mcp` 0.1.3; four read-only tools, disabled by default.
-- Versions are independent; do not call the whole project "Vivary 0.3.1".
+- npm scaffolder: `@vivary/create` 0.4.2
+- PyPI scaffolder: `create-vivary` 0.4.2
+- PyPI knowledge graph CLI: `vivary-tropo` 0.5.3, command `tropo`
+- PyPI review CLI: `vivary-ozone` 0.3.1, command `ozone`
+- PyPI coordination CLI: `vivary-exo` 0.3.0, command `exo`
+- PyPI policy facade: `vivary-strato` 0.1.2, experimental command `strato decide --governed`; Core init does not copy skills or templates.
+- PyPI governed-context seam: `vivary-core` 0.2.7, library only.
+- Optional Cognee adapter: `vivary-memory-cognee` 0.1.2, command `vivary-cognee`
+- Optional local stdio adapter: `vivary-mcp` 0.1.3; four read-only tools, disabled by default.
+- Versions are independent; do not call the whole project "Vivary 0.4.2".
 
-The versions above are registry truth. The five-file behavior belongs to unpublished
-development source until the README release table lists `create-vivary` and
-`@vivary/create` 0.4.2.
+The versions above are registry truth. The five-file behavior is the published
+`create-vivary` and `@vivary/create` 0.4.2 scaffolder.
 
-## Run the development-source candidate
+## Run the published scaffolder
 
 ```bash
-python packages/create-vivary/create_vivary.py init my-workspace --preset coding --no-wizard
-python packages/create-vivary/create_vivary.py doctor my-workspace
-python packages/tropo/tropo.py check --root my-workspace
+uvx create-vivary init my-workspace --preset coding --no-wizard
+uvx create-vivary doctor my-workspace
+uvx --from vivary-tropo tropo check --root my-workspace
 ```
 
 Pin the previous published full-layout scaffolder only when that behavior is wanted:

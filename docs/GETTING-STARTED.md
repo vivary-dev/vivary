@@ -5,12 +5,11 @@ project one bounded context capsule, one visible state surface, provenance and
 verification hooks, and deliberate human gates. It does not require a particular
 editor, agent runtime, database, memory provider, or MCP client.
 
-> **Release truth:** the five-file workflow on this page describes the
-> unpublished 0.4.2 development source. Registry `@latest` is still 0.3.1 and
-> creates the historical full layout. During release review, run the scaffolder
-> from a Vivary checkout or an isolated candidate artifact; do not substitute an
-> unpinned registry command. The [README release table](../README.md#release-status)
-> is the publication authority.
+> **Release truth:** the five-file workflow on this page is published 0.4.2
+> behavior, verified on the public registries on 2026-08-15. The
+> [README release table](../README.md#release-status) is the publication authority.
+> Pin `create-vivary==0.3.1` or `@vivary/create@0.3.1` only to get the historical
+> full layout.
 
 ## Set up with an agent
 
@@ -19,7 +18,7 @@ Paste this into Claude Code, Codex, Cursor, or another coding agent:
 ```text
 Set up Vivary in this project.
 
-1. Confirm Python 3.11+ and the Vivary 0.4.2 candidate command route described below are available. Do not install anything without approval or substitute registry latest while it remains 0.3.1.
+1. Confirm Python 3.11+ and either uv or pipx are available. Do not install anything without my approval.
 2. If this folder already has content, run `create-vivary adopt . --json`. Show me the exact creates, bounded patches, optional projections, kept files, conflicts, privacy result, and plan_hash. Stop on any conflict. Apply only the exact approved plan with `--yes --plan <plan_hash>`.
 3. If this folder is empty, ask which preset fits (coding, second-brain, knowledge-work, or writing), then run `create-vivary init . --preset <choice>`.
 4. Verify with `create-vivary doctor .` and `tropo check --root .`. Both must pass.
@@ -28,20 +27,25 @@ Set up Vivary in this project.
 
 ## 1. Install
 
-You need Python 3.11 or newer. To inspect the 0.4.2 candidate from this repository
-without changing an installed tool, call its entry points directly:
+You need Python 3.11 or newer. Run the published scaffolder from the public index
+with no permanent install:
 
 ```bash
-python packages/create-vivary/create_vivary.py --help
-python packages/tropo/tropo.py --help
+uvx create-vivary --help
+uvx --from vivary-tropo tropo --help
 ```
 
-When operating on another folder, replace `create-vivary` and `tropo` in the
-examples below with those absolute source-script paths, or use an isolated release
-candidate environment. The optional MCP package has third-party runtime dependencies;
-verify its `vivary-mcp --help` entry point only inside the isolated candidate
-environment where its wheel is installed. Published 0.3.1 remains available for the previous layout
-with `uvx --from create-vivary==0.3.1 create-vivary ...` or
+The npm launcher runs the same PyPI scaffolder:
+
+```bash
+npx @vivary/create@0.4.2 --help
+```
+
+The examples below write `create-vivary` and `tropo` as bare commands. Keep the
+`uvx` prefix if you have not installed the tools. The optional MCP package carries
+third-party runtime dependencies, so install `vivary-mcp` explicitly before you
+check its `vivary-mcp --help` entry point. Version 0.3.1 remains available for the
+previous layout with `uvx --from create-vivary==0.3.1 create-vivary ...` or
 `npx @vivary/create@0.3.1 ...`. Do not expect those pinned commands to produce the
 five-file seed.
 

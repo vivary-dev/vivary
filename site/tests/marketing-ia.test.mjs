@@ -32,14 +32,15 @@ const blogPosts = readdirSync(blogDir)
     source: readFileSync(new URL(name, blogDir), 'utf8'),
   }));
 
-const sourceVersion = (packageDirectory) => {
-  const manifest = readFileSync(
-    new URL(`../../packages/${packageDirectory}/pyproject.toml`, import.meta.url),
-    'utf8',
-  );
-  const match = manifest.match(/^version\s*=\s*"(\d+\.\d+\.\d+)"\s*$/m);
-  assert.ok(match, `${packageDirectory} must declare a source version`);
-  return match[1];
+const rootReadme = readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
+
+const publishedVersion = (surface) => {
+  const row = rootReadme
+    .split(/\r?\n/)
+    .find((line) => line.startsWith(`| \`${surface}\``));
+  const version = row?.split('|')[2]?.trim();
+  assert.match(version ?? '', /^\d+\.\d+\.\d+$/, `${surface} needs a release-table row`);
+  return version;
 };
 
 test('FAQ is a concise homepage section rather than a docs route', () => {
@@ -182,14 +183,22 @@ test('guide documents expose distinct search metadata and agent task routes', ()
   assert.match(robots, /Sitemap: https:\/\/vivary\.vercel\.app\/sitemap-index\.xml/);
 });
 
-test('agent search surfaces derive development versions from package manifests', () => {
-  const createVersion = sourceVersion('create-vivary');
-  const mcpVersion = sourceVersion('mcp');
+test('agent search surfaces derive published versions from the root release table', () => {
+  // llms.txt is an install surface, so every version in it must be registry truth from
+  // the README release table, not a manifest version that can lead the registry.
+  const createVersion = publishedVersion('create-vivary');
+  const mcpVersion = publishedVersion('vivary-mcp');
 
-  assert.match(syncScript, /const readSourceVersion =/);
-  assert.match(llmsText, new RegExp(`unpublished ${createVersion.replaceAll('.', '\\.')} source candidate`));
+  assert.match(syncScript, /const readPublishedVersion =/);
+  assert.doesNotMatch(syncScript, /readSourceVersion/);
+  assert.match(llmsText, new RegExp(`published ${createVersion.replaceAll('.', '\\.')} scaffolder`));
+  assert.doesNotMatch(llmsText, /unpublished/i);
   assert.equal(llmsText.includes(`\`vivary-mcp\` ${mcpVersion}`), true);
-  assert.equal(llmsText.includes(`\`@vivary/create\` ${createVersion}`), true);
+  assert.equal(llmsText.includes(`\`@vivary/create\` ${publishedVersion('@vivary/create')}`), true);
+
+  // Deliberately no manifest-equals-registry assertion. The Staged lifecycle step in
+  // docs/RELEASE-WORKFLOW.md requires the manifest to advance while the release table
+  // still shows the old published version, so equality is wrong for most of a cycle.
 });
 
 test('public and agent guides share one concise STE100 style source', () => {

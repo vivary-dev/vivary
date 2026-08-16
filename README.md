@@ -21,49 +21,46 @@ inside a small, well-formed world with a substrate, an atmosphere, and gates.
 
 ## Release status
 
-The current coordinated development train is named **Vivary Governed Context**. A train is a
-release label, not a suite version: packages retain independent semvers. The only
-numeric lockstep is the same scaffolder distributed as `create-vivary` on PyPI and
-`@vivary/create` on npm. This policy resolves
+The coordinated release train named **Vivary Governed Context** is **published and
+verified**. A train is a release label, not a suite version: packages retain
+independent semvers. The only numeric lockstep is the same scaffolder distributed as
+`create-vivary` on PyPI and `@vivary/create` on npm. This policy resolves
 [#149](https://github.com/vivary-dev/vivary/issues/149); its lifecycle lives in the
 [release workflow](docs/RELEASE-WORKFLOW.md#train-and-version-lifecycle).
 
-The registry table is published install truth. The development-source paragraph below
-is checkout truth. A source version does not become published because it is higher,
-merged, tagged, documented, or grouped into the train. Registry status was verified
-**2026-08-10**.
+The registry table below is published install truth. Registry status was verified
+**2026-08-15**.
 
 | Surface | Published version | Link |
 |---|---:|---|
-| `vivary` (PyPI, installs the suite) | 0.1.0 | [PyPI](https://pypi.org/project/vivary/) |
-| `create-vivary` (PyPI) | 0.3.1 | [PyPI](https://pypi.org/project/create-vivary/) |
-| `@vivary/create` (npm) | 0.3.1 | [npm](https://www.npmjs.com/package/@vivary/create) |
-| `vivary-tropo` | 0.4.1 | [PyPI](https://pypi.org/project/vivary-tropo/) |
-| `vivary-ozone` | 0.2.0 | [PyPI](https://pypi.org/project/vivary-ozone/) |
-| `vivary-exo` | 0.2.2 | [PyPI](https://pypi.org/project/vivary-exo/) |
-| `vivary-memory-cognee` | 0.1.0 | [PyPI](https://pypi.org/project/vivary-memory-cognee/) |
+| `vivary` (PyPI meta) | 0.1.10 | [PyPI](https://pypi.org/project/vivary/) |
+| `create-vivary` (PyPI) | 0.4.2 | [PyPI](https://pypi.org/project/create-vivary/) |
+| `@vivary/create` (npm) | 0.4.2 | [npm](https://www.npmjs.com/package/@vivary/create) |
+| `vivary-core` | 0.2.7 | [PyPI](https://pypi.org/project/vivary-core/) |
+| `vivary-tropo` | 0.5.3 | [PyPI](https://pypi.org/project/vivary-tropo/) |
+| `vivary-strato` | 0.1.2 | [PyPI](https://pypi.org/project/vivary-strato/) |
+| `vivary-ozone` | 0.3.1 | [PyPI](https://pypi.org/project/vivary-ozone/) |
+| `vivary-exo` | 0.3.0 | [PyPI](https://pypi.org/project/vivary-exo/) |
+| `vivary-memory-cognee` | 0.1.2 | [PyPI](https://pypi.org/project/vivary-memory-cognee/) |
+| `vivary-mcp` (optional) | 0.1.3 | [PyPI](https://pypi.org/project/vivary-mcp/) |
 
-**Unpublished development source:** `create-vivary` and `@vivary/create` **0.4.2**,
-`vivary-core` **0.2.7**, `vivary-tropo` **0.5.3**, `vivary-strato` **0.1.2**,
-`vivary-ozone` **0.3.1**, `vivary-exo` **0.3.0**, `vivary-memory-cognee`
-**0.1.2**, `vivary-mcp` **0.1.3**, and the `vivary` meta-package **0.1.10**. The
-package manifests own role-to-Core floors. The
-[meta-package manifest](packages/vivary/pyproject.toml)
-owns its component floors, including `create-vivary>=0.4.2`,
-`vivary-tropo>=0.5.3`, and `vivary-strato>=0.1.2`. It receives Core transitively.
+Every version in the table is live on its registry and passed a cache-resistant
+install smoke on 2026-08-15. The package manifests own role-to-Core floors. The
+[meta-package manifest](packages/vivary/pyproject.toml) owns its component floors,
+including `create-vivary>=0.4.2`, `vivary-tropo>=0.5.3`, and `vivary-strato>=0.1.2`.
+It receives Core transitively. `vivary-memory-cognee` and `vivary-mcp` ride the same
+train as optional packages and are not meta-package dependencies.
 
-No development source package version above was published to a registry, promoted from
-`dev` to `prod`, or enabled by default. The documentation site may deploy automatically
-from `dev`; that is not package publication.
-The Vivary Governed Context train remains held at a later, separate human publication gate.
-[CHANGELOG.md](CHANGELOG.md) records its development slices without rewriting earlier
-independent-version history. [Migration status](docs/MIGRATION-STATUS.md) owns maturity
-classifications; [decisions](docs/DECISIONS.md) routes the durable policy.
+[CHANGELOG.md](CHANGELOG.md) records the train and the exact smokes that verified it,
+without rewriting earlier independent-version history.
+[Migration status](docs/MIGRATION-STATUS.md) owns maturity classifications.
+[Decisions](docs/DECISIONS.md) routes the durable policy.
 
 Users who need the previously published full-layout behavior can pin it explicitly:
 `uvx --from create-vivary==0.3.1 create-vivary ...` or
-`npx @vivary/create@0.3.1 ...`. The 0.4.2 source does not silently migrate or rewrite
-those legacy workspaces; Doctor keeps them read-compatible.
+`npx @vivary/create@0.3.1 ...`. That pin is the only supported route to the legacy
+layout. Version 0.4.2 does not silently migrate or rewrite those legacy workspaces,
+and Doctor keeps them read-compatible.
 
 ## Public Signals
 
@@ -90,12 +87,12 @@ Current command surface:
 - `tropo check` / `graph` / `find` / `query` / `migrate` / `map` / `init --packs`
 - `strato decide --governed`
 - `ozone review` / `impact` / `verify --governed`
-- `exo board` / `conflicts` / `claim` / `roles`, plus the unreleased
+- `exo board` / `conflicts` / `claim` / `roles`, plus the opt-in
   `exo control REQUEST --governed`
 - `vivary-cognee doctor` / `index` / `recall` / `forget` from the optional
   `vivary-memory-cognee` package
-- `vivary-mcp --workspace ALIAS PATH` from the optional, unpublished
-  `vivary-mcp` package
+- `vivary-mcp --workspace ALIAS PATH` from the optional `vivary-mcp` package,
+  which stays off by default
 
 For local debugging and bug reports, the core CLIs accept `--receipt PATH` or
 `VIVARY_RECEIPT_LOG=PATH` to append a dependency-free JSONL run receipt. Receipts stay
@@ -106,20 +103,22 @@ by itself.
 
 ## Quickstart
 
-The five-file workflow below belongs to the **unpublished 0.4.2 development
-source**. Registry `@latest` still resolves to published 0.3.1 and creates the
-historical full layout; do not use it to evaluate this release candidate. From a
-Vivary checkout, run the candidate directly with Python 3.11+:
+The five-file workflow below is the published 0.4.2 behavior. Use the public
+launchers. You need Python 3.11 or newer:
 
 ```bash
-python packages/create-vivary/create_vivary.py init my-workspace --preset coding --no-wizard
-python packages/create-vivary/create_vivary.py doctor my-workspace
-python packages/tropo/tropo.py check --root my-workspace
+uvx create-vivary init my-workspace --preset coding --no-wizard
+uvx create-vivary doctor my-workspace
+uvx --from vivary-tropo tropo check --root my-workspace
 ```
 
-The ordinary public launchers become the thin path only after the
-[release-status table](#release-status) lists 0.4.2. Until then, pin 0.3.1 only
-when you deliberately want the previous full-layout behavior:
+The npm launcher installs and runs the same PyPI scaffolder:
+
+```bash
+npx @vivary/create@0.4.2 my-workspace --preset coding
+```
+
+Pin 0.3.1 only when you deliberately want the previous full-layout behavior:
 
 ```bash
 uvx --from create-vivary==0.3.1 create-vivary init my-workspace
@@ -139,11 +138,11 @@ current workspace binding, proposes one create or update without writing, and ap
 only the exact human-approved plan hash. It reruns Doctor and rolls back on failure;
 there is no batch, starter-pack, or automatic second-brain materialization mode.
 `tropo find` returns small typed context packets for agents and humans to read first;
-The unreleased `tropo find --governed` path is the first opt-in `vivary-core` adapter:
+The opt-in `tropo find --governed` path is the first `vivary-core` adapter:
 it turns one explicitly scoped, read-only workspace scan into a bounded, fingerprinted
 Task Capsule whose claims carry evidence and selection reasons. It performs no fetch,
 write, indexing, provider, or memory operation; plain `tropo find` is unchanged.
-The unreleased `strato decide --governed` facade is the second adapter. It validates
+The opt-in `strato decide --governed` facade is the second adapter. It validates
 one authority- and workspace-bound request, then exposes core's budget, capsule/receipt
 gate, and next-loop decision as stable machine-readable output. It is advisory unless
 `--strict` is set, persists nothing, and rejects free-form status text rather than
@@ -154,9 +153,8 @@ enables it, and `tropo migrate` handles backend switching. When local vector pol
 enabled, embedded migration stores graph-shaped vectors with source/embedding
 fingerprints; `--mode vector` uses those stored rows when they are current and
 falls back to deterministic typed text results when the embedded index is missing,
-stale, or partial. On the unreleased `dev`
-branch, `tropo query --mode semantic` can call an explicitly configured optional
-semantic-memory provider while still returning typed Vivary node ids.
+stale, or partial. `tropo query --mode semantic` can call an explicitly configured
+optional semantic-memory provider while still returning typed Vivary node ids.
 
 For workspaces that explicitly choose Cognee semantic memory, the optional
 `vivary-memory-cognee` package adds `vivary-cognee doctor`, `index`, `recall`, and
@@ -164,7 +162,7 @@ For workspaces that explicitly choose Cognee semantic memory, the optional
 hits that map back to known Vivary node ids. It is not part of the default install and
 provider writes require explicit approval. `tropo query --mode semantic --json` uses
 that same optional provider bridge after the workspace has been configured and indexed.
-The unreleased `vivary_core.recall` API is a separate provider-neutral firewall. It
+The `vivary_core.recall` API is a separate provider-neutral firewall. It
 classifies normalized candidates and projects caller-persisted recall transitions.
 Create and supersede require a proposal-bound human approval. Core adds no provider,
 store, network call, or default memory capability.

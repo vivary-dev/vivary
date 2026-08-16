@@ -1,6 +1,6 @@
 # vivary-ozone
 
-> Current published release: **0.2.0**. Development source: **0.3.1**, held for the final coordinated release train.
+> Current published release: **0.3.1**. [The root release status](../../README.md#release-status) owns version and publication truth.
 
 **The review layer** — the protective filter. Where `tropo` answers *"is each
 document valid?"*, `ozone` reviews the **whole graph**: the relationship-level gaps a

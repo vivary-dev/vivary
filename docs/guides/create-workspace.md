@@ -9,9 +9,9 @@ The workspace contains no starter records, templates, skills, or second-brain co
 
 ## Release boundary
 
-These commands describe the unpublished 0.4.2 source candidate.
-Registry `latest` still installs published 0.3.1 and creates the historical full layout.
-Run these commands from the Vivary source checkout root.
+These commands describe published 0.4.2.
+Registry `latest` installs it and creates the five-file layout.
+Pin `create-vivary==0.3.1` only to get the historical full layout.
 
 ## Agent contract
 
@@ -49,7 +49,7 @@ The `second-brain` preset does not create notes or a pre-populated second brain.
 Run a dry-run before the first write.
 
 ```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-project --preset coding --no-wizard --dry-run --json
+uvx create-vivary init C:/path/to/my-project --preset coding --no-wizard --dry-run --json
 ```
 
 Confirm the target, preset, contract, and five planned files.
@@ -60,7 +60,7 @@ Stop if the target contains work that Vivary can overwrite.
 Run the same command without `--dry-run`.
 
 ```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-project --preset coding --no-wizard --json
+uvx create-vivary init C:/path/to/my-project --preset coding --no-wizard --json
 ```
 
 Vivary creates this tree:
@@ -87,8 +87,8 @@ Run Doctor.
 Then run Tropo validation.
 
 ```bash
-python packages/create-vivary/create_vivary.py doctor C:/path/to/my-project
-python packages/tropo/tropo.py check --root C:/path/to/my-project
+uvx create-vivary doctor C:/path/to/my-project
+uvx --from vivary-tropo tropo check --root C:/path/to/my-project
 ```
 
 Both commands must exit with code `0`.
@@ -99,8 +99,8 @@ Fix each error before an agent uses the workspace.
 Preview the policy before creation.
 
 ```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-notes --preset second-brain --no-wizard --dry-run --json
-python packages/create-vivary/create_vivary.py init C:/path/to/my-notes --preset second-brain --no-wizard --json
+uvx create-vivary init C:/path/to/my-notes --preset second-brain --no-wizard --dry-run --json
+uvx create-vivary init C:/path/to/my-notes --preset second-brain --no-wizard --json
 ```
 
 The result is still the five-file seed.
@@ -111,8 +111,8 @@ Real notes must come from later work.
 Include an adapter in the initial command only when the runtime needs it.
 
 ```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-agent-project --preset coding --adapter agents --no-wizard
-python packages/create-vivary/create_vivary.py init C:/path/to/my-claude-project --preset coding --adapter claude --no-wizard
+uvx create-vivary init C:/path/to/my-agent-project --preset coding --adapter agents --no-wizard
+uvx create-vivary init C:/path/to/my-claude-project --preset coding --adapter claude --no-wizard
 ```
 
 Each adapter adds one bounded runtime file.
@@ -121,7 +121,7 @@ Use `--adapter` twice when both adapters are required.
 Include active code context only after explicit selection.
 
 ```bash
-python packages/create-vivary/create_vivary.py init C:/path/to/my-code-project --preset coding --active-context cocoindex-code --no-wizard
+uvx create-vivary init C:/path/to/my-code-project --preset coding --active-context cocoindex-code --no-wizard
 ```
 
 This option keeps the five-file seed.

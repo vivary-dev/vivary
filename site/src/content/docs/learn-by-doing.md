@@ -15,8 +15,8 @@ The command reference keeps exhaustive flags, schemas, limits, and exit codes.
 
 ## Release boundary
 
-The guide library describes the unpublished 0.4.2 source candidate.
-Registry `latest` still installs published 0.3.1.
+The guide library describes published 0.4.2.
+Registry `latest` installs it.
 Use the [release-status table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) as the publication authority.
 
 The [historical proof](/walkthrough/) records the published 0.3.1 full layout.
@@ -24,41 +24,39 @@ Do not use that 38-file fixture as the thin-workspace expectation.
 
 ## Command route
 
-Before release, run each guide from the Vivary source checkout root.
-Use these source commands:
+Run each guide with the published launchers.
+Use these commands:
 
 ```bash
-python packages/create-vivary/create_vivary.py
-python packages/tropo/tropo.py
+uvx create-vivary
+uvx --from vivary-tropo tropo
 ```
 
-The non-governed guide commands include these source paths.
+The guide commands use these launchers.
 Replace each example workspace path with the intended absolute path.
 
-Governed capsule and record commands need an isolated candidate environment.
-Get approval before you create or change that environment.
+Install the tools first if you prefer bare `create-vivary` and `tropo` commands.
+Get approval before you install anything into a shared environment.
 
-Create the environment on Windows:
+Install into an environment on Windows:
 
 ```powershell
-python -m venv C:/path/to/vivary-candidate
-C:/path/to/vivary-candidate/Scripts/python.exe -m pip install ./packages/core ./packages/tropo ./packages/create-vivary
-C:/path/to/vivary-candidate/Scripts/Activate.ps1
+python -m venv C:/path/to/vivary-env
+C:/path/to/vivary-env/Scripts/python.exe -m pip install vivary
+C:/path/to/vivary-env/Scripts/Activate.ps1
 ```
 
-Create the environment on macOS or Linux:
+Install into an environment on macOS or Linux:
 
 ```bash
-python -m venv /path/to/vivary-candidate
-/path/to/vivary-candidate/bin/python -m pip install ./packages/core ./packages/tropo ./packages/create-vivary
-source /path/to/vivary-candidate/bin/activate
+python -m venv /path/to/vivary-env
+/path/to/vivary-env/bin/python -m pip install vivary
+source /path/to/vivary-env/bin/activate
 ```
 
-Use that environment for every `--governed` or `record` command.
-Do not use the published 0.3.1 command for these candidate procedures.
-
-After 0.4.2 is published, use `create-vivary` and `tropo` directly.
-Do not use unversioned registry `latest` before publication.
+The `vivary` meta package installs the CLI suite.
+Use it for every `--governed` or `record` command.
+Pin `create-vivary==0.3.1` only to get the historical full layout.
 
 ## Choose a guide
 

@@ -37,9 +37,9 @@ work.
 
 ## Public governed-context vocabulary
 
-These terms name the development-source contract; they do not imply publication or
-graduation. Current maturity lives in [MIGRATION-STATUS.md](MIGRATION-STATUS.md), and
-exact command schemas live in [COMMANDS.md](COMMANDS.md#governed-machine-readable-envelopes-development-source).
+These terms name the governed-context contract. They do not imply that a surface has
+graduated. Current maturity lives in [MIGRATION-STATUS.md](MIGRATION-STATUS.md), and
+exact command schemas live in [COMMANDS.md](COMMANDS.md#governed-machine-readable-envelopes).
 
 - **Governed context** — bounded context whose claims retain typed evidence, selection
   reasons, conflicts, unknowns, omissions, workspace identity, and required checks.

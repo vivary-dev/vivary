@@ -111,7 +111,7 @@ approved source files. If provider state and source files disagree, source files
   Bellamente candidate, normalization must supply typed evidence and either a known
   stable Tropo node ID or the explicit unresolved-identity marker defined by the
   [Bellamente contract](https://github.com/vivary-dev/vivary/blob/dev/docs/bellamente-memory/SPEC-bellamente-memory.md#6-candidaterecallprovider-contract).
-  The unreleased `vivary_core.recall` surface then classifies the candidate and can
+  The `vivary_core.recall` surface then classifies the candidate and can
   project a caller-persisted transition. Learned memory never silently becomes
   authored truth.
 
@@ -274,7 +274,7 @@ Current scaffold output diverges: it writes `enabled = true` with runtime gates 
 indexes nothing, and makes no provider call, but does not yet meet the approved
 disabled-policy contract.
 
-In the source checkout's unreleased `vivary-memory-cognee` 0.1.2 adapter, privacy
+In the published `vivary-memory-cognee` 0.1.2 adapter, privacy
 filtering is owned by `build_snapshot`. Built-in private patterns and
 `memory.privacy.private_paths` always apply. When `respect_gitignore` is `true` (the
 default), the adapter passes only relative Markdown candidates through Core's
@@ -288,7 +288,7 @@ evidence](https://github.com/vivary-dev/vivary/blob/dev/packages/memory-cognee/t
 
 The source checkout and next `vivary-memory-cognee` release include
 `.strato/private/**` in the built-in floor and compare explicit privacy patterns
-case-insensitively on Windows. The currently published 0.1.0 package lacks that
+case-insensitively on Windows. The earlier 0.1.0 release lacks that
 built-in `.strato/private/**` entry; its generated Vivary configuration lists the path
 in `memory.privacy.private_paths`, but hand-written or older configuration must add it
 explicitly before indexing.

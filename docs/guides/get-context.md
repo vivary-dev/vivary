@@ -41,7 +41,7 @@ Tell me everything.
 Run `find` for normal task context.
 
 ```bash
-python packages/tropo/tropo.py find "where is release truth owned" --root C:/path/to/project --budget 1200 --json
+uvx --from vivary-tropo tropo find "where is release truth owned" --root C:/path/to/project --budget 1200 --json
 ```
 
 The default budget is 1,200 approximate tokens.
@@ -63,7 +63,7 @@ State that the result is unknown when evidence is missing.
 Use `query` when you need typed or filtered matches.
 
 ```bash
-python packages/tropo/tropo.py query "release status" --root C:/path/to/project --type project --json
+uvx --from vivary-tropo tropo query "release status" --root C:/path/to/project --type project --json
 ```
 
 Use `--path` to limit paths.
@@ -75,7 +75,7 @@ The [command reference](../COMMANDS.md#tropo--the-typed-knowledge-graph) owns al
 ## 4. Create a governed capsule
 
 Create a capsule only when later work needs evidence binding.
-Activate the approved candidate environment from the [guide library](../LEARN-BY-DOING.md#command-route).
+Use the published launchers from the [guide library](../LEARN-BY-DOING.md#command-route).
 
 ```bash
 tropo find "record the verified release change" --root C:/path/to/project --governed --json > C:/path/to/task-capsule.json
@@ -128,7 +128,7 @@ A loosening or invalid overlay fails closed.
 Add `--receipt` when the operator needs a local run receipt.
 
 ```bash
-python packages/tropo/tropo.py find "where is release truth owned" --root C:/path/to/project --json \
+uvx --from vivary-tropo tropo find "where is release truth owned" --root C:/path/to/project --json \
   --receipt C:/path/to/project/.vivary/runtime/receipts.jsonl
 ```
 

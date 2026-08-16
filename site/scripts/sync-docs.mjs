@@ -282,26 +282,18 @@ const readPublishedVersion = (surface) => {
   return version;
 };
 
-const readSourceVersion = (packageDirectory) => {
-  const manifest = fs.readFileSync(
-    path.join(repoRoot, 'packages', packageDirectory, 'pyproject.toml'),
-    'utf8',
-  );
-  const match = manifest.match(/^version\s*=\s*"(\d+\.\d+\.\d+)"\s*$/m);
-  if (!match) {
-    throw new Error(`Could not find source version for ${packageDirectory}/pyproject.toml`);
-  }
-  return match[1];
-};
-
+// Every version below is registry truth read from the root release table. The manifests
+// are source truth and can lead the registry between trains, so they are not the right
+// input for an agent-facing install surface.
 const createVivaryPyPI = readPublishedVersion('create-vivary');
 const createVivaryNpm = readPublishedVersion('@vivary/create');
+const coreVersion = readPublishedVersion('vivary-core');
 const tropoVersion = readPublishedVersion('vivary-tropo');
+const stratoVersion = readPublishedVersion('vivary-strato');
 const ozoneVersion = readPublishedVersion('vivary-ozone');
 const exoVersion = readPublishedVersion('vivary-exo');
 const cogneeVersion = readPublishedVersion('vivary-memory-cognee');
-const createVivarySource = readSourceVersion('create-vivary');
-const mcpSource = readSourceVersion('mcp');
+const mcpVersion = readPublishedVersion('vivary-mcp');
 
 const isGuidePage = ([, slug]) => slug === 'learn-by-doing' || slug.startsWith('guides/');
 
@@ -322,7 +314,7 @@ const coreDocsList = pages
 const llmsText = `# Vivary
 
 Vivary is a lightweight, local-first governed-context standard and scaffolder. The
-unpublished ${createVivarySource} source candidate creates five operational files: one context
+published ${createVivaryPyPI} scaffolder creates five operational files: one context
 capsule, one visible state surface, workspace policy, startup routing, and bounded
 private/runtime ignores. It seeds no starter records, template pack, or second brain.
 
@@ -340,21 +332,21 @@ Full Documentation: https://vivary.vercel.app/llms-full.txt
 - PyPI knowledge graph CLI: \`vivary-tropo\` ${tropoVersion}, command \`tropo\`
 - PyPI review CLI: \`vivary-ozone\` ${ozoneVersion}, command \`ozone\`
 - PyPI coordination CLI: \`vivary-exo\` ${exoVersion}, command \`exo\`
-- The unpublished source package \`vivary-strato\` exposes experimental command \`strato decide --governed\`; Core init does not copy skills or templates.
+- PyPI policy facade: \`vivary-strato\` ${stratoVersion}, experimental command \`strato decide --governed\`; Core init does not copy skills or templates.
+- PyPI governed-context seam: \`vivary-core\` ${coreVersion}, library only.
 - Optional Cognee adapter: \`vivary-memory-cognee\` ${cogneeVersion}, command \`vivary-cognee\`
-- Optional unpublished local stdio adapter: \`vivary-mcp\` ${mcpSource}; four read-only tools, disabled by default.
+- Optional local stdio adapter: \`vivary-mcp\` ${mcpVersion}; four read-only tools, disabled by default.
 - Versions are independent; do not call the whole project "Vivary ${createVivaryPyPI}".
 
-The versions above are registry truth. The five-file behavior belongs to unpublished
-development source until the README release table lists \`create-vivary\` and
-\`@vivary/create\` ${createVivarySource}.
+The versions above are registry truth. The five-file behavior is the published
+\`create-vivary\` and \`@vivary/create\` ${createVivaryPyPI} scaffolder.
 
-## Run the development-source candidate
+## Run the published scaffolder
 
 \`\`\`bash
-python packages/create-vivary/create_vivary.py init my-workspace --preset coding --no-wizard
-python packages/create-vivary/create_vivary.py doctor my-workspace
-python packages/tropo/tropo.py check --root my-workspace
+uvx create-vivary init my-workspace --preset coding --no-wizard
+uvx create-vivary doctor my-workspace
+uvx --from vivary-tropo tropo check --root my-workspace
 \`\`\`
 
 Pin the previous published full-layout scaffolder only when that behavior is wanted:
