@@ -1,75 +1,76 @@
 {
-  "date": "2026-07-06",
-  "generated_at": "2026-07-06T14:04:08Z",
+  "date": "2026-08-24",
+  "generated_at": "2026-08-24T10:03:02Z",
   "github": {
     "forks": 1,
-    "open_issues": 17,
-    "pushed_at": "2026-07-06T12:58:36Z",
+    "open_issues": 19,
+    "pushed_at": "2026-08-23T09:42:21Z",
     "stale": false,
-    "stars": 3,
+    "stars": 4,
     "watchers": 0
   },
   "github_forks": 1,
-  "github_stars": 3,
+  "github_stars": 4,
   "npm": {
     "packages": {
       "@vivary/create": {
-        "end": "2026-07-05",
-        "last_week": 319,
+        "end": "2026-08-23",
+        "last_week": 38,
         "stale": false,
-        "start": "2026-06-29",
+        "start": "2026-08-17",
         "versions_last_week": {
-          "0.1.0": 4,
-          "0.1.1": 5,
-          "0.2.0": 4,
-          "0.2.2": 4,
-          "0.2.3": 3,
-          "0.2.5": 14,
-          "0.2.6": 21,
-          "0.2.7": 22,
-          "0.2.8": 52,
-          "0.3.1": 190
+          "0.1.0": 2,
+          "0.1.1": 2,
+          "0.2.0": 2,
+          "0.2.2": 2,
+          "0.2.3": 2,
+          "0.2.5": 2,
+          "0.2.6": 1,
+          "0.2.7": 2,
+          "0.2.8": 1,
+          "0.3.1": 4,
+          "0.4.2": 18
         }
       }
     },
-    "weekly_total": 319
+    "weekly_total": 38
   },
-  "npm_weekly": 319,
+  "npm_weekly": 38,
   "pypi": {
     "packages": {
       "create-vivary": {
-        "last_day": 47,
-        "last_month": 1867,
-        "last_week": 512,
+        "last_day": 7,
+        "last_month": 773,
+        "last_week": 153,
         "stale": false
       },
       "vivary-exo": {
-        "last_day": 40,
-        "last_month": 675,
-        "last_week": 180,
+        "last_day": 2,
+        "last_month": 687,
+        "last_week": 150,
         "stale": false
       },
       "vivary-ozone": {
-        "last_day": 40,
-        "last_month": 441,
-        "last_week": 170,
+        "last_day": 6,
+        "last_month": 659,
+        "last_week": 152,
         "stale": false
       },
       "vivary-tropo": {
-        "last_day": 84,
-        "last_month": 2859,
-        "last_week": 770,
+        "last_day": 4,
+        "last_month": 2159,
+        "last_week": 177,
         "stale": false
       }
     },
-    "weekly_total": 1632
+    "weekly_total": 632
   },
-  "pypi_weekly": 1632,
+  "pypi_weekly": 632,
   "status": "ok",
   "totals": {
-    "npm_weekly": 319,
-    "package_weekly": 1951,
-    "pypi_weekly": 1632
+    "npm_weekly": 38,
+    "package_weekly": 670,
+    "pypi_weekly": 632
   },
   "warnings": []
 }
