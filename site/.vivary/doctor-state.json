@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "metrics": {
+    "date": "2026-08-10",
+    "graph_nodes": 9,
+    "graph_edges": 28,
+    "graph_broken": 0,
+    "error_count": 0,
+    "warning_count": 0,
+    "module_index_count": 2,
+    "total_files": 3
+  }
+}

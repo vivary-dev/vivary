@@ -1,0 +1,71 @@
+version = 1
+exclude = [
+  ".git",
+  ".claude",
+  ".agents",
+  ".strato",
+  "docs",
+  "templates",
+  "memory",
+  "heartbeat-reports",
+  "README.md",
+  "AGENTS.md",
+  "SOUL.md",
+  "STRATO.md",
+  "STATE.md",
+  "USER.md",
+  "MEMORY.md",
+  "bug-risk-playbook.md",
+  "astro.config.mjs",
+  "package-lock.json",
+  "package.json",
+  "public/assets",
+  "public/favicon.png",
+  "public/favicon.svg",
+  "public/fonts",
+  "public/llms-full.txt",
+  "public/llms.txt",
+  "public/media",
+  "public/robots.txt",
+  "public/usage-snapshot.svg",
+  "scripts/check-built-links.mjs",
+  "scripts/sync-docs.mjs",
+  "src/assets",
+  "src/content",
+  "src/content.config.ts",
+  "src/pages",
+  "src/styles",
+  "tests/marketing-ia.test.mjs",
+  "tests/support-modal.test.mjs",
+  "tsconfig.json",
+]
+
+[base]
+derive = ["id", "title"]
+allow_untyped = true
+optional = { tags = "string-list" }
+
+[types.module]
+folder = "modules"
+required = { project = "string", status = "enum:active|draft|blocked|archived", module_area = "string" }
+optional = { related_modules = "ref-list", related_changes = "ref-list", verification = "ref-list", gates = "ref-list", source_files = "string-list", test_files = "string-list" }
+
+[types.implementation_slice]
+folder = "changes"
+required = { project = "string", status = "enum:planned|active|done|blocked|deferred", slice = "string" }
+optional = { branch = "string", related_modules = "ref-list", related_changes = "ref-list", verification = "ref-list", gates = "ref-list" }
+
+[types.decision]
+folder = "decisions"
+required = { project = "string", status = "enum:proposed|accepted|deferred|superseded", date = "date" }
+optional = { supersedes = "ref", superseded_by = "ref", related_modules = "ref-list", related_changes = "ref-list", rationale = "string" }
+
+[types.verification]
+folder = "verification"
+required = { project = "string", status = "enum:planned|passed|failed|blocked|deferred", target = "string" }
+optional = { command = "string", evidence = "any", related_modules = "ref-list", related_changes = "ref-list" }
+
+[types.gate]
+folder = "gates"
+required = { project = "string", status = "enum:open|approved|rejected|deferred", gate = "string" }
+optional = { approver = "string", approved_at = "datetime", command_intent = "string", related_modules = "ref-list", related_changes = "ref-list" }

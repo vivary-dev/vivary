@@ -18,3 +18,13 @@ pnpm-debug.log*
 
 # macOS-specific files
 .DS_Store
+
+# Vivary private context
+USER.md
+MEMORY.md
+memory/*
+!memory/.gitkeep
+heartbeat-reports/*
+!heartbeat-reports/.gitkeep
+.strato/private/
+*.vivary-tmp

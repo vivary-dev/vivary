@@ -1,6 +1,6 @@
 # AGENTS.md — Vivary runtime contract
 
-The contract for **any** agent working in this repo (Claude Code, Codex CLI, …).
+The contract for any agent working in this repository.
 Lean by law — depth lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Read it
 once; don't reload it every turn.
 
@@ -34,7 +34,7 @@ Default to a single focused pass. When a task is repeatable, long-running, or
 unattended, *consider recommending* a loop (a program that prompts the agent and
 decides whether to continue) rather than reaching for one by default. Judging fit
 and setting one up safely lives in the **loops skill**
-(`.claude/skills/loops/`).
+(`.agents/skills/loops/SKILL.md`).
 
 If you do run a loop: it must self-verify each tick and have hard stops (max
 iterations, no-progress detection, budget ceiling), and it still **stops at the
@@ -70,8 +70,8 @@ No merge until the human has approved the plan **and** the delivered change matc
 it. If the work diverged from the approved plan, re-align before merging — don't
 merge and explain after.
 
-*How* you produce the plan is runtime-specific; your runtime overlay names the
-mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
+The written plan is the handoff. A runtime may provide planning tools, but it
+does not become a second owner of project policy.
 
 ## Constraints
 
@@ -80,9 +80,8 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
   the `ci` checks + the `ozone review` gate green first. `dev` blocks force-push and
   deletion. `main` is the vestigial baseline; `prod` is reserved for a future release cut.
 - **No nested git repos.** Vivary is one repo; packages are plain subdirectories.
-- **Supply chain.** Before any install, check `~/dev/agents/.shared/deny-list-npm.json`
-  and run `npm`/`pnpm audit`. Vet new dependencies; prefer pinned pre-compromise
-  versions.
+- **Supply chain.** Before any install, follow the HQ security-audit workflow and
+  run `npm`/`pnpm audit`. Vet new dependencies and commit the lockfile.
 - **Platform.** Windows / PowerShell (`$null`, never `nul`; bash also available).
   `tropo` needs Python 3.11+ (stdlib `tomllib`).
 - **CI runs free** on the public `vivary-dev/vivary` repo (Actions is free for public
@@ -108,12 +107,12 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
 ## Verify
 
 ```bash
-python packages/tropo/tests/test_tropo.py                  # 171/171
-python packages/ozone/tests/test_ozone.py                  # 110/110
-python packages/exo/tests/test_exo.py                      # 29/29
-python packages/create-vivary/tests/test_create_vivary.py  # OK (exit 0)
-python -m pytest packages/core/tests/ -q                   # 771 Windows; 770 + 1 skip Linux
-python -m pytest packages/strato/tests/ -q                 # 48/48
+python packages/tropo/tests/test_tropo.py
+python packages/ozone/tests/test_ozone.py
+python packages/exo/tests/test_exo.py
+python packages/create-vivary/tests/test_create_vivary.py
+python -m pytest packages/core/tests/ -q
+python -m pytest packages/strato/tests/ -q
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # clean
 ```
 
