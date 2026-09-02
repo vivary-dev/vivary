@@ -2,8 +2,9 @@
 
 Each case records the exit code and the streams one real run produced. A stream
 that two runs under different temporary directories agree on is frozen whole in
-command_surface_snapshots.py, and a stream that varies keeps fragments. Routing
-work must keep every recorded value unchanged.
+command_surface_snapshots.py, and a stream that varies between runs or that the
+case calls environment-dependent keeps fragments. Routing work must keep every
+recorded value unchanged.
 """
 
 import tempfile
@@ -161,13 +162,17 @@ def case_problems(
     stderr: str,
     installed: bool = False,
 ) -> list[str]:
-    """Report every recorded value the capture failed to reproduce."""
+    """Report every recorded value the capture failed to reproduce.
+
+    The source run and the installed replay judge a case the same way, so a
+    stream the case calls environment-dependent falls back to fragments in both.
+    """
     problems = []
     if code != case.exit_code:
         problems.append(f"{case.name}: exited {code} instead of {case.exit_code}")
     for stream, text in zip(STREAMS, (stdout, stderr)):
         exact = case.stdout_exact if stream == "stdout" else case.stderr_exact
-        if installed and stream in case.environment_dependent:
+        if stream in case.environment_dependent:
             exact = None
         if exact is not None:
             if normalize(text) != exact:
@@ -215,13 +220,34 @@ class CommandSurfaceCharacterizationTests(unittest.TestCase):
         for case in CASES:
             first, second = capture(case, 2)
             for index, stream in enumerate(STREAMS, start=1):
-                if case.silent_stream == stream or first[index] != second[index]:
+                if (
+                    case.silent_stream == stream
+                    or stream in case.environment_dependent
+                    or first[index] != second[index]
+                ):
                     continue
                 with self.subTest(case=case.name, stream=stream):
                     exact = case.stdout_exact if stream == "stdout" else case.stderr_exact
                     self.assertIsNotNone(
                         exact, f"{case.name}: {stream} is deterministic and must be frozen"
                     )
+
+    def test_environment_dependent_streams_are_judged_by_fragments(self):
+        case = CommandCase(
+            "probe", "tropo", ("--help",), 0,
+            stdout=("storage:file",), stdout_exact="storage:file installed\n",
+            silent_stream="stderr", environment_dependent=("stdout",),
+        )
+        for installed in (False, True):
+            with self.subTest(installed=installed):
+                self.assertEqual(
+                    case_problems(case, 0, "storage:file not-installed\n", "", installed),
+                    [],
+                )
+                self.assertEqual(
+                    case_problems(case, 0, "storage:embedded\n", "", installed),
+                    ["probe: stdout is missing 'storage:file'"],
+                )
 
 
 if __name__ == "__main__":

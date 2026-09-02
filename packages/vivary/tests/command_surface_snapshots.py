@@ -2,7 +2,8 @@
 
 Each entry holds the whole stream one run produced, trailing whitespace
 stripped per line and closed by a single newline. Streams that a case
-declares silent or that vary between runs are absent by design.
+declares silent, environment-dependent, or that vary between runs are
+absent by design.
 """
 
 SNAPSHOTS = {
@@ -31,55 +32,11 @@ SNAPSHOTS = {
             "                        (or set VIVARY_RECEIPT_LOG)\n"
         ),
     },
-    "create-vivary-capabilities": {
-        "stdout": (
-            "create-vivary capabilities for coding:\n"
-            "- storage:file: File-backed typed graph (default, installed)\n"
-            "- storage:embedded: Local embedded storage (not-installed)\n"
-            "- memory:none: No semantic memory (default, installed)\n"
-            "- memory:local: Local semantic memory policy (installed)\n"
-            "- memory:cognee: Cognee semantic memory (not-installed)\n"
-            "- active-context:cocoindex-code: CocoIndex-code active context (not-installed)\n"
-            "- interop:mcp: Read-only MCP interoperability (not-installed)\n"
-            "- governed-context:core: Governed contracts (vivary-core) (not-installed)\n"
-            "- governed-context:tropo: Governed context compilation (Tropo) (not-installed)\n"
-            "- governed-policy:strato: Governed policy decisions (Strato) (not-installed)\n"
-            "- governed-verification:ozone: Governed verification (Ozone) (not-installed)\n"
-            "- governed-control:exo: Governed execution control (Exo) (not-installed)\n"
-        ),
-    },
     "create-vivary-unknown-flag": {
         "stderr": (
             "usage: create-vivary [-h] [--version] [--receipt PATH]\n"
             "                     {init,wizard,doctor,capabilities,adopt,record} ...\n"
             "create-vivary: error: unrecognized arguments: --nope\n"
-        ),
-    },
-    "create-vivary-doctor": {
-        "stdout": (
-            "create-vivary doctor: failed (0 node(s), 0 edge(s), 0 broken)\n"
-            "memory: disabled (none)\n"
-            "capability: interop:mcp (not-installed)\n"
-            "capability: governed-context:core (not-installed)\n"
-            "capability: governed-context:tropo (not-installed)\n"
-            "capability: governed-policy:strato (not-installed)\n"
-            "capability: governed-verification:ozone (not-installed)\n"
-            "capability: governed-control:exo (not-installed)\n"
-            "error: missing required file: README.md\n"
-            "error: missing required file: AGENTS.md\n"
-            "error: missing required file: SOUL.md\n"
-            "error: missing required file: STRATO.md\n"
-            "error: missing required file: STATE.md\n"
-            "error: missing required file: USER.md\n"
-            "error: missing required file: MEMORY.md\n"
-            "error: missing required file: bug-risk-playbook.md\n"
-            "error: missing required file: tropo.toml\n"
-            "error: missing required file: .gitignore\n"
-            "error: missing required file: templates/AGENTS.md\n"
-            "error: missing required file: .claude/skills/strato/SKILL.md\n"
-            "error: missing required file: .claude/skills/loops/SKILL.md\n"
-            "error: missing required file: .agents/skills/strato/SKILL.md\n"
-            "error: missing required file: .agents/skills/loops/SKILL.md\n"
         ),
     },
     "tropo-help": {
