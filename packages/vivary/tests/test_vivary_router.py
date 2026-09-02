@@ -8,6 +8,7 @@ fixture and are compared on help output only.
 import contextlib
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -48,6 +49,8 @@ DISTRIBUTIONS = {
     "exo": "vivary-exo",
 }
 COMPONENT_MODULES = ("create_vivary", "tropo", "strato", "ozone", "exo")
+UNROUTED_MODULE = "tropo"
+UNROUTED_OPERATION = "map"
 
 
 class ParityCase(NamedTuple):
@@ -130,6 +133,22 @@ class RouterBehaviorTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(out, "")
         self.assertIn("usage: vivary", err)
+
+    def test_unrouted_component_operation_stays_standalone(self):
+        self.assertNotIn(UNROUTED_OPERATION, vivary_cli.ROUTE_BY_VERB)
+        args = [UNROUTED_OPERATION, "--root", VAULT]
+        with tempfile.TemporaryDirectory() as work:
+            standalone = run([MODULE_FILES[UNROUTED_MODULE], *args], work)
+            routed = run([VIVARY_CLI, *args], work)
+            front_door_help = run([VIVARY_CLI, "--help"], work)
+        self.assertEqual(standalone[0], 0, standalone[2])
+        self.assertIn(f"tropo {UNROUTED_OPERATION}", standalone[1])
+        self.assertEqual(routed[0], 2)
+        self.assertEqual(routed[1], "")
+        self.assertIn("usage: vivary", routed[2])
+        self.assertIsNone(
+            re.search(rf"(?m)^\s+{UNROUTED_OPERATION}\b", front_door_help[1])
+        )
 
     def test_version_imports_no_component(self):
         with tempfile.TemporaryDirectory() as work:

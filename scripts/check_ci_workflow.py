@@ -47,6 +47,10 @@ def main() -> None:
     artifact_check = (
         'python scripts/check_release_artifacts.py --repository . --artifacts "$artifacts"'
     )
+    parity_tests = "python scripts/tests/test_installed_route_parity.py"
+    parity_check = (
+        'python scripts/check_installed_route_parity.py "$smoke/venv/bin"'
+    )
     site_install = "        run: npm ci\n        working-directory: site"
     site_audit = (
         "        run: npm audit --audit-level=high\n"
@@ -161,6 +165,9 @@ def main() -> None:
         test_job.index(artifact_test) < test_job.index(artifact_check),
         "artifact contract tests must precede the real archive check",
     )
+    for command in (parity_tests, parity_check):
+        require(command in test_job, f"tests job must run {command}")
+        require(test_job.count(command) == 1, f"tests job must run {command} exactly once")
     require(
         site_install in site_job,
         "site job must run npm ci with working-directory: site",
