@@ -152,6 +152,14 @@ Exact floors and source versions live only in the
 [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) distinguishes those source versions
 from registry truth. The map was checked against those manifests on **2026-08-09**.
 
+The meta-package also owns a front door. `vivary` holds a static table of ten task
+verbs, imports the one component a verb needs, and calls it in the same process. It
+adds no component code, no subprocess, and no dynamic discovery, so the arrows above
+are the same edges the router uses. Each route carries the component version floor
+that shipped the verb, and the standalone commands remain the full operation surface.
+[COMMANDS.md](/commands/#vivary--the-front-door-and-local-visibility-helpers) owns
+the verb table.
+
 What it owns:
 
 - **Determinism** — canonical JSON, sha256 fingerprints, deterministic IDs. Same

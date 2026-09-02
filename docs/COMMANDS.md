@@ -82,20 +82,67 @@ argument and work bounds live only in [MCP.md](MCP.md#bounded-work).
 
 ---
 
-## vivary — local visibility helpers
+## vivary — the front door and local visibility helpers
 
 ```
+vivary <verb> [ARGS...]
 vivary logs [PATH] [--json] [--tail N] [--failed]
 vivary logs email [PATH] --to EMAIL [--subject TEXT] [--out FILE]
                   [--json] [--tail N] [--failed]
 ```
 
-The `vivary` meta package installs the four core CLIs and adds a tiny local helper for
-the receipt files they emit. `vivary logs` summarizes a JSONL receipt file as text or
-JSON. `vivary logs email` creates a redacted support email draft from the same
-whitelisted receipt fields. Unknown fields, malformed lines, stdout/stderr-like fields,
-file contents, raw query text, target ids, and local paths are not copied into the
-summary.
+The `vivary` meta package installs the four core CLIs and the scaffolder, routes ten
+task verbs to them, and adds a local helper for the receipt files they emit.
+
+### Task verbs
+
+A verb runs the component operation in the same process. Arguments and output pass
+through unchanged, so each verb behaves like the standalone command it maps to.
+`vivary --help` groups the verbs the same way this table does. These verbs ship in
+`vivary` 0.2.0 from source. The published 0.1.10 on PyPI does not have them until the
+next release publishes.
+
+| Group | Verb | Standalone equivalent | Job |
+|---|---|---|---|
+| Workspace | `vivary create` | `create-vivary init` | Create a Vivary workspace scaffold. |
+| Workspace | `vivary adopt` | `create-vivary adopt` | Plan and apply bounded governed context for an existing workspace. |
+| Workspace | `vivary doctor` | `create-vivary doctor` | Validate a Vivary workspace scaffold. |
+| Workspace | `vivary capabilities` | `create-vivary capabilities` | List the optional preset capabilities. |
+| Graph and retrieval | `vivary check` | `tropo check` | Validate the context graph and report errors and warnings. |
+| Graph and retrieval | `vivary find` | `tropo find` | Retrieve a token-budgeted context set for a query. |
+| Policy | `vivary decide` | `strato decide` | Evaluate one governed decision request. |
+| Review | `vivary review` | `ozone review` | Run a review rule pack over the context graph. |
+| Review | `vivary impact` | `ozone impact` | Show what one node affects. |
+| Coordination | `vivary control` | `exo control` | Dispatch one governed Core control request. |
+
+Each route declares the component version floor that shipped the verb:
+`create-vivary>=0.4.2` for the workspace verbs, `vivary-tropo>=0.5.3` for `check` and
+`find`, `vivary-strato>=0.1.2` for `decide`, `vivary-ozone>=0.3.1` for `review` and
+`impact`, and `vivary-exo>=0.3.0` for `control`. A component below its floor is refused
+with exit code `2` and a message naming the required version. The floors match the
+[meta-package manifest](https://github.com/vivary-dev/vivary/blob/dev/packages/vivary/pyproject.toml).
+A missing component, or one below its floor, is refused with exit code `2` and a `pip
+install` hint naming the distribution.
+
+The front door covers the ten approved task intents and nothing else. The standalone
+`create-vivary`, `tropo`, `strato`, `ozone`, and `exo` commands remain the advanced
+surface with every operation, and `vivary --help` lists them. They are not deprecated,
+and a new component operation stays reachable there without a meta-package release.
+Promoting an operation to a verb takes a meta-package minor release, a matching floor
+bump, and approval of the verb name.
+
+**Temporary limitation.** `vivary <verb> --help` passes component help through
+verbatim, so the usage line names the component program, for example `usage: tropo
+...` rather than `usage: vivary check ...`. The exit code, options, and behavior are
+correct. A follow-up adds an optional `prog` seam to the components on their own patch
+cadence so the routed usage line reads `vivary`.
+
+### Receipt commands
+
+`vivary logs` summarizes a JSONL receipt file as text or JSON. `vivary logs email`
+creates a redacted support email draft from the same whitelisted receipt fields.
+Unknown fields, malformed lines, stdout/stderr-like fields, file contents, raw query
+text, target ids, and local paths are not copied into the summary.
 
 | Command | Job |
 |---|---|

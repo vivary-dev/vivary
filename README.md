@@ -51,6 +51,10 @@ including `create-vivary>=0.4.2`, `vivary-tropo>=0.5.3`, and `vivary-strato>=0.1
 It receives Core transitively. `vivary-memory-cognee` and `vivary-mcp` ride the same
 train as optional packages and are not meta-package dependencies.
 
+Source leads the registry for one package. The `vivary` meta package is staged at
+**0.2.0** for the front-door task verbs and has not published. Installing `vivary`
+from PyPI still gives the 0.1.10 in the table above.
+
 [CHANGELOG.md](CHANGELOG.md) records the train and the exact smokes that verified it,
 without rewriting earlier independent-version history.
 [Migration status](docs/MIGRATION-STATUS.md) owns maturity classifications.
@@ -82,6 +86,10 @@ high-leverage backlog lives in [docs/PRODUCT-ROADMAP.md](docs/PRODUCT-ROADMAP.md
 
 Current command surface:
 
+- `vivary create` / `adopt` / `doctor` / `capabilities` / `check` / `find` / `decide` /
+  `review` / `impact` / `control` from the `vivary` meta package, the front door that
+  routes ten task verbs to the commands below. The standalone commands stay the
+  advanced surface with every operation.
 - `create-vivary init` / `doctor` / `wizard` / `capabilities` / `adopt` / `record` /
   `doctor --trend`
 - `tropo check` / `graph` / `find` / `query` / `migrate` / `map` / `init --packs`

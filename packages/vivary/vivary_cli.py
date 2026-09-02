@@ -1,13 +1,16 @@
-"""Small visibility helpers for Vivary receipts.
+"""The Vivary front door and its local visibility helpers.
 
-This module intentionally stays dependency-free and local-only. It reads the
-privacy-preserving JSONL receipts already emitted by the core CLIs and can format
-an email draft, but it never sends telemetry or mail on its own.
+This module routes ten task-first verbs to the installed component CLIs and reads
+the privacy-preserving JSONL receipts those CLIs emit. It stays dependency-free
+and local-only: it never sends telemetry or mail on its own, and it imports a
+component only when a routed verb asks for one.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib
+import importlib.metadata
 import json
 import os
 import platform
@@ -16,11 +19,12 @@ import sys
 import urllib.parse
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
-__version__ = "0.1.10"
+__version__ = "0.2.0"
 DEFAULT_RECEIPT_LOG = ".vivary/receipts.jsonl"
 RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
+HELP_WIDTH = 79
 SAFE_FIELDS = (
     "schema",
     "timestamp",
@@ -36,6 +40,66 @@ SAFE_FIELDS = (
     "platform",
     "receipt_source",
     "error_type",
+)
+
+
+class Component(NamedTuple):
+    module: str
+    distribution: str
+    group: str
+    floor: str
+
+
+COMPONENTS = {
+    "create_vivary": Component(
+        "create_vivary", "create-vivary", "Workspace", "0.4.2"),
+    "tropo": Component("tropo", "vivary-tropo", "Graph and retrieval", "0.5.3"),
+    "strato": Component("strato", "vivary-strato", "Policy", "0.1.2"),
+    "ozone": Component("ozone", "vivary-ozone", "Review", "0.3.1"),
+    "exo": Component("exo", "vivary-exo", "Coordination", "0.3.0"),
+}
+
+
+class Route(NamedTuple):
+    verb: str
+    module: str
+    operation: tuple[str, ...]
+    summary: str
+
+
+ROUTES = (
+    Route("create", "create_vivary", ("init",),
+          "Create a Vivary workspace scaffold"),
+    Route("adopt", "create_vivary", ("adopt",),
+          "Plan and apply governed context for an existing workspace"),
+    Route("doctor", "create_vivary", ("doctor",),
+          "Validate a Vivary workspace scaffold"),
+    Route("capabilities", "create_vivary", ("capabilities",),
+          "List the optional preset capabilities"),
+    Route("check", "tropo", ("check",),
+          "Validate the context graph and report errors and warnings"),
+    Route("find", "tropo", ("find",),
+          "Retrieve a token-budgeted context set for a query"),
+    Route("decide", "strato", ("decide",),
+          "Evaluate one governed decision request"),
+    Route("review", "ozone", ("review",),
+          "Run a review rule pack over the context graph"),
+    Route("impact", "ozone", ("impact",),
+          "Show what one node affects"),
+    Route("control", "exo", ("control",),
+          "Dispatch one governed Core control request"),
+)
+
+ROUTE_BY_VERB = {route.verb: route for route in ROUTES}
+
+HELPER_COMMANDS = ("logs", "email")
+
+ADVANCED_COMMANDS = (
+    ("create-vivary", "Scaffold, adopt, and validate workspaces"),
+    ("tropo", "The context graph, its validation, and retrieval"),
+    ("strato", "The governed decision policy layer"),
+    ("ozone", "Review, impact, and evidence verification"),
+    ("exo", "Coordination, work items, and governed control"),
 )
 
 
@@ -267,10 +331,148 @@ def cmd_logs_email(args: argparse.Namespace) -> int:
     return 0
 
 
+def _release_tuple(text: str) -> tuple[tuple[int, ...], bool]:
+    """Split a version into its release numbers and whether it is a final release."""
+    match = re.match(r"\d+(?:\.\d+)*", text.strip())
+    if match is None:
+        return (0, 0, 0), False
+    release = [int(part) for part in match.group().split(".")]
+    release.extend([0] * (3 - len(release)))
+    rest = text.strip()[match.end():]
+    return tuple(release), re.fullmatch(r"(?:\.post\d+)?", rest) is not None
+
+
+def _below_floor(installed: str, floor: str) -> bool:
+    release, is_final = _release_tuple(installed)
+    floor_release, _ = _release_tuple(floor)
+    if release != floor_release:
+        return release < floor_release
+    return not is_final
+
+
+def _installed_version(component: Component, module: Any) -> str | None:
+    try:
+        installed = importlib.metadata.version(component.distribution)
+    except importlib.metadata.PackageNotFoundError:
+        installed = getattr(module, "__version__", None)
+    return installed if isinstance(installed, str) else None
+
+
+def _dispatch(route: Route, rest: list[str]) -> int:
+    component = COMPONENTS[route.module]
+    try:
+        module = importlib.import_module(route.module)
+    except ModuleNotFoundError as exc:
+        if exc.name != component.module:
+            raise
+        print(
+            f"vivary {route.verb}: {component.distribution} is not installed."
+            f' Run: pip install "{component.distribution}>={component.floor}"',
+            file=sys.stderr,
+        )
+        return 2
+
+    main = getattr(module, "main", None)
+    if not callable(main):
+        print(
+            f"vivary {route.verb}: the importable module {component.module} is not"
+            f" {component.distribution} (no main entry point)",
+            file=sys.stderr,
+        )
+        return 2
+
+    installed = _installed_version(component, module)
+    if installed is None:
+        print(
+            f"vivary {route.verb}: cannot read the version of {component.distribution}",
+            file=sys.stderr,
+        )
+        return 2
+
+    if _below_floor(installed, component.floor):
+        print(
+            f"vivary {route.verb}: needs {component.distribution} {component.floor}"
+            f" or newer, found {installed}. Run: pip install --upgrade"
+            f' "{component.distribution}>={component.floor}"',
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        return main([*route.operation, *rest])
+    except SystemExit as exc:
+        code = exc.code
+        if code is None:
+            return 0
+        if isinstance(code, int):
+            return code
+        # A component can exit with a message string, which a standalone run
+        # would have had the interpreter print before exiting 1.
+        print(code, file=sys.stderr)
+        return 1
+
+
+def _description() -> str:
+    width = max(len(route.verb) for route in ROUTES)
+    lines = [
+        "The Vivary front door, plus local visibility helpers.",
+        "",
+        "Task verbs:",
+    ]
+    for group in dict.fromkeys(COMPONENTS[route.module].group for route in ROUTES):
+        lines.append("")
+        lines.append(f"  {group}")
+        lines.extend(
+            f"    {route.verb.ljust(width)}  {route.summary}"
+            for route in ROUTES
+            if COMPONENTS[route.module].group == group
+        )
+    return "\n".join(lines)
+
+
+def _usage() -> str:
+    """Lay out the command list by hand.
+
+    argparse treats the `{a,b,c}` choice list as one unbreakable token, so the
+    generated usage line runs past the width budget once ten verbs join the two
+    receipt commands.
+    """
+    names = (*HELPER_COMMANDS, *(route.verb for route in ROUTES))
+    tokens = [f"{name}," for name in names[:-1]]
+    tokens.append(f"{names[-1]}}} ...")
+    indent = " " * len("usage: ")
+    budget = HELP_WIDTH - len(indent)
+    lines = ["vivary [-h] [--version] {"]
+    for token in tokens:
+        if len(lines[-1]) + len(token) > budget:
+            lines.append("")
+        lines[-1] += token
+    return ("\n" + indent).join(lines)
+
+
+def _epilog() -> str:
+    width = max(len(name) for name, _ in ADVANCED_COMMANDS)
+    lines = [
+        "Advanced:",
+        "",
+        "  Each component also installs its own command with the full operation set.",
+        "",
+    ]
+    lines.extend(f"    {name.ljust(width)}  {summary}" for name, summary in ADVANCED_COMMANDS)
+    return "\n".join(lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="vivary", description="Vivary visibility helpers.")
+    parser = argparse.ArgumentParser(
+        prog="vivary",
+        usage=_usage(),
+        description=_description(),
+        epilog=_epilog(),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--version", action="version", version=f"vivary {__version__}")
-    sub = parser.add_subparsers(dest="command")
+    # A custom usage would otherwise become the prefix of every subcommand's prog.
+    sub = parser.add_subparsers(dest="command", metavar="<command>", prog="vivary")
 
     logs = sub.add_parser("logs", help="summarize local Vivary JSONL run receipts")
     logs.add_argument("path", nargs="?", default=os.environ.get(RECEIPT_ENV, DEFAULT_RECEIPT_LOG))
@@ -293,11 +495,16 @@ def build_parser() -> argparse.ArgumentParser:
     email.add_argument("--failed", action="store_true", help="include only failed receipts")
     email.set_defaults(func=cmd_logs_email)
 
+    for route in ROUTES:
+        sub.add_parser(route.verb, add_help=False)
+
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in ROUTE_BY_VERB:
+        return _dispatch(ROUTE_BY_VERB[argv[0]], argv[1:])
     if len(argv) >= 2 and argv[0] == "logs" and argv[1] == "email":
         argv = [argv[1], *argv[2:]]
     parser = build_parser()

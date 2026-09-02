@@ -1,6 +1,7 @@
 # vivary
 
-`vivary 0.1.10` is published and provides one install for the Vivary CLI suite:
+`vivary 0.2.0` is the source version and provides one install for the Vivary CLI
+suite:
 
 ```bash
 python -m pip install vivary
@@ -27,6 +28,22 @@ The install includes:
 
 It receives `vivary-core` transitively through the role packages rather than owning a
 duplicate Core floor.
+
+The `vivary` command is also the front door. It routes ten task verbs to the
+installed components in the same process, grouped in `vivary --help` as Workspace,
+Graph and retrieval, Policy, Review, and Coordination:
+
+```bash
+vivary create my-workspace --preset coding --no-wizard
+vivary check --root my-workspace
+vivary review --root my-workspace --strict
+```
+
+Each route declares the component version floor it needs, and a component below
+that floor is refused with exit code 2. The standalone `create-vivary`, `tropo`,
+`strato`, `ozone`, and `exo` commands remain the advanced surface with the full
+operation set and are not deprecated. `vivary <verb> --help` currently prints the
+component program name in its usage line.
 
 Ozone and Exo expose explicit governed paths:
 

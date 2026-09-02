@@ -105,8 +105,14 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "          uv build --out-dir \"$artifacts\" packages/vivary\n"
         "          npm pack packages/create-vivary/npm --pack-destination \"$artifacts\"\n"
         "          python scripts/check_release_artifacts.py --repository . --artifacts \"$artifacts\"\n"
+        "      - name: installed route parity contract tests\n"
+        "        run: python scripts/tests/test_installed_route_parity.py\n"
         "      - name: core\n"
         "        run: python -m pytest packages/core/tests/ -q\n"
+        "      - name: packaged front door smoke\n"
+        "        run: python scripts/check_installed_route_parity.py \"$smoke/venv/bin\"\n"
+        "      - name: installed command surface\n"
+        "        run: python scripts/check_installed_route_parity.py --characterize \"$smoke/venv/bin\"\n"
         "      - name: diff hygiene\n"
         "        env:\n"
         "          BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}\n"
@@ -153,6 +159,13 @@ AUTOMATION_BEHAVIOR_COMMAND = (
 ARTIFACT_TEST_COMMAND = "python scripts/tests/test_release_artifacts.py"
 ARTIFACT_CHECK_COMMAND = (
     'python scripts/check_release_artifacts.py --repository . --artifacts "$artifacts"'
+)
+PARITY_TEST_COMMAND = "python scripts/tests/test_installed_route_parity.py"
+PARITY_CHECK_COMMAND = (
+    'python scripts/check_installed_route_parity.py "$smoke/venv/bin"'
+)
+PARITY_CHARACTERIZE_COMMAND = (
+    'python scripts/check_installed_route_parity.py --characterize "$smoke/venv/bin"'
 )
 
 
@@ -204,6 +217,35 @@ def test_release_artifact_contract_and_real_archives_must_run():
         message = _run(workflow.replace(command, "echo artifact proof skipped", 1))
         assert message, f"CI must execute {command}"
         assert command in message
+
+
+def test_installed_route_parity_proofs_must_run():
+    workflow = _workflow(INSTALL + AUDIT)
+    for command in (
+        PARITY_TEST_COMMAND,
+        PARITY_CHECK_COMMAND,
+        PARITY_CHARACTERIZE_COMMAND,
+    ):
+        message = _run(workflow.replace(command, "echo parity proof skipped", 1))
+        assert message, f"CI must execute {command}"
+        assert command in message
+
+
+def test_installed_command_surface_must_follow_route_parity():
+    reordered = _workflow(INSTALL + AUDIT).replace(
+        "      - name: packaged front door smoke\n"
+        f"        run: {PARITY_CHECK_COMMAND}\n"
+        "      - name: installed command surface\n"
+        f"        run: {PARITY_CHARACTERIZE_COMMAND}\n",
+        "      - name: installed command surface\n"
+        f"        run: {PARITY_CHARACTERIZE_COMMAND}\n"
+        "      - name: packaged front door smoke\n"
+        f"        run: {PARITY_CHECK_COMMAND}\n",
+        1,
+    )
+    message = _run(reordered)
+    assert message, "replaying the surface before proving route parity must fail"
+    assert "must precede" in message
 
 
 def test_missing_site_audit_gate_fails():

@@ -47,6 +47,14 @@ def main() -> None:
     artifact_check = (
         'python scripts/check_release_artifacts.py --repository . --artifacts "$artifacts"'
     )
+    parity_tests = "python scripts/tests/test_installed_route_parity.py"
+    parity_check = (
+        'python scripts/check_installed_route_parity.py "$smoke/venv/bin"'
+    )
+    parity_characterize = (
+        "python scripts/check_installed_route_parity.py --characterize"
+        ' "$smoke/venv/bin"'
+    )
     site_install = "        run: npm ci\n        working-directory: site"
     site_audit = (
         "        run: npm audit --audit-level=high\n"
@@ -160,6 +168,13 @@ def main() -> None:
     require(
         test_job.index(artifact_test) < test_job.index(artifact_check),
         "artifact contract tests must precede the real archive check",
+    )
+    for command in (parity_tests, parity_check, parity_characterize):
+        require(command in test_job, f"tests job must run {command}")
+        require(test_job.count(command) == 1, f"tests job must run {command} exactly once")
+    require(
+        test_job.index(parity_check) < test_job.index(parity_characterize),
+        "route parity must precede the installed command surface replay",
     )
     require(
         site_install in site_job,

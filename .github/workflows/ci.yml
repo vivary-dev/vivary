@@ -139,6 +139,10 @@ jobs:
         run: python packages/vivary/tests/test_vivary_cli.py
       - name: vivary command surface characterization
         run: python packages/vivary/tests/test_command_surface_characterization.py
+      - name: vivary task-first route parity
+        run: python packages/vivary/tests/test_vivary_router.py
+      - name: installed route parity contract tests
+        run: python scripts/tests/test_installed_route_parity.py
       - name: release artifact contract tests
         run: python scripts/tests/test_release_artifacts.py
       - name: release artifact license contract
@@ -180,6 +184,8 @@ jobs:
             cd "$smoke"
             "$smoke/venv/bin/vivary" logs --help > /dev/null
           )
+          python scripts/check_installed_route_parity.py "$smoke/venv/bin"
+          python scripts/check_installed_route_parity.py --characterize "$smoke/venv/bin"
           create-vivary capabilities --preset coding --json \
             > "$smoke/capabilities.json"
           mkdir -p "$smoke/tropo-workspace/decisions" "$smoke/tropo-workspace/modules"
@@ -324,7 +330,7 @@ jobs:
           assert version("vivary-core") == "0.2.7"
           assert version("vivary-exo") == "0.3.0"
           assert version("create-vivary") == "0.4.2"
-          assert version("vivary") == "0.1.10"
+          assert version("vivary") == "0.2.0"
           assert "vivary-core>=0.2.5" in requires("vivary-exo")
           vivary_requirements = requires("vivary") or []
           assert "create-vivary>=0.4.2" in vivary_requirements
@@ -694,6 +700,16 @@ jobs:
           )) {
             & (Join-Path $scripts "$command.exe") --help | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "$command entrypoint failed" }
+          }
+          $vivary = Join-Path $scripts "vivary.exe"
+          & $vivary --version | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "vivary version failed" }
+          & $vivary check --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "vivary check help failed" }
+          $routedCapabilities = & $vivary capabilities --preset coding --json
+          if ($LASTEXITCODE -ne 0) { throw "vivary capabilities failed" }
+          if (-not ($routedCapabilities | ConvertFrom-Json).available_capabilities) {
+            throw "routed capabilities reported no capability rows"
           }
           $mcpVenv = Join-Path $smoke "mcp-venv"
           python -m venv $mcpVenv
