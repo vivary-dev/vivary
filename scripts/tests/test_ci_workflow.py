@@ -39,6 +39,9 @@ def _run(workflow_text=None):
     return None
 
 
+RELEASE_BUILD_COMMANDS = _load().release_build_commands()
+
+
 def _workflow(site_steps: str, trailing_job: str = "") -> str:
     return (
         "name: ci\n"
@@ -100,10 +103,8 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "      - name: release artifact license contract\n"
         "        run: |\n"
         "          artifacts=\"$(mktemp -d)\"\n"
-        "          uv build --out-dir \"$artifacts\" packages/create-vivary\n"
-        "          uv build --out-dir \"$artifacts\" packages/mcp\n"
-        "          uv build --out-dir \"$artifacts\" packages/vivary\n"
-        "          npm pack packages/create-vivary/npm --pack-destination \"$artifacts\"\n"
+        + "".join(f"          {command}\n" for command in RELEASE_BUILD_COMMANDS)
+        + "          npm pack packages/create-vivary/npm --pack-destination \"$artifacts\"\n"
         "          python scripts/check_release_artifacts.py --repository . --artifacts \"$artifacts\"\n"
         "      - name: installed route parity contract tests\n"
         "        run: python scripts/tests/test_installed_route_parity.py\n"
@@ -208,9 +209,7 @@ def test_release_artifact_contract_and_real_archives_must_run():
     for command in (
         "python -m pip install uv==0.11.21",
         ARTIFACT_TEST_COMMAND,
-        'uv build --out-dir "$artifacts" packages/create-vivary',
-        'uv build --out-dir "$artifacts" packages/mcp',
-        'uv build --out-dir "$artifacts" packages/vivary',
+        *RELEASE_BUILD_COMMANDS,
         'npm pack packages/create-vivary/npm --pack-destination "$artifacts"',
         ARTIFACT_CHECK_COMMAND,
     ):

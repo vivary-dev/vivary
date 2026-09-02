@@ -1,8 +1,21 @@
+import importlib.util
 import re
 from pathlib import Path
 
 
 WORKFLOW = Path(".github/workflows/ci.yml")
+ARTIFACT_CHECKER = Path("scripts/check_release_artifacts.py")
+
+
+def release_build_commands() -> tuple[str, ...]:
+    """One `uv build` line per Python distribution the release checker verifies."""
+    spec = importlib.util.spec_from_file_location("release_artifacts", ARTIFACT_CHECKER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return tuple(
+        f'uv build --out-dir "$artifacts" packages/{package}'
+        for package, _ in module.PYTHON_CANDIDATES
+    )
 
 
 def require(condition: bool, message: str) -> None:
@@ -157,9 +170,7 @@ def main() -> None:
     for command in (
         "python -m pip install uv==0.11.21",
         artifact_test,
-        'uv build --out-dir "$artifacts" packages/create-vivary',
-        'uv build --out-dir "$artifacts" packages/mcp',
-        'uv build --out-dir "$artifacts" packages/vivary',
+        *release_build_commands(),
         'npm pack packages/create-vivary/npm --pack-destination "$artifacts"',
         artifact_check,
     ):

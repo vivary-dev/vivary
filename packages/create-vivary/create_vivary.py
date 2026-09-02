@@ -8774,14 +8774,15 @@ def build_parser(
 ) -> argparse.ArgumentParser:
     """Build the parser, optionally under a front door's program name.
 
-    With no `prog` the standalone names are unchanged. With one, the top level
-    takes its first word and the named `operation` takes the whole name.
+    With no `prog` the standalone names are unchanged. With one, both the top
+    level and the named `operation` answer to the whole routed name, so a usage
+    error names the operation the front door routed rather than the scaffolder.
     """
     def routed_prog(name: str) -> str | None:
         return prog if name == operation else None
 
     parser = argparse.ArgumentParser(
-        prog=prog.split()[0] if prog else "create-vivary",
+        prog=prog or "create-vivary",
         description="Create a lightweight local-first Vivary context workspace.",
     )
     parser.add_argument("--version", action="version", version=f"create-vivary {__version__}")
@@ -8979,7 +8980,15 @@ def build_parser(
         default=None,
         help="Vivary source checkout root (mainly for local development/tests)",
     )
+    if prog and operation in sub.choices:
+        # argparse reports an unrecognized argument from the top level, so the
+        # routed operation's own usage has to be the one the top level prints.
+        parser.usage = _usage_text(sub.choices[operation])
     return parser
+
+
+def _usage_text(parser: argparse.ArgumentParser) -> str:
+    return parser.format_usage().removeprefix("usage: ").rstrip("\n")
 
 
 def with_default_command(argv: list[str]) -> list[str]:
@@ -9495,6 +9504,7 @@ def _main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     """Run create-vivary, naming the program `prog` when a front door supplies one."""
+    prog = (prog or "").strip() or None
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     started_at = time.monotonic()
     receipt_path, receipt_source = _extract_receipt_path(raw_argv)

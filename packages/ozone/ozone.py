@@ -2038,13 +2038,20 @@ def _append_run_receipt(
 
 
 def _parse_args(argv=None, *, prog=None):
+    # A front door already named the operation in `prog`, so the routed parser
+    # offers that one command and hides it from the usage line.
+    routed = argv[0] if prog and argv and argv[0] in COMMANDS else None
     p = argparse.ArgumentParser(
         prog=prog or "ozone",
         description="Vivary review, impact, and governed evidence verification.",
     )
     p.add_argument("--version", action="version", version=f"ozone {__version__}")
-    p.add_argument("command", nargs="?", default="review",
-                   choices=COMMANDS)
+    if routed is None:
+        p.add_argument("command", nargs="?", default="review",
+                       choices=COMMANDS)
+    else:
+        p.add_argument("command", nargs="?", default=routed,
+                       choices=[routed], help=argparse.SUPPRESS)
     p.add_argument("id", nargs="?", help="impact node id or verify request document")
     p.add_argument("--governed", action="store_true",
                    help="explicitly opt in to governed receipt and gate verification")
@@ -2084,6 +2091,7 @@ def _main(argv=None, *, prog=None):
 
 def main(argv=None, *, prog=None):
     """Run ozone, naming the program `prog` when a front door supplies one."""
+    prog = (prog or "").strip() or None
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     started_at = time.monotonic()
     receipt_path, receipt_source = _extract_receipt_path(raw_argv)

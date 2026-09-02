@@ -132,10 +132,24 @@ Promoting an operation to a verb takes a meta-package minor release, a matching 
 bump, and approval of the verb name.
 
 Routed help names the front door. `vivary <verb> --help` prints `usage: vivary
-<verb> ...`, and a usage error from a routed verb reads `vivary <verb>: error: ...`.
-Each component at its floor accepts an optional program name from the router, and a
-component below the floor is refused before it runs. Standalone help is unchanged:
-`tropo --help` still prints `usage: tropo ...`.
+<verb> ...`, and a usage error from any of the ten verbs reads `vivary <verb>:
+error: ...` above the operation's own usage line, never the component's command
+list. `vivary check --help` and `vivary review --help` carry the component's full
+option set under the verb, and the component's other commands are hidden because
+the verb already named the operation.
+
+`vivary --version` reports the front door. `vivary <verb> --version` answers
+exactly as the standalone operation does, so `check`, `find`, `review`, and
+`impact` report the component that serves them, and `create`, `adopt`, `doctor`,
+`capabilities`, `decide`, and `control` refuse the flag because it belongs to
+their component's own top level.
+
+The floor is checked on the imported module. `__version__` is read from the module
+the router just imported, which is the code the verb will run, and the distribution
+metadata is the fallback only for a component that declares none. In an installed
+environment the floors guarantee the seam, and the signature check covers a source
+checkout whose metadata is newer than the imported module. Standalone help is
+unchanged: `tropo --help` still prints `usage: tropo ...`.
 
 ### Receipt commands
 

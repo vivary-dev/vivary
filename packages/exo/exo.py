@@ -957,7 +957,7 @@ def _main_control(argv, *, prog=None):
 def _main(argv=None, *, prog=None):
     if argv and argv[0] == "control":
         return _main_control(argv[1:], prog=prog)
-    p = argparse.ArgumentParser(prog=prog.split()[0] if prog else "exo",
+    p = argparse.ArgumentParser(prog=prog or "exo",
                                 description="The coordination layer over the tropo graph.")
     p.add_argument("--version", action="version", version=f"exo {__version__}")
     p.add_argument("command", nargs="?", default="conflicts",
@@ -985,6 +985,7 @@ def _main(argv=None, *, prog=None):
 
 def main(argv=None, *, prog=None):
     """Run exo, naming the program `prog` when a front door supplies one."""
+    prog = (prog or "").strip() or None
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     receipt_path, receipt_source = _extract_receipt_path(raw_argv)
     request_path = _control_request_path(raw_argv)

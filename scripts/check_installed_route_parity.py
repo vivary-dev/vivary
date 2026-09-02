@@ -1,9 +1,10 @@
-"""Prove the installed Vivary front door matches the standalone commands.
+"""Prove the installed Vivary front door matches the seam it routes to.
 
 Given the script directory of a virtual environment that has `vivary` and its
 components installed, this runs every legacy help command, compares each routed
-verb against the component invocation it stands for, and checks that an unrouted
-component operation stays standalone and stays out of the front door's help.
+verb against the installed component run under the same program name, and checks
+that an unrouted component operation stays standalone and stays out of the front
+door's help.
 
 With --characterize it instead replays the repository characterization table
 through the installed console scripts, so the frozen command surface is proven
@@ -29,7 +30,15 @@ CHARACTERIZATION_TESTS = ROOT / "packages" / "vivary" / "tests"
 if str(CHARACTERIZATION_TESTS) not in sys.path:
     sys.path.insert(0, str(CHARACTERIZATION_TESTS))
 
-from route_prog import COMMAND_FOR_MODULE, normalize_prog, routed_prog, standalone_prog
+COMMAND_FOR_MODULE = {
+    "create_vivary": "create-vivary",
+    "tropo": "tropo",
+    "strato": "strato",
+    "ozone": "ozone",
+    "exo": "exo",
+}
+
+UNKNOWN_FLAG = "--definitely-not-a-flag"
 
 LEGACY_COMMANDS = (
     ("vivary", ("--help",)),
@@ -84,37 +93,46 @@ def script_path(bin_dir: Path, name: str) -> Path:
     return windows if windows.exists() else bin_dir / name
 
 
-def compare(
-    label: str,
-    routed: Result,
-    standalone: Result,
-    names: tuple[str, str] | None = None,
-) -> list[str]:
-    """Compare one routed run with its standalone run.
+def routed_prog(verb: str) -> str:
+    return f"vivary {verb}"
 
-    With `names` the two program names are normalized away first, which is how
-    help output is judged once a component renders the front door's name.
-    """
-    def prepare(result: Result, name: str) -> tuple[str, str]:
-        if names is None:
-            return result.stdout, result.stderr
-        return (
-            normalize_prog(result.stdout, name, names[1]),
-            normalize_prog(result.stderr, name, names[1]),
-        )
 
+def oracle_source(module: str, operation: list[str], args: tuple[str, ...], name: str) -> str:
+    """Source that runs the installed component under the router's program name."""
+    return (
+        f"import {module}\n"
+        f"raise SystemExit({module}.main({[*operation, *args]!r}, prog={name!r}))\n"
+    )
+
+
+def compare(label: str, routed: Result, expected: Result) -> list[str]:
+    """Compare one routed run with the component run under the same program name."""
     problems = []
-    if routed.code != standalone.code:
+    if routed.code != expected.code:
         problems.append(
-            f"{label}: exit code {routed.code} does not match {standalone.code}"
+            f"{label}: exit code {routed.code} does not match {expected.code}"
         )
-    routed_streams = prepare(routed, names[1] if names else "")
-    standalone_streams = prepare(standalone, names[0] if names else "")
     for stream, left, right in zip(
-        ("stdout", "stderr"), routed_streams, standalone_streams
+        ("stdout", "stderr"),
+        (routed.stdout, routed.stderr),
+        (expected.stdout, expected.stderr),
     ):
         if left != right:
-            problems.append(f"{label}: {stream} does not match the standalone command")
+            problems.append(f"{label}: {stream} does not match the component run")
+    return problems
+
+
+def usage_error_problems(label: str, name: str, routed: Result) -> list[str]:
+    """Judge a routed usage error on its exit code, its silence, and its name."""
+    problems = []
+    if routed.code != 2:
+        problems.append(f"{label}: exited {routed.code} instead of the usage error 2")
+    if routed.stdout != "":
+        problems.append(f"{label}: a usage error must not write stdout")
+    if not routed.stderr.startswith(f"usage: {name}"):
+        problems.append(f"{label}: stderr does not open with usage: {name}")
+    if f"{name}: error:" not in routed.stderr:
+        problems.append(f"{label}: stderr carries no {name}: error: prefix")
     return problems
 
 
@@ -274,27 +292,28 @@ def main(argv: list[str] | None = None) -> int:
         routes = json.loads(probe.stdout)
 
         helps = 0
+        usage_errors = 0
         fixtures = 0
         for verb, module, operation in routes:
-            command = COMMAND_FOR_MODULE[module]
-            cases = [("--help",)]
+            name = routed_prog(verb)
+            cases = [("--help",), (UNKNOWN_FLAG,)]
             if verb in FIXTURE_ARGS:
                 cases.append(FIXTURE_ARGS[verb])
             for case in cases:
                 routed = runner.run("vivary", (verb, *case), work)
-                standalone = runner.run(command, (*operation, *case), work)
+                expected = runner.run_python(
+                    oracle_source(module, operation, case, name), work
+                )
                 label = f"vivary {verb} {' '.join(case)}"
+                problems.extend(compare(label, routed, expected))
                 if case == ("--help",):
-                    names = (
-                        standalone_prog(module, tuple(operation)),
-                        routed_prog(verb),
-                    )
-                    problems.extend(compare(label, routed, standalone, names))
-                    if not routed.stdout.startswith(f"usage: {names[1]}"):
-                        problems.append(f"{label}: routed help does not name {names[1]}")
+                    if not routed.stdout.startswith(f"usage: {name}"):
+                        problems.append(f"{label}: routed help does not name {name}")
                     helps += 1
+                elif case == (UNKNOWN_FLAG,):
+                    problems.extend(usage_error_problems(label, name, routed))
+                    usage_errors += 1
                 else:
-                    problems.extend(compare(label, routed, standalone))
                     fixtures += 1
 
         standalone = runner.run(
@@ -315,7 +334,8 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"{bin_dir}: installed route parity passed"
         f" ({len(LEGACY_COMMANDS)} legacy command(s), {helps} help parity,"
-        f" {fixtures} fixture parity, 1 unrouted operation)"
+        f" {usage_errors} usage-error parity, {fixtures} fixture parity,"
+        " 1 unrouted operation)"
     )
     return 0
 

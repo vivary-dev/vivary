@@ -352,10 +352,19 @@ def _below_floor(installed: str, floor: str) -> bool:
 
 
 def _installed_version(component: Component, module: Any) -> str | None:
+    """Read the version of the code that will run, not of a stale distribution.
+
+    A checkout on `PYTHONPATH` shadows an older installed wheel, so the module's
+    own `__version__` is the honest answer and the distribution metadata is only
+    the fallback for a component that declares none.
+    """
+    declared = getattr(module, "__version__", None)
+    if isinstance(declared, str):
+        return declared
     try:
         installed = importlib.metadata.version(component.distribution)
     except importlib.metadata.PackageNotFoundError:
-        installed = getattr(module, "__version__", None)
+        return None
     return installed if isinstance(installed, str) else None
 
 
@@ -366,7 +375,7 @@ def _prog_keyword(main: Any, route: Route) -> dict[str, str]:
     help still names its own program.
     """
     try:
-        parameters = inspect.signature(main).parameters
+        parameters = inspect.signature(main, follow_wrapped=False).parameters
     except (TypeError, ValueError):
         return {}
     return {"prog": f"vivary {route.verb}"} if "prog" in parameters else {}
@@ -412,8 +421,17 @@ def _dispatch(route: Route, rest: list[str]) -> int:
         )
         return 2
 
+    argv = [*route.operation, *rest]
+    keyword = _prog_keyword(main, route)
     try:
-        return main([*route.operation, *rest], **_prog_keyword(main, route))
+        try:
+            return main(argv, **keyword)
+        except TypeError as exc:
+            if not keyword or "prog" not in str(exc):
+                raise
+            # A signature can advertise the seam through a wrapper that does not
+            # forward it, so the verb still runs under the component's own name.
+            return main(argv)
     except SystemExit as exc:
         code = exc.code
         if code is None:

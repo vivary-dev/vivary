@@ -8,8 +8,15 @@ import zipfile
 from pathlib import Path
 
 
+# Every Python distribution the release publishes, in dependency order.
 PYTHON_CANDIDATES = (
+    ("core", "vivary-core"),
+    ("tropo", "vivary-tropo"),
+    ("strato", "vivary-strato"),
+    ("ozone", "vivary-ozone"),
+    ("exo", "vivary-exo"),
     ("create-vivary", "create-vivary"),
+    ("memory-cognee", "vivary-memory-cognee"),
     ("mcp", "vivary-mcp"),
     ("vivary", "vivary"),
 )

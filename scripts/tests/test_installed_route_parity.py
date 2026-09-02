@@ -53,6 +53,15 @@ def test_stream_mismatches_are_reported_per_stream():
     assert "stderr does not match" in stderr_problems[0]
 
 
+def test_a_routed_program_name_is_compared_and_not_normalized():
+    module = _load()
+    routed = _result(module, stdout="usage: vivary check [-h] [--json]\n")
+    expected = _result(module, stdout="usage: tropo [-h] [--json]\n")
+    problems = module.compare("vivary check --help", routed, expected)
+    assert len(problems) == 1
+    assert "stdout does not match the component run" in problems[0]
+
+
 def test_every_stream_can_fail_at_once():
     module = _load()
     problems = module.compare(
@@ -63,39 +72,51 @@ def test_every_stream_can_fail_at_once():
     assert len(problems) == 3
 
 
-def test_help_parity_ignores_the_program_name_and_its_wrapping():
+def test_a_usage_error_that_names_the_verb_passes():
     module = _load()
     routed = _result(
-        module, stdout="usage: vivary check [-h]\n                    [--json]\n"
+        module,
+        code=2,
+        stdout="",
+        stderr="usage: vivary check [-h]\nvivary check: error: unrecognized arguments\n",
     )
-    standalone = _result(module, stdout="usage: tropo [-h] [--json]\n")
-    assert module.compare("vivary check --help", routed, standalone,
-                          ("tropo", "vivary check")) == []
+    assert module.usage_error_problems("vivary check", "vivary check", routed) == []
 
 
-def test_help_parity_still_reports_a_real_difference():
+def test_a_usage_error_that_names_the_component_is_reported():
     module = _load()
-    routed = _result(module, stdout="usage: vivary check [-h] [--json]\n")
-    standalone = _result(module, stdout="usage: tropo [-h] [--json] [--quiet]\n")
-    problems = module.compare("vivary check --help", routed, standalone,
-                              ("tropo", "vivary check"))
-    assert len(problems) == 1
-    assert "stdout does not match" in problems[0]
+    routed = _result(
+        module,
+        code=2,
+        stdout="",
+        stderr="usage: tropo [-h]\ntropo: error: unrecognized arguments\n",
+    )
+    problems = module.usage_error_problems("vivary check", "vivary check", routed)
+    assert len(problems) == 2
+    assert any("does not open with usage: vivary check" in problem for problem in problems)
+    assert any("no vivary check: error: prefix" in problem for problem in problems)
 
 
-def test_a_routed_usage_error_is_normalized_to_the_front_door():
+def test_a_usage_error_must_exit_two_and_stay_off_stdout():
     module = _load()
-    routed = _result(module, stdout="", stderr="vivary check: error: nope\n")
-    standalone = _result(module, stdout="", stderr="tropo: error: nope\n")
-    assert module.compare("vivary check", routed, standalone,
-                          ("tropo", "vivary check")) == []
+    routed = _result(
+        module,
+        code=0,
+        stdout="leaked",
+        stderr="usage: vivary check [-h]\nvivary check: error: nope\n",
+    )
+    problems = module.usage_error_problems("vivary check", "vivary check", routed)
+    assert len(problems) == 2
+    assert any("instead of the usage error 2" in problem for problem in problems)
+    assert any("must not write stdout" in problem for problem in problems)
 
 
-def test_standalone_prog_names_nested_operations():
+def test_the_oracle_runs_the_component_under_the_routed_name():
     module = _load()
-    assert module.standalone_prog("tropo", ("check",)) == "tropo"
-    assert module.standalone_prog("create_vivary", ("init",)) == "create-vivary init"
-    assert module.standalone_prog("exo", ("control",)) == "exo control"
+    source = module.oracle_source("tropo", ["check"], ("--root", "vault"), "vivary check")
+    assert "import tropo" in source
+    assert "['check', '--root', 'vault']" in source
+    assert "prog='vivary check'" in source
     assert module.routed_prog("check") == "vivary check"
 
 

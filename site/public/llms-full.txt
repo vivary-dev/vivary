@@ -664,10 +664,24 @@ Promoting an operation to a verb takes a meta-package minor release, a matching 
 bump, and approval of the verb name.
 
 Routed help names the front door. `vivary <verb> --help` prints `usage: vivary
-<verb> ...`, and a usage error from a routed verb reads `vivary <verb>: error: ...`.
-Each component at its floor accepts an optional program name from the router, and a
-component below the floor is refused before it runs. Standalone help is unchanged:
-`tropo --help` still prints `usage: tropo ...`.
+<verb> ...`, and a usage error from any of the ten verbs reads `vivary <verb>:
+error: ...` above the operation's own usage line, never the component's command
+list. `vivary check --help` and `vivary review --help` carry the component's full
+option set under the verb, and the component's other commands are hidden because
+the verb already named the operation.
+
+`vivary --version` reports the front door. `vivary <verb> --version` answers
+exactly as the standalone operation does, so `check`, `find`, `review`, and
+`impact` report the component that serves them, and `create`, `adopt`, `doctor`,
+`capabilities`, `decide`, and `control` refuse the flag because it belongs to
+their component's own top level.
+
+The floor is checked on the imported module. `__version__` is read from the module
+the router just imported, which is the code the verb will run, and the distribution
+metadata is the fallback only for a component that declares none. In an installed
+environment the floors guarantee the seam, and the signature check covers a source
+checkout whose metadata is newer than the imported module. Standalone help is
+unchanged: `tropo --help` still prints `usage: tropo ...`.
 
 ### Receipt commands
 
@@ -6748,9 +6762,17 @@ patch. Published registry versions remain unchanged.
   keyword-only `prog` argument to `main` and to the parser it builds. Nothing else in
   those packages changed.
 - `vivary <verb> --help` now prints `usage: vivary <verb> ...`, and a usage error from
-  a routed verb reads `vivary <verb>: error: ...`. The router passes the program name
-  only to a component whose `main` accepts it, so an older component keeps the
-  documented verbatim behavior.
+  a routed verb reads `vivary <verb>: error: ...`. In an installed environment the
+  dependency floors guarantee the seam, and the signature check covers a source
+  checkout whose distribution metadata is newer than the imported module.
+- A routed usage error prints the operation's own usage line, not the component's
+  command list. The flat-parser components fix their command positional to the routed
+  operation and hide it, so `vivary check --help` and `vivary review --help` carry the
+  full option set under the verb without listing the component's other commands.
+- The version floor is checked on the imported module. `__version__` is read from the
+  module the router just imported, and distribution metadata is the fallback only for
+  a component that declares none, so a source checkout ahead of an installed wheel is
+  judged on the code it will run.
 
 ### Changed
 
@@ -6771,12 +6793,17 @@ patch. Published registry versions remain unchanged.
 
 - `python packages/vivary/tests/test_vivary_cli.py` — 9/9 passed.
 - `python packages/vivary/tests/test_command_surface_characterization.py` — 3/3 passed
-  over the frozen surface table, which is unchanged by this slice.
-- `python packages/vivary/tests/test_vivary_router.py` — 24/24 passed.
-- `python scripts/tests/test_installed_route_parity.py` — 24/24 passed.
+  over the frozen surface table, which grows by the six `create-vivary` operation
+  helps the seam touched and keeps every earlier snapshot byte for byte.
+- `python packages/vivary/tests/test_vivary_router.py` — 30/30 passed. Every verb is
+  compared against the component itself run under the same program name.
+- `python scripts/tests/test_installed_route_parity.py` — 25/25 passed.
 - `python packages/tropo/tests/test_tropo.py` — 193/193 passed.
 - `python packages/ozone/tests/test_ozone.py` — 110/110 passed.
-- `python packages/exo/tests/test_exo.py` — 29/29 passed.
+- `python packages/exo/tests/test_exo.py` — 30/30 passed.
+- `python -m pytest packages/core/tests/ -q` — 799 passed, 1 skipped, and 1 known
+  failure from the container's `noexec` temporary mount
+  (`test_repository_fsmonitor_hook_is_not_invoked_by_default_observation`).
 - `python -m pytest packages/strato/tests/ -q` — 48/48 passed.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` — 4
   documents, 0 errors, 0 warnings.
@@ -6786,23 +6813,30 @@ patch. Published registry versions remain unchanged.
 - `python scripts/check_ci_workflow.py` and
   `python scripts/tests/test_ci_workflow.py` — contract passed; 17/17 cases passed.
 - `python scripts/check_line_endings.py` — 308 tracked text files checked.
-- `python scripts/tests/test_release_artifacts.py` — 7/7 passed, and
+- `python scripts/tests/test_release_artifacts.py` — 8/8 passed, and
   `python scripts/check_release_artifacts.py --repository . --artifacts <dir>` over
-  freshly built `create-vivary`, `vivary-mcp`, and `vivary` distributions plus
-  `npm pack` of the launcher — 7 release artifacts passed license verification.
+  freshly built distributions for all nine published Python packages plus `npm pack`
+  of the launcher — 19 release artifacts passed license verification.
 - Nine wheels built with `python -m pip wheel --no-deps`, installed into a fresh
   virtual environment as `vivary`, `pip check` clean, then
   `python scripts/check_installed_route_parity.py <venv>/bin` — 8 legacy commands, 10
-  help parity, 8 fixture parity, and 1 unrouted operation passed — and
-  `... --characterize <venv>/bin` — 37 installed command-surface cases passed.
+  help parity, 10 usage-error parity, 8 fixture parity, and 1 unrouted operation
+  passed — and `... --characterize <venv>/bin` — 43 installed command-surface cases
+  passed.
 - `node packages/create-vivary/tests/test_npm_launcher.js` — 11/11 passed. The npm
   launcher declares no dependencies, so the advisory gate has no dependency tree to
   audit there.
-- By hand against that installed environment: `vivary check --help`,
-  `vivary create --help`, `vivary decide --help`, and `vivary control --help` each
-  print `usage: vivary <verb> ...`. `vivary check --typo` prints
-  `vivary check: error: unrecognized arguments: --typo` and exits `2`, and
-  `tropo --help` still prints `usage: tropo ...`.
+- By hand against that installed environment at `COLUMNS=80`: `vivary doctor . --typo`
+  prints the `doctor` usage line and `vivary doctor: error: unrecognized arguments:
+  --typo` with no subcommand list, `vivary decide --typo r.json` and
+  `vivary control --typo` print their own usage under the `vivary <verb>: error:`
+  prefix, `vivary check --help` and `vivary review --help` open with
+  `usage: vivary check` and `usage: vivary review` and carry no command list, and
+  standalone `create-vivary init --help` and `tropo --help` are unchanged.
+- The floor regression is reproduced and fixed: with `vivary-tropo` metadata pinned to
+  `0.5.3` in an installed environment and the `0.5.4` source tree on `PYTHONPATH`, the
+  previous router refused `vivary check` with `needs vivary-tropo 0.5.4 or newer, found
+  0.5.3` and the current one exits `0`.
 - The graph review gate over a freshly scaffolded workspace:
   `python packages/create-vivary/create_vivary.py init sandboxes/ci-ws --preset coding
   --force --no-wizard`, `... doctor sandboxes/ci-ws`,

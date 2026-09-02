@@ -71,6 +71,18 @@ CASES = tuple(
     for case in (
         CommandCase("create-vivary-help", "create-vivary", ("--help",), 0,
                     silent_stream="stderr"),
+        CommandCase("create-vivary-init-help", "create-vivary", ("init", "--help"), 0,
+                    silent_stream="stderr"),
+        CommandCase("create-vivary-adopt-help", "create-vivary", ("adopt", "--help"), 0,
+                    silent_stream="stderr"),
+        CommandCase("create-vivary-doctor-help", "create-vivary", ("doctor", "--help"), 0,
+                    silent_stream="stderr"),
+        CommandCase("create-vivary-capabilities-help", "create-vivary",
+                    ("capabilities", "--help"), 0, silent_stream="stderr"),
+        CommandCase("create-vivary-wizard-help", "create-vivary", ("wizard", "--help"), 0,
+                    silent_stream="stderr"),
+        CommandCase("create-vivary-record-help", "create-vivary", ("record", "--help"), 0,
+                    silent_stream="stderr"),
         # why: the capability report names the components installed in this environment
         CommandCase("create-vivary-capabilities", "create-vivary",
                     ("capabilities", "--preset", "coding"), 0,

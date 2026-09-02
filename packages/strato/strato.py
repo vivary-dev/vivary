@@ -283,11 +283,12 @@ def _emit(result: dict[str, Any], *, json_output: bool) -> None:
 def _build_parser(*, prog: str | None = None) -> argparse.ArgumentParser:
     """Build the parser, optionally under a front door's program name.
 
-    With no `prog` the standalone names are unchanged. With one, the top level
-    takes its first word and `decide` takes the whole name.
+    With no `prog` the standalone names are unchanged. With one, both the top
+    level and `decide` answer to the whole routed name, so a usage error names
+    the operation the front door routed rather than the policy command.
     """
     parser = argparse.ArgumentParser(
-        prog=prog.split()[0] if prog else "strato",
+        prog=prog or "strato",
         description="Vivary governed loop policy",
     )
     parser.add_argument("--version", action="version", version=f"strato {__version__}")
@@ -308,10 +309,15 @@ def _build_parser(*, prog: str | None = None) -> argparse.ArgumentParser:
         help="exit 1 when a valid policy evaluation blocks or requests a gate",
     )
     decide.add_argument("request", help="decision-request JSON file, or - for stdin")
+    if prog:
+        # argparse reports an unrecognized argument from the top level, so the
+        # routed operation's own usage has to be the one the top level prints.
+        parser.usage = decide.format_usage().removeprefix("usage: ").rstrip("\n")
     return parser
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    prog = (prog or "").strip() or None
     args = _build_parser(prog=prog).parse_args(argv)
     try:
         request = _load_request(args.request)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import subprocess
@@ -14,6 +15,29 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parents[2]
 CHECKER = REPOSITORY / "scripts" / "check_release_artifacts.py"
 LICENSE_BYTES = b"MIT fixture license\n"
+
+
+def load_checker():
+    spec = importlib.util.spec_from_file_location("release_artifacts", CHECKER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+PYTHON_CANDIDATES = load_checker().PYTHON_CANDIDATES
+
+# One fixture version per candidate, independent of the real manifests.
+FIXTURE_VERSIONS = {
+    "vivary-core": "0.2.0",
+    "vivary-tropo": "0.5.0",
+    "vivary-strato": "0.1.0",
+    "vivary-ozone": "0.3.0",
+    "vivary-exo": "0.3.0",
+    "create-vivary": "0.4.2",
+    "vivary-memory-cognee": "0.1.0",
+    "vivary-mcp": "0.1.3",
+    "vivary": "0.1.10",
+}
 
 
 class ReleaseArtifactContractTests(unittest.TestCase):
@@ -67,12 +91,8 @@ class ReleaseArtifactContractTests(unittest.TestCase):
         (repository / "LICENSE").parent.mkdir(parents=True)
         (repository / "LICENSE").write_bytes(LICENSE_BYTES)
 
-        candidates = (
-            ("create-vivary", "create-vivary", "0.4.2"),
-            ("mcp", "vivary-mcp", "0.1.3"),
-            ("vivary", "vivary", "0.1.10"),
-        )
-        for package, distribution, version in candidates:
+        for package, distribution in PYTHON_CANDIDATES:
+            version = FIXTURE_VERSIONS[distribution]
             self._write_manifest(repository, package, distribution, version)
             self._write_python_artifacts(artifacts, distribution, version)
 
@@ -109,13 +129,24 @@ class ReleaseArtifactContractTests(unittest.TestCase):
             check=False,
         )
 
+    def test_every_published_python_package_is_a_candidate(self) -> None:
+        published = {
+            manifest.parent.name
+            for manifest in (REPOSITORY / "packages").glob("*/pyproject.toml")
+        }
+        self.assertEqual({package for package, _ in PYTHON_CANDIDATES}, published)
+        self.assertEqual(set(FIXTURE_VERSIONS), {name for _, name in PYTHON_CANDIDATES})
+
     def test_complete_release_artifact_set_passes(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:
             repository, artifacts = self._complete_fixture(Path(raw_root))
             result = self._run_checker(repository, artifacts)
 
+        expected = 2 * len(PYTHON_CANDIDATES) + 1
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-        self.assertIn("7 release artifacts passed license verification", result.stdout)
+        self.assertIn(
+            f"{expected} release artifacts passed license verification", result.stdout
+        )
 
     def test_npm_scope_passes_without_python_archives(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:

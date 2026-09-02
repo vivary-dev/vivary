@@ -1,10 +1,11 @@
-"""Prove the ten task-first verbs behave exactly like the standalone commands.
+"""Prove the ten task-first verbs behave exactly like the seam they route to.
 
-Each verb is compared against its component invocation in exit code, stdout, and
-stderr. `create` and `adopt` write a workspace, so they have no read-only offline
-fixture and are compared on help output only. The refusal paths run in-process
-against stand-in modules, because a missing or prerelease component cannot be
-staged from this checkout.
+The expected result for a routed verb is the component itself, run in a separate
+interpreter with the same program name the router supplies. Exit code, standard
+output, and standard error are compared byte for byte, so nothing about the
+routed run is normalized away. The refusal paths run in-process against stand-in
+modules, because a missing or prerelease component cannot be staged from this
+checkout.
 """
 
 import argparse
@@ -22,12 +23,6 @@ from pathlib import Path
 from typing import NamedTuple
 
 from cli_runner import run_cli
-from route_prog import (
-    COMMAND_FOR_MODULE,
-    normalize_prog,
-    routed_prog,
-    standalone_prog,
-)
 
 ROOT = Path(__file__).resolve().parents[3]
 PACKAGES = ROOT / "packages"
@@ -45,17 +40,18 @@ for _path in IMPORT_PATHS:
 import vivary_cli
 
 VIVARY_CLI = str(PACKAGES / "vivary" / "vivary_cli.py")
-COMPONENT_FILES = {
-    "create_vivary": str(PACKAGES / "create-vivary" / "create_vivary.py"),
-    "tropo": str(PACKAGES / "tropo" / "tropo.py"),
-    "strato": str(PACKAGES / "strato" / "strato.py"),
-    "ozone": str(PACKAGES / "ozone" / "ozone.py"),
-    "exo": str(PACKAGES / "exo" / "exo.py"),
+COMMAND_FOR_MODULE = {
+    "create_vivary": "create-vivary",
+    "tropo": "tropo",
+    "strato": "strato",
+    "ozone": "ozone",
+    "exo": "exo",
 }
 UNROUTED_MODULE = "tropo"
 UNROUTED_OPERATION = "map"
 STAND_IN_VERB = "check"
 SEAM_VERBS = ("create", "check", "decide", "review", "control")
+UNKNOWN_FLAG = "--definitely-not-a-flag"
 
 # Each installed version paired with whether the tropo floor of 0.5.4 accepts it.
 FLOOR_CASES = (
@@ -96,8 +92,22 @@ VERSION_PROBE = (
 ) % (tuple(vivary_cli.COMPONENTS),)
 
 
+def routed_prog(verb: str) -> str:
+    return f"vivary {verb}"
+
+
 def run(argv: list[str], cwd: str) -> tuple[int, str, str]:
     return run_cli(argv, cwd, IMPORT_PATHS)
+
+
+def oracle_source(route: vivary_cli.Route, args: tuple[str, ...]) -> str:
+    """Source that runs the component under the program name the router supplies."""
+    argv = [*route.operation, *args]
+    return (
+        f"import {route.module}\n"
+        f"raise SystemExit({route.module}.main({argv!r},"
+        f" prog={routed_prog(route.verb)!r}))\n"
+    )
 
 
 def front_door_help() -> tuple[int, str, str]:
@@ -106,20 +116,19 @@ def front_door_help() -> tuple[int, str, str]:
 
 
 @contextlib.contextmanager
-def stand_in_component(module_name: str, stand_in: types.ModuleType | None):
-    """Route one verb at a stand-in module and read its version, not the wheel's.
+def stand_in_component(
+    module_name: str, stand_in: types.ModuleType | None, *, metadata_version=None
+):
+    """Route one verb at a stand-in module, optionally under a stand-in metadata answer.
 
-    `importlib.metadata` answers for whatever is installed beside this checkout,
-    so the lookup has to miss before the fallback to `__version__` can be seen.
+    The floor is read from the module, so a stand-in needs no metadata at all
+    unless the case is about metadata disagreeing with the imported code.
     """
     saved_module = sys.modules.get(module_name)
     saved_version = vivary_cli.importlib.metadata.version
-
-    def not_installed(distribution):
-        raise vivary_cli.importlib.metadata.PackageNotFoundError(distribution)
-
     sys.modules[module_name] = stand_in
-    vivary_cli.importlib.metadata.version = not_installed
+    if metadata_version is not None:
+        vivary_cli.importlib.metadata.version = lambda distribution: metadata_version
     try:
         yield
     finally:
@@ -143,31 +152,17 @@ class RouteParityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as work:
             routed = run([VIVARY_CLI, route.verb, *case.args], work)
         with tempfile.TemporaryDirectory() as work:
-            standalone = run(
-                [COMPONENT_FILES[route.module], *route.operation, *case.args], work
-            )
-        return route, routed, standalone
+            expected = run(["-c", oracle_source(route, case.args)], work)
+        return route, routed, expected
 
     def assert_parity(self, case: ParityCase) -> None:
-        _, routed, standalone = self.run_both(case)
-        self.assertEqual(routed, standalone)
+        _, routed, expected = self.run_both(case)
+        self.assertEqual(routed, expected)
 
-    def test_help_matches_the_standalone_command(self):
+    def test_help_matches_the_component_run_under_the_same_name(self):
         for route in vivary_cli.ROUTES:
             with self.subTest(verb=route.verb):
-                _, routed, standalone = self.run_both(
-                    ParityCase(route.verb, ("--help",))
-                )
-                names = (
-                    standalone_prog(route.module, route.operation),
-                    routed_prog(route.verb),
-                )
-                self.assertEqual(routed[0], standalone[0])
-                for index in (1, 2):
-                    self.assertEqual(
-                        normalize_prog(routed[index], names[1], names[1]),
-                        normalize_prog(standalone[index], *names),
-                    )
+                self.assert_parity(ParityCase(route.verb, ("--help",)))
 
     def test_routed_help_names_the_front_door(self):
         for route in vivary_cli.ROUTES:
@@ -179,7 +174,21 @@ class RouteParityTests(unittest.TestCase):
                     out.startswith(f"usage: vivary {route.verb}"), out[:80]
                 )
 
-    def test_offline_fixtures_match_the_standalone_command(self):
+    def test_a_usage_error_matches_the_component_and_names_the_verb(self):
+        for route in vivary_cli.ROUTES:
+            with self.subTest(verb=route.verb):
+                _, routed, expected = self.run_both(
+                    ParityCase(route.verb, (UNKNOWN_FLAG,))
+                )
+                self.assertEqual(routed, expected)
+                code, out, err = routed
+                name = routed_prog(route.verb)
+                self.assertEqual(code, 2, err)
+                self.assertEqual(out, "")
+                self.assertTrue(err.startswith(f"usage: {name}"), err[:80])
+                self.assertIn(f"{name}: error:", err)
+
+    def test_offline_fixtures_match_the_component_run_under_the_same_name(self):
         for case in FIXTURE_CASES:
             with self.subTest(verb=case.verb, args=case.args):
                 self.assert_parity(case)
@@ -195,13 +204,14 @@ class ProgSeamTests(unittest.TestCase):
             if saved is not None:
                 os.environ["VIVARY_RECEIPT_LOG"] = saved
 
-    def help_usage(self, module, operation, prog) -> str:
-        out = io.StringIO()
+    def help_streams(self, module, operation, prog) -> tuple[str, str]:
+        out, err = io.StringIO(), io.StringIO()
         with self.no_receipt_log(), contextlib.redirect_stdout(out):
-            with self.assertRaises(SystemExit) as raised:
-                module.main([*operation, "--help"], **({"prog": prog} if prog else {}))
+            with contextlib.redirect_stderr(err):
+                with self.assertRaises(SystemExit) as raised:
+                    module.main([*operation, "--help"], **({"prog": prog} if prog else {}))
         self.assertEqual(raised.exception.code, 0)
-        return out.getvalue()
+        return out.getvalue(), err.getvalue()
 
     def test_the_characterization_suite_freezes_every_standalone_help(self):
         import test_command_surface_characterization as surface
@@ -221,7 +231,9 @@ class ProgSeamTests(unittest.TestCase):
             route = vivary_cli.ROUTE_BY_VERB[verb]
             module = importlib.import_module(route.module)
             with self.subTest(verb=verb):
-                routed = self.help_usage(module, route.operation, routed_prog(verb))
+                routed, _ = self.help_streams(
+                    module, route.operation, routed_prog(verb)
+                )
                 self.assertTrue(
                     routed.startswith(f"usage: {routed_prog(verb)}"), routed[:80]
                 )
@@ -231,9 +243,21 @@ class ProgSeamTests(unittest.TestCase):
             route = vivary_cli.ROUTE_BY_VERB[verb]
             module = importlib.import_module(route.module)
             with self.subTest(verb=verb):
-                standalone = self.help_usage(module, route.operation, None)
-                name = standalone_prog(route.module, route.operation)
-                self.assertTrue(standalone.startswith(f"usage: {name}"), standalone[:80])
+                standalone, _ = self.help_streams(module, route.operation, None)
+                command = COMMAND_FOR_MODULE[route.module]
+                self.assertTrue(
+                    standalone.startswith(f"usage: {command}"), standalone[:80]
+                )
+
+    def test_a_blank_prog_behaves_like_a_standalone_run(self):
+        for verb in SEAM_VERBS:
+            route = vivary_cli.ROUTE_BY_VERB[verb]
+            module = importlib.import_module(route.module)
+            with self.subTest(verb=verb):
+                self.assertEqual(
+                    self.help_streams(module, route.operation, "   "),
+                    self.help_streams(module, route.operation, None),
+                )
 
 
 class ProgKeywordTests(unittest.TestCase):
@@ -277,6 +301,43 @@ class ProgKeywordTests(unittest.TestCase):
                 self.assertEqual(code, 0, err)
                 expected = routed_prog(STAND_IN_VERB) if accepts else None
                 self.assertEqual(calls, [(list(route.operation), expected)])
+
+    def test_a_component_that_refuses_the_keyword_is_retried_without_it(self):
+        route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
+        component = vivary_cli.COMPONENTS[route.module]
+        calls = []
+
+        def record(argv=None, *, prog=None, calls=calls):
+            calls.append(prog)
+            if prog is not None:
+                raise TypeError("main() got an unexpected keyword argument 'prog'")
+            return 0
+
+        stand_in = types.ModuleType(route.module)
+        stand_in.__version__ = component.floor
+        stand_in.main = record
+        with stand_in_component(route.module, stand_in):
+            code, out, err = call_main([route.verb])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out, "")
+        self.assertEqual(calls, [routed_prog(STAND_IN_VERB), None])
+
+    def test_an_unrelated_type_error_is_not_retried(self):
+        route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
+        component = vivary_cli.COMPONENTS[route.module]
+        calls = []
+
+        def record(argv=None, *, prog=None, calls=calls):
+            calls.append(prog)
+            raise TypeError("unsupported operand type(s)")
+
+        stand_in = types.ModuleType(route.module)
+        stand_in.__version__ = component.floor
+        stand_in.main = record
+        with stand_in_component(route.module, stand_in):
+            with self.assertRaises(TypeError):
+                call_main([route.verb])
+        self.assertEqual(calls, [routed_prog(STAND_IN_VERB)])
 
 
 class FrontDoorHelpTests(unittest.TestCase):
@@ -329,8 +390,9 @@ class RouterBehaviorTests(unittest.TestCase):
     def test_unrouted_component_operation_stays_standalone(self):
         self.assertNotIn(UNROUTED_OPERATION, vivary_cli.ROUTE_BY_VERB)
         args = [UNROUTED_OPERATION, "--root", VAULT]
+        component = str(PACKAGES / UNROUTED_MODULE / f"{UNROUTED_MODULE}.py")
         with tempfile.TemporaryDirectory() as work:
-            standalone = run([COMPONENT_FILES[UNROUTED_MODULE], *args], work)
+            standalone = run([component, *args], work)
             routed = run([VIVARY_CLI, *args], work)
         self.assertEqual(standalone[0], 0, standalone[2])
         self.assertIn(f"tropo {UNROUTED_OPERATION}", standalone[1])
@@ -412,6 +474,39 @@ class RouterBehaviorTests(unittest.TestCase):
 
         stand_in.main = refuse
         with stand_in_component(route.module, stand_in):
+            code, out, err = call_main([route.verb])
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "")
+        self.assertIn(component.floor, err)
+
+    def test_the_floor_is_read_from_the_module_not_from_older_metadata(self):
+        route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
+        component = vivary_cli.COMPONENTS[route.module]
+        calls = []
+        stand_in = types.ModuleType(route.module)
+        stand_in.__version__ = component.floor
+
+        def record(argv, *, prog=None, calls=calls):
+            calls.append(argv)
+            return 0
+
+        stand_in.main = record
+        with stand_in_component(route.module, stand_in, metadata_version="0.0.1"):
+            code, out, err = call_main([route.verb])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out, "")
+        self.assertEqual(calls, [list(route.operation)])
+
+    def test_a_module_without_a_version_falls_back_to_the_distribution(self):
+        route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
+        component = vivary_cli.COMPONENTS[route.module]
+        stand_in = types.ModuleType(route.module)
+
+        def refuse(argv=None):
+            raise AssertionError("the router ran a component below its floor")
+
+        stand_in.main = refuse
+        with stand_in_component(route.module, stand_in, metadata_version="0.0.1"):
             code, out, err = call_main([route.verb])
         self.assertEqual(code, 2)
         self.assertEqual(out, "")
