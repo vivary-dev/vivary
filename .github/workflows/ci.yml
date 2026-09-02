@@ -329,7 +329,7 @@ jobs:
           assert version("vivary-core") == "0.2.7"
           assert version("vivary-exo") == "0.3.0"
           assert version("create-vivary") == "0.4.2"
-          assert version("vivary") == "0.1.10"
+          assert version("vivary") == "0.2.0"
           assert "vivary-core>=0.2.5" in requires("vivary-exo")
           vivary_requirements = requires("vivary") or []
           assert "create-vivary>=0.4.2" in vivary_requirements

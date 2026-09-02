@@ -11,6 +11,80 @@ the `v0.1.0` line.
 `vivary-memory-cognee` **0.1.2** · optional `vivary-mcp` **0.1.3**. Versions are
 independent. There is no single "Vivary 0.4.2" release.
 
+## [Unreleased: Vivary Front Door] — 2026-09-02
+
+This slice advances the unpublished `vivary` meta-package to **0.2.0** and changes no
+other package. Ten user-visible verbs are new, so the meta-package takes a minor bump.
+Published registry versions remain unchanged.
+
+### Added
+
+- `vivary` now routes ten task verbs to the installed components in the same process:
+  `create`, `adopt`, `doctor`, and `capabilities` to `create-vivary`; `check` and
+  `find` to `tropo`; `decide` to `strato`; `review` and `impact` to `ozone`; and
+  `control` to `exo`. Arguments and output pass through unchanged.
+- `vivary --help` groups those verbs as Workspace, Graph and retrieval, Policy,
+  Review, and Coordination, and lists the five standalone commands as the advanced
+  surface.
+- Each route declares the component version floor that shipped its verb. A component
+  below its floor is refused with exit code `2` and a message naming the required
+  version. The router imports a component only when a verb asks for one.
+- A characterization suite freezes the observed command surface of the six entry
+  modules before routing, and a router suite compares every verb against its
+  standalone invocation on exit code, standard output, and standard error.
+- A parity checker runs the same comparison against wheels installed into a fresh
+  environment, and CI runs it beside the other meta-package proofs.
+
+### Known limitation
+
+- `vivary <verb> --help` passes component help through verbatim, so the usage line
+  names the component program rather than `vivary`. Exit codes, options, and behavior
+  are correct. A follow-up adds an optional `prog` seam to the components on their own
+  patch cadence.
+
+### Unchanged
+
+- The standalone `create-vivary`, `tropo`, `strato`, `ozone`, and `exo` commands keep
+  every operation and are not deprecated. No component package changed.
+
+### Verification
+
+- `python packages/vivary/tests/test_vivary_cli.py` — 9/9 passed.
+- `python packages/vivary/tests/test_command_surface_characterization.py` — 1 test
+  over the frozen surface table passed.
+- `python packages/vivary/tests/test_vivary_router.py` — 8/8 passed.
+- `python scripts/tests/test_installed_route_parity.py` — 13/13 passed.
+- `python packages/tropo/tests/test_tropo.py` — 193/193 passed.
+- `python packages/ozone/tests/test_ozone.py` — 110/110 passed.
+- `python packages/exo/tests/test_exo.py` — 29/29 passed.
+- `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` — 4
+  documents, 0 errors, 0 warnings.
+- `python scripts/check_package_docs_parity.py` and
+  `python scripts/tests/test_package_docs_parity.py` — contract passed; 10/10 cases
+  passed.
+- `python scripts/check_ci_workflow.py` and
+  `python scripts/tests/test_ci_workflow.py` — contract passed; 16/16 cases passed.
+- `python scripts/check_line_endings.py` — 306 tracked text files checked.
+- The graph review gate over a freshly scaffolded workspace:
+  `python packages/create-vivary/create_vivary.py init sandboxes/ci-ws --preset coding
+  --force --no-wizard`, `... doctor sandboxes/ci-ws`,
+  `python packages/tropo/tropo.py check --root sandboxes/ci-ws`, and
+  `python packages/ozone/ozone.py review --root sandboxes/ci-ws --strict` — 3 nodes,
+  0 warnings, 3 informational notes.
+- With Node 22.23.2, `npm ci`, `npm audit --audit-level=high`, `npm run sync-docs`,
+  `npm run build`, `npm run test:site`, and `npm run test:links` from `site/` — 0
+  vulnerabilities, mirrors refreshed, 33 pages built, 14/14 source tests passed, and
+  2,749 local references plus 1,550 anchors passed.
+- `python packages/create-vivary/tests/test_create_vivary.py` — 2 errors and 2 skips
+  in the offline verification container, where the wizard storage tests try to install
+  `vivary-tropo[embedded]` at run time. The same two errors occur on the parent commit,
+  and this change touches no component package.
+- `python -m pytest packages/core/tests/ -q` and
+  `python -m pytest packages/strato/tests/ -q` were not run because the verification
+  container has no `pytest`. CI runs both.
+
+Publishing remains a manual human gate.
+
 ## [Published and verified: Vivary Governed Context] — 2026-08-15
 
 The coordinated train published to PyPI and npm from the approved commit

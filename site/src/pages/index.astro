@@ -266,6 +266,15 @@ const faq = [
             </li>
           ))}
         </ol>
+        <p class="adoption-note">
+          One front door covers the common work. The <code>vivary</code> meta package
+          routes ten task verbs to these commands: <code>create</code>,
+          <code>adopt</code>, <code>doctor</code>, <code>capabilities</code>,
+          <code>check</code>, <code>find</code>, <code>decide</code>,
+          <code>review</code>, <code>impact</code>, and <code>control</code>. The
+          standalone commands stay the advanced surface with every operation. See the
+          <a href="/commands/">command reference</a>.
+        </p>
         <div class="adoption-actions">
           <a class="button button-primary" href="/getting-started/">Run the adoption path</a>
           <a class="text-link" href="/walkthrough/">See the public walkthrough</a>
@@ -1018,6 +1027,16 @@ const faq = [
       .adoption-flow p {
         margin: 0;
         color: var(--muted);
+      }
+
+      .adoption-note {
+        margin: 2.4rem 0 0;
+        max-width: 62ch;
+        color: var(--muted);
+      }
+
+      .adoption-note code {
+        color: var(--mint-pale);
       }
 
       .proof {
