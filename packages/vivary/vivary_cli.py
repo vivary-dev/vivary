@@ -16,7 +16,9 @@ import json
 import os
 import platform
 import re
+import site
 import sys
+import sysconfig
 import urllib.parse
 from email.message import EmailMessage
 from pathlib import Path
@@ -399,16 +401,46 @@ def _is_editable(distribution: Any) -> bool:
     return bool(isinstance(record, dict) and record.get("dir_info", {}).get("editable"))
 
 
-def _identity_error(component: Component, module: Any) -> str | None:
-    """Refuse a module that is not the code the installed distribution records.
+def _installed_locations() -> tuple[Path, ...]:
+    """Collect the directories an installed distribution can occupy."""
+    candidates: list[str] = []
+    for name in ("getsitepackages", "getusersitepackages"):
+        getter = getattr(site, name, None)
+        if getter is None:
+            continue
+        found = getter()
+        candidates.extend([found] if isinstance(found, str) else found)
+    candidates.extend(
+        path
+        for path in (sysconfig.get_path("purelib"), sysconfig.get_path("platlib"))
+        if path
+    )
+    roots: dict[Path, None] = {}
+    for text in candidates:
+        try:
+            roots[Path(text).resolve()] = None
+        except OSError:
+            continue
+    return tuple(roots)
 
-    Import-time code has already run by the time this can look, so this stops
-    the call, not the import. A source checkout, a distribution with no RECORD,
-    and an editable install all live outside the recorded files legitimately, so
-    each of them skips the comparison.
+
+def _identity_error(component: Component, module: Any) -> str | None:
+    """Refuse a module that occupies the component's name inside the install.
+
+    The case this catches is a different distribution sitting under the module
+    name in an installed-packages directory, where the recorded files say the
+    code that ran is not the one the distribution shipped. Import-time code has
+    already run by the time this can look, so this stops the call, not the
+    import. A module imported from anywhere else — a source checkout, a
+    `PYTHONPATH` tree, the current directory — is a developer shadowing a wheel
+    on purpose and skips the check, as do a distribution with no RECORD and an
+    editable install, which live outside the recorded files legitimately.
     """
     path = getattr(module, "__file__", None)
     if path is None:
+        return None
+    imported = Path(path).resolve()
+    if not any(imported.is_relative_to(root) for root in _installed_locations()):
         return None
     try:
         distribution = importlib.metadata.distribution(component.distribution)
@@ -417,7 +449,6 @@ def _identity_error(component: Component, module: Any) -> str | None:
     files = distribution.files
     if files is None or _is_editable(distribution):
         return None
-    imported = Path(path).resolve()
     if any(Path(distribution.locate_file(name)).resolve() == imported for name in files):
         return None
     return (

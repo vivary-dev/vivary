@@ -6802,10 +6802,12 @@ patch. Published registry versions remain unchanged.
 - The version floor is checked on the imported module. `__version__` is read from the
   module the router just imported, and distribution metadata is the fallback only for
   a component that declares none or an unreadable one, so a source checkout ahead of
-  an installed wheel is judged on the code it will run. An importable module that the
-  installed distribution does not record is refused before the call, an import failure
-  in a component or its dependencies is reported without a traceback, and a local
-  version segment no longer reads as a prerelease.
+  an installed wheel is judged on the code it will run. A module imported from inside
+  an installed-packages directory that the installed distribution does not record is
+  refused before the call, while a module imported from anywhere else — a source
+  checkout, a `PYTHONPATH` tree, the current directory — is a deliberate shadow and
+  runs. An import failure in a component or its dependencies is reported without a
+  traceback, and a local version segment no longer reads as a prerelease.
 - The release artifact gate now covers all nine published Python distributions and
   inventories what they carry: each wheel holds exactly the module its manifest
   declares beside its metadata and license, and each sdist ships no test directory,
@@ -6834,9 +6836,8 @@ patch. Published registry versions remain unchanged.
   by observation and still match the module from before the seam byte for byte, the
   two front-door help snapshots were re-recorded for the new help text, and one
   unknown-verb case was added.
-- `python packages/vivary/tests/test_vivary_router.py` — 38/38 passed, 1 skipped
-  because `vivary-tropo` is not installed in this checkout. Every verb is compared
-  against the component itself run under the same program name.
+- `python packages/vivary/tests/test_vivary_router.py` — 39/39 passed. Every verb is
+  compared against the component itself run under the same program name.
 - `python scripts/tests/test_installed_route_parity.py` — 29/29 passed.
 - `python packages/tropo/tests/test_tropo.py` — 193/193 passed.
 - `python packages/ozone/tests/test_ozone.py` — 110/110 passed.

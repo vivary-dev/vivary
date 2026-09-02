@@ -144,6 +144,48 @@ def stand_in_component(
             sys.modules[module_name] = saved_module
 
 
+@contextlib.contextmanager
+def installed_location(directory: str):
+    """Count one temporary directory as an installed-packages directory."""
+    saved = vivary_cli.site.getsitepackages
+    vivary_cli.site.getsitepackages = lambda: [directory]
+    try:
+        yield
+    finally:
+        vivary_cli.site.getsitepackages = saved
+
+
+class StandInDistribution:
+    """A distribution that records the named files and is not editable."""
+
+    def __init__(self, root: str, names: tuple[str, ...]) -> None:
+        self.root = Path(root)
+        self.files = [Path(name) for name in names]
+
+    def locate_file(self, name) -> Path:
+        return self.root / name
+
+    def read_text(self, name: str) -> str | None:
+        return None
+
+
+@contextlib.contextmanager
+def stand_in_distribution(name: str, files: tuple[str, ...]):
+    """Answer the metadata lookup for one distribution with a stand-in."""
+    metadata = vivary_cli.importlib.metadata
+    saved = metadata.distribution
+    with tempfile.TemporaryDirectory() as root:
+        metadata.distribution = lambda requested: (
+            StandInDistribution(root, files)
+            if requested == name
+            else saved(requested)
+        )
+        try:
+            yield
+        finally:
+            metadata.distribution = saved
+
+
 def call_main(argv: list[str]) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -485,29 +527,37 @@ class RouterBehaviorTests(unittest.TestCase):
         self.assertIn("pip install --upgrade", err)
         self.assertNotIn("Traceback", err)
 
-    def test_a_module_outside_the_installed_distribution_is_refused(self):
+    def test_a_foreign_module_inside_the_install_is_refused(self):
         route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
         component = vivary_cli.COMPONENTS[route.module]
-        metadata = vivary_cli.importlib.metadata
-        try:
-            distribution = metadata.distribution(component.distribution)
-        except metadata.PackageNotFoundError:
-            self.skipTest(f"{component.distribution} is not installed here")
-        if distribution.files is None:
-            self.skipTest(f"{component.distribution} records no files")
 
         def refuse(argv=None, *, prog=None):
             raise AssertionError("the router ran a foreign module")
 
-        stand_in = types.ModuleType(route.module)
-        stand_in.__version__ = component.floor
-        stand_in.__file__ = str(Path(tempfile.gettempdir()) / f"{route.module}.py")
-        stand_in.main = refuse
-        with stand_in_component(route.module, stand_in):
-            code, out, err = call_main([route.verb])
+        with tempfile.TemporaryDirectory() as installed:
+            stand_in = types.ModuleType(route.module)
+            stand_in.__version__ = component.floor
+            stand_in.__file__ = str(Path(installed) / f"{route.module}.py")
+            stand_in.main = refuse
+            with stand_in_component(route.module, stand_in), installed_location(
+                installed
+            ), stand_in_distribution(component.distribution, ()):
+                code, out, err = call_main([route.verb])
         self.assertEqual(code, 2)
         self.assertEqual(out, "")
         self.assertIn(f"is not the installed {component.distribution}", err)
+
+    def test_a_module_outside_the_install_skips_the_identity_check(self):
+        route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
+        component = vivary_cli.COMPONENTS[route.module]
+        with tempfile.TemporaryDirectory() as installed, tempfile.TemporaryDirectory() as checkout:
+            stand_in = types.ModuleType(route.module)
+            stand_in.__version__ = component.floor
+            stand_in.__file__ = str(Path(checkout) / f"{route.module}.py")
+            with installed_location(installed), stand_in_distribution(
+                component.distribution, ()
+            ):
+                self.assertIsNone(vivary_cli._identity_error(component, stand_in))
 
     def test_unrouted_component_operation_stays_standalone(self):
         self.assertNotIn(UNROUTED_OPERATION, vivary_cli.ROUTE_BY_VERB)
