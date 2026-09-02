@@ -26,6 +26,11 @@ ROOT = Path(__file__).resolve().parents[1]
 VAULT = str(ROOT / "packages" / "tropo" / "examples" / "vault")
 CHARACTERIZATION_TESTS = ROOT / "packages" / "vivary" / "tests"
 
+if str(CHARACTERIZATION_TESTS) not in sys.path:
+    sys.path.insert(0, str(CHARACTERIZATION_TESTS))
+
+from route_prog import COMMAND_FOR_MODULE, normalize_prog, routed_prog, standalone_prog
+
 LEGACY_COMMANDS = (
     ("vivary", ("--help",)),
     ("vivary", ("--version",)),
@@ -46,14 +51,6 @@ FIXTURE_ARGS = {
     "review": ("--root", VAULT),
     "impact": ("nope-id", "--root", VAULT),
     "control": ("--governed", "missing.json", "--strict"),
-}
-
-COMMAND_FOR_MODULE = {
-    "create_vivary": "create-vivary",
-    "tropo": "tropo",
-    "strato": "strato",
-    "ozone": "ozone",
-    "exo": "exo",
 }
 
 SCRIPT_FOR_CASE = {
@@ -87,16 +84,37 @@ def script_path(bin_dir: Path, name: str) -> Path:
     return windows if windows.exists() else bin_dir / name
 
 
-def compare(label: str, routed: Result, standalone: Result) -> list[str]:
+def compare(
+    label: str,
+    routed: Result,
+    standalone: Result,
+    names: tuple[str, str] | None = None,
+) -> list[str]:
+    """Compare one routed run with its standalone run.
+
+    With `names` the two program names are normalized away first, which is how
+    help output is judged once a component renders the front door's name.
+    """
+    def prepare(result: Result, name: str) -> tuple[str, str]:
+        if names is None:
+            return result.stdout, result.stderr
+        return (
+            normalize_prog(result.stdout, name, names[1]),
+            normalize_prog(result.stderr, name, names[1]),
+        )
+
     problems = []
     if routed.code != standalone.code:
         problems.append(
             f"{label}: exit code {routed.code} does not match {standalone.code}"
         )
-    if routed.stdout != standalone.stdout:
-        problems.append(f"{label}: stdout does not match the standalone command")
-    if routed.stderr != standalone.stderr:
-        problems.append(f"{label}: stderr does not match the standalone command")
+    routed_streams = prepare(routed, names[1] if names else "")
+    standalone_streams = prepare(standalone, names[0] if names else "")
+    for stream, left, right in zip(
+        ("stdout", "stderr"), routed_streams, standalone_streams
+    ):
+        if left != right:
+            problems.append(f"{label}: {stream} does not match the standalone command")
     return problems
 
 
@@ -266,10 +284,17 @@ def main(argv: list[str] | None = None) -> int:
                 routed = runner.run("vivary", (verb, *case), work)
                 standalone = runner.run(command, (*operation, *case), work)
                 label = f"vivary {verb} {' '.join(case)}"
-                problems.extend(compare(label, routed, standalone))
                 if case == ("--help",):
+                    names = (
+                        standalone_prog(module, tuple(operation)),
+                        routed_prog(verb),
+                    )
+                    problems.extend(compare(label, routed, standalone, names))
+                    if not routed.stdout.startswith(f"usage: {names[1]}"):
+                        problems.append(f"{label}: routed help does not name {names[1]}")
                     helps += 1
                 else:
+                    problems.extend(compare(label, routed, standalone))
                     fixtures += 1
 
         standalone = runner.run(

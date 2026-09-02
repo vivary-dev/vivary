@@ -63,6 +63,42 @@ def test_every_stream_can_fail_at_once():
     assert len(problems) == 3
 
 
+def test_help_parity_ignores_the_program_name_and_its_wrapping():
+    module = _load()
+    routed = _result(
+        module, stdout="usage: vivary check [-h]\n                    [--json]\n"
+    )
+    standalone = _result(module, stdout="usage: tropo [-h] [--json]\n")
+    assert module.compare("vivary check --help", routed, standalone,
+                          ("tropo", "vivary check")) == []
+
+
+def test_help_parity_still_reports_a_real_difference():
+    module = _load()
+    routed = _result(module, stdout="usage: vivary check [-h] [--json]\n")
+    standalone = _result(module, stdout="usage: tropo [-h] [--json] [--quiet]\n")
+    problems = module.compare("vivary check --help", routed, standalone,
+                              ("tropo", "vivary check"))
+    assert len(problems) == 1
+    assert "stdout does not match" in problems[0]
+
+
+def test_a_routed_usage_error_is_normalized_to_the_front_door():
+    module = _load()
+    routed = _result(module, stdout="", stderr="vivary check: error: nope\n")
+    standalone = _result(module, stdout="", stderr="tropo: error: nope\n")
+    assert module.compare("vivary check", routed, standalone,
+                          ("tropo", "vivary check")) == []
+
+
+def test_standalone_prog_names_nested_operations():
+    module = _load()
+    assert module.standalone_prog("tropo", ("check",)) == "tropo"
+    assert module.standalone_prog("create_vivary", ("init",)) == "create-vivary init"
+    assert module.standalone_prog("exo", ("control",)) == "exo control"
+    assert module.routed_prog("check") == "vivary check"
+
+
 def test_unrouted_operation_stays_standalone():
     module = _load()
     problems = module.unrouted_problems(

@@ -20,11 +20,11 @@ need to reproduce a specific composition.
 
 The install includes:
 
-- `create-vivary>=0.4.2`: thin greenfield init and deterministic brownfield adoption.
-- `vivary-tropo>=0.5.3`: typed governed context and local retrieval.
-- `vivary-strato>=0.1.2`: policy and deliberate human gates.
-- `vivary-ozone>=0.3.1`: review and evidence verification.
-- `vivary-exo>=0.3.0`: optional bounded orchestration.
+- `create-vivary>=0.4.3`: thin greenfield init and deterministic brownfield adoption.
+- `vivary-tropo>=0.5.4`: typed governed context and local retrieval.
+- `vivary-strato>=0.1.3`: policy and deliberate human gates.
+- `vivary-ozone>=0.3.2`: review and evidence verification.
+- `vivary-exo>=0.3.1`: optional bounded orchestration.
 
 It receives `vivary-core` transitively through the role packages rather than owning a
 duplicate Core floor.

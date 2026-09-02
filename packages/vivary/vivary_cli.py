@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import importlib.metadata
+import inspect
 import json
 import os
 import platform
@@ -52,11 +53,11 @@ class Component(NamedTuple):
 
 COMPONENTS = {
     "create_vivary": Component(
-        "create_vivary", "create-vivary", "Workspace", "0.4.2"),
-    "tropo": Component("tropo", "vivary-tropo", "Graph and retrieval", "0.5.3"),
-    "strato": Component("strato", "vivary-strato", "Policy", "0.1.2"),
-    "ozone": Component("ozone", "vivary-ozone", "Review", "0.3.1"),
-    "exo": Component("exo", "vivary-exo", "Coordination", "0.3.0"),
+        "create_vivary", "create-vivary", "Workspace", "0.4.3"),
+    "tropo": Component("tropo", "vivary-tropo", "Graph and retrieval", "0.5.4"),
+    "strato": Component("strato", "vivary-strato", "Policy", "0.1.3"),
+    "ozone": Component("ozone", "vivary-ozone", "Review", "0.3.2"),
+    "exo": Component("exo", "vivary-exo", "Coordination", "0.3.1"),
 }
 
 
@@ -358,6 +359,19 @@ def _installed_version(component: Component, module: Any) -> str | None:
     return installed if isinstance(installed, str) else None
 
 
+def _prog_keyword(main: Any, route: Route) -> dict[str, str]:
+    """Name the front door only for a component that accepts the prog seam.
+
+    A component released before the seam keeps the verbatim behavior, so its
+    help still names its own program.
+    """
+    try:
+        parameters = inspect.signature(main).parameters
+    except (TypeError, ValueError):
+        return {}
+    return {"prog": f"vivary {route.verb}"} if "prog" in parameters else {}
+
+
 def _dispatch(route: Route, rest: list[str]) -> int:
     component = COMPONENTS[route.module]
     try:
@@ -399,7 +413,7 @@ def _dispatch(route: Route, rest: list[str]) -> int:
         return 2
 
     try:
-        return main([*route.operation, *rest])
+        return main([*route.operation, *rest], **_prog_keyword(main, route))
     except SystemExit as exc:
         code = exc.code
         if code is None:

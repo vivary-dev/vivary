@@ -15,7 +15,7 @@ from vivary_core.control_actors import ACTOR_KIND, AUTHORITY_CLASS, can_hold_aut
 
 from vivary_core.policy_loop import next_loop_step
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 REQUEST_SCHEMA = "vivary.strato-decision-request/v0"
 DECISION_SCHEMA = "vivary.strato-decision/v0"
@@ -280,11 +280,21 @@ def _emit(result: dict[str, Any], *, json_output: bool) -> None:
         print("reasons: " + ", ".join(result["reason_codes"]))
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="strato", description="Vivary governed loop policy")
+def _build_parser(*, prog: str | None = None) -> argparse.ArgumentParser:
+    """Build the parser, optionally under a front door's program name.
+
+    With no `prog` the standalone names are unchanged. With one, the top level
+    takes its first word and `decide` takes the whole name.
+    """
+    parser = argparse.ArgumentParser(
+        prog=prog.split()[0] if prog else "strato",
+        description="Vivary governed loop policy",
+    )
     parser.add_argument("--version", action="version", version=f"strato {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
-    decide = commands.add_parser("decide", help="evaluate the next governed loop step")
+    decide = commands.add_parser(
+        "decide", prog=prog, help="evaluate the next governed loop step"
+    )
     decide.add_argument(
         "--governed",
         action="store_true",
@@ -301,8 +311,8 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    args = _build_parser(prog=prog).parse_args(argv)
     try:
         request = _load_request(args.request)
     except RecursionError as error:

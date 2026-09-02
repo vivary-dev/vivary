@@ -113,7 +113,7 @@ if os.name == "nt":
     _PUBLIC_FILE_SHARE_ALL = 0x00000001 | 0x00000002 | 0x00000004
     _PUBLIC_OPEN_EXISTING = 3
 
-__version__ = "0.5.3"
+__version__ = "0.5.4"
 RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
 RECEIPT_SCHEMA = "vivary.run_receipt.v1"
 COMMANDS = (
@@ -6487,8 +6487,8 @@ def _append_run_receipt(
     return True
 
 
-def _main(argv=None):
-    p = argparse.ArgumentParser(prog="tropo", description="The filesystem is the schema.")
+def _main(argv=None, *, prog=None):
+    p = argparse.ArgumentParser(prog=prog or "tropo", description="The filesystem is the schema.")
     p.add_argument("--version", action="version", version=f"tropo {__version__}")
     p.add_argument("command", nargs="?", default="check",
                    choices=COMMANDS)
@@ -6568,12 +6568,13 @@ def _main(argv=None):
             "migrate": cmd_migrate, "query": cmd_query, "find": cmd_find}[args.command](args, resolver)
 
 
-def main(argv=None):
+def main(argv=None, *, prog=None):
+    """Run tropo, naming the program `prog` when a front door supplies one."""
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     started_at = time.monotonic()
     receipt_path, receipt_source = _extract_receipt_path(raw_argv)
     try:
-        rc = _main(raw_argv)
+        rc = _main(raw_argv, prog=prog)
     except SystemExit as e:
         code = _exit_code_value(e.code)
         receipt_ok = _append_run_receipt(

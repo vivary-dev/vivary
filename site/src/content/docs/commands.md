@@ -120,9 +120,9 @@ next release publishes.
 | Coordination | `vivary control` | `exo control` | Dispatch one governed Core control request. |
 
 Each route declares the component version floor that shipped the verb:
-`create-vivary>=0.4.2` for the workspace verbs, `vivary-tropo>=0.5.3` for `check` and
-`find`, `vivary-strato>=0.1.2` for `decide`, `vivary-ozone>=0.3.1` for `review` and
-`impact`, and `vivary-exo>=0.3.0` for `control`. A component below its floor is refused
+`create-vivary>=0.4.3` for the workspace verbs, `vivary-tropo>=0.5.4` for `check` and
+`find`, `vivary-strato>=0.1.3` for `decide`, `vivary-ozone>=0.3.2` for `review` and
+`impact`, and `vivary-exo>=0.3.1` for `control`. A component below its floor is refused
 with exit code `2` and a message naming the required version. The floors match the
 [meta-package manifest](https://github.com/vivary-dev/vivary/blob/dev/packages/vivary/pyproject.toml).
 A missing component, or one below its floor, is refused with exit code `2` and a `pip
@@ -135,11 +135,11 @@ and a new component operation stays reachable there without a meta-package relea
 Promoting an operation to a verb takes a meta-package minor release, a matching floor
 bump, and approval of the verb name.
 
-**Temporary limitation.** `vivary <verb> --help` passes component help through
-verbatim, so the usage line names the component program, for example `usage: tropo
-...` rather than `usage: vivary check ...`. The exit code, options, and behavior are
-correct. A follow-up adds an optional `prog` seam to the components on their own patch
-cadence so the routed usage line reads `vivary`.
+Routed help names the front door. `vivary <verb> --help` prints `usage: vivary
+<verb> ...`, and a usage error from a routed verb reads `vivary <verb>: error: ...`.
+Each component at its floor accepts an optional program name from the router, and a
+component below the floor is refused before it runs. Standalone help is unchanged:
+`tropo --help` still prints `usage: tropo ...`.
 
 ### Receipt commands
 

@@ -31,7 +31,7 @@ import sys
 import tempfile
 import time
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
 RECEIPT_SCHEMA = "vivary.run_receipt.v1"
 COMMANDS = ("conflicts", "board", "claim", "roles")
@@ -937,9 +937,9 @@ def cmd_control(args):
     return 1 if args.strict and _control_strict_failure(result) else 0
 
 
-def _main_control(argv):
+def _main_control(argv, *, prog=None):
     parser = argparse.ArgumentParser(
-        prog="exo control",
+        prog=prog or "exo control",
         description="Dispatch one governed Core control request.",
         allow_abbrev=False,
     )
@@ -954,10 +954,10 @@ def _main_control(argv):
     return cmd_control(args)
 
 
-def _main(argv=None):
+def _main(argv=None, *, prog=None):
     if argv and argv[0] == "control":
-        return _main_control(argv[1:])
-    p = argparse.ArgumentParser(prog="exo",
+        return _main_control(argv[1:], prog=prog)
+    p = argparse.ArgumentParser(prog=prog.split()[0] if prog else "exo",
                                 description="The coordination layer over the tropo graph.")
     p.add_argument("--version", action="version", version=f"exo {__version__}")
     p.add_argument("command", nargs="?", default="conflicts",
@@ -983,7 +983,8 @@ def _main(argv=None):
     }[args.command](args)
 
 
-def main(argv=None):
+def main(argv=None, *, prog=None):
+    """Run exo, naming the program `prog` when a front door supplies one."""
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     receipt_path, receipt_source = _extract_receipt_path(raw_argv)
     request_path = _control_request_path(raw_argv)
@@ -998,7 +999,7 @@ def main(argv=None):
             return 2
     started_at = time.monotonic() if receipt_path else None
     try:
-        rc = _main(raw_argv)
+        rc = _main(raw_argv, prog=prog)
     except SystemExit as e:
         code = _exit_code_value(e.code)
         receipt_ok = _append_run_receipt(

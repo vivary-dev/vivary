@@ -9,7 +9,9 @@ staged from this checkout.
 
 import argparse
 import contextlib
+import importlib
 import io
+import os
 import re
 import sys
 import tempfile
@@ -20,6 +22,12 @@ from pathlib import Path
 from typing import NamedTuple
 
 from cli_runner import run_cli
+from route_prog import (
+    COMMAND_FOR_MODULE,
+    normalize_prog,
+    routed_prog,
+    standalone_prog,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 PACKAGES = ROOT / "packages"
@@ -47,15 +55,16 @@ COMPONENT_FILES = {
 UNROUTED_MODULE = "tropo"
 UNROUTED_OPERATION = "map"
 STAND_IN_VERB = "check"
+SEAM_VERBS = ("create", "check", "decide", "review", "control")
 
-# Each installed version paired with whether the tropo floor of 0.5.3 accepts it.
+# Each installed version paired with whether the tropo floor of 0.5.4 accepts it.
 FLOOR_CASES = (
-    ("0.5.2", False),
-    ("0.5.3rc1", False),
-    ("0.5.3.dev1", False),
-    ("0.5.3", True),
-    ("0.5.3.post1", True),
-    ("0.5.4rc1", True),
+    ("0.5.3", False),
+    ("0.5.4rc1", False),
+    ("0.5.4.dev1", False),
+    ("0.5.4", True),
+    ("0.5.4.post1", True),
+    ("0.5.5rc1", True),
     ("0.6", True),
 )
 
@@ -129,7 +138,7 @@ def call_main(argv: list[str]) -> tuple[int, str, str]:
 
 
 class RouteParityTests(unittest.TestCase):
-    def assert_parity(self, case: ParityCase) -> None:
+    def run_both(self, case: ParityCase):
         route = vivary_cli.ROUTE_BY_VERB[case.verb]
         with tempfile.TemporaryDirectory() as work:
             routed = run([VIVARY_CLI, route.verb, *case.args], work)
@@ -137,17 +146,137 @@ class RouteParityTests(unittest.TestCase):
             standalone = run(
                 [COMPONENT_FILES[route.module], *route.operation, *case.args], work
             )
+        return route, routed, standalone
+
+    def assert_parity(self, case: ParityCase) -> None:
+        _, routed, standalone = self.run_both(case)
         self.assertEqual(routed, standalone)
 
     def test_help_matches_the_standalone_command(self):
         for route in vivary_cli.ROUTES:
             with self.subTest(verb=route.verb):
-                self.assert_parity(ParityCase(route.verb, ("--help",)))
+                _, routed, standalone = self.run_both(
+                    ParityCase(route.verb, ("--help",))
+                )
+                names = (
+                    standalone_prog(route.module, route.operation),
+                    routed_prog(route.verb),
+                )
+                self.assertEqual(routed[0], standalone[0])
+                for index in (1, 2):
+                    self.assertEqual(
+                        normalize_prog(routed[index], names[1], names[1]),
+                        normalize_prog(standalone[index], *names),
+                    )
+
+    def test_routed_help_names_the_front_door(self):
+        for route in vivary_cli.ROUTES:
+            with self.subTest(verb=route.verb):
+                with tempfile.TemporaryDirectory() as work:
+                    code, out, err = run([VIVARY_CLI, route.verb, "--help"], work)
+                self.assertEqual(code, 0, err)
+                self.assertTrue(
+                    out.startswith(f"usage: vivary {route.verb}"), out[:80]
+                )
 
     def test_offline_fixtures_match_the_standalone_command(self):
         for case in FIXTURE_CASES:
             with self.subTest(verb=case.verb, args=case.args):
                 self.assert_parity(case)
+
+
+class ProgSeamTests(unittest.TestCase):
+    @contextlib.contextmanager
+    def no_receipt_log(self):
+        saved = os.environ.pop("VIVARY_RECEIPT_LOG", None)
+        try:
+            yield
+        finally:
+            if saved is not None:
+                os.environ["VIVARY_RECEIPT_LOG"] = saved
+
+    def help_usage(self, module, operation, prog) -> str:
+        out = io.StringIO()
+        with self.no_receipt_log(), contextlib.redirect_stdout(out):
+            with self.assertRaises(SystemExit) as raised:
+                module.main([*operation, "--help"], **({"prog": prog} if prog else {}))
+        self.assertEqual(raised.exception.code, 0)
+        return out.getvalue()
+
+    def test_the_characterization_suite_freezes_every_standalone_help(self):
+        import test_command_surface_characterization as surface
+
+        frozen = {
+            case.command: case.stdout_exact
+            for case in surface.CASES
+            if case.argv == ("--help",)
+        }
+        for verb in SEAM_VERBS:
+            command = COMMAND_FOR_MODULE[vivary_cli.ROUTE_BY_VERB[verb].module]
+            with self.subTest(command=command):
+                self.assertIsNotNone(frozen.get(command))
+
+    def test_a_component_renders_the_routed_usage_line(self):
+        for verb in SEAM_VERBS:
+            route = vivary_cli.ROUTE_BY_VERB[verb]
+            module = importlib.import_module(route.module)
+            with self.subTest(verb=verb):
+                routed = self.help_usage(module, route.operation, routed_prog(verb))
+                self.assertTrue(
+                    routed.startswith(f"usage: {routed_prog(verb)}"), routed[:80]
+                )
+
+    def test_a_component_without_prog_keeps_its_standalone_usage_line(self):
+        for verb in SEAM_VERBS:
+            route = vivary_cli.ROUTE_BY_VERB[verb]
+            module = importlib.import_module(route.module)
+            with self.subTest(verb=verb):
+                standalone = self.help_usage(module, route.operation, None)
+                name = standalone_prog(route.module, route.operation)
+                self.assertTrue(standalone.startswith(f"usage: {name}"), standalone[:80])
+
+
+class ProgKeywordTests(unittest.TestCase):
+    def test_a_component_without_the_seam_is_called_verbatim(self):
+        def legacy_main(argv=None):
+            return 0
+
+        route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
+        self.assertEqual(vivary_cli._prog_keyword(legacy_main, route), {})
+
+    def test_a_component_with_the_seam_is_named_for_the_front_door(self):
+        def seam_main(argv=None, *, prog=None):
+            return 0
+
+        route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
+        self.assertEqual(
+            vivary_cli._prog_keyword(seam_main, route),
+            {"prog": routed_prog(STAND_IN_VERB)},
+        )
+
+    def test_the_router_passes_prog_only_to_a_component_that_accepts_it(self):
+        route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
+        component = vivary_cli.COMPONENTS[route.module]
+        for accepts in (False, True):
+            with self.subTest(accepts=accepts):
+                calls = []
+                if accepts:
+                    def record(argv=None, *, prog=None, calls=calls):
+                        calls.append((argv, prog))
+                        return 0
+                else:
+                    def record(argv=None, calls=calls):
+                        calls.append((argv, None))
+                        return 0
+
+                stand_in = types.ModuleType(route.module)
+                stand_in.__version__ = component.floor
+                stand_in.main = record
+                with stand_in_component(route.module, stand_in):
+                    code, _, err = call_main([route.verb])
+                self.assertEqual(code, 0, err)
+                expected = routed_prog(STAND_IN_VERB) if accepts else None
+                self.assertEqual(calls, [(list(route.operation), expected)])
 
 
 class FrontDoorHelpTests(unittest.TestCase):
@@ -317,16 +446,16 @@ class RouteTableTests(unittest.TestCase):
 class ReleaseOrderingTests(unittest.TestCase):
     def test_a_release_pads_to_three_places_and_marks_final(self):
         self.assertEqual(vivary_cli._release_tuple("0.6"), ((0, 6, 0), True))
-        self.assertEqual(vivary_cli._release_tuple("0.5.3.post1"), ((0, 5, 3), True))
-        self.assertEqual(vivary_cli._release_tuple("0.5.3rc1"), ((0, 5, 3), False))
-        self.assertEqual(vivary_cli._release_tuple("0.5.3.dev1"), ((0, 5, 3), False))
-        self.assertEqual(vivary_cli._release_tuple("0.5.3+local"), ((0, 5, 3), False))
+        self.assertEqual(vivary_cli._release_tuple("0.5.4.post1"), ((0, 5, 4), True))
+        self.assertEqual(vivary_cli._release_tuple("0.5.4rc1"), ((0, 5, 4), False))
+        self.assertEqual(vivary_cli._release_tuple("0.5.4.dev1"), ((0, 5, 4), False))
+        self.assertEqual(vivary_cli._release_tuple("0.5.4+local"), ((0, 5, 4), False))
 
     def test_the_floor_comparison_matches_the_recorded_cases(self):
         for installed, accepted in FLOOR_CASES:
             with self.subTest(installed=installed):
                 self.assertEqual(
-                    vivary_cli._below_floor(installed, "0.5.3"), not accepted
+                    vivary_cli._below_floor(installed, "0.5.4"), not accepted
                 )
 
 

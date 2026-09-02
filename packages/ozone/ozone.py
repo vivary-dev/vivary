@@ -32,7 +32,7 @@ import platform
 import sys
 import time
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
 RECEIPT_SCHEMA = "vivary.run_receipt.v1"
 REQUEST_SCHEMA = "vivary.ozone-verification-request/v0"
@@ -2037,9 +2037,9 @@ def _append_run_receipt(
     return True
 
 
-def _parse_args(argv=None):
+def _parse_args(argv=None, *, prog=None):
     p = argparse.ArgumentParser(
-        prog="ozone",
+        prog=prog or "ozone",
         description="Vivary review, impact, and governed evidence verification.",
     )
     p.add_argument("--version", action="version", version=f"ozone {__version__}")
@@ -2078,11 +2078,12 @@ def _run_args(args):
     }[args.command](args)
 
 
-def _main(argv=None):
-    return _run_args(_parse_args(argv))
+def _main(argv=None, *, prog=None):
+    return _run_args(_parse_args(argv, prog=prog))
 
 
-def main(argv=None):
+def main(argv=None, *, prog=None):
+    """Run ozone, naming the program `prog` when a front door supplies one."""
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     started_at = time.monotonic()
     receipt_path, receipt_source = _extract_receipt_path(raw_argv)
@@ -2100,7 +2101,7 @@ def main(argv=None):
             return 2
     args = None
     try:
-        args = _parse_args(raw_argv)
+        args = _parse_args(raw_argv, prog=prog)
         if args.receipt is not None:
             receipt_path, receipt_source = args.receipt, "flag"
         request_path = args.id if args.command == "verify" else None

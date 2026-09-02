@@ -47,13 +47,16 @@ The registry table below is published install truth. Registry status was verifie
 Every version in the table is live on its registry and passed a cache-resistant
 install smoke on 2026-08-15. The package manifests own role-to-Core floors. The
 [meta-package manifest](packages/vivary/pyproject.toml) owns its component floors,
-including `create-vivary>=0.4.2`, `vivary-tropo>=0.5.3`, and `vivary-strato>=0.1.2`.
+including `create-vivary>=0.4.3`, `vivary-tropo>=0.5.4`, and `vivary-strato>=0.1.3`.
 It receives Core transitively. `vivary-memory-cognee` and `vivary-mcp` ride the same
 train as optional packages and are not meta-package dependencies.
 
-Source leads the registry for one package. The `vivary` meta package is staged at
-**0.2.0** for the front-door task verbs and has not published. Installing `vivary`
-from PyPI still gives the 0.1.10 in the table above.
+Source leads the registry for six packages. The `vivary` meta package is staged at
+**0.2.0** for the front-door task verbs, and `create-vivary` / `@vivary/create`
+**0.4.3**, `vivary-tropo` **0.5.4**, `vivary-strato` **0.1.3**, `vivary-ozone`
+**0.3.2**, and `vivary-exo` **0.3.1** are staged for the routed-help program-name
+seam. None of them has published. Installing any of them from PyPI or npm still
+gives the version in the table above.
 
 [CHANGELOG.md](CHANGELOG.md) records the train and the exact smokes that verified it,
 without rewriting earlier independent-version history.

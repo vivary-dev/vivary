@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vivary-ozone"
-version = "0.3.1"
+version = "0.3.2"
 description = "The review layer: graph-aware review, impact analysis, and governed evidence verification."
 readme = "README.md"
 requires-python = ">=3.11"
