@@ -69,8 +69,8 @@ patch. Published registry versions remain unchanged.
   a component that declares none or an unreadable one, so a source checkout ahead of
   an installed wheel is judged on the code it will run. A module imported from inside
   an installed-packages directory that the installed distribution does not record is
-  refused before the call, while a module imported from anywhere else — a source
-  checkout, a `PYTHONPATH` tree, the current directory — is a deliberate shadow and
+  refused before the call, while a module imported from anywhere else (a source
+  checkout, a `PYTHONPATH` tree, the current directory) is a deliberate shadow and
   runs. An import failure in a component or its dependencies is reported without a
   traceback, and a local version segment no longer reads as a prerelease.
 - The release artifact gate now covers all nine published Python distributions and

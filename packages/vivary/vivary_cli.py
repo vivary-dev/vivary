@@ -431,8 +431,8 @@ def _identity_error(component: Component, module: Any) -> str | None:
     name in an installed-packages directory, where the recorded files say the
     code that ran is not the one the distribution shipped. Import-time code has
     already run by the time this can look, so this stops the call, not the
-    import. A module imported from anywhere else — a source checkout, a
-    `PYTHONPATH` tree, the current directory — is a developer shadowing a wheel
+    import. A module imported from anywhere else (a source checkout, a
+    `PYTHONPATH` tree, the current directory) is a developer shadowing a wheel
     on purpose and skips the check, as do a distribution with no RECORD and an
     editable install, which live outside the recorded files legitimately.
     """
