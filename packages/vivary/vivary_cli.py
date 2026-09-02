@@ -1,13 +1,15 @@
-"""Small visibility helpers for Vivary receipts.
+"""The Vivary front door and its local visibility helpers.
 
-This module intentionally stays dependency-free and local-only. It reads the
-privacy-preserving JSONL receipts already emitted by the core CLIs and can format
-an email draft, but it never sends telemetry or mail on its own.
+This module routes ten task-first verbs to the installed component CLIs and reads
+the privacy-preserving JSONL receipts those CLIs emit. It stays dependency-free
+and local-only: it never sends telemetry or mail on its own, and it imports a
+component only when a routed verb asks for one.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import platform
@@ -16,7 +18,7 @@ import sys
 import urllib.parse
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 __version__ = "0.1.10"
 DEFAULT_RECEIPT_LOG = ".vivary/receipts.jsonl"
@@ -36,6 +38,49 @@ SAFE_FIELDS = (
     "platform",
     "receipt_source",
     "error_type",
+)
+
+
+class Route(NamedTuple):
+    verb: str
+    group: str
+    module: str
+    operation: tuple[str, ...]
+    floor: str
+    summary: str
+
+
+ROUTES = (
+    Route("create", "Workspace", "create_vivary", ("init",), "0.4.2",
+          "Create a Vivary workspace scaffold"),
+    Route("adopt", "Workspace", "create_vivary", ("adopt",), "0.4.2",
+          "Plan and apply bounded governed context for an existing workspace"),
+    Route("doctor", "Workspace", "create_vivary", ("doctor",), "0.4.2",
+          "Validate a Vivary workspace scaffold"),
+    Route("capabilities", "Workspace", "create_vivary", ("capabilities",), "0.4.2",
+          "List the optional preset capabilities"),
+    Route("check", "Graph and retrieval", "tropo", ("check",), "0.5.3",
+          "Validate the context graph and report errors and warnings"),
+    Route("find", "Graph and retrieval", "tropo", ("find",), "0.5.3",
+          "Retrieve a token-budgeted context set for a query"),
+    Route("decide", "Policy", "strato", ("decide",), "0.1.2",
+          "Evaluate one governed decision request"),
+    Route("review", "Review", "ozone", ("review",), "0.3.1",
+          "Run a review rule pack over the context graph"),
+    Route("impact", "Review", "ozone", ("impact",), "0.3.1",
+          "Show what one node affects"),
+    Route("control", "Coordination", "exo", ("control",), "0.3.0",
+          "Dispatch one governed Core control request"),
+)
+
+ROUTE_BY_VERB = {route.verb: route for route in ROUTES}
+
+ADVANCED_COMMANDS = (
+    ("create-vivary", "Scaffold, adopt, and validate workspaces"),
+    ("tropo", "The context graph, its validation, and retrieval"),
+    ("strato", "The governed decision policy layer"),
+    ("ozone", "Review, impact, and evidence verification"),
+    ("exo", "Coordination, work items, and governed control"),
 )
 
 
@@ -267,8 +312,67 @@ def cmd_logs_email(args: argparse.Namespace) -> int:
     return 0
 
 
+def _version_tuple(text: str) -> tuple[int, ...]:
+    leading = (re.match(r"\d*", chunk).group() for chunk in text.split("."))
+    return tuple(int(digits) if digits else 0 for digits in leading)
+
+
+def _dispatch(route: Route, rest: list[str]) -> int:
+    module = importlib.import_module(route.module)
+    installed = module.__version__
+    if _version_tuple(installed) < _version_tuple(route.floor):
+        print(
+            f"vivary {route.verb}: needs {route.module} {route.floor} or newer, found {installed}",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        return module.main([*route.operation, *rest])
+    except SystemExit as exc:
+        code = exc.code
+        if code is None:
+            return 0
+        if isinstance(code, int):
+            return code
+        # A component can exit with a message string, which a standalone run
+        # would have had the interpreter print before exiting 1.
+        print(code, file=sys.stderr)
+        return 1
+
+
+def _description() -> str:
+    width = max(len(route.verb) for route in ROUTES)
+    lines = ["Vivary visibility helpers.", "", "Task verbs:"]
+    for group in dict.fromkeys(route.group for route in ROUTES):
+        lines.append("")
+        lines.append(f"  {group}")
+        lines.extend(
+            f"    {route.verb.ljust(width)}  {route.summary}"
+            for route in ROUTES
+            if route.group == group
+        )
+    return "\n".join(lines)
+
+
+def _epilog() -> str:
+    width = max(len(name) for name, _ in ADVANCED_COMMANDS)
+    lines = [
+        "Advanced:",
+        "",
+        "  Each component also installs its own command with the full operation set.",
+        "",
+    ]
+    lines.extend(f"    {name.ljust(width)}  {summary}" for name, summary in ADVANCED_COMMANDS)
+    return "\n".join(lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="vivary", description="Vivary visibility helpers.")
+    parser = argparse.ArgumentParser(
+        prog="vivary",
+        description=_description(),
+        epilog=_epilog(),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--version", action="version", version=f"vivary {__version__}")
     sub = parser.add_subparsers(dest="command")
 
@@ -298,6 +402,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in ROUTE_BY_VERB:
+        return _dispatch(ROUTE_BY_VERB[argv[0]], argv[1:])
     if len(argv) >= 2 and argv[0] == "logs" and argv[1] == "email":
         argv = [argv[1], *argv[2:]]
     parser = build_parser()
