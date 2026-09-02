@@ -6,7 +6,7 @@ governed-context scaffolder. It forwards arguments unchanged to the Python
 
 Published version truth lives in the
 [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status).
-`@vivary/create 0.4.3` and `create-vivary 0.4.3` are published and require
+`@vivary/create 0.4.3` and `create-vivary 0.4.3` ship together and require
 `vivary-tropo>=0.5.3`.
 
 ```bash
