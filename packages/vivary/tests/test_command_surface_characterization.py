@@ -4,13 +4,12 @@ Each case records the exit code, the output fragments, and the stream boundaries
 one real run produced. Routing work must keep every recorded value unchanged.
 """
 
-import os
-import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from typing import NamedTuple
+
+from cli_runner import run_cli
 
 ROOT = Path(__file__).resolve().parents[3]
 PACKAGES = ROOT / "packages"
@@ -256,14 +255,14 @@ CASES = (
         "vivary",
         ("--help",),
         0,
-        stdout=("usage: vivary", "Vivary visibility helpers."),
+        stdout=("usage: vivary", "The Vivary front door"),
         silent_stream="stderr",
     ),
     CommandCase(
         "vivary",
         (),
         0,
-        stdout=("usage: vivary", "Vivary visibility helpers."),
+        stdout=("usage: vivary", "The Vivary front door"),
         silent_stream="stderr",
     ),
     CommandCase(
@@ -332,31 +331,10 @@ CASES = (
 
 def run_case(case: CommandCase) -> tuple[int, str, str]:
     command = COMMANDS[case.command]
-    env = dict(os.environ)
-    env.pop("VIVARY_RECEIPT_LOG", None)
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["COLUMNS"] = "80"
-    env.pop("PYTHONWARNINGS", None)
-    if command.import_paths:
-        env["PYTHONPATH"] = os.pathsep.join(command.import_paths)
-    else:
-        env.pop("PYTHONPATH", None)
-
     with tempfile.TemporaryDirectory() as work:
         for name in case.empty_files:
             (Path(work) / name).touch()
-        completed = subprocess.run(
-            [sys.executable, command.module, *case.argv],
-            cwd=work,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            encoding="utf-8",
-            check=False,
-            timeout=120,
-        )
-    return completed.returncode, completed.stdout, completed.stderr
+        return run_cli([command.module, *case.argv], work, command.import_paths)
 
 
 class CommandSurfaceCharacterizationTests(unittest.TestCase):

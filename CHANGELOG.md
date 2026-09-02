@@ -32,6 +32,11 @@ Published registry versions remain unchanged.
 - A characterization suite freezes the observed command surface of the six entry
   modules before routing, and a router suite compares every verb against its
   standalone invocation on exit code, standard output, and standard error.
+- The `vivary` usage line and its invalid-choice error list all ten verbs beside
+  `logs` and `email`, so a misspelled verb prints the whole command set.
+- A component that is missing, or too old for the verb, is refused with exit code `2`
+  and a `pip install` hint naming the distribution and the floor. Ordering follows the
+  release numbers, so a prerelease of the floor version counts as below it.
 - A parity checker runs the same comparison against wheels installed into a fresh
   environment, and CI runs it beside the other meta-package proofs.
 
