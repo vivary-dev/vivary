@@ -27,11 +27,59 @@ def require(condition: bool, message: str) -> None:
         raise SystemExit(message)
 
 
+def read_manifest(repository: Path, package: str) -> dict:
+    manifest = repository / "packages" / package / "pyproject.toml"
+    return tomllib.loads(manifest.read_text(encoding="utf-8"))
+
+
 def project_version(repository: Path, package: str, distribution: str) -> str:
     manifest = repository / "packages" / package / "pyproject.toml"
-    project = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]
+    project = read_manifest(repository, package)["project"]
     require(project["name"] == distribution, f"{manifest}: expected project name {distribution}")
     return project["version"]
+
+
+def declared_payload(repository: Path, package: str) -> tuple[list[str], list[str]]:
+    """Read the modules and packages the manifest allows an artifact to carry."""
+    setuptools = read_manifest(repository, package).get("tool", {}).get("setuptools", {})
+    return setuptools.get("py-modules", []), setuptools.get("packages", [])
+
+
+def require_wheel_inventory(
+    wheel: Path, names: list[str], dist_info: str, package: str,
+    py_modules: list[str], packages: list[str],
+) -> None:
+    """Hold a wheel to the module allowlist its manifest declares."""
+    payload = sorted(name for name in names if not name.startswith(dist_info))
+    require(
+        bool(payload), f"{wheel}: wheel carries no module beside its metadata"
+    )
+    if py_modules:
+        expected = sorted(f"{module}.py" for module in py_modules)
+        require(
+            payload == expected,
+            f"{wheel}: wheel carries {payload}, not the declared {expected}",
+        )
+        return
+    require(
+        bool(packages),
+        f"packages/{package}/pyproject.toml: declares no py-modules or packages",
+    )
+    strays = [
+        name
+        for name in payload
+        if not any(name.startswith(f"{declared}/") for declared in packages)
+    ]
+    require(not strays, f"{wheel}: wheel carries {strays} outside {packages}")
+
+
+def require_sdist_inventory(sdist: Path, names: list[str], root: str) -> None:
+    """Keep the test suite out of the archive a user downloads and builds."""
+    tests = [
+        name for name in names
+        if name == f"{root}tests" or name.startswith(f"{root}tests/")
+    ]
+    require(not tests, f"{sdist}: sdist carries the test directory {tests[:1]}")
 
 
 def verify_python_artifacts(
@@ -48,17 +96,28 @@ def verify_python_artifacts(
         require(wheel.is_file(), f"missing release artifact: {wheel}")
         require(sdist.is_file(), f"missing release artifact: {sdist}")
 
-        wheel_license = f"{normalized}-{version}.dist-info/licenses/LICENSE"
+        py_modules, packages = declared_payload(repository, package)
+        dist_info = f"{normalized}-{version}.dist-info/"
+        wheel_license = f"{dist_info}licenses/LICENSE"
         with zipfile.ZipFile(wheel) as archive:
-            require(wheel_license in archive.namelist(), f"{wheel}: missing {wheel_license}")
+            names = archive.namelist()
+            require(wheel_license in names, f"{wheel}: missing {wheel_license}")
             require(
                 archive.read(wheel_license) == license_bytes,
                 f"{wheel}: packaged LICENSE does not match repository LICENSE",
             )
+            require(
+                f"{dist_info}METADATA" in names, f"{wheel}: missing {dist_info}METADATA"
+            )
+            require_wheel_inventory(
+                wheel, names, dist_info, package, py_modules, packages
+            )
 
-        sdist_license = f"{normalized}-{version}/LICENSE"
+        root = f"{normalized}-{version}/"
+        sdist_license = f"{root}LICENSE"
         with tarfile.open(sdist, "r:gz") as archive:
-            member = archive.getmember(sdist_license) if sdist_license in archive.getnames() else None
+            names = archive.getnames()
+            member = archive.getmember(sdist_license) if sdist_license in names else None
             require(member is not None, f"{sdist}: missing {sdist_license}")
             stream = archive.extractfile(member)
             require(stream is not None, f"{sdist}: cannot read {sdist_license}")
@@ -66,6 +125,7 @@ def verify_python_artifacts(
                 stream.read() == license_bytes,
                 f"{sdist}: packaged LICENSE does not match repository LICENSE",
             )
+            require_sdist_inventory(sdist, names, root)
         verified += 2
     return verified
 

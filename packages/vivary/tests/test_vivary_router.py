@@ -11,6 +11,7 @@ checkout.
 import argparse
 import contextlib
 import importlib
+import inspect
 import io
 import os
 import re
@@ -40,13 +41,7 @@ for _path in IMPORT_PATHS:
 import vivary_cli
 
 VIVARY_CLI = str(PACKAGES / "vivary" / "vivary_cli.py")
-COMMAND_FOR_MODULE = {
-    "create_vivary": "create-vivary",
-    "tropo": "tropo",
-    "strato": "strato",
-    "ozone": "ozone",
-    "exo": "exo",
-}
+routed_prog = vivary_cli.routed_prog
 UNROUTED_MODULE = "tropo"
 UNROUTED_OPERATION = "map"
 STAND_IN_VERB = "check"
@@ -59,10 +54,24 @@ FLOOR_CASES = (
     ("0.5.4rc1", False),
     ("0.5.4.dev1", False),
     ("0.5.4", True),
+    ("0.5.4+d20260902", True),
     ("0.5.4.post1", True),
     ("0.5.5rc1", True),
     ("0.6", True),
 )
+
+
+class AdvertisedSeam:
+    """A wrapper whose signature promises the seam and whose call refuses it."""
+
+    __signature__ = inspect.signature(lambda argv=None, *, prog=None: 0)
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv=None):
+        self.calls.append(argv)
+        return 0
 
 
 class ParityCase(NamedTuple):
@@ -90,10 +99,6 @@ VERSION_PROBE = (
     "names = [name for name in %r if name in sys.modules]\n"
     "print(json.dumps(names))\n"
 ) % (tuple(vivary_cli.COMPONENTS),)
-
-
-def routed_prog(verb: str) -> str:
-    return f"vivary {verb}"
 
 
 def run(argv: list[str], cwd: str) -> tuple[int, str, str]:
@@ -222,7 +227,7 @@ class ProgSeamTests(unittest.TestCase):
             if case.argv == ("--help",)
         }
         for verb in SEAM_VERBS:
-            command = COMMAND_FOR_MODULE[vivary_cli.ROUTE_BY_VERB[verb].module]
+            command = vivary_cli.COMPONENTS[vivary_cli.ROUTE_BY_VERB[verb].module].command
             with self.subTest(command=command):
                 self.assertIsNotNone(frozen.get(command))
 
@@ -244,7 +249,7 @@ class ProgSeamTests(unittest.TestCase):
             module = importlib.import_module(route.module)
             with self.subTest(verb=verb):
                 standalone, _ = self.help_streams(module, route.operation, None)
-                command = COMMAND_FOR_MODULE[route.module]
+                command = vivary_cli.COMPONENTS[route.module].command
                 self.assertTrue(
                     standalone.startswith(f"usage: {command}"), standalone[:80]
                 )
@@ -302,25 +307,70 @@ class ProgKeywordTests(unittest.TestCase):
                 expected = routed_prog(STAND_IN_VERB) if accepts else None
                 self.assertEqual(calls, [(list(route.operation), expected)])
 
-    def test_a_component_that_refuses_the_keyword_is_retried_without_it(self):
+    def test_a_component_that_takes_any_keyword_is_named_for_the_front_door(self):
+        def open_main(*args, **kwargs):
+            return 0
+
+        route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
+        self.assertEqual(
+            vivary_cli._prog_keyword(open_main, route),
+            {"prog": routed_prog(STAND_IN_VERB)},
+        )
+
+    def test_a_component_that_takes_any_keyword_receives_the_prog(self):
         route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
         component = vivary_cli.COMPONENTS[route.module]
         calls = []
 
-        def record(argv=None, *, prog=None, calls=calls):
-            calls.append(prog)
-            if prog is not None:
-                raise TypeError("main() got an unexpected keyword argument 'prog'")
+        def record(*args, **kwargs):
+            calls.append((args, kwargs))
             return 0
 
         stand_in = types.ModuleType(route.module)
         stand_in.__version__ = component.floor
         stand_in.main = record
         with stand_in_component(route.module, stand_in):
+            code, _, err = call_main([route.verb])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(
+            calls,
+            [((list(route.operation),), {"prog": routed_prog(STAND_IN_VERB)})],
+        )
+
+    def test_a_component_that_refuses_the_keyword_is_retried_without_it(self):
+        route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
+        component = vivary_cli.COMPONENTS[route.module]
+        stand_in_main = AdvertisedSeam()
+        self.assertEqual(
+            vivary_cli._prog_keyword(stand_in_main, route),
+            {"prog": routed_prog(STAND_IN_VERB)},
+        )
+
+        stand_in = types.ModuleType(route.module)
+        stand_in.__version__ = component.floor
+        stand_in.main = stand_in_main
+        with stand_in_component(route.module, stand_in):
             code, out, err = call_main([route.verb])
         self.assertEqual(code, 0, err)
         self.assertEqual(out, "")
-        self.assertEqual(calls, [routed_prog(STAND_IN_VERB), None])
+        self.assertEqual(stand_in_main.calls, [list(route.operation)])
+
+    def test_a_type_error_from_the_component_body_is_not_retried(self):
+        route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
+        component = vivary_cli.COMPONENTS[route.module]
+        calls = []
+
+        def record(argv=None, *, prog=None, calls=calls):
+            calls.append(prog)
+            raise TypeError("main() got an unexpected keyword argument 'prog'")
+
+        stand_in = types.ModuleType(route.module)
+        stand_in.__version__ = component.floor
+        stand_in.main = record
+        with stand_in_component(route.module, stand_in):
+            with self.assertRaises(TypeError):
+                call_main([route.verb])
+        self.assertEqual(calls, [routed_prog(STAND_IN_VERB)])
 
     def test_an_unrelated_type_error_is_not_retried(self):
         route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
@@ -360,10 +410,30 @@ class FrontDoorHelpTests(unittest.TestCase):
         for name, _ in vivary_cli.ADVANCED_COMMANDS:
             self.assertRegex(out, rf"(?m)^ +{re.escape(name)} ")
 
+    def test_help_maps_each_standalone_command_to_the_verbs_it_serves(self):
+        code, out, err = front_door_help()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(
+            dict(vivary_cli.ADVANCED_COMMANDS),
+            {
+                "create-vivary": "create, adopt, doctor, capabilities",
+                "tropo": "check, find",
+                "strato": "decide",
+                "ozone": "review, impact",
+                "exo": "control",
+            },
+        )
+        for command, verbs in vivary_cli.ADVANCED_COMMANDS:
+            with self.subTest(command=command):
+                self.assertRegex(
+                    out, rf"(?m)^ +{re.escape(command)} +{re.escape(verbs)}$"
+                )
+
     def test_every_help_line_fits_the_width_budget(self):
         code, out, err = front_door_help()
         self.assertEqual(code, 0, err)
-        too_wide = [line for line in out.splitlines() if len(line) > 79]
+        budget = vivary_cli.HELP_WIDTH
+        too_wide = [line for line in out.splitlines() if len(line) > budget]
         self.assertEqual(too_wide, [])
 
     def test_every_verb_is_a_parser_choice_beside_the_receipt_commands(self):
@@ -386,6 +456,58 @@ class RouterBehaviorTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(out, "")
         self.assertIn("usage: vivary", err)
+        self.assertIn("argument command: invalid choice: 'nope'", err)
+
+    def test_a_separator_before_a_verb_is_routed(self):
+        with tempfile.TemporaryDirectory() as work:
+            code, out, err = run([VIVARY_CLI, "--", "check", "--help"], work)
+        self.assertEqual(code, 0, err)
+        self.assertTrue(out.startswith("usage: vivary check"), out[:80])
+
+    def test_a_dependency_import_error_is_reported_without_a_traceback(self):
+        route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
+        component = vivary_cli.COMPONENTS[route.module]
+        saved = vivary_cli.importlib.import_module
+
+        def refuse(name):
+            raise ImportError("No module named 'absent_dependency'",
+                              name="absent_dependency")
+
+        vivary_cli.importlib.import_module = refuse
+        try:
+            code, out, err = call_main([route.verb])
+        finally:
+            vivary_cli.importlib.import_module = saved
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "")
+        self.assertIn(f"{component.distribution} failed to import:", err)
+        self.assertIn("absent_dependency", err)
+        self.assertIn("pip install --upgrade", err)
+        self.assertNotIn("Traceback", err)
+
+    def test_a_module_outside_the_installed_distribution_is_refused(self):
+        route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
+        component = vivary_cli.COMPONENTS[route.module]
+        metadata = vivary_cli.importlib.metadata
+        try:
+            distribution = metadata.distribution(component.distribution)
+        except metadata.PackageNotFoundError:
+            self.skipTest(f"{component.distribution} is not installed here")
+        if distribution.files is None:
+            self.skipTest(f"{component.distribution} records no files")
+
+        def refuse(argv=None, *, prog=None):
+            raise AssertionError("the router ran a foreign module")
+
+        stand_in = types.ModuleType(route.module)
+        stand_in.__version__ = component.floor
+        stand_in.__file__ = str(Path(tempfile.gettempdir()) / f"{route.module}.py")
+        stand_in.main = refuse
+        with stand_in_component(route.module, stand_in):
+            code, out, err = call_main([route.verb])
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "")
+        self.assertIn(f"is not the installed {component.distribution}", err)
 
     def test_unrouted_component_operation_stays_standalone(self):
         self.assertNotIn(UNROUTED_OPERATION, vivary_cli.ROUTE_BY_VERB)
@@ -497,6 +619,33 @@ class RouterBehaviorTests(unittest.TestCase):
         self.assertEqual(out, "")
         self.assertEqual(calls, [list(route.operation)])
 
+    def test_a_module_version_that_is_not_a_release_falls_back_to_metadata(self):
+        route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
+        component = vivary_cli.COMPONENTS[route.module]
+        for metadata_version, accepted in ((component.floor, True), ("0.0.1", False)):
+            with self.subTest(metadata_version=metadata_version):
+                calls = []
+                stand_in = types.ModuleType(route.module)
+                stand_in.__version__ = "dev"
+
+                def record(argv, *, prog=None, calls=calls):
+                    calls.append(argv)
+                    return 0
+
+                stand_in.main = record
+                with stand_in_component(
+                    route.module, stand_in, metadata_version=metadata_version
+                ):
+                    code, out, err = call_main([route.verb])
+                if accepted:
+                    self.assertEqual(code, 0, err)
+                    self.assertEqual(calls, [list(route.operation)])
+                else:
+                    self.assertEqual(code, 2)
+                    self.assertEqual(out, "")
+                    self.assertEqual(calls, [])
+                    self.assertIn(component.floor, err)
+
     def test_a_module_without_a_version_falls_back_to_the_distribution(self):
         route = vivary_cli.ROUTE_BY_VERB[STAND_IN_VERB]
         component = vivary_cli.COMPONENTS[route.module]
@@ -544,7 +693,7 @@ class ReleaseOrderingTests(unittest.TestCase):
         self.assertEqual(vivary_cli._release_tuple("0.5.4.post1"), ((0, 5, 4), True))
         self.assertEqual(vivary_cli._release_tuple("0.5.4rc1"), ((0, 5, 4), False))
         self.assertEqual(vivary_cli._release_tuple("0.5.4.dev1"), ((0, 5, 4), False))
-        self.assertEqual(vivary_cli._release_tuple("0.5.4+local"), ((0, 5, 4), False))
+        self.assertEqual(vivary_cli._release_tuple("0.5.4+local"), ((0, 5, 4), True))
 
     def test_the_floor_comparison_matches_the_recorded_cases(self):
         for installed, accepted in FLOOR_CASES:

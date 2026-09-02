@@ -47,18 +47,25 @@ SAFE_FIELDS = (
 class Component(NamedTuple):
     module: str
     distribution: str
+    command: str
     group: str
     floor: str
 
 
 COMPONENTS = {
     "create_vivary": Component(
-        "create_vivary", "create-vivary", "Workspace", "0.4.3"),
-    "tropo": Component("tropo", "vivary-tropo", "Graph and retrieval", "0.5.4"),
-    "strato": Component("strato", "vivary-strato", "Policy", "0.1.3"),
-    "ozone": Component("ozone", "vivary-ozone", "Review", "0.3.2"),
-    "exo": Component("exo", "vivary-exo", "Coordination", "0.3.1"),
+        "create_vivary", "create-vivary", "create-vivary", "Workspace", "0.4.3"),
+    "tropo": Component(
+        "tropo", "vivary-tropo", "tropo", "Graph and retrieval", "0.5.4"),
+    "strato": Component("strato", "vivary-strato", "strato", "Policy", "0.1.3"),
+    "ozone": Component("ozone", "vivary-ozone", "ozone", "Review", "0.3.2"),
+    "exo": Component("exo", "vivary-exo", "exo", "Coordination", "0.3.1"),
 }
+
+
+def routed_prog(verb: str) -> str:
+    """Name the front door program a routed verb runs under."""
+    return f"vivary {verb}"
 
 
 class Route(NamedTuple):
@@ -72,7 +79,7 @@ ROUTES = (
     Route("create", "create_vivary", ("init",),
           "Create a Vivary workspace scaffold"),
     Route("adopt", "create_vivary", ("adopt",),
-          "Plan and apply governed context for an existing workspace"),
+          "Plan governed context for an existing workspace"),
     Route("doctor", "create_vivary", ("doctor",),
           "Validate a Vivary workspace scaffold"),
     Route("capabilities", "create_vivary", ("capabilities",),
@@ -95,13 +102,16 @@ ROUTE_BY_VERB = {route.verb: route for route in ROUTES}
 
 HELPER_COMMANDS = ("logs", "email")
 
-ADVANCED_COMMANDS = (
-    ("create-vivary", "Scaffold, adopt, and validate workspaces"),
-    ("tropo", "The context graph, its validation, and retrieval"),
-    ("strato", "The governed decision policy layer"),
-    ("ozone", "Review, impact, and evidence verification"),
-    ("exo", "Coordination, work items, and governed control"),
-)
+
+def _advanced_commands() -> tuple[tuple[str, str], ...]:
+    """Pair each standalone command with the verbs the front door routes to it."""
+    served: dict[str, list[str]] = {}
+    for route in ROUTES:
+        served.setdefault(COMPONENTS[route.module].command, []).append(route.verb)
+    return tuple((command, ", ".join(verbs)) for command, verbs in served.items())
+
+
+ADVANCED_COMMANDS = _advanced_commands()
 
 
 def _sanitize_receipt_value(value: Any) -> Any:
@@ -333,13 +343,18 @@ def cmd_logs_email(args: argparse.Namespace) -> int:
 
 
 def _release_tuple(text: str) -> tuple[tuple[int, ...], bool]:
-    """Split a version into its release numbers and whether it is a final release."""
-    match = re.match(r"\d+(?:\.\d+)*", text.strip())
+    """Split a version into its release numbers and whether it is a final release.
+
+    A local segment records where a build came from, not which release it is, so
+    `0.5.4+d20260902` is the final 0.5.4 and clears the 0.5.4 floor.
+    """
+    public = text.strip().split("+", 1)[0]
+    match = re.match(r"\d+(?:\.\d+)*", public)
     if match is None:
         return (0, 0, 0), False
     release = [int(part) for part in match.group().split(".")]
     release.extend([0] * (3 - len(release)))
-    rest = text.strip()[match.end():]
+    rest = public[match.end():]
     return tuple(release), re.fullmatch(r"(?:\.post\d+)?", rest) is not None
 
 
@@ -351,48 +366,108 @@ def _below_floor(installed: str, floor: str) -> bool:
     return not is_final
 
 
+def _parseable_version(text: Any) -> bool:
+    return isinstance(text, str) and text[:1].isdigit()
+
+
 def _installed_version(component: Component, module: Any) -> str | None:
     """Read the version of the code that will run, not of a stale distribution.
 
-    A checkout on `PYTHONPATH` shadows an older installed wheel, so the module's
-    own `__version__` is the honest answer and the distribution metadata is only
-    the fallback for a component that declares none.
+    The imported module is judged because it is the code that runs, and the
+    identity check guards the distribution, so a checkout on `PYTHONPATH` that
+    shadows an older wheel is measured on its own `__version__`. Distribution
+    metadata is the fallback for a component that declares no readable version.
     """
     declared = getattr(module, "__version__", None)
-    if isinstance(declared, str):
+    if _parseable_version(declared):
         return declared
     try:
         installed = importlib.metadata.version(component.distribution)
     except importlib.metadata.PackageNotFoundError:
         return None
-    return installed if isinstance(installed, str) else None
+    return installed if _parseable_version(installed) else None
+
+
+def _is_editable(distribution: Any) -> bool:
+    raw = distribution.read_text("direct_url.json")
+    if not raw:
+        return False
+    try:
+        record = json.loads(raw)
+    except json.JSONDecodeError:
+        return False
+    return bool(isinstance(record, dict) and record.get("dir_info", {}).get("editable"))
+
+
+def _identity_error(component: Component, module: Any) -> str | None:
+    """Refuse a module that is not the code the installed distribution records.
+
+    Import-time code has already run by the time this can look, so this stops
+    the call, not the import. A source checkout, a distribution with no RECORD,
+    and an editable install all live outside the recorded files legitimately, so
+    each of them skips the comparison.
+    """
+    path = getattr(module, "__file__", None)
+    if path is None:
+        return None
+    try:
+        distribution = importlib.metadata.distribution(component.distribution)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+    files = distribution.files
+    if files is None or _is_editable(distribution):
+        return None
+    imported = Path(path).resolve()
+    if any(Path(distribution.locate_file(name)).resolve() == imported for name in files):
+        return None
+    return (
+        f"the importable module {component.module} at {imported} is not the"
+        f" installed {component.distribution}"
+    )
 
 
 def _prog_keyword(main: Any, route: Route) -> dict[str, str]:
     """Name the front door only for a component that accepts the prog seam.
 
-    A component released before the seam keeps the verbatim behavior, so its
-    help still names its own program.
+    The dependency floors guarantee the seam in every installed environment, so
+    this check exists for a module at or above the floor whose `main` lacks the
+    keyword, which only a source checkout can produce. Such a component keeps
+    the verbatim behavior and its help still names its own program.
     """
     try:
         parameters = inspect.signature(main, follow_wrapped=False).parameters
     except (TypeError, ValueError):
         return {}
-    return {"prog": f"vivary {route.verb}"} if "prog" in parameters else {}
+    accepts = "prog" in parameters or any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+    return {"prog": routed_prog(route.verb)} if accepts else {}
 
 
 def _dispatch(route: Route, rest: list[str]) -> int:
     component = COMPONENTS[route.module]
     try:
         module = importlib.import_module(route.module)
-    except ModuleNotFoundError as exc:
-        if exc.name != component.module:
-            raise
-        print(
-            f"vivary {route.verb}: {component.distribution} is not installed."
-            f' Run: pip install "{component.distribution}>={component.floor}"',
-            file=sys.stderr,
-        )
+    except ImportError as exc:
+        if exc.name == component.module:
+            print(
+                f"vivary {route.verb}: {component.distribution} is not installed."
+                f' Run: pip install "{component.distribution}>={component.floor}"',
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"vivary {route.verb}: {component.distribution} failed to import:"
+                f' {exc}. Run: pip install --upgrade'
+                f' "{component.distribution}>={component.floor}"',
+                file=sys.stderr,
+            )
+        return 2
+
+    identity = _identity_error(component, module)
+    if identity is not None:
+        print(f"vivary {route.verb}: {identity}", file=sys.stderr)
         return 2
 
     main = getattr(module, "main", None)
@@ -427,7 +502,10 @@ def _dispatch(route: Route, rest: list[str]) -> int:
         try:
             return main(argv, **keyword)
         except TypeError as exc:
-            if not keyword or "prog" not in str(exc):
+            # A call that never bound has no frame below this one, so a deeper
+            # traceback is the component's own error and must not be retried.
+            binding_failure = exc.__traceback__.tb_next is None
+            if not keyword or not binding_failure or "prog" not in str(exc):
                 raise
             # A signature can advertise the seam through a wrapper that does not
             # forward it, so the verb still runs under the component's own name.
@@ -448,6 +526,8 @@ def _description() -> str:
     width = max(len(route.verb) for route in ROUTES)
     lines = [
         "The Vivary front door, plus local visibility helpers.",
+        "",
+        "`--` ends the front door's own options, as in `vivary -- check --help`.",
         "",
         "Task verbs:",
     ]
@@ -490,7 +570,7 @@ def _epilog() -> str:
         "  Each component also installs its own command with the full operation set.",
         "",
     ]
-    lines.extend(f"    {name.ljust(width)}  {summary}" for name, summary in ADVANCED_COMMANDS)
+    lines.extend(f"    {name.ljust(width)}  {verbs}" for name, verbs in ADVANCED_COMMANDS)
     return "\n".join(lines)
 
 
@@ -504,7 +584,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"vivary {__version__}")
     # A custom usage would otherwise become the prefix of every subcommand's prog.
-    sub = parser.add_subparsers(dest="command", metavar="<command>", prog="vivary")
+    sub = parser.add_subparsers(dest="command", metavar="command", prog="vivary")
 
     logs = sub.add_parser("logs", help="summarize local Vivary JSONL run receipts")
     logs.add_argument("path", nargs="?", default=os.environ.get(RECEIPT_ENV, DEFAULT_RECEIPT_LOG))
@@ -535,6 +615,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if len(argv) >= 2 and argv[0] == "--" and argv[1] in ROUTE_BY_VERB:
+        # Python 3.11 leaves the separator as the choice and refuses it, and
+        # 3.12.5 and later strip it into the routed placeholder, which prints
+        # the front door's help. Dropping it here gives one answer everywhere.
+        argv = argv[1:]
     if argv and argv[0] in ROUTE_BY_VERB:
         return _dispatch(ROUTE_BY_VERB[argv[0]], argv[1:])
     if len(argv) >= 2 and argv[0] == "logs" and argv[1] == "email":

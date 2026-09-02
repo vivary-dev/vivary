@@ -42,8 +42,8 @@ vivary review --root my-workspace --strict
 Each route declares the component version floor it needs, and a component below
 that floor is refused with exit code 2. The standalone `create-vivary`, `tropo`,
 `strato`, `ozone`, and `exo` commands remain the advanced surface with the full
-operation set and are not deprecated. `vivary <verb> --help` currently prints the
-component program name in its usage line.
+operation set and are not deprecated. Routed help and usage errors name
+`vivary <verb>`, so `vivary check --help` opens with `usage: vivary check`.
 
 Ozone and Exo expose explicit governed paths:
 

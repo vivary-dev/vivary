@@ -510,6 +510,13 @@ SNAPSHOTS = {
     "exo-control-missing-request": {
         "stdout": "exo control: refused: invalid_request_document\n",
     },
+    "vivary-nope": {
+        "stderr": (
+            "usage: vivary [-h] [--version] {logs,email,create,adopt,doctor,capabilities,\n"
+            "       check,find,decide,review,impact,control} ...\n"
+            "vivary: error: argument command: invalid choice: 'nope' (choose from 'logs', 'email', 'create', 'adopt', 'doctor', 'capabilities', 'check', 'find', 'decide', 'review', 'impact', 'control')\n"
+        ),
+    },
     "vivary-help": {
         "stdout": (
             "usage: vivary [-h] [--version] {logs,email,create,adopt,doctor,capabilities,\n"
@@ -517,11 +524,13 @@ SNAPSHOTS = {
             "\n"
             "The Vivary front door, plus local visibility helpers.\n"
             "\n"
+            "`--` ends the front door's own options, as in `vivary -- check --help`.\n"
+            "\n"
             "Task verbs:\n"
             "\n"
             "  Workspace\n"
             "    create        Create a Vivary workspace scaffold\n"
-            "    adopt         Plan and apply governed context for an existing workspace\n"
+            "    adopt         Plan governed context for an existing workspace\n"
             "    doctor        Validate a Vivary workspace scaffold\n"
             "    capabilities  List the optional preset capabilities\n"
             "\n"
@@ -540,7 +549,7 @@ SNAPSHOTS = {
             "    control       Dispatch one governed Core control request\n"
             "\n"
             "positional arguments:\n"
-            "  <command>\n"
+            "  command\n"
             "    logs      summarize local Vivary JSONL run receipts\n"
             "    email     build a local email draft from receipts (also available as\n"
             "              `vivary logs email`)\n"
@@ -553,11 +562,11 @@ SNAPSHOTS = {
             "\n"
             "  Each component also installs its own command with the full operation set.\n"
             "\n"
-            "    create-vivary  Scaffold, adopt, and validate workspaces\n"
-            "    tropo          The context graph, its validation, and retrieval\n"
-            "    strato         The governed decision policy layer\n"
-            "    ozone          Review, impact, and evidence verification\n"
-            "    exo            Coordination, work items, and governed control\n"
+            "    create-vivary  create, adopt, doctor, capabilities\n"
+            "    tropo          check, find\n"
+            "    strato         decide\n"
+            "    ozone          review, impact\n"
+            "    exo            control\n"
         ),
     },
     "vivary-no-arguments": {
@@ -567,11 +576,13 @@ SNAPSHOTS = {
             "\n"
             "The Vivary front door, plus local visibility helpers.\n"
             "\n"
+            "`--` ends the front door's own options, as in `vivary -- check --help`.\n"
+            "\n"
             "Task verbs:\n"
             "\n"
             "  Workspace\n"
             "    create        Create a Vivary workspace scaffold\n"
-            "    adopt         Plan and apply governed context for an existing workspace\n"
+            "    adopt         Plan governed context for an existing workspace\n"
             "    doctor        Validate a Vivary workspace scaffold\n"
             "    capabilities  List the optional preset capabilities\n"
             "\n"
@@ -590,7 +601,7 @@ SNAPSHOTS = {
             "    control       Dispatch one governed Core control request\n"
             "\n"
             "positional arguments:\n"
-            "  <command>\n"
+            "  command\n"
             "    logs      summarize local Vivary JSONL run receipts\n"
             "    email     build a local email draft from receipts (also available as\n"
             "              `vivary logs email`)\n"
@@ -603,11 +614,11 @@ SNAPSHOTS = {
             "\n"
             "  Each component also installs its own command with the full operation set.\n"
             "\n"
-            "    create-vivary  Scaffold, adopt, and validate workspaces\n"
-            "    tropo          The context graph, its validation, and retrieval\n"
-            "    strato         The governed decision policy layer\n"
-            "    ozone          Review, impact, and evidence verification\n"
-            "    exo            Coordination, work items, and governed control\n"
+            "    create-vivary  create, adopt, doctor, capabilities\n"
+            "    tropo          check, find\n"
+            "    strato         decide\n"
+            "    ozone          review, impact\n"
+            "    exo            control\n"
         ),
     },
     "vivary-logs-help": {

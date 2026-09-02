@@ -142,6 +142,9 @@ CASES = tuple(
                     ("control", "--governed", "missing.json", "--strict"), 1,
                     silent_stream="stderr"),
 
+        CommandCase("vivary-nope", "vivary", ("nope",), 2,
+                    stderr=("argument command: invalid choice: 'nope'",),
+                    silent_stream="stdout"),
         CommandCase("vivary-help", "vivary", ("--help",), 0, silent_stream="stderr"),
         CommandCase("vivary-no-arguments", "vivary", (), 0, silent_stream="stderr"),
         CommandCase("vivary-logs-help", "vivary", ("logs", "--help"), 0,
@@ -172,7 +175,6 @@ def case_problems(
     code: int,
     stdout: str,
     stderr: str,
-    installed: bool = False,
 ) -> list[str]:
     """Report every recorded value the capture failed to reproduce.
 
@@ -250,16 +252,13 @@ class CommandSurfaceCharacterizationTests(unittest.TestCase):
             stdout=("storage:file",), stdout_exact="storage:file installed\n",
             silent_stream="stderr", environment_dependent=("stdout",),
         )
-        for installed in (False, True):
-            with self.subTest(installed=installed):
-                self.assertEqual(
-                    case_problems(case, 0, "storage:file not-installed\n", "", installed),
-                    [],
-                )
-                self.assertEqual(
-                    case_problems(case, 0, "storage:embedded\n", "", installed),
-                    ["probe: stdout is missing 'storage:file'"],
-                )
+        self.assertEqual(
+            case_problems(case, 0, "storage:file not-installed\n", ""), []
+        )
+        self.assertEqual(
+            case_problems(case, 0, "storage:embedded\n", ""),
+            ["probe: stdout is missing 'storage:file'"],
+        )
 
 
 if __name__ == "__main__":

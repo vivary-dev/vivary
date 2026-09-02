@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -25,18 +24,23 @@ from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parents[1]
 VAULT = str(ROOT / "packages" / "tropo" / "examples" / "vault")
-CHARACTERIZATION_TESTS = ROOT / "packages" / "vivary" / "tests"
+VIVARY_PACKAGE = ROOT / "packages" / "vivary"
+CHARACTERIZATION_TESTS = VIVARY_PACKAGE / "tests"
 
-if str(CHARACTERIZATION_TESTS) not in sys.path:
-    sys.path.insert(0, str(CHARACTERIZATION_TESTS))
+# Appended, never prepended, so this checkout cannot shadow a module the caller
+# put ahead of it.
+for _path in (VIVARY_PACKAGE, CHARACTERIZATION_TESTS):
+    if str(_path) not in sys.path:
+        sys.path.append(str(_path))
 
-COMMAND_FOR_MODULE = {
-    "create_vivary": "create-vivary",
-    "tropo": "tropo",
-    "strato": "strato",
-    "ozone": "ozone",
-    "exo": "exo",
-}
+import vivary_cli
+from cli_runner import pinned_env
+
+routed_prog = vivary_cli.routed_prog
+
+# The installed table names the module that enters a `-c` source, so it is held
+# to an identifier this checkout already knows.
+MODULE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 UNKNOWN_FLAG = "--definitely-not-a-flag"
 
@@ -93,8 +97,13 @@ def script_path(bin_dir: Path, name: str) -> Path:
     return windows if windows.exists() else bin_dir / name
 
 
-def routed_prog(verb: str) -> str:
-    return f"vivary {verb}"
+def refuse_unknown_module(module: str) -> None:
+    """Refuse a module name the checkout does not route before it is executed."""
+    if MODULE_NAME.fullmatch(module) is None or module not in vivary_cli.COMPONENTS:
+        raise SystemExit(
+            f"{module}: the installed route table names a module this checkout"
+            " does not route"
+        )
 
 
 def oracle_source(module: str, operation: list[str], args: tuple[str, ...], name: str) -> str:
@@ -160,8 +169,6 @@ def unrouted_problems(
 
 def load_command_surface():
     """Import the characterization table the repository suite records."""
-    if str(CHARACTERIZATION_TESTS) not in sys.path:
-        sys.path.insert(0, str(CHARACTERIZATION_TESTS))
     import test_command_surface_characterization as surface
 
     return surface
@@ -172,20 +179,7 @@ def characterized_problems(surface, case, result: Result) -> list[str]:
     script = SCRIPT_FOR_CASE.get(case.command)
     if script is None:
         return [f"{case.name}: {case.command} has no installed console script"]
-    return surface.case_problems(
-        case, result.code, result.stdout, result.stderr, installed=True
-    )
-
-
-def base_env() -> dict[str, str]:
-    env = dict(os.environ)
-    env.pop("VIVARY_RECEIPT_LOG", None)
-    env.pop("PYTHONWARNINGS", None)
-    env.pop("PYTHONPATH", None)
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["COLUMNS"] = "80"
-    return env
+    return surface.case_problems(case, result.code, result.stdout, result.stderr)
 
 
 class Runner:
@@ -198,7 +192,7 @@ class Runner:
         completed = subprocess.run(
             argv,
             cwd=cwd,
-            env=base_env(),
+            env=pinned_env(),
             stdin=subprocess.DEVNULL,
             capture_output=True,
             encoding="utf-8",
@@ -290,6 +284,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{bin_dir}: could not read the installed route table", file=sys.stderr)
             return 2
         routes = json.loads(probe.stdout)
+        for _, module, _ in routes:
+            refuse_unknown_module(module)
 
         helps = 0
         usage_errors = 0

@@ -8,7 +8,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CHECKER = ROOT / "scripts" / "check_installed_route_parity.py"
-VIVARY_PACKAGE = ROOT / "packages" / "vivary"
 
 
 def _load():
@@ -281,23 +280,46 @@ def test_a_missing_script_directory_is_a_usage_error():
 
 def test_every_routed_module_has_a_console_script_name():
     module = _load()
-    if str(VIVARY_PACKAGE) not in sys.path:
-        sys.path.insert(0, str(VIVARY_PACKAGE))
-    import vivary_cli
+    for route in module.vivary_cli.ROUTES:
+        component = module.vivary_cli.COMPONENTS[route.module]
+        assert component.command in module.SCRIPT_FOR_CASE, route.verb
 
-    for route in vivary_cli.ROUTES:
-        assert route.module in module.COMMAND_FOR_MODULE, route.verb
+
+def test_the_checker_shares_the_router_program_name():
+    module = _load()
+    assert module.routed_prog is module.vivary_cli.routed_prog
+
+
+def test_a_module_the_checkout_does_not_route_is_refused():
+    module = _load()
+    for name in ("os", "tropo; import shutil", "1tropo", "", "tropo.sub"):
+        try:
+            module.refuse_unknown_module(name)
+        except SystemExit as exc:
+            assert "does not route" in str(exc), name
+        else:
+            raise AssertionError(f"{name!r} was not refused")
+
+
+def test_every_routed_module_passes_the_refusal():
+    module = _load()
+    for route in module.vivary_cli.ROUTES:
+        module.refuse_unknown_module(route.module)
 
 
 def test_fixture_arguments_cover_every_non_writing_verb():
     module = _load()
-    if str(VIVARY_PACKAGE) not in sys.path:
-        sys.path.insert(0, str(VIVARY_PACKAGE))
-    import vivary_cli
-
     writing = {"create", "adopt"}
-    verbs = {route.verb for route in vivary_cli.ROUTES}
+    verbs = {route.verb for route in module.vivary_cli.ROUTES}
     assert set(module.FIXTURE_ARGS) == verbs - writing
+
+
+def test_the_checker_pins_the_same_environment_as_the_suites():
+    module = _load()
+    env = module.pinned_env()
+    assert env["COLUMNS"] == "80"
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert "PYTHONPATH" not in env
 
 
 if __name__ == "__main__":

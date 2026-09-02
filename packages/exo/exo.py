@@ -986,6 +986,7 @@ def _main(argv=None, *, prog=None):
 def main(argv=None, *, prog=None):
     """Run exo, naming the program `prog` when a front door supplies one."""
     prog = (prog or "").strip() or None
+    name = prog or "exo"
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     receipt_path, receipt_source = _extract_receipt_path(raw_argv)
     request_path = _control_request_path(raw_argv)
@@ -994,7 +995,8 @@ def main(argv=None, *, prog=None):
             receipt_path, receipt_source = None, None
         else:
             print(
-                "exo: receipt: receipt path must not identify the governed control request",
+                f"{name}: receipt: receipt path must not identify the governed"
+                " control request",
                 file=sys.stderr,
             )
             return 2

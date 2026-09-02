@@ -2092,6 +2092,7 @@ def _main(argv=None, *, prog=None):
 def main(argv=None, *, prog=None):
     """Run ozone, naming the program `prog` when a front door supplies one."""
     prog = (prog or "").strip() or None
+    name = prog or "ozone"
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     started_at = time.monotonic()
     receipt_path, receipt_source = _extract_receipt_path(raw_argv)
@@ -2103,7 +2104,8 @@ def main(argv=None, *, prog=None):
             receipt_path, receipt_source = None, None
         else:
             print(
-                "ozone: receipt: receipt path must not identify the verification request",
+                f"{name}: receipt: receipt path must not identify the"
+                " verification request",
                 file=sys.stderr,
             )
             return 2
@@ -2115,7 +2117,8 @@ def main(argv=None, *, prog=None):
         request_path = args.id if args.command == "verify" else None
         if _receipt_targets_request(request_path, receipt_path):
             print(
-                "ozone: receipt: receipt path must not identify the verification request",
+                f"{name}: receipt: receipt path must not identify the"
+                " verification request",
                 file=sys.stderr,
             )
             return 2

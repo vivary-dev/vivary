@@ -112,11 +112,12 @@ python packages/tropo/tests/test_tropo.py                  # 193/193
 python packages/ozone/tests/test_ozone.py                  # 110/110
 python packages/exo/tests/test_exo.py                      # 30/30
 python packages/create-vivary/tests/test_create_vivary.py  # OK (exit 0)
-python -m pytest packages/core/tests/ -q                   # 771 Windows; 770 + 1 skip Linux
+python -m pytest packages/core/tests/ -q                   # 799 + 1 skip Linux; Windows count from CI
 python -m pytest packages/strato/tests/ -q                 # 48/48
-python packages/vivary/tests/test_command_surface_characterization.py  # OK (exit 0)
-python packages/vivary/tests/test_vivary_router.py         # 30/30
-python scripts/tests/test_installed_route_parity.py        # 25/25
+python packages/vivary/tests/test_command_surface_characterization.py  # 3/3
+python packages/vivary/tests/test_vivary_cli.py            # 9/9
+python packages/vivary/tests/test_vivary_router.py         # 38/38
+python scripts/tests/test_installed_route_parity.py        # 29/29
 python packages/tropo/tropo.py check --root packages/tropo/examples/vault   # clean
 ```
 

@@ -336,6 +336,7 @@ jobs:
           assert version("vivary-core") == "0.2.7"
           assert version("vivary-exo") == "0.3.1"
           assert version("vivary-ozone") == "0.3.2"
+          assert version("vivary-strato") == "0.1.3"
           assert version("create-vivary") == "0.4.3"
           assert version("vivary") == "0.2.0"
           assert "vivary-core>=0.2.5" in requires("vivary-exo")
@@ -719,6 +720,10 @@ jobs:
           if (-not ($routedCapabilities | ConvertFrom-Json).available_capabilities) {
             throw "routed capabilities reported no capability rows"
           }
+          python scripts/check_installed_route_parity.py $scripts
+          if ($LASTEXITCODE -ne 0) { throw "installed route parity failed" }
+          python scripts/check_installed_route_parity.py --characterize $scripts
+          if ($LASTEXITCODE -ne 0) { throw "installed command surface failed" }
           $mcpVenv = Join-Path $smoke "mcp-venv"
           python -m venv $mcpVenv
           if ($LASTEXITCODE -ne 0) { throw "MCP venv creation failed" }

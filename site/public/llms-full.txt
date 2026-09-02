@@ -548,8 +548,10 @@ MCP SDK dependency.
 - **From a repo checkout:** `python packages/tropo/tropo.py check`, etc.
 
 Every command on this page is available from the published PyPI and npm packages
-listed in the [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status). Governed paths stay
-behind an explicit `--governed` flag and are opt-in, not default behavior.
+listed in the [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status), except the front-door
+task verbs, which ship in `vivary` 0.2.0 from source until this train publishes.
+Governed paths stay behind an explicit `--governed` flag and are opt-in, not default
+behavior.
 
 For the four layer CLIs and the scaffolder, exit codes are uniform: **`0`** success ·
 **`1`** findings/errors · **`2`** usage/config error. Gate CI on the exit code; don't
@@ -628,16 +630,16 @@ task verbs to them, and adds a local helper for the receipt files they emit.
 
 ### Task verbs
 
-A verb runs the component operation in the same process. Arguments and output pass
-through unchanged, so each verb behaves like the standalone command it maps to.
-`vivary --help` groups the verbs the same way this table does. These verbs ship in
-`vivary` 0.2.0 from source. The published 0.1.10 on PyPI does not have them until the
-next release publishes.
+A verb runs the component operation in the same process. Arguments pass through
+unchanged and the operation's output is the component's, while the program name, the
+usage line, and the hidden command list are the front door's. `vivary --help` groups
+the verbs the same way this table does. These verbs ship in `vivary` 0.2.0 from source.
+The published 0.1.10 on PyPI does not have them until the next release publishes.
 
 | Group | Verb | Standalone equivalent | Job |
 |---|---|---|---|
 | Workspace | `vivary create` | `create-vivary init` | Create a Vivary workspace scaffold. |
-| Workspace | `vivary adopt` | `create-vivary adopt` | Plan and apply bounded governed context for an existing workspace. |
+| Workspace | `vivary adopt` | `create-vivary adopt` | Plan governed context for an existing workspace. |
 | Workspace | `vivary doctor` | `create-vivary doctor` | Validate a Vivary workspace scaffold. |
 | Workspace | `vivary capabilities` | `create-vivary capabilities` | List the optional preset capabilities. |
 | Graph and retrieval | `vivary check` | `tropo check` | Validate the context graph and report errors and warnings. |
@@ -660,33 +662,41 @@ The front door covers the ten approved task intents and nothing else. The standa
 `create-vivary`, `tropo`, `strato`, `ozone`, and `exo` commands remain the advanced
 surface with every operation, and `vivary --help` lists them. They are not deprecated,
 and a new component operation stays reachable there without a meta-package release.
-Promoting an operation to a verb takes a meta-package minor release, a matching floor
-bump, and approval of the verb name.
+Promoting an operation to a verb is a policy decision, not a code detail. It takes a
+meta-package minor release, a matching floor bump, and approval of the verb name.
 
 Routed help names the front door. `vivary <verb> --help` prints `usage: vivary
 <verb> ...`, and a usage error from any of the ten verbs reads `vivary <verb>:
 error: ...` above the operation's own usage line, never the component's command
 list. `vivary check --help` and `vivary review --help` carry the component's full
 option set under the verb, and the component's other commands are hidden because
-the verb already named the operation.
+the verb already named the operation. Those two components share one flat option
+set, so a flag their routed help names for another operation, such as tropo's
+`--budget` for `find`, applies only to those standalone operations.
+
+The routed name covers the program, not the reporting layer. A status or error line
+a component prints itself still carries the component's own name, so `vivary check`
+in a folder with no configuration reports `tropo: no tropo.toml found walking up
+from ...`.
 
 `vivary --version` reports the front door. `vivary <verb> --version` answers
 exactly as the standalone operation does, so `check`, `find`, `review`, and
-`impact` report the component that serves them, and `create`, `adopt`, `doctor`,
-`capabilities`, `decide`, and `control` refuse the flag because it belongs to
-their component's own top level.
+`impact` report the component version that serves them, and `create`, `adopt`,
+`doctor`, `capabilities`, `decide`, and `control` refuse the flag with the routed
+usage because it belongs to their component's own top level.
 
 The floor is checked on the imported module. `__version__` is read from the module
 the router just imported, which is the code the verb will run, and the distribution
 metadata is the fallback only for a component that declares none. In an installed
 environment the floors guarantee the seam, and the signature check covers a source
-checkout whose metadata is newer than the imported module. Standalone help is
-unchanged: `tropo --help` still prints `usage: tropo ...`.
+checkout whose imported module is newer than its distribution metadata. Standalone
+help is unchanged: `tropo --help` still prints `usage: tropo ...`.
 
 ### Receipt commands
 
-`vivary logs` summarizes a JSONL receipt file as text or JSON. `vivary logs email`
-creates a redacted support email draft from the same whitelisted receipt fields.
+`vivary logs` summarizes a JSONL receipt file as text or JSON. `vivary logs email`,
+also reachable as `vivary email`, creates a redacted support email draft from the same
+whitelisted receipt fields.
 Unknown fields, malformed lines, stdout/stderr-like fields, file contents, raw query
 text, target ids, and local paths are not copied into the summary.
 
@@ -6209,6 +6219,18 @@ uvx --no-cache --index-url https://pypi.org/simple --from vivary-mcp==<ver> viva
 uvx --no-cache --index-url https://pypi.org/simple --from create-vivary==<ver> create-vivary --version
 ```
 
+Smoke the front door's routed verbs from the registry as well. The first line of
+`uvx --no-cache --index-url https://pypi.org/simple --from vivary==<ver> vivary check
+--help` must be `usage: vivary check`, and the installed parity checker must pass
+against a venv built from the registry:
+
+```bash
+python -m venv /tmp/vivary-registry
+/tmp/vivary-registry/bin/pip install --index-url https://pypi.org/simple vivary==<ver>
+python scripts/check_installed_route_parity.py /tmp/vivary-registry/bin
+python scripts/check_installed_route_parity.py --characterize /tmp/vivary-registry/bin
+```
+
 If npm changed, verify both the registry version and the launcher path:
 
 ```bash
@@ -6436,13 +6458,15 @@ flowchart BT
 Exact floors and source versions live only in the
 [package manifests](https://github.com/vivary-dev/vivary/tree/dev/packages); the
 [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) distinguishes those source versions
-from registry truth. The map was checked against those manifests on **2026-08-09**.
+from registry truth. The map was checked against those manifests on **2026-09-02**.
 
 The meta-package also owns a front door. `vivary` holds a static table of ten task
 verbs, imports the one component a verb needs, and calls it in the same process. It
 adds no component code, no subprocess, and no dynamic discovery, so the arrows above
-are the same edges the router uses. Each route carries the component version floor
-that shipped the verb, and the standalone commands remain the full operation surface.
+are the same edges the router uses. Each component accepts an optional program name,
+so routed help names the verb rather than the component. Each route carries the
+component version floor that shipped the verb, and the standalone commands remain the
+full operation surface.
 [COMMANDS.md](https://vivary.vercel.app/commands/#vivary--the-front-door-and-local-visibility-helpers) owns
 the verb table.
 
@@ -6604,7 +6628,7 @@ against the linked manifests, contracts, and registry pages on **2026-08-15**.
 | **Stable** | Published and supported; this is not a promise of post-1.0 API stability. | The registry versions and their baseline CLI/workspace behavior listed in the [release-status table](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status). | Registry links live in that table; baseline regressions live with [Tropo](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py), [Ozone](https://github.com/vivary-dev/vivary/blob/dev/packages/ozone/tests/test_ozone.py), [Exo](https://github.com/vivary-dev/vivary/blob/dev/packages/exo/tests/test_exo.py), and [create-vivary](https://github.com/vivary-dev/vivary/blob/dev/packages/create-vivary/tests/test_create_vivary.py). |
 | **Optional** | Installed, configured, or invoked only by explicit choice; optional is independent of maturity. | Ozone and Exo beyond the Tropo + Strato baseline; storage and semantic-memory capabilities including `vivary-memory-cognee`; Obsidian and active-context integrations; and the published but experimental `vivary-mcp`. | [Architecture boundaries](https://vivary.vercel.app/architecture/#2-the-first-principles-baseline), [semantic-memory gates](https://vivary.vercel.app/semantic-memory/#non-negotiables), [active-context gates](https://vivary.vercel.app/active-context/), and the [MCP install boundary](https://vivary.vercel.app/mcp/#install-boundary). |
 | **Experimental** | Published and opt-in where callable, with contracts that may still change before 1.0. | The `thin-v0.3` init/adoption contract in `create-vivary`; `vivary-core`; governed Tropo, Strato, Ozone, and Exo paths; the provider-neutral recall firewall; and the optional read-only `vivary-mcp` adapter. | [Thin adoption regressions](https://github.com/vivary-dev/vivary/tree/dev/packages/create-vivary/tests), [Core contract tests](https://github.com/vivary-dev/vivary/tree/dev/packages/core/tests), [role envelopes](https://vivary.vercel.app/commands/#governed-machine-readable-envelopes), and [MCP contract tests](https://github.com/vivary-dev/vivary/tree/dev/packages/mcp/tests). |
-| **Held** | Complete or partial source work that must not be described as published, graduated, or default-enabled. | **None.** The named **Vivary Governed Context** train published and was verified on 2026-08-15, so every version in the root release status is registry truth. | The release policy resolved by [#149](https://github.com/vivary-dev/vivary/issues/149), the documentation acceptance completed by [#210](https://github.com/vivary-dev/vivary/issues/210), and the per-item human gates in the [release workflow](https://vivary.vercel.app/release-workflow/#gates). |
+| **Held** | Complete or partial source work that must not be described as published, graduated, or default-enabled. | The staged, unpublished train: the five component patches `create-vivary` / `@vivary/create` 0.4.3, `vivary-tropo` 0.5.4, `vivary-strato` 0.1.3, `vivary-ozone` 0.3.2, and `vivary-exo` 0.3.1, plus the front-door meta-package `vivary` 0.2.0. The **Vivary Governed Context** train published and was verified on 2026-08-15, so every version in the root release status is still registry truth. | The release policy resolved by [#149](https://github.com/vivary-dev/vivary/issues/149), the documentation acceptance completed by [#210](https://github.com/vivary-dev/vivary/issues/210), and the per-item human gates in the [release workflow](https://vivary.vercel.app/release-workflow/#gates). |
 | **Deprecated** | Formally discouraged with a documented replacement and removal policy. | **None.** Legacy full workspace layouts and legacy Exo graph commands remain read-compatible surfaces, not deprecations. New init/adopt no longer generate the full layout. | [Doctor compatibility contract](https://vivary.vercel.app/commands/#doctor-compatibility-and-declared-configuration) and [legacy Exo commands](https://vivary.vercel.app/commands/#legacy-graph-coordination). |
 | **Planned** | Described intent with no shipped behavior claim. | Cloud storage adapters and non-file/cloud migration targets; any broader MCP transport or named-client compatibility. | [Data-layer future work](https://github.com/vivary-dev/vivary/blob/dev/docs/SPEC-data-layer.md#future--cloud-adapters-03x); MCP external conformance remains explicitly [unproven](https://vivary.vercel.app/mcp/#contract). These are plans or hypotheses until implementation evidence exists. |
 
@@ -6749,7 +6773,10 @@ patch. Published registry versions remain unchanged.
   version. The router imports a component only when a verb asks for one.
 - A characterization suite freezes the observed command surface of the six entry
   modules before routing, and a router suite compares every verb against its
-  standalone invocation on exit code, standard output, and standard error.
+  standalone invocation on exit code, standard output, and standard error. Two
+  `create-vivary` streams name the components installed in the environment, so they
+  are judged by fragments and their exact snapshots were dropped, and one no-config
+  case was added for `tropo check` in a folder with no `tropo.toml`.
 - The `vivary` usage line and its invalid-choice error list all ten verbs beside
   `logs` and `email`, so a misspelled verb prints the whole command set.
 - A component that is missing, or too old for the verb, is refused with exit code `2`
@@ -6759,20 +6786,30 @@ patch. Published registry versions remain unchanged.
   environment, and CI runs it beside the other meta-package proofs.
 - `create-vivary` **0.4.3**, `vivary-tropo` **0.5.4**, `vivary-strato` **0.1.3**,
   `vivary-ozone` **0.3.2**, and `vivary-exo` **0.3.1** each add one optional
-  keyword-only `prog` argument to `main` and to the parser it builds. Nothing else in
-  those packages changed.
+  keyword-only `prog` argument to `main` and to the parser it builds. `create-vivary`
+  and `strato` also name the routed operation's subparser and lift its usage line to
+  the top level, `tropo` and `ozone` fix their command positional to the routed
+  operation and hide it, and `ozone` and `exo` prefix the receipt-collision message
+  with the routed name. Nothing else in those packages changed.
 - `vivary <verb> --help` now prints `usage: vivary <verb> ...`, and a usage error from
   a routed verb reads `vivary <verb>: error: ...`. In an installed environment the
   dependency floors guarantee the seam, and the signature check covers a source
-  checkout whose distribution metadata is newer than the imported module.
+  checkout whose imported module is newer than its distribution metadata.
 - A routed usage error prints the operation's own usage line, not the component's
   command list. The flat-parser components fix their command positional to the routed
   operation and hide it, so `vivary check --help` and `vivary review --help` carry the
   full option set under the verb without listing the component's other commands.
 - The version floor is checked on the imported module. `__version__` is read from the
   module the router just imported, and distribution metadata is the fallback only for
-  a component that declares none, so a source checkout ahead of an installed wheel is
-  judged on the code it will run.
+  a component that declares none or an unreadable one, so a source checkout ahead of
+  an installed wheel is judged on the code it will run. An importable module that the
+  installed distribution does not record is refused before the call, an import failure
+  in a component or its dependencies is reported without a traceback, and a local
+  version segment no longer reads as a prerelease.
+- The release artifact gate now covers all nine published Python distributions and
+  inventories what they carry: each wheel holds exactly the module its manifest
+  declares beside its metadata and license, and each sdist ships no test directory,
+  which a new `MANIFEST.in` per package enforces.
 
 ### Changed
 
@@ -6793,11 +6830,14 @@ patch. Published registry versions remain unchanged.
 
 - `python packages/vivary/tests/test_vivary_cli.py` — 9/9 passed.
 - `python packages/vivary/tests/test_command_surface_characterization.py` — 3/3 passed
-  over the frozen surface table, which grows by the six `create-vivary` operation
-  helps the seam touched and keeps every earlier snapshot byte for byte.
-- `python packages/vivary/tests/test_vivary_router.py` — 30/30 passed. Every verb is
-  compared against the component itself run under the same program name.
-- `python scripts/tests/test_installed_route_parity.py` — 25/25 passed.
+  over 44 cases. The six `create-vivary` operation helps the seam touched were frozen
+  by observation and still match the module from before the seam byte for byte, the
+  two front-door help snapshots were re-recorded for the new help text, and one
+  unknown-verb case was added.
+- `python packages/vivary/tests/test_vivary_router.py` — 38/38 passed, 1 skipped
+  because `vivary-tropo` is not installed in this checkout. Every verb is compared
+  against the component itself run under the same program name.
+- `python scripts/tests/test_installed_route_parity.py` — 29/29 passed.
 - `python packages/tropo/tests/test_tropo.py` — 193/193 passed.
 - `python packages/ozone/tests/test_ozone.py` — 110/110 passed.
 - `python packages/exo/tests/test_exo.py` — 30/30 passed.
@@ -6811,9 +6851,9 @@ patch. Published registry versions remain unchanged.
   `python scripts/tests/test_package_docs_parity.py` — contract passed; 10/10 cases
   passed.
 - `python scripts/check_ci_workflow.py` and
-  `python scripts/tests/test_ci_workflow.py` — contract passed; 17/17 cases passed.
-- `python scripts/check_line_endings.py` — 308 tracked text files checked.
-- `python scripts/tests/test_release_artifacts.py` — 8/8 passed, and
+  `python scripts/tests/test_ci_workflow.py` — contract passed; 20/20 cases passed.
+- `python scripts/check_line_endings.py` — 316 tracked text files checked.
+- `python scripts/tests/test_release_artifacts.py` — 14/14 passed, and
   `python scripts/check_release_artifacts.py --repository . --artifacts <dir>` over
   freshly built distributions for all nine published Python packages plus `npm pack`
   of the launcher — 19 release artifacts passed license verification.
@@ -6821,18 +6861,19 @@ patch. Published registry versions remain unchanged.
   virtual environment as `vivary`, `pip check` clean, then
   `python scripts/check_installed_route_parity.py <venv>/bin` — 8 legacy commands, 10
   help parity, 10 usage-error parity, 8 fixture parity, and 1 unrouted operation
-  passed — and `... --characterize <venv>/bin` — 43 installed command-surface cases
+  passed — and `... --characterize <venv>/bin` — 44 installed command-surface cases
   passed.
 - `node packages/create-vivary/tests/test_npm_launcher.js` — 11/11 passed. The npm
   launcher declares no dependencies, so the advisory gate has no dependency tree to
   audit there.
-- By hand against that installed environment at `COLUMNS=80`: `vivary doctor . --typo`
-  prints the `doctor` usage line and `vivary doctor: error: unrecognized arguments:
-  --typo` with no subcommand list, `vivary decide --typo r.json` and
-  `vivary control --typo` print their own usage under the `vivary <verb>: error:`
-  prefix, `vivary check --help` and `vivary review --help` open with
-  `usage: vivary check` and `usage: vivary review` and carry no command list, and
-  standalone `create-vivary init --help` and `tropo --help` are unchanged.
+- By hand against that installed environment at `COLUMNS=80`: `vivary --help` lists
+  each standalone command against the verbs it serves, `vivary nope` exits 2 with
+  `argument command: invalid choice: 'nope'`, `vivary -- check --root
+  packages/tropo/examples/vault` routes and reports 4 documents, `vivary doctor .
+  --typo` prints the `doctor` usage line and `vivary doctor: error: unrecognized
+  arguments: --typo` with no subcommand list, `vivary check --help` opens with
+  `usage: vivary check` and carries no command list, and standalone
+  `create-vivary init --help` and `tropo --help` are unchanged.
 - The floor regression is reproduced and fixed: with `vivary-tropo` metadata pinned to
   `0.5.3` in an installed environment and the `0.5.4` source tree on `PYTHONPATH`, the
   previous router refused `vivary check` with `needs vivary-tropo 0.5.4 or newer, found
