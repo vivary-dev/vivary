@@ -185,6 +185,7 @@ jobs:
             "$smoke/venv/bin/vivary" logs --help > /dev/null
           )
           python scripts/check_installed_route_parity.py "$smoke/venv/bin"
+          python scripts/check_installed_route_parity.py --characterize "$smoke/venv/bin"
           create-vivary capabilities --preset coding --json \
             > "$smoke/capabilities.json"
           mkdir -p "$smoke/tropo-workspace/decisions" "$smoke/tropo-workspace/modules"

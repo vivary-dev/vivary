@@ -122,6 +122,91 @@ def test_help_that_lists_the_unrouted_operation_is_reported():
     assert "lists the unrouted operation map" in problems[0]
 
 
+def _case(surface, **overrides):
+    fields = {"name": "probe", "command": "tropo", "argv": ("--help",), "exit_code": 0}
+    fields.update(overrides)
+    return surface.CommandCase(**fields)
+
+
+def test_every_characterized_command_maps_to_a_console_script():
+    module = _load()
+    surface = module.load_command_surface()
+    assert set(module.SCRIPT_FOR_CASE) == set(surface.COMMANDS)
+    for case in surface.CASES:
+        assert case.command in module.SCRIPT_FOR_CASE, case.name
+
+
+def test_an_unmapped_characterized_command_is_reported():
+    module = _load()
+    surface = module.load_command_surface()
+    problems = module.characterized_problems(
+        surface, _case(surface, command="nope"), _result(module, stdout="")
+    )
+    assert len(problems) == 1
+    assert "no installed console script" in problems[0]
+
+
+def test_a_frozen_stream_must_match_whole():
+    module = _load()
+    surface = module.load_command_surface()
+    case = _case(surface, stdout_exact="one\ntwo\n", silent_stream="stderr")
+    assert (
+        module.characterized_problems(
+            surface, case, _result(module, stdout="one\ntwo\n")
+        )
+        == []
+    )
+    problems = module.characterized_problems(
+        surface, case, _result(module, stdout="one\ntwo\nthree\n")
+    )
+    assert len(problems) == 1
+    assert "stdout does not match the frozen stream" in problems[0]
+
+
+def test_a_stream_without_a_frozen_record_falls_back_to_fragments():
+    module = _load()
+    surface = module.load_command_surface()
+    case = _case(surface, stdout=("one",), silent_stream="stderr")
+    problems = module.characterized_problems(
+        surface, case, _result(module, stdout="one\ntwo\n")
+    )
+    assert problems == []
+
+
+def test_an_environment_dependent_stream_falls_back_to_fragments():
+    module = _load()
+    surface = module.load_command_surface()
+    case = _case(
+        surface,
+        stdout=("installed",),
+        stdout_exact="installed here\n",
+        silent_stream="stderr",
+        environment_dependent=("stdout",),
+    )
+    problems = module.characterized_problems(
+        surface, case, _result(module, stdout="installed elsewhere\n")
+    )
+    assert problems == []
+
+
+def test_a_characterized_exit_code_and_silent_stream_are_checked():
+    module = _load()
+    surface = module.load_command_surface()
+    case = _case(surface, stdout_exact="one\n", silent_stream="stderr")
+    problems = module.characterized_problems(
+        surface, case, _result(module, code=1, stdout="one\n", stderr="noise\n")
+    )
+    assert len(problems) == 2
+    assert any("exited 1 instead of 0" in problem for problem in problems)
+    assert any("stderr must stay silent" in problem for problem in problems)
+
+
+def test_characterize_still_validates_the_script_directory():
+    module = _load()
+    with tempfile.TemporaryDirectory() as tmp:
+        assert module.main(["--characterize", str(Path(tmp) / "absent")]) == 2
+
+
 def test_script_path_prefers_the_windows_executable():
     module = _load()
     with tempfile.TemporaryDirectory() as tmp:

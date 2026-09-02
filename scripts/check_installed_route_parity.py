@@ -4,6 +4,10 @@ Given the script directory of a virtual environment that has `vivary` and its
 components installed, this runs every legacy help command, compares each routed
 verb against the component invocation it stands for, and checks that an unrouted
 component operation stays standalone and stays out of the front door's help.
+
+With --characterize it instead replays the repository characterization table
+through the installed console scripts, so the frozen command surface is proven
+from a real installation rather than from the checked-out modules.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parents[1]
 VAULT = str(ROOT / "packages" / "tropo" / "examples" / "vault")
+CHARACTERIZATION_TESTS = ROOT / "packages" / "vivary" / "tests"
 
 LEGACY_COMMANDS = (
     ("vivary", ("--help",)),
@@ -49,6 +54,15 @@ COMMAND_FOR_MODULE = {
     "strato": "strato",
     "ozone": "ozone",
     "exo": "exo",
+}
+
+SCRIPT_FOR_CASE = {
+    "create-vivary": "create-vivary",
+    "tropo": "tropo",
+    "strato": "strato",
+    "ozone": "ozone",
+    "exo": "exo",
+    "vivary": "vivary",
 }
 
 UNROUTED_COMMAND = "tropo"
@@ -108,6 +122,25 @@ def unrouted_problems(
     return problems
 
 
+def load_command_surface():
+    """Import the characterization table the repository suite records."""
+    if str(CHARACTERIZATION_TESTS) not in sys.path:
+        sys.path.insert(0, str(CHARACTERIZATION_TESTS))
+    import test_command_surface_characterization as surface
+
+    return surface
+
+
+def characterized_problems(surface, case, result: Result) -> list[str]:
+    """Apply the recorded exact and fragment assertions to one installed run."""
+    script = SCRIPT_FOR_CASE.get(case.command)
+    if script is None:
+        return [f"{case.name}: {case.command} has no installed console script"]
+    return surface.case_problems(
+        case, result.code, result.stdout, result.stderr, installed=True
+    )
+
+
 def base_env() -> dict[str, str]:
     env = dict(os.environ)
     env.pop("VIVARY_RECEIPT_LOG", None)
@@ -158,6 +191,20 @@ class Runner:
         return self._invoke([str(self.python), str(path), *args], cwd)
 
 
+def characterize(runner: Runner) -> tuple[list[str], int]:
+    """Replay every characterized case through the installed console scripts."""
+    surface = load_command_surface()
+    problems: list[str] = []
+    for case in surface.CASES:
+        script = SCRIPT_FOR_CASE.get(case.command, case.command)
+        with tempfile.TemporaryDirectory() as work:
+            for name in case.empty_files:
+                (Path(work) / name).touch()
+            result = runner.run(script, case.argv, work)
+        problems.extend(characterized_problems(surface, case, result))
+    return problems, len(surface.CASES)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="check_installed_route_parity.py",
@@ -166,6 +213,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "bin_dir",
         help="script directory of a virtual environment with vivary installed",
+    )
+    parser.add_argument(
+        "--characterize",
+        action="store_true",
+        help="replay the characterization table through the installed scripts",
     )
     args = parser.parse_args(argv)
 
@@ -176,6 +228,17 @@ def main(argv: list[str] | None = None) -> int:
 
     runner = Runner(bin_dir)
     problems: list[str] = []
+
+    if args.characterize:
+        problems, cases = characterize(runner)
+        if problems:
+            for problem in problems:
+                print(problem, file=sys.stderr)
+            print(f"{bin_dir}: installed command surface failed", file=sys.stderr)
+            return 1
+        print(f"{bin_dir}: installed command surface passed ({cases} case(s))")
+        return 0
+
     with tempfile.TemporaryDirectory() as work:
         for name, command_args in LEGACY_COMMANDS:
             label = " ".join((name, *command_args))
