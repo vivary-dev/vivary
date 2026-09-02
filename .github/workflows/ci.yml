@@ -137,6 +137,8 @@ jobs:
           python -m pytest packages/mcp/tests/ -q
       - name: vivary meta CLI
         run: python packages/vivary/tests/test_vivary_cli.py
+      - name: vivary command surface characterization
+        run: python packages/vivary/tests/test_command_surface_characterization.py
       - name: release artifact contract tests
         run: python scripts/tests/test_release_artifacts.py
       - name: release artifact license contract
