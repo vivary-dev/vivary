@@ -335,6 +335,9 @@ def run_case(case: CommandCase) -> tuple[int, str, str]:
     env = dict(os.environ)
     env.pop("VIVARY_RECEIPT_LOG", None)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["COLUMNS"] = "80"
+    env.pop("PYTHONWARNINGS", None)
     if command.import_paths:
         env["PYTHONPATH"] = os.pathsep.join(command.import_paths)
     else:
@@ -347,6 +350,7 @@ def run_case(case: CommandCase) -> tuple[int, str, str]:
             [sys.executable, command.module, *case.argv],
             cwd=work,
             env=env,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             encoding="utf-8",
             check=False,
