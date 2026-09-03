@@ -7,7 +7,7 @@ workspace.
 
 Published version truth lives in the
 [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status).
-`create-vivary 0.4.2` and `@vivary/create 0.4.2` are published and require
+`create-vivary 0.4.3` and `@vivary/create 0.4.3` ship together and require
 `vivary-tropo>=0.5.3`.
 
 ## New workspaces

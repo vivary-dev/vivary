@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vivary-exo"
-version = "0.3.0"
+version = "0.3.1"
 description = "The coordination layer: graph-aware conflict detection, work claiming, and role contracts over a tropo knowledge graph."
 readme = "README.md"
 requires-python = ">=3.11"

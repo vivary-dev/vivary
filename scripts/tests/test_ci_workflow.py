@@ -39,6 +39,9 @@ def _run(workflow_text=None):
     return None
 
 
+RELEASE_BUILD_COMMANDS = _load().release_build_commands()
+
+
 def _workflow(site_steps: str, trailing_job: str = "") -> str:
     return (
         "name: ci\n"
@@ -100,15 +103,16 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "      - name: release artifact license contract\n"
         "        run: |\n"
         "          artifacts=\"$(mktemp -d)\"\n"
-        "          uv build --out-dir \"$artifacts\" packages/create-vivary\n"
-        "          uv build --out-dir \"$artifacts\" packages/mcp\n"
-        "          uv build --out-dir \"$artifacts\" packages/vivary\n"
-        "          npm pack packages/create-vivary/npm --pack-destination \"$artifacts\"\n"
+        + "".join(f"          {command}\n" for command in RELEASE_BUILD_COMMANDS)
+        + "          npm pack packages/create-vivary/npm --pack-destination \"$artifacts\"\n"
         "          python scripts/check_release_artifacts.py --repository . --artifacts \"$artifacts\"\n"
         "      - name: installed route parity contract tests\n"
         "        run: python scripts/tests/test_installed_route_parity.py\n"
         "      - name: core\n"
         "        run: python -m pytest packages/core/tests/ -q\n"
+        "      - name: wheelhouse smoke\n"
+        "        run: |\n"
+        "          assert version(\"vivary-strato\") == \"0.1.3\"\n"
         "      - name: packaged front door smoke\n"
         "        run: python scripts/check_installed_route_parity.py \"$smoke/venv/bin\"\n"
         "      - name: installed command surface\n"
@@ -120,7 +124,14 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "\n"
         "  governed-platform-proof:\n"
         "    needs: changes\n"
-        "    steps: []\n"
+        "    steps:\n"
+        "      - name: installed-wheel capability surface\n"
+        "        shell: pwsh\n"
+        "        run: |\n"
+        f"          {WINDOWS_PARITY_CHECK_COMMAND}\n"
+        "          if ($LASTEXITCODE -ne 0) { throw \"installed route parity failed\" }\n"
+        f"          {WINDOWS_PARITY_CHARACTERIZE_COMMAND}\n"
+        "          if ($LASTEXITCODE -ne 0) { throw \"installed command surface failed\" }\n"
         "\n"
         "  orientation-proof:\n"
         "    needs: changes\n"
@@ -167,6 +178,11 @@ PARITY_CHECK_COMMAND = (
 PARITY_CHARACTERIZE_COMMAND = (
     'python scripts/check_installed_route_parity.py --characterize "$smoke/venv/bin"'
 )
+WINDOWS_PARITY_CHECK_COMMAND = "python scripts/check_installed_route_parity.py $scripts"
+WINDOWS_PARITY_CHARACTERIZE_COMMAND = (
+    "python scripts/check_installed_route_parity.py --characterize $scripts"
+)
+STRATO_PIN = 'assert version("vivary-strato") == "0.1.3"'
 
 
 def test_real_workflow_passes_and_is_not_modified():
@@ -208,9 +224,7 @@ def test_release_artifact_contract_and_real_archives_must_run():
     for command in (
         "python -m pip install uv==0.11.21",
         ARTIFACT_TEST_COMMAND,
-        'uv build --out-dir "$artifacts" packages/create-vivary',
-        'uv build --out-dir "$artifacts" packages/mcp',
-        'uv build --out-dir "$artifacts" packages/vivary',
+        *RELEASE_BUILD_COMMANDS,
         'npm pack packages/create-vivary/npm --pack-destination "$artifacts"',
         ARTIFACT_CHECK_COMMAND,
     ):
@@ -246,6 +260,39 @@ def test_installed_command_surface_must_follow_route_parity():
     message = _run(reordered)
     assert message, "replaying the surface before proving route parity must fail"
     assert "must precede" in message
+
+
+def test_windows_governed_job_must_prove_installed_route_parity():
+    workflow = _workflow(INSTALL + AUDIT)
+    for command in (
+        WINDOWS_PARITY_CHECK_COMMAND,
+        WINDOWS_PARITY_CHARACTERIZE_COMMAND,
+    ):
+        message = _run(workflow.replace(command, "echo windows proof skipped", 1))
+        assert message, f"the Windows job must execute {command}"
+        assert command in message
+
+
+def test_windows_command_surface_must_follow_route_parity():
+    reordered = _workflow(INSTALL + AUDIT).replace(
+        f"          {WINDOWS_PARITY_CHECK_COMMAND}\n"
+        "          if ($LASTEXITCODE -ne 0) { throw \"installed route parity failed\" }\n"
+        f"          {WINDOWS_PARITY_CHARACTERIZE_COMMAND}\n",
+        f"          {WINDOWS_PARITY_CHARACTERIZE_COMMAND}\n"
+        "          if ($LASTEXITCODE -ne 0) { throw \"installed route parity failed\" }\n"
+        f"          {WINDOWS_PARITY_CHECK_COMMAND}\n",
+        1,
+    )
+    message = _run(reordered)
+    assert message, "replaying the Windows surface before proving parity must fail"
+    assert "must precede" in message
+
+
+def test_wheelhouse_smoke_must_pin_the_installed_strato_version():
+    workflow = _workflow(INSTALL + AUDIT).replace(STRATO_PIN, "assert True", 1)
+    message = _run(workflow)
+    assert message, "the wheelhouse smoke must pin every routed component version"
+    assert "vivary-strato" in message
 
 
 def test_missing_site_audit_gate_fails():

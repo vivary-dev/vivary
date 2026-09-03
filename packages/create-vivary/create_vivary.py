@@ -129,7 +129,7 @@ if os.name == "nt":
     _WINDOWS_FILE_DISPOSITION_INFO_CLASS = 4
 
 
-__version__ = "0.4.2"
+__version__ = "0.4.3"
 
 PRESETS = ("coding", "second-brain", "knowledge-work", "writing")
 
@@ -8769,16 +8769,28 @@ def _add_receipt_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(
+    *, prog: str | None = None, operation: str | None = None
+) -> argparse.ArgumentParser:
+    """Build the parser, optionally under a front door's program name.
+
+    With no `prog` the standalone names are unchanged. With one, both the top
+    level and the named `operation` answer to the whole routed name, so a usage
+    error names the operation the front door routed rather than the scaffolder.
+    """
+    def routed_prog(name: str) -> str | None:
+        return prog if name == operation else None
+
     parser = argparse.ArgumentParser(
-        prog="create-vivary",
+        prog=prog or "create-vivary",
         description="Create a lightweight local-first Vivary context workspace.",
     )
     parser.add_argument("--version", action="version", version=f"create-vivary {__version__}")
     _add_receipt_argument(parser)
     sub = parser.add_subparsers(dest="command")
 
-    init = sub.add_parser("init", help="create a Vivary workspace scaffold")
+    init = sub.add_parser("init", prog=routed_prog("init"),
+                          help="create a Vivary workspace scaffold")
     _add_receipt_argument(init)
     init.add_argument("target", help="directory to create or populate")
     init.add_argument("--preset", choices=PRESETS, default="coding")
@@ -8829,7 +8841,8 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--privacy", choices=["local", "cloud"], default=None,
                       help="data locality hint for --auto decisions")
 
-    wizard = sub.add_parser("wizard", help="reconfigure storage for an existing workspace")
+    wizard = sub.add_parser("wizard", prog=routed_prog("wizard"),
+                            help="reconfigure storage for an existing workspace")
     _add_receipt_argument(wizard)
     wizard.add_argument("target", help="workspace directory to reconfigure")
     wizard.add_argument("--auto", action="store_true")
@@ -8844,7 +8857,8 @@ def build_parser() -> argparse.ArgumentParser:
     wizard.add_argument("--dry-run", action="store_true")
     wizard.add_argument("--repo-root", default=None)
 
-    doctor = sub.add_parser("doctor", help="validate a Vivary workspace scaffold")
+    doctor = sub.add_parser("doctor", prog=routed_prog("doctor"),
+                            help="validate a Vivary workspace scaffold")
     _add_receipt_argument(doctor)
     doctor.add_argument("target", help="workspace directory to validate")
     doctor.add_argument("--json", action="store_true", help="print a JSON report")
@@ -8878,13 +8892,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Vivary source checkout root (mainly for local development/tests)",
     )
 
-    capabilities = sub.add_parser("capabilities", help="list optional preset capabilities")
+    capabilities = sub.add_parser("capabilities", prog=routed_prog("capabilities"),
+                                  help="list optional preset capabilities")
     _add_receipt_argument(capabilities)
     capabilities.add_argument("--preset", choices=PRESETS, default="coding")
     capabilities.add_argument("--json", action="store_true", help="print a JSON report")
 
     adopt = sub.add_parser(
-        "adopt", help="plan and apply bounded governed context for an existing workspace"
+        "adopt", prog=routed_prog("adopt"),
+        help="plan and apply bounded governed context for an existing workspace"
     )
     _add_receipt_argument(adopt)
     adopt.add_argument("target", help="existing directory to adopt")
@@ -8926,6 +8942,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     record = sub.add_parser(
         "record",
+        prog=routed_prog("record"),
         help="plan and apply one capsule-bound record earned by real work",
     )
     _add_receipt_argument(record)
@@ -8963,7 +8980,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Vivary source checkout root (mainly for local development/tests)",
     )
+    if prog and operation in sub.choices:
+        # argparse reports an unrecognized argument from the top level, so the
+        # routed operation's own usage has to be the one the top level prints.
+        parser.usage = _usage_text(sub.choices[operation])
     return parser
+
+
+def _usage_text(parser: argparse.ArgumentParser) -> str:
+    return parser.format_usage().removeprefix("usage: ").rstrip("\n")
 
 
 def with_default_command(argv: list[str]) -> list[str]:
@@ -9154,11 +9179,11 @@ def _append_run_receipt(
     return True
 
 
-def _main(argv: list[str] | None = None) -> int:
+def _main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     argv = with_default_command(argv)
-    parser = build_parser()
+    parser = build_parser(prog=prog, operation=argv[0] if argv else None)
     args = parser.parse_args(argv)
 
     if args.command == "capabilities":
@@ -9477,12 +9502,14 @@ def _main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    """Run create-vivary, naming the program `prog` when a front door supplies one."""
+    prog = (prog or "").strip() or None
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     started_at = time.monotonic()
     receipt_path, receipt_source = _extract_receipt_path(raw_argv)
     try:
-        rc = _main(raw_argv)
+        rc = _main(raw_argv, prog=prog)
     except SystemExit as exc:
         code = _exit_code_value(exc.code)
         receipt_ok = _append_run_receipt(

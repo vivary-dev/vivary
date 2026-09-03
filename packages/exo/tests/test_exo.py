@@ -291,6 +291,16 @@ def _compiled_control_capsule_and_receipt():
     return capsule, receipt
 
 
+def test_runtime_version_matches_package_manifest():
+    import tomllib
+
+    project = tomllib.loads(
+        (Path(ROOT) / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]
+    assert exo.__version__ == project["version"]
+    assert "vivary-core>=0.2.5" in project["dependencies"]
+
+
 def test_governed_control_dispatches_all_eight_exact_operations():
     for operation, request in _control_smoke_requests().items():
         before = copy.deepcopy(request)

@@ -10,7 +10,7 @@ model made every file pay a ceremony tax — `type:`, `created:`, `updated:`,
 write down only the irreducible signal. A clean note can have **zero
 frontmatter** and still be fully typed and valid.
 
-> Status: **working engine (published v0.5.3).** `tropo.py` implements spec v1 end-to-end —
+> Status: **working engine (v0.5.4).** `tropo.py` implements spec v1 end-to-end —
 > folder-as-type resolution, derivation, validation, packs, **overlays**, the
 > `signal` report, **`fix`** (de-noise), **`init`**, the graph layer
 > (`graph`/`blast`/`view`/`plan`), typed retrieval (`find`/`query`), read-only

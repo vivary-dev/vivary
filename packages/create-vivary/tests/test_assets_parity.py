@@ -66,7 +66,7 @@ def test_package_data_excludes_the_legacy_full_scaffold():
     manifest = (Path(__file__).resolve().parents[1] / "MANIFEST.in").read_text(
         encoding="utf-8"
     )
-    assert manifest.splitlines() == ["prune create_vivary_assets"]
+    assert manifest.splitlines() == ["prune create_vivary_assets", "prune tests"]
 
 
 def test_python_and_npm_create_versions_are_lockstep():

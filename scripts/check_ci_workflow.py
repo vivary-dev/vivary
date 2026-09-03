@@ -1,8 +1,21 @@
+import importlib.util
 import re
 from pathlib import Path
 
 
 WORKFLOW = Path(".github/workflows/ci.yml")
+ARTIFACT_CHECKER = Path("scripts/check_release_artifacts.py")
+
+
+def release_build_commands() -> tuple[str, ...]:
+    """One `uv build` line per Python distribution the release checker verifies."""
+    spec = importlib.util.spec_from_file_location("release_artifacts", ARTIFACT_CHECKER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return tuple(
+        f'uv build --out-dir "$artifacts" packages/{package}'
+        for package, _ in module.PYTHON_CANDIDATES
+    )
 
 
 def require(condition: bool, message: str) -> None:
@@ -55,6 +68,11 @@ def main() -> None:
         "python scripts/check_installed_route_parity.py --characterize"
         ' "$smoke/venv/bin"'
     )
+    windows_parity_check = "python scripts/check_installed_route_parity.py $scripts"
+    windows_parity_characterize = (
+        "python scripts/check_installed_route_parity.py --characterize $scripts"
+    )
+    strato_pin = 'assert version("vivary-strato") == "0.1.3"'
     site_install = "        run: npm ci\n        working-directory: site"
     site_audit = (
         "        run: npm audit --audit-level=high\n"
@@ -157,9 +175,7 @@ def main() -> None:
     for command in (
         "python -m pip install uv==0.11.21",
         artifact_test,
-        'uv build --out-dir "$artifacts" packages/create-vivary',
-        'uv build --out-dir "$artifacts" packages/mcp',
-        'uv build --out-dir "$artifacts" packages/vivary',
+        *release_build_commands(),
         'npm pack packages/create-vivary/npm --pack-destination "$artifacts"',
         artifact_check,
     ):
@@ -175,6 +191,24 @@ def main() -> None:
     require(
         test_job.index(parity_check) < test_job.index(parity_characterize),
         "route parity must precede the installed command surface replay",
+    )
+    require(
+        strato_pin in test_job,
+        f"wheelhouse smoke must pin the installed strato version with {strato_pin}",
+    )
+    for command in (windows_parity_check, windows_parity_characterize):
+        require(
+            command in governed_job,
+            f"governed-platform-proof job must run {command}",
+        )
+        require(
+            governed_job.count(command) == 1,
+            f"governed-platform-proof job must run {command} exactly once",
+        )
+    require(
+        governed_job.index(windows_parity_check)
+        < governed_job.index(windows_parity_characterize),
+        "Windows route parity must precede the installed command surface replay",
     )
     require(
         site_install in site_job,

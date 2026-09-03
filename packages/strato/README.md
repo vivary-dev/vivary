@@ -65,7 +65,7 @@ skill (`.claude/skills/loops/`).
 
 ## Versioning
 
-The `vivary-strato` Python distribution is published at version **0.1.2** and requires
+The `vivary-strato` Python distribution is at version **0.1.3** and requires
 `vivary-core>=0.2.4`. Both shipped in the Vivary Governed Context train. The templates
 and skills remain bundled by `create-vivary`, and the runtime package does not
 duplicate or replace them.

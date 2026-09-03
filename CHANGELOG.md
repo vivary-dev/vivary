@@ -13,9 +13,12 @@ independent. There is no single "Vivary 0.4.2" release.
 
 ## [Unreleased: Vivary Front Door] — 2026-09-02
 
-This slice advances the unpublished `vivary` meta-package to **0.2.0** and changes no
-other package. Ten user-visible verbs are new, so the meta-package takes a minor bump.
-Published registry versions remain unchanged.
+This slice advances the unpublished `vivary` meta-package to **0.2.0** and takes each
+routed component to its next patch: `create-vivary` / `@vivary/create` **0.4.3**,
+`vivary-tropo` **0.5.4**, `vivary-strato` **0.1.3**, `vivary-ozone` **0.3.2**, and
+`vivary-exo` **0.3.1**. Ten user-visible verbs are new, so the meta-package takes a
+minor bump. Each component gains one optional keyword and nothing else, so each takes a
+patch. Published registry versions remain unchanged.
 
 ### Added
 
@@ -31,7 +34,10 @@ Published registry versions remain unchanged.
   version. The router imports a component only when a verb asks for one.
 - A characterization suite freezes the observed command surface of the six entry
   modules before routing, and a router suite compares every verb against its
-  standalone invocation on exit code, standard output, and standard error.
+  standalone invocation on exit code, standard output, and standard error. Two
+  `create-vivary` streams name the components installed in the environment, so they
+  are judged by fragments and their exact snapshots were dropped, and one no-config
+  case was added for `tropo check` in a folder with no `tropo.toml`.
 - The `vivary` usage line and its invalid-choice error list all ten verbs beside
   `logs` and `email`, so a misspelled verb prints the whole command set.
 - A component that is missing, or too old for the verb, is refused with exit code `2`
@@ -39,54 +45,120 @@ Published registry versions remain unchanged.
   release numbers, so a prerelease of the floor version counts as below it.
 - A parity checker runs the same comparison against wheels installed into a fresh
   environment, and CI runs it beside the other meta-package proofs.
+- `create-vivary` **0.4.3**, `vivary-tropo` **0.5.4**, `vivary-strato` **0.1.3**,
+  `vivary-ozone` **0.3.2**, and `vivary-exo` **0.3.1** each add one optional
+  keyword-only `prog` argument to `main` and to the parser it builds. `create-vivary`
+  and `strato` also name the routed operation's subparser and lift its usage line to
+  the top level, `tropo` and `ozone` fix their command positional to the routed
+  operation and hide it, and `ozone` and `exo` prefix the receipt-collision message
+  with the routed name. Nothing else in those packages changed.
+- `vivary <verb> --help` now prints `usage: vivary <verb> ...`, and a usage error from
+  a routed verb reads `vivary <verb>: error: ...`. In an installed environment the
+  dependency floors guarantee the seam, and the signature check covers a source
+  checkout whose imported module is newer than its distribution metadata.
+- A routed usage error prints the operation's own usage line, not the component's
+  command list. The flat-parser components fix their command positional to the routed
+  operation and hide it, so `vivary check --help` and `vivary review --help` carry the
+  full option set under the verb without listing the component's other commands.
+- The version floor is checked on the imported module. `__version__` is read from the
+  module the router just imported, and distribution metadata is the fallback only for
+  a component that declares none or an unreadable one, so a source checkout ahead of
+  an installed wheel is judged on the code it will run. A module imported from inside
+  an installed-packages directory that the installed distribution does not record is
+  refused before the call, while a module imported from anywhere else (a source
+  checkout, a `PYTHONPATH` tree, the current directory) is a deliberate shadow and
+  runs. An import failure in a component or its dependencies is reported without a
+  traceback, and a local version segment no longer reads as a prerelease.
+- The release artifact gate now covers all nine published Python distributions and
+  inventories what they carry: each wheel holds exactly the module its manifest
+  declares beside its metadata and license, and each sdist ships no test directory,
+  which a new `MANIFEST.in` per package enforces.
 
-### Known limitation
+### Changed
 
-- `vivary <verb> --help` passes component help through verbatim, so the usage line
-  names the component program rather than `vivary`. Exit codes, options, and behavior
-  are correct. A follow-up adds an optional `prog` seam to the components on their own
-  patch cadence.
+- The `vivary` meta-package dependency floors rise to `create-vivary>=0.4.3`,
+  `vivary-tropo>=0.5.4`, `vivary-strato>=0.1.3`, `vivary-ozone>=0.3.2`, and
+  `vivary-exo>=0.3.1`, which are the versions that carry the seam. A component below
+  its floor is still refused with exit code `2`.
+- `create-vivary` on PyPI and `@vivary/create` on npm move to **0.4.3** together. That
+  numeric lockstep is the only one in the suite.
 
 ### Unchanged
 
 - The standalone `create-vivary`, `tropo`, `strato`, `ozone`, and `exo` commands keep
-  every operation and are not deprecated. No component package changed.
+  every operation and are not deprecated. Standalone help, usage, and error prefixes
+  stay byte-identical, which the frozen command-surface table proves.
 
 ### Verification
 
 - `python packages/vivary/tests/test_vivary_cli.py` — 9/9 passed.
-- `python packages/vivary/tests/test_command_surface_characterization.py` — 1 test
-  over the frozen surface table passed.
-- `python packages/vivary/tests/test_vivary_router.py` — 8/8 passed.
-- `python scripts/tests/test_installed_route_parity.py` — 13/13 passed.
+- `python packages/vivary/tests/test_command_surface_characterization.py` — 3/3 passed
+  over 44 cases. The six `create-vivary` operation helps the seam touched were frozen
+  by observation and still match the module from before the seam byte for byte, the
+  two front-door help snapshots were re-recorded for the new help text, and one
+  unknown-verb case was added.
+- `python packages/vivary/tests/test_vivary_router.py` — 39/39 passed. Every verb is
+  compared against the component itself run under the same program name.
+- `python scripts/tests/test_installed_route_parity.py` — 29/29 passed.
 - `python packages/tropo/tests/test_tropo.py` — 193/193 passed.
 - `python packages/ozone/tests/test_ozone.py` — 110/110 passed.
-- `python packages/exo/tests/test_exo.py` — 29/29 passed.
+- `python packages/exo/tests/test_exo.py` — 30/30 passed.
+- `python -m pytest packages/core/tests/ -q` — 799 passed, 1 skipped, and 1 known
+  failure from the container's `noexec` temporary mount
+  (`test_repository_fsmonitor_hook_is_not_invoked_by_default_observation`).
+- `python -m pytest packages/strato/tests/ -q` — 48/48 passed.
 - `python packages/tropo/tropo.py check --root packages/tropo/examples/vault` — 4
   documents, 0 errors, 0 warnings.
 - `python scripts/check_package_docs_parity.py` and
   `python scripts/tests/test_package_docs_parity.py` — contract passed; 10/10 cases
   passed.
 - `python scripts/check_ci_workflow.py` and
-  `python scripts/tests/test_ci_workflow.py` — contract passed; 16/16 cases passed.
-- `python scripts/check_line_endings.py` — 306 tracked text files checked.
+  `python scripts/tests/test_ci_workflow.py` — contract passed; 20/20 cases passed.
+- `python scripts/check_line_endings.py` — 316 tracked text files checked.
+- `python scripts/tests/test_release_artifacts.py` — 14/14 passed, and
+  `python scripts/check_release_artifacts.py --repository . --artifacts <dir>` over
+  freshly built distributions for all nine published Python packages plus `npm pack`
+  of the launcher — 19 release artifacts passed license verification.
+- Nine wheels built with `python -m pip wheel --no-deps`, installed into a fresh
+  virtual environment as `vivary`, `pip check` clean, then
+  `python scripts/check_installed_route_parity.py <venv>/bin` — 8 legacy commands, 10
+  help parity, 10 usage-error parity, 8 fixture parity, and 1 unrouted operation
+  passed — and `... --characterize <venv>/bin` — 44 installed command-surface cases
+  passed.
+- `node packages/create-vivary/tests/test_npm_launcher.js` — 11/11 passed. The npm
+  launcher declares no dependencies, so the advisory gate has no dependency tree to
+  audit there.
+- By hand against that installed environment at `COLUMNS=80`: `vivary --help` lists
+  each standalone command against the verbs it serves, `vivary nope` exits 2 with
+  `argument command: invalid choice: 'nope'`, `vivary -- check --root
+  packages/tropo/examples/vault` routes and reports 4 documents, `vivary doctor .
+  --typo` prints the `doctor` usage line and `vivary doctor: error: unrecognized
+  arguments: --typo` with no subcommand list, `vivary check --help` opens with
+  `usage: vivary check` and carries no command list, and standalone
+  `create-vivary init --help` and `tropo --help` are unchanged.
+- The floor regression is reproduced and fixed: with `vivary-tropo` metadata pinned to
+  `0.5.3` in an installed environment and the `0.5.4` source tree on `PYTHONPATH`, the
+  previous router refused `vivary check` with `needs vivary-tropo 0.5.4 or newer, found
+  0.5.3` and the current one exits `0`.
 - The graph review gate over a freshly scaffolded workspace:
   `python packages/create-vivary/create_vivary.py init sandboxes/ci-ws --preset coding
   --force --no-wizard`, `... doctor sandboxes/ci-ws`,
   `python packages/tropo/tropo.py check --root sandboxes/ci-ws`, and
   `python packages/ozone/ozone.py review --root sandboxes/ci-ws --strict` — 3 nodes,
   0 warnings, 3 informational notes.
-- With Node 22.23.2, `npm ci`, `npm audit --audit-level=high`, `npm run sync-docs`,
+- With Node 22.23.2, `npm audit --audit-level=high`, `npm run sync-docs`,
   `npm run build`, `npm run test:site`, and `npm run test:links` from `site/` — 0
   vulnerabilities, mirrors refreshed, 33 pages built, 14/14 source tests passed, and
   2,749 local references plus 1,550 anchors passed.
-- `python packages/create-vivary/tests/test_create_vivary.py` — 2 errors and 2 skips
-  in the offline verification container, where the wizard storage tests try to install
-  `vivary-tropo[embedded]` at run time. The same two errors occur on the parent commit,
-  and this change touches no component package.
-- `python -m pytest packages/core/tests/ -q` and
-  `python -m pytest packages/strato/tests/ -q` were not run because the verification
-  container has no `pytest`. CI runs both.
+- `python packages/create-vivary/tests/test_create_vivary.py` — 194 tests with 2 errors
+  and 2 skips in the offline verification container, where the wizard storage tests try
+  to install `vivary-tropo[embedded]` at run time. The same two errors are recorded on
+  the parent commit, and the failing path is untouched by this slice.
+- `python -m pytest packages/core/tests/ -q` — 799 passed, 1 skipped, and 1 failure in
+  `test_repository_fsmonitor_hook_is_not_invoked_by_default_observation`. That test
+  writes its own fsmonitor hook into the temporary directory and asserts a positive
+  control that git executed it. The verification container mounts `/tmp` `noexec`, so
+  the control cannot run. No package under `packages/core` changed. CI runs it.
 
 Publishing remains a manual human gate.
 

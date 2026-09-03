@@ -20,8 +20,10 @@ MCP SDK dependency.
 - **From a repo checkout:** `python packages/tropo/tropo.py check`, etc.
 
 Every command on this page is available from the published PyPI and npm packages
-listed in the [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status). Governed paths stay
-behind an explicit `--governed` flag and are opt-in, not default behavior.
+listed in the [root release status](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status), except the front-door
+task verbs, which ship in `vivary` 0.2.0 from source until this train publishes.
+Governed paths stay behind an explicit `--governed` flag and are opt-in, not default
+behavior.
 
 For the four layer CLIs and the scaffolder, exit codes are uniform: **`0`** success ·
 **`1`** findings/errors · **`2`** usage/config error. Gate CI on the exit code; don't
@@ -100,16 +102,16 @@ task verbs to them, and adds a local helper for the receipt files they emit.
 
 ### Task verbs
 
-A verb runs the component operation in the same process. Arguments and output pass
-through unchanged, so each verb behaves like the standalone command it maps to.
-`vivary --help` groups the verbs the same way this table does. These verbs ship in
-`vivary` 0.2.0 from source. The published 0.1.10 on PyPI does not have them until the
-next release publishes.
+A verb runs the component operation in the same process. Arguments pass through
+unchanged and the operation's output is the component's, while the program name, the
+usage line, and the hidden command list are the front door's. `vivary --help` groups
+the verbs the same way this table does. These verbs ship in `vivary` 0.2.0 from source.
+The published 0.1.10 on PyPI does not have them until the next release publishes.
 
 | Group | Verb | Standalone equivalent | Job |
 |---|---|---|---|
 | Workspace | `vivary create` | `create-vivary init` | Create a Vivary workspace scaffold. |
-| Workspace | `vivary adopt` | `create-vivary adopt` | Plan and apply bounded governed context for an existing workspace. |
+| Workspace | `vivary adopt` | `create-vivary adopt` | Plan governed context for an existing workspace. |
 | Workspace | `vivary doctor` | `create-vivary doctor` | Validate a Vivary workspace scaffold. |
 | Workspace | `vivary capabilities` | `create-vivary capabilities` | List the optional preset capabilities. |
 | Graph and retrieval | `vivary check` | `tropo check` | Validate the context graph and report errors and warnings. |
@@ -120,9 +122,9 @@ next release publishes.
 | Coordination | `vivary control` | `exo control` | Dispatch one governed Core control request. |
 
 Each route declares the component version floor that shipped the verb:
-`create-vivary>=0.4.2` for the workspace verbs, `vivary-tropo>=0.5.3` for `check` and
-`find`, `vivary-strato>=0.1.2` for `decide`, `vivary-ozone>=0.3.1` for `review` and
-`impact`, and `vivary-exo>=0.3.0` for `control`. A component below its floor is refused
+`create-vivary>=0.4.3` for the workspace verbs, `vivary-tropo>=0.5.4` for `check` and
+`find`, `vivary-strato>=0.1.3` for `decide`, `vivary-ozone>=0.3.2` for `review` and
+`impact`, and `vivary-exo>=0.3.1` for `control`. A component below its floor is refused
 with exit code `2` and a message naming the required version. The floors match the
 [meta-package manifest](https://github.com/vivary-dev/vivary/blob/dev/packages/vivary/pyproject.toml).
 A missing component, or one below its floor, is refused with exit code `2` and a `pip
@@ -132,19 +134,41 @@ The front door covers the ten approved task intents and nothing else. The standa
 `create-vivary`, `tropo`, `strato`, `ozone`, and `exo` commands remain the advanced
 surface with every operation, and `vivary --help` lists them. They are not deprecated,
 and a new component operation stays reachable there without a meta-package release.
-Promoting an operation to a verb takes a meta-package minor release, a matching floor
-bump, and approval of the verb name.
+Promoting an operation to a verb is a policy decision, not a code detail. It takes a
+meta-package minor release, a matching floor bump, and approval of the verb name.
 
-**Temporary limitation.** `vivary <verb> --help` passes component help through
-verbatim, so the usage line names the component program, for example `usage: tropo
-...` rather than `usage: vivary check ...`. The exit code, options, and behavior are
-correct. A follow-up adds an optional `prog` seam to the components on their own patch
-cadence so the routed usage line reads `vivary`.
+Routed help names the front door. `vivary <verb> --help` prints `usage: vivary
+<verb> ...`, and a usage error from any of the ten verbs reads `vivary <verb>:
+error: ...` above the operation's own usage line, never the component's command
+list. `vivary check --help` and `vivary review --help` carry the component's full
+option set under the verb, and the component's other commands are hidden because
+the verb already named the operation. Those two components share one flat option
+set, so a flag their routed help names for another operation, such as tropo's
+`--budget` for `find`, applies only to those standalone operations.
+
+The routed name covers the program, not the reporting layer. A status or error line
+a component prints itself still carries the component's own name, so `vivary check`
+in a folder with no configuration reports `tropo: no tropo.toml found walking up
+from ...`.
+
+`vivary --version` reports the front door. `vivary <verb> --version` answers
+exactly as the standalone operation does, so `check`, `find`, `review`, and
+`impact` report the component version that serves them, and `create`, `adopt`,
+`doctor`, `capabilities`, `decide`, and `control` refuse the flag with the routed
+usage because it belongs to their component's own top level.
+
+The floor is checked on the imported module. `__version__` is read from the module
+the router just imported, which is the code the verb will run, and the distribution
+metadata is the fallback only for a component that declares none. In an installed
+environment the floors guarantee the seam, and the signature check covers a source
+checkout whose imported module is newer than its distribution metadata. Standalone
+help is unchanged: `tropo --help` still prints `usage: tropo ...`.
 
 ### Receipt commands
 
-`vivary logs` summarizes a JSONL receipt file as text or JSON. `vivary logs email`
-creates a redacted support email draft from the same whitelisted receipt fields.
+`vivary logs` summarizes a JSONL receipt file as text or JSON. `vivary logs email`,
+also reachable as `vivary email`, creates a redacted support email draft from the same
+whitelisted receipt fields.
 Unknown fields, malformed lines, stdout/stderr-like fields, file contents, raw query
 text, target ids, and local paths are not copied into the summary.
 

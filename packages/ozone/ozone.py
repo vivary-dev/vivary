@@ -32,7 +32,7 @@ import platform
 import sys
 import time
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
 RECEIPT_SCHEMA = "vivary.run_receipt.v1"
 REQUEST_SCHEMA = "vivary.ozone-verification-request/v0"
@@ -2037,14 +2037,21 @@ def _append_run_receipt(
     return True
 
 
-def _parse_args(argv=None):
+def _parse_args(argv=None, *, prog=None):
+    # A front door already named the operation in `prog`, so the routed parser
+    # offers that one command and hides it from the usage line.
+    routed = argv[0] if prog and argv and argv[0] in COMMANDS else None
     p = argparse.ArgumentParser(
-        prog="ozone",
+        prog=prog or "ozone",
         description="Vivary review, impact, and governed evidence verification.",
     )
     p.add_argument("--version", action="version", version=f"ozone {__version__}")
-    p.add_argument("command", nargs="?", default="review",
-                   choices=COMMANDS)
+    if routed is None:
+        p.add_argument("command", nargs="?", default="review",
+                       choices=COMMANDS)
+    else:
+        p.add_argument("command", nargs="?", default=routed,
+                       choices=[routed], help=argparse.SUPPRESS)
     p.add_argument("id", nargs="?", help="impact node id or verify request document")
     p.add_argument("--governed", action="store_true",
                    help="explicitly opt in to governed receipt and gate verification")
@@ -2078,11 +2085,14 @@ def _run_args(args):
     }[args.command](args)
 
 
-def _main(argv=None):
-    return _run_args(_parse_args(argv))
+def _main(argv=None, *, prog=None):
+    return _run_args(_parse_args(argv, prog=prog))
 
 
-def main(argv=None):
+def main(argv=None, *, prog=None):
+    """Run ozone, naming the program `prog` when a front door supplies one."""
+    prog = (prog or "").strip() or None
+    name = prog or "ozone"
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     started_at = time.monotonic()
     receipt_path, receipt_source = _extract_receipt_path(raw_argv)
@@ -2094,19 +2104,21 @@ def main(argv=None):
             receipt_path, receipt_source = None, None
         else:
             print(
-                "ozone: receipt: receipt path must not identify the verification request",
+                f"{name}: receipt: receipt path must not identify the"
+                " verification request",
                 file=sys.stderr,
             )
             return 2
     args = None
     try:
-        args = _parse_args(raw_argv)
+        args = _parse_args(raw_argv, prog=prog)
         if args.receipt is not None:
             receipt_path, receipt_source = args.receipt, "flag"
         request_path = args.id if args.command == "verify" else None
         if _receipt_targets_request(request_path, receipt_path):
             print(
-                "ozone: receipt: receipt path must not identify the verification request",
+                f"{name}: receipt: receipt path must not identify the"
+                " verification request",
                 file=sys.stderr,
             )
             return 2

@@ -8,7 +8,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CHECKER = ROOT / "scripts" / "check_installed_route_parity.py"
-VIVARY_PACKAGE = ROOT / "packages" / "vivary"
 
 
 def _load():
@@ -53,6 +52,15 @@ def test_stream_mismatches_are_reported_per_stream():
     assert "stderr does not match" in stderr_problems[0]
 
 
+def test_a_routed_program_name_is_compared_and_not_normalized():
+    module = _load()
+    routed = _result(module, stdout="usage: vivary check [-h] [--json]\n")
+    expected = _result(module, stdout="usage: tropo [-h] [--json]\n")
+    problems = module.compare("vivary check --help", routed, expected)
+    assert len(problems) == 1
+    assert "stdout does not match the component run" in problems[0]
+
+
 def test_every_stream_can_fail_at_once():
     module = _load()
     problems = module.compare(
@@ -61,6 +69,54 @@ def test_every_stream_can_fail_at_once():
         _result(module, code=0, stdout="c", stderr="d"),
     )
     assert len(problems) == 3
+
+
+def test_a_usage_error_that_names_the_verb_passes():
+    module = _load()
+    routed = _result(
+        module,
+        code=2,
+        stdout="",
+        stderr="usage: vivary check [-h]\nvivary check: error: unrecognized arguments\n",
+    )
+    assert module.usage_error_problems("vivary check", "vivary check", routed) == []
+
+
+def test_a_usage_error_that_names_the_component_is_reported():
+    module = _load()
+    routed = _result(
+        module,
+        code=2,
+        stdout="",
+        stderr="usage: tropo [-h]\ntropo: error: unrecognized arguments\n",
+    )
+    problems = module.usage_error_problems("vivary check", "vivary check", routed)
+    assert len(problems) == 2
+    assert any("does not open with usage: vivary check" in problem for problem in problems)
+    assert any("no vivary check: error: prefix" in problem for problem in problems)
+
+
+def test_a_usage_error_must_exit_two_and_stay_off_stdout():
+    module = _load()
+    routed = _result(
+        module,
+        code=0,
+        stdout="leaked",
+        stderr="usage: vivary check [-h]\nvivary check: error: nope\n",
+    )
+    problems = module.usage_error_problems("vivary check", "vivary check", routed)
+    assert len(problems) == 2
+    assert any("instead of the usage error 2" in problem for problem in problems)
+    assert any("must not write stdout" in problem for problem in problems)
+
+
+def test_the_oracle_runs_the_component_under_the_routed_name():
+    module = _load()
+    source = module.oracle_source("tropo", ["check"], ("--root", "vault"), "vivary check")
+    assert "import tropo" in source
+    assert "['check', '--root', 'vault']" in source
+    assert "prog='vivary check'" in source
+    assert module.routed_prog("check") == "vivary check"
 
 
 def test_unrouted_operation_stays_standalone():
@@ -224,23 +280,46 @@ def test_a_missing_script_directory_is_a_usage_error():
 
 def test_every_routed_module_has_a_console_script_name():
     module = _load()
-    if str(VIVARY_PACKAGE) not in sys.path:
-        sys.path.insert(0, str(VIVARY_PACKAGE))
-    import vivary_cli
+    for route in module.vivary_cli.ROUTES:
+        component = module.vivary_cli.COMPONENTS[route.module]
+        assert component.command in module.SCRIPT_FOR_CASE, route.verb
 
-    for route in vivary_cli.ROUTES:
-        assert route.module in module.COMMAND_FOR_MODULE, route.verb
+
+def test_the_checker_shares_the_router_program_name():
+    module = _load()
+    assert module.routed_prog is module.vivary_cli.routed_prog
+
+
+def test_a_module_the_checkout_does_not_route_is_refused():
+    module = _load()
+    for name in ("os", "tropo; import shutil", "1tropo", "", "tropo.sub"):
+        try:
+            module.refuse_unknown_module(name)
+        except SystemExit as exc:
+            assert "does not route" in str(exc), name
+        else:
+            raise AssertionError(f"{name!r} was not refused")
+
+
+def test_every_routed_module_passes_the_refusal():
+    module = _load()
+    for route in module.vivary_cli.ROUTES:
+        module.refuse_unknown_module(route.module)
 
 
 def test_fixture_arguments_cover_every_non_writing_verb():
     module = _load()
-    if str(VIVARY_PACKAGE) not in sys.path:
-        sys.path.insert(0, str(VIVARY_PACKAGE))
-    import vivary_cli
-
     writing = {"create", "adopt"}
-    verbs = {route.verb for route in vivary_cli.ROUTES}
+    verbs = {route.verb for route in module.vivary_cli.ROUTES}
     assert set(module.FIXTURE_ARGS) == verbs - writing
+
+
+def test_the_checker_pins_the_same_environment_as_the_suites():
+    module = _load()
+    env = module.pinned_env()
+    assert env["COLUMNS"] == "80"
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert "PYTHONPATH" not in env
 
 
 if __name__ == "__main__":

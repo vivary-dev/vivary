@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vivary-strato"
-version = "0.1.2"
+version = "0.1.3"
 description = "The policy layer: governed loop decisions, budgets, and human gates over Vivary task capsules."
 readme = "README.md"
 requires-python = ">=3.11"

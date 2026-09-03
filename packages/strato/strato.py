@@ -15,7 +15,7 @@ from vivary_core.control_actors import ACTOR_KIND, AUTHORITY_CLASS, can_hold_aut
 
 from vivary_core.policy_loop import next_loop_step
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 REQUEST_SCHEMA = "vivary.strato-decision-request/v0"
 DECISION_SCHEMA = "vivary.strato-decision/v0"
@@ -280,11 +280,22 @@ def _emit(result: dict[str, Any], *, json_output: bool) -> None:
         print("reasons: " + ", ".join(result["reason_codes"]))
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="strato", description="Vivary governed loop policy")
+def _build_parser(*, prog: str | None = None) -> argparse.ArgumentParser:
+    """Build the parser, optionally under a front door's program name.
+
+    With no `prog` the standalone names are unchanged. With one, both the top
+    level and `decide` answer to the whole routed name, so a usage error names
+    the operation the front door routed rather than the policy command.
+    """
+    parser = argparse.ArgumentParser(
+        prog=prog or "strato",
+        description="Vivary governed loop policy",
+    )
     parser.add_argument("--version", action="version", version=f"strato {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
-    decide = commands.add_parser("decide", help="evaluate the next governed loop step")
+    decide = commands.add_parser(
+        "decide", prog=prog, help="evaluate the next governed loop step"
+    )
     decide.add_argument(
         "--governed",
         action="store_true",
@@ -298,11 +309,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="exit 1 when a valid policy evaluation blocks or requests a gate",
     )
     decide.add_argument("request", help="decision-request JSON file, or - for stdin")
+    if prog:
+        # argparse reports an unrecognized argument from the top level, so the
+        # routed operation's own usage has to be the one the top level prints.
+        parser.usage = decide.format_usage().removeprefix("usage: ").rstrip("\n")
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    prog = (prog or "").strip() or None
+    args = _build_parser(prog=prog).parse_args(argv)
     try:
         request = _load_request(args.request)
     except RecursionError as error:

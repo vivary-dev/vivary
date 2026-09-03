@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import subprocess
@@ -16,6 +17,34 @@ CHECKER = REPOSITORY / "scripts" / "check_release_artifacts.py"
 LICENSE_BYTES = b"MIT fixture license\n"
 
 
+def load_checker():
+    spec = importlib.util.spec_from_file_location("release_artifacts", CHECKER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+PYTHON_CANDIDATES = load_checker().PYTHON_CANDIDATES
+
+
+def fixture_module(distribution: str) -> str:
+    """One module name per fixture distribution, independent of the real layout."""
+    return distribution.replace("-", "_")
+
+# One fixture version per candidate, independent of the real manifests.
+FIXTURE_VERSIONS = {
+    "vivary-core": "0.2.0",
+    "vivary-tropo": "0.5.0",
+    "vivary-strato": "0.1.0",
+    "vivary-ozone": "0.3.0",
+    "vivary-exo": "0.3.0",
+    "create-vivary": "0.4.2",
+    "vivary-memory-cognee": "0.1.0",
+    "vivary-mcp": "0.1.3",
+    "vivary": "0.1.10",
+}
+
+
 class ReleaseArtifactContractTests(unittest.TestCase):
     def _write_manifest(self, repository: Path, package: str, name: str, version: str) -> None:
         package_root = repository / "packages" / package
@@ -23,7 +52,10 @@ class ReleaseArtifactContractTests(unittest.TestCase):
         (package_root / "pyproject.toml").write_text(
             "[project]\n"
             f'name = "{name}"\n'
-            f'version = "{version}"\n',
+            f'version = "{version}"\n'
+            "\n"
+            "[tool.setuptools]\n"
+            f'py-modules = ["{fixture_module(name)}"]\n',
             encoding="utf-8",
         )
 
@@ -36,6 +68,7 @@ class ReleaseArtifactContractTests(unittest.TestCase):
         normalized = distribution.replace("-", "_")
         wheel = artifacts / f"{normalized}-{version}-py3-none-any.whl"
         with zipfile.ZipFile(wheel, "w") as archive:
+            archive.writestr(f"{fixture_module(distribution)}.py", "")
             archive.writestr(
                 f"{normalized}-{version}.dist-info/licenses/LICENSE",
                 LICENSE_BYTES,
@@ -67,12 +100,8 @@ class ReleaseArtifactContractTests(unittest.TestCase):
         (repository / "LICENSE").parent.mkdir(parents=True)
         (repository / "LICENSE").write_bytes(LICENSE_BYTES)
 
-        candidates = (
-            ("create-vivary", "create-vivary", "0.4.2"),
-            ("mcp", "vivary-mcp", "0.1.3"),
-            ("vivary", "vivary", "0.1.10"),
-        )
-        for package, distribution, version in candidates:
+        for package, distribution in PYTHON_CANDIDATES:
+            version = FIXTURE_VERSIONS[distribution]
             self._write_manifest(repository, package, distribution, version)
             self._write_python_artifacts(artifacts, distribution, version)
 
@@ -109,13 +138,24 @@ class ReleaseArtifactContractTests(unittest.TestCase):
             check=False,
         )
 
+    def test_every_published_python_package_is_a_candidate(self) -> None:
+        published = {
+            manifest.parent.name
+            for manifest in (REPOSITORY / "packages").glob("*/pyproject.toml")
+        }
+        self.assertEqual({package for package, _ in PYTHON_CANDIDATES}, published)
+        self.assertEqual(set(FIXTURE_VERSIONS), {name for _, name in PYTHON_CANDIDATES})
+
     def test_complete_release_artifact_set_passes(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:
             repository, artifacts = self._complete_fixture(Path(raw_root))
             result = self._run_checker(repository, artifacts)
 
+        expected = 2 * len(PYTHON_CANDIDATES) + 1
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-        self.assertIn("7 release artifacts passed license verification", result.stdout)
+        self.assertIn(
+            f"{expected} release artifacts passed license verification", result.stdout
+        )
 
     def test_npm_scope_passes_without_python_archives(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:
@@ -195,6 +235,90 @@ class ReleaseArtifactContractTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(f"{tgz}: missing package/LICENSE", result.stderr)
+
+
+    def test_a_wheel_that_carries_more_than_its_module_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            repository, artifacts = self._complete_fixture(Path(raw_root))
+            wheel = artifacts / "vivary_tropo-0.5.0-py3-none-any.whl"
+            with zipfile.ZipFile(wheel, "a") as archive:
+                archive.writestr("tests/test_tropo.py", "")
+            result = self._run_checker(repository, artifacts)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(f"{wheel}: wheel carries", result.stderr)
+        self.assertIn("tests/test_tropo.py", result.stderr)
+
+    def test_a_wheel_without_its_declared_module_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            repository, artifacts = self._complete_fixture(Path(raw_root))
+            wheel = artifacts / "vivary_exo-0.3.0-py3-none-any.whl"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr(
+                    "vivary_exo-0.3.0.dist-info/licenses/LICENSE", LICENSE_BYTES
+                )
+                archive.writestr("vivary_exo-0.3.0.dist-info/METADATA", "")
+            result = self._run_checker(repository, artifacts)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("carries no module beside its metadata", result.stderr)
+
+    def test_a_wheel_missing_its_metadata_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            repository, artifacts = self._complete_fixture(Path(raw_root))
+            wheel = artifacts / "vivary-0.1.10-py3-none-any.whl"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr("vivary.py", "")
+                archive.writestr("vivary-0.1.10.dist-info/licenses/LICENSE", LICENSE_BYTES)
+            result = self._run_checker(repository, artifacts)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing vivary-0.1.10.dist-info/METADATA", result.stderr)
+
+    def test_an_sdist_that_ships_tests_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            repository, artifacts = self._complete_fixture(Path(raw_root))
+            sdist = artifacts / "vivary_strato-0.1.0.tar.gz"
+            with tarfile.open(sdist, "w:gz") as archive:
+                for name, content in (
+                    ("vivary_strato-0.1.0/LICENSE", LICENSE_BYTES),
+                    ("vivary_strato-0.1.0/tests/test_strato.py", b""),
+                ):
+                    info = tarfile.TarInfo(name)
+                    info.size = len(content)
+                    archive.addfile(info, io.BytesIO(content))
+            result = self._run_checker(repository, artifacts)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(f"{sdist}: sdist carries the test directory", result.stderr)
+
+    def test_a_package_wheel_is_held_to_its_declared_packages(self) -> None:
+        module = load_checker()
+        wheel = Path("vivary_core-0.2.7-py3-none-any.whl")
+        names = [
+            "vivary_core/__init__.py",
+            "vivary_core-0.2.7.dist-info/METADATA",
+        ]
+        module.require_wheel_inventory(
+            wheel, names, "vivary_core-0.2.7.dist-info/", "core", [], ["vivary_core"]
+        )
+        with self.assertRaises(SystemExit) as raised:
+            module.require_wheel_inventory(
+                wheel,
+                [*names, "tests/test_core.py"],
+                "vivary_core-0.2.7.dist-info/",
+                "core",
+                [],
+                ["vivary_core"],
+            )
+        self.assertIn("outside ['vivary_core']", str(raised.exception))
+
+    def test_every_real_manifest_declares_an_artifact_allowlist(self) -> None:
+        module = load_checker()
+        for package, _ in PYTHON_CANDIDATES:
+            with self.subTest(package=package):
+                py_modules, packages = module.declared_payload(REPOSITORY, package)
+                self.assertTrue(py_modules or packages)
 
 
 if __name__ == "__main__":

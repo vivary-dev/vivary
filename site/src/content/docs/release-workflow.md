@@ -299,6 +299,18 @@ uvx --no-cache --index-url https://pypi.org/simple --from vivary-mcp==<ver> viva
 uvx --no-cache --index-url https://pypi.org/simple --from create-vivary==<ver> create-vivary --version
 ```
 
+Smoke the front door's routed verbs from the registry as well. The first line of
+`uvx --no-cache --index-url https://pypi.org/simple --from vivary==<ver> vivary check
+--help` must be `usage: vivary check`, and the installed parity checker must pass
+against a venv built from the registry:
+
+```bash
+python -m venv /tmp/vivary-registry
+/tmp/vivary-registry/bin/pip install --index-url https://pypi.org/simple vivary==<ver>
+python scripts/check_installed_route_parity.py /tmp/vivary-registry/bin
+python scripts/check_installed_route_parity.py --characterize /tmp/vivary-registry/bin
+```
+
 If npm changed, verify both the registry version and the launcher path:
 
 ```bash

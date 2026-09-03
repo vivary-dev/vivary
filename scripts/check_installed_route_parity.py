@@ -1,9 +1,10 @@
-"""Prove the installed Vivary front door matches the standalone commands.
+"""Prove the installed Vivary front door matches the seam it routes to.
 
 Given the script directory of a virtual environment that has `vivary` and its
 components installed, this runs every legacy help command, compares each routed
-verb against the component invocation it stands for, and checks that an unrouted
-component operation stays standalone and stays out of the front door's help.
+verb against the installed component run under the same program name, and checks
+that an unrouted component operation stays standalone and stays out of the front
+door's help.
 
 With --characterize it instead replays the repository characterization table
 through the installed console scripts, so the frozen command surface is proven
@@ -14,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -24,7 +24,25 @@ from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parents[1]
 VAULT = str(ROOT / "packages" / "tropo" / "examples" / "vault")
-CHARACTERIZATION_TESTS = ROOT / "packages" / "vivary" / "tests"
+VIVARY_PACKAGE = ROOT / "packages" / "vivary"
+CHARACTERIZATION_TESTS = VIVARY_PACKAGE / "tests"
+
+# Appended, never prepended, so this checkout cannot shadow a module the caller
+# put ahead of it.
+for _path in (VIVARY_PACKAGE, CHARACTERIZATION_TESTS):
+    if str(_path) not in sys.path:
+        sys.path.append(str(_path))
+
+import vivary_cli
+from cli_runner import pinned_env
+
+routed_prog = vivary_cli.routed_prog
+
+# The installed table names the module that enters a `-c` source, so it is held
+# to an identifier this checkout already knows.
+MODULE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+UNKNOWN_FLAG = "--definitely-not-a-flag"
 
 LEGACY_COMMANDS = (
     ("vivary", ("--help",)),
@@ -46,14 +64,6 @@ FIXTURE_ARGS = {
     "review": ("--root", VAULT),
     "impact": ("nope-id", "--root", VAULT),
     "control": ("--governed", "missing.json", "--strict"),
-}
-
-COMMAND_FOR_MODULE = {
-    "create_vivary": "create-vivary",
-    "tropo": "tropo",
-    "strato": "strato",
-    "ozone": "ozone",
-    "exo": "exo",
 }
 
 SCRIPT_FOR_CASE = {
@@ -87,16 +97,51 @@ def script_path(bin_dir: Path, name: str) -> Path:
     return windows if windows.exists() else bin_dir / name
 
 
-def compare(label: str, routed: Result, standalone: Result) -> list[str]:
-    problems = []
-    if routed.code != standalone.code:
-        problems.append(
-            f"{label}: exit code {routed.code} does not match {standalone.code}"
+def refuse_unknown_module(module: str) -> None:
+    """Refuse a module name the checkout does not route before it is executed."""
+    if MODULE_NAME.fullmatch(module) is None or module not in vivary_cli.COMPONENTS:
+        raise SystemExit(
+            f"{module}: the installed route table names a module this checkout"
+            " does not route"
         )
-    if routed.stdout != standalone.stdout:
-        problems.append(f"{label}: stdout does not match the standalone command")
-    if routed.stderr != standalone.stderr:
-        problems.append(f"{label}: stderr does not match the standalone command")
+
+
+def oracle_source(module: str, operation: list[str], args: tuple[str, ...], name: str) -> str:
+    """Source that runs the installed component under the router's program name."""
+    return (
+        f"import {module}\n"
+        f"raise SystemExit({module}.main({[*operation, *args]!r}, prog={name!r}))\n"
+    )
+
+
+def compare(label: str, routed: Result, expected: Result) -> list[str]:
+    """Compare one routed run with the component run under the same program name."""
+    problems = []
+    if routed.code != expected.code:
+        problems.append(
+            f"{label}: exit code {routed.code} does not match {expected.code}"
+        )
+    for stream, left, right in zip(
+        ("stdout", "stderr"),
+        (routed.stdout, routed.stderr),
+        (expected.stdout, expected.stderr),
+    ):
+        if left != right:
+            problems.append(f"{label}: {stream} does not match the component run")
+    return problems
+
+
+def usage_error_problems(label: str, name: str, routed: Result) -> list[str]:
+    """Judge a routed usage error on its exit code, its silence, and its name."""
+    problems = []
+    if routed.code != 2:
+        problems.append(f"{label}: exited {routed.code} instead of the usage error 2")
+    if routed.stdout != "":
+        problems.append(f"{label}: a usage error must not write stdout")
+    if not routed.stderr.startswith(f"usage: {name}"):
+        problems.append(f"{label}: stderr does not open with usage: {name}")
+    if f"{name}: error:" not in routed.stderr:
+        problems.append(f"{label}: stderr carries no {name}: error: prefix")
     return problems
 
 
@@ -124,8 +169,6 @@ def unrouted_problems(
 
 def load_command_surface():
     """Import the characterization table the repository suite records."""
-    if str(CHARACTERIZATION_TESTS) not in sys.path:
-        sys.path.insert(0, str(CHARACTERIZATION_TESTS))
     import test_command_surface_characterization as surface
 
     return surface
@@ -136,20 +179,7 @@ def characterized_problems(surface, case, result: Result) -> list[str]:
     script = SCRIPT_FOR_CASE.get(case.command)
     if script is None:
         return [f"{case.name}: {case.command} has no installed console script"]
-    return surface.case_problems(
-        case, result.code, result.stdout, result.stderr, installed=True
-    )
-
-
-def base_env() -> dict[str, str]:
-    env = dict(os.environ)
-    env.pop("VIVARY_RECEIPT_LOG", None)
-    env.pop("PYTHONWARNINGS", None)
-    env.pop("PYTHONPATH", None)
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["COLUMNS"] = "80"
-    return env
+    return surface.case_problems(case, result.code, result.stdout, result.stderr)
 
 
 class Runner:
@@ -162,7 +192,7 @@ class Runner:
         completed = subprocess.run(
             argv,
             cwd=cwd,
-            env=base_env(),
+            env=pinned_env(),
             stdin=subprocess.DEVNULL,
             capture_output=True,
             encoding="utf-8",
@@ -254,21 +284,31 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{bin_dir}: could not read the installed route table", file=sys.stderr)
             return 2
         routes = json.loads(probe.stdout)
+        for _, module, _ in routes:
+            refuse_unknown_module(module)
 
         helps = 0
+        usage_errors = 0
         fixtures = 0
         for verb, module, operation in routes:
-            command = COMMAND_FOR_MODULE[module]
-            cases = [("--help",)]
+            name = routed_prog(verb)
+            cases = [("--help",), (UNKNOWN_FLAG,)]
             if verb in FIXTURE_ARGS:
                 cases.append(FIXTURE_ARGS[verb])
             for case in cases:
                 routed = runner.run("vivary", (verb, *case), work)
-                standalone = runner.run(command, (*operation, *case), work)
+                expected = runner.run_python(
+                    oracle_source(module, operation, case, name), work
+                )
                 label = f"vivary {verb} {' '.join(case)}"
-                problems.extend(compare(label, routed, standalone))
+                problems.extend(compare(label, routed, expected))
                 if case == ("--help",):
+                    if not routed.stdout.startswith(f"usage: {name}"):
+                        problems.append(f"{label}: routed help does not name {name}")
                     helps += 1
+                elif case == (UNKNOWN_FLAG,):
+                    problems.extend(usage_error_problems(label, name, routed))
+                    usage_errors += 1
                 else:
                     fixtures += 1
 
@@ -290,7 +330,8 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"{bin_dir}: installed route parity passed"
         f" ({len(LEGACY_COMMANDS)} legacy command(s), {helps} help parity,"
-        f" {fixtures} fixture parity, 1 unrouted operation)"
+        f" {usage_errors} usage-error parity, {fixtures} fixture parity,"
+        " 1 unrouted operation)"
     )
     return 0
 
