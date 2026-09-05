@@ -1,9 +1,10 @@
 # 02a: Define the preservation manifest and restore acceptance fixtures
 Type: packet
 Parent: 02
-Status: in-progress
+Status: done
 Depends-on: []
 Owner: integration agent
+Evidence: [Review receipt](../receipts/02a-preservation-contract.md)
 Scope: Synthetic manifest and restore test cases; no real source import or deletion.
 Verification-kind: inspection
 Timebox: One context window; end after the manifest and failure cases are reviewed.
@@ -66,3 +67,7 @@ Name those limits in the receipt and prepare the executable successor.
 - 2026-09-05: Prepared as independent source-preservation contract work. Planned output files are deliverables. Actual restoration and imported-source licenses remain outcome 02 acceptance work.
 
 - 2026-09-05: Integration agent claimed this first independent packet and created the manifest contract and 13 synthetic acceptance cases. Second-reader review and CI are pending. Outcome 02 remains incomplete.
+
+- 2026-09-05: Two-reader review found and corrected the initial prose-only fixture ambiguity. The contract now has 33 structured acceptance cases, including positive resume and malformed-input refusal. JSON parsed and case IDs are unique. Documentation CI remains pending; no restoration result is claimed.
+
+- 2026-09-05: Inspection acceptance complete; the two-reader review and [CI guard suite](https://github.com/vivary-dev/vivary/actions/runs/33990271792) passed. Supersedes earlier pending-review log entries. Final publication checks are tracked on PR #328. Source restoration and BrowserPod runtime behavior remain open.

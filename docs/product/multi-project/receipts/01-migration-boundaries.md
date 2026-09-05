@@ -74,42 +74,21 @@ Ticket 10 retains the real runtime acceptance work. Ticket 01 does not close AC-
 
 The public boundary map now covers the public repositories, private and local-only source classes, dirty-work categories, S-00A and S-00 through S-13 responsibilities, known license-file findings, proposed public owners, destination classes, and unresolved authority. The map deliberately omits private coordinates and does not state that any source has been restored.
 
-The documentation candidate is ready for human review through the normal pull-request workflow. The repository validator, line-ending check, and diff check must pass in the isolated Vivary worktree before the corrected ticket 01 acceptance is recorded.
+The documentation and provenance outcome is complete. Two-reader scope review, the generated-plan guard, all 17 adversarial guard tests, line endings, and diff hygiene passed in [CI](https://github.com/vivary-dev/vivary/actions/runs/33990271792). PR merge remains a separate human gate. This receipt does not authorize or prove source import.
 
-## Next packet: ticket 02 source-preservation proof
+## Successor packets
 
-Status remains `needs-info` until this receipt is accepted, the private source manifest has an owner, and license dispositions exist for every selected slice.
+Current dispatch belongs to [the generated graph](../graph.md). The earlier
+embedded task proposals are superseded by the bounded packet files:
 
-- Scope: prove a copy-and-restore method with disposable fixtures. Do not edit a source checkout, import product code, or retire anything.
-- Owning files: `scripts/prove_multi_project_source_preservation.py`, `scripts/tests/test_prove_multi_project_source_preservation.py`, `tests/fixtures/multi-project/source-preservation/`, and `docs/product/multi-project/receipts/02-source-preservation.md`.
-- Acceptance: the approved manifest binds source class, selected relative paths, content hashes, history or attribution method, dirty-file capture, license disposition, restore destination, and owner. A disposable restoration matches the manifest. Both source repositories remain unchanged. The receipt distinguishes public history, private material, and local-only material.
-- Commands after the missing inputs exist:
+- [02a](../packets/02a-source-preservation-fixture.md) defines the synthetic
+  preservation contract and fixture oracle; it needs no real-source import.
+- [02b](../packets/02b-restore-fixture-harness.md) executes restoration in
+  BrowserPod after the toolchain proof. Only real-source import requires the
+  selected private manifest and applicable license dispositions.
+- [03a](../packets/03a-project-registry-contract.md) can define the portable
+  registry contract now. Choosing a persistence owner is part of subsequent
+  integration; planned output files are not start prerequisites.
 
-```console
-python -m pytest scripts/tests/test_prove_multi_project_source_preservation.py -q
-python scripts/prove_multi_project_source_preservation.py --fixture tests/fixtures/multi-project/source-preservation --output docs/product/multi-project/receipts/02-source-preservation.md --check
-python scripts/check_multi_project_plan.py --check
-python scripts/check_line_endings.py
-git diff --check
-```
-
-The first two commands name the required future script and test contract; they are not claimed to exist or pass in this receipt.
-
-## Next packet: ticket 03 registry contract
-
-Status remains `needs-info` until this receipt is accepted and the application package and persistence owner are selected.
-
-- Scope: define portable project identity, machine-local bindings, authority, idempotency, and repository-level mutation serialization. Do not build project UI or treat the existing workspace-graph `project` type as the registry.
-- Owning files: `docs/product/multi-project/contracts/project-registry.md`, `docs/product/multi-project/fixtures/project-registry.json`, `scripts/check_multi_project_registry_contract.py`, and `scripts/tests/test_multi_project_registry_contract.py`. The contract must name exact production implementation files before the ticket becomes actionable.
-- Acceptance: fixtures cover an external no-VCS root, Git repository, linked worktree, monorepo with two logical projects, colocated Jujutsu workspace, moved path, missing root, duplicate registration, shared repository identity, stale authority, and concurrent mutation ownership. Portable identity round-trips without a machine path or secret. Duplicate requests converge. Shared repository mutations serialize under one owner.
-- Commands after the missing owner and files exist:
-
-```console
-python -m pytest scripts/tests/test_multi_project_registry_contract.py -q
-python scripts/check_multi_project_registry_contract.py --fixtures docs/product/multi-project/fixtures/project-registry.json --check
-python scripts/check_multi_project_plan.py --check
-python scripts/check_line_endings.py
-git diff --check
-```
-
-The first two commands name the required future checker and test contract; they are not claimed to exist or pass in this receipt.
+These packet files own implementation paths, commands, and exact prerequisites.
+Do not dispatch from historical commands embedded in older receipt revisions.

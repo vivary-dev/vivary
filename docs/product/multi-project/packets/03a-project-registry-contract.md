@@ -31,7 +31,9 @@ live connection, or production-placement prerequisite.
 ## Done condition
 
 1. Define stable project identity separately from portable content identity,
-   local path, common repository identity, checkout identity, and runtime session.
+   local path, common repository identity, checkout identity, runtime session,
+   and BrowserPod execution-copy identity. Define revision-checked write-back;
+   do not imply that the pod disk is the original device folder.
 2. Define registration as a read-only inspection plus a registry write. It must
    not initialize VCS, modify project files, create remotes, or adopt implicitly.
 3. Define deterministic expected results for no-VCS, Git, linked worktree,

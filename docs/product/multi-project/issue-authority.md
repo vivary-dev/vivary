@@ -37,3 +37,7 @@ mapping. Detailed requirements remain linked canonical documents. Issue status,
 assignee, dependencies, and evidence become authoritative; generated graph
 snapshots must record the source revision and be refreshed after each unit.
 No agent may silently maintain conflicting Markdown and issue statuses.
+
+2026-09-05 live reconciliation: issues 151 and 214 now point to this program and
+no longer carry `priority:now`. Issue 148 explicitly excludes WSL for this work.
+Their original bodies are preserved, no issue was closed, and PR #328 is `active`.

@@ -1,8 +1,9 @@
 # 01: Reconcile migration provenance and product boundaries
 Type: outcome
-Status: in-progress
+Status: done
 Blocked-by: []
 Owner: integration agent
+Evidence: [Review receipt](../receipts/01-migration-boundaries.md)
 Scope: Public documentation and provenance reconciliation only. Human action is limited to reviewing the documentation pull request.
 Unlocks: [02, 03]
 
@@ -42,3 +43,5 @@ git diff --check
 - 2026-09-05: Habitat graph/link/privacy guard passed for all 36 tickets; six adversarial guard fixtures passed. Public source was reviewed for private material. Line endings passed. Final diff hygiene and PR CI are recorded in the pull request. Ticket remains ready-for-human for documentation review; no source import or release gate is closed.
 
 - 2026-09-05: Owner corrected the execution environment to BrowserPod and explicitly excluded Habitat/WSL. Historical checks retain their actual environment labels; BrowserPod proof is pending. Program and entry-point instructions now preserve this decision. Shared plan is in PR #328 for review.
+
+- 2026-09-05: Inspection acceptance complete; the two-reader review and [CI guard suite](https://github.com/vivary-dev/vivary/actions/runs/33990271792) passed. Supersedes earlier pending-review log entries. Final publication checks are tracked on PR #328. Source restoration and BrowserPod runtime behavior remain open.

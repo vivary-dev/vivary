@@ -20,6 +20,8 @@ Vivary helps people and their agents work in portable filesystem workspaces. The
 
 **Adoption**: Adding the bounded Vivary contract to an existing project through a previewed, conflict-aware change. Existing instructions, history, tooling, and files remain owned by the project.
 
+**Execution copy**: A scoped snapshot or working copy made available to BrowserPod. It is distinct from the authoritative project root. File changes reach that root only through an explicit, revision-checked write-back operation. A BrowserPod disk does not prove access to an existing device folder.
+
 **Runtime binding**: The association of a session with a particular agent runtime, project root, execution location, and applicable authority.
 
 **Session**: An interaction owned by a selected runtime and referenced by the workbench. Resuming a session preserves its project and execution binding.

@@ -10,13 +10,13 @@ gate completion. Agents execute bounded packets; a future feature or release
 decision does not block an independent packet. Packet dependencies gate starts.
 
 Frontier: 03a.
-In progress: 02a.
+In progress: none.
 
 ## Execution packets
 
 | Packet | Parent | Status | Start dependencies |
 | --- | --- | --- | --- |
-| [02a: Define the preservation manifest and restore acceptance fixtures](packets/02a-source-preservation-fixture.md) | 02 | in-progress | [] |
+| [02a: Define the preservation manifest and restore acceptance fixtures](packets/02a-source-preservation-fixture.md) | 02 | done | [] |
 | [02b: Implement and execute the synthetic restoration harness](packets/02b-restore-fixture-harness.md) | 02 | needs-info | [02a, 10b] |
 | [03a: Define the portable registry contract and acceptance fixtures](packets/03a-project-registry-contract.md) | 03 | ready-for-agent | [] |
 | [10a: Establish the BrowserPod compatibility boundary](packets/10a-browserpod-compatibility-preflight.md) | 10 | done | [] |
@@ -26,7 +26,7 @@ In progress: 02a.
 
 | Outcome | Status | Completion dependencies |
 | --- | --- | --- |
-| [01: Reconcile migration provenance and product boundaries](tickets/01-reconcile-migration-boundaries.md) | in-progress | [] |
+| [01: Reconcile migration provenance and product boundaries](tickets/01-reconcile-migration-boundaries.md) | done | [] |
 | [02: Prove source integration can preserve history and dirty work](tickets/02-prove-source-preservation.md) | in-progress | [01] |
 | [03: Define project registry and authority contracts](tickets/03-define-project-registry.md) | planned | [01] |
 | [04: Define runtime, session, action, and tool contracts](tickets/04-define-runtime-session-contracts.md) | planned | [02, 03] |

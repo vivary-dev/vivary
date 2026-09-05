@@ -34,3 +34,11 @@ not product acceptance, a security certification, or a release result.
 No observed BrowserPod behavior, source restoration, new artifact release, or
 100% result is claimed. New findings repair the owning packet and its evidence;
 they do not silently change product direction or stop unrelated ready work.
+
+## Verification checkpoint
+
+[CI](https://github.com/vivary-dev/vivary/actions/runs/33990271792) passed all jobs, including the 17 adversarial planning-guard tests,
+graph validation, line endings, diff hygiene, site build, and Windows checks.
+Outcome 01 and inspection packets 02a and 10a are complete. Packet 03a is the
+next independent task. These results do not prove the 33 restoration cases;
+02b must execute them after 10b establishes the BrowserPod toolchain.
