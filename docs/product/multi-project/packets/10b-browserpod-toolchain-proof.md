@@ -72,7 +72,7 @@ bounded packets once the required tools pass.
 
 No payment, new account, allowance increase, credential transfer, global header
 change, or replacement environment. If the approved connection cannot boot,
-record the exact failure and leave this packet open. Continue 02a/03a and probe
+record the exact failure and leave this packet open. Continue independent ready packets from the graph and probe
 source preparation. Stop after one session's checks; do not churn pod boots.
 
 ## Log

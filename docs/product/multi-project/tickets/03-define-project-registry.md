@@ -35,7 +35,7 @@ git diff --check
 
 ## Next packet
 
-[03a](../packets/03a-project-registry-contract.md) owns the independent contract and acceptance-fixture work. Planned files are outputs. Live execution, real source import, and full parent acceptance remain separate work.
+[03b](../packets/03b-registry-contract-model.md) owns executable model and concurrency verification after 10b proves the BrowserPod toolchain. [03a](../receipts/03a-registry-contract.md) records the completed contract inspection. Production integration and full parent acceptance remain separate work.
 
 ## Log
 

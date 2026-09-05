@@ -86,8 +86,8 @@ embedded task proposals are superseded by the bounded packet files:
 - [02b](../packets/02b-restore-fixture-harness.md) executes restoration in
   BrowserPod after the toolchain proof. Only real-source import requires the
   selected private manifest and applicable license dispositions.
-- [03a](../packets/03a-project-registry-contract.md) can define the portable
-  registry contract now. Choosing a persistence owner is part of subsequent
+- [03a](../packets/03a-project-registry-contract.md) owns portable registry
+  contract inspection. Its current status belongs to the graph. Choosing a persistence owner is part of subsequent
   integration; planned output files are not start prerequisites.
 
 These packet files own implementation paths, commands, and exact prerequisites.
