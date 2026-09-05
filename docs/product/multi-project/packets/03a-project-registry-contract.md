@@ -1,11 +1,12 @@
 # 03a: Define the portable registry contract and acceptance fixtures
 Type: packet
 Parent: 03
-Status: ready-for-agent
+Status: done
 Depends-on: []
-Owner: registry contract agent
+Owner: Codex integration agent
 Scope: Contract, data fixtures, and test expectations only; no persistence implementation.
 Verification-kind: inspection
+Evidence: [Registry inspection receipt](../receipts/03a-registry-contract.md)
 Timebox: One context window; stop after the contract and fixtures are reviewed.
 
 ## Goal
@@ -69,3 +70,7 @@ than inventing a production default. BrowserPod remains the execution choice.
 ## Log
 
 - 2026-09-05: Prepared as independent contract work. App placement and future output files are no longer circular start prerequisites. No registry implementation or behavior result is claimed.
+
+- 2026-09-05: Codex integration agent claimed 03a under the owner's instruction to take the next issue. One reader inspects existing schema semantics; only the integration agent writes this contract and fixtures. Browserbase was requested for verification and its connection is being checked. No runtime, source import, or database selection is needed for this inspection packet.
+
+- 2026-09-05: Source review, two-reader contract/fixture review, JSON inspection, exact record expectations, and documentation checks completed. Browserbase was requested but is not exposed to this session. No browser or product runtime ran. The executable successor is 03b, which requires 10b's actual BrowserPod toolchain proof. Parent 03 remains in progress; PR #328 carries final publication checks.

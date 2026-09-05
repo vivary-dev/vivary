@@ -1,0 +1,2890 @@
+{
+  "fixtureVersion": 1,
+  "contract": "vivary.project-registry-contract.v1",
+  "inputs": {
+    "register": {
+      "operation": "register",
+      "request": {
+        "operationId": "op-register",
+        "expectedPolicyRevision": 1,
+        "expectedRegistryRevision": 7,
+        "locationRef": "location-a",
+        "displayName": "Example project",
+        "contentIdentity": null,
+        "attachProjectId": null
+      },
+      "trusted": {
+        "actorId": "actor-a",
+        "collectionId": "collection-a",
+        "deviceId": "device-a",
+        "member": true,
+        "capabilities": [
+          "register-project",
+          "export-project",
+          "rebind-project",
+          "mutate-project",
+          "write-back-project"
+        ],
+        "rootAccess": [
+          "root-a",
+          "root-b",
+          "root-sub"
+        ],
+        "policyRevision": 1,
+        "registryRevision": 7,
+        "root": {
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "content-a",
+          "vcs": {
+            "kind": "none",
+            "repositoryId": null,
+            "checkoutId": null,
+            "mutationOwner": null
+          }
+        },
+        "portable": null,
+        "binding": null,
+        "existingRootBindings": [],
+        "receipt": null,
+        "allocatedProjectId": "project-new",
+        "allocatedBindingId": "binding-new",
+        "allocatedIdsInUse": false,
+        "reservations": [],
+        "nextFence": 8,
+        "execution": null,
+        "patchVerified": true,
+        "overlapSafe": true,
+        "privateState": {
+          "locator": "synthetic-local-only",
+          "credentialRef": "synthetic-credential-only",
+          "remoteRef": "synthetic-remote-only"
+        }
+      }
+    },
+    "export": {
+      "operation": "export",
+      "request": {
+        "operationId": "op-export",
+        "expectedPolicyRevision": 1,
+        "projectId": "project-a"
+      },
+      "trusted": {
+        "actorId": "actor-a",
+        "collectionId": "collection-a",
+        "deviceId": "device-a",
+        "member": true,
+        "capabilities": [
+          "register-project",
+          "export-project",
+          "rebind-project",
+          "mutate-project",
+          "write-back-project"
+        ],
+        "rootAccess": [
+          "root-a",
+          "root-b",
+          "root-sub"
+        ],
+        "policyRevision": 1,
+        "registryRevision": 7,
+        "root": {
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "content-a",
+          "vcs": {
+            "kind": "none",
+            "repositoryId": null,
+            "checkoutId": null,
+            "mutationOwner": null
+          }
+        },
+        "portable": {
+          "schemaVersion": 1,
+          "projectId": "project-a",
+          "displayName": "Example project",
+          "contentIdentity": null
+        },
+        "binding": {
+          "bindingId": "binding-a",
+          "projectId": "project-a",
+          "collectionId": "collection-a",
+          "actorId": "actor-a",
+          "deviceId": "device-a",
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "bindingRevision": 1,
+          "policyRevision": 1,
+          "vcs": {
+            "kind": "none",
+            "repositoryId": null,
+            "checkoutId": null,
+            "mutationOwner": null
+          }
+        },
+        "existingRootBindings": [],
+        "receipt": null,
+        "allocatedProjectId": "project-new",
+        "allocatedBindingId": "binding-new",
+        "allocatedIdsInUse": false,
+        "reservations": [],
+        "nextFence": 8,
+        "execution": null,
+        "patchVerified": true,
+        "overlapSafe": true,
+        "privateState": {
+          "locator": "synthetic-local-only",
+          "credentialRef": "synthetic-credential-only",
+          "remoteRef": "synthetic-remote-only"
+        }
+      }
+    },
+    "rebind": {
+      "operation": "rebind",
+      "request": {
+        "operationId": "op-rebind",
+        "expectedPolicyRevision": 1,
+        "expectedRegistryRevision": 7,
+        "bindingId": "binding-a",
+        "expectedBindingRevision": 1,
+        "locationRef": "location-new"
+      },
+      "trusted": {
+        "actorId": "actor-a",
+        "collectionId": "collection-a",
+        "deviceId": "device-a",
+        "member": true,
+        "capabilities": [
+          "register-project",
+          "export-project",
+          "rebind-project",
+          "mutate-project",
+          "write-back-project"
+        ],
+        "rootAccess": [
+          "root-a",
+          "root-b",
+          "root-sub"
+        ],
+        "policyRevision": 1,
+        "registryRevision": 7,
+        "root": {
+          "rootId": "root-a",
+          "locationRef": "location-new",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "content-a",
+          "vcs": {
+            "kind": "none",
+            "repositoryId": null,
+            "checkoutId": null,
+            "mutationOwner": null
+          }
+        },
+        "portable": {
+          "schemaVersion": 1,
+          "projectId": "project-a",
+          "displayName": "Example project",
+          "contentIdentity": null
+        },
+        "binding": {
+          "bindingId": "binding-a",
+          "projectId": "project-a",
+          "collectionId": "collection-a",
+          "actorId": "actor-a",
+          "deviceId": "device-a",
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "bindingRevision": 1,
+          "policyRevision": 1,
+          "vcs": {
+            "kind": "none",
+            "repositoryId": null,
+            "checkoutId": null,
+            "mutationOwner": null
+          }
+        },
+        "existingRootBindings": [],
+        "receipt": null,
+        "allocatedProjectId": "project-new",
+        "allocatedBindingId": "binding-new",
+        "allocatedIdsInUse": false,
+        "reservations": [],
+        "nextFence": 8,
+        "execution": null,
+        "patchVerified": true,
+        "overlapSafe": true,
+        "privateState": {
+          "locator": "synthetic-local-only",
+          "credentialRef": "synthetic-credential-only",
+          "remoteRef": "synthetic-remote-only"
+        }
+      }
+    },
+    "admit": {
+      "operation": "admit-mutation",
+      "request": {
+        "operationId": "op-mutate",
+        "expectedPolicyRevision": 1,
+        "expectedRegistryRevision": 7,
+        "bindingId": "binding-a",
+        "expectedBindingRevision": 1,
+        "expectedContentRevision": "content-a",
+        "requestedVcsOwner": "git"
+      },
+      "trusted": {
+        "actorId": "actor-a",
+        "collectionId": "collection-a",
+        "deviceId": "device-a",
+        "member": true,
+        "capabilities": [
+          "register-project",
+          "export-project",
+          "rebind-project",
+          "mutate-project",
+          "write-back-project"
+        ],
+        "rootAccess": [
+          "root-a",
+          "root-b",
+          "root-sub"
+        ],
+        "policyRevision": 1,
+        "registryRevision": 7,
+        "root": {
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "content-a",
+          "vcs": {
+            "kind": "git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "git"
+          }
+        },
+        "portable": {
+          "schemaVersion": 1,
+          "projectId": "project-a",
+          "displayName": "Example project",
+          "contentIdentity": null
+        },
+        "binding": {
+          "bindingId": "binding-a",
+          "projectId": "project-a",
+          "collectionId": "collection-a",
+          "actorId": "actor-a",
+          "deviceId": "device-a",
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "bindingRevision": 1,
+          "policyRevision": 1,
+          "vcs": {
+            "kind": "git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "git"
+          }
+        },
+        "existingRootBindings": [],
+        "receipt": null,
+        "allocatedProjectId": "project-new",
+        "allocatedBindingId": "binding-new",
+        "allocatedIdsInUse": false,
+        "reservations": [],
+        "nextFence": 8,
+        "execution": null,
+        "patchVerified": true,
+        "overlapSafe": true,
+        "privateState": {
+          "locator": "synthetic-local-only",
+          "credentialRef": "synthetic-credential-only",
+          "remoteRef": "synthetic-remote-only"
+        }
+      }
+    },
+    "writeback": {
+      "operation": "authorize-write-back",
+      "request": {
+        "operationId": "op-mutate",
+        "expectedPolicyRevision": 1,
+        "bindingId": "binding-a",
+        "expectedBindingRevision": 1,
+        "expectedContentRevision": "content-a",
+        "requestedVcsOwner": "git",
+        "executionCopyId": "copy-a",
+        "patchDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "selectedPaths": [
+          "docs/note.txt"
+        ],
+        "fence": 8
+      },
+      "trusted": {
+        "actorId": "actor-a",
+        "collectionId": "collection-a",
+        "deviceId": "device-a",
+        "member": true,
+        "capabilities": [
+          "register-project",
+          "export-project",
+          "rebind-project",
+          "mutate-project",
+          "write-back-project"
+        ],
+        "rootAccess": [
+          "root-a",
+          "root-b",
+          "root-sub"
+        ],
+        "policyRevision": 1,
+        "registryRevision": 7,
+        "root": {
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "content-a",
+          "vcs": {
+            "kind": "git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "git"
+          }
+        },
+        "portable": {
+          "schemaVersion": 1,
+          "projectId": "project-a",
+          "displayName": "Example project",
+          "contentIdentity": null
+        },
+        "binding": {
+          "bindingId": "binding-a",
+          "projectId": "project-a",
+          "collectionId": "collection-a",
+          "actorId": "actor-a",
+          "deviceId": "device-a",
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "bindingRevision": 1,
+          "policyRevision": 1,
+          "vcs": {
+            "kind": "git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "git"
+          }
+        },
+        "existingRootBindings": [],
+        "receipt": null,
+        "allocatedProjectId": "project-new",
+        "allocatedBindingId": "binding-new",
+        "allocatedIdsInUse": false,
+        "reservations": [
+          {
+            "keys": [
+              "device-a:checkout:checkout-a",
+              "device-a:repository:repository-a"
+            ],
+            "ownerOperationId": "op-mutate",
+            "state": "active",
+            "fence": 8
+          }
+        ],
+        "nextFence": 8,
+        "execution": {
+          "sessionId": "native-session-a",
+          "actorId": "actor-a",
+          "projectId": "project-a",
+          "bindingId": "binding-a",
+          "bindingRevision": 1,
+          "policyRevision": 1,
+          "executionCopyId": "copy-a",
+          "baseContentRevision": "content-a"
+        },
+        "patchVerified": true,
+        "overlapSafe": true,
+        "privateState": {
+          "locator": "synthetic-local-only",
+          "credentialRef": "synthetic-credential-only",
+          "remoteRef": "synthetic-remote-only"
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "register-external-no-vcs",
+      "rules": [
+        "R2",
+        "R3",
+        "R5"
+      ],
+      "inputRef": "register",
+      "mutations": [],
+      "expect": {
+        "output": {
+          "code": "registered",
+          "projectId": "project-new",
+          "bindingId": "binding-new",
+          "bindingRevision": 1,
+          "replayed": false
+        },
+        "effects": [
+          "registry"
+        ],
+        "recordChanges": {
+          "insertPortable": {
+            "schemaVersion": 1,
+            "projectId": "project-new",
+            "displayName": "Example project",
+            "contentIdentity": null
+          },
+          "insertBinding": {
+            "bindingId": "binding-new",
+            "projectId": "project-new",
+            "collectionId": "collection-a",
+            "actorId": "actor-a",
+            "deviceId": "device-a",
+            "rootId": "root-a",
+            "locationRef": "location-a",
+            "bindingRevision": 1,
+            "policyRevision": 1,
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            }
+          },
+          "registryRevision": 8,
+          "insertReceipt": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "register",
+            "operationId": "op-register",
+            "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
+            "status": "complete",
+            "rootId": "root-a",
+            "output": {
+              "code": "registered",
+              "projectId": "project-new",
+              "bindingId": "binding-new",
+              "bindingRevision": 1,
+              "replayed": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "register-git",
+      "rules": [
+        "R4",
+        "R5"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/vcs",
+          "value": {
+            "kind": "git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "git"
+          }
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "registered",
+          "projectId": "project-new",
+          "bindingId": "binding-new",
+          "bindingRevision": 1,
+          "replayed": false
+        },
+        "effects": [
+          "registry"
+        ],
+        "recordChanges": {
+          "insertPortable": {
+            "schemaVersion": 1,
+            "projectId": "project-new",
+            "displayName": "Example project",
+            "contentIdentity": null
+          },
+          "insertBinding": {
+            "bindingId": "binding-new",
+            "projectId": "project-new",
+            "collectionId": "collection-a",
+            "actorId": "actor-a",
+            "deviceId": "device-a",
+            "rootId": "root-a",
+            "locationRef": "location-a",
+            "bindingRevision": 1,
+            "policyRevision": 1,
+            "vcs": {
+              "kind": "git",
+              "repositoryId": "repository-a",
+              "checkoutId": "checkout-a",
+              "mutationOwner": "git"
+            }
+          },
+          "registryRevision": 8,
+          "insertReceipt": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "register",
+            "operationId": "op-register",
+            "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
+            "status": "complete",
+            "rootId": "root-a",
+            "output": {
+              "code": "registered",
+              "projectId": "project-new",
+              "bindingId": "binding-new",
+              "bindingRevision": 1,
+              "replayed": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "register-linked-worktree",
+      "rules": [
+        "R4"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/rootId",
+          "value": "root-b"
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/root/locationRef",
+          "value": "location-b"
+        },
+        {
+          "op": "set",
+          "pointer": "/request/locationRef",
+          "value": "location-b"
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/root/vcs",
+          "value": {
+            "kind": "git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-b",
+            "mutationOwner": "git"
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/existingRootBindings",
+          "value": [
+            {
+              "bindingId": "binding-a",
+              "projectId": "project-a",
+              "collectionId": "collection-a",
+              "actorId": "actor-a",
+              "deviceId": "device-a",
+              "rootId": "root-a",
+              "locationRef": "location-a",
+              "bindingRevision": 1,
+              "policyRevision": 1,
+              "vcs": {
+                "kind": "none",
+                "repositoryId": null,
+                "checkoutId": null,
+                "mutationOwner": null
+              }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "registered",
+          "projectId": "project-new",
+          "bindingId": "binding-new",
+          "bindingRevision": 1,
+          "replayed": false
+        },
+        "effects": [
+          "registry"
+        ],
+        "recordChanges": {
+          "insertPortable": {
+            "schemaVersion": 1,
+            "projectId": "project-new",
+            "displayName": "Example project",
+            "contentIdentity": null
+          },
+          "insertBinding": {
+            "bindingId": "binding-new",
+            "projectId": "project-new",
+            "collectionId": "collection-a",
+            "actorId": "actor-a",
+            "deviceId": "device-a",
+            "rootId": "root-b",
+            "locationRef": "location-b",
+            "bindingRevision": 1,
+            "policyRevision": 1,
+            "vcs": {
+              "kind": "git",
+              "repositoryId": "repository-a",
+              "checkoutId": "checkout-b",
+              "mutationOwner": "git"
+            }
+          },
+          "registryRevision": 8,
+          "insertReceipt": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "register",
+            "operationId": "op-register",
+            "requestDigest": "4e9bac70d3a635d54c1f5c1b99989cff6cbf7383d921efe7061e5b928fc50a40",
+            "status": "complete",
+            "rootId": "root-b",
+            "output": {
+              "code": "registered",
+              "projectId": "project-new",
+              "bindingId": "binding-new",
+              "bindingRevision": 1,
+              "replayed": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "register-monorepo-subproject",
+      "rules": [
+        "R4"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/rootId",
+          "value": "root-sub"
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/root/locationRef",
+          "value": "location-sub"
+        },
+        {
+          "op": "set",
+          "pointer": "/request/locationRef",
+          "value": "location-sub"
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/root/vcs",
+          "value": {
+            "kind": "git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "git"
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/existingRootBindings",
+          "value": [
+            {
+              "bindingId": "binding-a",
+              "projectId": "project-a",
+              "collectionId": "collection-a",
+              "actorId": "actor-a",
+              "deviceId": "device-a",
+              "rootId": "root-a",
+              "locationRef": "location-a",
+              "bindingRevision": 1,
+              "policyRevision": 1,
+              "vcs": {
+                "kind": "git",
+                "repositoryId": "repository-a",
+                "checkoutId": "checkout-a",
+                "mutationOwner": "git"
+              }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "registered",
+          "projectId": "project-new",
+          "bindingId": "binding-new",
+          "bindingRevision": 1,
+          "replayed": false
+        },
+        "effects": [
+          "registry"
+        ],
+        "recordChanges": {
+          "insertPortable": {
+            "schemaVersion": 1,
+            "projectId": "project-new",
+            "displayName": "Example project",
+            "contentIdentity": null
+          },
+          "insertBinding": {
+            "bindingId": "binding-new",
+            "projectId": "project-new",
+            "collectionId": "collection-a",
+            "actorId": "actor-a",
+            "deviceId": "device-a",
+            "rootId": "root-sub",
+            "locationRef": "location-sub",
+            "bindingRevision": 1,
+            "policyRevision": 1,
+            "vcs": {
+              "kind": "git",
+              "repositoryId": "repository-a",
+              "checkoutId": "checkout-a",
+              "mutationOwner": "git"
+            }
+          },
+          "registryRevision": 8,
+          "insertReceipt": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "register",
+            "operationId": "op-register",
+            "requestDigest": "d4aae5bfeaf00e35dde81d51ac2ddc349425c4820524df2e4fd1dab598e0ba99",
+            "status": "complete",
+            "rootId": "root-sub",
+            "output": {
+              "code": "registered",
+              "projectId": "project-new",
+              "bindingId": "binding-new",
+              "bindingRevision": 1,
+              "replayed": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "register-colocated-jj-unresolved",
+      "rules": [
+        "R5",
+        "R11"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/vcs",
+          "value": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": null
+          }
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "registered",
+          "projectId": "project-new",
+          "bindingId": "binding-new",
+          "bindingRevision": 1,
+          "replayed": false
+        },
+        "effects": [
+          "registry"
+        ],
+        "recordChanges": {
+          "insertPortable": {
+            "schemaVersion": 1,
+            "projectId": "project-new",
+            "displayName": "Example project",
+            "contentIdentity": null
+          },
+          "insertBinding": {
+            "bindingId": "binding-new",
+            "projectId": "project-new",
+            "collectionId": "collection-a",
+            "actorId": "actor-a",
+            "deviceId": "device-a",
+            "rootId": "root-a",
+            "locationRef": "location-a",
+            "bindingRevision": 1,
+            "policyRevision": 1,
+            "vcs": {
+              "kind": "jj-git",
+              "repositoryId": "repository-a",
+              "checkoutId": "checkout-a",
+              "mutationOwner": null
+            }
+          },
+          "registryRevision": 8,
+          "insertReceipt": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "register",
+            "operationId": "op-register",
+            "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
+            "status": "complete",
+            "rootId": "root-a",
+            "output": {
+              "code": "registered",
+              "projectId": "project-new",
+              "bindingId": "binding-new",
+              "bindingRevision": 1,
+              "replayed": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "register-unsupported-vcs-read-only",
+      "rules": [
+        "R5"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/vcs",
+          "value": {
+            "kind": "unsupported",
+            "repositoryId": null,
+            "checkoutId": null,
+            "mutationOwner": null
+          }
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "registered",
+          "projectId": "project-new",
+          "bindingId": "binding-new",
+          "bindingRevision": 1,
+          "replayed": false
+        },
+        "effects": [
+          "registry"
+        ],
+        "recordChanges": {
+          "insertPortable": {
+            "schemaVersion": 1,
+            "projectId": "project-new",
+            "displayName": "Example project",
+            "contentIdentity": null
+          },
+          "insertBinding": {
+            "bindingId": "binding-new",
+            "projectId": "project-new",
+            "collectionId": "collection-a",
+            "actorId": "actor-a",
+            "deviceId": "device-a",
+            "rootId": "root-a",
+            "locationRef": "location-a",
+            "bindingRevision": 1,
+            "policyRevision": 1,
+            "vcs": {
+              "kind": "unsupported",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            }
+          },
+          "registryRevision": 8,
+          "insertReceipt": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "register",
+            "operationId": "op-register",
+            "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
+            "status": "complete",
+            "rootId": "root-a",
+            "output": {
+              "code": "registered",
+              "projectId": "project-new",
+              "bindingId": "binding-new",
+              "bindingRevision": 1,
+              "replayed": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "duplicate-root-different-operation",
+      "rules": [
+        "R4"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/existingRootBindings",
+          "value": [
+            {
+              "bindingId": "binding-a",
+              "projectId": "project-a",
+              "collectionId": "collection-a",
+              "actorId": "actor-a",
+              "deviceId": "device-a",
+              "rootId": "root-a",
+              "locationRef": "location-a",
+              "bindingRevision": 1,
+              "policyRevision": 1,
+              "vcs": {
+                "kind": "none",
+                "repositoryId": null,
+                "checkoutId": null,
+                "mutationOwner": null
+              }
+            }
+          ]
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/portable",
+          "value": {
+            "schemaVersion": 1,
+            "projectId": "project-a",
+            "displayName": "Example project",
+            "contentIdentity": null
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/binding",
+          "value": {
+            "bindingId": "binding-a",
+            "projectId": "project-a",
+            "collectionId": "collection-a",
+            "actorId": "actor-a",
+            "deviceId": "device-a",
+            "rootId": "root-a",
+            "locationRef": "location-a",
+            "bindingRevision": 1,
+            "policyRevision": 1,
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            }
+          }
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "already-registered",
+          "projectId": "project-a",
+          "bindingId": "binding-a",
+          "bindingRevision": 1,
+          "replayed": false
+        },
+        "effects": [
+          "registry"
+        ],
+        "recordChanges": {
+          "registryRevision": 8,
+          "insertReceipt": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "register",
+            "operationId": "op-register",
+            "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
+            "status": "complete",
+            "rootId": "root-a",
+            "output": {
+              "code": "already-registered",
+              "projectId": "project-a",
+              "bindingId": "binding-a",
+              "bindingRevision": 1,
+              "replayed": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "canonical-path-alias-converges",
+      "rules": [
+        "R3",
+        "R4"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/request/locationRef",
+          "value": "location-alias"
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/root/locationRef",
+          "value": "location-alias"
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/existingRootBindings",
+          "value": [
+            {
+              "bindingId": "binding-a",
+              "projectId": "project-a",
+              "collectionId": "collection-a",
+              "actorId": "actor-a",
+              "deviceId": "device-a",
+              "rootId": "root-a",
+              "locationRef": "location-a",
+              "bindingRevision": 1,
+              "policyRevision": 1,
+              "vcs": {
+                "kind": "none",
+                "repositoryId": null,
+                "checkoutId": null,
+                "mutationOwner": null
+              }
+            }
+          ]
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/portable",
+          "value": {
+            "schemaVersion": 1,
+            "projectId": "project-a",
+            "displayName": "Example project",
+            "contentIdentity": null
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/binding",
+          "value": {
+            "bindingId": "binding-a",
+            "projectId": "project-a",
+            "collectionId": "collection-a",
+            "actorId": "actor-a",
+            "deviceId": "device-a",
+            "rootId": "root-a",
+            "locationRef": "location-a",
+            "bindingRevision": 1,
+            "policyRevision": 1,
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            }
+          }
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "already-registered",
+          "projectId": "project-a",
+          "bindingId": "binding-a",
+          "bindingRevision": 1,
+          "replayed": false
+        },
+        "effects": [
+          "registry"
+        ],
+        "recordChanges": {
+          "registryRevision": 8,
+          "insertReceipt": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "register",
+            "operationId": "op-register",
+            "requestDigest": "cadb4f8208ebad0ad2aac306aaf06f72f1ce56f19fcec3afc4e88660ab0166a1",
+            "status": "complete",
+            "rootId": "root-a",
+            "output": {
+              "code": "already-registered",
+              "projectId": "project-a",
+              "bindingId": "binding-a",
+              "bindingRevision": 1,
+              "replayed": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "same-content-other-root-is-new",
+      "rules": [
+        "R4"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/rootId",
+          "value": "root-b"
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/root/locationRef",
+          "value": "location-b"
+        },
+        {
+          "op": "set",
+          "pointer": "/request/locationRef",
+          "value": "location-b"
+        },
+        {
+          "op": "set",
+          "pointer": "/request/contentIdentity",
+          "value": {
+            "algorithm": "sha256",
+            "manifestDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/portable",
+          "value": {
+            "schemaVersion": 1,
+            "projectId": "project-a",
+            "displayName": "Example project",
+            "contentIdentity": {
+              "algorithm": "sha256",
+              "manifestDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/existingRootBindings",
+          "value": [
+            {
+              "bindingId": "binding-a",
+              "projectId": "project-a",
+              "collectionId": "collection-a",
+              "actorId": "actor-a",
+              "deviceId": "device-a",
+              "rootId": "root-a",
+              "locationRef": "location-a",
+              "bindingRevision": 1,
+              "policyRevision": 1,
+              "vcs": {
+                "kind": "none",
+                "repositoryId": null,
+                "checkoutId": null,
+                "mutationOwner": null
+              }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "registered",
+          "projectId": "project-new",
+          "bindingId": "binding-new",
+          "bindingRevision": 1,
+          "replayed": false
+        },
+        "effects": [
+          "registry"
+        ],
+        "recordChanges": {
+          "insertPortable": {
+            "schemaVersion": 1,
+            "projectId": "project-new",
+            "displayName": "Example project",
+            "contentIdentity": {
+              "algorithm": "sha256",
+              "manifestDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          },
+          "insertBinding": {
+            "bindingId": "binding-new",
+            "projectId": "project-new",
+            "collectionId": "collection-a",
+            "actorId": "actor-a",
+            "deviceId": "device-a",
+            "rootId": "root-b",
+            "locationRef": "location-b",
+            "bindingRevision": 1,
+            "policyRevision": 1,
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            }
+          },
+          "registryRevision": 8,
+          "insertReceipt": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "register",
+            "operationId": "op-register",
+            "requestDigest": "2bf3eae0aca6b8c63e25aec227ec4952bb6ca64d7a1ef89e04e5a920f1faf572",
+            "status": "complete",
+            "rootId": "root-b",
+            "output": {
+              "code": "registered",
+              "projectId": "project-new",
+              "bindingId": "binding-new",
+              "bindingRevision": 1,
+              "replayed": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "missing-root-preserves-records",
+      "rules": [
+        "R3"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/exists",
+          "value": false
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/existingRootBindings",
+          "value": [
+            {
+              "bindingId": "binding-a",
+              "projectId": "project-a",
+              "collectionId": "collection-a",
+              "actorId": "actor-a",
+              "deviceId": "device-a",
+              "rootId": "root-a",
+              "locationRef": "location-a",
+              "bindingRevision": 1,
+              "policyRevision": 1,
+              "vcs": {
+                "kind": "none",
+                "repositoryId": null,
+                "checkoutId": null,
+                "mutationOwner": null
+              }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "root-unavailable"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "file-is-not-root",
+      "rules": [
+        "R3"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/isDirectory",
+          "value": false
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "not-directory"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "unproved-path-identity",
+      "rules": [
+        "R3"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/identityVerified",
+          "value": false
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "identity-unverified"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "root-not-authorized",
+      "rules": [
+        "R2"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/rootAccess",
+          "value": []
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "denied"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "actor-not-member",
+      "rules": [
+        "R2"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/member",
+          "value": false
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "denied"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "register-capability-absent",
+      "rules": [
+        "R2"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/capabilities",
+          "value": [
+            "export-project"
+          ]
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "denied"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "stale-registration-policy",
+      "rules": [
+        "R2",
+        "R10"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/policyRevision",
+          "value": 2
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "stale-policy"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "compare-and-set-lost",
+      "rules": [
+        "R5"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/registryRevision",
+          "value": 8
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "retry-state"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "allocation-collision",
+      "rules": [
+        "R5"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/allocatedIdsInUse",
+          "value": true
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "allocation-conflict"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "imported-id-does-not-attach",
+      "rules": [
+        "R6"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/request/attachProjectId",
+          "value": "project-a"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "attachment-required"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "portable-export-only",
+      "rules": [
+        "R2",
+        "R7"
+      ],
+      "inputRef": "export",
+      "mutations": [],
+      "expect": {
+        "output": {
+          "code": "exported",
+          "project": {
+            "schemaVersion": 1,
+            "projectId": "project-a",
+            "displayName": "Example project",
+            "contentIdentity": null
+          }
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "export-needs-own-capability",
+      "rules": [
+        "R2"
+      ],
+      "inputRef": "export",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/capabilities",
+          "value": [
+            "register-project"
+          ]
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "denied"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "foreign-binding-does-not-authorize-export",
+      "rules": [
+        "R2"
+      ],
+      "inputRef": "export",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/binding/actorId",
+          "value": "actor-b"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "denied"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "explicit-move-keeps-project-id",
+      "rules": [
+        "R8"
+      ],
+      "inputRef": "rebind",
+      "mutations": [],
+      "expect": {
+        "output": {
+          "code": "rebound",
+          "projectId": "project-a",
+          "bindingId": "binding-a",
+          "bindingRevision": 2,
+          "replayed": false
+        },
+        "effects": [
+          "registry"
+        ],
+        "recordChanges": {
+          "replaceBinding": {
+            "bindingId": "binding-a",
+            "projectId": "project-a",
+            "collectionId": "collection-a",
+            "actorId": "actor-a",
+            "deviceId": "device-a",
+            "rootId": "root-a",
+            "locationRef": "location-new",
+            "bindingRevision": 2,
+            "policyRevision": 1,
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            }
+          },
+          "registryRevision": 8,
+          "insertReceipt": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "rebind",
+            "operationId": "op-rebind",
+            "requestDigest": "e125c0d9d04a93e03c78dcdfa88d42ca0d0af65eb6415ab37a09c664fd750a19",
+            "status": "complete",
+            "rootId": "root-a",
+            "output": {
+              "code": "rebound",
+              "projectId": "project-a",
+              "bindingId": "binding-a",
+              "bindingRevision": 2,
+              "replayed": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "same-path-replacement-root-refused",
+      "rules": [
+        "R8"
+      ],
+      "inputRef": "rebind",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/rootId",
+          "value": "root-b"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "root-replaced"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "stale-rebind",
+      "rules": [
+        "R8",
+        "R10"
+      ],
+      "inputRef": "rebind",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/binding/bindingRevision",
+          "value": 2
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "stale-binding"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "foreign-binding-rebind-denied",
+      "rules": [
+        "R2"
+      ],
+      "inputRef": "rebind",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/binding/collectionId",
+          "value": "collection-b"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "denied"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "git-mutation-reserves-common-and-checkout",
+      "rules": [
+        "R10",
+        "R11",
+        "R12"
+      ],
+      "inputRef": "admit",
+      "mutations": [],
+      "expect": {
+        "output": {
+          "code": "admitted",
+          "bindingId": "binding-a",
+          "keys": [
+            "device-a:checkout:checkout-a",
+            "device-a:repository:repository-a"
+          ],
+          "fence": 8,
+          "ownerOperationId": "op-mutate"
+        },
+        "effects": [
+          "registry",
+          "reservation"
+        ],
+        "recordChanges": {
+          "insertReservation": {
+            "keys": [
+              "device-a:checkout:checkout-a",
+              "device-a:repository:repository-a"
+            ],
+            "ownerOperationId": "op-mutate",
+            "state": "active",
+            "fence": 8
+          },
+          "registryRevision": 8,
+          "insertReceipt": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "admit-mutation",
+            "operationId": "op-mutate",
+            "requestDigest": "d60262e61b0eac2c519d78c022616f1635edf2f31235258ee2b288a4b364042b",
+            "status": "pending",
+            "rootId": "root-a",
+            "output": {
+              "code": "admitted",
+              "bindingId": "binding-a",
+              "keys": [
+                "device-a:checkout:checkout-a",
+                "device-a:repository:repository-a"
+              ],
+              "fence": 8,
+              "ownerOperationId": "op-mutate"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "no-vcs-mutation-reserves-root",
+      "rules": [
+        "R11"
+      ],
+      "inputRef": "admit",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/vcs",
+          "value": {
+            "kind": "none",
+            "repositoryId": null,
+            "checkoutId": null,
+            "mutationOwner": null
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/binding/vcs",
+          "value": {
+            "kind": "none",
+            "repositoryId": null,
+            "checkoutId": null,
+            "mutationOwner": null
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/request/requestedVcsOwner",
+          "value": null
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "admitted",
+          "bindingId": "binding-a",
+          "keys": [
+            "device-a:root:root-a"
+          ],
+          "fence": 8,
+          "ownerOperationId": "op-mutate"
+        },
+        "effects": [
+          "registry",
+          "reservation"
+        ],
+        "recordChanges": {
+          "insertReservation": {
+            "keys": [
+              "device-a:root:root-a"
+            ],
+            "ownerOperationId": "op-mutate",
+            "state": "active",
+            "fence": 8
+          },
+          "registryRevision": 8,
+          "insertReceipt": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "admit-mutation",
+            "operationId": "op-mutate",
+            "requestDigest": "400fd5125b3c7ea866451159a85e9e31b585405729ec4d6671431e5a1e1f75e8",
+            "status": "pending",
+            "rootId": "root-a",
+            "output": {
+              "code": "admitted",
+              "bindingId": "binding-a",
+              "keys": [
+                "device-a:root:root-a"
+              ],
+              "fence": 8,
+              "ownerOperationId": "op-mutate"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "other-worktree-repository-busy",
+      "rules": [
+        "R11"
+      ],
+      "inputRef": "admit",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/reservations",
+          "value": [
+            {
+              "keys": [
+                "device-a:checkout:checkout-b",
+                "device-a:repository:repository-a"
+              ],
+              "ownerOperationId": "other-operation",
+              "state": "active",
+              "fence": 7
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "busy"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "monorepo-other-project-checkout-busy",
+      "rules": [
+        "R11"
+      ],
+      "inputRef": "admit",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/reservations",
+          "value": [
+            {
+              "keys": [
+                "device-a:checkout:checkout-a",
+                "device-a:repository:repository-a"
+              ],
+              "ownerOperationId": "other-operation",
+              "state": "active",
+              "fence": 7
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "busy"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "uncertain-writer-not-expired-away",
+      "rules": [
+        "R12"
+      ],
+      "inputRef": "admit",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/reservations",
+          "value": [
+            {
+              "keys": [
+                "device-a:checkout:checkout-a",
+                "device-a:repository:repository-a"
+              ],
+              "ownerOperationId": "other-operation",
+              "state": "uncertain",
+              "fence": 7
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "reconciliation-required"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "colocated-jj-owner-unresolved",
+      "rules": [
+        "R11"
+      ],
+      "inputRef": "admit",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/vcs",
+          "value": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": null
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/binding/vcs",
+          "value": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": null
+          }
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "read-only"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "colocated-jj-single-owner",
+      "rules": [
+        "R11"
+      ],
+      "inputRef": "admit",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/vcs",
+          "value": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "jj"
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/binding/vcs",
+          "value": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "jj"
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/request/requestedVcsOwner",
+          "value": "jj"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "admitted",
+          "bindingId": "binding-a",
+          "keys": [
+            "device-a:checkout:checkout-a",
+            "device-a:repository:repository-a"
+          ],
+          "fence": 8,
+          "ownerOperationId": "op-mutate"
+        },
+        "effects": [
+          "registry",
+          "reservation"
+        ],
+        "recordChanges": {
+          "insertReservation": {
+            "keys": [
+              "device-a:checkout:checkout-a",
+              "device-a:repository:repository-a"
+            ],
+            "ownerOperationId": "op-mutate",
+            "state": "active",
+            "fence": 8
+          },
+          "registryRevision": 8,
+          "insertReceipt": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "admit-mutation",
+            "operationId": "op-mutate",
+            "requestDigest": "cc17ad06c257ec3deff4a1abc262bf3f7ea1ca480d4a7feaa18d1b83cdaf600a",
+            "status": "pending",
+            "rootId": "root-a",
+            "output": {
+              "code": "admitted",
+              "bindingId": "binding-a",
+              "keys": [
+                "device-a:checkout:checkout-a",
+                "device-a:repository:repository-a"
+              ],
+              "fence": 8,
+              "ownerOperationId": "op-mutate"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "git-mutator-cannot-take-jj-owner",
+      "rules": [
+        "R11"
+      ],
+      "inputRef": "admit",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/vcs",
+          "value": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "jj"
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/binding/vcs",
+          "value": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "jj"
+          }
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "read-only"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "mutation-content-changed",
+      "rules": [
+        "R10"
+      ],
+      "inputRef": "admit",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/contentRevision",
+          "value": "content-b"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "content-conflict"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "write-back-bound-copy-authorized",
+      "rules": [
+        "R10",
+        "R12",
+        "R13"
+      ],
+      "inputRef": "writeback",
+      "mutations": [],
+      "expect": {
+        "output": {
+          "code": "authorized",
+          "bindingId": "binding-a",
+          "executionCopyId": "copy-a",
+          "patchDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "selectedPaths": [
+            "docs/note.txt"
+          ],
+          "fence": 8
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "write-back-project-mismatch",
+      "rules": [
+        "R13"
+      ],
+      "inputRef": "writeback",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/execution/projectId",
+          "value": "project-b"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "copy-mismatch"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "write-back-copy-mismatch",
+      "rules": [
+        "R13"
+      ],
+      "inputRef": "writeback",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/request/executionCopyId",
+          "value": "copy-b"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "copy-mismatch"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "write-back-stale-fence",
+      "rules": [
+        "R12"
+      ],
+      "inputRef": "writeback",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/request/fence",
+          "value": 7
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "stale-fence"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "write-back-root-changed",
+      "rules": [
+        "R10",
+        "R13"
+      ],
+      "inputRef": "writeback",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/contentRevision",
+          "value": "content-b"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "content-conflict"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "write-back-unverified-patch",
+      "rules": [
+        "R13"
+      ],
+      "inputRef": "writeback",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/patchVerified",
+          "value": false
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "patch-unverified"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "unknown-caller-field",
+      "rules": [
+        "R1"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/request/privatePath",
+          "value": "synthetic-private-value"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "invalid-input"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "wrong-request-type",
+      "rules": [
+        "R1"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/request/expectedRegistryRevision",
+          "value": "seven"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "invalid-input"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "same-operation-replayed",
+      "rules": [
+        "R9"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/receipt",
+          "value": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "register",
+            "operationId": "op-register",
+            "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
+            "status": "complete",
+            "rootId": "root-a",
+            "output": {
+              "code": "registered",
+              "projectId": "project-new",
+              "bindingId": "binding-new",
+              "bindingRevision": 1,
+              "replayed": false
+            }
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/portable",
+          "value": {
+            "schemaVersion": 1,
+            "projectId": "project-new",
+            "displayName": "Example project",
+            "contentIdentity": null
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/binding",
+          "value": {
+            "bindingId": "binding-new",
+            "projectId": "project-new",
+            "collectionId": "collection-a",
+            "actorId": "actor-a",
+            "deviceId": "device-a",
+            "rootId": "root-a",
+            "locationRef": "location-a",
+            "bindingRevision": 1,
+            "policyRevision": 1,
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            }
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/existingRootBindings",
+          "value": [
+            {
+              "bindingId": "binding-new",
+              "projectId": "project-new",
+              "collectionId": "collection-a",
+              "actorId": "actor-a",
+              "deviceId": "device-a",
+              "rootId": "root-a",
+              "locationRef": "location-a",
+              "bindingRevision": 1,
+              "policyRevision": 1,
+              "vcs": {
+                "kind": "none",
+                "repositoryId": null,
+                "checkoutId": null,
+                "mutationOwner": null
+              }
+            }
+          ]
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/registryRevision",
+          "value": 8
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "registered",
+          "projectId": "project-new",
+          "bindingId": "binding-new",
+          "bindingRevision": 1,
+          "replayed": true
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "same-key-different-request",
+      "rules": [
+        "R9"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/receipt",
+          "value": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "register",
+            "operationId": "op-register",
+            "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
+            "status": "complete",
+            "rootId": "root-a",
+            "output": {
+              "code": "registered",
+              "projectId": "project-new",
+              "bindingId": "binding-new",
+              "bindingRevision": 1,
+              "replayed": false
+            }
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/request/displayName",
+          "value": "Changed label"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "operation-conflict"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "replay-after-revocation-denied",
+      "rules": [
+        "R2",
+        "R9"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/receipt",
+          "value": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "register",
+            "operationId": "op-register",
+            "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
+            "status": "complete",
+            "rootId": "root-a",
+            "output": {
+              "code": "registered",
+              "projectId": "project-new",
+              "bindingId": "binding-new",
+              "bindingRevision": 1,
+              "replayed": false
+            }
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/member",
+          "value": false
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "denied"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "crashed-registration-not-repeated",
+      "rules": [
+        "R9"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/receipt",
+          "value": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "register",
+            "operationId": "op-register",
+            "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
+            "status": "pending",
+            "rootId": "root-a",
+            "output": {
+              "code": "registered",
+              "projectId": "project-new",
+              "bindingId": "binding-new",
+              "bindingRevision": 1,
+              "replayed": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "reconciliation-required"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "rebind-replay-reauthorizes-current-result",
+      "rules": [
+        "R8",
+        "R9"
+      ],
+      "inputRef": "rebind",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/receipt",
+          "value": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "rebind",
+            "operationId": "op-rebind",
+            "requestDigest": "e125c0d9d04a93e03c78dcdfa88d42ca0d0af65eb6415ab37a09c664fd750a19",
+            "status": "complete",
+            "rootId": "root-a",
+            "output": {
+              "code": "rebound",
+              "projectId": "project-a",
+              "bindingId": "binding-a",
+              "bindingRevision": 2,
+              "replayed": false
+            }
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/binding/bindingRevision",
+          "value": 2
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/binding/locationRef",
+          "value": "location-new"
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/registryRevision",
+          "value": 8
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "rebound",
+          "projectId": "project-a",
+          "bindingId": "binding-a",
+          "bindingRevision": 2,
+          "replayed": true
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "physical-root-owned-by-other-actor",
+      "rules": [
+        "R2",
+        "R4"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/existingRootBindings",
+          "value": [
+            {
+              "bindingId": "binding-a",
+              "projectId": "project-a",
+              "collectionId": "collection-a",
+              "actorId": "actor-b",
+              "deviceId": "device-a",
+              "rootId": "root-a",
+              "locationRef": "location-a",
+              "bindingRevision": 1,
+              "policyRevision": 1,
+              "vcs": {
+                "kind": "none",
+                "repositoryId": null,
+                "checkoutId": null,
+                "mutationOwner": null
+              }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "denied"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "nested-no-vcs-roots-ambiguous",
+      "rules": [
+        "R4"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/overlapSafe",
+          "value": false
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "ambiguous-ownership"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "attachment-trigger-before-duplicate",
+      "rules": [
+        "R6"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/existingRootBindings",
+          "value": [
+            {
+              "bindingId": "binding-a",
+              "projectId": "project-a",
+              "collectionId": "collection-a",
+              "actorId": "actor-a",
+              "deviceId": "device-a",
+              "rootId": "root-a",
+              "locationRef": "location-a",
+              "bindingRevision": 1,
+              "policyRevision": 1,
+              "vcs": {
+                "kind": "none",
+                "repositoryId": null,
+                "checkoutId": null,
+                "mutationOwner": null
+              }
+            }
+          ]
+        },
+        {
+          "op": "set",
+          "pointer": "/request/attachProjectId",
+          "value": "project-a"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "attachment-required"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "portable-content-does-not-become-project-id",
+      "rules": [
+        "R4",
+        "R5"
+      ],
+      "inputRef": "register",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/request/contentIdentity",
+          "value": {
+            "algorithm": "sha256",
+            "manifestDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "registered",
+          "projectId": "project-new",
+          "bindingId": "binding-new",
+          "bindingRevision": 1,
+          "replayed": false
+        },
+        "effects": [
+          "registry"
+        ],
+        "recordChanges": {
+          "insertPortable": {
+            "schemaVersion": 1,
+            "projectId": "project-new",
+            "displayName": "Example project",
+            "contentIdentity": {
+              "algorithm": "sha256",
+              "manifestDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          },
+          "insertBinding": {
+            "bindingId": "binding-new",
+            "projectId": "project-new",
+            "collectionId": "collection-a",
+            "actorId": "actor-a",
+            "deviceId": "device-a",
+            "rootId": "root-a",
+            "locationRef": "location-a",
+            "bindingRevision": 1,
+            "policyRevision": 1,
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            }
+          },
+          "registryRevision": 8,
+          "insertReceipt": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "register",
+            "operationId": "op-register",
+            "requestDigest": "8e3deed3bc99da7ecf06510674e83e79f82b27668a9be4b6fbcc484c3edcbdd9",
+            "status": "complete",
+            "rootId": "root-a",
+            "output": {
+              "code": "registered",
+              "projectId": "project-new",
+              "bindingId": "binding-new",
+              "bindingRevision": 1,
+              "replayed": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "export-retains-selected-content-identity",
+      "rules": [
+        "R7"
+      ],
+      "inputRef": "export",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/portable/contentIdentity",
+          "value": {
+            "algorithm": "sha256",
+            "manifestDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "exported",
+          "project": {
+            "schemaVersion": 1,
+            "projectId": "project-a",
+            "displayName": "Example project",
+            "contentIdentity": {
+              "algorithm": "sha256",
+              "manifestDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          }
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "replay-after-later-binding-change",
+      "rules": [
+        "R9"
+      ],
+      "inputRef": "rebind",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/receipt",
+          "value": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "rebind",
+            "operationId": "op-rebind",
+            "requestDigest": "e125c0d9d04a93e03c78dcdfa88d42ca0d0af65eb6415ab37a09c664fd750a19",
+            "status": "complete",
+            "rootId": "root-a",
+            "output": {
+              "code": "rebound",
+              "projectId": "project-a",
+              "bindingId": "binding-a",
+              "bindingRevision": 2,
+              "replayed": false
+            }
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/binding/bindingRevision",
+          "value": 3
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "superseded-operation"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "replay-after-binding-removal",
+      "rules": [
+        "R9"
+      ],
+      "inputRef": "rebind",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/receipt",
+          "value": {
+            "actorId": "actor-a",
+            "collectionId": "collection-a",
+            "deviceId": "device-a",
+            "operation": "rebind",
+            "operationId": "op-rebind",
+            "requestDigest": "e125c0d9d04a93e03c78dcdfa88d42ca0d0af65eb6415ab37a09c664fd750a19",
+            "status": "complete",
+            "rootId": "root-a",
+            "output": {
+              "code": "rebound",
+              "projectId": "project-a",
+              "bindingId": "binding-a",
+              "bindingRevision": 2,
+              "replayed": false
+            }
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/binding",
+          "value": null
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "superseded-operation"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "write-back-needs-separate-capability",
+      "rules": [
+        "R2"
+      ],
+      "inputRef": "writeback",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/capabilities",
+          "value": [
+            "mutate-project"
+          ]
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "denied"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "write-back-unsafe-relative-path",
+      "rules": [
+        "R1",
+        "R13"
+      ],
+      "inputRef": "writeback",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/request/selectedPaths",
+          "value": [
+            "../outside.txt"
+          ]
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "invalid-input"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    }
+  ]
+}

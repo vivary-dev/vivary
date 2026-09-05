@@ -9,7 +9,7 @@ The 36 numbered outcomes preserve the complete product. Their dependencies
 gate completion. Agents execute bounded packets; a future feature or release
 decision does not block an independent packet. Packet dependencies gate starts.
 
-Frontier: 03a.
+Frontier: none.
 In progress: none.
 
 ## Execution packets
@@ -18,7 +18,8 @@ In progress: none.
 | --- | --- | --- | --- |
 | [02a: Define the preservation manifest and restore acceptance fixtures](packets/02a-source-preservation-fixture.md) | 02 | done | [] |
 | [02b: Implement and execute the synthetic restoration harness](packets/02b-restore-fixture-harness.md) | 02 | needs-info | [02a, 10b] |
-| [03a: Define the portable registry contract and acceptance fixtures](packets/03a-project-registry-contract.md) | 03 | ready-for-agent | [] |
+| [03a: Define the portable registry contract and acceptance fixtures](packets/03a-project-registry-contract.md) | 03 | done | [] |
+| [03b: Execute the portable registry contract against a deterministic model](packets/03b-registry-contract-model.md) | 03 | needs-info | [03a, 10b] |
 | [10a: Establish the BrowserPod compatibility boundary](packets/10a-browserpod-compatibility-preflight.md) | 10 | done | [] |
 | [10b: Prove the first BrowserPod toolchain on a disposable fixture](packets/10b-browserpod-toolchain-proof.md) | 10 | needs-info | [10a] |
 
@@ -28,7 +29,7 @@ In progress: none.
 | --- | --- | --- |
 | [01: Reconcile migration provenance and product boundaries](tickets/01-reconcile-migration-boundaries.md) | done | [] |
 | [02: Prove source integration can preserve history and dirty work](tickets/02-prove-source-preservation.md) | in-progress | [01] |
-| [03: Define project registry and authority contracts](tickets/03-define-project-registry.md) | planned | [01] |
+| [03: Define project registry and authority contracts](tickets/03-define-project-registry.md) | in-progress | [01] |
 | [04: Define runtime, session, action, and tool contracts](tickets/04-define-runtime-session-contracts.md) | planned | [02, 03] |
 | [05: Integrate the preserved workbench shell](tickets/05-integrate-workbench-shell.md) | planned | [02, 03] |
 | [06: Implement project registration and switching](tickets/06-register-and-switch-projects.md) | planned | [03, 05] |

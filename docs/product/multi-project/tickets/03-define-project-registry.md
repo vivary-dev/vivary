@@ -1,6 +1,6 @@
 # 03: Define project registry and authority contracts
 Type: outcome
-Status: planned
+Status: in-progress
 Blocked-by: [01]
 Unlocks: [04, 05, 06, 07, 08, 12, 14, 18]
 
@@ -40,3 +40,7 @@ git diff --check
 ## Log
 
 - 2026-09-05: Initial public plan recorded. Implementation has not started.
+
+- 2026-09-05: Packet 03a started contract inspection. Executable contract and serialization proof remain open.
+
+- 2026-09-05: Inspection packet 03a completed the portable registry contract and synthetic acceptance oracle. [03b](../packets/03b-registry-contract-model.md) owns executable state/concurrency tests after the BrowserPod proof. Production transactions and adapter enforcement remain unproved.
