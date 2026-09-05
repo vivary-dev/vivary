@@ -4,12 +4,18 @@ The contract for **any** agent working in this repo (Claude Code, Codex CLI, …
 Lean by law — depth lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Read it
 once; don't reload it every turn.
 
-## Mission
+## Product direction and entry
 
-Vivary is a **standard + scaffolder for agent-native workspaces**. Its baseline is
-*a self-improving loop over a typed knowledge graph, with one visible state surface
-and human gates.* Modules: **tropo** (knowledge), **strato** (agent OS), **ozone**
-(review), **exo** (orchestration).
+Start at [the tracked program](docs/product/multi-project/design.md), then
+[the graph](docs/product/multi-project/graph.md). The owner decided on 2026-09-05
+that Vivary absorbs the full Littleagent scope. The GUI is primary; standalone
+workspaces, runtime choice, optional version control, templates, and optional
+Brain learning remain supported. Ticket status owns the current frontier. For this program, the owner selected
+BrowserPod on 2026-09-05 and explicitly excluded Habitat/WSL; that choice overrides
+machine defaults. Verify its connection and compatibility before execution.
+Keep the graph, owning ticket, evidence, and next task current after each unit.
+The existing standard and scaffolder remain the shipped baseline; the program
+does not turn planned application features into release claims.
 
 ## Design law (non-negotiable)
 
@@ -78,7 +84,7 @@ mechanism (for Claude Code, see CLAUDE.md → "ultraplan").
 - **Branch rules (enforced).** `dev` is the protected integration branch — **no direct
   pushes**. Every change lands via a feature branch cut from `dev` → PR → merge, with
   the `ci` checks + the `ozone review` gate green first. `dev` blocks force-push and
-  deletion. `main` is the vestigial baseline; `prod` is reserved for a future release cut.
+  deletion. See [CONTRIBUTING.md](CONTRIBUTING.md) for branch and legacy-branch policy.
 - **No nested git repos.** Vivary is one repo; packages are plain subdirectories.
 - **Supply chain.** Before any install, check `~/dev/agents/.shared/deny-list-npm.json`
   and run `npm`/`pnpm audit`. Vet new dependencies; prefer pinned pre-compromise

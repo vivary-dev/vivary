@@ -2,7 +2,8 @@
 
 **Read [AGENTS.md](AGENTS.md) first — it is the contract for every agent and it
 governs you.** This file only adds Claude Code specifics. Starting fresh? Begin
-from [HANDOFF.md](HANDOFF.md).
+from [the tracked program](docs/product/multi-project/design.md) and
+[its ticket graph](docs/product/multi-project/graph.md).
 
 ## Ultraplan — how Claude satisfies the plan+alignment gate
 
