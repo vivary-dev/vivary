@@ -639,6 +639,10 @@ jobs:
         run: |
           python scripts/tests/test_multi_project_plan.py
           python scripts/check_multi_project_plan.py --check
+      - name: registry contract model
+        run: |
+          node --test scripts/tests/test_registry_contract_model.mjs
+          node scripts/registry_contract_model.mjs --fixture docs/product/multi-project/fixtures/project-registry.json --check
       - name: line endings
         run: python scripts/check_line_endings.py
       - name: diff hygiene

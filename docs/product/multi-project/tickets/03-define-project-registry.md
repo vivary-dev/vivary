@@ -35,7 +35,7 @@ git diff --check
 
 ## Next packet
 
-[03b](../packets/03b-registry-contract-model.md) owns executable model and concurrency verification after 10b proves the BrowserPod toolchain. [03a](../receipts/03a-registry-contract.md) records the completed contract inspection. Production integration and full parent acceptance remain separate work.
+[03b](../packets/03b-registry-contract-model.md) completed executable reference-model verification in the authorized Habitat fallback. [03c](../packets/03c-registry-transaction-mapping.md) owns the native transaction and adapter mapping. [03a](../receipts/03a-registry-contract.md) records the completed contract inspection. Production integration and full parent acceptance remain separate work.
 
 ## Log
 
@@ -44,3 +44,5 @@ git diff --check
 - 2026-09-05: Packet 03a started contract inspection. Executable contract and serialization proof remain open.
 
 - 2026-09-05: Inspection packet 03a completed the portable registry contract and synthetic acceptance oracle. [03b](../packets/03b-registry-contract-model.md) owns executable state/concurrency tests after the BrowserPod proof. Production transactions and adapter enforcement remain unproved.
+
+- 2026-09-05: Packet 03b completed its sandboxed reference-model checks after independent QA corrections. Outcome 03 remains in progress: transaction mapping and owning production adapters still need evidence.

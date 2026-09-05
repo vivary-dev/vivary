@@ -58,9 +58,9 @@ those behaviors. It also does not prove durable state, process fencing,
 BrowserPod, host-folder write-back, native CLI authentication, cancellation,
 resume, or the HoH product acceptance cycle.
 
-The task-owned container and keepalive are retained only for the current 03b
-verification session. Its receipt must record the passing candidate and final
-cleanup. Existing authentication volumes and source repositories remain intact.
+The task-owned container was retained through the [03b verification](03b-registry-contract-model.md),
+then stopped and removed. Its identified hidden keepalive was stopped. Existing
+authentication volumes and source repositories remain intact.
 
 ## Exact probe source
 

@@ -1,12 +1,13 @@
 # 03b: Execute the portable registry contract against a deterministic model
 Type: packet
 Parent: 03
-Status: in-progress
+Status: done
 Depends-on: [03a, 10c]
 Owner: registry implementation agent
 Scope: Dependency-free reference evaluator and synthetic state-transition tests; no production registry or source import.
 Verification-kind: runtime
 Timebox: One context window; checkpoint after the evaluator and adversarial schedules are verified.
+Evidence: [Model receipt](../receipts/03b-registry-contract-model.md)
 
 ## Goal
 
@@ -87,3 +88,5 @@ test pass by introducing case-specific behavior or bypassing authority checks.
 - 2026-09-05: Prepared as 03a's executable successor. The selected BrowserPod toolchain is the named execution prerequisite. Production persistence and cross-process enforcement remain separate integration work.
 
 - 2026-09-05: The owner authorized Habitat fallback; 10c passed its bounded toolchain probe. Claimed by the registry implementation agent for candidate model authoring, with sandbox execution and independent review owned by the integration agent. The 57 decisions remain unexecuted at this checkpoint.
+
+- 2026-09-05: Completed reference-model verification in Habitat: 25 canonical tests, 57 exact fixture decisions, four deliberate CLI failures, and two independent regression probes. Independent review exposed and corrected authorization, parsing, collision, receipt, and revision-boundary gaps. Production enforcement remains unproved. Packet 03c maps native transactions; 02b is the lowest ready execution packet.

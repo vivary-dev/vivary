@@ -49,3 +49,8 @@ These results do not prove the 33 restoration cases;
 The [HoH comparison](research/hoh-alignment.md) adds acceptance refinements
 without advancing implementation status. Runtime-enforced roles, frozen
 candidates, claim-level QA, and evidence-fed replanning remain unverified.
+
+[03b](receipts/03b-registry-contract-model.md) now records actual Habitat model
+verification and independent QA corrections. Its results do not establish the
+production HoH cycle or filesystem enforcement. The next executable packet is
+02b; independent transaction mapping is prepared as 03c.
