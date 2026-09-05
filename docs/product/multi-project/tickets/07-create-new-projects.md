@@ -1,0 +1,36 @@
+# 07: Implement new-project planning and creation
+Status: needs-info
+Blocked-by: [03, 06]
+Needs: Verified predecessor evidence for [03, 06], plus exact implementation files and executable behavior-verification commands recorded before this ticket becomes actionable.
+Unlocks: [09, 13, 19, 24]
+
+## Goal
+
+Create blank Vivary projects through the GUI and service contract while keeping VCS, hosting, and templates independent choices.
+
+## Context
+
+Program context: [design](../design.md), [migration](../migration.md), [release](../release.md), and [evidence](../evidence.md).
+
+Own new-project service and UI. Reuse `scaffold_thin_workspace`, dry-run output, Doctor, and Tropo checks from `packages/create-vivary`. Read `design.md`, `evidence.md`, and the creation guide. Do not duplicate init rules.
+
+## Done condition
+
+A user previews the exact target and files, applies a bound plan, verifies the workspace, and registers it. A crash or repeated request does not create a duplicate project. VCS and hosting can remain `none`.
+
+## Verify
+
+Run service and browser tests for blank creation, occupied target refusal, changed plan input, interruption, retry, and registration. Run Doctor and Tropo against the result.
+
+
+Common planning checks (these checks do not prove product behavior):
+
+```console
+python scripts/check_multi_project_plan.py --check
+python scripts/check_line_endings.py
+git diff --check
+```
+
+## Log
+
+- 2026-09-05: Initial public plan recorded. Implementation has not started.
