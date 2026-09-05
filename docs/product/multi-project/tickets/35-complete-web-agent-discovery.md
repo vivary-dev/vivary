@@ -1,8 +1,10 @@
 # 35: Complete DNS, headers, Markdown, skills, and ARD discovery
-Status: needs-info
+Type: outcome
+Status: planned
 Blocked-by: [25, 26, 31, 32, 33, 34]
-Needs: Verified predecessor evidence for [25, 26, 31, 32, 33, 34], plus exact implementation files and executable behavior-verification commands recorded before this ticket becomes actionable.
 Unlocks: [27]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
 
 ## Goal
 

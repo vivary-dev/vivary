@@ -1,8 +1,10 @@
 # 32: Publish a hosted MCP endpoint and card
-Status: needs-info
+Type: outcome
+Status: planned
 Blocked-by: [26]
-Needs: Verified predecessor evidence for [26], plus exact implementation files and executable behavior-verification commands recorded before this ticket becomes actionable.
 Unlocks: [27, 35]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
 
 ## Goal
 

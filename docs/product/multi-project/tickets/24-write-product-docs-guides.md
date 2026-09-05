@@ -1,8 +1,10 @@
 # 24: Write installed docs, guides, and UI help
-Status: needs-info
+Type: outcome
+Status: planned
 Blocked-by: [05, 07, 08, 09, 10, 11, 15, 16, 17, 18, 19, 20, 21, 22, 23, 29, 30, 36]
-Needs: Verified predecessor evidence for [05, 07, 08, 09, 10, 11, 15, 16, 17, 18, 19, 20, 21, 22, 23, 29, 30, 36], plus exact implementation files and executable behavior-verification commands recorded before this ticket becomes actionable.
 Unlocks: [25, 26, 27]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
 
 ## Goal
 
@@ -34,3 +36,5 @@ git diff --check
 ## Log
 
 - 2026-09-05: Initial public plan recorded. Implementation has not started.
+
+- 2026-09-05: Preserve unresolved earlier dogfood, tutorial, and token-savings benchmark requirements through [the issue authority map](../issue-authority.md). Pilot cost metrics do not replace the separate comparative token-savings protocol.

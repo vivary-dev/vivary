@@ -1,8 +1,10 @@
 # 27: Deploy, release, and pass the actual 100 percent readiness gate
-Status: needs-info
+Type: outcome
+Status: planned
 Blocked-by: [13, 23, 24, 25, 26, 31, 32, 33, 34, 35, 36]
-Needs: Verified predecessor evidence for [13, 23, 24, 25, 26, 31, 32, 33, 34, 35, 36], plus exact implementation files and executable behavior-verification commands recorded before this ticket becomes actionable.
 Unlocks: [28]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
 
 ## Goal
 

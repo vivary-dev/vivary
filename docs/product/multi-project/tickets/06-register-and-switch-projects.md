@@ -1,8 +1,10 @@
 # 06: Implement project registration and switching
-Status: needs-info
+Type: outcome
+Status: planned
 Blocked-by: [03, 05]
-Needs: Verified predecessor evidence for [03, 05], plus exact implementation files and executable behavior-verification commands recorded before this ticket becomes actionable.
 Unlocks: [07, 08, 11, 12]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
 
 ## Goal
 

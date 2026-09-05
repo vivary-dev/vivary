@@ -1,6 +1,6 @@
 # Ticket 01 migration-boundary receipt
 
-Status: ready for human review in the documentation pull request.
+Status: initial boundary receipt retained; current audit and packet readiness live in the generated graph.
 
 Recorded: 2026-09-05
 
@@ -12,7 +12,7 @@ The canonical public destination is `vivary-dev/vivary`. The public source ident
 
 Exact paths, branch names, commit hashes, worktree locations, dirty manifests, active-writer details, and private review material stay in the private provenance record. That record is an input to controlled preservation work; it is not part of this documentation set.
 
-Human review of the documentation pull request is the only action for which ticket 01 is ready. The owner authorized publishing these reviewed contracts through the normal pull-request workflow on 2026-09-05. No product release, source import, source move, repository creation, remote change, retirement, archive, rename, redirect, or deletion is recorded as executed.
+The initial documentation PR still requires the repository merge gate. That gate does not prohibit independent contract and fixture packets under existing implementation authority. The owner authorized publishing these reviewed contracts through the normal pull-request workflow on 2026-09-05. No product release, source import, source move, repository creation, remote change, retirement, archive, rename, redirect, or deletion is recorded as executed.
 
 The live agent-readiness baseline remains Level 1/5, with three passing checks among sixteen scored checks and no official overall percentage. The required real 100 percent acceptance result has not been obtained.
 
@@ -74,7 +74,7 @@ Ticket 10 retains the real runtime acceptance work. Ticket 01 does not close AC-
 
 The public boundary map now covers the public repositories, private and local-only source classes, dirty-work categories, S-00A and S-00 through S-13 responsibilities, known license-file findings, proposed public owners, destination classes, and unresolved authority. The map deliberately omits private coordinates and does not state that any source has been restored.
 
-The documentation candidate is ready for human review through the normal pull-request workflow. The repository validator, line-ending check, and diff check must pass in the isolated Vivary worktree before the pull request is opened or ticket 01 is marked done.
+The documentation candidate is ready for human review through the normal pull-request workflow. The repository validator, line-ending check, and diff check must pass in the isolated Vivary worktree before the corrected ticket 01 acceptance is recorded.
 
 ## Next packet: ticket 02 source-preservation proof
 

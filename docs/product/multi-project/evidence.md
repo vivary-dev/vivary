@@ -95,7 +95,9 @@ optional packages.
 
 ## Missing application behavior
 
-No inspected package provides a desktop GUI, local application server, managed
+The following negative inventory concerns Vivary Python packages only. Agent-Native already provides native sessions, runs, transcripts, tasks, and other application owners; [the native inventory](native-owners.md) distinguishes those installed or documented capabilities from configured Workbench behavior.
+
+No inspected Vivary Python package provides a desktop GUI, local application server, managed
 project registry, project switcher, persistent session store, terminal supervisor,
 or streaming agent transcript.
 

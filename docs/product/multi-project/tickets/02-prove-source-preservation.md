@@ -1,8 +1,10 @@
 # 02: Prove source integration can preserve history and dirty work
-Status: needs-info
+Type: outcome
+Status: in-progress
 Blocked-by: [01]
-Needs: Human acceptance of ticket 01, an owner-approved private source manifest, and a license disposition for every selected slice. The future proof script, test, fixture, and receipt paths below must exist before this ticket becomes actionable.
 Unlocks: [04, 05]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
 
 ## Goal
 
@@ -33,17 +35,7 @@ git diff --check
 
 ## Next packet
 
-- Scope: prove a copy-and-restore method with disposable fixtures. Do not edit a source checkout, import product code, or retire anything.
-- Files: `scripts/prove_multi_project_source_preservation.py`, `scripts/tests/test_prove_multi_project_source_preservation.py`, `tests/fixtures/multi-project/source-preservation/`, and `docs/product/multi-project/receipts/02-source-preservation.md`.
-- Acceptance: the approved manifest binds source class, selected relative paths, content hashes, history or attribution method, dirty-file capture, license disposition, restore destination, and owner. A disposable restoration matches the manifest, and both source repositories remain unchanged.
-- Behavior commands after the missing inputs and files exist:
-
-```console
-python -m pytest scripts/tests/test_prove_multi_project_source_preservation.py -q
-python scripts/prove_multi_project_source_preservation.py --fixture tests/fixtures/multi-project/source-preservation --output docs/product/multi-project/receipts/02-source-preservation.md --check
-```
-
-These commands define the required future interface. This ticket does not claim that the files exist or the commands pass.
+[02a](../packets/02a-source-preservation-fixture.md) owns the independent contract and acceptance-fixture work. Planned files are outputs. Live execution, real source import, and full parent acceptance remain separate work.
 
 ## Log
 

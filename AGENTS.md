@@ -13,7 +13,10 @@ workspaces, runtime choice, optional version control, templates, and optional
 Brain learning remain supported. Ticket status owns the current frontier. For this program, the owner selected
 BrowserPod on 2026-09-05 and explicitly excluded Habitat/WSL; that choice overrides
 machine defaults. Verify its connection and compatibility before execution.
-Keep the graph, owning ticket, evidence, and next task current after each unit.
+Read [execution rules](docs/product/multi-project/execution-contract.md). The 36
+records are outcome contracts; agents claim bounded lettered packets from the
+generated graph. Keep the graph, owning packet, evidence, and next task current
+after each unit. Older issue priorities do not override this program.
 The existing standard and scaffolder remain the shipped baseline; the program
 does not turn planned application features into release claims.
 

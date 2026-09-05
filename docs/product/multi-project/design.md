@@ -1,8 +1,8 @@
 # Vivary multi-project workbench
 
-Updated: 2026-09-05. Status: documented program; implementation evidence is tracked by the ticket graph. The product direction is approved. Technical defaults below remain recommendations until reviewed.
+Updated: 2026-09-05. Status: documented program; implementation evidence is tracked by the ticket graph. The product direction and BrowserPod execution choice are approved. Ordinary reversible technical choices belong to the owning packet; explicit unresolved product, account, security, and release decisions retain their stated owners.
 
-This is the canonical program plan. Start here, then open [the graph](graph.md), [source evidence](evidence.md), [migration map](migration.md), or [release criteria](release.md). [CONTEXT.md](CONTEXT.md) defines the terms.
+This is the canonical program plan. [Execution rules](execution-contract.md), [scope coverage](capability-matrix.md), [native owners](native-owners.md), and [current risks](audit.md) keep the work bounded and current. Start here, then open [the graph](graph.md), [source evidence](evidence.md), [migration map](migration.md), or [release criteria](release.md). [CONTEXT.md](CONTEXT.md) defines the terms.
 
 ## Product direction and authority
 
@@ -12,7 +12,7 @@ The product handles new and existing projects, workspace templates installed wit
 
 The full little-agent scope survives: visual planning, research, tickets, workers, review, portable handoffs, CLI agents, factory mode, email intake, and heartbeat maintenance. Delivery order does not remove later scope.
 
-Planning is the immediate priority, and HarnessMax removal remains deferred. Website, UI, docs, guides, and a real 100% isitagentready.com result belong to the delivery program. This plan does not claim that the behavior is implemented, released, or published.
+Implementation proceeds through the bounded packets in the generated graph. HarnessMax removal remains deferred. Website, UI, docs, guides, and a real 100% isitagentready.com result belong to the delivery program. This plan does not claim that the behavior is implemented, released, or published.
 
 No model, storage vendor, hosting plan, default runtime, or payment service is selected by this document. Earlier Littleagent implementation authority remains relevant to compatible work after the changed contracts are reconciled. Planning authority does not establish implementation or publication evidence.
 

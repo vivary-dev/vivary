@@ -1,14 +1,18 @@
 # 20: Run bounded factory work
-Status: needs-info
+Type: outcome
+Status: planned
 Blocked-by: [04, 10, 14, 15, 16, 17, 29]
-Needs: Verified predecessor evidence for [04, 10, 14, 15, 16, 17, 29], plus exact implementation files and executable behavior-verification commands recorded before this ticket becomes actionable.
 Unlocks: [24, 36]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
 
 ## Goal
 
 Run Littleagent S-08 and S-09 factory workflows with explicit authority, worker ownership, budgets, stop conditions, verification, and production gates.
 
 ## Context
+
+Read [the native owner inventory](../native-owners.md) before adding any run, session, task, plan, messaging, scheduler, or resource infrastructure.
 
 Program context: [design](../design.md), [migration](../migration.md), [release](../release.md), and [evidence](../evidence.md).
 

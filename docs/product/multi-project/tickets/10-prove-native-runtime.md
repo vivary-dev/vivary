@@ -1,14 +1,18 @@
 # 10: Complete native runtime proof from S-00A
-Status: needs-info
+Type: outcome
+Status: in-progress
 Blocked-by: [04]
-Needs: Verified predecessor evidence for [04], plus exact implementation files and executable behavior-verification commands recorded before this ticket becomes actionable.
 Unlocks: [16, 20, 22, 23, 24, 30, 36]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
 
 ## Goal
 
 Replace deterministic host-only evidence with one real supported native runtime execution, cancellation, and resume proof in the bound project root.
 
 ## Context
+
+Read [the native owner inventory](../native-owners.md) before adding any run, session, task, plan, messaging, scheduler, or resource infrastructure.
 
 The owner selected BrowserPod on 2026-09-05 and excluded Habitat/WSL for this work. Verify the connection and exact toolchain there. Do not count historical Habitat fixtures as BrowserPod or real-runtime acceptance.
 
@@ -35,4 +39,4 @@ git diff --check
 
 ## Log
 
-- 2026-09-05: Initial public plan recorded. Implementation has not started.
+- 2026-09-05: Preserved local host and readiness UI exist. Eleven historical deterministic tests and a browser pass were recorded. BrowserPod integration and real coding-runtime acceptance have not passed. Start early preflight packets 10a/10b before import; reuse the host where compatibility is proved.

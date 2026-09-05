@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Synthetic acceptance cases. No real source paths, history, or restoration claims.",
+  "source": {
+    "sourceId": "fixture-project",
+    "owner": "fixture-owner",
+    "files": [
+      {
+        "path": "docs/note.txt",
+        "kind": "file",
+        "content": "abc",
+        "size": 3,
+        "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "class": "tracked-dirty",
+        "destination": "docs/note.txt"
+      }
+    ],
+    "history": "synthetic fixture; no real commit ancestry",
+    "attribution": "synthetic test content",
+    "exclusions": ["real credentials", "hosted issue history", "real runtime state"]
+  },
+  "cases": [
+    {"id": "restore-empty", "change": "none", "target": "empty", "expect": "restored", "sourceUnchanged": true},
+    {"id": "repeat-identical", "change": "none", "target": "identical verified receipt and bytes", "expect": "already-restored", "sourceUnchanged": true},
+    {"id": "source-missing", "change": "remove selected source file", "target": "empty", "expect": "source-missing", "noWrites": true},
+    {"id": "source-changed", "change": "change content after planning", "target": "empty", "expect": "source-hash-mismatch", "noWrites": true},
+    {"id": "wrong-size", "change": "set expected size to 4", "target": "empty", "expect": "source-size-mismatch", "noWrites": true},
+    {"id": "duplicate-destination", "change": "add a second entry with destination docs/note.txt", "target": "empty", "expect": "destination-collision", "noWrites": true},
+    {"id": "absolute-path", "change": "set destination to /escape.txt", "target": "empty", "expect": "unsafe-path", "noWrites": true},
+    {"id": "parent-traversal", "change": "set destination to ../escape.txt", "target": "empty", "expect": "unsafe-path", "noWrites": true},
+    {"id": "symlink-escape", "change": "replace destination parent with a link to an external fixture root", "target": "linked parent", "expect": "unsafe-link", "noWrites": true},
+    {"id": "case-collision", "change": "add destination DOCS/NOTE.TXT under case-insensitive target policy", "target": "empty", "expect": "destination-collision", "noWrites": true},
+    {"id": "changed-target", "change": "none", "target": "unexpected existing bytes", "expect": "target-conflict", "noWrites": true},
+    {"id": "interrupted-restore", "change": "interrupt after one owned output and before receipt completion", "target": "owned partial restore", "expect": "incomplete", "sourceUnchanged": true},
+    {"id": "resume-changed-partial", "change": "change a partial destination before retry", "target": "owned partial restore with changed bytes", "expect": "target-conflict", "noWrites": true}
+  ],
+  "unproved": [
+    "actual BrowserPod filesystem semantics",
+    "Windows junction and reserved-name behavior",
+    "real source license and attribution disposition",
+    "working-tree, Git-history, ignored-resource and hosted-asset restoration",
+    "runtime session and credential backup"
+  ]
+}

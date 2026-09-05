@@ -1,8 +1,10 @@
 # 05: Integrate the preserved workbench shell
-Status: needs-info
+Type: outcome
+Status: planned
 Blocked-by: [02, 03]
-Needs: Verified predecessor evidence for [02, 03], plus exact implementation files and executable behavior-verification commands recorded before this ticket becomes actionable.
 Unlocks: [06, 11, 15, 18, 24]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
 
 ## Goal
 

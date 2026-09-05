@@ -1,14 +1,18 @@
 # 30: Add deterministic heartbeat maintenance
-Status: needs-info
+Type: outcome
+Status: planned
 Blocked-by: [04, 10, 18]
-Needs: Verified predecessor evidence for [04, 10, 18], plus exact implementation files and executable behavior-verification commands recorded before this ticket becomes actionable.
 Unlocks: [24, 36]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
 
 ## Goal
 
 Implement S-12 heartbeat and maintenance work with deterministic no-op checks, notification policy, stop, and recovery.
 
 ## Context
+
+Read [the native owner inventory](../native-owners.md) before adding any run, session, task, plan, messaging, scheduler, or resource infrastructure.
 
 Program context: [design](../design.md), [migration](../migration.md), [release](../release.md), and [evidence](../evidence.md).
 

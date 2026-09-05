@@ -1,8 +1,10 @@
 # 21: Add research specialists and evaluation
-Status: needs-info
+Type: outcome
+Status: planned
 Blocked-by: [04, 15, 16, 18]
-Needs: Verified predecessor evidence for [04, 15, 16, 18], plus exact implementation files and executable behavior-verification commands recorded before this ticket becomes actionable.
 Unlocks: [24, 36]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
 
 ## Goal
 

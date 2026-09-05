@@ -1,8 +1,10 @@
 # 34: Publish working browser WebMCP tools
-Status: needs-info
+Type: outcome
+Status: planned
 Blocked-by: [26, 31]
-Needs: Verified predecessor evidence for [26, 31], plus exact implementation files and executable behavior-verification commands recorded before this ticket becomes actionable.
 Unlocks: [27, 35]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
 
 ## Goal
 

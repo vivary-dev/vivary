@@ -1,8 +1,10 @@
 # 26: Publish one real read-only service and OpenAPI catalog
-Status: needs-info
+Type: outcome
+Status: planned
 Blocked-by: [23, 24, 25]
-Needs: Verified predecessor evidence for [23, 24, 25], plus exact implementation files and executable behavior-verification commands recorded before this ticket becomes actionable.
 Unlocks: [27, 31, 32, 33, 34, 35]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
 
 ## Goal
 

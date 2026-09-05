@@ -1,9 +1,12 @@
 # 01: Reconcile migration provenance and product boundaries
-Status: ready-for-human
+Type: outcome
+Status: in-progress
 Blocked-by: []
 Owner: integration agent
 Scope: Public documentation and provenance reconciliation only. Human action is limited to reviewing the documentation pull request.
 Unlocks: [02, 03]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
 
 ## Goal
 

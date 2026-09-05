@@ -1,8 +1,10 @@
 # 17: Deliver crash recovery and native session resume
-Status: needs-info
+Type: outcome
+Status: planned
 Blocked-by: [04, 11, 12, 14, 15, 16]
-Needs: Verified predecessor evidence for [04, 11, 12, 14, 15, 16], plus exact implementation files and executable behavior-verification commands recorded before this ticket becomes actionable.
 Unlocks: [20, 24, 29, 36]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
 
 ## Goal
 

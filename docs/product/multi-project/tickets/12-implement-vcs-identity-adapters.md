@@ -1,8 +1,10 @@
 # 12: Implement none, Git, and Jujutsu identity adapters
-Status: needs-info
+Type: outcome
+Status: planned
 Blocked-by: [03, 06]
-Needs: Verified predecessor evidence for [03, 06], plus exact implementation files and executable behavior-verification commands recorded before this ticket becomes actionable.
 Unlocks: [13, 14, 15, 16, 17, 29]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
 
 ## Goal
 
