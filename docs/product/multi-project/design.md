@@ -1,6 +1,6 @@
 # Vivary multi-project workbench
 
-Updated: 2026-09-05. Status: documented program; implementation evidence is tracked by the ticket graph. The product direction and BrowserPod execution choice are approved. Ordinary reversible technical choices belong to the owning packet; explicit unresolved product, account, security, and release decisions retain their stated owners.
+Updated: 2026-09-05. Status: documented program; implementation evidence is tracked by the ticket graph. The product direction, BrowserPod preference, and subsequent Habitat fallback are approved. Ordinary reversible technical choices belong to the owning packet; explicit unresolved product, account, security, and release decisions retain their stated owners.
 
 This is the canonical program plan. [Execution rules](execution-contract.md), [scope coverage](capability-matrix.md), [native owners](native-owners.md), and [current risks](audit.md) keep the work bounded and current. Start here, then open [the graph](graph.md), [source evidence](evidence.md), [migration map](migration.md), or [release criteria](release.md). [CONTEXT.md](CONTEXT.md) defines the terms.
 
@@ -22,8 +22,13 @@ The owner explicitly selected BrowserPod for this work and rejected Habitat/WSL
 after the agent used the machine default. BrowserPod is the selected execution
 environment; connection readiness, toolchain compatibility, and native coding
 runtime behavior still require direct proof. Earlier Habitat checks remain
-historical evidence and do not satisfy BrowserPod acceptance. Do not substitute
-another environment. Preferred runtime choice and standalone workspace support
+historical evidence and do not satisfy BrowserPod acceptance. Later on the same
+date, the owner answered "ok lets continue we will have to use the other sandbox
+if necessary", then clarified "habitat or w/e its called". That explicit answer
+authorizes Habitat fallback for this development work and supersedes the earlier
+absolute prohibition. It does not establish BrowserPod compatibility. Packet 10c
+owns the new bounded Habitat proof; 10b keeps the BrowserPod proof open.
+Preferred runtime choice and standalone workspace support
 remain part of the product; this decision does not authorize account, spending,
 credential-transfer, or production-hosting changes.
 
@@ -128,6 +133,14 @@ Bind each session to actor, project identity, canonical root or checkout, execut
 Offer native local execution and supported sandboxed execution with accurate capability descriptions. A path in a prompt is not filesystem isolation. If a runtime cannot enforce required limits, make that mode unavailable under that policy. Do not compensate by copying credentials or weakening protection.
 
 When VCS is absent, use content fingerprints, conflict-aware patch previews, and a single active writer as the initial supported workflow. Isolated copies can be added with explicit reconciliation. Do not promise branches, atomic merges, or Git rollback for an ordinary folder.
+
+## Research-informed verification
+
+The [HoH comparison](research/hoh-alignment.md) records the owner-requested
+review of arXiv:2609.01481v1. Its acceptance refinements belong to outcomes
+04, 15, 16, 18, 20, 21, 29, and 36. They are agent-selected implementation criteria,
+not evidence that the product already implements the method. Existing native
+run, task, session, and receipt owners remain in place.
 
 ## Brain and self-improvement
 

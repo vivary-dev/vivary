@@ -40,9 +40,10 @@ Do not reset dirty work, run a competing push, or take over another active write
 
 ## Execution and verification
 
-BrowserPod is the selected environment for project execution. No Habitat/WSL
-substitution. Runtime packets require the live preflight for the exact tools they
-will execute. Native CLI, Python, database, persistence, and isolation support
+BrowserPod remains the preferred environment. The owner subsequently authorized
+Habitat fallback on 2026-09-05; see the exact answer in the design decision.
+Runtime packets name the environment and require its live preflight for the exact
+tools they will execute. Habitat results cannot satisfy BrowserPod-specific checks. Native CLI, Python, database, persistence, and isolation support
 remain separate capabilities until each is observed.
 
 Inspection packets may read source, write contracts and fixtures, inspect diffs,

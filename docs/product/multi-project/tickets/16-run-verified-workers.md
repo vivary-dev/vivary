@@ -22,7 +22,11 @@ Own worker orchestration through supported runtime APIs, verification receipts, 
 
 A worker cannot start without project, runtime, execution location, authority, plan revision, and verification target. The result separates measured usage from configured limits and unsupported enforcement.
 
+Developer self-tests produce a candidate-ready result, not independent acceptance. Record the exact candidate identity, native run/session references, configuration, and developer checks for the separate QA stage owned by outcome 29. Never mix observations from different candidate versions.
+
 ## Verify
+
+Change the candidate after self-tests and assert old observations cannot accept it. Confirm a developer completion message without independent evidence remains unaccepted.
 
 Run deterministic policy fixtures and approved no-cost runtime tasks. Reconcile reported usage with runtime receipts. Test cancellation, timeout, exceeded supported limits, and unavailable enforcement.
 
@@ -38,3 +42,5 @@ git diff --check
 ## Log
 
 - 2026-09-05: Initial public plan recorded. Implementation has not started.
+
+- 2026-09-05: Refined acceptance after the owner-requested [HoH comparison](../research/hoh-alignment.md). These criteria remain unimplemented and unverified.

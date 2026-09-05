@@ -14,7 +14,7 @@ Replace deterministic host-only evidence with one real supported native runtime 
 
 Read [the native owner inventory](../native-owners.md) before adding any run, session, task, plan, messaging, scheduler, or resource infrastructure.
 
-The owner selected BrowserPod on 2026-09-05 and excluded Habitat/WSL for this work. Verify the connection and exact toolchain there. Do not count historical Habitat fixtures as BrowserPod or real-runtime acceptance.
+The owner selected BrowserPod and later authorized Habitat fallback on 2026-09-05. Packet 10c proves only the bounded Habitat toolchain; 10b retains the separate BrowserPod proof. Neither a historical fixture nor a toolchain check establishes real coding-runtime acceptance.
 
 Program context: [design](../design.md), [migration](../migration.md), [release](../release.md), and [evidence](../evidence.md).
 

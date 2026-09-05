@@ -22,7 +22,11 @@ Own factory coordination, monitoring UI, receipts, and tests. Reuse verified run
 
 Factory runs stop at configured boundaries and human gates. Every effect names its worker, project, task, plan, runtime, evidence, and measured cost. Restart and no-progress behavior converge.
 
+Each durable iteration binds its input artifact, development document, native developer run, frozen candidate, independent QA report, and resulting artifact. Only the developer writes the artifact; the next planner consumes the prior verified behaviors and gaps. Reuse native dispatch and persistence. Keep iteration, budget, retry, and no-progress bounds explicit. Continue from file/receipt evidence when Brain is disabled; Brain promotion is a separate reviewed operation.
+
 ## Verify
+
+Crash between candidate creation, QA, and replanning; recover the exact artifact/report pair without accepting an uncertain result or repeating an effect. Show a failed observation changes the next bounded task and a prior verified behavior remains a preservation constraint.
 
 Run bounded multi-worker fixture scenarios for dependency order, no progress, budget refusal, cancellation, crash recovery, review rejection, and production gate.
 
@@ -38,3 +42,5 @@ git diff --check
 ## Log
 
 - 2026-09-05: Initial public plan recorded. Implementation has not started.
+
+- 2026-09-05: Refined acceptance after the owner-requested [HoH comparison](../research/hoh-alignment.md). These criteria remain unimplemented and unverified.

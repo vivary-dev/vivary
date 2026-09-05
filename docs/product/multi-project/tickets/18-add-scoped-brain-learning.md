@@ -20,7 +20,11 @@ Own Brain setup, project bindings, learning proposals, review UI, and tests. Rea
 
 A user can skip Brain. Accepted setup keeps source files authoritative. Lessons carry evidence and scope. No proposal changes skills, instructions, or authority without review. Cross-project promotion requires explicit selection.
 
+Project evidence continuity works with Brain disabled. Brain adds optional retrieval and reviewed promotion across scopes; it does not own acceptance or authorize changes to model, tools, policy, instructions, or skills.
+
 ## Verify
+
+Complete a project evidence-to-next-plan handoff with Brain disabled and verify no Brain connection or permission is requested.
 
 Run tests for skipped setup, project-scoped retrieval, private-source exclusion, conflicting lesson, reject, accept, rollback, export, and deletion-limit disclosure.
 
@@ -36,3 +40,5 @@ git diff --check
 ## Log
 
 - 2026-09-05: Initial public plan recorded. Implementation has not started.
+
+- 2026-09-05: Refined acceptance after the owner-requested [HoH comparison](../research/hoh-alignment.md). These criteria remain unimplemented and unverified.

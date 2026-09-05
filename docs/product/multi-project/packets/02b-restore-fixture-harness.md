@@ -1,13 +1,12 @@
 # 02b: Implement and execute the synthetic restoration harness
 Type: packet
 Parent: 02
-Status: needs-info
-Depends-on: [02a, 10b]
+Status: ready-for-agent
+Depends-on: [02a, 10c]
 Owner: source preservation implementation agent
-Scope: Synthetic restoration in one disposable BrowserPod root; no real source import.
+Scope: Synthetic restoration in one disposable Habitat container root; no real source import.
 Verification-kind: runtime
 Timebox: One context window; at most 90 minutes, then checkpoint incomplete work.
-Needs: Packet 10b must verify the user-scoped BrowserPod connection and Node filesystem/toolchain behavior. The integration owner must attach that receipt before execution.
 
 ## Goal
 
@@ -18,7 +17,7 @@ executing real file operations inside the selected environment.
 
 Read [the manifest contract](../contracts/source-preservation.md),
 [its fixtures](../fixtures/source-preservation.json), [02a](02a-source-preservation-fixture.md),
-and the actual 10b receipt. Retain ordinary repository testing conventions.
+and the [actual 10c Habitat receipt](../receipts/10c-habitat-fallback-proof.md). Retain ordinary repository testing conventions.
 The fixture inputs are synthetic. Existing files to read are listed above;
 the script and tests below are outputs to create.
 
@@ -34,11 +33,11 @@ Every fixture has an executable assertion. Real restore and repeated restore
 produce the exact expected bytes; sources remain unchanged. Rejected fixtures
 write nothing. Interruption cannot produce a completed receipt. A changed
 partial target is refused. Tests must catch a deliberate wrong-hash mutation.
-The receipt identifies BrowserPod, versions, commands, results, and limits.
+The receipt identifies Habitat, versions, commands, results, and limits.
 
 ## Verify
 
-Run inside BrowserPod:
+Run inside the offline Habitat container proved by 10c:
 
 ```console
 node --test scripts/tests/test_prove_multi_project_source_preservation.mjs
@@ -47,15 +46,17 @@ node scripts/prove_multi_project_source_preservation.mjs --fixture docs/product/
 
 Create both commands in this packet. The second command verifies a disposable
 fixture and emits results; it must not claim real-source preservation or write
-to source checkouts. CI can add regression coverage, but the BrowserPod receipt
-is required for this environment-dependent behavior.
+to source checkouts. CI can add regression coverage, but the Habitat execution receipt
+is required for this packet. Habitat does not prove BrowserPod compatibility.
 
 ## Stop conditions
 
 No private source, live credentials, source publication, overwrite, or retirement.
-Do not substitute a host filesystem for a failed BrowserPod operation. Record
+Do not substitute a host filesystem for a failed container operation. Record
 the failure and continue only independent in-scope work.
 
 ## Log
 
 - 2026-09-05: Prepared as 02a's executable successor. Source preservation and licenses remain open after fixture success.
+
+- 2026-09-05: The owner authorized Habitat fallback and 10c passed the Node/fs/crypto probe. This packet is ready after the current 03b continuation; restore behavior must still be proved by its own real filesystem tests.

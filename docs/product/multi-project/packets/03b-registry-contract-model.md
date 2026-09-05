@@ -1,13 +1,12 @@
 # 03b: Execute the portable registry contract against a deterministic model
 Type: packet
 Parent: 03
-Status: needs-info
-Depends-on: [03a, 10b]
+Status: in-progress
+Depends-on: [03a, 10c]
 Owner: registry implementation agent
 Scope: Dependency-free reference evaluator and synthetic state-transition tests; no production registry or source import.
 Verification-kind: runtime
 Timebox: One context window; checkpoint after the evaluator and adversarial schedules are verified.
-Needs: The runtime integration owner must attach 10b's actual user-scoped BrowserPod receipt proving Node, filesystem fixture reads, node:test, and SHA-256 support. No host or WSL substitute.
 
 ## Goal
 
@@ -18,7 +17,7 @@ without selecting a production database or claiming filesystem enforcement.
 
 Read [the registry contract](../contracts/project-registry.md),
 [its fixtures](../fixtures/project-registry.json), [03a](03a-project-registry-contract.md),
-and the actual 10b receipt. The contract names the caller/adapter boundary,
+and the [actual 10c Habitat receipt](../receipts/10c-habitat-fallback-proof.md). The contract names the caller/adapter boundary,
 validation order, every decision code, and permitted effects. The fixture inputs
 are synthetic adapter observations, never caller authority assertions.
 
@@ -55,14 +54,14 @@ is verification tooling, not a production registry or a second service.
 6. Tests fail when deliberately changing the deduplication key to path text,
    dropping the common-repository key, exporting the whole trusted object, or
    accepting a stale fence. Record the observed failures and restored passing run.
-7. The receipt names BrowserPod, tool versions, exact commands/results, and limits.
+7. The receipt names Habitat, tool versions, exact commands/results, and limits.
    Actual root detection, durable locks, process fencing, and file write-back remain
    unproved. Parent outcome 03 stays open until its production transaction mapping
    and owning adapter checks have evidence.
 
 ## Verify
 
-Run inside the BrowserPod instance established by 10b:
+Run inside the offline Habitat container established by 10c:
 
 ```console
 node --test scripts/tests/test_registry_contract_model.mjs
@@ -71,8 +70,8 @@ node scripts/registry_contract_model.mjs --fixture docs/product/multi-project/fi
 
 The second command must be a read-only fixture evaluator. Its stdout reports
 case IDs, decision matches, and aggregate status without raw local adapter facts.
-Existing CI may provide additional regression coverage. CI is not BrowserPod
-compatibility evidence. Authoring and inspection may proceed before boot, but this
+Existing CI may provide additional regression coverage. CI is not evidence of the selected sandbox
+configuration or BrowserPod compatibility. Authoring and inspection may proceed before boot, but this
 runtime packet cannot close without the exact environment verification.
 
 ## Stop conditions
@@ -86,3 +85,5 @@ test pass by introducing case-specific behavior or bypassing authority checks.
 ## Log
 
 - 2026-09-05: Prepared as 03a's executable successor. The selected BrowserPod toolchain is the named execution prerequisite. Production persistence and cross-process enforcement remain separate integration work.
+
+- 2026-09-05: The owner authorized Habitat fallback; 10c passed its bounded toolchain probe. Claimed by the registry implementation agent for candidate model authoring, with sandbox execution and independent review owned by the integration agent. The 57 decisions remain unexecuted at this checkpoint.

@@ -60,7 +60,12 @@ and operation capability. Every operation except export additionally requires
 explicit access to the observed root. Existing project/binding operations must resolve those records
 inside the same actor, collection, and device scope. Return `denied` without
 record details on a mismatch. Export requires `export-project`, independently of
-register or mutate. Export never creates a local binding on the receiving device.
+register or mutate. Export requires both the selected portable record and a
+matching project binding in the current actor/collection/device scope. Missing or
+mismatched selected records return `binding-unavailable`; a resolved foreign
+record returns `denied`. A multi-binding lookup selects the authorized scope
+before projection, independent of storage order. Export never creates a local
+binding on the receiving device.
 
 | Operation | Required capabilities | Exact caller request fields, in addition to `operationId` and `expectedPolicyRevision` |
 | --- | --- | --- |
@@ -221,6 +226,11 @@ to attempt a bound operation; it is not evidence that bytes reached the root.
 | 5 | Apply the operation's root, identity, overlap, VCS owner, content, reservation, and patch rules. Mutation content is compared to `expectedContentRevision`; write-back also compares it to the execution copy's base revision |
 | 6 | New register, already-registered receipt creation, rebind, and admission compare `expectedRegistryRevision` with current `registryRevision` at atomic commit; mismatch returns `retry-state` with no writes. Each accepted transaction advances registry revision once. Export and write-back do not compare registry revision or change registry state |
 
+Before any new transaction, if its registry increment or a required binding-revision
+increment would exceed the safe-integer domain, return `invalid-input` with no
+changes. Read-only operations and still-current receipt replays do not increment
+revisions and remain eligible at that boundary.
+
 Apply R1, then R2. Resolve current scope, policy, binding, and root as required
 by the operation before accepting an idempotent replay. Check an existing receipt
 under R9 before proposing any new reservation or allocation. A replay must not
@@ -268,7 +278,11 @@ observations, not accept them from JSON request bodies.
 | `privateState` | Synthetic local-only `{locator, credentialRef, remoteRef}` strings used to prove export omission. They are not product request fields or new credential storage |
 
 Every trusted field is present, though unused optional records may be null. Reject
-unknown trusted fields and invalid record shapes with `invalid-input`. Record IDs
+unknown trusted fields and invalid record shapes with `invalid-input`. Shape
+validation covers even unused records. Authorization and decisions use only the
+records relevant to the operation: collision lookup for register/rebind and
+execution binding for write-back. Unused valid records cannot change an unrelated
+operation's result. Record IDs
 and strings follow the rules above. `root` booleans are strict booleans. VCS kinds
 are `none`, `git`, `jj-git`, or `unsupported`; unsupported has null repository,
 checkout, and owner. An adapter probe failure must produce unavailable/unverified

@@ -9,19 +9,20 @@ The 36 numbered outcomes preserve the complete product. Their dependencies
 gate completion. Agents execute bounded packets; a future feature or release
 decision does not block an independent packet. Packet dependencies gate starts.
 
-Frontier: none.
-In progress: none.
+Frontier: 02b.
+In progress: 03b.
 
 ## Execution packets
 
 | Packet | Parent | Status | Start dependencies |
 | --- | --- | --- | --- |
 | [02a: Define the preservation manifest and restore acceptance fixtures](packets/02a-source-preservation-fixture.md) | 02 | done | [] |
-| [02b: Implement and execute the synthetic restoration harness](packets/02b-restore-fixture-harness.md) | 02 | needs-info | [02a, 10b] |
+| [02b: Implement and execute the synthetic restoration harness](packets/02b-restore-fixture-harness.md) | 02 | ready-for-agent | [02a, 10c] |
 | [03a: Define the portable registry contract and acceptance fixtures](packets/03a-project-registry-contract.md) | 03 | done | [] |
-| [03b: Execute the portable registry contract against a deterministic model](packets/03b-registry-contract-model.md) | 03 | needs-info | [03a, 10b] |
+| [03b: Execute the portable registry contract against a deterministic model](packets/03b-registry-contract-model.md) | 03 | in-progress | [03a, 10c] |
 | [10a: Establish the BrowserPod compatibility boundary](packets/10a-browserpod-compatibility-preflight.md) | 10 | done | [] |
 | [10b: Prove the first BrowserPod toolchain on a disposable fixture](packets/10b-browserpod-toolchain-proof.md) | 10 | needs-info | [10a] |
+| [10c: Prove the authorized Habitat fallback toolchain](packets/10c-habitat-fallback-proof.md) | 10 | done | [10a] |
 
 ## Product outcomes
 

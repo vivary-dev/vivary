@@ -20,7 +20,11 @@ Own the pilot protocol, consent and privacy notes, frozen task set, measurement 
 
 The report separates measured values from inference, records failures and interventions, names the exact versions and settings, and preserves participant privacy. It states what the pilot cannot prove.
 
+Record artifact versions, model/harness/runtime configuration, role contracts, iteration count, total tokens/time/cost, interventions, regressions, and accepted capabilities. Compare the evidence-fed workflow with a declared baseline under comparable task and resource budgets. Keep private evaluation results out of development inputs; public QA observations may inform later work. Configuration changes define a separate comparison condition. Paper results are motivation, not measured Vivary gains.
+
 ## Verify
+
+Trace each reported claim to its tested candidate and raw observations. Audit evaluator isolation, budget differences, failures, and missing data before making comparative claims.
 
 Run the frozen pilot protocol with approved no-cost resources or stop at the exact paid-runtime gate. Recompute metrics from raw receipts and have a reviewer trace each reported value.
 
@@ -38,3 +42,5 @@ git diff --check
 - 2026-09-05: Initial public plan recorded. Implementation has not started.
 
 - 2026-09-05: Preserve unresolved earlier dogfood, tutorial, and token-savings benchmark requirements through [the issue authority map](../issue-authority.md). Pilot cost metrics do not replace the separate comparative token-savings protocol.
+
+- 2026-09-05: Refined acceptance after the owner-requested [HoH comparison](../research/hoh-alignment.md). These criteria remain unimplemented and unverified.
