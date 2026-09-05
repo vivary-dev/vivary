@@ -37,3 +37,5 @@ git diff --check
 - 2026-09-05: Public boundary receipt completed in the sanitized candidate. Status moved to `ready-for-human` for documentation pull-request review only. No preservation, retirement, publication, or real-runtime proof is claimed.
 
 - 2026-09-05: Habitat graph/link/privacy guard passed for all 36 tickets; six adversarial guard fixtures passed. Public source was reviewed for private material. Line endings passed. Final diff hygiene and PR CI are recorded in the pull request. Ticket remains ready-for-human for documentation review; no source import or release gate is closed.
+
+- 2026-09-05: Owner corrected the execution environment to BrowserPod and explicitly excluded Habitat/WSL. Historical checks retain their actual environment labels; BrowserPod proof is pending. Program and entry-point instructions now preserve this decision. Shared plan is in PR #328 for review.

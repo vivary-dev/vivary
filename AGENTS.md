@@ -10,7 +10,9 @@ Start at [the tracked program](docs/product/multi-project/design.md), then
 [the graph](docs/product/multi-project/graph.md). The owner decided on 2026-09-05
 that Vivary absorbs the full Littleagent scope. The GUI is primary; standalone
 workspaces, runtime choice, optional version control, templates, and optional
-Brain learning remain supported. Ticket status owns the current frontier.
+Brain learning remain supported. Ticket status owns the current frontier. For this program, the owner selected
+BrowserPod on 2026-09-05 and explicitly excluded Habitat/WSL; that choice overrides
+machine defaults. Verify its connection and compatibility before execution.
 Keep the graph, owning ticket, evidence, and next task current after each unit.
 The existing standard and scaffolder remain the shipped baseline; the program
 does not turn planned application features into release claims.

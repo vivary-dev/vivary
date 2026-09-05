@@ -16,6 +16,17 @@ Planning is the immediate priority, and HarnessMax removal remains deferred. Web
 
 No model, storage vendor, hosting plan, default runtime, or payment service is selected by this document. Earlier Littleagent implementation authority remains relevant to compatible work after the changed contracts are reconciled. Planning authority does not establish implementation or publication evidence.
 
+## Execution decision: 2026-09-05
+
+The owner explicitly selected BrowserPod for this work and rejected Habitat/WSL
+after the agent used the machine default. BrowserPod is the selected execution
+environment; connection readiness, toolchain compatibility, and native coding
+runtime behavior still require direct proof. Earlier Habitat checks remain
+historical evidence and do not satisfy BrowserPod acceptance. Do not substitute
+another environment. Preferred runtime choice and standalone workspace support
+remain part of the product; this decision does not authorize account, spending,
+credential-transfer, or production-hosting changes.
+
 ## Recommended architecture
 
 Use Vivary as the portable workspace and governance layer. Compose Agent-Native's application, action, chat, run, session, resource, connection, and automation primitives in the workbench. Selected coding runtimes retain their loops, tools, compaction, and native session state.

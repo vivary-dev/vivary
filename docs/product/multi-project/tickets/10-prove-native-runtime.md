@@ -10,6 +10,8 @@ Replace deterministic host-only evidence with one real supported native runtime 
 
 ## Context
 
+The owner selected BrowserPod on 2026-09-05 and excluded Habitat/WSL for this work. Verify the connection and exact toolchain there. Do not count historical Habitat fixtures as BrowserPod or real-runtime acceptance.
+
 Program context: [design](../design.md), [migration](../migration.md), [release](../release.md), and [evidence](../evidence.md).
 
 Own the native runtime adapter, readiness UI, public API map updates, and proof receipt. Reuse Littleagent S-00A host code and eleven deterministic tests. Read S-00A findings before changing the adapter. Do not make paid calls without approval.
