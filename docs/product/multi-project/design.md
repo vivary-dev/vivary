@@ -49,9 +49,14 @@ The owner answered the three questions in
    gated proposal at a time with a named execution check, and skills that
    roll back while the record persists. Background memory consolidation
    without a gate is not selected.
+4. A layer over the user's harnesses. Vivary drives whichever coding agent
+   the user already pays for, Claude Code, Codex, or another through an
+   adapter, with one role contract and one receipt shape. The loop never
+   requires its own model API key and never resells tokens. Stated by the
+   owner on 2026-09-06.
 
-Packet [20a](packets/20a-headless-loop-proof.md) carries the first decision and
-is claimed before other ready packets. Outcomes 18, 19, 20, 30, and 36 carry the
+Packet [20a](packets/20a-headless-loop-proof.md) carries the first and fourth
+decisions and is claimed before other ready packets. Outcomes 18, 19, 20, 30, and 36 carry the
 rest in their logs. These decisions change order and acceptance. They do not add
 product scope or authorize spending, publication, scheduling, or account changes.
 
