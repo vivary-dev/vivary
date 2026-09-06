@@ -635,6 +635,18 @@ jobs:
         run: python scripts/check_package_docs_parity.py
       - name: tropo check (example vault, strict)
         run: python packages/tropo/tropo.py check --root packages/tropo/examples/vault
+      - name: multi-project plan guard
+        run: |
+          python scripts/tests/test_multi_project_plan.py
+          python scripts/check_multi_project_plan.py --check
+      - name: registry contract model
+        run: |
+          node --test scripts/tests/test_registry_contract_model.mjs
+          node scripts/registry_contract_model.mjs --fixture docs/product/multi-project/fixtures/project-registry.json --check
+      - name: source restoration fixture
+        run: |
+          node --test scripts/tests/test_prove_multi_project_source_preservation.mjs
+          node scripts/prove_multi_project_source_preservation.mjs --fixture docs/product/multi-project/fixtures/source-preservation.json --check
       - name: line endings
         run: python scripts/check_line_endings.py
       - name: diff hygiene

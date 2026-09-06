@@ -1,0 +1,35 @@
+# 19: Integrate the template program after its prerequisites
+Type: outcome
+Status: planned
+Blocked-by: [07, 08]
+External-gates: [template-installer]
+Unlocks: [24, 36]
+
+Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
+
+## Goal
+
+Connect project creation and empty-child composition to the template installer after its held program is released.
+
+## Context
+
+Program context: [design](../design.md), [migration](../migration.md), [release](../release.md), and [evidence](../evidence.md).
+
+Own only the workbench wrapper, capability detection, project binding, UI, and wrapper tests. Read [the held template-installer contract](../external-dependencies.md#held-template-installer-program). The external program must finish tickets 01-06. The repository owner must explicitly lift its hold and provide a canonical approved source packet. A compatible template API must exist in an installed artifact.
+
+## Done condition
+
+The wrapper discovers the installed capability and shows the template plan and receipt. It binds the target project, handles recovery, and leaves the workspace usable without the workbench. It contains no copied catalog or template implementation.
+
+## Verify
+
+Run wrapper tests against the template program's installed conformance fixture and failure responses. Prove missing or held capability disables the UI without changing project state.
+
+
+Run the [canonical common planning checks](../execution-contract.md#maintaining-the-graph)
+after changing this outcome's metadata. These checks validate planning documents;
+they do not prove the behavior above.
+
+## Log
+
+- 2026-09-05: Initial public plan recorded. Implementation has not started.

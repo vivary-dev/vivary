@@ -1,0 +1,987 @@
+{
+  "fixtureSchemaVersion": 1,
+  "purpose": "Synthetic acceptance cases. No real paths, history, credentials, or restoration claims.",
+  "defaults": {
+    "manifestRef": "base",
+    "sourceTreeRef": "source-base",
+    "targetTreeRef": "target-empty",
+    "receiptRef": "none",
+    "tempTreeRef": "temp-empty",
+    "policy": {
+      "pathStyle": "posix-relative",
+      "caseSensitivity": "sensitive",
+      "noFollow": true,
+      "rejectUnknownFields": true
+    },
+    "expect": {
+      "sourceUnchanged": true,
+      "privacySafeError": true
+    }
+  },
+  "manifests": {
+    "base": {
+      "schemaVersion": 1,
+      "sourceId": "fixture-project",
+      "owner": "fixture-writer",
+      "files": [
+        {
+          "path": "docs/note.txt",
+          "kind": "file",
+          "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "size": 3,
+          "class": "tracked-dirty",
+          "destination": "docs/note.txt"
+        },
+        {
+          "path": "assets/empty.bin",
+          "kind": "file",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0,
+          "class": "untracked",
+          "destination": "assets/empty.bin"
+        }
+      ],
+      "history": {
+        "kind": "none",
+        "evidenceRef": null,
+        "reason": "Synthetic fixture has no repository history."
+      },
+      "attribution": {
+        "sourceOwner": "fixture-author",
+        "licenseDisposition": "Synthetic test content authored for this repository.",
+        "reviewed": true
+      },
+      "exclusions": [
+        {
+          "class": "credentials",
+          "reason": "Secrets require an authorized secret-backup mechanism."
+        },
+        {
+          "class": "hosted-records",
+          "reason": "Issue and asset exports require a separate private manifest."
+        },
+        {
+          "class": "runtime-state",
+          "reason": "Runtime recovery belongs to its owning runtime contract."
+        }
+      ]
+    }
+  },
+  "trees": {
+    "source-base": [
+      {
+        "path": "docs/note.txt",
+        "kind": "file",
+        "contentBase64": "YWJj"
+      },
+      {
+        "path": "assets/empty.bin",
+        "kind": "file",
+        "contentBase64": ""
+      },
+      {
+        "path": "unselected/keep.txt",
+        "kind": "file",
+        "contentBase64": "a2VlcA=="
+      }
+    ],
+    "source-note-changed": [
+      {
+        "path": "docs/note.txt",
+        "kind": "file",
+        "contentBase64": "YWJk"
+      },
+      {
+        "path": "assets/empty.bin",
+        "kind": "file",
+        "contentBase64": ""
+      },
+      {
+        "path": "unselected/keep.txt",
+        "kind": "file",
+        "contentBase64": "a2VlcA=="
+      }
+    ],
+    "target-empty": [],
+    "temp-empty": [],
+    "target-restored": [
+      {
+        "path": "docs/note.txt",
+        "kind": "file",
+        "contentBase64": "YWJj"
+      },
+      {
+        "path": "assets/empty.bin",
+        "kind": "file",
+        "contentBase64": ""
+      }
+    ],
+    "target-restored-plus-unrelated": [
+      {
+        "path": "docs/note.txt",
+        "kind": "file",
+        "contentBase64": "YWJj"
+      },
+      {
+        "path": "assets/empty.bin",
+        "kind": "file",
+        "contentBase64": ""
+      },
+      {
+        "path": "user/keep.txt",
+        "kind": "file",
+        "contentBase64": "a2VlcA=="
+      }
+    ],
+    "target-unexpected-bytes": [
+      {
+        "path": "docs/note.txt",
+        "kind": "file",
+        "contentBase64": "YmFk"
+      }
+    ],
+    "target-parent-file": [
+      {
+        "path": "docs",
+        "kind": "file",
+        "contentBase64": "eA=="
+      }
+    ],
+    "target-directory-at-output": [
+      {
+        "path": "docs/note.txt",
+        "kind": "directory"
+      }
+    ],
+    "target-linked-parent": [
+      {
+        "path": "docs",
+        "kind": "link",
+        "target": "../outside-synthetic-root"
+      }
+    ],
+    "target-partial": [
+      {
+        "path": "docs/note.txt",
+        "kind": "file",
+        "contentBase64": "YWJj"
+      }
+    ],
+    "target-partial-changed": [
+      {
+        "path": "docs/note.txt",
+        "kind": "file",
+        "contentBase64": "YmFk"
+      }
+    ]
+  },
+  "receipts": {
+    "none": null,
+    "complete-base": {
+      "status": "complete",
+      "manifestRef": "base",
+      "verifiedTargetTreeRef": "target-restored"
+    },
+    "incomplete-base": {
+      "status": "incomplete",
+      "manifestRef": "base",
+      "ownedPaths": [
+        "docs/note.txt"
+      ],
+      "observedTargetTreeRef": "target-partial"
+    }
+  },
+  "cases": [
+    {
+      "id": "restore-empty",
+      "mutations": [],
+      "expect": {
+        "result": "restored",
+        "noWrites": false,
+        "targetTreeRef": "target-restored",
+        "receiptStatus": "complete",
+        "receiptBinding": "current-manifest",
+        "verifiedPaths": [
+          "docs/note.txt",
+          "assets/empty.bin"
+        ],
+        "tempTreeRef": "temp-empty"
+      }
+    },
+    {
+      "id": "repeat-identical",
+      "setup": {
+        "targetTreeRef": "target-restored",
+        "receiptRef": "complete-base"
+      },
+      "mutations": [],
+      "expect": {
+        "result": "already-restored",
+        "noWrites": true,
+        "targetTreeRef": "target-restored",
+        "receiptStatus": "complete",
+        "receiptBinding": "current-manifest",
+        "verifiedPaths": [
+          "docs/note.txt",
+          "assets/empty.bin"
+        ],
+        "tempTreeRef": "temp-empty"
+      }
+    },
+    {
+      "id": "repeat-preserves-unrelated-target",
+      "setup": {
+        "targetTreeRef": "target-restored-plus-unrelated",
+        "receiptRef": "complete-base"
+      },
+      "mutations": [],
+      "expect": {
+        "result": "already-restored",
+        "noWrites": true,
+        "targetTreeRef": "target-restored-plus-unrelated",
+        "receiptStatus": "complete",
+        "receiptBinding": "current-manifest",
+        "verifiedPaths": [
+          "docs/note.txt",
+          "assets/empty.bin"
+        ],
+        "tempTreeRef": "temp-empty"
+      }
+    },
+    {
+      "id": "identical-target-without-receipt",
+      "setup": {
+        "targetTreeRef": "target-restored"
+      },
+      "mutations": [],
+      "expect": {
+        "result": "target-conflict",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "source-missing",
+      "mutations": [
+        {
+          "op": "tree-remove",
+          "tree": "source",
+          "path": "docs/note.txt"
+        }
+      ],
+      "expect": {
+        "result": "source-missing",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "source-changed-same-size",
+      "setup": {
+        "sourceTreeRef": "source-note-changed"
+      },
+      "mutations": [],
+      "expect": {
+        "result": "source-hash-mismatch",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "wrong-size",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/files/0/size",
+          "value": 4
+        }
+      ],
+      "expect": {
+        "result": "source-size-mismatch",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "duplicate-destination",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/files/1/destination",
+          "value": "docs/note.txt"
+        }
+      ],
+      "expect": {
+        "result": "destination-collision",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "case-collision",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/files/1/destination",
+          "value": "DOCS/NOTE.TXT"
+        },
+        {
+          "op": "set-policy",
+          "field": "caseSensitivity",
+          "value": "insensitive"
+        }
+      ],
+      "expect": {
+        "result": "destination-collision",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "ancestor-destination-collision",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/files/1/destination",
+          "value": "docs/note.txt/child.bin"
+        }
+      ],
+      "expect": {
+        "result": "destination-collision",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "target-parent-is-file",
+      "setup": {
+        "targetTreeRef": "target-parent-file"
+      },
+      "mutations": [],
+      "expect": {
+        "result": "target-conflict",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "target-directory-at-output",
+      "setup": {
+        "targetTreeRef": "target-directory-at-output"
+      },
+      "mutations": [],
+      "expect": {
+        "result": "target-conflict",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "changed-target",
+      "setup": {
+        "targetTreeRef": "target-unexpected-bytes"
+      },
+      "mutations": [],
+      "expect": {
+        "result": "target-conflict",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "absolute-destination-posix",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/files/0/destination",
+          "value": "/escape.txt"
+        }
+      ],
+      "expect": {
+        "result": "unsafe-path",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "absolute-destination-windows",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/files/0/destination",
+          "value": "C:/escape.txt"
+        }
+      ],
+      "expect": {
+        "result": "unsafe-path",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "parent-traversal-destination",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/files/0/destination",
+          "value": "../escape.txt"
+        }
+      ],
+      "expect": {
+        "result": "unsafe-path",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "dot-segment-destination",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/files/0/destination",
+          "value": "docs/./note.txt"
+        }
+      ],
+      "expect": {
+        "result": "unsafe-path",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "absolute-source-path",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/files/0/path",
+          "value": "/escape.txt"
+        }
+      ],
+      "expect": {
+        "result": "unsafe-path",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "parent-traversal-source",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/files/0/path",
+          "value": "../escape.txt"
+        }
+      ],
+      "expect": {
+        "result": "unsafe-path",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "source-symlink",
+      "mutations": [
+        {
+          "op": "tree-replace",
+          "tree": "source",
+          "path": "docs/note.txt",
+          "entry": {
+            "path": "docs/note.txt",
+            "kind": "link",
+            "target": "../outside-synthetic-root"
+          }
+        }
+      ],
+      "expect": {
+        "result": "unsafe-link",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "source-intermediate-symlink",
+      "mutations": [
+        {
+          "op": "tree-remove",
+          "tree": "source",
+          "path": "docs/note.txt"
+        },
+        {
+          "op": "tree-add",
+          "tree": "source",
+          "path": "docs",
+          "entry": {
+            "path": "docs",
+            "kind": "link",
+            "target": "../outside-synthetic-root"
+          }
+        }
+      ],
+      "expect": {
+        "result": "unsafe-link",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "destination-symlink-escape",
+      "setup": {
+        "targetTreeRef": "target-linked-parent"
+      },
+      "mutations": [],
+      "expect": {
+        "result": "unsafe-link",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "unsupported-manifest-kind",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/files/0/kind",
+          "value": "link"
+        }
+      ],
+      "expect": {
+        "result": "unsupported-kind",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "interrupted-after-one-output",
+      "mutations": [],
+      "fault": {
+        "op": "interrupt-after-output",
+        "count": 1
+      },
+      "expect": {
+        "result": "incomplete",
+        "noWrites": false,
+        "targetTreeRef": "target-partial",
+        "receiptStatus": "incomplete",
+        "receiptBinding": "current-manifest",
+        "ownedPaths": [
+          "docs/note.txt"
+        ],
+        "tempTreeRef": "temp-empty"
+      }
+    },
+    {
+      "id": "resume-changed-partial",
+      "setup": {
+        "targetTreeRef": "target-partial-changed",
+        "receiptRef": "incomplete-base"
+      },
+      "mutations": [],
+      "expect": {
+        "result": "target-conflict",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "stale-receipt-binding",
+      "setup": {
+        "targetTreeRef": "target-restored",
+        "receiptRef": "complete-base"
+      },
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/files/1/destination",
+          "value": "assets/empty-copy.bin"
+        }
+      ],
+      "expect": {
+        "result": "receipt-binding-mismatch",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "complete-receipt-selected-source-changed",
+      "setup": {
+        "targetTreeRef": "target-restored",
+        "receiptRef": "complete-base"
+      },
+      "mutations": [
+        {
+          "op": "tree-replace",
+          "tree": "source",
+          "path": "docs/note.txt",
+          "entry": {
+            "path": "docs/note.txt",
+            "kind": "file",
+            "contentBase64": "YWJk"
+          }
+        }
+      ],
+      "expect": {
+        "result": "source-hash-mismatch",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "incomplete-receipt-selected-source-changed",
+      "setup": {
+        "targetTreeRef": "target-partial",
+        "receiptRef": "incomplete-base"
+      },
+      "mutations": [
+        {
+          "op": "tree-replace",
+          "tree": "source",
+          "path": "docs/note.txt",
+          "entry": {
+            "path": "docs/note.txt",
+            "kind": "file",
+            "contentBase64": "YWJk"
+          }
+        }
+      ],
+      "expect": {
+        "result": "source-hash-mismatch",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "complete-receipt-unselected-source-changed",
+      "setup": {
+        "targetTreeRef": "target-restored",
+        "receiptRef": "complete-base"
+      },
+      "mutations": [
+        {
+          "op": "tree-replace",
+          "tree": "source",
+          "path": "unselected/keep.txt",
+          "entry": {
+            "path": "unselected/keep.txt",
+            "kind": "file",
+            "contentBase64": "ZHJpZnQ="
+          }
+        }
+      ],
+      "expect": {
+        "result": "receipt-binding-mismatch",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "incomplete-receipt-unselected-source-changed",
+      "setup": {
+        "targetTreeRef": "target-partial",
+        "receiptRef": "incomplete-base"
+      },
+      "mutations": [
+        {
+          "op": "tree-replace",
+          "tree": "source",
+          "path": "unselected/keep.txt",
+          "entry": {
+            "path": "unselected/keep.txt",
+            "kind": "file",
+            "contentBase64": "ZHJpZnQ="
+          }
+        }
+      ],
+      "expect": {
+        "result": "receipt-binding-mismatch",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "invalid-json",
+      "rawManifestText": "{\"schemaVersion\":1",
+      "mutations": [],
+      "expect": {
+        "result": "invalid-json",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "duplicate-json-key",
+      "rawManifestText": "{\"schemaVersion\":1,\"sourceId\":\"a\",\"sourceId\":\"b\"}",
+      "mutations": [],
+      "expect": {
+        "result": "duplicate-json-key",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "non-object-root",
+      "rawManifestText": "[]",
+      "mutations": [],
+      "expect": {
+        "result": "invalid-manifest-root",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "unsupported-schema-version",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/schemaVersion",
+          "value": 2
+        }
+      ],
+      "expect": {
+        "result": "unsupported-schema-version",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "invalid-field-set",
+      "mutations": [
+        {
+          "op": "remove-json",
+          "pointer": "/owner"
+        },
+        {
+          "op": "set-json",
+          "pointer": "/files/0/size",
+          "value": -1
+        },
+        {
+          "op": "set-json",
+          "pointer": "/files/0/sha256",
+          "value": "not-a-digest"
+        },
+        {
+          "op": "set-json",
+          "pointer": "/files/0/class",
+          "value": "unknown-class"
+        },
+        {
+          "op": "set-json",
+          "pointer": "/unexpected",
+          "value": true
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "missing-field",
+          "invalid-size",
+          "invalid-sha256",
+          "invalid-enum",
+          "unknown-field"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "history-field-set",
+      "mutations": [
+        {
+          "op": "remove-json",
+          "pointer": "/history/reason"
+        },
+        {
+          "op": "set-json",
+          "pointer": "/history/unexpected",
+          "value": true
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "missing-field",
+          "unknown-field"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "history-wrong-type",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/history",
+          "value": []
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "invalid-type"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "history-evidence-required",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/history/kind",
+          "value": "commit"
+        },
+        {
+          "op": "set-json",
+          "pointer": "/history/evidenceRef",
+          "value": null
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "invalid-type"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "attribution-field-set",
+      "mutations": [
+        {
+          "op": "remove-json",
+          "pointer": "/attribution/sourceOwner"
+        },
+        {
+          "op": "set-json",
+          "pointer": "/attribution/unexpected",
+          "value": true
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "missing-field",
+          "unknown-field"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "attribution-wrong-type",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/attribution",
+          "value": []
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "invalid-type"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "attribution-not-reviewed",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/attribution/reviewed",
+          "value": false
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "invalid-value"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "exclusions-wrong-type",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/exclusions",
+          "value": "not-an-array"
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "invalid-type"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "exclusion-field-set",
+      "mutations": [
+        {
+          "op": "remove-json",
+          "pointer": "/exclusions/0/reason"
+        },
+        {
+          "op": "set-json",
+          "pointer": "/exclusions/0/unexpected",
+          "value": true
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "missing-field",
+          "unknown-field"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "exclusion-empty-class",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/exclusions/0/class",
+          "value": ""
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "invalid-value"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "resume-unchanged-partial",
+      "setup": {
+        "targetTreeRef": "target-partial",
+        "receiptRef": "incomplete-base"
+      },
+      "mutations": [],
+      "expect": {
+        "result": "restored",
+        "noWrites": false,
+        "targetTreeRef": "target-restored",
+        "receiptStatus": "complete",
+        "receiptBinding": "current-manifest",
+        "verifiedPaths": [
+          "docs/note.txt",
+          "assets/empty.bin"
+        ],
+        "tempTreeRef": "temp-empty"
+      }
+    },
+    {
+      "id": "wrong-json-type",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/files",
+          "value": "not-an-array"
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "invalid-type"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "duplicate-source-path",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/files/1/path",
+          "value": "docs/note.txt"
+        }
+      ],
+      "expect": {
+        "result": "source-collision",
+        "noWrites": true
+      }
+    }
+  ],
+  "unproved": [
+    "actual BrowserPod filesystem semantics",
+    "host-specific Unicode aliases, junctions, reserved names, and locking",
+    "real source license and attribution disposition",
+    "working-tree, Git-history, ignored-resource, and hosted-asset restoration",
+    "runtime session and credential backup"
+  ]
+}
