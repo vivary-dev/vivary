@@ -40,3 +40,5 @@ they do not prove the behavior above.
 - 2026-09-05: Preserve unresolved earlier dogfood, tutorial, and token-savings benchmark requirements through [the issue authority map](../issue-authority.md). Pilot cost metrics do not replace the separate comparative token-savings protocol.
 
 - 2026-09-05: Refined acceptance after the owner-requested [HoH comparison](../research/hoh-alignment.md). These criteria remain unimplemented and unverified.
+
+- 2026-09-06: Per [the alignment brief](../research/hoh-direction-brief.md): name the outer-loop objective (interventions per task, cost per accepted task, regressions) on the frozen task set, record skill and instruction versions in the configuration, and reuse the frozen set as the keep-or-discard check for outer-loop proposals with results kept out of proposer inputs. Unimplemented and unverified.

@@ -32,6 +32,29 @@ Runtime choice and standalone support remain part of the product. This developme
 decision does not authorize account, spending, credential-transfer, scheduled
 activation, or production-hosting changes.
 
+## Direction decision: 2026-09-06
+
+The owner answered the three questions in
+[the alignment brief](research/hoh-direction-brief.md) on 2026-09-06:
+
+1. Loop first. The planning, coding, and testing loop runs and proves itself
+   on files before the GUI depends on it. The GUI stays vital for usability
+   and accessibility and is not descoped; it consumes the loop's evidence
+   instead of preceding it.
+2. Code first. The first project under the loop is a code project with an
+   executable test suite, because that oracle is verifiable. Non-code
+   workspaces wait for a declared oracle.
+3. WikiSkill-shaped outer loop. Cross-session learning follows the
+   compile-into-skills design: write-once traces, patch-only patterns, one
+   gated proposal at a time with a named execution check, and skills that
+   roll back while the record persists. Background memory consolidation
+   without a gate is not selected.
+
+Packet [20a](packets/20a-headless-loop-proof.md) carries the first decision and
+is claimed before other ready packets. Outcomes 18, 19, 20, 30, and 36 carry the
+rest in their logs. These decisions change order and acceptance. They do not add
+product scope or authorize spending, publication, scheduling, or account changes.
+
 ## Recommended architecture
 
 Use Vivary as the portable workspace and governance layer. Compose Agent-Native's application, action, chat, run, session, resource, connection, and automation primitives in the workbench. Selected coding runtimes retain their loops, tools, compaction, and native session state.
@@ -142,6 +165,11 @@ review of arXiv:2609.01481v1. Its acceptance refinements belong to outcomes
 not evidence that the product already implements the method. Existing native
 run, task, session, and receipt owners remain in place.
 
+[The alignment brief](research/hoh-direction-brief.md) of 2026-09-06 extends
+that review to the outer loop and the fleet question, with every number traced
+to its source page, and records the owner's answers in
+[the direction decision](#direction-decision-2026-09-06).
+
 ## Brain and self-improvement
 
 Recommend a Brain during onboarding and let the user skip it. Start with sourced files, retrieval, and project-scoped learning records. Semantic indexes and provider-backed memory remain optional and rebuildable where feasible.
@@ -149,6 +177,10 @@ Recommend a Brain during onboarding and let the user skip it. Start with sourced
 The learning loop is evidence capture, candidate lesson, evaluation, review, and accepted change. Separate user knowledge from runtime transcripts and operational traces. Proposals do not rewrite skills, authority, or instructions automatically. Support comparison, rejection, rollback, and provenance.
 
 Default learning scope is the originating project. Moving knowledge into a shared Brain requires explicit selection or policy. Keep credentials, private source material, and another project's context out of automatic cross-project prompts. The user can inspect, export, correct, and remove managed memory with documented limits.
+
+Decided 2026-09-06: the learning loop is WikiSkill-shaped, per
+[the direction decision](#direction-decision-2026-09-06). Working agents load
+skills and a short index, never the raw learning corpus.
 
 ## Full scope and delivery
 

@@ -34,3 +34,5 @@ they do not prove the behavior above.
 ## Log
 
 - 2026-09-05: Initial public plan recorded. Implementation has not started.
+
+- 2026-09-06: The outer loop's runner belongs here, per [the alignment brief](../research/hoh-direction-brief.md): consolidate new traces into patterns by patch, draft at most one proposal, and run its named execution check. An unchanged trace count is a no-op. A shared-skill or instruction change stops at `ready-for-human` with the verbatim diff, never an automatic apply. Each run leaves a receipt. Unimplemented and unverified.
