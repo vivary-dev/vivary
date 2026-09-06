@@ -2,9 +2,10 @@
 
 Type: packet
 Parent: 20
-Status: ready-for-agent
+Status: needs-info
 Depends-on: [10c]
 Owner: Claude loop proof agent
+Needs: A verified pre-admission bound on cumulative input and output for an installed Claude Code invocation, supplied by the runtime integration maintainer. Jeff owns any proposed change to this packet's hard token policy. The installed CLI has no documented bound that satisfies it.
 Scope: Implement and run one Claude Code proof over one immutable fixture baseline. Complete three healthy iterations and two isolated fault runs within 100,000 reported tokens. Do not run Codex parity, a GUI, an Agent-Native server, a new scheduler, or a paid API key.
 Verification-kind: runtime
 Timebox: One context window. Stop after three healthy iterations and both fault runs, or at a stop condition, and write the receipt.
@@ -55,13 +56,15 @@ enforcement boundary. Mount the specification, oracle, and common prompts
 read-only for every role that can see them. The sequencer rejects a changed
 frozen candidate, oracle, or prompt instead of accepting its report.
 
-The trusted sequencer may run as the Habitat WSL control process and launch one
-bounded Docker container per role invocation. The full source bundle and proof
+The trusted sequencer may run as the Habitat WSL control process. Keep the
+authenticated CLI host separate from the credential-free role tool filesystem.
+The full source bundle and proof
 tree are control-process views only. Give each role a minimal projection of its
 declared files. The planner must not inherit the source bundle, candidate trees,
 raw developer logs, or another receipt root. Its public receipt index may expose
 only approved detail files. Never mount the Docker socket inside a model-driven
-container. Give every role a proxy-only network and explicit CPU, memory,
+container. Give the CLI host a proxy-only network and the role tool worker no
+external network. Give both explicit CPU, memory,
 process, capability, and no-new-privileges limits. The existing offline
 preflight proves the image tools and authentication state only. It does not
 prove this live execution design.
@@ -80,13 +83,22 @@ container cannot run the coding agent.
 ## Usage contract
 
 Packet 20a has one 100,000-token ceiling across every model call in its healthy,
-fault, schema-retry, and live-preflight paths. Before a role call,
-the sequencer must observe a positive remaining balance. Use a verified native
-per-call limit when Claude Code `2.1.241` exposes one. Otherwise, inspect streamed
-usage and stop at the first observation at or above the ceiling. Record the
-configured sampling interval, cancellation delay, overshoot bound, and observed
-overshoot. Use `null` with a reason when the CLI cannot report a bound. This is
-an accounting stop, not an exact provider-side token reservation.
+fault, schema-retry, and live-preflight paths. Before a role call, require a
+verified maximum cumulative input-plus-output charge for that invocation,
+including native retries and auxiliary model requests. Bind the maximum to the
+installed runtime, model, policy, and enforcement evidence. Reserve that maximum
+atomically from the remaining packet balance before launching the CLI. Refuse
+the call when the bound is unknown, cannot be enforced, or exceeds the balance.
+
+Settle from actual usage only when the result proves complete accounting.
+Retain the full reservation after interruption or incomplete usage. A turn cap,
+an output-only cap, and observed cost do not establish a total-token bound.
+Streamed usage and cancellation are secondary checks, never admission authority.
+Any observed overrun fails the proof. The current installed CLI has no documented
+mechanism that passes this preflight. Do not make a model call to discover the
+bound. Keep live execution stopped and continue independent deterministic work
+or another available packet. Changing this hard-token policy requires Jeff's
+specific approval of a reviewable alternative.
 
 Store the monotonic packet ledger at
 `/tmp/vivary-hoh-proof/20a/usage.json`. Every healthy, fault, retry, and
@@ -127,9 +139,25 @@ Mount a read-only source bundle at `/opt/vivary-hoh-source`, outside the proof
 tree. Set `HABITAT_TASK_HOST_ROOT` to the verified persistent Habitat work root,
 then bind `${HABITAT_TASK_HOST_ROOT}/vivary-hoh-proof` to the container path
 `/tmp/vivary-hoh-proof`. Verify the actual source, target, filesystem, and
-options before any model call. Do not bind the production checkout. Mount only
-the existing Claude authentication volume needed by this runtime. Leave every
+options before any model call. Do not bind the production checkout. Mount
+only the existing Claude authentication volume into the trusted CLI host. Do
+not expose it through a role filesystem or a model-selected tool. Leave every
 other `/tmp` path on its normal temporary filesystem.
+
+Use a verified separation boundary. One supported composition to prove is a
+Claude host with all built-in tools disabled and only explicit, scoped MCP
+tools whose worker filesystem has no authentication mount or credential
+environment. The worker may read its public inputs and perform role-authorized
+candidate operations. It may not execute arbitrary commands in the authenticated
+host. Keep native session/authentication handling in the CLI. Do not create new
+credential storage or copy authentication into a tool worker.
+
+Before acceptance, use a synthetic credential canary to prove every model tool
+cannot read it through paths, links, environment variables, process files, or
+shell execution. The CLI must still authenticate through its existing native
+state. Missing isolation stops the runtime proof. Deterministic candidate tests
+run in a credential-free, network-disabled sandbox, never in the trusted WSL
+control process.
 
 Materialize the tracked fixture from the read-only bundle into a private Git
 repository in the persistent proof tree. Create one initial commit with fixed
@@ -149,9 +177,18 @@ Use these explicit private paths in Habitat:
 
 Do not run a fault against the healthy project or receipt root. Never use
 `git reset` or `git clean` on the Vivary checkout or another user project.
-Keep the baseline and evidence after the task container stops. Before closure,
-export a hash-bound evidence archive and manifest to the ignored Littleagent
-path `.tmp/hoh-proof/20a/`. Include mount evidence, the baseline bundle, receipt
+Keep the baseline and evidence after the task container stops. Before export,
+resolve the absolute preserved Littleagent checkout as `LITTLEAGENT_ROOT` and
+record that value privately. Run the following host-side check with that value:
+
+```console
+git -C "$LITTLEAGENT_ROOT" check-ignore -v .tmp/hoh-proof/20a/probe
+```
+
+Require an ignore-rule match and verify that the resolved export target stays
+inside that checkout's `.tmp/hoh-proof/20a/`. Export a hash-bound evidence archive
+and manifest to `${LITTLEAGENT_ROOT}/.tmp/hoh-proof/20a/`. Never resolve that
+relative suffix against the Vivary checkout. Include mount evidence, the baseline bundle, receipt
 indexes and details, candidate bindings, raw usage records, and command output.
 Exclude authentication data and provider transcripts. Record the archive and
 manifest hashes in the tracked 20a receipt.
@@ -161,6 +198,9 @@ manifest hashes in the tracked 20a receipt.
 - Create `tools/hoh_loop.py`.
 - Create `tools/hoh/__init__.py`, `tools/hoh/protocol.py`, and
   `tools/hoh/claude.py`.
+- If the installed native boundary requires scoped MCP tools, create
+  `tools/hoh/role_tools.py` and `tools/tests/test_hoh_role_tools.py` for that
+  bounded adapter seam. They add no provider API client or persistent service.
 - Create `tools/hoh/prompts/planner.md`, `tools/hoh/prompts/developer.md`, and
   `tools/hoh/prompts/qa.md`.
 - Create `tools/tests/test_hoh_loop.py` and the tests-only executable
@@ -170,24 +210,30 @@ manifest hashes in the tracked 20a receipt.
   `docs/product/multi-project/fixtures/hoh-loop/tests/test_links.py`.
 - Create `docs/product/multi-project/receipts/20a-headless-loop-proof.md`.
 - Update this packet's status and log, then regenerate the graph.
+- Update `CHANGELOG.md` at closure and run the approved canonical site sync.
+  Commit its generated changelog and `llms-full.txt` mirrors with the receipt.
 - At 20a closure, materialize
   `docs/product/multi-project/packets/20b-codex-loop-parity-proof.md` from the
-  tracked continuation contract below. Set `Depends-on: [20a]` and switch the
-  valid frontier to 20b in the same change that marks 20a done.
+  tracked continuation contract below. Set `Depends-on: [20a]` and its status
+  from verified Codex prerequisites in the same change that marks 20a done.
 
 The private baseline, candidate worktrees, detailed receipts, and CLI output
 are runtime outputs. Do not commit them as product source.
 
 ## Required 20b continuation
 
-Before 20a closes, create packet 20b with `Parent: 20`,
-`Status: ready-for-agent`, `Depends-on: [20a]`, owner `Codex loop parity agent`,
-and a one-context-window timebox. In the same graph-valid update, mark 20a done,
-bind its receipt, render the graph, and make 20b the frontier. An unfinished 20a
-is a start gate, not a reason to mark 20b `needs-info`.
+Before 20a closes, create packet 20b with `Parent: 20`, `Depends-on: [20a]`,
+owner `Codex loop parity agent`, and a one-context-window timebox. Set
+`Status: ready-for-agent` only when its native authentication and required
+pre-call budget bound are verified. Otherwise set `Status: needs-info` and
+name the missing capability and runtime integration maintainer in `Needs`.
+In the same graph-valid update, mark 20a done, bind its receipt, and render the
+graph. Make 20b the frontier only if it is ready. An unfinished 20a is a start
+gate, not a reason to mark 20b `needs-info`.
 
 Packet 20b owns only `tools/hoh/codex.py`,
-`tools/tests/test_hoh_codex.py`, its packet and receipt, and the graph update.
+`tools/tests/test_hoh_codex.py`, its packet and receipt, the graph update,
+`CHANGELOG.md`, and its generated site changelog and `llms-full.txt` mirrors.
 It may make bounded adapter-registration changes in `tools/hoh/protocol.py` or
 `tools/hoh_loop.py` when required. It must not change the common schema,
 transition semantics, role prompts, fixture oracle, or Claude adapter to make
@@ -199,14 +245,18 @@ permissions, immutable baseline commit, tree, specification, oracle, and prompt
 hashes as 20a. It never starts from Claude's modified project. Restore the 20a
 baseline and evidence from the verified persistent bind or the ignored
 Littleagent archive, then compare every hash before the first Codex model call.
-Use a Codex-only authentication volume and the same bounded role-container
-execution design. Do not expose the Docker socket to a role container.
+Keep native Codex authentication outside every model tool's filesystem and
+environment. Prove the same credential-canary refusals with the installed
+adapter. Do not assume that read-only mounts deny reads or that a Claude flag
+exists in Codex. Do not expose the Docker socket to a role container.
 
 Give 20b a separate 100,000-token ceiling covering healthy, fault, retry, and
 preflight calls. Apply the 20a usage field definitions and cache mapping rule.
 Preserve `vendor_usage_raw` and normalize input, output, cache read, and cache
-write fields without double counting. Enforce the first observed ceiling and
-record sampling and overshoot limits. Record `codex_top_level_turns` while
+write fields without double counting. Require and reserve a verified maximum
+whole-invocation charge before each call, with the same refusal and incomplete-
+accounting rules as 20a. Missing enforcement blocks only live Codex execution.
+Record `codex_top_level_turns` while
 `claude_agentic_turns` is `null`. Record prompt bytes and SHA-256. All model
 calls atomically advance `/tmp/vivary-hoh-proof/20b/usage.json`. Repeating the
 budget argument in a new process verifies the ceiling without resetting spend.
@@ -241,10 +291,28 @@ authentication changes only 20b to `needs-info`, with the exact restoration
 owner. A missing, failed, or partial Codex run leaves parity incomplete. Never
 substitute an API key or fabricate evidence.
 
-Before 20b closes, export its hash-bound evidence archive to the ignored
-Littleagent path `.tmp/hoh-proof/20b/`. Keep the persistent proof tree after the
-task container stops. The tracked receipt binds both restored 20a evidence and
-new 20b evidence.
+Before 20b closes, verify its host-side ignore rule:
+
+```console
+git -C "$LITTLEAGENT_ROOT" check-ignore -v .tmp/hoh-proof/20b/probe
+```
+
+Verify the resolved target stays inside that checkout's `.tmp/hoh-proof/20b/`,
+then export there. The tracked receipt binds both restored 20a evidence and new
+20b evidence. Update the canonical changelog with the actual proof status and
+generate its site mirrors before closing either runtime packet.
+
+The 20b owner retains the persistent proof tree until independent parity review
+and a restore-and-hash check of both exported archives pass. Then that owner
+prepares an itemized cleanup receipt: exact task paths and container names,
+stopped-process evidence, reachable baseline commits, archive/manifest hashes,
+and the restoration result. Request approval for each removal operation. No
+authentication volume, image, proxy, production mount, or other agent's data is
+a cleanup target. Until approval, record the cleanup owner and a review-by date
+seven days after closure in the existing receipt. Surface an overdue decision
+at the next handoff without scheduling a job. The archives remain the evidence
+input for outcome 04; their later removal needs that owner's acceptance and a
+separate approved operation.
 
 At 20a closure, move this continuation contract into the canonical 20b packet
 and replace this section with a link to 20b in the same graph-valid update.
@@ -286,9 +354,9 @@ Canonical 20b then becomes the only owner of its detailed contract.
    previously passing behavior fails. The sequencer halts, names the regression,
    and preserves the healthy proof. It does not change the oracle or prompts.
 10. `vendor_usage_raw` and the normalized input, output, cache, budget-total,
-    and separate turn fields bind every live call. The aggregate stays at or
-    below 100,000 unless the recorded observation interval permits a measured
-    overshoot. No call starts after the first observed ceiling.
+    and separate turn fields bind every live call. Each call has a prior verified
+    reservation that fits the balance. The total never exceeds 100,000. Unknown
+    bounds or incomplete accounting cannot release or authorize usage.
 11. The receipt records wall time and the subscription used. No API-key spend,
     unit result, or fake-adapter result can replace live evidence.
 12. The mount record and exported evidence archive preserve the baseline,
@@ -298,7 +366,8 @@ Canonical 20b then becomes the only owner of its detailed contract.
    comparison, no Codex parity, and no broader quality-decay measurement.
 14. Before closing 20a, create packet 20b with the prescribed Codex adapter,
     three iterations, both isolated fault runs, and common-schema comparison.
-    Mark 20a done and expose 20b as ready in one graph-valid update.
+    Mark 20a done and set 20b's status from its verified prerequisites in one
+    graph-valid update. An unsupported Codex budget bound keeps 20b `needs-info`.
 
 ## Verify
 
@@ -346,9 +415,10 @@ Use no paid API key, GUI, Agent-Native server, change under `packages/`,
 scheduled job, or network beyond Claude Code's provider through the Habitat
 proxy. Use no more than three healthy iterations and the two named fault runs.
 Stop each iteration after one hour or the packet at its context-window boundary.
-Stop before starting any role call when no reported-token budget remains. Use a
-verified native per-call ceiling or the live usage stream, and cancel at the
-first observed 100,000-token aggregate ceiling.
+Stop before starting any role call without an enforceable, verified maximum
+charge that fits the remaining token balance. Also stop on any credential-canary
+exposure or failed role isolation. No accounting-only fallback satisfies these
+requirements.
 
 Stop if fixture tests cannot run, the installed CLI cannot enforce the role's
 authority, the proxy cannot reach Claude Code, usage cannot be bound to the
@@ -369,3 +439,4 @@ them.
 - 2026-09-06: Packet created from the scoped effect of [the direction decision](../design.md#direction-decision-2026-09-06). Implementation has not started.
 - 2026-09-06: Corrected the execution boundary to one Claude Code proof in one context window. Codex parity moves to packet 20b, which is materialized only when 20a closes so the packet dependency and generated frontier remain valid.
 - 2026-09-06: Review tightened the expected-red starter oracle, planner isolation, tests-only fault probe, usage ceiling, and durable evidence handoff. No runtime implementation started.
+- 2026-09-06: PR #335 review required pre-admission token reservations and credential isolation. The installed Claude CLI has no documented whole-invocation token bound, so live calls remain stopped and this packet needs that concrete capability or an approved policy alternative. Offline tools and subscription authentication passed. Independent available work continues under D17.

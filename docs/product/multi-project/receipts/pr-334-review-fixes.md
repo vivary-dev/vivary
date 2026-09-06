@@ -22,7 +22,7 @@ Runtime proof and application acceptance remain open.
 | Independent review: adapter invariant existed only in a log | Outcome 04's done condition owns the normative shared contract and incomplete-proof rule |
 | Independent review: incomplete starter verification | A passing baseline harness asserts the starter's exact expected failures. Product tests must pass in the completed disposable candidate |
 | Independent review: unspecified fault commands | A test-owned controller and exact commands reproduce the checkpoint interruption and the candidate regression |
-| Independent review: missing usage ceiling | Each runtime packet stops on its recorded 100,000-token accounting budget, with native or streamed metering and explicit measurement limits |
+| Independent review: missing usage ceiling | Each runtime packet requires a verified pre-call maximum within its 100,000-token balance; PR #335 follow-up below records why live calls are stopped |
 | Independent review: private draft prerequisite | The tracked 20a continuation section defines the complete required 20b outputs and acceptance |
 | Independent review: temporary evidence loss | A verified persistent task mount and a hash-bound export preserve the baseline and evidence across container stops |
 | Independent review: candidate-only write authority | Role-specific mounts and read-only oracle/prompt views must pass live permission checks before role output can count as proof |
@@ -31,9 +31,10 @@ Runtime proof and application acceptance remain open.
 
 The existing planning guard requires completed dependencies for a ready packet.
 It also forbids using `needs-info` for unfinished dependencies. The correction
-therefore keeps 20a executable and requires it to create 20b when its verified
-inputs exist, before closing 20a in the same valid graph update. This introduces
-no packet state, policy bypass, or false authentication blocker.
+requires 20a to create 20b before closing in the same valid graph update. The
+follow-up below blocks live execution on the unsupported token bound. Separate
+Codex prerequisites determine 20b's status. This introduces no packet state or
+policy bypass.
 
 ## Runtime preflight
 
@@ -63,10 +64,47 @@ The [HoH appendix](https://arxiv.org/pdf/2609.01481v1), pages 22 to 25,
 provides schematic role prompts but no reusable schemas or public runtime
 implementation. The packet owns its schema and enforcement proof.
 
-## Verification
+## PR 335 follow-up
+
+| Finding | Correction |
+| --- | --- |
+| [Pre-call token bound](https://github.com/vivary-dev/vivary/pull/335#discussion_r3944993308) | Require an enforceable whole-invocation maximum before reserving usage; an unsupported bound stops live calls |
+| [Ignored export location](https://github.com/vivary-dev/vivary/pull/335#discussion_r3944993311) | Resolve the Littleagent checkout explicitly and require ignore and containment checks before export |
+| [Credential exposure](https://github.com/vivary-dev/vivary/pull/335#discussion_r3944993314) | Separate authenticated CLI state from model tool filesystems and prove canary denials |
+| [Closure release truth](https://github.com/vivary-dev/vivary/pull/335#discussion_r3944993317) | Both runtime closures own canonical changelog updates and generated mirrors |
+| [Parity cleanup](https://github.com/vivary-dev/vivary/pull/335#discussion_r3944993321) | The parity owner prepares itemized, restore-proven cleanup for explicit approval and retains archives for outcome 04 |
+
+The first remote review of `2c497d6` found five additional issues. The follow-up
+binds exports to the verified absolute Littleagent checkout and requires
+`git check-ignore` plus containment checks. Both proof closures own their
+changelog and generated mirrors. The 20b owner must prepare a restore-proven,
+itemized cleanup request, preserve archives for outcome 04, and record a dated
+pending approval. Model tools must have a credential-free filesystem and pass
+canary probes before acceptance. The authenticated CLI remains the owner of
+native authentication. The packet requires a verified maximum invocation charge
+before token reservation. Missing enforcement stops only live execution.
+
+The installed Claude parser accepts `--max-turns`, despite omitting it from
+help. An offline empty-prompt probe reached input validation, while a deliberately
+invalid option returned an unknown-option error. A turn cap does not bound total
+tokens. The [Claude CLI reference](https://code.claude.com/docs/en/cli-usage) and
+[environment reference](https://code.claude.com/docs/en/env-vars) do not establish
+a whole-invocation token reservation. Codex `0.143.0` has
+[post-response budget accounting](https://github.com/openai/codex/blob/rust-v0.143.0/codex-rs/core/src/rollout_budget.rs),
+which also cannot authorize a bounded call in advance. Packet 20a names that
+concrete missing capability and its owner as `needs-info`. No model calls ran.
+
+A proof-only alternative with explicit call/time caps and measured token
+accounting awaits the owner's approval. It is not active policy. Independent
+work remains authorized while that decision or a supported bound is pending.
+The continuation requires separate Codex prerequisite evidence before setting
+20b ready; a Claude proof cannot establish Codex budget enforcement.
+
+## Initial correction verification
 
 The author ran the planning renderer and guard, the line-ending guard, and
-`git diff --check`. All passed. The generated frontier contains 20a.
+`git diff --check`. All passed. The initial generated frontier contained 20a;
+the follow-up removes it until its concrete budget prerequisite is resolved.
 
 The independent reader rechecked all reported execution gaps and accepted the
 final packet. Their planning, line-ending, and diff checks passed. They confirmed
