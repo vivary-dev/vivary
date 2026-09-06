@@ -98,13 +98,14 @@ filesystem containment, physical isolation, persistent uniqueness, historical
 fence allocation, process fencing, native cancellation/resume, real write-back,
 and the HoH product cycle remain unproved.
 
-[03c](../packets/03c-registry-transaction-mapping.md) is prepared for transaction
-and adapter mapping. [02b](../packets/02b-restore-fixture-harness.md) is the lowest
-ready packet and must prove synthetic restoration through real file operations.
+The [generated frontier](../index.md) owns the next executable packet. The
+[PR 328 review receipt](pr-328-code-review.md) records later corrections and
+38 passing registry tests, 57 fixture decisions, and five independent probes.
+The earlier source hashes and 25-test result above remain historical evidence.
 Source import, production database selection, real-runtime activation, merges,
 and release were not performed by this packet.
 
 Final cleanup: the two source hashes were rechecked inside the container and
 matched the receipt above. The task-owned container was stopped and removed; its
 identified hidden WSL keepalive was stopped. No existing authentication volume or
-other session was removed. BrowserPod proof 10b remains open.
+other session was removed. BrowserPod proof 10b is inactive under the later owner decision.

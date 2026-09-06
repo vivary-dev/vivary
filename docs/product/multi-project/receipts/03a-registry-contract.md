@@ -1,5 +1,10 @@
 # Registry contract inspection receipt
 
+Historical inspection receipt. The later owner decision marks BrowserPod
+unavailable and Habitat current. Follow [the execution rules](../execution-contract.md)
+and [generated frontier](../index.md) for current work; the earlier execution
+selection described below is superseded.
+
 Recorded: 2026-09-05. Packet 03a is contract and fixture inspection only.
 Source and two-reader contract/fixture inspection are complete. Final publication
 checks are recorded on PR #328.

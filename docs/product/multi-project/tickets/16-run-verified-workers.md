@@ -31,13 +31,9 @@ Change the candidate after self-tests and assert old observations cannot accept 
 Run deterministic policy fixtures and approved no-cost runtime tasks. Reconcile reported usage with runtime receipts. Test cancellation, timeout, exceeded supported limits, and unavailable enforcement.
 
 
-Common planning checks (these checks do not prove product behavior):
-
-```console
-python scripts/check_multi_project_plan.py --check
-python scripts/check_line_endings.py
-git diff --check
-```
+Run the [canonical common planning checks](../execution-contract.md#maintaining-the-graph)
+after changing this outcome's metadata. These checks validate planning documents;
+they do not prove the behavior above.
 
 ## Log
 

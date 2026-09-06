@@ -25,13 +25,9 @@ Registries, downloads, production pages, redirects, API and protocol routes, aut
 Run clean installed-artifact smokes and live URL checks. Run the real isitagentready.com `all` profile after deployment. Do not calculate a substitute percentage or disable failed checks. Complete release notes only after the gate passes.
 
 
-Common planning checks (these checks do not prove product behavior):
-
-```console
-python scripts/check_multi_project_plan.py --check
-python scripts/check_line_endings.py
-git diff --check
-```
+Run the [canonical common planning checks](../execution-contract.md#maintaining-the-graph)
+after changing this outcome's metadata. These checks validate planning documents;
+they do not prove the behavior above.
 
 ## Log
 

@@ -25,13 +25,9 @@ An MCP client discovers the card, connects through the advertised transport, lis
 Run the pinned MCP conformance suite, tool schema tests, cancellation and limit tests, and direct staging calls. Compare every card tool with an implemented operation.
 
 
-Common planning checks (these checks do not prove product behavior):
-
-```console
-python scripts/check_multi_project_plan.py --check
-python scripts/check_line_endings.py
-git diff --check
-```
+Run the [canonical common planning checks](../execution-contract.md#maintaining-the-graph)
+after changing this outcome's metadata. These checks validate planning documents;
+they do not prove the behavior above.
 
 ## Log
 

@@ -309,12 +309,20 @@ const resourceKey = (value, label) => {
 };
 
 const reservation = (value, label) => {
-  exactKeys(value, ["keys", "ownerOperationId", "state", "fence"], label);
+  exactKeys(value, [
+    "keys", "ownerActorId", "ownerCollectionId", "ownerDeviceId",
+    "ownerOperationId", "state", "fence",
+  ], label);
   uniqueArray(value.keys, resourceKey, `${label}.keys`);
   if (value.keys.length === 0 || value.keys.some((key, index) => index > 0 && value.keys[index - 1] >= key)) {
     invalid(`${label}.keys must be nonempty, unique, and sorted`);
   }
-  id(value.ownerOperationId, `${label}.ownerOperationId`);
+  for (const field of ["ownerActorId", "ownerCollectionId", "ownerDeviceId", "ownerOperationId"]) {
+    id(value[field], `${label}.${field}`);
+  }
+  if (value.keys.some((key) => key.split(":")[0] !== value.ownerDeviceId)) {
+    invalid(`${label}.keys must match the owner device`);
+  }
   if (value.state !== "active" && value.state !== "uncertain") invalid(`${label}.state is invalid`);
   safeInteger(value.fence, 1, `${label}.fence`);
 };
@@ -362,12 +370,13 @@ const successOutput = (value, operation, operationId, deviceId, label) => {
 const receipt = (value, label) => {
   exactKeys(value, [
     "actorId", "collectionId", "deviceId", "operation", "operationId",
-    "requestDigest", "status", "rootId", "output",
+    "requestDigest", "status", "rootId", "vcs", "output",
   ], label);
   for (const field of ["actorId", "collectionId", "deviceId", "operationId", "rootId"]) id(value[field], `${label}.${field}`);
   if (!["register", "rebind", "admit-mutation"].includes(value.operation)) invalid(`${label}.operation is invalid`);
   if (typeof value.requestDigest !== "string" || !HEX_64.test(value.requestDigest)) invalid(`${label}.requestDigest is invalid`);
   if (!["complete", "pending", "uncertain"].includes(value.status)) invalid(`${label}.status is invalid`);
+  vcs(value.vcs, `${label}.vcs`);
   successOutput(value.output, value.operation, value.operationId, value.deviceId, `${label}.output`);
 };
 
@@ -385,7 +394,7 @@ const execution = (value, label) => {
 
 const relativePath = (value, label) => {
   if (typeof value !== "string" || value.length === 0 || hasUnpairedSurrogate(value)) invalid(`${label} is invalid`);
-  if (value.startsWith("/") || value.includes("\\") || value.includes("\0")) invalid(`${label} is unsafe`);
+  if (/^[A-Za-z]:/.test(value) || value.startsWith("/") || value.includes("\\") || value.includes("\0")) invalid(`${label} is unsafe`);
   const pieces = value.split("/");
   if (pieces.some((piece) => piece === "" || piece === "." || piece === "..")) invalid(`${label} is not normalized`);
 };
@@ -534,6 +543,7 @@ const receiptRecord = (operation, request, trusted, output, status) => ({
   requestDigest: digestRequest(request),
   status,
   rootId: trusted.root.rootId,
+  vcs: { ...trusted.root.vcs },
   output,
 });
 
@@ -567,11 +577,29 @@ const cannotIncrement = (value) => value === Number.MAX_SAFE_INTEGER;
 
 const admissionReceiptMatchesRequest = (request, stored) => {
   if (stored.output.bindingId !== request.bindingId) return false;
-  const keys = stored.output.keys;
-  if (request.requestedVcsOwner === null) {
-    return keys.length === 1 && keys[0] === `${stored.deviceId}:root:${stored.rootId}`;
+  const observed = stored.vcs;
+  let expectedKeys;
+  if (observed.kind === "none") {
+    if (request.requestedVcsOwner !== null) return false;
+    expectedKeys = [`${stored.deviceId}:root:${stored.rootId}`];
+  } else if (observed.kind === "git" && request.requestedVcsOwner === "git") {
+    expectedKeys = [
+      `${stored.deviceId}:checkout:${observed.checkoutId}`,
+      `${stored.deviceId}:repository:${observed.repositoryId}`,
+    ].sort();
+  } else if (
+    observed.kind === "jj-git" &&
+    observed.mutationOwner === "jj" &&
+    request.requestedVcsOwner === "jj"
+  ) {
+    expectedKeys = [
+      `${stored.deviceId}:checkout:${observed.checkoutId}`,
+      `${stored.deviceId}:repository:${observed.repositoryId}`,
+    ].sort();
+  } else {
+    return false;
   }
-  return keys.length === 2 && keys[0].split(":")[1] === "checkout" && keys[1].split(":")[1] === "repository";
+  return same(stored.output.keys, expectedKeys);
 };
 
 const replay = (operation, request, trusted) => {
@@ -736,6 +764,7 @@ export function evaluateRegistryOperation(input) {
   if (trusted.root.rootId !== current.rootId) {
     return refusal(operation === "authorize-write-back" ? "content-conflict" : "root-replaced");
   }
+  if (trusted.root.locationRef !== current.locationRef) return refusal("stale-binding");
   if (!same(trusted.root.vcs, current.vcs)) return refusal("stale-binding");
   if (trusted.root.contentRevision !== request.expectedContentRevision) return refusal("content-conflict");
   const keys = mutationKeys(trusted, request.requestedVcsOwner);
@@ -759,6 +788,9 @@ export function evaluateRegistryOperation(input) {
     };
     const insertReservation = {
       keys,
+      ownerActorId: trusted.actorId,
+      ownerCollectionId: trusted.collectionId,
+      ownerDeviceId: trusted.deviceId,
       ownerOperationId: request.operationId,
       state: "active",
       fence: trusted.nextFence,
@@ -772,17 +804,26 @@ export function evaluateRegistryOperation(input) {
 
   const relevant = trusted.reservations.filter((item) => intersects(item.keys, keys));
   if (relevant.some((item) => item.state === "uncertain")) return refusal("reconciliation-required");
-  const heldKeys = new Set();
-  for (const item of relevant) {
-    if (item.state === "active" && item.ownerOperationId === request.operationId && item.fence === request.fence) {
-      item.keys.forEach((key) => heldKeys.add(key));
-    }
-  }
-  if (keys.some((key) => !heldKeys.has(key))) return refusal("stale-fence");
-  const selectedReservation = relevant.find((item) =>
-    item.state === "active" && item.ownerOperationId === request.operationId && item.keys.some((key) => keys.includes(key))
-  );
-  if (selectedReservation?.fence !== request.fence) return refusal("stale-fence");
+  if (relevant.some((item) =>
+    item.ownerOperationId === request.operationId &&
+    item.fence === request.fence &&
+    (
+      item.ownerActorId !== trusted.actorId ||
+      item.ownerCollectionId !== trusted.collectionId ||
+      item.ownerDeviceId !== trusted.deviceId
+    )
+  )) return refusal("denied");
+  if (relevant.length !== 1) return refusal("stale-fence");
+  const selectedReservation = relevant[0];
+  if (!(
+    selectedReservation.state === "active" &&
+    selectedReservation.ownerActorId === trusted.actorId &&
+    selectedReservation.ownerCollectionId === trusted.collectionId &&
+    selectedReservation.ownerDeviceId === trusted.deviceId &&
+    selectedReservation.ownerOperationId === request.operationId &&
+    selectedReservation.fence === request.fence &&
+    same(selectedReservation.keys, keys)
+  )) return refusal("stale-fence");
 
   const run = trusted.execution;
   if (
@@ -820,6 +861,12 @@ export function applyAtomicTransition(state, input) {
   safeInteger(state.registryRevision, 0, "state.registryRevision");
   for (const field of ["portables", "bindings", "receipts", "reservations"]) {
     if (!Array.isArray(state[field])) invalid(`state.${field} must be an array`);
+  }
+  try {
+    validateRegistryInput(input);
+  } catch (error) {
+    if (!(error instanceof RegistryInputError)) throw error;
+    return { ...refusal("invalid-input"), state, committed: false };
   }
   const refreshed = clone(input);
   const trusted = refreshed.trusted;
@@ -907,7 +954,12 @@ export function materializeFixtureCase(fixture, fixtureCase) {
     }
     if (!isObject(parent)) invalid("Fixture mutation parent must be an object");
     if (mutation.op === "set") {
-      parent[final] = clone(mutation.value);
+      Object.defineProperty(parent, final, {
+        value: clone(mutation.value),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
     } else {
       if (!Object.hasOwn(parent, final)) invalid("Fixture remove target is missing");
       delete parent[final];
@@ -924,9 +976,14 @@ const validateFixtureEnvelope = (fixture) => {
 
 export function checkFixture(fixture) {
   validateFixtureEnvelope(fixture);
-  return fixture.cases.map((fixtureCase) => {
+  const caseIds = new Set();
+  for (const fixtureCase of fixture.cases) {
     exactKeys(fixtureCase, ["id", "rules", "inputRef", "mutations", "expect"], "fixture case");
     id(fixtureCase.id, "fixture case id");
+    if (caseIds.has(fixtureCase.id)) invalid(`Duplicate fixture case ID ${fixtureCase.id}`);
+    caseIds.add(fixtureCase.id);
+  }
+  return fixture.cases.map((fixtureCase) => {
     const actual = evaluateRegistryOperation(materializeFixtureCase(fixture, fixtureCase));
     return {
       id: fixtureCase.id,

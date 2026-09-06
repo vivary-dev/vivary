@@ -66,8 +66,8 @@ const missing = async (absolutePath) => {
   }
 };
 
-test("the generic DSL runs all 33 cases on real disposable filesystems", async () => {
-  assert.equal(fixture.cases.length, 33);
+test("the generic DSL runs all 47 cases on real disposable filesystems", async () => {
+  assert.equal(fixture.cases.length, 47);
   const results = await runFixture(fixture);
   assert.deepEqual(results.filter((result) => !result.pass), []);
 
@@ -79,13 +79,39 @@ test("the generic DSL runs all 33 cases on real disposable filesystems", async (
     "case-collision",
     "ancestor-destination-collision",
     "source-symlink",
+    "source-intermediate-symlink",
     "destination-symlink-escape",
     "stale-receipt-binding",
+    "history-field-set",
+    "history-wrong-type",
+    "history-evidence-required",
+    "attribution-field-set",
+    "attribution-wrong-type",
+    "attribution-not-reviewed",
+    "exclusions-wrong-type",
+    "exclusion-field-set",
+    "exclusion-empty-class",
+    "complete-receipt-selected-source-changed",
+    "incomplete-receipt-selected-source-changed",
+    "complete-receipt-unselected-source-changed",
+    "incomplete-receipt-unselected-source-changed",
     "source-changed-same-size",
     "resume-changed-partial",
   ]) {
     assert.ok(covered.has(required), `fixture coverage is missing ${required}`);
   }
+});
+
+test("the fixture runner rejects duplicate case IDs before running cases", async () => {
+  const duplicateFixture = structuredClone(fixture);
+  duplicateFixture.cases[duplicateFixture.cases.length - 1] = structuredClone(
+    duplicateFixture.cases[0],
+  );
+
+  await assert.rejects(
+    runFixture(duplicateFixture),
+    /duplicate fixture case id: restore-empty/u,
+  );
 });
 
 test("strict parsing rejects malformed and nested duplicate keys before filesystem access", async () => {
@@ -288,6 +314,31 @@ test("source, target, temporary, and receipt roots reject symbolic links", async
   }
 });
 
+test("a linked intermediate source parent is rejected without reading outside bytes", async (context) => {
+  const sandbox = await makeSandbox(context);
+  const outsideRoot = path.join(sandbox.root, "outside-source");
+  const outsidePath = path.join(outsideRoot, "note.txt");
+  const outsideBytes = Buffer.from("outside-sentinel");
+  await mkdir(outsideRoot);
+  await writeFile(outsidePath, outsideBytes);
+  await rm(path.join(sandbox.roots.source, "docs"), { recursive: true });
+  await symlink("../outside-source", path.join(sandbox.roots.source, "docs"), "dir");
+
+  await chmod(outsidePath, 0o000);
+  try {
+    assert.equal(
+      (await restoreSourcePreservation(operation(sandbox.roots))).result,
+      "unsafe-link",
+    );
+    assert.deepEqual(await readdir(sandbox.roots.target), []);
+    assert.deepEqual(await readdir(sandbox.roots.temp), []);
+    assert.deepEqual(await readdir(sandbox.roots.receipt), []);
+  } finally {
+    await chmod(outsidePath, 0o600);
+  }
+  assert.deepEqual(await readFile(outsidePath), outsideBytes);
+});
+
 test("schema types and fixture prototype keys are rejected before writes", async () => {
   const wrongSize = baseManifest();
   wrongSize.files[0].size = "3";
@@ -315,7 +366,9 @@ test("schema types and fixture prototype keys are rejected before writes", async
 });
 
 test("an unwritable receipt root refuses before creating target output", {
-  skip: process.platform === "win32" ? "POSIX mode proof runs in Habitat" : false,
+  skip: process.platform === "win32" || process.geteuid?.() === 0
+    ? "POSIX mode proof requires an unprivileged POSIX process"
+    : false,
 }, async (context) => {
   const sandbox = await makeSandbox(context);
   await chmod(sandbox.roots.receipt, 0o500);

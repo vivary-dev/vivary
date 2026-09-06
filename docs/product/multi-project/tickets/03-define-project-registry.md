@@ -25,13 +25,9 @@ Contract fixtures cover external roots, no-VCS folders, Git worktrees, monorepos
 Run contract tests that round-trip portable identity separately from local paths and secrets. Prove duplicate operations converge and shared repository mutations serialize.
 
 
-Common planning checks (these checks do not prove product behavior):
-
-```console
-python scripts/check_multi_project_plan.py --check
-python scripts/check_line_endings.py
-git diff --check
-```
+Run the [canonical common planning checks](../execution-contract.md#maintaining-the-graph)
+after changing this outcome's metadata. These checks validate planning documents;
+they do not prove the behavior above.
 
 ## Next packet
 

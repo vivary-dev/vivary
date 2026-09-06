@@ -31,13 +31,9 @@ Crash between candidate creation, QA, and replanning; recover the exact artifact
 Run bounded multi-worker fixture scenarios for dependency order, no progress, budget refusal, cancellation, crash recovery, review rejection, and production gate.
 
 
-Common planning checks (these checks do not prove product behavior):
-
-```console
-python scripts/check_multi_project_plan.py --check
-python scripts/check_line_endings.py
-git diff --check
-```
+Run the [canonical common planning checks](../execution-contract.md#maintaining-the-graph)
+after changing this outcome's metadata. These checks validate planning documents;
+they do not prove the behavior above.
 
 ## Log
 

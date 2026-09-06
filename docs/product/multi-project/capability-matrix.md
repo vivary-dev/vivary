@@ -4,7 +4,8 @@ Status: retained outcome coverage for the current program.
 
 Tickets 01 through 36 remain stable parent outcomes. Their graph dependencies are
 completion dependencies. A bounded packet may start earlier when it is reversible,
-uses existing inputs, respects BrowserPod gates, and cannot falsely close its parent.
+uses existing inputs, respects its selected environment gates, and cannot falsely
+close its parent.
 
 Optional means the user can skip the capability. It does not remove the parent
 outcome from the release program. Every optional path must prove `skip`,
@@ -21,7 +22,7 @@ outcome from the release program. Every optional path must prove `skip`,
 | 07 | Create greenfield projects | Blank thin workspace with no VCS, host, template, or Brain | Git or Jujutsu, host, template, and Brain choices remain separate branches |
 | 08 | Adopt brownfield projects | Read-only registration and approved dry-run adoption fixture | Monorepo, worktree, submodule, VCS, and populated-folder conflicts complete coverage |
 | 09 | Standalone and headless parity | Existing offline CLI behavior with the GUI closed | Each supported GUI operation gains a matching structured headless contract |
-| 10 | Real native runtime proof, S-00A and S-09 | 10a static BrowserPod preflight, then 10b pure-JS toolchain and persistence proof | Authenticated coding runtime start, file change, cancel, resume, and usage close the parent |
+| 10 | Real native runtime proof, S-00A and S-09 | Retain 10a as historical BrowserPod inspection; use 10c for the bounded Habitat toolchain | Authenticated coding runtime start, file change, cancel, resume, and usage close the parent; 10b stays inactive while BrowserPod is unavailable |
 | 11 | Files, drafts, and conflict-safe editing, S-01 | Local file, reload, stale revision, and conflicting-save fixtures | Preview providers and remote-edit cases extend the supported matrix |
 | 12 | No-VCS, Git, and Jujutsu identity adapters | No-VCS single-writer and read-only capability path | Git, worktree, monorepo, and colocated Jujutsu behavior close the parent |
 | 13 | Optional repository hosts | Skip, local-only, custom-remote, and fake-host paths | GitHub or Gitea live writes retain per-action human gates |

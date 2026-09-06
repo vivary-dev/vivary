@@ -93,13 +93,16 @@ BrowserPod Node fixture can close unrelated acceptance gates.
 
 ## Maintaining the graph
 
-After changing outcome or packet metadata:
+This section owns the common planning checks. Outcome contracts link here instead
+of copying the commands. After changing outcome or packet metadata:
 
 ```console
 python scripts/check_multi_project_plan.py --render
 python scripts/check_multi_project_plan.py --check
+python scripts/check_line_endings.py
 git diff --check
 ```
 
-The renderer only transforms planning documents. CI runs the guard's adversarial
-fixtures and rejects frontier, dependency, status, coverage, and evidence drift.
+The renderer only transforms the generated frontier index and full graph. CI runs
+the guard's adversarial fixtures and rejects frontier, dependency, status, coverage,
+and evidence drift.

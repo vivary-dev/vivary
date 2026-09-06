@@ -29,13 +29,9 @@ The readiness screen reports actual state. One authorized runtime starts in the 
 Run deterministic host tests and one approved no-cost real-runtime proof. Record runtime version, auth state without secrets, project binding, events, cancellation result, resume result, and cost.
 
 
-Common planning checks (these checks do not prove product behavior):
-
-```console
-python scripts/check_multi_project_plan.py --check
-python scripts/check_line_endings.py
-git diff --check
-```
+Run the [canonical common planning checks](../execution-contract.md#maintaining-the-graph)
+after changing this outcome's metadata. These checks validate planning documents;
+they do not prove the behavior above.
 
 ## Log
 

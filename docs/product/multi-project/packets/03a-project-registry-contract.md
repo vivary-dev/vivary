@@ -57,7 +57,7 @@ adapter checks inside BrowserPod once the required toolchain is verified.
 ```console
 git diff --check
 git diff -- docs/product/multi-project/contracts/project-registry.md docs/product/multi-project/fixtures/project-registry.json
-gh pr checks 328 --repo vivary-dev/vivary
+gh pr checks
 ```
 
 ## Stop conditions
@@ -65,7 +65,8 @@ gh pr checks 328 --repo vivary-dev/vivary
 Do not choose a database, import source, create a project, or start a runtime.
 Do not ask for those choices to write the independent contract. When source
 semantics conflict, record the competing facts and the affected fixture rather
-than inventing a production default. BrowserPod remains the execution choice.
+than inventing a production default. Current execution authority belongs to
+[the execution rules](../execution-contract.md); BrowserPod is unavailable.
 
 ## Log
 

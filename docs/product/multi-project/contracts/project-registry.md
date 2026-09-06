@@ -78,12 +78,13 @@ binding on the receiving device.
 Every listed field is required. `attachProjectId` is null or an ID. Revision and
 fence fields are safe JSON integers at least 1, except registry revision may be 0.
 `requestedVcsOwner` is null, `git`, or `jj`. `displayName` is 1 to 200 Unicode
-characters. Content identity is the shape defined above. `patchDigest` is 64
-lowercase hexadecimal characters. `selectedPaths` is a nonempty duplicate-free
-list of normalized relative POSIX paths. Reject absolute paths, backslashes,
+scalar values and rejects unpaired surrogates. Content identity is the shape
+defined above. `patchDigest` is 64 lowercase hexadecimal characters.
+`selectedPaths` is a nonempty duplicate-free list of normalized relative POSIX
+paths. Reject absolute paths, backslashes, Windows drive prefixes,
 empty/dot/dot-dot components, NUL, and unpaired Unicode surrogates. The actual
-adapter must also verify containment and link behavior. Other request values are
-IDs under the identifier rule. JSON keys are unique. Unknown fields are invalid.
+adapter must also verify containment and link behavior. Other request values
+are IDs under the identifier rule. JSON keys are unique. Unknown fields are invalid.
 
 **R3, observed root.** Missing root returns `root-unavailable`, a non-directory
 returns `not-directory`, and unverified canonical identity returns
@@ -167,7 +168,7 @@ integers, booleans, null, strings, arrays, and objects only. Trusted observation
 allocations, capabilities, and evidence are not caller request fields or digest
 inputs. The receipt stores enough bound identity to reauthorize its result.
 
-## Mutation and BrowserPod write-back
+## Mutation and execution-copy write-back
 
 **R10, revision authority.** Before granting an operation, compare the requested
 binding and policy revisions with current private records and trusted policy.
@@ -177,8 +178,9 @@ the expected snapshot. A successful file effect must emit a new observed revisio
 for later plans; it never silently updates the precondition of an existing plan.
 Return `stale-binding`, `stale-policy`, or `content-conflict` respectively. A changed
 root identity returns `root-replaced`. A changed VCS observation relative to the
-binding returns `stale-binding`; refresh and authorize a new binding first. A native
-session ID, BrowserPod origin, disk name, or storage key is not an access grant.
+binding, or a root observation whose `locationRef` differs from the binding, returns
+`stale-binding`; refresh and authorize a rebind first. A native session ID, runtime
+origin, disk name, or storage key is not an access grant.
 
 **R11, one mutation owner.** For Git, reserve both the common repository key and
 checkout key. For colocated Jujutsu, require an explicitly selected `jj` owner and
@@ -196,13 +198,15 @@ devices, the adapter must withhold mutation capability rather than claim isolati
 
 **R12, recovery and fencing.** A granted mutation has one operation owner and a
 monotonically increasing fencing token for every reserved key. The actual writer
-must recheck current token, scope, policy, binding, and content at the effect boundary.
+must recheck current token, operation-owner actor/collection/device scope, policy,
+binding, and content at the effect boundary.
 Lease expiry or a disconnected browser does not prove the previous writer stopped.
 An uncertain owner keeps the keys quarantined and returns `reconciliation-required`
 until cancellation and reconciliation prove whether the effect happened. A stale
-token returns `stale-fence`. Never claim that an in-memory decision, JSON fixture,
-or database row alone can fence an external process. Outcome 04 owns the enforceable
-adapter and outcome 17 owns cross-process recovery.
+token or another active owner intersecting any required key returns `stale-fence`.
+Never claim that an in-memory decision, JSON fixture, or database row alone can
+fence an external process. Outcome 04 owns the enforceable adapter and outcome 17
+owns cross-process recovery.
 
 **R13, execution-copy write-back.** Require an authenticated execution binding
 whose project, binding revision, policy revision, and owner match the selected
@@ -270,8 +274,8 @@ observations, not accept them from JSON request bodies.
 | `existingRootBindings` | Current bindings returned by the trusted register/rebind collision resolver. The resolver must include every binding matching the candidate physical-root key or destination. Other operations do not use this lookup. Multiple distinct matching binding IDs return `ambiguous-ownership`; a matching foreign actor returns `denied` before projection |
 | `allocatedProjectId`, `allocatedBindingId`, `allocatedIdsInUse` | Trusted proposed IDs and collision observation for a new registration. Unused by duplicates, replay, and other operations |
 | `overlapSafe` | Boolean verified overlap result required for registration and all mutation admission. False returns `ambiguous-ownership` |
-| `receipt` | Null or `{actorId, collectionId, deviceId, operation, operationId, requestDigest, status, rootId, output}`. Status is `complete`, `pending`, or `uncertain`. Digest is 64 lowercase hex. Output is the recorded operation result. It must satisfy the exact replay rules |
-| `reservations` | Array of `{keys, ownerOperationId, state, fence}`. Keys are unique sorted resource keys, state is `active` or `uncertain`, fence is a positive safe integer |
+| `receipt` | Null or `{actorId, collectionId, deviceId, operation, operationId, requestDigest, status, rootId, vcs, output}`. Status is `complete`, `pending`, or `uncertain`. Digest is 64 lowercase hex. `vcs` freezes the admission-time VCS observation used to derive mutation keys, so reconciliation does not substitute a later live observation. Output is the recorded operation result. It must satisfy the exact replay rules |
+| `reservations` | Array of `{keys, ownerActorId, ownerCollectionId, ownerDeviceId, ownerOperationId, state, fence}`. Keys are unique sorted resource keys and every key's device component matches `ownerDeviceId`. State is `active` or `uncertain`; fence is a positive safe integer. The owner fields bind an otherwise scope-local operation ID to its authenticated admission scope without weakening cross-actor resource contention |
 | `nextFence` | Trusted next token for an admission. It must exceed every token for the selected keys; otherwise `stale-fence`. Monotonic allocation and historical high-water storage require a real owner in later integration |
 | `execution` | Null or the execution record in the table with `actorId`; required for write-back |
 | `patchVerified` | Boolean adapter proof that the requested digest and exact selected path set belong to the authorized patch. False returns `patch-unverified` |
@@ -291,10 +295,16 @@ evidence, not `none`. Required Git/Jujutsu resource IDs cannot be null.
 For rebind, an entry in `existingRootBindings` with the new location and a
 different binding returns `root-conflict`. Same physical-root duplicates must
 already satisfy the uniqueness invariant. Both root and destination conflict
-observations are private adapter facts. For write-back, all required keys must be
-held actively by `request.operationId` with the requested fence. Missing keys,
-wrong owner, or wrong token return `stale-fence`. Any uncertain required key returns
-`reconciliation-required`. Write-back must not allocate a fresh reservation.
+observations are private adapter facts. For write-back, one reservation must hold
+the complete required key set actively for the current actor, collection, device,
+`request.operationId`, and requested fence, and it must be the only current active
+reservation intersecting any required key. Never combine partial reservation
+records or select an older matching record while another active owner overlaps it.
+Missing keys, conflicting active ownership, a wrong owner, or a wrong token return
+`stale-fence`; a matching operation ID and fence owned by another authenticated
+scope returns `denied`. Any uncertain required key returns
+`reconciliation-required` before active-owner checks. Write-back must not allocate
+a fresh reservation. Disjoint reservations do not affect authorization.
 
 All refusals return exactly `{code}`. Successful public results contain only:
 
@@ -311,9 +321,11 @@ All refusals return exactly `{code}`. Successful public results contain only:
 ## Acceptance fixture interpretation
 
 [The JSON fixture](../fixtures/project-registry.json) is the normative synthetic
-oracle for 03b. Each case names an `inputRef`, optional generic `set` operations,
-and an expected decision and effects. Clone the referenced input and apply each
-`set` at its JSON Pointer, replacing an existing value or adding one object field.
+oracle for 03b. Case IDs are unique. Each case names an `inputRef`, optional
+generic `set` operations, and an expected decision and effects. Clone the
+referenced input and apply each `set` at its JSON Pointer, replacing an existing
+value or defining one own enumerable object field, including prototype-named
+fields such as `__proto__`.
 Array replacement replaces the whole array. There are no case-name-specific rules.
 `remove` removes exactly the named existing field. Missing parent references and
 unsupported fixture operations are fixture errors, not accepted product inputs.

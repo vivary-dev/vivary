@@ -5,6 +5,10 @@ Updated: 2026-09-05
 This file records public contracts for work that is required by the Vivary graph but is not implemented by the multi-project tickets themselves. It does not publish private planning material or mark held work complete.
 
 ## Held template-installer program
+Gate: template-installer
+Status: held
+Owner: template-installer program owner
+Required-by: [19]
 
 The template-installer program remains on hold. Ticket 19 may start only after the repository owner explicitly lifts the hold, a canonical approved source packet is available, and an installed artifact exposes a compatible API.
 

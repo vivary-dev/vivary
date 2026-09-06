@@ -25,13 +25,9 @@ Every item has preservation evidence, restore proof, current owner, dependencies
 Recheck roots, worktrees, remotes, dirty state, unpushed commits, issues, releases, deployments, links, automations, and saved memory before presenting actions. Execute nothing until the matching per-item approval exists.
 
 
-Common planning checks (these checks do not prove product behavior):
-
-```console
-python scripts/check_multi_project_plan.py --check
-python scripts/check_line_endings.py
-git diff --check
-```
+Run the [canonical common planning checks](../execution-contract.md#maintaining-the-graph)
+after changing this outcome's metadata. These checks validate planning documents;
+they do not prove the behavior above.
 
 ## Log
 

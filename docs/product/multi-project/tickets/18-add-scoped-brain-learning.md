@@ -29,13 +29,9 @@ Complete a project evidence-to-next-plan handoff with Brain disabled and verify 
 Run tests for skipped setup, project-scoped retrieval, private-source exclusion, conflicting lesson, reject, accept, rollback, export, and deletion-limit disclosure.
 
 
-Common planning checks (these checks do not prove product behavior):
-
-```console
-python scripts/check_multi_project_plan.py --check
-python scripts/check_line_endings.py
-git diff --check
-```
+Run the [canonical common planning checks](../execution-contract.md#maintaining-the-graph)
+after changing this outcome's metadata. These checks validate planning documents;
+they do not prove the behavior above.
 
 ## Log
 

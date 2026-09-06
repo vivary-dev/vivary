@@ -1211,6 +1211,13 @@ const validateFixtureEnvelope = (fixture) => {
   if (!isObject(fixture) || fixture.fixtureSchemaVersion !== 1 || !isObject(fixture.defaults) ||
       !isObject(fixture.manifests) || !isObject(fixture.trees) || !isObject(fixture.receipts) ||
       !Array.isArray(fixture.cases)) throw new Error("invalid source-preservation fixture");
+  const caseIds = new Set();
+  for (const fixtureCase of fixture.cases) {
+    const id = fixtureCase?.id;
+    if (typeof id !== "string" || id.length === 0) throw new Error("invalid fixture case id");
+    if (caseIds.has(id)) throw new Error(`duplicate fixture case id: ${id}`);
+    caseIds.add(id);
+  }
 };
 
 /** Run every fixture case against fresh real directories. Case IDs are labels only. */

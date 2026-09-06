@@ -6,8 +6,9 @@ once; don't reload it every turn.
 
 ## Product direction and entry
 
-Start at [the tracked program](docs/product/multi-project/design.md), then
-[the graph](docs/product/multi-project/graph.md). The owner decided on 2026-09-05
+Start at [the current frontier](docs/product/multi-project/index.md). That lean,
+generated index routes to the active packet, full graph, and program design only
+when they are needed. The owner decided on 2026-09-05
 that Vivary absorbs the full Littleagent scope. The GUI is primary; standalone
 workspaces, runtime choice, optional version control, templates, and optional
 Brain learning remain supported. Ticket status owns the current frontier. Use the bounded, verified Habitat environment named by the packet. On 2026-09-05

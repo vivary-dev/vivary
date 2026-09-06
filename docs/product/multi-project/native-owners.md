@@ -44,9 +44,9 @@ Evidence labels have narrow meanings:
    dependency, exact plan revision, project binding, lease, or acceptance receipt.
 3. Treat every documented primitive as unavailable until its installed export,
    configuration, identity boundary, and required optional package are checked.
-4. BrowserPod remains preferred; the owner also authorized Habitat fallback.
-   Use the packet-specific environment receipt. A local Node, Desktop, Habitat,
-   or WSL result does not prove BrowserPod support.
+4. Habitat is the current bounded development environment. BrowserPod is unavailable
+   and inactive under the owner's latest decision. Use the packet-specific environment
+   receipt; an environment result proves only the capabilities observed there.
 
 Source basis: `Jeff-Kazzee/littleagent` `docs/product/NATIVE_RUNTIME_PROOF.md`,
 plus the version-matched files under `node_modules/@agent-native/core/docs/content/`.

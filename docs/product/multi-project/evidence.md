@@ -41,9 +41,9 @@ storage or memory policy. These flags do not discover or supervise agent runtime
 
 Brownfield adoption already separates planning from mutation. `BrownfieldInventory`
 in `create_vivary.py` lines 4535-4565 takes a bounded read-only inventory.
-`plan_adopt` at lines 5346-5405 returns a deterministic plan and plan hash.
-`adopt_workspace` at lines 6342-6412 requires that approved hash, replans before the
-first write, refuses conflicts, and uses transaction recovery.
+`plan_adopt` at lines 5346-5660 returns a deterministic plan and plan hash.
+`adopt_workspace` at lines 6342-6536 requires that approved hash, replans before the
+first write, refuses conflicts, journals the transaction, and rolls back failed writes.
 
 The [adoption guide](../../guides/adopt-project.md) lines 29-108 limits the
 default payload to three Vivary files plus managed blocks in `AGENTS.md` and

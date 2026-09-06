@@ -25,13 +25,9 @@ A supported browser discovers and invokes each advertised tool. Unsupported brow
 Run browser tests in every supported engine for discovery, invocation, refusal, abort, navigation, and fallback. Compare registered tools with implemented operations.
 
 
-Common planning checks (these checks do not prove product behavior):
-
-```console
-python scripts/check_multi_project_plan.py --check
-python scripts/check_line_endings.py
-git diff --check
-```
+Run the [canonical common planning checks](../execution-contract.md#maintaining-the-graph)
+after changing this outcome's metadata. These checks validate planning documents;
+they do not prove the behavior above.
 
 ## Log
 

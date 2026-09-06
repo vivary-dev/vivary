@@ -28,13 +28,9 @@ The public receipt maps every source identity or class, S-00A and S-00 through S
 Review [the receipt](../receipts/01-migration-boundaries.md) against every row in `migration.md` and every S-00A/S-00 through S-13 entry. Run the planning validator, line-ending check, and diff check in the isolated Vivary worktree. A human can trace each retained responsibility to one source class, one proposed owner, and its unresolved preservation prerequisite.
 
 
-Common planning checks (these checks do not prove product behavior):
-
-```console
-python scripts/check_multi_project_plan.py --check
-python scripts/check_line_endings.py
-git diff --check
-```
+Run the [canonical common planning checks](../execution-contract.md#maintaining-the-graph)
+after changing this outcome's metadata. These checks validate planning documents;
+they do not prove the behavior above.
 
 ## Log
 

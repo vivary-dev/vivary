@@ -5,8 +5,10 @@ Parent outcome 02 remains in progress.
 
 ## Artifact and environment
 
-The dependency-free [restoration script](../../../../scripts/prove_multi_project_source_preservation.mjs)
-executes real filesystem operations from the generic [33-case fixture](../fixtures/source-preservation.json).
+The original packet-completion run used the dependency-free
+[restoration script](../../../../scripts/prove_multi_project_source_preservation.mjs)
+to execute real filesystem operations from the then-current generic
+[33-case fixture](../fixtures/source-preservation.json).
 The [tests](../../../../scripts/tests/test_prove_multi_project_source_preservation.mjs)
 cover restore, repeat, interruption, resume, strict parsing, no-follow checks,
 permission refusal, rollback, and deliberate faulty implementation detection.
@@ -35,6 +37,10 @@ SHA-256 of the exact tested files, matched inside Habitat and at installation:
 | --- | --- |
 | `scripts/prove_multi_project_source_preservation.mjs` | `577ee5d369cbc3a4b3676bb7b1776ee742f08b6c4b53792bbe2349bcd78d957b` |
 | `scripts/tests/test_prove_multi_project_source_preservation.mjs` | `019728306a5c581f22cedb7faf06f5c05a96c14d0d5e1bcf20eaa2db5f96e192` |
+
+These counts and digests remain the historical evidence for the original 02b
+completion. The later PR review checkpoint below records expanded candidate QA
+separately.
 
 ## Commands and results
 
@@ -102,6 +108,30 @@ The faulty copy failed `source-changed-same-size`. The original source digest
 remained unchanged. The final independent reader found no remaining concrete
 violation within this packet's stated scope.
 
+## PR 328 restoration review checkpoint
+
+Source inspection of the restoration review comments found one runner defect,
+one environment-dependent test, one stale frontier sentence, and proof gaps in
+otherwise implemented behavior. The review candidate expands the fixture from
+33 to 47 cases. It adds an intermediate source-link refusal, exact nested
+`history`, `attribution`, and `exclusions` validation, and changed selected and
+unselected source bytes for complete and incomplete receipt-backed runs. The
+runner now rejects empty, non-string, and duplicate case IDs before creating a
+working directory. The POSIX permission test skips privileged execution because
+root can bypass the directory mode bits.
+
+The coordinator verified the final candidate in non-root Habitat:
+**16 tests passed, zero failed, zero skipped; 47/47 fixture cases passed**.
+The installed files match the verified SHA-256 identities in the
+[PR 328 review receipt](pr-328-code-review.md). These additional synthetic cases
+do not prove restoration of any real source.
+
+The root-only skip branch was inspected but could not be exercised under this
+container's unchanged isolation profile. UID 0 cannot traverse the installed
+Node location with all capabilities dropped, and the temporary filesystem is
+`noexec`. The test now explicitly skips Windows and `geteuid() === 0`; the
+unprivileged permission-refusal test passed. Container protections were retained.
+
 ## Limits and next work
 
 This proves synthetic, single-process Linux restoration and controlled
@@ -111,11 +141,12 @@ history, ignored resources, hosted records, credentials, or runtime recovery.
 Handled-error rollback does not promise original directory timestamps.
 No production importer or source repository is declared preserved.
 
-The next ready packet is [03c](../packets/03c-registry-transaction-mapping.md).
+The generated [ticket graph](../graph.md) owns the current frontier; this
+receipt does not duplicate it.
 Outcome 02 still requires actual source provenance, rights, and restoration
 evidence. The product QA/replanning loop and release gates remain open.
 
-Final cleanup: the tested source hashes matched the installed artifacts. The
+Original 02b cleanup: the tested source hashes matched the installed artifacts. The
 task-owned container was identified, stopped, and removed; its identified hidden
 WSL keepalive was stopped. Existing containers and authentication volumes were
 preserved.

@@ -482,6 +482,30 @@
       }
     },
     {
+      "id": "source-intermediate-symlink",
+      "mutations": [
+        {
+          "op": "tree-remove",
+          "tree": "source",
+          "path": "docs/note.txt"
+        },
+        {
+          "op": "tree-add",
+          "tree": "source",
+          "path": "docs",
+          "entry": {
+            "path": "docs",
+            "kind": "link",
+            "target": "../outside-synthetic-root"
+          }
+        }
+      ],
+      "expect": {
+        "result": "unsafe-link",
+        "noWrites": true
+      }
+    },
+    {
       "id": "destination-symlink-escape",
       "setup": {
         "targetTreeRef": "target-linked-parent"
@@ -548,6 +572,98 @@
           "op": "set-json",
           "pointer": "/files/1/destination",
           "value": "assets/empty-copy.bin"
+        }
+      ],
+      "expect": {
+        "result": "receipt-binding-mismatch",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "complete-receipt-selected-source-changed",
+      "setup": {
+        "targetTreeRef": "target-restored",
+        "receiptRef": "complete-base"
+      },
+      "mutations": [
+        {
+          "op": "tree-replace",
+          "tree": "source",
+          "path": "docs/note.txt",
+          "entry": {
+            "path": "docs/note.txt",
+            "kind": "file",
+            "contentBase64": "YWJk"
+          }
+        }
+      ],
+      "expect": {
+        "result": "source-hash-mismatch",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "incomplete-receipt-selected-source-changed",
+      "setup": {
+        "targetTreeRef": "target-partial",
+        "receiptRef": "incomplete-base"
+      },
+      "mutations": [
+        {
+          "op": "tree-replace",
+          "tree": "source",
+          "path": "docs/note.txt",
+          "entry": {
+            "path": "docs/note.txt",
+            "kind": "file",
+            "contentBase64": "YWJk"
+          }
+        }
+      ],
+      "expect": {
+        "result": "source-hash-mismatch",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "complete-receipt-unselected-source-changed",
+      "setup": {
+        "targetTreeRef": "target-restored",
+        "receiptRef": "complete-base"
+      },
+      "mutations": [
+        {
+          "op": "tree-replace",
+          "tree": "source",
+          "path": "unselected/keep.txt",
+          "entry": {
+            "path": "unselected/keep.txt",
+            "kind": "file",
+            "contentBase64": "ZHJpZnQ="
+          }
+        }
+      ],
+      "expect": {
+        "result": "receipt-binding-mismatch",
+        "noWrites": true
+      }
+    },
+    {
+      "id": "incomplete-receipt-unselected-source-changed",
+      "setup": {
+        "targetTreeRef": "target-partial",
+        "receiptRef": "incomplete-base"
+      },
+      "mutations": [
+        {
+          "op": "tree-replace",
+          "tree": "source",
+          "path": "unselected/keep.txt",
+          "entry": {
+            "path": "unselected/keep.txt",
+            "kind": "file",
+            "contentBase64": "ZHJpZnQ="
+          }
         }
       ],
       "expect": {
@@ -632,6 +748,179 @@
           "invalid-sha256",
           "invalid-enum",
           "unknown-field"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "history-field-set",
+      "mutations": [
+        {
+          "op": "remove-json",
+          "pointer": "/history/reason"
+        },
+        {
+          "op": "set-json",
+          "pointer": "/history/unexpected",
+          "value": true
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "missing-field",
+          "unknown-field"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "history-wrong-type",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/history",
+          "value": []
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "invalid-type"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "history-evidence-required",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/history/kind",
+          "value": "commit"
+        },
+        {
+          "op": "set-json",
+          "pointer": "/history/evidenceRef",
+          "value": null
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "invalid-type"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "attribution-field-set",
+      "mutations": [
+        {
+          "op": "remove-json",
+          "pointer": "/attribution/sourceOwner"
+        },
+        {
+          "op": "set-json",
+          "pointer": "/attribution/unexpected",
+          "value": true
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "missing-field",
+          "unknown-field"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "attribution-wrong-type",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/attribution",
+          "value": []
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "invalid-type"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "attribution-not-reviewed",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/attribution/reviewed",
+          "value": false
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "invalid-value"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "exclusions-wrong-type",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/exclusions",
+          "value": "not-an-array"
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "invalid-type"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "exclusion-field-set",
+      "mutations": [
+        {
+          "op": "remove-json",
+          "pointer": "/exclusions/0/reason"
+        },
+        {
+          "op": "set-json",
+          "pointer": "/exclusions/0/unexpected",
+          "value": true
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "missing-field",
+          "unknown-field"
+        ],
+        "noWrites": true
+      }
+    },
+    {
+      "id": "exclusion-empty-class",
+      "mutations": [
+        {
+          "op": "set-json",
+          "pointer": "/exclusions/0/class",
+          "value": ""
+        }
+      ],
+      "expect": {
+        "result": "invalid-manifest",
+        "issues": [
+          "invalid-value"
         ],
         "noWrites": true
       }

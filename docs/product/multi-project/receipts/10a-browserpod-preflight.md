@@ -1,5 +1,10 @@
 # BrowserPod compatibility preflight
 
+Historical inspection receipt. The later owner decision marks BrowserPod
+unavailable and Habitat current. Follow [the execution rules](../execution-contract.md)
+and [generated frontier](../index.md) for current work; the earlier execution
+selection described below is superseded.
+
 Recorded: 2026-09-05. Source inspection and documentation evidence only.
 
 BrowserPod is selected. No pod was booted, no model called, and no BrowserPod

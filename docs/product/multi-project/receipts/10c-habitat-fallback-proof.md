@@ -7,7 +7,8 @@ no registry decision tests or real coding-agent execution are claimed here.
 
 The owner's subsequent Habitat authorization is recorded in
 [the execution decision](../design.md#execution-decision-2026-09-05).
-BrowserPod remains preferred and unproved under 10b.
+Habitat is the current bounded development environment. BrowserPod is unavailable;
+its separate 10b proof remains inactive and unproved.
 
 The existing `habitat/vivary-dev:2026-08-31` image was used without installation.
 Image identity: `sha256:ffdba5d54dd6f91875fa60fc15103b6b30bb23ecaaf2d8ed65559d3cdff05bee`.

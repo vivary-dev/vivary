@@ -2,6 +2,7 @@
 Type: outcome
 Status: planned
 Blocked-by: [07, 08]
+External-gates: [template-installer]
 Unlocks: [24, 36]
 
 Execution: Start only a bounded packet listed in [the graph](../graph.md). Parent dependencies gate completion, not independent preparatory work.
@@ -25,13 +26,9 @@ The wrapper discovers the installed capability and shows the template plan and r
 Run wrapper tests against the template program's installed conformance fixture and failure responses. Prove missing or held capability disables the UI without changing project state.
 
 
-Common planning checks (these checks do not prove product behavior):
-
-```console
-python scripts/check_multi_project_plan.py --check
-python scripts/check_line_endings.py
-git diff --check
-```
+Run the [canonical common planning checks](../execution-contract.md#maintaining-the-graph)
+after changing this outcome's metadata. These checks validate planning documents;
+they do not prove the behavior above.
 
 ## Log
 

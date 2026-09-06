@@ -22,6 +22,13 @@ patch. Published registry versions remain unchanged.
 
 ### Added
 
+- Maintainers now have a tracked 36-outcome multi-project workbench program with
+  bounded execution packets, a generated lean frontier index and dependency graph,
+  linked evidence receipts, and a planning guard for status, dependency, coverage,
+  privacy, and evidence drift. Executable reference tools cover deterministic
+  registry decisions and synthetic source-preservation and restoration fixtures.
+  These are bounded verification tools; they do not claim a package release,
+  production enforcement, real-source restoration, or completed product behavior.
 - `vivary` now routes ten task verbs to the installed components in the same process:
   `create`, `adopt`, `doctor`, and `capabilities` to `create-vivary`; `check` and
   `find` to `tropo`; `decide` to `strato`; `review` and `impact` to `ozone`; and
@@ -91,6 +98,8 @@ patch. Published registry versions remain unchanged.
 
 ### Verification
 
+- The multi-project planning guard's 33 adversarial tests passed in the bounded
+  Habitat environment with Python 3.11.16.
 - `python packages/vivary/tests/test_vivary_cli.py` — 9/9 passed.
 - `python packages/vivary/tests/test_command_surface_characterization.py` — 3/3 passed
   over 44 cases. The six `create-vivary` operation helps the seam touched were frozen

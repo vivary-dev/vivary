@@ -72,6 +72,13 @@ test("boundary validation rejects unknown fields, missing fields, types, version
   }
 });
 
+test("direct object validation rejects an unpaired surrogate display name", () => {
+  const input = base("register");
+  input.request.displayName = "\uD800";
+  assert.equal(decision(input).output.code, "invalid-input");
+  assert.throws(() => validateRegistryInput(input), RegistryInputError);
+});
+
 test("write-back paths are normalized, relative, POSIX, safe, and duplicate-free", () => {
   const unsafeSets = [
     [],
@@ -94,6 +101,14 @@ test("write-back paths are normalized, relative, POSIX, safe, and duplicate-free
   valid.request.selectedPaths = ["docs/notes/東京.txt", "README.md"];
   assert.equal(decision(valid).output.code, "authorized");
 });
+
+for (const selectedPath of ["C:/escape.txt", "C:escape.txt"]) {
+  test(`write-back rejects Windows drive path ${selectedPath}`, () => {
+    const input = base("writeback");
+    input.request.selectedPaths = [selectedPath];
+    assert.equal(decision(input).output.code, "invalid-input");
+  });
+}
 
 test("canonical request digests are recursively ordered and cover Unicode and JSON escapes", () => {
   const request = base("register").request;
@@ -192,6 +207,7 @@ const pendingAdmissionReceipt = (input, overrides = {}) => ({
   requestDigest: digestRequest(input.request),
   status: "pending",
   rootId: overrides.rootId ?? input.trusted.root.rootId,
+  vcs: structuredClone(overrides.vcs ?? input.trusted.root.vcs),
   output: {
     code: "admitted",
     bindingId: overrides.bindingId ?? input.request.bindingId,
@@ -208,12 +224,37 @@ test("admission receipts require complete sorted keys and their own operation ow
     { keys: ["device-b:checkout:checkout-a", "device-b:repository:repository-a"], ownerOperationId: "op-mutate" },
     { keys: ["device-a:repository:repository-a", "device-a:checkout:checkout-a"], ownerOperationId: "op-mutate" },
     { keys: ["device-a:checkout:checkout-a", "device-a:repository:repository-a"], ownerOperationId: "other-operation" },
+    { keys: ["device-a:checkout:checkout-other", "device-a:repository:repository-other"], ownerOperationId: "op-mutate" },
   ];
   for (const variant of variants) {
     const input = base("admit");
     input.trusted.receipt = pendingAdmissionReceipt(input, variant);
     assert.equal(decision(input).output.code, "invalid-input");
   }
+});
+
+test("fixture set creates prototype-named fields as own properties", () => {
+  const input = materializeFixtureCase(fixture, {
+    inputRef: "register",
+    mutations: [{
+      op: "set",
+      pointer: "/request/__proto__",
+      value: { polluted: true },
+    }],
+  });
+  assert.equal(Object.hasOwn(input.request, "__proto__"), true);
+  assert.equal(decision(input).output.code, "invalid-input");
+  assert.equal(Object.hasOwn(Object.prototype, "polluted"), false);
+});
+
+test("fixture validation rejects duplicate case IDs", () => {
+  const duplicated = structuredClone(fixture);
+  duplicated.cases[1].id = duplicated.cases[0].id;
+  duplicated.cases[0].inputRef = "missing-input";
+  assert.throws(
+    () => checkFixture(duplicated),
+    (error) => error instanceof RegistryInputError && /Duplicate fixture case ID/.test(error.message),
+  );
 });
 
 test("admission receipt semantics bind to its digested request, not later root observations", () => {
@@ -237,7 +278,15 @@ test("admission receipt semantics bind to its digested request, not later root o
 
   const historical = base("admit");
   historical.request.requestedVcsOwner = null;
-  historical.trusted.receipt = pendingAdmissionReceipt(historical, { keys: ["device-a:root:root-a"] });
+  historical.trusted.receipt = pendingAdmissionReceipt(historical, {
+    keys: ["device-a:root:root-a"],
+    vcs: {
+      kind: "none",
+      repositoryId: null,
+      checkoutId: null,
+      mutationOwner: null,
+    },
+  });
   historical.trusted.root.rootId = "root-current";
   historical.trusted.root.contentRevision = "content-current";
   historical.trusted.root.vcs = {
@@ -248,7 +297,74 @@ test("admission receipt semantics bind to its digested request, not later root o
   };
   historical.trusted.rootAccess.push("root-current");
   assert.equal(decision(historical).output.code, "reconciliation-required");
+
+  const historicalGit = base("admit");
+  historicalGit.trusted.receipt = pendingAdmissionReceipt(historicalGit);
+  historicalGit.trusted.root.vcs.repositoryId = "repository-current";
+  historicalGit.trusted.root.vcs.checkoutId = "checkout-current";
+  assert.equal(decision(historicalGit).output.code, "reconciliation-required");
 });
+
+test("write-back requires one complete reservation", () => {
+  const split = base("writeback");
+  split.trusted.reservations = [
+    {
+      keys: ["device-a:checkout:checkout-a"],
+      ownerActorId: "actor-a",
+      ownerCollectionId: "collection-a",
+      ownerDeviceId: "device-a",
+      ownerOperationId: "op-mutate",
+      state: "active",
+      fence: 8,
+    },
+    {
+      keys: ["device-a:repository:repository-a"],
+      ownerActorId: "actor-a",
+      ownerCollectionId: "collection-a",
+      ownerDeviceId: "device-a",
+      ownerOperationId: "op-mutate",
+      state: "active",
+      fence: 8,
+    },
+  ];
+  assert.equal(decision(split).output.code, "stale-fence");
+});
+
+test("write-back refuses conflicting active ownership and permits disjoint reservations", () => {
+  const conflict = base("writeback");
+  const newerOwner = structuredClone(conflict.trusted.reservations[0]);
+  newerOwner.ownerOperationId = "operation-new-owner";
+  newerOwner.fence += 1;
+  conflict.trusted.reservations.push(newerOwner);
+  assert.equal(decision(conflict).output.code, "stale-fence");
+
+  const disjoint = base("writeback");
+  const otherRoot = structuredClone(disjoint.trusted.reservations[0]);
+  otherRoot.keys = [
+    "device-a:checkout:checkout-other",
+    "device-a:repository:repository-other",
+  ];
+  otherRoot.ownerOperationId = "operation-other-root";
+  otherRoot.fence += 1;
+  disjoint.trusted.reservations.push(otherRoot);
+  assert.equal(decision(disjoint).output.code, "authorized");
+});
+
+test("write-back reservation ownership is bound to the authenticated scope", () => {
+  const foreignActor = base("writeback");
+  foreignActor.trusted.actorId = "actor-b";
+  foreignActor.trusted.binding.actorId = "actor-b";
+  foreignActor.trusted.execution.actorId = "actor-b";
+  assert.equal(decision(foreignActor).output.code, "denied");
+});
+
+for (const name of ["admit", "writeback"]) {
+  test(`${name} is invalid after relocation until the binding is rebound`, () => {
+    const input = base(name);
+    input.trusted.root.locationRef = "location-moved";
+    assert.equal(decision(input).output.code, "stale-binding", name);
+  });
+}
 
 test("nonincrementable revisions refuse new writes while reads and safe increments remain valid", () => {
   const noChanges = { output: { code: "invalid-input" }, effects: [], recordChanges: {} };
@@ -319,6 +435,23 @@ const emptyState = (registryRevision = 7) => ({
   receipts: [],
   reservations: [],
 });
+
+for (const [name, input] of [
+  ["null", null],
+  ["empty object", {}],
+  ["partial object", { operation: "register" }],
+]) {
+  test(`atomic transitions reject a ${name} operation envelope without changing state`, () => {
+    const state = emptyState();
+    assert.deepEqual(applyAtomicTransition(state, input), {
+      output: { code: "invalid-input" },
+      effects: [],
+      recordChanges: {},
+      state,
+      committed: false,
+    });
+  });
+}
 
 const registration = ({ operationId, projectId, bindingId, expectedRegistryRevision = 7 }) => {
   const input = base("register");
@@ -418,6 +551,9 @@ test("uncertain ownership and a crash after intent preserve quarantine and requi
   const uncertainState = stateForMutationInputs(input);
   uncertainState.reservations.push({
     keys: ["device-a:checkout:checkout-a", "device-a:repository:repository-a"],
+    ownerActorId: "actor-other",
+    ownerCollectionId: "collection-a",
+    ownerDeviceId: "device-a",
     ownerOperationId: "other-operation",
     state: "uncertain",
     fence: 7,
@@ -536,7 +672,7 @@ const mutationDefinitions = {
   ),
   "accept-stale-fence": (source) => source
     .replaceAll("item.fence === request.fence", "item.fence >= request.fence")
-    .replace("selectedReservation?.fence !== request.fence", "selectedReservation?.fence < request.fence"),
+    .replace("selectedReservation.fence === request.fence", "selectedReservation.fence >= request.fence"),
 };
 
 test("deliberate contract mutants are killed by the fixture oracle", async (context) => {

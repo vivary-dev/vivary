@@ -31,13 +31,9 @@ Feed a prior report with one verified behavior and one gap into replanning. Asse
 Run browser and contract tests for plan revision changes, dependency cycles, external-source refresh, stale approval, and project switching.
 
 
-Common planning checks (these checks do not prove product behavior):
-
-```console
-python scripts/check_multi_project_plan.py --check
-python scripts/check_line_endings.py
-git diff --check
-```
+Run the [canonical common planning checks](../execution-contract.md#maintaining-the-graph)
+after changing this outcome's metadata. These checks validate planning documents;
+they do not prove the behavior above.
 
 ## Log
 

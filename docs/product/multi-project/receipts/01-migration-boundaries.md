@@ -83,9 +83,9 @@ embedded task proposals are superseded by the bounded packet files:
 
 - [02a](../packets/02a-source-preservation-fixture.md) defines the synthetic
   preservation contract and fixture oracle; it needs no real-source import.
-- [02b](../packets/02b-restore-fixture-harness.md) executes restoration in
-  BrowserPod after the toolchain proof. Only real-source import requires the
-  selected private manifest and applicable license dispositions.
+- [02b](../packets/02b-restore-fixture-harness.md) executed the synthetic
+  restoration harness in Habitat. Only real-source import requires the selected
+  private manifest and applicable license dispositions.
 - [03a](../packets/03a-project-registry-contract.md) owns portable registry
   contract inspection. Its current status belongs to the graph. Choosing a persistence owner is part of subsequent
   integration; planned output files are not start prerequisites.

@@ -25,13 +25,9 @@ Restart reconstructs the project, task, plan, runtime, session, draft, and verif
 Run crash-point, restart, stale receipt, changed root, cancelled process, partial event stream, and native resume tests. Prove replay does not duplicate completed effects.
 
 
-Common planning checks (these checks do not prove product behavior):
-
-```console
-python scripts/check_multi_project_plan.py --check
-python scripts/check_line_endings.py
-git diff --check
-```
+Run the [canonical common planning checks](../execution-contract.md#maintaining-the-graph)
+after changing this outcome's metadata. These checks validate planning documents;
+they do not prove the behavior above.
 
 ## Log
 

@@ -25,13 +25,9 @@ The guide inventory in `release.md` is complete and follows installed behavior. 
 Follow every guide from installed artifacts in isolated fixtures. Run documentation lint, command and package parity checks, link checks, and screenshot verification.
 
 
-Common planning checks (these checks do not prove product behavior):
-
-```console
-python scripts/check_multi_project_plan.py --check
-python scripts/check_line_endings.py
-git diff --check
-```
+Run the [canonical common planning checks](../execution-contract.md#maintaining-the-graph)
+after changing this outcome's metadata. These checks validate planning documents;
+they do not prove the behavior above.
 
 ## Log
 

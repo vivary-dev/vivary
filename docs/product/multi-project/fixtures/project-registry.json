@@ -395,6 +395,9 @@
               "device-a:checkout:checkout-a",
               "device-a:repository:repository-a"
             ],
+            "ownerActorId": "actor-a",
+            "ownerCollectionId": "collection-a",
+            "ownerDeviceId": "device-a",
             "ownerOperationId": "op-mutate",
             "state": "active",
             "fence": 8
@@ -476,6 +479,12 @@
             "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
             "status": "complete",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            },
             "output": {
               "code": "registered",
               "projectId": "project-new",
@@ -551,6 +560,12 @@
             "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
             "status": "complete",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "git",
+              "repositoryId": "repository-a",
+              "checkoutId": "checkout-a",
+              "mutationOwner": "git"
+            },
             "output": {
               "code": "registered",
               "projectId": "project-new",
@@ -663,6 +678,12 @@
             "requestDigest": "4e9bac70d3a635d54c1f5c1b99989cff6cbf7383d921efe7061e5b928fc50a40",
             "status": "complete",
             "rootId": "root-b",
+            "vcs": {
+              "kind": "git",
+              "repositoryId": "repository-a",
+              "checkoutId": "checkout-b",
+              "mutationOwner": "git"
+            },
             "output": {
               "code": "registered",
               "projectId": "project-new",
@@ -775,6 +796,12 @@
             "requestDigest": "d4aae5bfeaf00e35dde81d51ac2ddc349425c4820524df2e4fd1dab598e0ba99",
             "status": "complete",
             "rootId": "root-sub",
+            "vcs": {
+              "kind": "git",
+              "repositoryId": "repository-a",
+              "checkoutId": "checkout-a",
+              "mutationOwner": "git"
+            },
             "output": {
               "code": "registered",
               "projectId": "project-new",
@@ -850,6 +877,12 @@
             "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
             "status": "complete",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "jj-git",
+              "repositoryId": "repository-a",
+              "checkoutId": "checkout-a",
+              "mutationOwner": null
+            },
             "output": {
               "code": "registered",
               "projectId": "project-new",
@@ -924,6 +957,12 @@
             "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
             "status": "complete",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "unsupported",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            },
             "output": {
               "code": "registered",
               "projectId": "project-new",
@@ -1019,6 +1058,12 @@
             "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
             "status": "complete",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            },
             "output": {
               "code": "already-registered",
               "projectId": "project-a",
@@ -1125,6 +1170,12 @@
             "requestDigest": "cadb4f8208ebad0ad2aac306aaf06f72f1ce56f19fcec3afc4e88660ab0166a1",
             "status": "complete",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            },
             "output": {
               "code": "already-registered",
               "projectId": "project-a",
@@ -1251,6 +1302,12 @@
             "requestDigest": "2bf3eae0aca6b8c63e25aec227ec4952bb6ca64d7a1ef89e04e5a920f1faf572",
             "status": "complete",
             "rootId": "root-b",
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            },
             "output": {
               "code": "registered",
               "projectId": "project-new",
@@ -1610,6 +1667,12 @@
             "requestDigest": "e125c0d9d04a93e03c78dcdfa88d42ca0d0af65eb6415ab37a09c664fd750a19",
             "status": "complete",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            },
             "output": {
               "code": "rebound",
               "projectId": "project-a",
@@ -1715,6 +1778,9 @@
               "device-a:checkout:checkout-a",
               "device-a:repository:repository-a"
             ],
+            "ownerActorId": "actor-a",
+            "ownerCollectionId": "collection-a",
+            "ownerDeviceId": "device-a",
             "ownerOperationId": "op-mutate",
             "state": "active",
             "fence": 8
@@ -1729,6 +1795,12 @@
             "requestDigest": "d60262e61b0eac2c519d78c022616f1635edf2f31235258ee2b288a4b364042b",
             "status": "pending",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "git",
+              "repositoryId": "repository-a",
+              "checkoutId": "checkout-a",
+              "mutationOwner": "git"
+            },
             "output": {
               "code": "admitted",
               "bindingId": "binding-a",
@@ -1795,6 +1867,9 @@
             "keys": [
               "device-a:root:root-a"
             ],
+            "ownerActorId": "actor-a",
+            "ownerCollectionId": "collection-a",
+            "ownerDeviceId": "device-a",
             "ownerOperationId": "op-mutate",
             "state": "active",
             "fence": 8
@@ -1809,6 +1884,12 @@
             "requestDigest": "400fd5125b3c7ea866451159a85e9e31b585405729ec4d6671431e5a1e1f75e8",
             "status": "pending",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            },
             "output": {
               "code": "admitted",
               "bindingId": "binding-a",
@@ -1838,6 +1919,9 @@
                 "device-a:checkout:checkout-b",
                 "device-a:repository:repository-a"
               ],
+              "ownerActorId": "actor-a",
+              "ownerCollectionId": "collection-a",
+              "ownerDeviceId": "device-a",
               "ownerOperationId": "other-operation",
               "state": "active",
               "fence": 7
@@ -1869,6 +1953,9 @@
                 "device-a:checkout:checkout-a",
                 "device-a:repository:repository-a"
               ],
+              "ownerActorId": "actor-a",
+              "ownerCollectionId": "collection-a",
+              "ownerDeviceId": "device-a",
               "ownerOperationId": "other-operation",
               "state": "active",
               "fence": 7
@@ -1900,6 +1987,9 @@
                 "device-a:checkout:checkout-a",
                 "device-a:repository:repository-a"
               ],
+              "ownerActorId": "actor-a",
+              "ownerCollectionId": "collection-a",
+              "ownerDeviceId": "device-a",
               "ownerOperationId": "other-operation",
               "state": "uncertain",
               "fence": 7
@@ -2005,6 +2095,9 @@
               "device-a:checkout:checkout-a",
               "device-a:repository:repository-a"
             ],
+            "ownerActorId": "actor-a",
+            "ownerCollectionId": "collection-a",
+            "ownerDeviceId": "device-a",
             "ownerOperationId": "op-mutate",
             "state": "active",
             "fence": 8
@@ -2019,6 +2112,12 @@
             "requestDigest": "cc17ad06c257ec3deff4a1abc262bf3f7ea1ca480d4a7feaa18d1b83cdaf600a",
             "status": "pending",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "jj-git",
+              "repositoryId": "repository-a",
+              "checkoutId": "checkout-a",
+              "mutationOwner": "jj"
+            },
             "output": {
               "code": "admitted",
               "bindingId": "binding-a",
@@ -2281,6 +2380,12 @@
             "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
             "status": "complete",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            },
             "output": {
               "code": "registered",
               "projectId": "project-new",
@@ -2381,6 +2486,12 @@
             "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
             "status": "complete",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            },
             "output": {
               "code": "registered",
               "projectId": "project-new",
@@ -2424,6 +2535,12 @@
             "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
             "status": "complete",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            },
             "output": {
               "code": "registered",
               "projectId": "project-new",
@@ -2466,6 +2583,12 @@
             "requestDigest": "b05fdc667476ebd3787e5779e2dc0b2156abf0649a2417de4d263a6e7f0f01bc",
             "status": "pending",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            },
             "output": {
               "code": "registered",
               "projectId": "project-new",
@@ -2504,6 +2627,12 @@
             "requestDigest": "e125c0d9d04a93e03c78dcdfa88d42ca0d0af65eb6415ab37a09c664fd750a19",
             "status": "complete",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            },
             "output": {
               "code": "rebound",
               "projectId": "project-a",
@@ -2711,6 +2840,12 @@
             "requestDigest": "8e3deed3bc99da7ecf06510674e83e79f82b27668a9be4b6fbcc484c3edcbdd9",
             "status": "complete",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            },
             "output": {
               "code": "registered",
               "projectId": "project-new",
@@ -2774,6 +2909,12 @@
             "requestDigest": "e125c0d9d04a93e03c78dcdfa88d42ca0d0af65eb6415ab37a09c664fd750a19",
             "status": "complete",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            },
             "output": {
               "code": "rebound",
               "projectId": "project-a",
@@ -2816,6 +2957,12 @@
             "requestDigest": "e125c0d9d04a93e03c78dcdfa88d42ca0d0af65eb6415ab37a09c664fd750a19",
             "status": "complete",
             "rootId": "root-a",
+            "vcs": {
+              "kind": "none",
+              "repositoryId": null,
+              "checkoutId": null,
+              "mutationOwner": null
+            },
             "output": {
               "code": "rebound",
               "projectId": "project-a",
