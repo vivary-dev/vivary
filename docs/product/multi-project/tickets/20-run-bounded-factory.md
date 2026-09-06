@@ -42,3 +42,6 @@ they do not prove the behavior above.
 - 2026-09-05: Refined acceptance after the owner-requested [HoH comparison](../research/hoh-alignment.md). These criteria remain unimplemented and unverified.
 
 - 2026-09-06: Owner decision: loop first, code first, per [the direction decision](../design.md#direction-decision-2026-09-06). Packet [20a](../packets/20a-headless-loop-proof.md) proves one headless planning, coding, and testing iteration on files with a subscription CLI runtime before any GUI dependency. Acceptance adds all three ablation-backed mechanisms (plan revision from evidence, evidence feedback, artifact warm start), a regression and no-progress stop with a report, a code-quality decay check beside the pass check, and concurrency one measured before two. Unimplemented and unverified.
+
+- 2026-09-06: The [PR #334 correction receipt](../receipts/pr-334-review-fixes.md) separates the runtime proofs into bounded packets. [20a](../packets/20a-headless-loop-proof.md) owns the first proof and must prepare its parity continuation before closing. Full factory and cross-runtime acceptance remain open.
+- 2026-09-06: [20c](../packets/20c-headless-loop-preparation.md) keeps deterministic proof preparation claimable while 20a lacks its required native-call budget capability. Only 20a's live execution is blocked; preparation cannot establish runtime acceptance.

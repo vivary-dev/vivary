@@ -24,6 +24,15 @@ Fixtures distinguish installed, configured, authenticated, bound, runnable, and 
 
 Bind each iteration to its model, harness, runtime, policy, and role-contract versions. Enforce planner/developer/QA read, write, and tool permissions through supported runtime capabilities; mark unavailable enforcement explicitly. Validate each role output against a versioned schema with a bounded retry budget and a recorded failure after exhaustion. A prompt instruction alone does not establish the boundary. Runtime choice remains configurable between recorded iterations.
 
+Under [decision four](../design.md#direction-decision-2026-09-06), adapters share
+one versioned role-permission contract, prompt handoff, receipt schema, and usage
+field definitions. Verify that contract on Claude Code and Codex using the
+owner's subscriptions without requiring a model API key. Required enforcement,
+receipt shape, policy, and fixture baseline must match; runtime/model versions,
+native flags, measured usage, and generated candidates can differ. Missing
+authentication or required enforcement leaves that runtime's proof incomplete.
+A single-runtime receipt cannot pass this cross-runtime acceptance.
+
 ## Verify
 
 Refuse planner or QA artifact writes, wrong-role tools, malformed outputs, exhausted retries, and stale configuration bindings. Verify these permissions in the actual adapter, not just a synthetic object.
@@ -41,4 +50,4 @@ they do not prove the behavior above.
 
 - 2026-09-05: Refined acceptance after the owner-requested [HoH comparison](../research/hoh-alignment.md). These criteria remain unimplemented and unverified.
 
-- 2026-09-06: Owner decision four in [the direction decision](../design.md#direction-decision-2026-09-06): Vivary is a layer over whichever coding agent the user is subscribed to. The runtime and session contract is an adapter contract: the same role permission sets, prompt handoff, receipt shape, and usage fields across Claude Code, Codex, and later adapters, with no model API key required for the loop. Packet [20a](../packets/20a-headless-loop-proof.md) is the first evidence input. Unimplemented and unverified.
+- 2026-09-06: [Decision four](../design.md#direction-decision-2026-09-06) adds the shared adapter acceptance above. Packet [20a](../packets/20a-headless-loop-proof.md) supplies the first runtime evidence; its required continuation supplies parity evidence. Unimplemented and unverified.

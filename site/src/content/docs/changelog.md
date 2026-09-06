@@ -26,6 +26,13 @@ patch. Published registry versions remain unchanged.
 
 ### Added
 
+- The multi-project program records the subscribed-runtime adapter direction
+  and its shared role/receipt acceptance. The first headless loop proof and
+  its required Codex parity continuation use separate bounded packets and
+  isolated copies of one recorded fixture baseline. Packet 20c keeps deterministic
+  preparation claimable while live calls require a verified invocation budget
+  bound. These are planning and verification requirements; neither runtime proof
+  nor product integration is complete, and package versions remain unchanged.
 - Packet 12a defines trusted root/VCS observations and expected refusal
   oracles for access grants, root replacement, and Git/Jujutsu administration.
   The synthetic registry contract and validator bind private Jujutsu repository
