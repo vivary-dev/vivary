@@ -249,8 +249,11 @@ const contentIdentity = (value, label) => {
 };
 
 const vcs = (value, label) => {
-  exactKeys(value, ["kind", "repositoryId", "checkoutId", "mutationOwner"], label);
+  if (!isObject(value)) invalid(`${label} must be an object`);
   if (!["none", "git", "jj-git", "unsupported"].includes(value.kind)) invalid(`${label}.kind is unsupported`);
+  const keys = ["kind", "repositoryId", "checkoutId", "mutationOwner"];
+  if (value.kind === "jj-git") keys.splice(3, 0, "jjRepositoryId");
+  exactKeys(value, keys, label);
   if (value.kind === "none" || value.kind === "unsupported") {
     if (value.repositoryId !== null || value.checkoutId !== null || value.mutationOwner !== null) {
       invalid(`${label} must not name VCS resources`);
@@ -260,8 +263,11 @@ const vcs = (value, label) => {
   id(value.repositoryId, `${label}.repositoryId`);
   id(value.checkoutId, `${label}.checkoutId`);
   if (value.kind === "git" && value.mutationOwner !== "git") invalid(`${label} Git owner must be git`);
-  if (value.kind === "jj-git" && value.mutationOwner !== "jj" && value.mutationOwner !== null) {
-    invalid(`${label} Jujutsu owner must be jj or null`);
+  if (value.kind === "jj-git") {
+    id(value.jjRepositoryId, `${label}.jjRepositoryId`);
+    if (value.mutationOwner !== "jj" && value.mutationOwner !== null) {
+      invalid(`${label} Jujutsu owner must be jj or null`);
+    }
   }
 };
 

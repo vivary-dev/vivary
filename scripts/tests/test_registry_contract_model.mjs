@@ -22,8 +22,8 @@ const fixture = parseStrictJson(await readFile(fixturePath, "utf8"));
 const base = (name) => structuredClone(fixture.inputs[name]);
 const decision = (input) => evaluateRegistryOperation(structuredClone(input));
 
-test("the generic fixture DSL evaluates all 57 exact outputs, effects, and record changes", () => {
-  assert.equal(fixture.cases.length, 57);
+test("the generic fixture DSL evaluates all 59 exact outputs, effects, and record changes", () => {
+  assert.equal(fixture.cases.length, 59);
   const results = checkFixture(fixture);
   assert.deepEqual(results.filter((result) => !result.pass), []);
   for (const fixtureCase of fixture.cases) {
@@ -70,6 +70,34 @@ test("boundary validation rejects unknown fields, missing fields, types, version
     assert.deepEqual(decision(input), { output: { code: "invalid-input" }, effects: [], recordChanges: {} });
     assert.throws(() => validateRegistryInput(input), RegistryInputError);
   }
+});
+
+test("jj-git requires a valid private Jujutsu repository identity and other kinds reject it", () => {
+  const jjVcs = {
+    kind: "jj-git",
+    repositoryId: "repository-a",
+    checkoutId: "checkout-a",
+    jjRepositoryId: "jj-repository-a",
+    mutationOwner: "jj",
+  };
+  for (const mutate of [
+    (input) => { delete input.trusted.root.vcs.jjRepositoryId; },
+    (input) => { input.trusted.root.vcs.jjRepositoryId = null; },
+    (input) => { input.trusted.root.vcs.jjRepositoryId = "contains:separator"; },
+  ]) {
+    const input = base("admit");
+    input.request.requestedVcsOwner = "jj";
+    input.trusted.root.vcs = structuredClone(jjVcs);
+    input.trusted.binding.vcs = structuredClone(jjVcs);
+    mutate(input);
+    assert.equal(decision(input).output.code, "invalid-input");
+    assert.throws(() => validateRegistryInput(input), RegistryInputError);
+  }
+
+  const git = base("admit");
+  git.trusted.root.vcs.jjRepositoryId = "jj-repository-a";
+  assert.equal(decision(git).output.code, "invalid-input");
+  assert.throws(() => validateRegistryInput(git), RegistryInputError);
 });
 
 test("direct object validation rejects an unpaired surrogate display name", () => {
@@ -694,7 +722,7 @@ test("deliberate contract mutants are killed by the fixture oracle", async (cont
       await writeFile(mutantPath, mutantSource, "utf8");
       const mutant = await import(`${pathToFileURL(mutantPath).href}?run=${Date.now()}-${name}`);
       const results = mutant.checkFixture(fixture);
-      assert.ok(results.some((result) => !result.pass), `${name} survived all 57 fixture cases`);
+      assert.ok(results.some((result) => !result.pass), `${name} survived all 59 fixture cases`);
     });
   }
 });

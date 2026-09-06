@@ -5,7 +5,7 @@ Parent: 12
 Status: done
 Depends-on: [03c]
 Owner: Coordinating Codex, sole writer, with an independent Codex reader
-Scope: Storage-neutral observation contract and deterministic expected filesystem/VCS oracles only. No registry schema, write-back, live project mutation, or production adapter activation.
+Scope: Storage-neutral observation contract and deterministic expected filesystem/VCS oracles only. No production registry schema, write-back, live project mutation, or production adapter activation.
 Verification-kind: inspection
 Evidence: [Observation contract receipt](../receipts/12a-root-vcs-observation-contract.md)
 Verification-result: passed
@@ -37,6 +37,12 @@ make unsupported layouts writable.
   `docs/product/multi-project/fixtures/root-vcs-observation.json`.
 - Create
   `docs/product/multi-project/receipts/12a-root-vcs-observation-contract.md`.
+- PR #333 review correction: amend the private VCS field in
+  `docs/product/multi-project/contracts/project-registry.md`, its synthetic
+  `fixtures/project-registry.json` oracle, `scripts/registry_contract_model.mjs`,
+  and `scripts/tests/test_registry_contract_model.mjs` together. This keeps the
+  observation contract and its reference consumer consistent; it adds no
+  production storage or adapter.
 - Update this packet and graph only after independent review.
 
 ## Required cases
@@ -98,6 +104,7 @@ rg -n "R3|R4|R8|R10|R11|R12|R13|rootId|locationRef|repositoryId|checkoutId|mutat
 rg -n "rootId|locationRef|repositoryId|checkoutId|realpath|gitDir|commondir|canonicalCwd" apps/workbench node_modules/@agent-native/core/dist -g '*.ts' -g '*.d.ts'
 python -m json.tool docs/product/multi-project/fixtures/root-vcs-observation.json
 python -c "import json,pathlib; d=json.loads(pathlib.Path('docs/product/multi-project/fixtures/root-vcs-observation.json').read_text(encoding='utf-8')); c=d['cases']; assert d['fixtureVersion']==1 and isinstance(c,list) and c and len({x['id'] for x in c})==len(c)"
+node --test scripts/tests/test_registry_contract_model.mjs
 python scripts/check_multi_project_plan.py --check
 python scripts/check_line_endings.py
 git diff --check
@@ -139,3 +146,10 @@ Do not create 12b in this packet.
 - 2026-09-06: Stopped at the accepted contract checkpoint. The receipt describes
   the later implementation session and prerequisites. No 12b, adapter, database,
   runtime start, write-back, or production lock was created. Outcome 12 stays open.
+- 2026-09-06: PR #333 review found five contract/oracle gaps. Corrected
+  scoped read-only grants, private Jujutsu administration binding, Git
+  replacement and R13 root-conflict oracles, and the frontier receipt.
+  The observation fixture now has 68 cases, 28 relations, and 19 boundary
+  assertions. The shared synthetic registry contract/model stayed in
+  sync; 39 tests and 59 fixture decisions pass after the two new cases
+  first failed under the old validator. See the receipt for review evidence.

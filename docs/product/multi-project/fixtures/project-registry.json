@@ -828,6 +828,7 @@
             "kind": "jj-git",
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
+            "jjRepositoryId": "jj-repository-a",
             "mutationOwner": null
           }
         }
@@ -864,6 +865,7 @@
               "kind": "jj-git",
               "repositoryId": "repository-a",
               "checkoutId": "checkout-a",
+              "jjRepositoryId": "jj-repository-a",
               "mutationOwner": null
             }
           },
@@ -881,6 +883,7 @@
               "kind": "jj-git",
               "repositoryId": "repository-a",
               "checkoutId": "checkout-a",
+              "jjRepositoryId": "jj-repository-a",
               "mutationOwner": null
             },
             "output": {
@@ -2019,6 +2022,7 @@
             "kind": "jj-git",
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
+            "jjRepositoryId": "jj-repository-a",
             "mutationOwner": null
           }
         },
@@ -2029,6 +2033,7 @@
             "kind": "jj-git",
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
+            "jjRepositoryId": "jj-repository-a",
             "mutationOwner": null
           }
         }
@@ -2055,6 +2060,7 @@
             "kind": "jj-git",
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
+            "jjRepositoryId": "jj-repository-a",
             "mutationOwner": "jj"
           }
         },
@@ -2065,6 +2071,7 @@
             "kind": "jj-git",
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
+            "jjRepositoryId": "jj-repository-a",
             "mutationOwner": "jj"
           }
         },
@@ -2116,6 +2123,7 @@
               "kind": "jj-git",
               "repositoryId": "repository-a",
               "checkoutId": "checkout-a",
+              "jjRepositoryId": "jj-repository-a",
               "mutationOwner": "jj"
             },
             "output": {
@@ -2146,6 +2154,7 @@
             "kind": "jj-git",
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
+            "jjRepositoryId": "jj-repository-a",
             "mutationOwner": "jj"
           }
         },
@@ -2156,6 +2165,7 @@
             "kind": "jj-git",
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
+            "jjRepositoryId": "jj-repository-a",
             "mutationOwner": "jj"
           }
         }
@@ -3028,6 +3038,95 @@
       "expect": {
         "output": {
           "code": "invalid-input"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "colocated-jj-administration-changed",
+      "rules": [
+        "R10",
+        "R11"
+      ],
+      "inputRef": "admit",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/vcs",
+          "value": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "jjRepositoryId": "jj-repository-a-recreated",
+            "mutationOwner": "jj"
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/binding/vcs",
+          "value": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "jjRepositoryId": "jj-repository-a",
+            "mutationOwner": "jj"
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/request/requestedVcsOwner",
+          "value": "jj"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "stale-binding"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "write-back-colocated-jj-administration-changed",
+      "rules": [
+        "R10",
+        "R11",
+        "R13"
+      ],
+      "inputRef": "writeback",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/vcs",
+          "value": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "jjRepositoryId": "jj-repository-a-recreated",
+            "mutationOwner": "jj"
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/binding/vcs",
+          "value": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "jjRepositoryId": "jj-repository-a",
+            "mutationOwner": "jj"
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/request/requestedVcsOwner",
+          "value": "jj"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "stale-binding"
         },
         "effects": [],
         "recordChanges": {}
