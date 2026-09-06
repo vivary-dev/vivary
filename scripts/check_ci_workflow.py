@@ -50,6 +50,8 @@ def main() -> None:
     runner_install = "python -m pip install pytest packaging"
     first_pytest = "python -m pytest"
     contract_tests = "python scripts/tests/test_ci_workflow.py"
+    source_navigation_check = "python -B scripts/check-source-navigation.py --check"
+    source_navigation_tests = "python -B scripts/tests/test-source-navigation.py"
     automation_guard = "python scripts/check_repository_automation.py"
     automation_tests = "python scripts/tests/test_repository_automation.py"
     automation_behavior = (
@@ -166,6 +168,12 @@ def main() -> None:
         test_job.count(contract_tests) == 1,
         "tests job must run the CI workflow contract regression suite exactly once",
     )
+    for command in (source_navigation_check, source_navigation_tests):
+        require(command in test_job, f"tests job must run {command}")
+        require(
+            test_job.count(command) == 1,
+            f"tests job must run {command} exactly once",
+        )
     for command in (automation_guard, automation_tests, automation_behavior):
         require(command in test_job, f"tests job must run {command}")
         require(

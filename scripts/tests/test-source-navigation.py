@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import os
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -200,6 +202,100 @@ class SourceNavigationTests(unittest.TestCase):
         )
 
         self.assert_navigation_error(repository, source_map, "locator target is not an existing file")
+
+    def test_locator_cannot_target_its_own_or_another_source_map_record(self) -> None:
+        internal_locators = (
+            "docs/product/multi-project/source-map/sources/native-owners.md",
+            "docs/product/multi-project/source-map/sources/registry-contract.md",
+        )
+        for locator in internal_locators:
+            with self.subTest(locator=locator):
+                temporary, repository, source_map = self.make_fixture()
+                try:
+                    record = source_map / "sources" / "native-owners.md"
+                    old = checker.validate_source_navigation(repository, source_map)["locators"]["native-owners"]
+                    record.write_text(
+                        record.read_text(encoding="utf-8").replace(
+                            f"locator: {old}", f"locator: {locator}"
+                        ),
+                        encoding="utf-8",
+                    )
+                    self.assert_navigation_error(repository, source_map, "inside source-map root")
+                finally:
+                    temporary.cleanup()
+
+    def test_locator_symlink_alias_cannot_resolve_into_source_map(self) -> None:
+        temporary, repository, source_map = self.make_fixture()
+        self.addCleanup(temporary.cleanup)
+        link = repository / "docs" / "source-map-record-alias.md"
+        try:
+            link.symlink_to(source_map / "sources" / "registry-contract.md")
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"file symlink unavailable: {exc}")
+        record = source_map / "sources" / "native-owners.md"
+        old = checker.validate_source_navigation(repository, source_map)["locators"]["native-owners"]
+        record.write_text(
+            record.read_text(encoding="utf-8").replace(
+                f"locator: {old}", "locator: docs/source-map-record-alias.md"
+            ),
+            encoding="utf-8",
+        )
+
+        self.assert_navigation_error(repository, source_map, "inside source-map root")
+
+    def test_source_map_root_symlink_fails_before_resolution(self) -> None:
+        temporary, repository, source_map = self.make_fixture()
+        self.addCleanup(temporary.cleanup)
+        alternate = repository / "alternate" / "source-map"
+        alternate.parent.mkdir(parents=True)
+        source_map.replace(alternate)
+        try:
+            source_map.symlink_to(alternate, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"directory symlink unavailable: {exc}")
+
+        self.assert_navigation_error(repository, source_map, "must be a real directory")
+
+    @unittest.skipUnless(os.name == "nt", "directory junctions are Windows-specific")
+    def test_source_map_root_junction_fails_before_resolution(self) -> None:
+        temporary, repository, source_map = self.make_fixture()
+        self.addCleanup(temporary.cleanup)
+        alternate = repository / "alternate" / "source-map"
+        alternate.parent.mkdir(parents=True)
+        source_map.replace(alternate)
+        created = subprocess.run(
+            ["cmd.exe", "/d", "/c", "mklink", "/J", str(source_map), str(alternate)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if created.returncode != 0:
+            self.skipTest(f"directory junction unavailable: {created.stderr.strip()}")
+        try:
+            self.assert_navigation_error(repository, source_map, "must be a real directory")
+        finally:
+            source_map.rmdir()
+
+    @unittest.skipUnless(os.name == "nt", "directory junctions are Windows-specific")
+    def test_source_map_interior_junction_fails_inventory(self) -> None:
+        temporary, repository, source_map = self.make_fixture()
+        self.addCleanup(temporary.cleanup)
+        module = source_map / "modules" / "native-runtime"
+        alternate = repository / "alternate" / "native-runtime"
+        alternate.parent.mkdir(parents=True)
+        module.replace(alternate)
+        created = subprocess.run(
+            ["cmd.exe", "/d", "/c", "mklink", "/J", str(module), str(alternate)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if created.returncode != 0:
+            self.skipTest(f"directory junction unavailable: {created.stderr.strip()}")
+        try:
+            self.assert_navigation_error(repository, source_map, "tree inventory mismatch")
+        finally:
+            module.rmdir()
 
     def test_symlink_escape_fails(self) -> None:
         temporary, repository, source_map = self.make_fixture()

@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 import re
+import stat
 from collections import Counter
 from pathlib import Path
 
@@ -97,8 +98,19 @@ def analyze_source_map(source_map: Path):
     return TROPO.analyze(str(source_map), [], resolver)
 
 
+def _is_linked_directory(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    try:
+        attributes = path.lstat().st_file_attributes
+    except (AttributeError, OSError):
+        return False
+    reparse_point = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    return bool(attributes & reparse_point)
+
+
 def _validate_tree_inventory(source_map: Path) -> None:
-    if source_map.is_symlink() or not source_map.is_dir():
+    if _is_linked_directory(source_map) or not source_map.is_dir():
         raise NavigationError("source-map root must be a real directory")
 
     actual: dict[str, str] = {}
@@ -110,7 +122,7 @@ def _validate_tree_inventory(source_map: Path) -> None:
                 for entry in entries:
                     path = Path(entry.path)
                     relative = path.relative_to(source_map).as_posix()
-                    if entry.is_symlink():
+                    if _is_linked_directory(path) or entry.is_symlink():
                         actual[relative] = "symlink"
                     elif entry.is_dir(follow_symlinks=False):
                         actual[relative] = "directory"
@@ -145,7 +157,12 @@ def _validate_tree_inventory(source_map: Path) -> None:
         )
 
 
-def _locator_target(repository: Path, record_id: str, locator: object) -> tuple[str, Path]:
+def _locator_target(
+    repository: Path,
+    source_map: Path,
+    record_id: str,
+    locator: object,
+) -> tuple[str, Path]:
     if not isinstance(locator, str) or not locator.strip():
         raise NavigationError(f"{record_id}: locator must be a non-empty string")
     if locator != locator.strip() or "\\" in locator:
@@ -171,6 +188,12 @@ def _locator_target(repository: Path, record_id: str, locator: object) -> tuple[
         target_real.relative_to(repository_real)
     except ValueError as exc:
         raise NavigationError(f"{record_id}: locator escapes repository root") from exc
+    try:
+        target_real.relative_to(source_map)
+    except ValueError:
+        pass
+    else:
+        raise NavigationError(f"{record_id}: locator target is inside source-map root")
     if not target_real.is_file():
         raise NavigationError(f"{record_id}: locator target is not an existing file: {locator}")
     return locator, target_real
@@ -179,8 +202,14 @@ def _locator_target(repository: Path, record_id: str, locator: object) -> tuple[
 def validate_source_navigation(repository: Path, source_map: Path) -> dict[str, object]:
     """Validate identities, typed edges, and external source locators."""
     repository = repository.resolve()
-    _validate_tree_inventory(source_map)
+    if _is_linked_directory(source_map) or not source_map.is_dir():
+        raise NavigationError("source-map root must be a real directory")
     source_map = source_map.resolve()
+    try:
+        source_map.relative_to(repository)
+    except ValueError as exc:
+        raise NavigationError("source-map root escapes repository root") from exc
+    _validate_tree_inventory(source_map)
     docs = analyze_source_map(source_map)
 
     ids = [doc.derived.get("id") for doc in docs]
@@ -233,7 +262,12 @@ def validate_source_navigation(repository: Path, source_map: Path) -> dict[str, 
         if doc.type != "source_reference":
             continue
         record_id = doc.derived["id"]
-        locator, _target = _locator_target(repository, record_id, doc.fields.get("locator"))
+        locator, _target = _locator_target(
+            repository,
+            source_map,
+            record_id,
+            doc.fields.get("locator"),
+        )
         locators[record_id] = locator
     if set(locators) != {key for key, value in EXPECTED_NODES.items() if value[0] == "source_reference"}:
         raise NavigationError("source-reference locator set does not match the selected records")

@@ -12,9 +12,15 @@ module_refs: [root-observation, project-registry, native-runtime]
 
 ## Outcome ownership
 
-Outcomes 06, 07, 09, and 10 own isolated worktree changes, reviewable delivery,
-conflict handling, and resumable handoffs. Registry contracts govern project identity
-while hard gates continue to govern outward and destructive actions.
+Outcome [11](../../../tickets/11-finish-workspace-editor.md) owns the project-file
+adapter, draft persistence, conflict-safe saves, and byte evidence. Outcome
+[16](../../../tickets/16-run-verified-workers.md) owns worker execution and
+verification receipts around effects. Outcome
+[17](../../../tickets/17-deliver-recovery-review-handoffs.md) owns recovery and replay.
+Outcome [29](../../../tickets/29-deliver-review-integration-handoffs.md) owns review,
+integration, and portable handoffs. Outcome
+[06](../../../tickets/06-register-and-switch-projects.md) owns read-only registration
+and switching. Registration grants no project-file effect.
 
 ## Caller-visible contract and errors
 

@@ -11,8 +11,15 @@ module_refs: [project-registry]
 
 ## Outcome ownership
 
-Outcomes 05 through 11 own sandboxed worktrees, coding-runtime dispatch, sessions,
-messaging, supervision, and handoff behavior under the program execution contract.
+Outcome [04](../../../tickets/04-define-runtime-session-contracts.md) owns the app
+runtime, session, action, event, tool, and receipt contracts. Outcome
+[10](../../../tickets/10-prove-native-runtime.md) owns the native adapter and real
+execution proof. Outcome [16](../../../tickets/16-run-verified-workers.md) owns worker
+orchestration, verification receipts, and usage accounting. Outcome
+[17](../../../tickets/17-deliver-recovery-review-handoffs.md) owns crash recovery and
+native session resume. Outcome
+[29](../../../tickets/29-deliver-review-integration-handoffs.md) owns review,
+integration, and portable handoffs.
 
 ## Caller-visible contract and errors
 

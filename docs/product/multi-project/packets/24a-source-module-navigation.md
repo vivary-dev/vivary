@@ -59,6 +59,9 @@ Each source-reference record is the sole owner of its locator.
   `scripts/tests/test-source-navigation.py` for the source-locator, graph-identity,
   typed-edge, and negative navigation checks below. Reuse Tropo through its existing
   commands or tested library functions. Add no parser or graph engine.
+- Update `.github/workflows/ci.yml`, `scripts/check_ci_workflow.py`, and
+  `scripts/tests/test_ci_workflow.py` so the required tests job runs both source
+  navigation commands and removal of either command fails the CI contract suite.
 - Update `AGENTS.md` and `docs/README.md` with a short conditional pointer to the
   source-map index. Preserve existing execution and release authorities.
 - Update `CHANGELOG.md`, then regenerate
@@ -128,6 +131,8 @@ python -B packages/tropo/tropo.py find "root observation" --budget 1200 --json -
 python -B packages/tropo/tropo.py blast root-observation-contract --depth 2 --json --root docs/product/multi-project/source-map
 python -B scripts/check-source-navigation.py --check
 python -B scripts/tests/test-source-navigation.py
+python -B scripts/check_ci_workflow.py
+python -B scripts/tests/test_ci_workflow.py
 python -B scripts/check_multi_project_plan.py --render
 python -B scripts/check_multi_project_plan.py --check
 python -B scripts/check_line_endings.py
@@ -136,13 +141,19 @@ git diff --check
 
 The navigation checker verifies the exact selected record IDs, unique identities,
 expected directed edges, and source locators. Resolve each locator within the
-canonical repository and reject missing targets or escapes. Check the graph's
-source tree contains only the index, four modules, and eleven source records.
-Keep evidence and generated mirrors outside that tree.
+canonical repository and outside the source-map metadata tree. Reject missing
+targets, repository escapes, direct targets of the same or another source-map
+record, and external symlink aliases that resolve back into the source map. Check
+the graph's source tree contains only the index, four modules, and eleven source
+records. Keep evidence and generated mirrors outside that tree.
 
 The focused tests use disposable local fixtures and the same checker. Prove a
-broken typed reference, duplicate ID, missing locator, and escaping locator fail.
-For movement, keep a source-reference record's filename and graph ID fixed.
+broken typed reference, duplicate ID, missing locator, escaping locator, direct
+metadata target, and resolved symlink alias into metadata fail. The CI contract
+tests prove removal of either navigation command fails. Refuse symlink or Windows
+reparse-point indirection at the source-map root and within its inventory before
+resolving or traversing it. For movement, keep a source-reference record's filename
+and graph ID fixed.
 Move its target fixture, update only the locator, and prove incoming edges still
 resolve. This proves navigation continuity, not physical filesystem identity.
 
@@ -183,3 +194,12 @@ No publication, account change, or product activation occurs.
   Its adversarial review found a duplicate-edge counting defect; the focused test
   failed first, the checker was corrected, and the reader accepted the rerun with
   no remaining finding. Packet 24a is complete. Outcome 24 remains planned.
+- 2026-09-06: PR #336 review found missing CI enforcement, an in-tree locator
+  target gap, and two incorrect outcome-owner summaries. Packet 24a returned to
+  in progress for a bounded correction and new independent review. The accepted
+  candidate evidence above remains history for commit `445464e` only.
+- 2026-09-06: The correction added CI enforcement, direct and resolved-alias
+  metadata-target refusals, Python 3.11 compatible root and interior reparse-point
+  refusal, and exact linked outcome owners. Independent review reproduced each
+  adversarial case, matched candidate hashes, and accepted the 18-test correction
+  with no remaining finding. Packet 24a returned to done; Outcome 24 remains planned.

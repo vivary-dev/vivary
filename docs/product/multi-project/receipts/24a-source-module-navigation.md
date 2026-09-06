@@ -2,7 +2,7 @@
 
 Evidence-record: 24a
 Date: 2026-09-06. Verification kind: inspection.
-Result: bounded source navigation accepted after independent retrieval and adversarial review.
+Result: bounded source navigation accepted after independent PR correction review.
 
 ## Implemented boundary
 
@@ -25,7 +25,10 @@ source-map tree other than `tropo.toml`, the 16 selected Markdown records, and t
 expected parent directories. It then verifies unique derived IDs, exact record paths
 and types, raw typed-edge multiplicity plus the exact expected edge set, zero findings
 or broken edges, and all eleven locators. Locator validation rejects noncanonical separators and segments,
-absolute or escaping paths, missing or non-file targets, and resolution failures.
+absolute or escaping paths, missing or non-file targets, resolution failures, and
+targets that resolve inside the source-map metadata tree. The CI contract requires
+both the production checker and its focused regression suite exactly once in the
+repository tests job.
 
 ## Observed graph
 
@@ -48,7 +51,7 @@ inbound impacts: `root-observation` at distance one, then `project-registry`,
 
 ## Focused refusal and continuity checks
 
-The 13-test suite uses disposable local fixtures and the production checker. It
+The initial 13-test suite used disposable local fixtures and the production checker. It
 proved refusal of a broken typed reference, duplicate derived ID, duplicate identical
 edge, missing or empty locator, missing target, directory target, absolute path,
 drive path, UNC path, backslash path, dot or parent segment, doubled separator,
@@ -60,6 +63,19 @@ The movement case preserved a source-reference filename and derived ID, moved it
 fixture target, and changed only the owning locator. Every other source-map record and
 incoming edge stayed identical. This proves navigation continuity across a target
 move. It does not prove physical filesystem identity.
+
+PR #336 review then exposed two missing refusal cases: a locator could directly
+target its own or another source-map record, or reach one through a symlink outside
+the source-map tree. Two focused tests reproduced that acceptance before the checker
+changed. The current suite rejects both direct metadata targets and resolved aliases
+into the metadata tree. Independent review then showed that resolving the source-map
+root before inventory bypassed the existing root-symlink refusal. A focused test
+reproduced that regression before validation restored the pre-resolution check.
+Windows junction probes then exposed root and interior reparse-point indirection;
+Windows-gated tests reproduced both cases before the checker added a Python 3.11
+compatible `lstat` attribute check at the root and during inventory. The current
+18-test suite passes. Two additional CI contract tests remove the checker and
+regression-suite commands independently and prove either removal fails closed.
 
 ## Verification log
 
@@ -74,10 +90,12 @@ service. No account or repository publication action ran.
 | `python -B packages/tropo/tropo.py find "root observation" --budget 1200 --json --root docs/product/multi-project/source-map` | 0 | 5 results, estimated 556 tokens |
 | `python -B packages/tropo/tropo.py blast root-observation-contract --depth 2 --json --root docs/product/multi-project/source-map` | 0 | 4 inbound impacts through depth 2 |
 | `python -B scripts/check-source-navigation.py --check` | 0 | 16 records, 23 edges, 11 locators, 0 broken |
-| `python -B scripts/tests/test-source-navigation.py` | 0 | 13 tests passed |
+| `python -B scripts/tests/test-source-navigation.py` | 0 | 18 tests passed after the new locator, root-link, and interior-junction refusal cases failed before implementation |
+| `python -B scripts/check_ci_workflow.py` | 0 | CI workflow requires both source-navigation commands exactly once |
+| `python -B scripts/tests/test_ci_workflow.py` | 0 | 22 tests passed after both new command-removal cases failed before implementation |
 | `python -B scripts/check_multi_project_plan.py --render` | 0 | Generated frontier and graph updated |
 | `python -B scripts/check_multi_project_plan.py --check` | 0 | 36 outcomes and bounded packet graph passed |
-| `python -B scripts/check_line_endings.py` | 0 | 405 tracked text files checked, with 4 unchanged legacy allowlist entries |
+| `python -B scripts/check_line_endings.py` | 0 | 425 tracked text files checked, with 4 unchanged legacy allowlist entries |
 | `git diff --check` | 0 | No whitespace error |
 | `npm run sync-docs` from `site/` | 0 | Changelog and LLM mirrors regenerated from canonical sources |
 | `npm run build` from `site/` | 1 | Astro unavailable because this isolated worktree has no installed `site/node_modules` |
@@ -111,18 +129,43 @@ edge acceptance, then passed after the checker counted raw edge tuples before se
 comparison. The source-reference record remains the one locator owner. Independent
 inspection establishes semantic suitability without a second hardcoded path map.
 
-The final independent rerun reported clean 16/23/11/0 checker counts, rejected the
+The initial final independent rerun reported clean 16/23/11/0 checker counts, rejected the
 duplicate edge probe with the exact repeated tuple, passed all 13 tests in 38.151
 seconds, and passed planning, tracked line-ending, and diff checks. It reported no
 remaining finding. A failed output-wrapper attempt preceded the corrected commands
 and made no product assertion. Only the later commands and exact exits above count.
 
-| Independently hashed candidate artifact | SHA-256 |
+| Initial independently hashed artifact at commit `445464e` | SHA-256 |
 | --- | --- |
 | `docs/product/multi-project/source-map/tropo.toml` | `2b1ffa1e8b10d195ff41afa736f5cb311d00569e1452869d279c5bee5c991e3c` |
 | `docs/product/multi-project/source-map/modules/root-observation/index.md` | `ed380b3d3051c00f28961123bce27434f8ee92b3f5a7ab71907d29cf38a80184` |
 | `scripts/check-source-navigation.py` | `033200256962e50a2f953553e71862d0ffd38aafc11c188e01e2c740644f7c96` |
 | `scripts/tests/test-source-navigation.py` | `81f81c554504d6de48b19446691865acc8dec565d73386c0131a61368e8242a0` |
+
+PR #336 review also corrected the module-owner summaries against the current outcome
+contracts: root observation is owned by 12, registry identity and transactions by 03,
+runtime responsibilities by 04, 10, 16, 17, and 29, and project-file effects by 11,
+16, 17, and 29. Outcome 06 remains the read-only registration and switching owner.
+The earlier successful CI run 34060080201 proves commit `445464e` only. It does not
+prove the correction candidate described in this section.
+
+### Independent PR correction review
+
+The final independent reader reran the production checker and both focused suites,
+removed each CI command in turn, and exercised direct metadata targets, external
+symlink aliases into metadata, movement continuity, a symlinked source-map root, and
+Windows junctions at the root and inside the inventory. All refusal and continuity
+probes passed. It also reran the 36-outcome plan check, the 425-file line-ending
+check with four unchanged legacy allowlist entries, and the diff check. No concrete
+defect remained.
+
+| Independently matched correction artifact | SHA-256 |
+| --- | --- |
+| `.github/workflows/ci.yml` | `13d6a0dc214bb788391577f7be33b16794f576237ec092aaf8e481f567ecde0b` |
+| `scripts/check-source-navigation.py` | `a9a1eb88d11b94688770e8d201c396cb004d314ddaae095cf45b8bfffd6e1261` |
+| `scripts/check_ci_workflow.py` | `2ef66919d6347a8377ddfef532f42e3498d5964805039f99daf9a040716fddb9` |
+| `scripts/tests/test-source-navigation.py` | `985932e2c0aaad7b2a5a28b77290ec5e52eeccf497e8ea9fc7238ae557e702bc` |
+| `scripts/tests/test_ci_workflow.py` | `33ade99a6b6af8661397b892fe32d8600dd2c16feac77e4bfc5c66e7e2af0eae` |
 
 ## Result and continuation
 

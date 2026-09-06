@@ -46,3 +46,5 @@ they do not prove the behavior above.
 - 2026-09-06: Packet 24a implemented its bounded source graph and entered independent retrieval review. Outcome 24 remains planned with all installed-guide dependencies unchanged.
 
 - 2026-09-06: Packet 24a passed independent retrieval and adversarial checks. Its source-navigation receipt is accepted. Outcome 24 remains planned; this preparatory map does not satisfy installed-guide acceptance or remove any dependency.
+- 2026-09-06: PR #336 review returned Packet 24a to a bounded correction pass for CI enforcement, metadata-target refusal, and exact outcome-owner summaries. The earlier acceptance and CI result remain evidence for commit `445464e` only; current acceptance awaits a new independent review.
+- 2026-09-06: Packet 24a's PR correction passed independent CI-removal, metadata-target, symlink, Windows-junction, movement, planning, line-ending, and diff checks. The packet is done again with the prior commit evidence kept distinct from the accepted correction candidate. Outcome 24 remains planned.

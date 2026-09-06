@@ -13,7 +13,8 @@ module_refs: [root-observation]
 
 ## Outcome ownership
 
-Outcome 03 owns stable project identity, registry state, and transaction rules.
+Outcome [03](../../../tickets/03-define-project-registry.md) owns stable project
+identity, registry state, authority, idempotency, and transaction rules.
 
 ## Caller-visible contract and errors
 

@@ -12,8 +12,9 @@ evidence_refs: [observation-receipt]
 
 ## Outcome ownership
 
-Outcome 12 owns project discovery. Packet 12a established this bounded observer
-contract and its continuation guidance.
+Outcome [12](../../../tickets/12-implement-vcs-identity-adapters.md) owns VCS
+observation and mutation-owner adapters. Packet 12a established this bounded
+observer contract and its continuation guidance.
 
 ## Caller-visible contract and errors
 
