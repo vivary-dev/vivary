@@ -1,8 +1,12 @@
 """Adversarial tests for planning drift and false execution readiness."""
 import importlib.util
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 spec = importlib.util.spec_from_file_location('plan_check', Path(__file__).resolve().parents[1] / 'check_multi_project_plan.py')
 module = importlib.util.module_from_spec(spec)
@@ -281,6 +285,100 @@ class PlanCheckTests(unittest.TestCase):
         (self.plan / 'fixtures/public.json').write_bytes(b'{"value":"\xff"}\n')
         self.assert_error('invalid UTF-8 JSON')
 
+    def test_non_finite_json_constants_fail(self):
+        (self.plan / 'fixtures').mkdir()
+        artifact = self.plan / 'fixtures/public.json'
+        for constant in ('NaN', 'Infinity', '-Infinity'):
+            with self.subTest(constant=constant):
+                artifact.write_text(f'{{"value":{constant}}}\n', encoding='utf-8')
+                self.assert_error('invalid JSON constant')
+
+    def test_plan_preflight_rejects_all_symlink_kinds_without_reading_targets(self):
+        original_resolve = Path.resolve
+        with tempfile.TemporaryDirectory() as outside_temp:
+            outside = Path(outside_temp)
+            file_target = outside / 'private.txt'
+            file_target.write_text('private sentinel\n', encoding='utf-8')
+            directory_target = outside / 'private-directory'
+            directory_target.mkdir()
+            cases = (
+                ('file', self.plan / 'tickets/file-link.md', file_target, False),
+                ('directory', self.plan / 'receipts/directory-link', directory_target, True),
+                ('broken', self.plan / 'packets/broken-link.md', outside / 'missing', False),
+            )
+            for kind, link, target, target_is_directory in cases:
+                with self.subTest(kind=kind):
+                    link.symlink_to(target, target_is_directory=target_is_directory)
+
+                    def guarded_read_text(path, *args, **kwargs):
+                        raise AssertionError(f'read {path} before rejecting {kind} symlink')
+
+                    def guarded_resolve(path, *args, **kwargs):
+                        if path == link:
+                            raise AssertionError(f'resolved known {kind} symlink')
+                        return original_resolve(path, *args, **kwargs)
+
+                    try:
+                        with mock.patch.object(Path, 'read_text', new=guarded_read_text), \
+                                mock.patch.object(Path, 'resolve', new=guarded_resolve):
+                            errors = module.check(self.root)
+                        relative = link.relative_to(self.root)
+                        self.assertIn(f'{relative}: symbolic link is not allowed', errors)
+                    finally:
+                        link.unlink(missing_ok=True)
+
+    def test_plan_preflight_stops_at_symlinked_ancestor(self):
+        product = self.root / 'docs/product'
+        target = self.root / 'real-product'
+        product.rename(target)
+        product.symlink_to(target, target_is_directory=True)
+        original_is_symlink = Path.is_symlink
+
+        def guarded_is_symlink(path):
+            if path == self.plan:
+                raise AssertionError('inspected a descendant of a known symlink')
+            return original_is_symlink(path)
+
+        def guarded_read_text(path, *args, **kwargs):
+            raise AssertionError(f'read {path} before rejecting ancestor symlink')
+
+        with mock.patch.object(Path, 'is_symlink', new=guarded_is_symlink), \
+                mock.patch.object(Path, 'read_text', new=guarded_read_text):
+            errors = module.check(self.root)
+        relative = product.relative_to(self.root)
+        self.assertEqual(errors, [f'{relative}: symbolic link is not allowed'])
+
+    def test_render_cli_refuses_symlink_before_writing_outputs(self):
+        scripts = self.root / 'scripts'
+        scripts.mkdir()
+        checker = scripts / 'check_multi_project_plan.py'
+        shutil.copyfile(module.__file__, checker)
+        graph = self.plan / 'graph.md'
+        index = self.plan / 'index.md'
+        graph.write_text('graph sentinel\n', encoding='utf-8')
+        index.write_text('index sentinel\n', encoding='utf-8')
+        before = (graph.read_bytes(), index.read_bytes())
+
+        with tempfile.TemporaryDirectory() as outside_temp:
+            target = Path(outside_temp) / 'private.txt'
+            target.write_text('private sentinel\n', encoding='utf-8')
+            link = self.plan / 'receipts/private-link'
+            link.symlink_to(target)
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(checker), '--render'],
+                    cwd=self.root,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            finally:
+                link.unlink(missing_ok=True)
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('symbolic link is not allowed', result.stdout)
+        self.assertEqual((graph.read_bytes(), index.read_bytes()), before)
+
     def test_duplicate_record_id_fails(self):
         (self.plan / 'tickets/01-duplicate.md').write_bytes(self.ticket('01').read_bytes())
         self.assert_error('duplicate record ID')
@@ -311,8 +409,10 @@ class PlanCheckTests(unittest.TestCase):
         self.assert_error('outcome dependency must name an outcome')
 
     def test_outcome_verify_can_link_to_canonical_common_checks(self):
+        public_doc = self.root / 'docs/common-checks.md'
+        public_doc.write_text('# Common checks\n\n## Maintaining the graph\n\nRun them.\n', encoding='utf-8')
         self.replace(self.ticket('01'), '```console\npython check.py\n```',
-                     '[Run the canonical common planning checks](../execution-contract.md#maintaining-the-graph).')
+                     '[Run the canonical common planning checks](../../../common-checks.md#maintaining-the-graph).')
         self.assertEqual(module.check(self.root), [])
 
     def test_held_external_gate_blocks_done_outcome(self):

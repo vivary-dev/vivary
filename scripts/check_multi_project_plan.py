@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 from urllib.parse import unquote
@@ -208,8 +209,68 @@ def json_text_values(value):
             yield from json_text_values(item)
 
 
+def reject_json_constant(value: str):
+    raise ValueError(value)
+
+
+def preflight_plan(plan: Path, root: Path) -> list[str]:
+    """Reject unsafe plan entries without following links or reading content."""
+    errors = []
+    try:
+        root_resolved = root.resolve(strict=True)
+    except OSError:
+        return ["repository root cannot be resolved"]
+
+    current = root
+    for part in plan.relative_to(root).parts:
+        current /= part
+        if current.is_symlink():
+            relative = current.relative_to(root)
+            return [f"{relative}: symbolic link is not allowed"]
+
+    try:
+        plan_resolved = plan.resolve(strict=True)
+    except OSError:
+        return [f"{plan.relative_to(root)}: cannot resolve plan directory"]
+    if not plan_resolved.is_relative_to(root_resolved):
+        return [f"{plan.relative_to(root)}: resolves outside repository"]
+
+    pending = [plan]
+    while pending:
+        directory = pending.pop()
+        try:
+            with os.scandir(directory) as scan:
+                entries = sorted(scan, key=lambda entry: entry.name)
+        except OSError:
+            errors.append(f"{directory.relative_to(root)}: cannot scan directory")
+            continue
+        for entry in entries:
+            path = Path(entry.path)
+            relative = path.relative_to(root)
+            if entry.is_symlink():
+                errors.append(f"{relative}: symbolic link is not allowed")
+                continue
+            try:
+                resolved = path.resolve(strict=True)
+            except OSError:
+                errors.append(f"{relative}: cannot resolve entry")
+                continue
+            if not resolved.is_relative_to(root_resolved):
+                errors.append(f"{relative}: resolves outside repository")
+                continue
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(path)
+            except OSError:
+                errors.append(f"{relative}: cannot inspect entry")
+    return errors
+
+
 def check(root: Path) -> list[str]:
     plan = root / "docs/product/multi-project"
+    preflight_errors = preflight_plan(plan, root)
+    if preflight_errors:
+        return preflight_errors
     records = read_records(plan)
     external_gates, errors = read_external_gates(plan)
     outcomes = {key for key, rec in records.items() if rec["kind"] == "outcome"}
@@ -371,9 +432,15 @@ def check(root: Path) -> list[str]:
         private_value = bool(PRIVATE_VALUE.search(body))
         if path.suffix.lower() == ".json":
             try:
-                decoded = json.loads(body.removeprefix("\ufeff"), object_pairs_hook=lambda pairs: pairs)
+                decoded = json.loads(
+                    body.removeprefix("\ufeff"),
+                    object_pairs_hook=lambda pairs: pairs,
+                    parse_constant=reject_json_constant,
+                )
             except json.JSONDecodeError as exc:
                 errors.append(f"{path.relative_to(root)}: invalid JSON: {exc.msg}")
+            except ValueError as exc:
+                errors.append(f"{path.relative_to(root)}: invalid JSON constant {exc}")
             else:
                 private_value = private_value or any(PRIVATE_VALUE.search(value) for value in json_text_values(decoded))
         if private_value:
@@ -388,10 +455,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     plan = root / "docs/product/multi-project"
-    if args.render:
+    failures = preflight_plan(plan, root) if args.render else []
+    if args.render and not failures:
         (plan / "graph.md").write_text(render_graph(plan, read_records(plan)), encoding="utf-8", newline="\n")
         (plan / "index.md").write_text(render_index(plan, read_records(plan)), encoding="utf-8", newline="\n")
-    failures = check(root)
+    if not failures:
+        failures = check(root)
     for failure in failures:
         print(f"ERROR: {failure}")
     if not failures:

@@ -162,6 +162,51 @@ test("fixture trees reject noncanonical base64 before creating a work directory"
   assert.equal(emptyBase64Result.pass, true, JSON.stringify(emptyBase64Result));
 });
 
+test("fixture tree mutations reject malformed combined trees before creating a work directory", async (context) => {
+  const validationRoot = await mkdtemp(path.join(tmpdir(), "vivary-fixture-mutation-validation-"));
+  context.after(async () => rm(validationRoot, { recursive: true, force: true }));
+  const missingWorkParent = path.join(validationRoot, "must-not-exist");
+  const malformedMutations = [
+    {
+      mutation: {
+        op: "tree-add",
+        tree: "source",
+        path: "extra.bin",
+        entry: { path: "other.bin", kind: "file", contentBase64: "" },
+      },
+      error: /invalid tree-add mutation/u,
+    },
+    {
+      mutation: {
+        op: "tree-replace",
+        tree: "source",
+        path: "docs/note.txt",
+        entry: { path: "other.txt", kind: "file", contentBase64: "" },
+      },
+      error: /invalid tree-replace mutation/u,
+    },
+    {
+      mutation: {
+        op: "tree-add",
+        tree: "source",
+        path: "docs/note.txt/child.bin",
+        entry: { path: "docs/note.txt/child.bin", kind: "file", contentBase64: "" },
+      },
+      error: /fixture tree ancestor is not a directory/u,
+    },
+  ];
+
+  for (const { mutation, error } of malformedMutations) {
+    const invalidFixture = fixtureWithOnlyCase("restore-empty");
+    invalidFixture.cases[0].mutations = [mutation];
+    await assert.rejects(
+      runFixture(invalidFixture, { workParent: missingWorkParent }),
+      error,
+      mutation.op,
+    );
+  }
+});
+
 test("fixture expectations reject unknown, mistyped, or incomplete assertions before work", async (context) => {
   const validationRoot = await mkdtemp(path.join(tmpdir(), "vivary-expect-validation-"));
   context.after(async () => rm(validationRoot, { recursive: true, force: true }));

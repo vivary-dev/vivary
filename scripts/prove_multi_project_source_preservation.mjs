@@ -1295,13 +1295,8 @@ const validateFixtureEnvelope = (fixture) => {
       fixture,
       true,
     );
-    if (Array.isArray(fixtureCase.mutations)) {
-      for (const mutation of fixtureCase.mutations) {
-        if (new Set(["tree-add", "tree-replace"]).has(mutation?.op)) {
-          validateFixtureTree([mutation.entry]);
-        }
-      }
-    }
+    const prepared = prepareFixtureCase(fixture, fixtureCase);
+    for (const tree of Object.values(prepared.trees)) validateFixtureTree(tree);
   }
 };
 
