@@ -421,6 +421,8 @@ def check(root: Path) -> list[str]:
                 errors.append(f"{path.relative_to(root)}: invalid UTF-8 JSON")
             elif path.suffix.lower() == ".md":
                 errors.append(f"{path.relative_to(root)}: invalid UTF-8 Markdown")
+            else:
+                errors.append(f"{path.relative_to(root)}: invalid UTF-8 planning artifact")
             continue
         except OSError:
             errors.append(f"{path.relative_to(root)}: cannot read planning artifact")

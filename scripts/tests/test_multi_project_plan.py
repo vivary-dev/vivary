@@ -321,16 +321,32 @@ class PlanCheckTests(unittest.TestCase):
         (self.plan / 'fixtures/public.json').write_bytes(b'{"value":"\xff"}\n')
         self.assert_error('invalid UTF-8 JSON')
 
+    def test_invalid_utf8_cannot_hide_private_text_artifacts(self):
+        for suffix in ('.txt', '.yaml', '.data'):
+            with self.subTest(suffix=suffix):
+                artifact = self.plan / f'raw-evidence{suffix}'
+                artifact.write_bytes(b'ghp_12345678901234567890\n\xff')
+                try:
+                    self.assert_error('invalid UTF-8')
+                finally:
+                    artifact.unlink()
+
     def test_deep_json_returns_privacy_or_nesting_diagnostics(self):
         (self.plan / 'fixtures').mkdir()
         artifact = self.plan / 'fixtures/public.json'
-        for depth, value, expected in (
-            (600, '"\\u0067hp_12345678901234567890"', 'possible private path or credential'),
-            (2000, '"ordinary"', 'JSON nesting exceeds parser limit'),
-        ):
-            with self.subTest(depth=depth):
-                artifact.write_text('{"child":' * depth + value + '}' * depth, encoding='utf-8')
-                self.assert_error(expected)
+        artifact.write_text('{"child":' * 600 + '"\\u0067hp_12345678901234567890"' + '}' * 600,
+                            encoding='utf-8')
+        self.assert_error('possible private path or credential')
+        artifact.write_text('{"child":' * 2000 + '"ordinary"' + '}' * 2000, encoding='utf-8')
+        errors = module.check(self.root)
+        self.assertTrue(not errors or all('JSON nesting exceeds parser limit' in error for error in errors), errors)
+        with mock.patch.object(module.json, 'loads', side_effect=RecursionError):
+            self.assert_error('JSON nesting exceeds parser limit')
+        decoded = 'ordinary'
+        for _ in range(2000):
+            decoded = [('child', decoded)]
+        with mock.patch.object(module.json, 'loads', return_value=decoded):
+            self.assertEqual(module.check(self.root), [])
 
     def test_non_finite_json_constants_fail(self):
         (self.plan / 'fixtures').mkdir()

@@ -307,6 +307,26 @@ test("fixture expectations reject unknown, mistyped, or incomplete assertions be
   }
 });
 
+test("fixture expectations reject unknown result and issue vocabulary before work", async (context) => {
+  const validationRoot = await mkdtemp(path.join(tmpdir(), "vivary-expect-vocabulary-"));
+  context.after(async () => rm(validationRoot, { recursive: true, force: true }));
+  const missingWorkParent = path.join(validationRoot, "must-not-exist");
+
+  const mistypedResult = fixtureWithOnlyCase("restore-empty");
+  mistypedResult.cases[0].expect.result = "restord";
+  await assert.rejects(
+    runFixture(mistypedResult, { workParent: missingWorkParent }),
+    /invalid fixture expectation/u,
+  );
+
+  const mistypedIssue = fixtureWithOnlyCase("invalid-field-set");
+  mistypedIssue.cases[0].expect.issues = ["unknown-feild"];
+  await assert.rejects(
+    runFixture(mistypedIssue, { workParent: missingWorkParent }),
+    /invalid fixture expectation/u,
+  );
+});
+
 test("no-write cases honor exact target and temporary tree assertions", async () => {
   const contradictoryFixture = fixtureWithOnlyCase("repeat-identical");
   contradictoryFixture.cases[0].expect.targetTreeRef = "target-empty";

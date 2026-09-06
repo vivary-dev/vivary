@@ -21,8 +21,8 @@ to fix the review findings and merge the corrected work into dev.
 - RED: the four planning regressions failed against the accepted validator (37 tests, four failures).
 - RED: both restoration regressions failed against the accepted runner (18 tests, two failures); canonical cases still reported 47/47.
 - Independent review added six failing boundary cases to the first planning candidate (49 tests, six failures): empty gate IDs, duplicate gate fields, malformed/non-UTF-8/BOM JSON, and historical log details under the explicit result field.
-- GREEN: 56/56 planning tests and the actual public plan consistency check passed.
-- GREEN: 31/31 restoration tests and 47/47 filesystem fixture cases passed with no skipped tests.
+- GREEN: 57/57 planning tests and the actual public plan consistency check passed.
+- GREEN: 32/32 restoration tests and 47/47 filesystem fixture cases passed with no skipped tests.
 - Checks ran as the existing non-root user in the bounded Habitat image, with networking disabled, a read-only root, no host mounts, all capabilities dropped, and no new privileges.
 - The test container is limited to one CPU, 384 MiB memory, 64 processes, and a 128 MiB temporary filesystem. It uses the existing image; no dependency installation is required.
 - The empty base64 string remains valid. Invalid characters, missing or excess padding, nonzero pad bits, and malformed tree mutation entries are rejected before creating a work directory.
@@ -33,10 +33,10 @@ to fix the review findings and merge the corrected work into dev.
 
 | Artifact | SHA-256 |
 | --- | --- |
-| `scripts/check_multi_project_plan.py` | `fb796228cb8d24000d2b044aec737fcc3e9a1e8eae0d64369ff71154bd494028` |
-| `scripts/tests/test_multi_project_plan.py` | `02903c1105024fd521f5480faf18242ed41c6e19fdff270630ae280166245438` |
-| `scripts/prove_multi_project_source_preservation.mjs` | `2ddae56ba6f2830a33a13dd4bd7eae334a40619ff1f5ccec8e8741ee27cfe6a9` |
-| `scripts/tests/test_prove_multi_project_source_preservation.mjs` | `7208aad5b55f324996c9ae835c32905eb5fce29f3d61051a32a737798df7cd20` |
+| `scripts/check_multi_project_plan.py` | `743196094142f77c8ee25f3a15ea908c1bf4411154262189b9ace71945bbe88c` |
+| `scripts/tests/test_multi_project_plan.py` | `bc36ebb01c96153ae0cf7f0a626cebf3e1c56e3c296d32ba8baaf7218ce8abfd` |
+| `scripts/prove_multi_project_source_preservation.mjs` | `76ad9a5a16899ce5b903488b564324f23470242510afee65b51395457eeb6a68` |
+| `scripts/tests/test_prove_multi_project_source_preservation.mjs` | `c82de35b9640294bb4c74a38f3d1749e85f7075fd6052b9358e2c7c75f14b0e6` |
 
 These checks establish fixture and planning validation behavior. They do not
 complete a product outcome, activate a factory, prove a coding runtime, or
@@ -110,3 +110,22 @@ UTF-8 receipts, and an unavailable receipt. The three restoration regressions
 failed before their fixes (31 tests, three failures). Final passing counts and
 source hashes appear above. These checks use synthetic inputs in the same
 bounded Habitat environment.
+
+## Text encoding and fixture vocabulary
+
+Automated review of `308e554` found three remaining validation issues:
+
+| Review | Finding | Resolution |
+| --- | --- | --- |
+| [3943097302](https://github.com/vivary-dev/vivary/pull/329#discussion_r3943097302) | Invalid UTF-8 hides private text | Report invalid encoding for every scanned planning artifact; a bad byte cannot turn a credential-bearing file into a passing scan. |
+| [3943097303](https://github.com/vivary-dev/vivary/pull/329#discussion_r3943097303) | Parser-specific nesting assumption | Accept either successful iterative scanning or an explicit parser-limit diagnostic, and exercise both paths without depending on a Python version's parser limit. |
+| [3943097306](https://github.com/vivary-dev/vivary/pull/329#discussion_r3943097306) | Unknown expected result values | Validate result and issue codes against the closed version-one vocabulary before filesystem setup. |
+
+RED: invalid-encoding fixtures failed in all three text-extension subcases (57
+planning tests). The new result/issue vocabulary regression failed before its fix
+(32 restoration tests, one failure). The portable deep-JSON check covers both a
+controlled parser refusal and successful iterative scanning; it does not assume
+that a particular nesting depth fails in every supported Python version. These
+checks ran in Habitat's existing Python 3.11 and Node 22 environment. No additional
+Python runtime was installed or claimed as tested. Final passing counts and source
+hashes appear above.

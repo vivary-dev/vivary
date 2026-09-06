@@ -152,7 +152,8 @@ follow the validation order above. These rules avoid case-name-specific behavior
 The runner validates the complete fixture before creating its work directory.
 Suites must contain at least one case. Envelope, default, case, setup, mutation,
 fault, expectation, and symbolic receipt fields follow the version-one schema;
-unknown fields and unresolved references are errors. Named manifests and receipt
+unknown fields and unresolved references are errors. Result and issue codes use
+the closed version-one vocabulary. Named manifests and receipt
 seeds must be valid; negative product cases use explicit mutations or malformed
 raw parser input. Each tree mutation is validated when applied, so later removal
 cannot hide an invalid intermediate entry. Seed path aliases use the selected

@@ -28,6 +28,43 @@ const FILE_CLASSES = new Set([
   "selected-ignored",
 ]);
 const HISTORY_KINDS = new Set(["none", "commit", "ref", "bundle"]);
+const V1_MANIFEST_ISSUE_CODES = new Set([
+  "invalid-enum",
+  "invalid-sha256",
+  "invalid-size",
+  "invalid-type",
+  "invalid-value",
+  "missing-field",
+  "unknown-field",
+]);
+const V1_OPERATION_RESULT_CODES = new Set([
+  "already-restored",
+  "destination-collision",
+  "duplicate-json-key",
+  "filesystem-error",
+  "incomplete",
+  "invalid-fault",
+  "invalid-json",
+  "invalid-manifest",
+  "invalid-manifest-root",
+  "invalid-policy",
+  "receipt-binding-mismatch",
+  "receipt-invalid",
+  "restored",
+  "rollback-failed",
+  "source-changed",
+  "source-collision",
+  "source-hash-mismatch",
+  "source-missing",
+  "source-not-file",
+  "source-size-mismatch",
+  "target-conflict",
+  "unsafe-link",
+  "unsafe-path",
+  "unsupported-kind",
+  "unsupported-schema-version",
+  "write-verification-failed",
+]);
 const MANIFEST_FIELDS = [
   "schemaVersion",
   "sourceId",
@@ -1344,6 +1381,9 @@ const validateFixtureExpectation = (expect, fixture, requireAssertions = false) 
       invalidFixtureExpectation();
     }
   }
+  if (Object.hasOwn(expect, "result") && !V1_OPERATION_RESULT_CODES.has(expect.result)) {
+    invalidFixtureExpectation();
+  }
   if (Object.hasOwn(expect, "receiptStatus") &&
       !new Set(["complete", "incomplete"]).has(expect.receiptStatus)) {
     invalidFixtureExpectation();
@@ -1353,7 +1393,8 @@ const validateFixtureExpectation = (expect, fixture, requireAssertions = false) 
   }
   if (Object.hasOwn(expect, "issues") &&
       (!Array.isArray(expect.issues) ||
-       !expect.issues.every((issue) => typeof issue === "string" && issue.length > 0))) {
+       !expect.issues.every((issue) => V1_MANIFEST_ISSUE_CODES.has(issue)) ||
+       new Set(expect.issues).size !== expect.issues.length)) {
     invalidFixtureExpectation();
   }
   for (const field of ["verifiedPaths", "ownedPaths"]) {
