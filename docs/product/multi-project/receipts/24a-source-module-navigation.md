@@ -91,8 +91,8 @@ service. No account or repository publication action ran.
 | `python -B packages/tropo/tropo.py blast root-observation-contract --depth 2 --json --root docs/product/multi-project/source-map` | 0 | 4 inbound impacts through depth 2 |
 | `python -B scripts/check-source-navigation.py --check` | 0 | 16 records, 23 edges, 11 locators, 0 broken |
 | `python -B scripts/tests/test-source-navigation.py` | 0 | 18 tests passed after the new locator, root-link, and interior-junction refusal cases failed before implementation |
-| `python -B scripts/check_ci_workflow.py` | 0 | CI workflow requires both source-navigation commands exactly once |
-| `python -B scripts/tests/test_ci_workflow.py` | 0 | 22 tests passed after both new command-removal cases failed before implementation |
+| `python -B scripts/check_ci_workflow.py` | 0 | Both Ubuntu tests and governed Windows verification require each source-navigation command exactly once |
+| `python -B scripts/tests/test_ci_workflow.py` | 0 | 24 tests passed, including job-scoped removal of either command from Ubuntu or Windows |
 | `python -B scripts/check_multi_project_plan.py --render` | 0 | Generated frontier and graph updated |
 | `python -B scripts/check_multi_project_plan.py --check` | 0 | 36 outcomes and bounded packet graph passed |
 | `python -B scripts/check_line_endings.py` | 0 | 425 tracked text files checked, with 4 unchanged legacy allowlist entries |
@@ -159,13 +159,29 @@ probes passed. It also reran the 36-outcome plan check, the 425-file line-ending
 check with four unchanged legacy allowlist entries, and the diff check. No concrete
 defect remained.
 
-| Independently matched correction artifact | SHA-256 |
+| Independently matched correction artifact at commit `b959e89` | SHA-256 |
 | --- | --- |
 | `.github/workflows/ci.yml` | `13d6a0dc214bb788391577f7be33b16794f576237ec092aaf8e481f567ecde0b` |
 | `scripts/check-source-navigation.py` | `a9a1eb88d11b94688770e8d201c396cb004d314ddaae095cf45b8bfffd6e1261` |
 | `scripts/check_ci_workflow.py` | `2ef66919d6347a8377ddfef532f42e3498d5964805039f99daf9a040716fddb9` |
 | `scripts/tests/test-source-navigation.py` | `985932e2c0aaad7b2a5a28b77290ec5e52eeccf497e8ea9fc7238ae557e702bc` |
 | `scripts/tests/test_ci_workflow.py` | `33ade99a6b6af8661397b892fe32d8600dd2c16feac77e4bfc5c66e7e2af0eae` |
+
+### Two-platform CI enforcement
+
+Final PR review observed that the Ubuntu job skipped the Windows-only junction tests
+and the governed Windows job did not invoke the navigation suite. The Windows job now
+runs the same production checker and 18-test suite under Python 3.11 while Ubuntu
+retains its existing runs. The CI guard requires each command exactly once in each
+job. Two new job-scoped regressions failed before that guard changed and passed in the
+24-test local CI contract suite afterward. The accepted local Windows 18-test run was
+not repeated; the pull-request CI gate owns the Python 3.11 Windows execution.
+
+| Two-platform enforcement candidate | SHA-256 |
+| --- | --- |
+| `.github/workflows/ci.yml` | `47f54019ea9b99be8e7c74bc5b974f3fa5069fbb9e7227c7d2c1e2e049286ef0` |
+| `scripts/check_ci_workflow.py` | `3549aefb4601a7c4ceb259531d80640a7a4356b9543b235458373194b5e881f5` |
+| `scripts/tests/test_ci_workflow.py` | `0054aae61fab5f54011af6a45a49adecfaab305087bb58a5f8d2ab8a75a377fe` |
 
 ## Result and continuation
 
@@ -174,6 +190,9 @@ It adds no runtime behavior, source import, production registry, write-back adap
 physical observer, installed guide, package release, or publication claim. A locator
 proves where a selected source lives at validation time. It does not prove runtime
 behavior or immutable physical identity.
+
+The two-platform workflow wiring is locally contract-verified. Pull-request CI owns
+the final Ubuntu and Windows runner execution for its committed candidate.
 
 Outcome 24 remains planned with its completion dependencies unchanged. Future agents
 select a task from the generated frontier first and use this source map only when work

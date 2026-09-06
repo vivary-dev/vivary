@@ -60,8 +60,9 @@ Each source-reference record is the sole owner of its locator.
   typed-edge, and negative navigation checks below. Reuse Tropo through its existing
   commands or tested library functions. Add no parser or graph engine.
 - Update `.github/workflows/ci.yml`, `scripts/check_ci_workflow.py`, and
-  `scripts/tests/test_ci_workflow.py` so the required tests job runs both source
-  navigation commands and removal of either command fails the CI contract suite.
+  `scripts/tests/test_ci_workflow.py` so both the required Ubuntu tests job and the
+  governed Windows verification job run both source navigation commands. Removal
+  of either command from either job must fail the CI contract suite.
 - Update `AGENTS.md` and `docs/README.md` with a short conditional pointer to the
   source-map index. Preserve existing execution and release authorities.
 - Update `CHANGELOG.md`, then regenerate
@@ -203,3 +204,8 @@ No publication, account change, or product activation occurs.
   refusal, and exact linked outcome owners. Independent review reproduced each
   adversarial case, matched candidate hashes, and accepted the 18-test correction
   with no remaining finding. Packet 24a returned to done; Outcome 24 remains planned.
+- 2026-09-06: Final PR review at `b959e89` found that Ubuntu CI skipped the two
+  Windows-only junction cases and no Windows job ran the navigation suite. The
+  governed Windows job now runs the checker and all 18 tests under Python 3.11.
+  Job-scoped contract regressions fail if either navigation command is removed from
+  Ubuntu or Windows; the local CI contract guard and all 24 tests passed.

@@ -174,6 +174,14 @@ def main() -> None:
             test_job.count(command) == 1,
             f"tests job must run {command} exactly once",
         )
+        require(
+            command in governed_job,
+            f"governed-platform-proof job must run {command}",
+        )
+        require(
+            governed_job.count(command) == 1,
+            f"governed-platform-proof job must run {command} exactly once",
+        )
     for command in (automation_guard, automation_tests, automation_behavior):
         require(command in test_job, f"tests job must run {command}")
         require(

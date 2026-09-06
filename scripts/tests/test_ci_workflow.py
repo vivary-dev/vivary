@@ -129,6 +129,10 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "  governed-platform-proof:\n"
         "    needs: changes\n"
         "    steps:\n"
+        "      - name: source navigation contract on Windows\n"
+        f"        run: {SOURCE_NAVIGATION_CHECK_COMMAND}\n"
+        "      - name: source navigation contract tests on Windows\n"
+        f"        run: {SOURCE_NAVIGATION_TEST_COMMAND}\n"
         "      - name: installed-wheel capability surface\n"
         "        shell: pwsh\n"
         "        run: |\n"
@@ -211,6 +215,7 @@ def test_source_navigation_contract_must_run():
     workflow = _workflow(INSTALL + AUDIT).replace(
         SOURCE_NAVIGATION_CHECK_COMMAND,
         "echo source navigation check skipped",
+        1,
     )
     message = _run(workflow)
     assert message, "CI must execute the source-navigation checker"
@@ -221,9 +226,36 @@ def test_source_navigation_regressions_must_run():
     workflow = _workflow(INSTALL + AUDIT).replace(
         SOURCE_NAVIGATION_TEST_COMMAND,
         "echo source navigation tests skipped",
+        1,
     )
     message = _run(workflow)
     assert message, "CI must execute the source-navigation regression suite"
+    assert SOURCE_NAVIGATION_TEST_COMMAND in message
+
+
+def _without_governed_command(workflow: str, command: str) -> str:
+    marker = "  governed-platform-proof:\n"
+    before, governed_and_later = workflow.split(marker, 1)
+    return before + marker + governed_and_later.replace(command, "echo skipped", 1)
+
+
+def test_windows_governed_job_must_run_source_navigation_contract():
+    workflow = _without_governed_command(
+        _workflow(INSTALL + AUDIT),
+        SOURCE_NAVIGATION_CHECK_COMMAND,
+    )
+    message = _run(workflow)
+    assert message, "the Windows job must execute the source-navigation checker"
+    assert SOURCE_NAVIGATION_CHECK_COMMAND in message
+
+
+def test_windows_governed_job_must_run_source_navigation_regressions():
+    workflow = _without_governed_command(
+        _workflow(INSTALL + AUDIT),
+        SOURCE_NAVIGATION_TEST_COMMAND,
+    )
+    message = _run(workflow)
+    assert message, "the Windows job must execute the source-navigation regression suite"
     assert SOURCE_NAVIGATION_TEST_COMMAND in message
 
 
