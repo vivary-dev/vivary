@@ -31,8 +31,19 @@ they do not prove the behavior above.
 
 ## Next packet
 
-[12a](../packets/12a-root-vcs-observation-contract.md) is ready after the 03c source mapping. It defines the trusted observation contract and expected oracles only. Production adapter implementation, physical identity probes, and cross-process mutation enforcement remain later work. Outcome completion dependencies do not gate this independent preparation.
+[12a](../packets/12a-root-vcs-observation-contract.md) completed its independently
+reviewed observation contract and expected oracles. Its
+[receipt](../receipts/12a-root-vcs-observation-contract.md#later-implementation-session)
+names the later implementation session and its prerequisites. Prepare that bounded
+packet in a later session after reading the generated frontier. No 12b was created
+in 12a. Physical identity, production integration, and cross-process mutation
+enforcement remain unproved. This parent outcome stays open.
 
 ## Log
 
 - 2026-09-05: Initial public plan recorded. Implementation has not started.
+
+- 2026-09-06: Packet 12a accepted a storage-neutral observation contract and
+  expected fixtures after independent review. No adapter implementation or
+  physical fixture execution occurred. Required inspection checks passed.
+  The receipt retains a separate Windows planning-test newline failure.

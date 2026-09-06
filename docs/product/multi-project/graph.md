@@ -9,7 +9,7 @@ The 36 numbered outcomes preserve the complete product. Their dependencies
 gate completion. Agents execute bounded packets; a future feature or release
 decision does not block an independent packet. Packet dependencies gate starts.
 
-Frontier: 12a, 20a.
+Frontier: 20a.
 In progress: none.
 
 ## Execution packets
@@ -24,7 +24,7 @@ In progress: none.
 | [10a: Establish the BrowserPod compatibility boundary](packets/10a-browserpod-compatibility-preflight.md) | 10 | done | [] |
 | [10b: Prove the first BrowserPod toolchain on a disposable fixture](packets/10b-browserpod-toolchain-proof.md) | 10 | needs-info | [10a] |
 | [10c: Prove the authorized Habitat fallback toolchain](packets/10c-habitat-fallback-proof.md) | 10 | done | [10a] |
-| [12a: Define the trusted root and VCS observation boundary](packets/12a-root-vcs-observation-contract.md) | 12 | ready-for-agent | [03c] |
+| [12a: Define the trusted root and VCS observation boundary](packets/12a-root-vcs-observation-contract.md) | 12 | done | [03c] |
 | [20a: Prove one headless planning, coding, and testing loop on files](packets/20a-headless-loop-proof.md) | 20 | ready-for-agent | [10c] |
 
 ## Product outcomes

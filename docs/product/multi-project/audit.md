@@ -31,9 +31,10 @@ not product acceptance, a security certification, or a release result.
 | Earlier token-savings benchmark and dogfood commitments can get lost | Bind old issue requirements to outcomes 36, 23, and 24 | Comparative claims and final release acceptance |
 | The real scanner is still Level 1/5 | Implemented services plus a live all-checks 100% result | Release readiness and agent-ready announcements |
 
-No BrowserPod execution, real-source preservation, new artifact release, or
-100% result is claimed. New findings repair the owning packet and its evidence;
-they do not silently change product direction or stop unrelated ready work.
+This audit establishes no BrowserPod execution, real-source preservation,
+new artifact release, or 100% result. New findings repair the owning packet
+and its evidence. They do not silently change product direction or stop
+unrelated ready work.
 
 ## Verification checkpoint
 
@@ -52,11 +53,16 @@ candidates, claim-level QA, and evidence-fed replanning remain unverified.
 [03b](receipts/03b-registry-contract-model.md) now records actual Habitat model
 verification and independent QA corrections. Its results do not establish the
 production HoH cycle or filesystem enforcement. Packet 02b supplies bounded
-synthetic filesystem evidence. [03c](receipts/03c-registry-transaction-mapping.md)
-completed the native transaction and adapter map after independent review. The
-next executable packet is [12a](packets/12a-root-vcs-observation-contract.md) for
-the trusted root/VCS observation contract; real-source preservation and
-production registry enforcement remain open.
+synthetic filesystem evidence.
+
+[03c](receipts/03c-registry-transaction-mapping.md) completed the native
+transaction and adapter map after independent review.
+
+[Packet 12a's receipt](receipts/12a-root-vcs-observation-contract.md) records the
+accepted trusted root/VCS observation inspection. Follow [the generated
+frontier](index.md) under [the loop-first
+direction](design.md#direction-decision-2026-09-06). Real-source preservation
+and production registry enforcement remain open.
 
 ## PR 328 review checkpoint
 
