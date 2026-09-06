@@ -96,6 +96,9 @@ patch. Published registry versions remain unchanged.
 
 ### Fixed
 
+- Agent-Native composition guidance and the execution-copy definition now follow
+  the selected runtime and authorized environment. The research review routes
+  agents to the generated frontier instead of an already completed packet.
 - Multi-project plan checks now require explicit successful verification and record-bound receipts, reject duplicate external gate metadata, and inspect public JSON for private values. Restoration fixture validation rejects malformed base64 and incomplete assertions before materializing files.
 
 ### Unchanged
