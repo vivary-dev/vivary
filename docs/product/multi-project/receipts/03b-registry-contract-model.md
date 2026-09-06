@@ -1,5 +1,6 @@
 # 03b Registry reference-model verification
 
+Evidence-record: 03b
 Date: 2026-09-05. Verification kind: runtime. Result: reference-model packet
 complete. Parent outcome 03 remains in progress.
 

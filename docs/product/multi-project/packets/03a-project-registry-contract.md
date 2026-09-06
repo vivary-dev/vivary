@@ -7,6 +7,7 @@ Owner: Codex integration agent
 Scope: Contract, data fixtures, and test expectations only; no persistence implementation.
 Verification-kind: inspection
 Evidence: [Registry inspection receipt](../receipts/03a-registry-contract.md)
+Verification-result: passed
 Timebox: One context window; stop after the contract and fixtures are reviewed.
 
 ## Goal

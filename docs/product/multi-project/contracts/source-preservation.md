@@ -149,6 +149,25 @@ destination aliases return `destination-collision`. Successful unchanged partial
 resume returns `restored`. Other expected codes are named by the fixtures and
 follow the validation order above. These rules avoid case-name-specific behavior.
 
+The runner validates the complete fixture before creating its work directory.
+Suites must contain at least one case. Envelope, default, case, setup, mutation,
+fault, expectation, and symbolic receipt fields follow the version-one schema;
+unknown fields and unresolved references are errors. Result and issue codes use
+the closed version-one vocabulary. Named manifests and receipt
+seeds must be valid; negative product cases use explicit mutations or malformed
+raw parser input. Each tree mutation is validated when applied, so later removal
+cannot hide an invalid intermediate entry. Seed path aliases use the selected
+setup policy before mutations run. Fault counts must reach a new output
+and declare an incomplete result. JSON Pointer array indices are canonical
+nonnegative integers; array removal closes the gap.
+
+Every declared expectation is evaluated. Target and temporary tree references
+remain active when `noWrites` is true. Path assertions check the returned response
+as well as the receipt. Receipt binding also checks returned manifest digest,
+source-tree digest, ordered output sizes and hashes, and the observed target
+digest for incomplete work. Symbolic receipt trees must match their declared
+manifest outputs before setup.
+
 ## Executed receipt format
 
 The version-one fixture implementation writes `restore-receipt.json` in a

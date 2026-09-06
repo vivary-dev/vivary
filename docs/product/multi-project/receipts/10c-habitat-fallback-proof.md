@@ -1,5 +1,6 @@
 # 10c Habitat fallback receipt
 
+Evidence-record: 10c
 Date: 2026-09-05. Verification kind: runtime. Result: one toolchain test passed;
 no registry decision tests or real coding-agent execution are claimed here.
 

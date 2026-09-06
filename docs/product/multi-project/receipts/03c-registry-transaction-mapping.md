@@ -1,5 +1,6 @@
 # 03c registry transaction mapping receipt
 
+Evidence-record: 03c
 Date: 2026-09-05. Verification kind: source inspection. Result: mapping accepted
 after independent review. No runtime, production database, root, account, or
 project file was exercised during this packet.

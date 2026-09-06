@@ -90,6 +90,10 @@ patch. Published registry versions remain unchanged.
 - `create-vivary` on PyPI and `@vivary/create` on npm move to **0.4.3** together. That
   numeric lockstep is the only one in the suite.
 
+### Fixed
+
+- Multi-project plan checks now require explicit successful verification and record-bound receipts, reject duplicate external gate metadata, and inspect public JSON for private values. Restoration fixture validation rejects malformed base64 and incomplete assertions before materializing files.
+
 ### Unchanged
 
 - The standalone `create-vivary`, `tropo`, `strato`, `ozone`, and `exo` commands keep
@@ -98,8 +102,9 @@ patch. Published registry versions remain unchanged.
 
 ### Verification
 
-- The multi-project planning guard's 33 adversarial tests passed in the bounded
-  Habitat environment with Python 3.11.16.
+- The multi-project planning guard's 67 adversarial tests passed in the bounded
+  Habitat environment with Python 3.11.16. The restoration proof passed 32 tests
+  and all 47 filesystem fixture cases in the same bounded environment.
 - `python packages/vivary/tests/test_vivary_cli.py` — 9/9 passed.
 - `python packages/vivary/tests/test_command_surface_characterization.py` — 3/3 passed
   over 44 cases. The six `create-vivary` operation helps the seam touched were frozen

@@ -8,6 +8,7 @@ Scope: One offline disposable Node toolchain probe; no app import or coding-runt
 Verification-kind: runtime
 Timebox: One bounded probe and cleanup checkpoint.
 Evidence: [Habitat receipt](../receipts/10c-habitat-fallback-proof.md)
+Verification-result: passed
 
 ## Goal
 

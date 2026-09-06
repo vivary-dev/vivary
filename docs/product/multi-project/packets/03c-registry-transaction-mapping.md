@@ -7,6 +7,7 @@ Owner: Codex registry_model, sole map writer; coordinating Codex owns independen
 Scope: Source-backed action, storage, transaction, and root-adapter map only. No production schema, action, adapter, or database selection.
 Verification-kind: inspection
 Evidence: [Transaction mapping receipt](../receipts/03c-registry-transaction-mapping.md)
+Verification-result: passed
 Timebox: One context window. Stop after a second reader can trace every map row to the contract and an inspected source.
 
 ## Goal

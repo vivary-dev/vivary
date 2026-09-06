@@ -1,5 +1,6 @@
 # Preservation contract review
 
+Evidence-record: 02a
 Recorded: 2026-09-05. Contract and synthetic-fixture work only.
 
 The [manifest contract](../contracts/source-preservation.md) and

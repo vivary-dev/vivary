@@ -1,5 +1,6 @@
 # 02b Synthetic restoration verification
 
+Evidence-record: 02b
 Date: 2026-09-05. Verification kind: runtime. Packet 02b is complete.
 Parent outcome 02 remains in progress.
 

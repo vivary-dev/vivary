@@ -29,8 +29,11 @@ reviewed before a database is selected; live pod execution requires a connection
 - `ready-for-human` names one actual operation that requires a human after the
   agent has prepared and verified everything else. PR merge approval remains
   separate from an agent's documentation or contract acceptance.
-- `done` requires a linked evidence receipt and a verification log. A packet's
-  success never automatically closes the outcome or a release gate.
+- `done` requires `Verification-result: passed`, a verification log, and a linked
+  receipt whose `Evidence-record` is the exact outcome or packet ID. The structured
+  result is authoritative; the log records commands, details, and relevant history,
+  including earlier failures. Duplicate or ambiguous result and binding fields are
+  invalid. A packet's success never automatically closes the outcome or a release gate.
 
 Claim the lowest ready packet whose verification environment is available.
 Record one writer before editing. Other agents may review, but must not edit its

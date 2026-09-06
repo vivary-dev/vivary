@@ -4,6 +4,7 @@ Status: done
 Blocked-by: []
 Owner: integration agent
 Evidence: [Review receipt](../receipts/01-migration-boundaries.md)
+Verification-result: passed
 Scope: Public documentation and provenance reconciliation only. Human action is limited to reviewing the documentation pull request.
 Unlocks: [02, 03]
 

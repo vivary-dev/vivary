@@ -1,5 +1,6 @@
 # Registry contract inspection receipt
 
+Evidence-record: 03a
 Historical inspection receipt. The later owner decision marks BrowserPod
 unavailable and Habitat current. Follow [the execution rules](../execution-contract.md)
 and [generated frontier](../index.md) for current work; the earlier execution

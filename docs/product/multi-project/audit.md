@@ -61,3 +61,6 @@ production registry enforcement remain open.
 ## PR 328 review checkpoint
 
 The [review receipt](receipts/pr-328-code-review.md) records all 40 thread dispositions, the corrected authorization and planning boundaries, and the 38/57 registry, 16/47 restoration, 33 planning, and five independent checks. Product outcomes remain subject to their own exit evidence.
+
+The [late-review receipt](receipts/pr-328-late-review.md) records the six subsequent
+validation fixes and their failing/passing regression evidence.

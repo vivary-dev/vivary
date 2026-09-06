@@ -5,6 +5,7 @@ Status: done
 Depends-on: []
 Owner: integration agent
 Evidence: [Review receipt](../receipts/02a-preservation-contract.md)
+Verification-result: passed
 Scope: Synthetic manifest and restore test cases; no real source import or deletion.
 Verification-kind: inspection
 Timebox: One context window; end after the manifest and failure cases are reviewed.

@@ -8,6 +8,7 @@ Scope: Dependency-free reference evaluator and synthetic state-transition tests;
 Verification-kind: runtime
 Timebox: One context window; checkpoint after the evaluator and adversarial schedules are verified.
 Evidence: [Model receipt](../receipts/03b-registry-contract-model.md)
+Verification-result: passed
 
 ## Goal
 

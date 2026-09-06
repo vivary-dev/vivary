@@ -7,6 +7,7 @@ Owner: Codex restore_model, sole code writer; coordinating Codex owns review and
 Scope: Synthetic restoration in one disposable Habitat container root; no real source import.
 Verification-kind: runtime
 Evidence: [Restoration receipt](../receipts/02b-restoration-fixture.md)
+Verification-result: passed
 Timebox: One context window; at most 90 minutes, then checkpoint incomplete work.
 
 ## Goal
