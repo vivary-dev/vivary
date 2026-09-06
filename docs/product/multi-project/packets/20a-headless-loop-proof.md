@@ -3,10 +3,10 @@
 Type: packet
 Parent: 20
 Status: needs-info
-Depends-on: [10c]
+Depends-on: [10c, 20c]
 Owner: Claude loop proof agent
 Needs: A verified pre-admission bound on cumulative input and output for an installed Claude Code invocation, supplied by the runtime integration maintainer. Jeff owns any proposed change to this packet's hard token policy. The installed CLI has no documented bound that satisfies it.
-Scope: Implement and run one Claude Code proof over one immutable fixture baseline. Complete three healthy iterations and two isolated fault runs within 100,000 reported tokens. Do not run Codex parity, a GUI, an Agent-Native server, a new scheduler, or a paid API key.
+Scope: Run one Claude Code proof using the deterministic implementation accepted in 20c. Complete three healthy iterations and two isolated fault runs within 100,000 reported tokens. Do not run Codex parity, a GUI, an Agent-Native server, a new scheduler, or a paid API key.
 Verification-kind: runtime
 Timebox: One context window. Stop after three healthy iterations and both fault runs, or at a stop condition, and write the receipt.
 
@@ -14,8 +14,10 @@ Timebox: One context window. Stop after three healthy iterations and both fault 
 
 Prove the file-based planning, development, and QA loop with the owner's Claude
 Code subscription. Bind each stage to the exact fixture, candidate, prompt,
-observation, and receipt state that produced it. This remains the first packet
-to claim under [the direction decision](../design.md#direction-decision-2026-09-06).
+observation, and receipt state that produced it. The claimable
+[20c preparation](20c-headless-loop-preparation.md) keeps the
+[loop-first direction](../design.md#direction-decision-2026-09-06) executable
+while the native-call budget capability is unavailable.
 
 Packet 20a proves one runtime against the common role and receipt contract. It
 does not prove cross-runtime acceptance. Packet 20b owns the Codex run and the
@@ -33,8 +35,8 @@ are in the paper's PDF appendix A.2 (arXiv 2609.01481v1, pages 22 to 25). The
 HTML omits them. The Fusepoint repository (`Flesymeb/fusepoint`, branch
 `gameloop`, `.gameloop/receipts/`) supplies the reference record shapes.
 
-Implement a runtime-neutral role, transition, and receipt interface in
-`tools/hoh/protocol.py`. Habitat has Claude Code `2.1.241`. The Claude adapter
+Packet 20c implements the runtime-neutral role, transition, and receipt
+interface in `tools/hoh/protocol.py`. Habitat has Claude Code `2.1.241`. The Claude adapter
 maps only capabilities verified from that installed CLI onto the interface.
 Record the version, model, subscription, and exact live-preflight flags. Do not
 copy flags from a newer host CLI or assume a flag the Habitat command has not
@@ -179,14 +181,20 @@ Do not run a fault against the healthy project or receipt root. Never use
 `git reset` or `git clean` on the Vivary checkout or another user project.
 Keep the baseline and evidence after the task container stops. Before export,
 resolve the absolute preserved Littleagent checkout as `LITTLEAGENT_ROOT` and
-record that value privately. Run the following host-side check with that value:
+record that value privately. Choose `evidence.tar.gz` and `manifest.json` as
+the output filenames. Run each host-side check separately and require a match
+for each exact path before writing either file:
 
 ```console
-git -C "$LITTLEAGENT_ROOT" check-ignore -v .tmp/hoh-proof/20a/probe
+git -C "$LITTLEAGENT_ROOT" check-ignore -v -- .tmp/hoh-proof/20a/evidence.tar.gz
+git -C "$LITTLEAGENT_ROOT" check-ignore -v -- .tmp/hoh-proof/20a/manifest.json
 ```
 
-Require an ignore-rule match and verify that the resolved export target stays
-inside that checkout's `.tmp/hoh-proof/20a/`. Export a hash-bound evidence archive
+Verify each resolved output stays inside that checkout's `.tmp/hoh-proof/20a/`.
+Apply the same separate ignore and containment checks to every temporary output
+path before creating it. A match on another filename is insufficient. Refuse
+existing output files; preserve prior evidence rather than overwriting it.
+Export a hash-bound evidence archive
 and manifest to `${LITTLEAGENT_ROOT}/.tmp/hoh-proof/20a/`. Never resolve that
 relative suffix against the Vivary checkout. Include mount evidence, the baseline bundle, receipt
 indexes and details, candidate bindings, raw usage records, and command output.
@@ -195,19 +203,10 @@ manifest hashes in the tracked 20a receipt.
 
 ## Owned files
 
-- Create `tools/hoh_loop.py`.
-- Create `tools/hoh/__init__.py`, `tools/hoh/protocol.py`, and
-  `tools/hoh/claude.py`.
-- If the installed native boundary requires scoped MCP tools, create
-  `tools/hoh/role_tools.py` and `tools/tests/test_hoh_role_tools.py` for that
-  bounded adapter seam. They add no provider API client or persistent service.
-- Create `tools/hoh/prompts/planner.md`, `tools/hoh/prompts/developer.md`, and
-  `tools/hoh/prompts/qa.md`.
-- Create `tools/tests/test_hoh_loop.py` and the tests-only executable
-  `tools/tests/hoh_fault_probe.py`.
-- Create `docs/product/multi-project/fixtures/hoh-loop/spec.md`,
-  `docs/product/multi-project/fixtures/hoh-loop/linkcheck.py`, and
-  `docs/product/multi-project/fixtures/hoh-loop/tests/test_links.py`.
+- Consume the fixture, prompts, protocol, sequencer, adapter, and tests accepted
+  by [20c](20c-headless-loop-preparation.md). Make only bounded fixes needed by
+  live enforcement, with regression tests. Any changed fixture or prompt hash
+  establishes a new baseline before all three healthy iterations and both faults.
 - Create `docs/product/multi-project/receipts/20a-headless-loop-proof.md`.
 - Update this packet's status and log, then regenerate the graph.
 - Update `CHANGELOG.md` at closure and run the approved canonical site sync.
@@ -291,14 +290,17 @@ authentication changes only 20b to `needs-info`, with the exact restoration
 owner. A missing, failed, or partial Codex run leaves parity incomplete. Never
 substitute an API key or fabricate evidence.
 
-Before 20b closes, verify its host-side ignore rule:
+Before 20b exports, check each exact output separately and require a match:
 
 ```console
-git -C "$LITTLEAGENT_ROOT" check-ignore -v .tmp/hoh-proof/20b/probe
+git -C "$LITTLEAGENT_ROOT" check-ignore -v -- .tmp/hoh-proof/20b/evidence.tar.gz
+git -C "$LITTLEAGENT_ROOT" check-ignore -v -- .tmp/hoh-proof/20b/manifest.json
 ```
 
-Verify the resolved target stays inside that checkout's `.tmp/hoh-proof/20b/`,
-then export there. The tracked receipt binds both restored 20a evidence and new
+Verify each resolved output stays inside that checkout's `.tmp/hoh-proof/20b/`.
+Check every temporary output path the same way before creating it. Refuse
+existing output files. Then export
+there. The tracked receipt binds both restored 20a evidence and new
 20b evidence. Update the canonical changelog with the actual proof status and
 generate its site mirrors before closing either runtime packet.
 
@@ -439,4 +441,5 @@ them.
 - 2026-09-06: Packet created from the scoped effect of [the direction decision](../design.md#direction-decision-2026-09-06). Implementation has not started.
 - 2026-09-06: Corrected the execution boundary to one Claude Code proof in one context window. Codex parity moves to packet 20b, which is materialized only when 20a closes so the packet dependency and generated frontier remain valid.
 - 2026-09-06: Review tightened the expected-red starter oracle, planner isolation, tests-only fault probe, usage ceiling, and durable evidence handoff. No runtime implementation started.
-- 2026-09-06: PR #335 review required pre-admission token reservations and credential isolation. The installed Claude CLI has no documented whole-invocation token bound, so live calls remain stopped and this packet needs that concrete capability or an approved policy alternative. Offline tools and subscription authentication passed. Independent available work continues under D17.
+- 2026-09-06: PR #335 review required pre-admission token reservations and credential isolation. The installed Claude CLI has no documented whole-invocation token bound, so live calls remain stopped and this packet needs that concrete capability or an approved policy alternative. Offline tools and subscription authentication passed. The execution contract permits independent available work.
+- 2026-09-06: Packet 20c owns claimable deterministic preparation while only this live proof remains blocked. Export checks now bind every actual archive, manifest, and temporary output path before writing it.

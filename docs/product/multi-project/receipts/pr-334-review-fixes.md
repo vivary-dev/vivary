@@ -73,6 +73,8 @@ implementation. The packet owns its schema and enforcement proof.
 | [Credential exposure](https://github.com/vivary-dev/vivary/pull/335#discussion_r3944993314) | Separate authenticated CLI state from model tool filesystems and prove canary denials |
 | [Closure release truth](https://github.com/vivary-dev/vivary/pull/335#discussion_r3944993317) | Both runtime closures own canonical changelog updates and generated mirrors |
 | [Parity cleanup](https://github.com/vivary-dev/vivary/pull/335#discussion_r3944993321) | The parity owner prepares itemized, restore-proven cleanup for explicit approval and retains archives for outcome 04 |
+| [Claimable deterministic preparation](https://github.com/vivary-dev/vivary/pull/335#discussion_r3945089814) | Packet 20c owns preparation and deterministic tests with a receipt; 20a depends on it and keeps only its actual native-call prerequisite blocked |
+| [Exact export paths](https://github.com/vivary-dev/vivary/pull/335#discussion_r3945089827) | Check each archive, manifest, and temporary output path separately for an ignore match and resolved containment before writing |
 
 The first remote review of `2c497d6` found five additional issues. The follow-up
 binds exports to the verified absolute Littleagent checkout and requires
@@ -105,6 +107,12 @@ The continuation requires separate Codex prerequisite evidence before setting
 The author ran the planning renderer and guard, the line-ending guard, and
 `git diff --check`. All passed. The initial generated frontier contained 20a;
 the follow-up removes it until its concrete budget prerequisite is resolved.
+Packet 20c provides the ready frontier for independent deterministic preparation.
+
+The independent recheck accepted both later findings with no contradiction.
+It verified 20c ownership and its offline container boundary, 20a's dependency,
+and the actual export checks. All four archive and manifest paths matched
+Littleagent's ignore rule. Planning, line-ending, diff, and writing checks passed.
 
 The independent reader rechecked all reported execution gaps and accepted the
 final packet. Their planning, line-ending, and diff checks passed. They confirmed

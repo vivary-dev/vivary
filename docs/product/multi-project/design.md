@@ -58,8 +58,11 @@ shape. The loop never requires its own model API key and never resells tokens.
 This clarification was not a fourth answer in the three-question brief.
 
 Packet [20a](packets/20a-headless-loop-proof.md) carries the first bounded
-runtime proof and is claimed before other ready packets. Its required
-continuation owns the cross-runtime proof. [Outcome 04](tickets/04-define-runtime-session-contracts.md#done-condition)
+runtime proof and retains priority when its prerequisites are satisfied.
+[20c](packets/20c-headless-loop-preparation.md) owns deterministic preparation
+while 20a's native-call budget prerequisite is unavailable. This split follows
+the execution contract's rule to stop only dependent operations. The required
+20b continuation of 20a owns the cross-runtime proof. [Outcome 04](tickets/04-define-runtime-session-contracts.md#done-condition)
 owns the shared adapter acceptance. Outcomes 18, 19, 20, 30, and 36 carry the
 rest in their logs. These decisions change order and acceptance. They do not add
 product scope or authorize spending, publication, scheduling, or account changes.
