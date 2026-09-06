@@ -40,3 +40,5 @@ they do not prove the behavior above.
 - 2026-09-05: Initial public plan recorded. Implementation has not started.
 
 - 2026-09-05: Refined acceptance after the owner-requested [HoH comparison](../research/hoh-alignment.md). These criteria remain unimplemented and unverified.
+
+- 2026-09-06: Owner decision: loop first, code first, per [the direction decision](../design.md#direction-decision-2026-09-06). Packet [20a](../packets/20a-headless-loop-proof.md) proves one headless planning, coding, and testing iteration on files with a subscription CLI runtime before any GUI dependency. Acceptance adds all three ablation-backed mechanisms (plan revision from evidence, evidence feedback, artifact warm start), a regression and no-progress stop with a report, a code-quality decay check beside the pass check, and concurrency one measured before two. Unimplemented and unverified.
