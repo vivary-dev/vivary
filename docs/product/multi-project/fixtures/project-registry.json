@@ -829,6 +829,7 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a",
             "mutationOwner": null
           }
         }
@@ -866,6 +867,7 @@
               "repositoryId": "repository-a",
               "checkoutId": "checkout-a",
               "jjRepositoryId": "jj-repository-a",
+              "jjWorkspaceId": "jj-workspace-a",
               "mutationOwner": null
             }
           },
@@ -884,6 +886,7 @@
               "repositoryId": "repository-a",
               "checkoutId": "checkout-a",
               "jjRepositoryId": "jj-repository-a",
+              "jjWorkspaceId": "jj-workspace-a",
               "mutationOwner": null
             },
             "output": {
@@ -2023,6 +2026,7 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a",
             "mutationOwner": null
           }
         },
@@ -2034,6 +2038,7 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a",
             "mutationOwner": null
           }
         }
@@ -2061,6 +2066,7 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a",
             "mutationOwner": "jj"
           }
         },
@@ -2072,6 +2078,7 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a",
             "mutationOwner": "jj"
           }
         },
@@ -2124,6 +2131,7 @@
               "repositoryId": "repository-a",
               "checkoutId": "checkout-a",
               "jjRepositoryId": "jj-repository-a",
+              "jjWorkspaceId": "jj-workspace-a",
               "mutationOwner": "jj"
             },
             "output": {
@@ -2155,6 +2163,7 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a",
             "mutationOwner": "jj"
           }
         },
@@ -2166,6 +2175,7 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a",
             "mutationOwner": "jj"
           }
         }
@@ -3059,6 +3069,7 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "jjRepositoryId": "jj-repository-a-recreated",
+            "jjWorkspaceId": "jj-workspace-a",
             "mutationOwner": "jj"
           }
         },
@@ -3070,6 +3081,7 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a",
             "mutationOwner": "jj"
           }
         },
@@ -3104,6 +3116,7 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "jjRepositoryId": "jj-repository-a-recreated",
+            "jjWorkspaceId": "jj-workspace-a",
             "mutationOwner": "jj"
           }
         },
@@ -3115,6 +3128,100 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a",
+            "mutationOwner": "jj"
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/request/requestedVcsOwner",
+          "value": "jj"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "stale-binding"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "colocated-jj-workspace-changed",
+      "rules": [
+        "R10",
+        "R11"
+      ],
+      "inputRef": "admit",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/vcs",
+          "value": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a-recreated",
+            "mutationOwner": "jj"
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/binding/vcs",
+          "value": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a",
+            "mutationOwner": "jj"
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/request/requestedVcsOwner",
+          "value": "jj"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "stale-binding"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "write-back-colocated-jj-workspace-changed",
+      "rules": [
+        "R10",
+        "R11",
+        "R13"
+      ],
+      "inputRef": "writeback",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/vcs",
+          "value": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a-recreated",
+            "mutationOwner": "jj"
+          }
+        },
+        {
+          "op": "set",
+          "pointer": "/trusted/binding/vcs",
+          "value": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a",
             "mutationOwner": "jj"
           }
         },

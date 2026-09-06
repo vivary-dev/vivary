@@ -144,6 +144,42 @@
       "volume": "volume-a",
       "file": "jj-repository-b",
       "incarnation": "generation-1"
+    },
+    "jj-workspace-a": {
+      "administration": {
+        "volume": "volume-a",
+        "file": "jj-working-copy-a",
+        "incarnation": "generation-1"
+      },
+      "workingTree": {
+        "volume": "volume-a",
+        "file": "directory-a",
+        "incarnation": "generation-1"
+      }
+    },
+    "jj-workspace-a-recreated": {
+      "administration": {
+        "volume": "volume-a",
+        "file": "jj-working-copy-a",
+        "incarnation": "generation-2"
+      },
+      "workingTree": {
+        "volume": "volume-a",
+        "file": "directory-a",
+        "incarnation": "generation-1"
+      }
+    },
+    "jj-workspace-a-repointed": {
+      "administration": {
+        "volume": "volume-a",
+        "file": "jj-working-copy-b",
+        "incarnation": "generation-1"
+      },
+      "workingTree": {
+        "volume": "volume-a",
+        "file": "directory-a",
+        "incarnation": "generation-1"
+      }
     }
   },
   "revisionSymbols": {
@@ -462,11 +498,22 @@
           "locations": {
             "common": "metadata-common-a",
             "checkout": "metadata-common-a",
-            "jj": "metadata-jj-a"
+            "jj": "metadata-jj-a",
+            "jjWorkspace": "metadata-jj-working-copy-a"
           },
           "headState": "detached",
           "dirtyState": "clean",
-          "stateEvidence": "jj-state-a"
+          "stateEvidence": "jj-state-a",
+          "jjWorkspaceAdministration": {
+            "volume": "volume-a",
+            "file": "jj-working-copy-a",
+            "incarnation": "generation-1"
+          },
+          "jjWorkspaceRoot": {
+            "volume": "volume-a",
+            "file": "directory-a",
+            "incarnation": "generation-1"
+          }
         },
         "content": {
           "scope": "scope-a",
@@ -1584,7 +1631,8 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "mutationOwner": "jj",
-            "jjRepositoryId": "jj-repository-a"
+            "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a"
           }
         },
         "rootAccess": [
@@ -1629,7 +1677,8 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "mutationOwner": null,
-            "jjRepositoryId": "jj-repository-a"
+            "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a"
           }
         },
         "rootAccess": [
@@ -1671,7 +1720,8 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "mutationOwner": null,
-            "jjRepositoryId": "jj-repository-a"
+            "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a"
           }
         },
         "rootAccess": [
@@ -2705,7 +2755,8 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "mutationOwner": "jj",
-            "jjRepositoryId": "jj-repository-a-recreated"
+            "jjRepositoryId": "jj-repository-a-recreated",
+            "jjWorkspaceId": "jj-workspace-a"
           }
         },
         "rootAccess": [
@@ -2755,7 +2806,8 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "mutationOwner": "jj",
-            "jjRepositoryId": "jj-repository-b"
+            "jjRepositoryId": "jj-repository-b",
+            "jjWorkspaceId": "jj-workspace-a"
           }
         },
         "rootAccess": [
@@ -2800,7 +2852,8 @@
             "repositoryId": "repository-a",
             "checkoutId": "checkout-a",
             "mutationOwner": "jj",
-            "jjRepositoryId": "jj-repository-a"
+            "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a"
           }
         },
         "rootAccess": [
@@ -2846,6 +2899,348 @@
       "inputRef": "no-vcs",
       "set": {
         "/caller/jjRepositoryId": "jj-repository-a"
+      },
+      "expected": {
+        "code": "invalid-input",
+        "reason": "caller-authority-field"
+      },
+      "effects": []
+    },
+    {
+      "id": "write-access-allowed-no-vcs",
+      "rules": [
+        "R2",
+        "R3",
+        "R10"
+      ],
+      "inputRef": "no-vcs",
+      "set": {
+        "/authority/locatorGrant": "read-write",
+        "/authority/requestedAccess": "write",
+        "/platform/root/osWritable": true
+      },
+      "expected": {
+        "code": "observed",
+        "root": {
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "revision-none-a",
+          "vcs": {
+            "kind": "none",
+            "repositoryId": null,
+            "checkoutId": null,
+            "mutationOwner": null
+          }
+        },
+        "rootAccess": [
+          "root-a"
+        ],
+        "overlapSafe": true,
+        "resourceKeys": [
+          "device-a:root:root-a"
+        ],
+        "mutationEligibility": "candidate",
+        "reason": null,
+        "diagnostics": {
+          "layout": "none",
+          "headState": "not-applicable",
+          "dirtyState": "not-applicable"
+        }
+      },
+      "effects": []
+    },
+    {
+      "id": "write-access-allowed-git",
+      "rules": [
+        "R2",
+        "R3",
+        "R10"
+      ],
+      "inputRef": "git",
+      "set": {
+        "/authority/locatorGrant": "read-write",
+        "/authority/requestedAccess": "write",
+        "/platform/root/osWritable": true
+      },
+      "expected": {
+        "code": "observed",
+        "root": {
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "revision-git-a",
+          "vcs": {
+            "kind": "git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "git"
+          }
+        },
+        "rootAccess": [
+          "root-a"
+        ],
+        "overlapSafe": true,
+        "resourceKeys": [
+          "device-a:checkout:checkout-a",
+          "device-a:repository:repository-a"
+        ],
+        "mutationEligibility": "candidate",
+        "reason": null,
+        "diagnostics": {
+          "layout": "git",
+          "headState": "branch",
+          "dirtyState": "clean"
+        }
+      },
+      "effects": []
+    },
+    {
+      "id": "write-access-allowed-colocated-jj",
+      "rules": [
+        "R2",
+        "R3",
+        "R10"
+      ],
+      "inputRef": "jj",
+      "set": {
+        "/authority/locatorGrant": "read-write",
+        "/authority/requestedAccess": "write",
+        "/platform/root/osWritable": true
+      },
+      "expected": {
+        "code": "observed",
+        "root": {
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "revision-jj-a",
+          "vcs": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "jj",
+            "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a"
+          }
+        },
+        "rootAccess": [
+          "root-a"
+        ],
+        "overlapSafe": true,
+        "resourceKeys": [
+          "device-a:checkout:checkout-a",
+          "device-a:repository:repository-a"
+        ],
+        "mutationEligibility": "candidate",
+        "reason": null,
+        "diagnostics": {
+          "layout": "jj-colocated",
+          "headState": "detached",
+          "dirtyState": "clean"
+        }
+      },
+      "effects": []
+    },
+    {
+      "id": "colocated-jj-recreated-workspace-administration",
+      "rules": [
+        "R3",
+        "R10",
+        "R11"
+      ],
+      "inputRef": "jj",
+      "set": {
+        "/platform/vcs/jjWorkspaceAdministration": {
+          "volume": "volume-a",
+          "file": "jj-working-copy-a",
+          "incarnation": "generation-2"
+        }
+      },
+      "expected": {
+        "code": "observed",
+        "root": {
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "revision-jj-a",
+          "vcs": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "jj",
+            "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a-recreated"
+          }
+        },
+        "rootAccess": [
+          "root-a"
+        ],
+        "overlapSafe": true,
+        "resourceKeys": [
+          "device-a:checkout:checkout-a",
+          "device-a:repository:repository-a"
+        ],
+        "mutationEligibility": "candidate",
+        "reason": null,
+        "diagnostics": {
+          "layout": "jj-colocated",
+          "headState": "detached",
+          "dirtyState": "clean"
+        }
+      },
+      "effects": []
+    },
+    {
+      "id": "colocated-jj-repointed-workspace-administration",
+      "rules": [
+        "R3",
+        "R10",
+        "R11"
+      ],
+      "inputRef": "jj",
+      "set": {
+        "/platform/vcs/jjWorkspaceAdministration": {
+          "volume": "volume-a",
+          "file": "jj-working-copy-b",
+          "incarnation": "generation-1"
+        }
+      },
+      "expected": {
+        "code": "observed",
+        "root": {
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "revision-jj-a",
+          "vcs": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "jj",
+            "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a-repointed"
+          }
+        },
+        "rootAccess": [
+          "root-a"
+        ],
+        "overlapSafe": true,
+        "resourceKeys": [
+          "device-a:checkout:checkout-a",
+          "device-a:repository:repository-a"
+        ],
+        "mutationEligibility": "candidate",
+        "reason": null,
+        "diagnostics": {
+          "layout": "jj-colocated",
+          "headState": "detached",
+          "dirtyState": "clean"
+        }
+      },
+      "effects": []
+    },
+    {
+      "id": "colocated-jj-workspace-metadata-alias",
+      "rules": [
+        "R3",
+        "R11"
+      ],
+      "inputRef": "jj",
+      "set": {
+        "/platform/vcs/locations/jjWorkspace": "metadata-jj-working-copy-alias"
+      },
+      "expected": {
+        "code": "observed",
+        "root": {
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "revision-jj-a",
+          "vcs": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "jj",
+            "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a"
+          }
+        },
+        "rootAccess": [
+          "root-a"
+        ],
+        "overlapSafe": true,
+        "resourceKeys": [
+          "device-a:checkout:checkout-a",
+          "device-a:repository:repository-a"
+        ],
+        "mutationEligibility": "candidate",
+        "reason": null,
+        "diagnostics": {
+          "layout": "jj-colocated",
+          "headState": "detached",
+          "dirtyState": "clean"
+        }
+      },
+      "effects": []
+    },
+    {
+      "id": "colocated-jj-workspace-administration-unverified",
+      "rules": [
+        "R3",
+        "R10"
+      ],
+      "inputRef": "jj",
+      "set": {
+        "/platform/vcs/jjWorkspaceAdministration": null
+      },
+      "expected": {
+        "code": "identity-unverified",
+        "reason": "vcs-identity-unverified"
+      },
+      "effects": []
+    },
+    {
+      "id": "colocated-jj-workspace-root-mismatch",
+      "rules": [
+        "R3",
+        "R10"
+      ],
+      "inputRef": "jj",
+      "set": {
+        "/platform/vcs/jjWorkspaceRoot": {
+          "volume": "volume-a",
+          "file": "directory-b",
+          "incarnation": "generation-1"
+        }
+      },
+      "expected": {
+        "code": "identity-unverified",
+        "reason": "vcs-identity-unverified"
+      },
+      "effects": []
+    },
+    {
+      "id": "caller-cannot-assert-jjWorkspaceId",
+      "rules": [
+        "R1",
+        "R2"
+      ],
+      "inputRef": "no-vcs",
+      "set": {
+        "/caller/jjWorkspaceId": "jj-workspace-a"
       },
       "expected": {
         "code": "invalid-input",
@@ -3054,6 +3449,69 @@
       "rightCase": "colocated-jj-metadata-alias",
       "pointer": "/resourceKeys",
       "comparison": "equal"
+    },
+    {
+      "id": "write-access-retains-no-vcs-observation",
+      "leftCase": "no-vcs",
+      "rightCase": "write-access-allowed-no-vcs",
+      "pointer": "/root",
+      "comparison": "equal"
+    },
+    {
+      "id": "write-access-retains-git-observation",
+      "leftCase": "ordinary-git",
+      "rightCase": "write-access-allowed-git",
+      "pointer": "/root",
+      "comparison": "equal"
+    },
+    {
+      "id": "write-access-retains-colocated-jj-observation",
+      "leftCase": "colocated-jj-selected",
+      "rightCase": "write-access-allowed-colocated-jj",
+      "pointer": "/root",
+      "comparison": "equal"
+    },
+    {
+      "id": "recreated-jj-workspace-identity",
+      "leftCase": "colocated-jj-selected",
+      "rightCase": "colocated-jj-recreated-workspace-administration",
+      "pointer": "/root/vcs/jjWorkspaceId",
+      "comparison": "different"
+    },
+    {
+      "id": "recreated-jj-workspace-common-keys",
+      "leftCase": "colocated-jj-selected",
+      "rightCase": "colocated-jj-recreated-workspace-administration",
+      "pointer": "/resourceKeys",
+      "comparison": "equal"
+    },
+    {
+      "id": "repointed-jj-workspace-identity",
+      "leftCase": "colocated-jj-selected",
+      "rightCase": "colocated-jj-repointed-workspace-administration",
+      "pointer": "/root/vcs/jjWorkspaceId",
+      "comparison": "different"
+    },
+    {
+      "id": "repointed-jj-workspace-common-keys",
+      "leftCase": "colocated-jj-selected",
+      "rightCase": "colocated-jj-repointed-workspace-administration",
+      "pointer": "/resourceKeys",
+      "comparison": "equal"
+    },
+    {
+      "id": "jj-workspace-alias-retains-identity",
+      "leftCase": "colocated-jj-selected",
+      "rightCase": "colocated-jj-workspace-metadata-alias",
+      "pointer": "/root/vcs/jjWorkspaceId",
+      "comparison": "equal"
+    },
+    {
+      "id": "jj-workspace-alias-retains-common-keys",
+      "leftCase": "colocated-jj-selected",
+      "rightCase": "colocated-jj-workspace-metadata-alias",
+      "pointer": "/resourceKeys",
+      "comparison": "equal"
     }
   ],
   "boundaryCases": [
@@ -3160,7 +3618,8 @@
           "repositoryId": "repository-a",
           "checkoutId": "checkout-a",
           "mutationOwner": "jj",
-          "jjRepositoryId": "jj-repository-a"
+          "jjRepositoryId": "jj-repository-a",
+          "jjWorkspaceId": "jj-workspace-a"
         }
       },
       "expectedCode": "stale-binding",
@@ -3329,14 +3788,16 @@
           "repositoryId": "repository-a",
           "checkoutId": "checkout-a",
           "mutationOwner": "jj",
-          "jjRepositoryId": "jj-repository-a"
+          "jjRepositoryId": "jj-repository-a",
+          "jjWorkspaceId": "jj-workspace-a"
         },
         "trustedCurrent": {
           "kind": "jj-git",
           "repositoryId": "repository-a",
           "checkoutId": "checkout-a",
           "mutationOwner": "jj",
-          "jjRepositoryId": "jj-repository-a-recreated"
+          "jjRepositoryId": "jj-repository-a-recreated",
+          "jjWorkspaceId": "jj-workspace-a"
         }
       },
       "expectedCode": "stale-binding",
@@ -3355,14 +3816,72 @@
           "repositoryId": "repository-a",
           "checkoutId": "checkout-a",
           "mutationOwner": "jj",
-          "jjRepositoryId": "jj-repository-a"
+          "jjRepositoryId": "jj-repository-a",
+          "jjWorkspaceId": "jj-workspace-a"
         },
         "trustedCurrent": {
           "kind": "jj-git",
           "repositoryId": "repository-a",
           "checkoutId": "checkout-a",
           "mutationOwner": "jj",
-          "jjRepositoryId": "jj-repository-b"
+          "jjRepositoryId": "jj-repository-b",
+          "jjWorkspaceId": "jj-workspace-a"
+        }
+      },
+      "expectedCode": "stale-binding",
+      "effects": []
+    },
+    {
+      "id": "jj-workspace-administration-recreated-binding",
+      "rule": "R10",
+      "owner": "registry",
+      "observationCase": "colocated-jj-recreated-workspace-administration",
+      "baseline": "all-other-owning-rule-preconditions-satisfied",
+      "comparison": {
+        "field": "vcs",
+        "boundOrRequested": {
+          "kind": "jj-git",
+          "repositoryId": "repository-a",
+          "checkoutId": "checkout-a",
+          "mutationOwner": "jj",
+          "jjRepositoryId": "jj-repository-a",
+          "jjWorkspaceId": "jj-workspace-a"
+        },
+        "trustedCurrent": {
+          "kind": "jj-git",
+          "repositoryId": "repository-a",
+          "checkoutId": "checkout-a",
+          "mutationOwner": "jj",
+          "jjRepositoryId": "jj-repository-a",
+          "jjWorkspaceId": "jj-workspace-a-recreated"
+        }
+      },
+      "expectedCode": "stale-binding",
+      "effects": []
+    },
+    {
+      "id": "jj-workspace-administration-repointed-binding",
+      "rule": "R10",
+      "owner": "registry",
+      "observationCase": "colocated-jj-repointed-workspace-administration",
+      "baseline": "all-other-owning-rule-preconditions-satisfied",
+      "comparison": {
+        "field": "vcs",
+        "boundOrRequested": {
+          "kind": "jj-git",
+          "repositoryId": "repository-a",
+          "checkoutId": "checkout-a",
+          "mutationOwner": "jj",
+          "jjRepositoryId": "jj-repository-a",
+          "jjWorkspaceId": "jj-workspace-a"
+        },
+        "trustedCurrent": {
+          "kind": "jj-git",
+          "repositoryId": "repository-a",
+          "checkoutId": "checkout-a",
+          "mutationOwner": "jj",
+          "jjRepositoryId": "jj-repository-a",
+          "jjWorkspaceId": "jj-workspace-a-repointed"
         }
       },
       "expectedCode": "stale-binding",

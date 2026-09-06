@@ -62,15 +62,24 @@ identity from its verified private administrative directory and its verified
 association with the working-tree root. Recreating either checkout component
 invalidates that identity. Renaming a branch or changing HEAD does not.
 
-Colocated Jujutsu also requires `jjRepositoryId`, derived from its verified
-Jujutsu administrative incarnation. Retain it in the private VCS observation
-and local binding, including an unresolved owner selection. Recreating or
-repointing that administration changes this ID even if Git directories, the
-working root, and content remain identical. R10 compares the complete stored
-and current VCS objects and returns `stale-binding` on that change. Recheck
-before admission and effects. Unverified Jujutsu identity refuses observation.
-This field follows the existing binding transaction and revision lifecycle;
-it creates no separate selection store. It is never a reservation key.
+Colocated Jujutsu also requires two private identities. `jjRepositoryId`
+identifies its verified common Jujutsu administration. `jjWorkspaceId` identifies
+its verified per-workspace working-copy administration and working-root
+association. Retain both in the VCS observation and local binding, including
+an unresolved owner selection. Recreating or repointing either administration
+changes its identity even if the other administration, Git directories, root,
+and content remain identical.
+
+For a colocated layout, the Jujutsu workspace must resolve to the same verified
+working tree as the Git checkout. Missing administration or an unverified or
+mismatched root association refuses observation with `identity-unverified`.
+The fixture derives `jjWorkspaceId` from `jjWorkspaceAdministration` and
+`jjWorkspaceRoot`; a path, workspace name, or repository ID alone is insufficient.
+
+R10 compares the complete stored and current VCS objects and returns
+`stale-binding` when either Jujutsu identity changes. Recheck before admission
+and effects. Both fields follow the existing binding transaction and revision
+lifecycle and are absent from portable export. Neither is a reservation key.
 
 Every observation records a private capture reference, observer/version,
 device/filesystem scope, locator resolution, handle identities, and completion
@@ -112,7 +121,7 @@ under R1/R2 and the registry validation table.
 | Authorized locator has no object | `root-unavailable` | `missing-root` |
 | Object is a file or another non-directory | `not-directory` | `non-directory-root` |
 | Directory lifetime cannot be verified | `identity-unverified` | `root-incarnation-unverified` |
-| VCS probe failed or repository, checkout, or Jujutsu administration (`jjRepositoryId`) identity is incomplete | `identity-unverified` | `vcs-probe-failed` or `vcs-identity-unverified` |
+| VCS probe failed or repository, checkout, or Jujutsu repository/workspace identity or root association is incomplete | `identity-unverified` | `vcs-probe-failed` or `vcs-identity-unverified` |
 | Capture changed or content inventory is incomplete | `identity-unverified` | `unstable-capture` or `content-unverified` |
 | Topology scan cannot prove ownership of overlaps | `ambiguous-ownership` | `overlap-unverified` |
 | Verified containment lacks the required common reservation domain | `ambiguous-ownership` | `overlap-without-common-domain` |
@@ -147,8 +156,8 @@ not durable resource IDs.
 | Ordinary Git, including detached or dirty checkout | `git`, verified repository and checkout IDs, owner `git` | Common repository and checkout keys. HEAD and dirty state are separate observations |
 | Linked Git worktree | Same repository ID as its common Git directory, distinct checkout ID, owner `git` | Both keys. A separate worktree does not remove repository contention |
 | Nested project or monorepo sibling inside one checkout | Distinct root IDs, same repository and checkout IDs, owner `git` | Same two keys, independently of project or collection identity |
-| Verified colocated Jujutsu | `jj-git`, verified common Git repository and checkout IDs, plus private `jjRepositoryId` | Owner `jj` only after trusted selection. Reserve the same keys a Git-only view would use |
-| Colocated Jujutsu without resolved selection | `jj-git`, verified Git IDs and `jjRepositoryId`, null owner | Read-only. A caller's requested owner cannot select the trusted owner |
+| Verified colocated Jujutsu | `jj-git`, verified common Git repository and checkout IDs, plus private `jjRepositoryId` and `jjWorkspaceId` | Owner `jj` only after trusted selection. Reserve the same keys a Git-only view would use |
+| Colocated Jujutsu without resolved selection | `jj-git`, verified Git/Jujutsu repository and checkout/workspace IDs, null owner | Read-only. A caller's requested owner cannot select the trusted owner |
 | Non-colocated Jujutsu workspace | `unsupported`, null IDs and owner | Read-only under registry v1. Retain layout diagnostic, including Git-backed or shared-repository workspace evidence |
 | Submodule inspected alone | Distinct verified Git repository and checkout IDs, owner `git` | Child keys only if no overlapping writable superproject scope exists |
 | Bare repository, conflicting markers, broken gitfile, unsupported storage layout | `unsupported`, null IDs and owner | Read-only. Incomplete probes instead return an unverified refusal |
@@ -236,7 +245,7 @@ successful effect. Never replace an existing request's expected revision.
 | `projectId`, `bindingId`, `bindingRevision`, stored `locationRef` and `vcs` | Current private registry records. Resolve in scope and compare under R8/R10 before effects |
 | Root `locationRef`, existence/type, `rootId`, `identityVerified` | Scoped locator resolution and live directory-incarnation evidence. Match request for register/rebind and binding for mutations. Refuse replacement or stale locator |
 | `rootAccess` | Current root grant plus actual access for the operation, resolved against the opened root. Neither a connection's configured state nor an OS permission alone grants access |
-| `repositoryId`, `checkoutId`, `jjRepositoryId` for `jj-git`, and `mutationOwner` | Verified administrative and working-copy topology plus trusted owner selection. Compare the complete VCS record, including Jujutsu administration, at admission and the effect boundary. Git reservation keys stay unchanged |
+| `repositoryId`, `checkoutId`, `jjRepositoryId`/`jjWorkspaceId` for `jj-git`, and `mutationOwner` | Verified administrative and working-copy topology plus trusted owner selection. Compare the complete VCS record, including both Jujutsu administrations and the workspace root association, at admission and the effect boundary. Git reservation keys stay unchanged |
 | `overlapSafe`, complete resource keys | Current physical containment, complete relevant binding set, and verified common domain. Recheck topology and preserve the admission-time keys for recovery |
 | `contentRevision` | Complete stable snapshot under the bound inventory policy. Compare caller `expectedContentRevision` and execution `baseContentRevision`. Refuse mismatch with `content-conflict` |
 | Existing-root/destination collisions | Trusted registry resolver plus observed identities. It must include all relevant bindings. Rebind to a different incarnation returns `root-replaced` |

@@ -28,7 +28,7 @@ collisions and never derive project identity from a path, remote URL, or content
 | Portable project | `schemaVersion: 1`, `projectId`, `displayName`, `contentIdentity` | The export allowlist. `displayName` is a user-authored label. Optional content identity describes selected portable content and establishes no local access |
 | Local binding | `bindingId`, `projectId`, `collectionId`, `actorId`, `deviceId`, `rootId`, `locationRef`, `bindingRevision`, `policyRevision`, `vcs` | Private association with an inspected root. A local service resolves `locationRef` through its scoped connection. It is never exported |
 | Root observation | `rootId`, `locationRef`, `exists`, `isDirectory`, `identityVerified`, `contentRevision`, `vcs` | Trusted adapter observation, never a caller's assertion. `rootId` identifies the canonical directory on one device. `contentRevision` identifies a snapshot, not the project |
-| VCS observation | `kind`, `repositoryId`, `checkoutId`, `mutationOwner`, plus private `jjRepositoryId` for colocated `jj-git` | `repositoryId` and `checkoutId` retain the shared Git identities. `jjRepositoryId` identifies the verified Jujutsu administrative incarnation and is absent from other kinds. `none` has null repository, checkout, and owner. `git` requires non-null Git IDs and owner `git`. Colocated `jj-git` has owner `jj` or null while unresolved. Unsupported layouts remain read-only |
+| VCS observation | `kind`, `repositoryId`, `checkoutId`, `mutationOwner`, plus private `jjRepositoryId` and `jjWorkspaceId` for colocated `jj-git` | `repositoryId` and `checkoutId` retain the shared Git identities. `jjRepositoryId` identifies the verified Jujutsu repository-administration incarnation. `jjWorkspaceId` identifies the verified private Jujutsu working-copy administration and its working-root association; the adapter replaces it when that administration is recreated or associated with another root. Both Jujutsu IDs are absent from other kinds. `none` has null repository, checkout, and owner. `git` requires non-null Git IDs and owner `git`. Colocated `jj-git` has owner `jj` or null while unresolved. Unsupported layouts remain read-only |
 | Execution binding | Native `sessionId`, `projectId`, `bindingId`, `bindingRevision`, `policyRevision`, `executionCopyId`, `baseContentRevision` | Private references. A BrowserPod copy and a session never become the authoritative project root |
 | Operation receipt | Scoped operation key, request digest, status, bound IDs/revisions, result | Private idempotency and recovery evidence. It references native action/run evidence when available; it does not create a second task or transcript owner |
 
@@ -178,15 +178,15 @@ the expected snapshot. A successful file effect must emit a new observed revisio
 for later plans; it never silently updates the precondition of an existing plan.
 Return `stale-binding`, `stale-policy`, or `content-conflict` respectively. A changed
 root identity returns `root-replaced`. A changed VCS observation relative to the
-binding, including a changed colocated `jjRepositoryId`, or a root observation whose
+binding, including a changed colocated `jjRepositoryId` or `jjWorkspaceId`, or a root observation whose
 `locationRef` differs from the binding, returns `stale-binding`. Refresh and authorize
 a rebind first. A native session ID, runtime
 origin, disk name, or storage key is not an access grant.
 
 **R11, one mutation owner.** For Git, reserve both the common repository key and
 checkout key. For colocated Jujutsu, require an explicitly selected `jj` owner and
-reserve the same Git repository and checkout keys; `jjRepositoryId` is a binding
-precondition, not a third reservation key. A Git mutator cannot run alongside it. For no VCS,
+reserve the same Git repository and checkout keys; `jjRepositoryId` and
+`jjWorkspaceId` are binding preconditions, not additional reservation keys. A Git mutator cannot run alongside it. For no VCS,
 reserve the root key. Each key includes device identity and the adapter's canonical
 resource ID, so different collections sharing a physical repository still contend.
 Never key locks only by project, actor, URL, or GUI tab. Acquire the complete sorted
@@ -291,9 +291,10 @@ execution binding for write-back. Unused valid records cannot change an unrelate
 operation's result. Record IDs
 and strings follow the rules above. `root` booleans are strict booleans. VCS kinds
 are `none`, `git`, `jj-git`, or `unsupported`. The `none`, `git`, and `unsupported`
-shapes remain exact and reject `jjRepositoryId`; unsupported has null repository,
-checkout, and owner. Colocated `jj-git` requires valid repository, checkout, and
-`jjRepositoryId` values even when owner selection is unresolved. An adapter probe
+shapes remain exact and reject `jjRepositoryId` and `jjWorkspaceId`; unsupported has
+null repository, checkout, and owner. Colocated `jj-git` requires valid repository,
+checkout, `jjRepositoryId`, and `jjWorkspaceId` values even when owner selection is
+unresolved. An adapter probe
 failure must produce unavailable/unverified evidence, not `none`.
 
 For rebind, an entry in `existingRootBindings` with the new location and a

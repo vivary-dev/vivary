@@ -43,6 +43,8 @@ make unsupported layouts writable.
   and `scripts/tests/test_registry_contract_model.mjs` together. This keeps the
   observation contract and its reference consumer consistent; it adds no
   production storage or adapter.
+- Record the bounded contract milestone in `CHANGELOG.md` and generate
+  its site/LLM-text mirrors through the existing sync script.
 - Update this packet and graph only after independent review.
 
 ## Required cases
@@ -153,3 +155,8 @@ Do not create 12b in this packet.
   assertions. The shared synthetic registry contract/model stayed in
   sync; 39 tests and 59 fixture decisions pass after the two new cases
   first failed under the old validator. See the receipt for review evidence.
+- 2026-09-06: The second PR review added Jujutsu working-copy administration
+  and root-association identity, positive write-access observations for all
+  three supported VCS kinds, and a bounded Unreleased changelog entry with
+  generated mirrors. The current observation fixture has 77 cases, 37
+  relations, and 21 boundary assertions. The receipt owns final verification.

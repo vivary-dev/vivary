@@ -9,12 +9,13 @@ Result: contract and expected oracles accepted after independent review.
 The [observation contract](../contracts/root-vcs-observation.md) assigns the
 trusted sources of root, repository, checkout, access, overlap, and content
 observations. The [expected fixture](../fixtures/root-vcs-observation.json)
-contains 68 observation cases, 28 identity/key relations, and 19 effect-boundary
+contains 77 observation cases, 37 identity/key relations, and 21 effect-boundary
 refusal assertions. All expected effects are empty.
 
-The PR review amends registry v1 with a private `jjRepositoryId` for
-`jj-git` records and updates its synthetic reference consumer. This identity
-binds Jujutsu administration without changing Git contention keys.
+The PR review amends registry v1 with private `jjRepositoryId` and
+`jjWorkspaceId` for `jj-git` records and updates its synthetic reference
+consumer. They bind Jujutsu repository and working-copy administration,
+including the workspace root association, without changing Git contention keys.
 Non-colocated Jujutsu remains an explicitly
 unsupported, read-only projection until a later contract extension. Colocated
 Jujutsu uses the same Git repository/checkout keys and requires a trusted `jj`
@@ -105,7 +106,7 @@ effect-boundary fact. It accepted the inspection checkpoint while retaining
 the separate Windows test-helper failure. It does not approve product runtime
 behavior or repository publication.
 
-## PR #333 corrections
+## Initial PR #333 corrections
 
 The [review of `97df0bc`](https://github.com/vivary-dev/vivary/pull/333#pullrequestreview-5126046129)
 found five gaps after the initial local review. Jeff authorized resolving the
@@ -119,7 +120,7 @@ findings and merging the verified PR on 2026-09-06.
 | [Stale frontier](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944682266) | The verification log distinguishes the initial empty frontier from the current 20a-ready direction. No 12b was created |
 | R13 recreated-root write-back, in the review body | `write-back-recreated-root` expects `content-conflict`, independently of R8/R10's `root-replaced` result |
 
-The observation fixture now has 68 cases, 28 relations, and 19 boundary
+At `d1af7d8`, the observation fixture had 68 cases, 28 relations, and 19 boundary
 assertions. Its document checker expands each case, checks symbols and
 relations, and confirms empty expected effects. It executes no observer.
 
@@ -148,18 +149,52 @@ line endings, and diff checks passed. The reader confirmed all five review
 corrections and found two wording defects: the failure table omitted Jujutsu
 identity, and a later-session paragraph fixed its future priority to 20a.
 Both were corrected. The final narrow recheck accepted the changes and
-independently compared all six SHA-256 rows below with current file bytes;
+independently compared all six artifact hashes recorded at `d1af7d8`;
 the command exited 0 with six matches. No physical or live-runtime proof
 was part of that acceptance.
 
+## Second PR #333 review
+
+The review of `d1af7d8` found three further gaps:
+
+| Finding | Correction and evidence |
+| --- | --- |
+| [Jujutsu working-copy administration](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944771957) | Private `jjWorkspaceId` binds verified per-workspace administration and its working-root association. Recreation/repointing changes it while Jujutsu repository identity, Git identities, root, content, and common keys stay equal. Alias, missing-administration, and mismatched-root cases have explicit expectations. R10 boundary oracles and synthetic admission/write-back cases require `stale-binding` on workspace identity change |
+| [Successful write-access observation](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944771960) | `write-access-allowed-no-vcs`, `write-access-allowed-git`, and `write-access-allowed-colocated-jj` use a read-write grant, an OS-writable root, and requested write access. Each expects the normal observation with empty effects |
+| [Release-truth entry](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944771964) | The Unreleased changelog now names the observation contract and synthetic registry milestone with its non-runtime limits. The existing site sync generated the changelog and LLM-text mirrors |
+
+The current observation fixture has 77 expected cases, 37 relations, and 21
+boundary assertions. The two private Jujutsu identities are absent from other
+VCS shapes and portable export. They add no reservation key or state store.
+The synthetic registry fixture includes separate admission and write-back
+refusals for repository and workspace administration replacement.
+
+The workspace-only admission and write-back cases first failed against the
+preceding validator. After adding `jjWorkspaceId`, the commands above passed
+39 tests and all 61 synthetic decisions. Exact validation rejects either
+private Jujutsu field on other VCS kinds and rejects missing, null, or invalid
+Jujutsu identities. The existing planning and line-ending checks passed;
+the separate Windows newline-helper failure was not rerun or repaired.
+
+The independent verifier reran the 39 tests and 61 decisions, expanded all
+77 expected observation cases through 113 JSON Pointer assignments, and
+checked 37 relations and 21 boundary assertions with empty effects. It checked
+the two Jujutsu identity lifetimes separately, workspace root association,
+all three positive write controls, and the explicit refusal counterexamples.
+Its first restricted-process test launch failed with `spawn EPERM` before tests;
+the unrestricted rerun passed all 39 tests with zero failures. Changelog
+body and mirror comparisons passed, and all six artifact hashes matched.
+The verifier accepted the revision with no actionable finding. This remains
+synthetic model and expected-document evidence, not a physical-observer pass.
+
 | Reviewed artifact after PR corrections | SHA-256 |
 | --- | --- |
-| `docs/product/multi-project/contracts/root-vcs-observation.md` | `210dd2a78ca5e12be4b8b765ce078892269e391dc20e8c884c8410efcea60752` |
-| `docs/product/multi-project/fixtures/root-vcs-observation.json` | `8cb5315c9794e2bddfb58eebe635bc686e8372cde1eeaf829bcf8631b52b4d13` |
-| `docs/product/multi-project/contracts/project-registry.md` | `b3e17084a977900211c7c425093c02050d131d21cd1a4afbb1d5eca4f80fcca0` |
-| `docs/product/multi-project/fixtures/project-registry.json` | `f960bd000ea6735d84469b5aef3e8985e5c90eee057a9975d9c1463ae3a55fbb` |
-| `scripts/registry_contract_model.mjs` | `f1c918f9c140827527d7a12b2d9f7e82547b83decd3e1a099eac46ee95c6b319` |
-| `scripts/tests/test_registry_contract_model.mjs` | `67137b9ffa5ca9b8f4a414371efdad61beee14735bc02df0edafc2e9997229bc` |
+| `docs/product/multi-project/contracts/root-vcs-observation.md` | `e7c92899f52d1eac2d2c93ad1ae828b79933f6e041bbd89adb45c7a6accfd136` |
+| `docs/product/multi-project/fixtures/root-vcs-observation.json` | `886f1fbfe234979a1fc8b6f15743eb3ed197ec3b5084b1a7b221c31d04ca24b9` |
+| `docs/product/multi-project/contracts/project-registry.md` | `2ab2d8c00b95303c1e68713d5201e0ab382047bcab576549b238eddf7ca94e04` |
+| `docs/product/multi-project/fixtures/project-registry.json` | `195cb88e530c4e347a18050387b4886b6ede5bf527b50aebf36bb56873ee3720` |
+| `scripts/registry_contract_model.mjs` | `e9eb2a1a75c176b196d1be47f2e54219ac0803e5121ba0c3292e242c378143d5` |
+| `scripts/tests/test_registry_contract_model.mjs` | `8af18dfd674febd1ccd667c956e21c2bd39d103a501b5d30f7100cc44e657efb` |
 
 ## Later implementation session
 

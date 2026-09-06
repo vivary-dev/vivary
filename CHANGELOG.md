@@ -22,6 +22,12 @@ patch. Published registry versions remain unchanged.
 
 ### Added
 
+- Packet 12a defines trusted root/VCS observations and expected refusal
+  oracles for access grants, root replacement, and Git/Jujutsu administration.
+  The synthetic registry contract and validator bind private Jujutsu repository
+  and workspace identities while preserving shared Git contention keys.
+  This is a contract and reference-model milestone, with no production
+  filesystem adapter, registry database, or live coding-runtime activation.
 - Maintainers now have a tracked 36-outcome multi-project workbench program with
   bounded execution packets, a generated lean frontier index and dependency graph,
   linked evidence receipts, and a planning guard for status, dependency, coverage,
