@@ -9,7 +9,7 @@ Result: contract and expected oracles accepted after independent review.
 The [observation contract](../contracts/root-vcs-observation.md) assigns the
 trusted sources of root, repository, checkout, access, overlap, and content
 observations. The [expected fixture](../fixtures/root-vcs-observation.json)
-contains 77 observation cases, 37 identity/key relations, and 21 effect-boundary
+contains 86 observation cases, 57 identity/key relations, and 25 effect-boundary
 refusal assertions. All expected effects are empty.
 
 The PR review amends registry v1 with private `jjRepositoryId` and
@@ -163,7 +163,7 @@ The review of `d1af7d8` found three further gaps:
 | [Successful write-access observation](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944771960) | `write-access-allowed-no-vcs`, `write-access-allowed-git`, and `write-access-allowed-colocated-jj` use a read-write grant, an OS-writable root, and requested write access. Each expects the normal observation with empty effects |
 | [Release-truth entry](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944771964) | The Unreleased changelog now names the observation contract and synthetic registry milestone with its non-runtime limits. The existing site sync generated the changelog and LLM-text mirrors |
 
-The current observation fixture has 77 expected cases, 37 relations, and 21
+At `a789112`, the observation fixture had 77 expected cases, 37 relations, and 21
 boundary assertions. The two private Jujutsu identities are absent from other
 VCS shapes and portable export. They add no reservation key or state store.
 The synthetic registry fixture includes separate admission and write-back
@@ -183,18 +183,59 @@ the two Jujutsu identity lifetimes separately, workspace root association,
 all three positive write controls, and the explicit refusal counterexamples.
 Its first restricted-process test launch failed with `spawn EPERM` before tests;
 the unrestricted rerun passed all 39 tests with zero failures. Changelog
-body and mirror comparisons passed, and all six artifact hashes matched.
+body and mirror comparisons passed, and all six artifact hashes recorded
+at `a789112` matched.
 The verifier accepted the revision with no actionable finding. This remains
 synthetic model and expected-document evidence, not a physical-observer pass.
 
+## Third PR #333 review
+
+The review of `a789112` found four further gaps:
+
+| Finding | Correction and evidence |
+| --- | --- |
+| [Unsupported shared Jujutsu evidence](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944847499) | Private `diagnostics.jjRepositoryEvidence` retains verified Jujutsu repository and optional Git backing identities. Relations distinguish shared and different repositories across non-colocated workspaces and retain Git backing. Missing required repository evidence refuses observation. The registry projection stays unsupported, read-only, with null VCS IDs and no resource keys |
+| [Stale maintained routes](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944847507) | The audit and outcome-02/03 continuation sections link the accepted 12a receipt, generated frontier, and current direction. Historical receipts and open product outcomes retain their evidence status |
+| [OS-readable roots without write permission](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944847511) | Three supported-layout cases request read with a read-only grant, OS read permission, and no OS write permission. They retain the normal root observation and empty effects |
+| [Linked-worktree private administration](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944847516) | Recreation and repointing change only checkout identity while root, repository, and content stay equal. The common reservation key remains shared. Admission and write-back boundaries require `stale-binding`; two executable registry decisions isolate checkout-only drift |
+
+The current observation corpus has 86 expected cases, 57 relations, and 25
+boundary assertions. Its exact diagnostic shape remains private and adds no
+registry field, durable store, or mutation key. The document checker verifies
+the new repository evidence against the same synthetic identity symbols.
+
+The registry implementation already compared the full VCS object. A deliberate
+`ignore-checkout-identity` mutant survived the preceding 61-case fixture and
+failed its selected test. The two new cases then killed that mutant; the test
+asserts that those two case IDs are its exact failures. The unchanged model
+passes all 63 synthetic decisions and the expanded suite passes 40 tests,
+including all five mutation-test variants.
+
+A separate reader accepted the third-review observation and registry
+corrections with no actionable finding. It reran all 40 tests and 63 synthetic
+registry decisions. It independently expanded 86 expected cases through 133
+JSON Pointer assignments and checked 57 relations and 25 boundary assertions
+with empty effects.
+
+The reader verified the exact Jujutsu repository diagnostic, unsupported
+non-colocated projections, OS-read-only controls, missing-evidence refusals,
+and linked-worktree checkout-only counterexamples at admission and write-back.
+Its hash comparison exited 0 with six matches. Planning, line-ending, and diff
+checks passed.
+
+That reader authored the maintained-route edits, so the coordinator separately
+checked those three diffs, their receipt/frontier/direction targets, and their
+preserved implementation limits. This acceptance proves no physical observer,
+database transaction, file effect, or live runtime.
+
 | Reviewed artifact after PR corrections | SHA-256 |
 | --- | --- |
-| `docs/product/multi-project/contracts/root-vcs-observation.md` | `e7c92899f52d1eac2d2c93ad1ae828b79933f6e041bbd89adb45c7a6accfd136` |
-| `docs/product/multi-project/fixtures/root-vcs-observation.json` | `886f1fbfe234979a1fc8b6f15743eb3ed197ec3b5084b1a7b221c31d04ca24b9` |
+| `docs/product/multi-project/contracts/root-vcs-observation.md` | `24377d52856a479324ca9e62e975e255e201ecb5768d5e8faba2723fe8949dec` |
+| `docs/product/multi-project/fixtures/root-vcs-observation.json` | `7dd4a295d394be268b06d991fde96b79ed43ec707642fb0133d0e2af0f55d0c4` |
 | `docs/product/multi-project/contracts/project-registry.md` | `2ab2d8c00b95303c1e68713d5201e0ab382047bcab576549b238eddf7ca94e04` |
-| `docs/product/multi-project/fixtures/project-registry.json` | `195cb88e530c4e347a18050387b4886b6ede5bf527b50aebf36bb56873ee3720` |
+| `docs/product/multi-project/fixtures/project-registry.json` | `f56a56bdbb43b4fb28af1fe7bf7d0c86208e67cf78e121a7d873eda47bebd35a` |
 | `scripts/registry_contract_model.mjs` | `e9eb2a1a75c176b196d1be47f2e54219ac0803e5121ba0c3292e242c378143d5` |
-| `scripts/tests/test_registry_contract_model.mjs` | `8af18dfd674febd1ccd667c956e21c2bd39d103a501b5d30f7100cc44e657efb` |
+| `scripts/tests/test_registry_contract_model.mjs` | `e73a7c6e0ebaf7d79bd5502ae91dffb4dd867d7f4578c45c73b28fe17593fd60` |
 
 ## Later implementation session
 

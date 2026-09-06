@@ -31,7 +31,19 @@ they do not prove the behavior above.
 
 ## Next packet
 
-[03b](../packets/03b-registry-contract-model.md) completed executable reference-model verification in the authorized Habitat fallback. [03c](../packets/03c-registry-transaction-mapping.md) completed the native transaction and adapter mapping. [12a](../packets/12a-root-vcs-observation-contract.md) is ready to define the missing trusted root/VCS observation boundary. [03a](../receipts/03a-registry-contract.md) records the completed contract inspection. Production integration and full parent acceptance remain separate work.
+[03b](../packets/03b-registry-contract-model.md) completed executable
+reference-model verification in the authorized Habitat fallback.
+[03c](../packets/03c-registry-transaction-mapping.md) completed the native
+transaction and adapter mapping.
+
+[Packet 12a's
+receipt](../receipts/12a-root-vcs-observation-contract.md) records the accepted
+trusted root/VCS observation inspection. Follow [the generated
+frontier](../index.md) under [the loop-first
+direction](../design.md#direction-decision-2026-09-06). [03a's
+receipt](../receipts/03a-registry-contract.md) records the completed registry
+contract inspection. Production integration and full parent acceptance remain
+separate work.
 
 ## Log
 

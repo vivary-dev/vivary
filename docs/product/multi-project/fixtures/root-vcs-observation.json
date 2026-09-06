@@ -180,6 +180,30 @@
         "file": "directory-a",
         "incarnation": "generation-1"
       }
+    },
+    "checkout-linked-admin-recreated": {
+      "administration": {
+        "volume": "volume-a",
+        "file": "git-private-linked",
+        "incarnation": "generation-2"
+      },
+      "workingTree": {
+        "volume": "volume-a",
+        "file": "directory-linked",
+        "incarnation": "generation-1"
+      }
+    },
+    "checkout-linked-admin-repointed": {
+      "administration": {
+        "volume": "volume-a",
+        "file": "git-private-linked-other",
+        "incarnation": "generation-1"
+      },
+      "workingTree": {
+        "volume": "volume-a",
+        "file": "directory-linked",
+        "incarnation": "generation-1"
+      }
     }
   },
   "revisionSymbols": {
@@ -703,7 +727,8 @@
         "diagnostics": {
           "layout": "none",
           "headState": "not-applicable",
-          "dirtyState": "not-applicable"
+          "dirtyState": "not-applicable",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -746,7 +771,8 @@
         "diagnostics": {
           "layout": "none",
           "headState": "not-applicable",
-          "dirtyState": "not-applicable"
+          "dirtyState": "not-applicable",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -789,7 +815,8 @@
         "diagnostics": {
           "layout": "none",
           "headState": "not-applicable",
-          "dirtyState": "not-applicable"
+          "dirtyState": "not-applicable",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -832,7 +859,8 @@
         "diagnostics": {
           "layout": "none",
           "headState": "not-applicable",
-          "dirtyState": "not-applicable"
+          "dirtyState": "not-applicable",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -880,7 +908,8 @@
         "diagnostics": {
           "layout": "none",
           "headState": "not-applicable",
-          "dirtyState": "not-applicable"
+          "dirtyState": "not-applicable",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -928,7 +957,8 @@
         "diagnostics": {
           "layout": "none",
           "headState": "not-applicable",
-          "dirtyState": "not-applicable"
+          "dirtyState": "not-applicable",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -985,7 +1015,8 @@
         "diagnostics": {
           "layout": "git",
           "headState": "branch",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -1032,7 +1063,8 @@
         "diagnostics": {
           "layout": "git",
           "headState": "branch",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -1077,7 +1109,8 @@
         "diagnostics": {
           "layout": "git",
           "headState": "branch",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -1131,7 +1164,8 @@
         "diagnostics": {
           "layout": "git",
           "headState": "branch",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -1185,7 +1219,8 @@
         "diagnostics": {
           "layout": "git-linked-worktree",
           "headState": "branch",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -1227,7 +1262,8 @@
         "diagnostics": {
           "layout": "git-linked-worktree",
           "headState": "branch",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -1277,7 +1313,8 @@
         "diagnostics": {
           "layout": "git-project-subdirectory",
           "headState": "branch",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -1327,7 +1364,8 @@
         "diagnostics": {
           "layout": "git-project-subdirectory",
           "headState": "branch",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -1404,7 +1442,8 @@
         "diagnostics": {
           "layout": "git-project-subdirectory",
           "headState": "branch",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -1468,7 +1507,8 @@
         "diagnostics": {
           "layout": "git",
           "headState": "branch",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -1514,7 +1554,8 @@
         "diagnostics": {
           "layout": "git",
           "headState": "branch",
-          "dirtyState": "tracked-and-untracked"
+          "dirtyState": "tracked-and-untracked",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -1560,7 +1601,8 @@
         "diagnostics": {
           "layout": "git",
           "headState": "detached",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -1604,7 +1646,8 @@
         "diagnostics": {
           "layout": "none",
           "headState": "not-applicable",
-          "dirtyState": "not-applicable"
+          "dirtyState": "not-applicable",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -1648,7 +1691,11 @@
         "diagnostics": {
           "layout": "jj-colocated",
           "headState": "detached",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": {
+            "jjRepositoryId": "jj-repository-a",
+            "backingGitRepositoryId": "repository-a"
+          }
         }
       },
       "effects": []
@@ -1691,7 +1738,11 @@
         "diagnostics": {
           "layout": "jj-colocated",
           "headState": "detached",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": {
+            "jjRepositoryId": "jj-repository-a",
+            "backingGitRepositoryId": "repository-a"
+          }
         }
       },
       "effects": []
@@ -1734,7 +1785,11 @@
         "diagnostics": {
           "layout": "jj-colocated",
           "headState": "detached",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": {
+            "jjRepositoryId": "jj-repository-a",
+            "backingGitRepositoryId": "repository-a"
+          }
         }
       },
       "effects": []
@@ -1773,7 +1828,11 @@
         "diagnostics": {
           "layout": "jj-workspace",
           "headState": "detached",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": {
+            "jjRepositoryId": "jj-repository-a",
+            "backingGitRepositoryId": null
+          }
         }
       },
       "effects": []
@@ -1824,7 +1883,11 @@
         "diagnostics": {
           "layout": "jj-workspace",
           "headState": "detached",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": {
+            "jjRepositoryId": "jj-repository-a",
+            "backingGitRepositoryId": null
+          }
         }
       },
       "effects": []
@@ -1867,7 +1930,8 @@
         "diagnostics": {
           "layout": "git-submodule",
           "headState": "branch",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -1909,7 +1973,8 @@
         "diagnostics": {
           "layout": "git-bare",
           "headState": "not-applicable",
-          "dirtyState": "not-applicable"
+          "dirtyState": "not-applicable",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -1951,7 +2016,8 @@
         "diagnostics": {
           "layout": "broken-gitfile",
           "headState": "not-applicable",
-          "dirtyState": "not-applicable"
+          "dirtyState": "not-applicable",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -1993,7 +2059,8 @@
         "diagnostics": {
           "layout": "ambiguous-markers",
           "headState": "not-applicable",
-          "dirtyState": "not-applicable"
+          "dirtyState": "not-applicable",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -2703,7 +2770,8 @@
         "diagnostics": {
           "layout": "none",
           "headState": "not-applicable",
-          "dirtyState": "not-applicable"
+          "dirtyState": "not-applicable",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -2772,7 +2840,11 @@
         "diagnostics": {
           "layout": "jj-colocated",
           "headState": "detached",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": {
+            "jjRepositoryId": "jj-repository-a-recreated",
+            "backingGitRepositoryId": "repository-a"
+          }
         }
       },
       "effects": []
@@ -2823,7 +2895,11 @@
         "diagnostics": {
           "layout": "jj-colocated",
           "headState": "detached",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": {
+            "jjRepositoryId": "jj-repository-b",
+            "backingGitRepositoryId": "repository-a"
+          }
         }
       },
       "effects": []
@@ -2869,7 +2945,11 @@
         "diagnostics": {
           "layout": "jj-colocated",
           "headState": "detached",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": {
+            "jjRepositoryId": "jj-repository-a",
+            "backingGitRepositoryId": "repository-a"
+          }
         }
       },
       "effects": []
@@ -2947,7 +3027,8 @@
         "diagnostics": {
           "layout": "none",
           "headState": "not-applicable",
-          "dirtyState": "not-applicable"
+          "dirtyState": "not-applicable",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -2994,7 +3075,8 @@
         "diagnostics": {
           "layout": "git",
           "headState": "branch",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": null
         }
       },
       "effects": []
@@ -3043,7 +3125,11 @@
         "diagnostics": {
           "layout": "jj-colocated",
           "headState": "detached",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": {
+            "jjRepositoryId": "jj-repository-a",
+            "backingGitRepositoryId": "repository-a"
+          }
         }
       },
       "effects": []
@@ -3094,7 +3180,11 @@
         "diagnostics": {
           "layout": "jj-colocated",
           "headState": "detached",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": {
+            "jjRepositoryId": "jj-repository-a",
+            "backingGitRepositoryId": "repository-a"
+          }
         }
       },
       "effects": []
@@ -3145,7 +3235,11 @@
         "diagnostics": {
           "layout": "jj-colocated",
           "headState": "detached",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": {
+            "jjRepositoryId": "jj-repository-a",
+            "backingGitRepositoryId": "repository-a"
+          }
         }
       },
       "effects": []
@@ -3191,7 +3285,11 @@
         "diagnostics": {
           "layout": "jj-colocated",
           "headState": "detached",
-          "dirtyState": "clean"
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": {
+            "jjRepositoryId": "jj-repository-a",
+            "backingGitRepositoryId": "repository-a"
+          }
         }
       },
       "effects": []
@@ -3245,6 +3343,386 @@
       "expected": {
         "code": "invalid-input",
         "reason": "caller-authority-field"
+      },
+      "effects": []
+    },
+    {
+      "id": "read-access-os-read-only-no-vcs",
+      "rules": [
+        "R2",
+        "R3"
+      ],
+      "inputRef": "no-vcs",
+      "set": {
+        "/authority/locatorGrant": "read-only",
+        "/authority/requestedAccess": "read",
+        "/platform/root/osReadable": true,
+        "/platform/root/osWritable": false
+      },
+      "expected": {
+        "code": "observed",
+        "root": {
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "revision-none-a",
+          "vcs": {
+            "kind": "none",
+            "repositoryId": null,
+            "checkoutId": null,
+            "mutationOwner": null
+          }
+        },
+        "rootAccess": [
+          "root-a"
+        ],
+        "overlapSafe": true,
+        "resourceKeys": [
+          "device-a:root:root-a"
+        ],
+        "mutationEligibility": "candidate",
+        "reason": null,
+        "diagnostics": {
+          "layout": "none",
+          "headState": "not-applicable",
+          "dirtyState": "not-applicable",
+          "jjRepositoryEvidence": null
+        }
+      },
+      "effects": []
+    },
+    {
+      "id": "read-access-os-read-only-git",
+      "rules": [
+        "R2",
+        "R3"
+      ],
+      "inputRef": "git",
+      "set": {
+        "/authority/locatorGrant": "read-only",
+        "/authority/requestedAccess": "read",
+        "/platform/root/osReadable": true,
+        "/platform/root/osWritable": false
+      },
+      "expected": {
+        "code": "observed",
+        "root": {
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "revision-git-a",
+          "vcs": {
+            "kind": "git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "git"
+          }
+        },
+        "rootAccess": [
+          "root-a"
+        ],
+        "overlapSafe": true,
+        "resourceKeys": [
+          "device-a:checkout:checkout-a",
+          "device-a:repository:repository-a"
+        ],
+        "mutationEligibility": "candidate",
+        "reason": null,
+        "diagnostics": {
+          "layout": "git",
+          "headState": "branch",
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": null
+        }
+      },
+      "effects": []
+    },
+    {
+      "id": "read-access-os-read-only-colocated-jj",
+      "rules": [
+        "R2",
+        "R3"
+      ],
+      "inputRef": "jj",
+      "set": {
+        "/authority/locatorGrant": "read-only",
+        "/authority/requestedAccess": "read",
+        "/platform/root/osReadable": true,
+        "/platform/root/osWritable": false
+      },
+      "expected": {
+        "code": "observed",
+        "root": {
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "revision-jj-a",
+          "vcs": {
+            "kind": "jj-git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-a",
+            "mutationOwner": "jj",
+            "jjRepositoryId": "jj-repository-a",
+            "jjWorkspaceId": "jj-workspace-a"
+          }
+        },
+        "rootAccess": [
+          "root-a"
+        ],
+        "overlapSafe": true,
+        "resourceKeys": [
+          "device-a:checkout:checkout-a",
+          "device-a:repository:repository-a"
+        ],
+        "mutationEligibility": "candidate",
+        "reason": null,
+        "diagnostics": {
+          "layout": "jj-colocated",
+          "headState": "detached",
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": {
+            "jjRepositoryId": "jj-repository-a",
+            "backingGitRepositoryId": "repository-a"
+          }
+        }
+      },
+      "effects": []
+    },
+    {
+      "id": "linked-worktree-recreated-administration",
+      "rules": [
+        "R3",
+        "R10",
+        "R11"
+      ],
+      "inputRef": "linked",
+      "set": {
+        "/platform/vcs/checkoutDirectory": {
+          "volume": "volume-a",
+          "file": "git-private-linked",
+          "incarnation": "generation-2"
+        }
+      },
+      "expected": {
+        "code": "observed",
+        "root": {
+          "rootId": "root-linked",
+          "locationRef": "location-linked",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "revision-git-a",
+          "vcs": {
+            "kind": "git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-linked-admin-recreated",
+            "mutationOwner": "git"
+          }
+        },
+        "rootAccess": [
+          "root-linked"
+        ],
+        "overlapSafe": true,
+        "resourceKeys": [
+          "device-a:checkout:checkout-linked-admin-recreated",
+          "device-a:repository:repository-a"
+        ],
+        "mutationEligibility": "candidate",
+        "reason": null,
+        "diagnostics": {
+          "layout": "git-linked-worktree",
+          "headState": "branch",
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": null
+        }
+      },
+      "effects": []
+    },
+    {
+      "id": "linked-worktree-repointed-administration",
+      "rules": [
+        "R3",
+        "R10",
+        "R11"
+      ],
+      "inputRef": "linked",
+      "set": {
+        "/platform/vcs/checkoutDirectory": {
+          "volume": "volume-a",
+          "file": "git-private-linked-other",
+          "incarnation": "generation-1"
+        }
+      },
+      "expected": {
+        "code": "observed",
+        "root": {
+          "rootId": "root-linked",
+          "locationRef": "location-linked",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "revision-git-a",
+          "vcs": {
+            "kind": "git",
+            "repositoryId": "repository-a",
+            "checkoutId": "checkout-linked-admin-repointed",
+            "mutationOwner": "git"
+          }
+        },
+        "rootAccess": [
+          "root-linked"
+        ],
+        "overlapSafe": true,
+        "resourceKeys": [
+          "device-a:checkout:checkout-linked-admin-repointed",
+          "device-a:repository:repository-a"
+        ],
+        "mutationEligibility": "candidate",
+        "reason": null,
+        "diagnostics": {
+          "layout": "git-linked-worktree",
+          "headState": "branch",
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": null
+        }
+      },
+      "effects": []
+    },
+    {
+      "id": "jj-workspace-git-backed",
+      "rules": [
+        "R3",
+        "R11"
+      ],
+      "inputRef": "jj-workspace",
+      "set": {
+        "/platform/vcs/layout": "jj-workspace-git-backed",
+        "/platform/vcs/commonDirectory": {
+          "volume": "volume-a",
+          "file": "git-common-a",
+          "incarnation": "generation-1"
+        }
+      },
+      "expected": {
+        "code": "observed",
+        "root": {
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "revision-jj-a",
+          "vcs": {
+            "kind": "unsupported",
+            "repositoryId": null,
+            "checkoutId": null,
+            "mutationOwner": null
+          }
+        },
+        "rootAccess": [
+          "root-a"
+        ],
+        "overlapSafe": true,
+        "resourceKeys": [],
+        "mutationEligibility": "read-only",
+        "reason": "noncolocated-jj-unmapped",
+        "diagnostics": {
+          "layout": "jj-workspace-git-backed",
+          "headState": "detached",
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": {
+            "jjRepositoryId": "jj-repository-a",
+            "backingGitRepositoryId": "repository-a"
+          }
+        }
+      },
+      "effects": []
+    },
+    {
+      "id": "jj-workspace-other-repository",
+      "rules": [
+        "R3",
+        "R11"
+      ],
+      "inputRef": "jj-workspace",
+      "set": {
+        "/platform/vcs/jjRepository": {
+          "volume": "volume-a",
+          "file": "jj-repository-b",
+          "incarnation": "generation-1"
+        }
+      },
+      "expected": {
+        "code": "observed",
+        "root": {
+          "rootId": "root-a",
+          "locationRef": "location-a",
+          "exists": true,
+          "isDirectory": true,
+          "identityVerified": true,
+          "contentRevision": "revision-jj-a",
+          "vcs": {
+            "kind": "unsupported",
+            "repositoryId": null,
+            "checkoutId": null,
+            "mutationOwner": null
+          }
+        },
+        "rootAccess": [
+          "root-a"
+        ],
+        "overlapSafe": true,
+        "resourceKeys": [],
+        "mutationEligibility": "read-only",
+        "reason": "noncolocated-jj-unmapped",
+        "diagnostics": {
+          "layout": "jj-workspace",
+          "headState": "detached",
+          "dirtyState": "clean",
+          "jjRepositoryEvidence": {
+            "jjRepositoryId": "jj-repository-b",
+            "backingGitRepositoryId": null
+          }
+        }
+      },
+      "effects": []
+    },
+    {
+      "id": "jj-workspace-repository-unverified",
+      "rules": [
+        "R3",
+        "R11"
+      ],
+      "inputRef": "jj-workspace",
+      "set": {
+        "/platform/vcs/jjRepository": null
+      },
+      "expected": {
+        "code": "identity-unverified",
+        "reason": "vcs-identity-unverified"
+      },
+      "effects": []
+    },
+    {
+      "id": "jj-workspace-git-backing-unverified",
+      "rules": [
+        "R3",
+        "R11"
+      ],
+      "inputRef": "jj-workspace",
+      "set": {
+        "/platform/vcs/layout": "jj-workspace-git-backed",
+        "/platform/vcs/commonDirectory": null
+      },
+      "expected": {
+        "code": "identity-unverified",
+        "reason": "vcs-identity-unverified"
       },
       "effects": []
     }
@@ -3510,6 +3988,152 @@
       "id": "jj-workspace-alias-retains-common-keys",
       "leftCase": "colocated-jj-selected",
       "rightCase": "colocated-jj-workspace-metadata-alias",
+      "pointer": "/resourceKeys",
+      "comparison": "equal"
+    },
+    {
+      "id": "os-read-only-retains-no-vcs",
+      "leftCase": "no-vcs",
+      "rightCase": "read-access-os-read-only-no-vcs",
+      "pointer": "/root",
+      "comparison": "equal"
+    },
+    {
+      "id": "os-read-only-retains-git",
+      "leftCase": "ordinary-git",
+      "rightCase": "read-access-os-read-only-git",
+      "pointer": "/root",
+      "comparison": "equal"
+    },
+    {
+      "id": "os-read-only-retains-colocated-jj",
+      "leftCase": "colocated-jj-selected",
+      "rightCase": "read-access-os-read-only-colocated-jj",
+      "pointer": "/root",
+      "comparison": "equal"
+    },
+    {
+      "id": "linked-worktree-recreated-administration-checkout",
+      "leftCase": "linked-worktree",
+      "rightCase": "linked-worktree-recreated-administration",
+      "pointer": "/root/vcs/checkoutId",
+      "comparison": "different"
+    },
+    {
+      "id": "linked-worktree-recreated-administration-root",
+      "leftCase": "linked-worktree",
+      "rightCase": "linked-worktree-recreated-administration",
+      "pointer": "/root/rootId",
+      "comparison": "equal"
+    },
+    {
+      "id": "linked-worktree-recreated-administration-repository",
+      "leftCase": "linked-worktree",
+      "rightCase": "linked-worktree-recreated-administration",
+      "pointer": "/root/vcs/repositoryId",
+      "comparison": "equal"
+    },
+    {
+      "id": "linked-worktree-recreated-administration-revision",
+      "leftCase": "linked-worktree",
+      "rightCase": "linked-worktree-recreated-administration",
+      "pointer": "/root/contentRevision",
+      "comparison": "equal"
+    },
+    {
+      "id": "linked-worktree-recreated-administration-common-contention",
+      "leftCase": "linked-worktree",
+      "rightCase": "linked-worktree-recreated-administration",
+      "pointer": "/resourceKeys",
+      "comparison": "intersection",
+      "expected": [
+        "device-a:repository:repository-a"
+      ]
+    },
+    {
+      "id": "linked-worktree-repointed-administration-checkout",
+      "leftCase": "linked-worktree",
+      "rightCase": "linked-worktree-repointed-administration",
+      "pointer": "/root/vcs/checkoutId",
+      "comparison": "different"
+    },
+    {
+      "id": "linked-worktree-repointed-administration-root",
+      "leftCase": "linked-worktree",
+      "rightCase": "linked-worktree-repointed-administration",
+      "pointer": "/root/rootId",
+      "comparison": "equal"
+    },
+    {
+      "id": "linked-worktree-repointed-administration-repository",
+      "leftCase": "linked-worktree",
+      "rightCase": "linked-worktree-repointed-administration",
+      "pointer": "/root/vcs/repositoryId",
+      "comparison": "equal"
+    },
+    {
+      "id": "linked-worktree-repointed-administration-revision",
+      "leftCase": "linked-worktree",
+      "rightCase": "linked-worktree-repointed-administration",
+      "pointer": "/root/contentRevision",
+      "comparison": "equal"
+    },
+    {
+      "id": "linked-worktree-repointed-administration-common-contention",
+      "leftCase": "linked-worktree",
+      "rightCase": "linked-worktree-repointed-administration",
+      "pointer": "/resourceKeys",
+      "comparison": "intersection",
+      "expected": [
+        "device-a:repository:repository-a"
+      ]
+    },
+    {
+      "id": "noncolocated-workspaces-share-repository",
+      "leftCase": "jj-workspace-noncolocated",
+      "rightCase": "jj-second-workspace-noncolocated",
+      "pointer": "/diagnostics/jjRepositoryEvidence/jjRepositoryId",
+      "comparison": "equal"
+    },
+    {
+      "id": "noncolocated-workspaces-distinct-roots",
+      "leftCase": "jj-workspace-noncolocated",
+      "rightCase": "jj-second-workspace-noncolocated",
+      "pointer": "/root/rootId",
+      "comparison": "different"
+    },
+    {
+      "id": "noncolocated-other-repository-distinct",
+      "leftCase": "jj-workspace-noncolocated",
+      "rightCase": "jj-workspace-other-repository",
+      "pointer": "/diagnostics/jjRepositoryEvidence/jjRepositoryId",
+      "comparison": "different"
+    },
+    {
+      "id": "noncolocated-shares-colocated-repository",
+      "leftCase": "jj-workspace-noncolocated",
+      "rightCase": "colocated-jj-selected",
+      "pointer": "/diagnostics/jjRepositoryEvidence/jjRepositoryId",
+      "comparison": "equal"
+    },
+    {
+      "id": "noncolocated-git-backing-retained",
+      "leftCase": "jj-workspace-git-backed",
+      "rightCase": "colocated-jj-selected",
+      "pointer": "/diagnostics/jjRepositoryEvidence/backingGitRepositoryId",
+      "comparison": "equal"
+    },
+    {
+      "id": "noncolocated-backing-keeps-read-only-root",
+      "leftCase": "jj-workspace-noncolocated",
+      "rightCase": "jj-workspace-git-backed",
+      "pointer": "/root",
+      "comparison": "equal"
+    },
+    {
+      "id": "noncolocated-backing-keeps-empty-keys",
+      "leftCase": "jj-workspace-noncolocated",
+      "rightCase": "jj-workspace-git-backed",
       "pointer": "/resourceKeys",
       "comparison": "equal"
     }
@@ -3882,6 +4506,102 @@
           "mutationOwner": "jj",
           "jjRepositoryId": "jj-repository-a",
           "jjWorkspaceId": "jj-workspace-a-repointed"
+        }
+      },
+      "expectedCode": "stale-binding",
+      "effects": []
+    },
+    {
+      "id": "linked-worktree-recreated-administration-admission",
+      "rule": "R10",
+      "owner": "registry",
+      "observationCase": "linked-worktree-recreated-administration",
+      "baseline": "admission-all-other-owning-rule-preconditions-satisfied",
+      "comparison": {
+        "field": "vcs",
+        "boundOrRequested": {
+          "kind": "git",
+          "repositoryId": "repository-a",
+          "checkoutId": "checkout-linked",
+          "mutationOwner": "git"
+        },
+        "trustedCurrent": {
+          "kind": "git",
+          "repositoryId": "repository-a",
+          "checkoutId": "checkout-linked-admin-recreated",
+          "mutationOwner": "git"
+        }
+      },
+      "expectedCode": "stale-binding",
+      "effects": []
+    },
+    {
+      "id": "linked-worktree-recreated-administration-write-back",
+      "rule": "R10",
+      "owner": "registry",
+      "observationCase": "linked-worktree-recreated-administration",
+      "baseline": "write-back-all-other-owning-rule-preconditions-satisfied",
+      "comparison": {
+        "field": "vcs",
+        "boundOrRequested": {
+          "kind": "git",
+          "repositoryId": "repository-a",
+          "checkoutId": "checkout-linked",
+          "mutationOwner": "git"
+        },
+        "trustedCurrent": {
+          "kind": "git",
+          "repositoryId": "repository-a",
+          "checkoutId": "checkout-linked-admin-recreated",
+          "mutationOwner": "git"
+        }
+      },
+      "expectedCode": "stale-binding",
+      "effects": []
+    },
+    {
+      "id": "linked-worktree-repointed-administration-admission",
+      "rule": "R10",
+      "owner": "registry",
+      "observationCase": "linked-worktree-repointed-administration",
+      "baseline": "admission-all-other-owning-rule-preconditions-satisfied",
+      "comparison": {
+        "field": "vcs",
+        "boundOrRequested": {
+          "kind": "git",
+          "repositoryId": "repository-a",
+          "checkoutId": "checkout-linked",
+          "mutationOwner": "git"
+        },
+        "trustedCurrent": {
+          "kind": "git",
+          "repositoryId": "repository-a",
+          "checkoutId": "checkout-linked-admin-repointed",
+          "mutationOwner": "git"
+        }
+      },
+      "expectedCode": "stale-binding",
+      "effects": []
+    },
+    {
+      "id": "linked-worktree-repointed-administration-write-back",
+      "rule": "R10",
+      "owner": "registry",
+      "observationCase": "linked-worktree-repointed-administration",
+      "baseline": "write-back-all-other-owning-rule-preconditions-satisfied",
+      "comparison": {
+        "field": "vcs",
+        "boundOrRequested": {
+          "kind": "git",
+          "repositoryId": "repository-a",
+          "checkoutId": "checkout-linked",
+          "mutationOwner": "git"
+        },
+        "trustedCurrent": {
+          "kind": "git",
+          "repositoryId": "repository-a",
+          "checkoutId": "checkout-linked-admin-repointed",
+          "mutationOwner": "git"
         }
       },
       "expectedCode": "stale-binding",

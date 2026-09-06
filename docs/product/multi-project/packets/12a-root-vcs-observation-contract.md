@@ -45,6 +45,9 @@ make unsupported layouts writable.
   production storage or adapter.
 - Record the bounded contract milestone in `CHANGELOG.md` and generate
   its site/LLM-text mirrors through the existing sync script.
+- Update the maintained continuation routes in `audit.md`,
+  `tickets/02-prove-source-preservation.md`, and
+  `tickets/03-define-project-registry.md` when closing this packet.
 - Update this packet and graph only after independent review.
 
 ## Required cases
@@ -160,3 +163,8 @@ Do not create 12b in this packet.
   three supported VCS kinds, and a bounded Unreleased changelog entry with
   generated mirrors. The current observation fixture has 77 cases, 37
   relations, and 21 boundary assertions. The receipt owns final verification.
+- 2026-09-06: The third PR review added private unsupported Jujutsu
+  repository diagnostics, OS-read-only positive controls, and linked-worktree
+  checkout-only replacement oracles. Maintained routes now point to the
+  accepted receipt and current frontier. The receipt owns current counts,
+  executable registry regression evidence, and independent acceptance.

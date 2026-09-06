@@ -22,8 +22,8 @@ const fixture = parseStrictJson(await readFile(fixturePath, "utf8"));
 const base = (name) => structuredClone(fixture.inputs[name]);
 const decision = (input) => evaluateRegistryOperation(structuredClone(input));
 
-test("the generic fixture DSL evaluates all 61 exact outputs, effects, and record changes", () => {
-  assert.equal(fixture.cases.length, 61);
+test("the generic fixture DSL evaluates all 63 exact outputs, effects, and record changes", () => {
+  assert.equal(fixture.cases.length, 63);
   const results = checkFixture(fixture);
   assert.deepEqual(results.filter((result) => !result.pass), []);
   for (const fixtureCase of fixture.cases) {
@@ -706,6 +706,10 @@ const mutationDefinitions = {
     "    `${trusted.deviceId}:repository:${observed.repositoryId}`,\n",
     "",
   ),
+  "ignore-checkout-identity": (source) => source.replace(
+    '  if (!same(trusted.root.vcs, current.vcs)) return refusal("stale-binding");',
+    '  if (!same({ ...trusted.root.vcs, checkoutId: current.vcs.checkoutId }, current.vcs)) return refusal("stale-binding");',
+  ),
   "trusted-export": (source) => source.replace(
     "project: portableProjection(trusted.portable)",
     "project: structuredClone(trusted)",
@@ -734,7 +738,13 @@ test("deliberate contract mutants are killed by the fixture oracle", async (cont
       await writeFile(mutantPath, mutantSource, "utf8");
       const mutant = await import(`${pathToFileURL(mutantPath).href}?run=${Date.now()}-${name}`);
       const results = mutant.checkFixture(fixture);
-      assert.ok(results.some((result) => !result.pass), `${name} survived all 61 fixture cases`);
+      assert.ok(results.some((result) => !result.pass), `${name} survived all 63 fixture cases`);
+      if (name === "ignore-checkout-identity") {
+        assert.deepEqual(
+          results.filter((result) => !result.pass).map((result) => result.id),
+          ["git-checkout-administration-changed", "write-back-git-checkout-administration-changed"],
+        );
+      }
     });
   }
 });

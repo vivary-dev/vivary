@@ -3238,6 +3238,51 @@
         "effects": [],
         "recordChanges": {}
       }
+    },
+    {
+      "id": "git-checkout-administration-changed",
+      "rules": [
+        "R10",
+        "R11"
+      ],
+      "inputRef": "admit",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/vcs/checkoutId",
+          "value": "checkout-a-recreated"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "stale-binding"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
+    },
+    {
+      "id": "write-back-git-checkout-administration-changed",
+      "rules": [
+        "R10",
+        "R11",
+        "R13"
+      ],
+      "inputRef": "writeback",
+      "mutations": [
+        {
+          "op": "set",
+          "pointer": "/trusted/root/vcs/checkoutId",
+          "value": "checkout-a-recreated"
+        }
+      ],
+      "expect": {
+        "output": {
+          "code": "stale-binding"
+        },
+        "effects": [],
+        "recordChanges": {}
+      }
     }
   ]
 }

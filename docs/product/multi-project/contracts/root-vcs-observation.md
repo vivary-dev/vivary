@@ -60,7 +60,10 @@ Repository and checkout IDs follow the same lifetime rule. Derive repository
 identity from the verified common administrative directory. Derive checkout
 identity from its verified private administrative directory and its verified
 association with the working-tree root. Recreating either checkout component
-invalidates that identity. Renaming a branch or changing HEAD does not.
+invalidates that identity. Linked-worktree private administration can change
+while the root and common repository stay equal. That changes only
+`checkoutId`; R10 refuses admission and write-back with `stale-binding`.
+Renaming a branch or changing HEAD does not change these identities.
 
 Colocated Jujutsu also requires two private identities. `jjRepositoryId`
 identifies its verified common Jujutsu administration. `jjWorkspaceId` identifies
@@ -97,10 +100,26 @@ An `observed` result contains exactly `code`, `root`, `rootAccess`, `overlapSafe
 `resourceKeys`, `mutationEligibility`, `reason`, and `diagnostics`.
 `root` has the registry's exact root shape. Its three booleans are true.
 `rootAccess` is the root-ID allowlist constructed for the requested operation
-from current policy and actual filesystem access. `diagnostics` has `layout`,
-`headState`, and `dirtyState`. Keep diagnostics, IDs, keys, and raw evidence
-private to the authorized adapter. They are absent from portable export and
-cross-user errors.
+from current policy and actual filesystem access. Read observation requires
+read access, including when the root has no OS write permission. Write
+observation requires the write grant and OS write access. Topology eligibility
+does not turn a read observation into mutation authority.
+
+`diagnostics` has exactly `layout`, `headState`, `dirtyState`, and
+`jjRepositoryEvidence`. The last field is null for non-Jujutsu layouts.
+For a verified Jujutsu layout it has exactly `jjRepositoryId` and
+`backingGitRepositoryId`, derived from the capture's verified Jujutsu and
+common Git administrative identities. The backing Git value is null when
+the inspected layout has no Git backing. Missing required repository
+evidence returns `identity-unverified`; it cannot become a null placeholder.
+
+Retain these diagnostics for unsupported non-colocated workspaces too.
+They preserve shared-repository and Git-backing relationships while the
+registry VCS projection remains `unsupported` with null IDs and owner,
+read-only eligibility, and no resource keys. These diagnostics are neither
+binding fields nor reservation keys. Keep diagnostics, IDs, keys, and raw
+evidence private to the authorized adapter. They are absent from portable
+export and cross-user errors.
 
 `mutationEligibility: candidate` means the topology has one owner and a
 derivable key set. It grants nothing. `read-only` has no usable resource keys
@@ -158,7 +177,7 @@ not durable resource IDs.
 | Nested project or monorepo sibling inside one checkout | Distinct root IDs, same repository and checkout IDs, owner `git` | Same two keys, independently of project or collection identity |
 | Verified colocated Jujutsu | `jj-git`, verified common Git repository and checkout IDs, plus private `jjRepositoryId` and `jjWorkspaceId` | Owner `jj` only after trusted selection. Reserve the same keys a Git-only view would use |
 | Colocated Jujutsu without resolved selection | `jj-git`, verified Git/Jujutsu repository and checkout/workspace IDs, null owner | Read-only. A caller's requested owner cannot select the trusted owner |
-| Non-colocated Jujutsu workspace | `unsupported`, null IDs and owner | Read-only under registry v1. Retain layout diagnostic, including Git-backed or shared-repository workspace evidence |
+| Non-colocated Jujutsu workspace | `unsupported`, null IDs and owner | Read-only under registry v1. Retain layout and `jjRepositoryEvidence` diagnostics, including verified Git backing and shared-repository relationships |
 | Submodule inspected alone | Distinct verified Git repository and checkout IDs, owner `git` | Child keys only if no overlapping writable superproject scope exists |
 | Bare repository, conflicting markers, broken gitfile, unsupported storage layout | `unsupported`, null IDs and owner | Read-only. Incomplete probes instead return an unverified refusal |
 
