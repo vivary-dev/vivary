@@ -16,6 +16,12 @@ Program context: [design](../design.md), [migration](../migration.md), [release]
 
 Own canonical `docs/`, README and changelog updates, app help, and guide verification. Read `release.md` guide inventory. Update behavior docs with their implementation tickets. Do not edit generated site mirrors by hand.
 
+## Preparatory source navigation
+
+[Packet 24a](../packets/24a-source-module-navigation.md) owns a bounded source graph
+and four module routes over existing canonical records. It is independent preparatory
+work. Its completion does not close installed guides or change the dependencies above.
+
 ## Done condition
 
 The guide inventory in `release.md` is complete and follows installed behavior. Screens and commands match artifacts. Claims distinguish supported, optional, held, and unavailable behavior.
@@ -34,3 +40,5 @@ they do not prove the behavior above.
 - 2026-09-05: Initial public plan recorded. Implementation has not started.
 
 - 2026-09-05: Preserve unresolved earlier dogfood, tutorial, and token-savings benchmark requirements through [the issue authority map](../issue-authority.md). Pilot cost metrics do not replace the separate comparative token-savings protocol.
+
+- 2026-09-06: Prepare 24a for source navigation and module ownership after the owner requested progressive disclosure and open knowledge. Product documentation acceptance remains pending.
