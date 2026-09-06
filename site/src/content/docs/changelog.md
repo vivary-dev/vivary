@@ -26,6 +26,16 @@ patch. Published registry versions remain unchanged.
 
 ### Added
 
+- A bounded product source map now routes four cross-cutting responsibilities to
+  canonical contracts, implementation, tests, and accepted evidence through Tropo
+  typed edges. Runtime packet policy and registry authorization prerequisites remain
+  contextual sources until their owning runtime and project-file behavior contracts
+  are implemented. A repository checker verifies 16 unique records, the exact edge
+  set, and 11 repository-contained source locators, rejects locators that resolve
+  back into navigation metadata, rejects source-map symlink and Windows reparse-point
+  indirection, and runs with its regression suite in both Ubuntu and governed Windows
+  CI jobs. This is maintainer navigation over current sources; it adds no runtime
+  behavior or package release.
 - The multi-project program records the subscribed-runtime adapter direction
   and its shared role/receipt acceptance. The first headless loop proof and
   its required Codex parity continuation use separate bounded packets and

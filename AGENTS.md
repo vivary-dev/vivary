@@ -30,9 +30,12 @@ room for the work. This file obeys its own law — keep it that way.
 
 **DRY + progressive disclosure.** One fact gets one owner. Root contracts and
 `index.md` files route; deeper files carry detail. Do not duplicate durable truth
-across README/docs/templates/skills when a link will do, and do not bulk-load a tree
-when `tropo graph`, `modules/index.md`, or a module's `index.md` can choose the next
-file.
+across README/docs/templates/skills when a link will do. Choose the next source
+from [the program frontier](docs/product/multi-project/index.md) or the owning
+package README. Use `tropo graph` and module indexes when the selected source
+tree configures them. When work crosses root observation, project identity,
+native runtime, or project write-back, start at the bounded
+[source map](docs/product/multi-project/source-map/index.md).
 
 ## The operating loop (per turn)
 

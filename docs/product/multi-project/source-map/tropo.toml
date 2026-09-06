@@ -1,0 +1,26 @@
+version = 1
+packs = ["repo-graph"]
+
+[base]
+derive = ["id", "title", "created", "updated"]
+allow_untyped = true
+strict = true
+
+[base.optional]
+module_refs = "ref-list"
+
+[types.module.optional]
+contract_refs = "ref-list"
+source_refs = "ref-list"
+test_refs = "ref-list"
+evidence_refs = "ref-list"
+module_refs = "ref-list"
+
+[types.source_reference]
+folder = "sources"
+
+[types.source_reference.required]
+project = "string"
+status = "enum:active|deferred|superseded"
+purpose = "string"
+locator = "string"

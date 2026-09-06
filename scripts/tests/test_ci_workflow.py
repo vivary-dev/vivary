@@ -90,6 +90,10 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "        run: python scripts/check_ci_workflow.py\n"
         "      - name: CI workflow contract tests\n"
         "        run: python scripts/tests/test_ci_workflow.py\n"
+        "      - name: source navigation contract\n"
+        "        run: python -B scripts/check-source-navigation.py --check\n"
+        "      - name: source navigation contract tests\n"
+        "        run: python -B scripts/tests/test-source-navigation.py\n"
         "      - name: repository automation contract\n"
         "        run: python scripts/check_repository_automation.py\n"
         "      - name: repository automation contract tests\n"
@@ -125,6 +129,10 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "  governed-platform-proof:\n"
         "    needs: changes\n"
         "    steps:\n"
+        "      - name: source navigation contract on Windows\n"
+        f"        run: {SOURCE_NAVIGATION_CHECK_COMMAND}\n"
+        "      - name: source navigation contract tests on Windows\n"
+        f"        run: {SOURCE_NAVIGATION_TEST_COMMAND}\n"
         "      - name: installed-wheel capability surface\n"
         "        shell: pwsh\n"
         "        run: |\n"
@@ -161,6 +169,8 @@ AUDIT = (
     "        working-directory: site\n"
 )
 CONTRACT_TEST_COMMAND = "python scripts/tests/test_ci_workflow.py"
+SOURCE_NAVIGATION_CHECK_COMMAND = "python -B scripts/check-source-navigation.py --check"
+SOURCE_NAVIGATION_TEST_COMMAND = "python -B scripts/tests/test-source-navigation.py"
 AUTOMATION_GUARD_COMMAND = "python scripts/check_repository_automation.py"
 AUTOMATION_TEST_COMMAND = "python scripts/tests/test_repository_automation.py"
 AUTOMATION_BEHAVIOR_COMMAND = (
@@ -199,6 +209,54 @@ def test_ci_contract_regression_suite_must_run():
     message = _run(workflow)
     assert message, "CI must execute the contract's negative regression suite"
     assert CONTRACT_TEST_COMMAND in message
+
+
+def test_source_navigation_contract_must_run():
+    workflow = _workflow(INSTALL + AUDIT).replace(
+        SOURCE_NAVIGATION_CHECK_COMMAND,
+        "echo source navigation check skipped",
+        1,
+    )
+    message = _run(workflow)
+    assert message, "CI must execute the source-navigation checker"
+    assert SOURCE_NAVIGATION_CHECK_COMMAND in message
+
+
+def test_source_navigation_regressions_must_run():
+    workflow = _workflow(INSTALL + AUDIT).replace(
+        SOURCE_NAVIGATION_TEST_COMMAND,
+        "echo source navigation tests skipped",
+        1,
+    )
+    message = _run(workflow)
+    assert message, "CI must execute the source-navigation regression suite"
+    assert SOURCE_NAVIGATION_TEST_COMMAND in message
+
+
+def _without_governed_command(workflow: str, command: str) -> str:
+    marker = "  governed-platform-proof:\n"
+    before, governed_and_later = workflow.split(marker, 1)
+    return before + marker + governed_and_later.replace(command, "echo skipped", 1)
+
+
+def test_windows_governed_job_must_run_source_navigation_contract():
+    workflow = _without_governed_command(
+        _workflow(INSTALL + AUDIT),
+        SOURCE_NAVIGATION_CHECK_COMMAND,
+    )
+    message = _run(workflow)
+    assert message, "the Windows job must execute the source-navigation checker"
+    assert SOURCE_NAVIGATION_CHECK_COMMAND in message
+
+
+def test_windows_governed_job_must_run_source_navigation_regressions():
+    workflow = _without_governed_command(
+        _workflow(INSTALL + AUDIT),
+        SOURCE_NAVIGATION_TEST_COMMAND,
+    )
+    message = _run(workflow)
+    assert message, "the Windows job must execute the source-navigation regression suite"
+    assert SOURCE_NAVIGATION_TEST_COMMAND in message
 
 
 def test_repository_automation_guard_and_regressions_must_run():

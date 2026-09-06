@@ -16,6 +16,12 @@ Program context: [design](../design.md), [migration](../migration.md), [release]
 
 Own canonical `docs/`, README and changelog updates, app help, and guide verification. Read `release.md` guide inventory. Update behavior docs with their implementation tickets. Do not edit generated site mirrors by hand.
 
+## Preparatory source navigation
+
+[Packet 24a](../packets/24a-source-module-navigation.md) owns a bounded source graph
+and four module routes over existing canonical records. It is independent preparatory
+work. Its completion does not close installed guides or change the dependencies above.
+
 ## Done condition
 
 The guide inventory in `release.md` is complete and follows installed behavior. Screens and commands match artifacts. Claims distinguish supported, optional, held, and unavailable behavior.
@@ -34,3 +40,11 @@ they do not prove the behavior above.
 - 2026-09-05: Initial public plan recorded. Implementation has not started.
 
 - 2026-09-05: Preserve unresolved earlier dogfood, tutorial, and token-savings benchmark requirements through [the issue authority map](../issue-authority.md). Pilot cost metrics do not replace the separate comparative token-savings protocol.
+
+- 2026-09-06: Prepare 24a for source navigation and module ownership after the owner requested progressive disclosure and open knowledge. Product documentation acceptance remains pending.
+
+- 2026-09-06: Packet 24a implemented its bounded source graph and entered independent retrieval review. Outcome 24 remains planned with all installed-guide dependencies unchanged.
+
+- 2026-09-06: Packet 24a passed independent retrieval and adversarial checks. Its source-navigation receipt is accepted. Outcome 24 remains planned; this preparatory map does not satisfy installed-guide acceptance or remove any dependency.
+- 2026-09-06: PR #336 review returned Packet 24a to a bounded correction pass for CI enforcement, metadata-target refusal, and exact outcome-owner summaries. The earlier acceptance and CI result remain evidence for commit `445464e` only; current acceptance awaits a new independent review.
+- 2026-09-06: Packet 24a's PR correction passed independent CI-removal, metadata-target, symlink, Windows-junction, movement, planning, line-ending, and diff checks. The packet is done again with the prior commit evidence kept distinct from the accepted correction candidate. Outcome 24 remains planned.
