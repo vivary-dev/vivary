@@ -104,8 +104,11 @@ canonical owner inventory and receipt instead of copying private local paths.
 
 The root-observation record links to its contract, Core source, tests, and receipt.
 The registry record distinguishes its executable model from production storage.
-The runtime record distinguishes host tests from real coding-runtime proof.
-The write-back record distinguishes authorization from observed file effects.
+The runtime record treats packet execution rules as contextual policy, links the
+planned Outcome 04 behavior contract gap, and distinguishes host tests from real
+coding-runtime proof. The write-back record treats registry contracts and receipts as
+authorization context, links the planned Outcome 11 contract and adapter gap, and
+distinguishes authorization from observed file effects.
 Every module has typed contract/source and evidence relationships, or an explicit
 gap for a relationship whose source does not exist. Reuse native capability owners.
 
@@ -208,4 +211,11 @@ No publication, account change, or product activation occurs.
   Windows-only junction cases and no Windows job ran the navigation suite. The
   governed Windows job now runs the checker and all 18 tests under Python 3.11.
   Job-scoped contract regressions fail if either navigation command is removed from
-  Ubuntu or Windows; the local CI contract guard and all 24 tests passed.
+  Ubuntu or Windows; the local CI contract guard and all 24 tests passed. CI run
+  `34062256277` passed commit `7147f05`; its governed Windows job ran all 18 source
+  tests, including both junction cases and the root symlink case, with no skips.
+- 2026-09-06: Automated PR review at `7147f05` found two contextual sources labeled
+  as implemented behavior contracts. Program execution policy and registry
+  authorization sources now use `source_refs`; the native-runtime and write-back
+  modules explicitly link the unimplemented Outcome 04 and Outcome 11 contract gaps.
+  The exact graph remains 16 nodes, 23 edges, and 11 locators.

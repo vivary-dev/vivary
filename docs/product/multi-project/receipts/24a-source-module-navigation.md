@@ -40,10 +40,10 @@ or broken edges. The exact edge groups were:
 | `source-map` | `module_refs` | `root-observation`, `project-registry`, `native-runtime`, `project-writeback` |
 | `root-observation` | `contract_refs`<br>`source_refs`<br>`test_refs`<br>`evidence_refs` | `root-observation-contract`<br>`checkout-observer-code`<br>`checkout-observer-tests`<br>`observation-receipt` |
 | `project-registry` | `contract_refs`<br>`source_refs`<br>`test_refs`<br>`evidence_refs`<br>`module_refs` | `registry-contract`, `registry-transactions`<br>`registry-model-code`<br>`registry-model-tests`<br>`registry-receipt`<br>`root-observation` |
-| `native-runtime` | `contract_refs`<br>`source_refs`<br>`module_refs` | `program-execution`<br>`native-owners`<br>`project-registry` |
-| `project-writeback` | `contract_refs`<br>`source_refs`<br>`evidence_refs`<br>`module_refs` | `registry-contract`<br>`native-owners`<br>`registry-receipt`<br>`root-observation`, `project-registry`, `native-runtime` |
+| `native-runtime` | `source_refs`<br>`module_refs` | `program-execution`, `native-owners`<br>`project-registry` |
+| `project-writeback` | `source_refs`<br>`module_refs` | `registry-contract`, `registry-receipt`, `native-owners`<br>`root-observation`, `project-registry`, `native-runtime` |
 
-`find "root observation"` returned five results at an estimated 556 of the
+`find "root observation"` returned five results at an estimated 555 of the
 1,200-token budget. The first result was `root-observation`, including its four typed
 outbound relationships. `blast root-observation-contract --depth 2` returned four
 inbound impacts: `root-observation` at distance one, then `project-registry`,
@@ -87,7 +87,7 @@ service. No account or repository publication action ran.
 | --- | ---: | --- |
 | `python -B packages/tropo/tropo.py check --root docs/product/multi-project/source-map` | 0 | 16 documents, 0 errors, 0 warnings |
 | `python -B packages/tropo/tropo.py graph --json --root docs/product/multi-project/source-map` | 0 | 16 nodes, 23 edges, 0 broken |
-| `python -B packages/tropo/tropo.py find "root observation" --budget 1200 --json --root docs/product/multi-project/source-map` | 0 | 5 results, estimated 556 tokens |
+| `python -B packages/tropo/tropo.py find "root observation" --budget 1200 --json --root docs/product/multi-project/source-map` | 0 | 5 results, estimated 555 tokens |
 | `python -B packages/tropo/tropo.py blast root-observation-contract --depth 2 --json --root docs/product/multi-project/source-map` | 0 | 4 inbound impacts through depth 2 |
 | `python -B scripts/check-source-navigation.py --check` | 0 | 16 records, 23 edges, 11 locators, 0 broken |
 | `python -B scripts/tests/test-source-navigation.py` | 0 | 18 tests passed after the new locator, root-link, and interior-junction refusal cases failed before implementation |
@@ -174,14 +174,43 @@ and the governed Windows job did not invoke the navigation suite. The Windows jo
 runs the same production checker and 18-test suite under Python 3.11 while Ubuntu
 retains its existing runs. The CI guard requires each command exactly once in each
 job. Two new job-scoped regressions failed before that guard changed and passed in the
-24-test local CI contract suite afterward. The accepted local Windows 18-test run was
-not repeated; the pull-request CI gate owns the Python 3.11 Windows execution.
+24-test local CI contract suite afterward. CI run `34062256277` passed commit
+`7147f05`. Its governed Windows job `101564744848` ran all 18 source-navigation tests
+in 31.602 seconds with no skips, explicitly including the root and interior junction
+cases and the root symlink case.
 
-| Two-platform enforcement candidate | SHA-256 |
+| Two-platform enforcement artifact at commit `7147f05` | SHA-256 |
 | --- | --- |
 | `.github/workflows/ci.yml` | `47f54019ea9b99be8e7c74bc5b974f3fa5069fbb9e7227c7d2c1e2e049286ef0` |
 | `scripts/check_ci_workflow.py` | `3549aefb4601a7c4ceb259531d80640a7a4356b9543b235458373194b5e881f5` |
 | `scripts/tests/test_ci_workflow.py` | `0054aae61fab5f54011af6a45a49adecfaab305087bb58a5f8d2ab8a75a377fe` |
+
+### Semantic edge correction
+
+Automated PR review at commit `7147f05` found that two contextual sources were
+labeled as completed behavior contracts. The program execution source governs packet
+claiming, verification, and human gates; it is policy context for native runtime work,
+not the unimplemented Outcome 04 runtime behavior contract. The registry contract and
+receipt establish identity, transaction, and write authorization prerequisites; they
+are context for project write-back, not the unimplemented Outcome 11 project-file
+behavior contract, adapter, or effect evidence.
+
+The module records now expose both intended caller-visible sections as future behavior
+and link the actual Outcome 04 and Outcome 11 gaps. Their contextual policy,
+authorization contract, authorization receipt, and native-owner inventory all use
+`source_refs`. The root-observation and project-registry modules retain their valid
+contract and provenance-specific evidence edges.
+
+Changing the two module records before changing the checker produced the expected
+failure: three old typed edges were missing and their three `source_refs` replacements
+were extra. After updating `EXPECTED_EDGES`, the checker returned 16 records, 23 edges,
+11 locators, and zero broken references. All 18 focused tests passed in 41.162 seconds.
+
+| Semantic edge correction candidate | SHA-256 |
+| --- | --- |
+| `scripts/check-source-navigation.py` | `b319d40a22ee5e9a49a319a00f67397ac0f104981626cf1eba976b29e3297864` |
+| `docs/product/multi-project/source-map/modules/native-runtime/index.md` | `023632b4aecd8725789249635995041dcc26c6b5f4f77fc2a067412bdb07ef7b` |
+| `docs/product/multi-project/source-map/modules/project-writeback/index.md` | `59795c4cfecfbab5af622ee87bb04b88369c16fc8f5f8fa6f7a42c67a1427195` |
 
 ## Result and continuation
 
@@ -191,8 +220,9 @@ physical observer, installed guide, package release, or publication claim. A loc
 proves where a selected source lives at validation time. It does not prove runtime
 behavior or immutable physical identity.
 
-The two-platform workflow wiring is locally contract-verified. Pull-request CI owns
-the final Ubuntu and Windows runner execution for its committed candidate.
+CI run `34062256277` proves the two-platform workflow at commit `7147f05` only. The
+semantic edge correction that follows that commit remains a separate candidate for
+the pull-request CI gate.
 
 Outcome 24 remains planned with its completion dependencies unchanged. Future agents
 select a task from the generated frontier first and use this source map only when work

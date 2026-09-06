@@ -2,8 +2,7 @@
 project: Vivary
 status: active
 module_area: native coding-runtime execution
-contract_refs: [program-execution]
-source_refs: [native-owners]
+source_refs: [program-execution, native-owners]
 module_refs: [project-registry]
 ---
 
@@ -21,11 +20,11 @@ native session resume. Outcome
 [29](../../../tickets/29-deliver-review-integration-handoffs.md) owns review,
 integration, and portable handoffs.
 
-## Caller-visible contract and errors
+## Intended caller-visible contract and errors
 
-Callers select a registered project and bounded task packet, then receive observable
-run state and failures without gaining ambient authority over repositories, secrets,
-spending, publication, or cleanup gates.
+When Outcome 04 is implemented, callers will select a registered project and bounded
+task packet, then receive observable run state and failures without gaining ambient
+authority over repositories, secrets, spending, publication, or cleanup gates.
 
 ## Hidden concerns
 
@@ -36,11 +35,15 @@ where each capability belongs.
 ## Dependencies
 
 Runtime work resolves stable project identity through the
-[project registry](../project-registry/index.md) and follows the shared execution contract.
+[project registry](../project-registry/index.md) and follows the
+[packet execution policy](../../sources/program-execution.md). That policy governs
+how work is claimed and verified; it is not the native runtime behavior contract.
 
 ## Gaps
 
-Preserved host-side evidence routed through the owner inventory is not proof of a real
-coding-runtime session. This checkout has no canonical runtime implementation or
-accepted live-runtime receipt to link, so this record deliberately has no test or
-evidence edge.
+The behavior contract required by
+[Outcome 04](../../../tickets/04-define-runtime-session-contracts.md) remains planned
+and unimplemented. Preserved host-side evidence routed through the owner inventory is
+not proof of a real coding-runtime session. This checkout has no canonical runtime
+implementation or accepted live-runtime receipt to link, so this record deliberately
+has no contract, test, or evidence edge.
