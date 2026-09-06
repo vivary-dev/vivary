@@ -1,11 +1,12 @@
 # 03c: Map registry transactions to native application seams
 Type: packet
 Parent: 03
-Status: in-progress
+Status: done
 Depends-on: [03b]
 Owner: Codex registry_model, sole map writer; coordinating Codex owns independent review
 Scope: Source-backed action, storage, transaction, and root-adapter map only. No production schema, action, adapter, or database selection.
 Verification-kind: inspection
+Evidence: [Transaction mapping receipt](../receipts/03c-registry-transaction-mapping.md)
 Timebox: One context window. Stop after a second reader can trace every map row to the contract and an inspected source.
 
 ## Goal
@@ -84,7 +85,7 @@ claim that project bytes changed.
 | Local files | `dist/local-artifacts/index.d.ts` and `dist/local-artifacts/index.js` | Are manifest-relative file helpers sufficient for external project identity, repository identity, cross-process reservations, and write-back fencing? |
 | Runtime binding | `harness-agents.mdx`, `dist/agent/harness/`, `apps/workbench/server/agent-runtime-host.ts`, and all non-test call sites | Which native session ID and optimistic generation remain native? Which project, binding, policy, root, execution-copy, and content revisions still need app-owned references? |
 | Root and VCS observation | Workbench server code plus installed public exports searched for `rootId`, `locationRef`, canonical filesystem identity, repository identity, and checkout identity | Is there a callable trusted adapter that distinguishes a path alias from a recreated directory and reports no-VCS, Git, linked-worktree, monorepo, and colocated Jujutsu identity? |
-| Runtime filesystem boundary | `sandbox-adapters.mdx`, installed sandbox declarations, and Workbench runtime configuration | Does an installed adapter resolve a registered project root or BrowserPod execution copy? Do not substitute the `run-code` sandbox seam for a coding-harness or project-root adapter. |
+| Runtime filesystem boundary | `sandbox-adapters.mdx`, installed sandbox declarations, and Workbench runtime configuration | Does an installed adapter resolve a registered project root or Habitat execution copy? Do not substitute the `run-code` sandbox seam for a coding-harness or project-root adapter. |
 
 ## Done condition
 
@@ -165,3 +166,5 @@ this packet.
 - 2026-09-05: Prepared after 03b's deterministic registry model passed its full fixture, schedule, and deliberate-mutation checks in the authorized Habitat fallback. This packet maps future production transactions and adapters. It does not implement them or complete outcome 03.
 
 - 2026-09-05: Claimed after 02b completed. The sole map writer will inspect existing native APIs and stage the four contract tables; the coordinator owns review and graph integration. No runtime or production schema is created by this packet.
+
+- 2026-09-05: Completed the four source-backed mapping tables and independent five-case trace. Recorded the strict-JSON transport gap, proposed registry partition, missing database/root owners, replay ordering, and filesystem-effect limits. Packet 12a is ready for the trusted root/VCS observation contract. No production implementation is claimed.

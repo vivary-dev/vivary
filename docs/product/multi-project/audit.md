@@ -22,8 +22,8 @@ not product acceptance, a security certification, or a release result.
 
 | Risk | Smallest next evidence | What it blocks |
 | --- | --- | --- |
-| Native Node modules, native coding CLIs, and Python may not run in BrowserPod | Actual capability/exit-code matrix on a synthetic fixture | Only operations needing those tools, not contracts or fixture preparation |
-| BrowserPod disk is not automatically the user's existing project folder | Trace selected project to execution copy and guarded write-back, using supported native transfer primitives first | Real brownfield mutation and save claims |
+| Native coding-runtime behavior is not proved by the Habitat toolchain and filesystem fixtures | Observe the selected coding runtime and its lifecycle in the authorized environment | Real coding-runtime integration claims; BrowserPod is unavailable and inactive |
+| An isolated execution copy is not automatically the user's existing project folder | Trace selected project to execution copy and guarded write-back, using supported native transfer primitives first | Real brownfield mutation and save claims |
 | Browser origin and storage key are not a user authorization boundary | Two synthetic users, scoped key selection, denied cross-user requests, and reload recovery | Multi-user and persistence claims |
 | Workbench source and old assets need path-specific rights and restore proof | Private source manifest, license disposition, byte restoration, and history receipt | Real-source import/publication and any retirement |
 | Cross-origin isolation may affect login, sidebar, or preview | Browser regression checks on the exact selected origin | Broad header change and deployment |
@@ -31,7 +31,7 @@ not product acceptance, a security certification, or a release result.
 | Earlier token-savings benchmark and dogfood commitments can get lost | Bind old issue requirements to outcomes 36, 23, and 24 | Comparative claims and final release acceptance |
 | The real scanner is still Level 1/5 | Implemented services plus a live all-checks 100% result | Release readiness and agent-ready announcements |
 
-No observed BrowserPod behavior, source restoration, new artifact release, or
+No BrowserPod execution, real-source preservation, new artifact release, or
 100% result is claimed. New findings repair the owning packet and its evidence;
 they do not silently change product direction or stop unrelated ready work.
 
@@ -51,6 +51,9 @@ candidates, claim-level QA, and evidence-fed replanning remain unverified.
 
 [03b](receipts/03b-registry-contract-model.md) now records actual Habitat model
 verification and independent QA corrections. Its results do not establish the
-production HoH cycle or filesystem enforcement. Packet 02b now supplies bounded synthetic filesystem evidence. The next
-executable packet is 03c for native transaction mapping; real-source preservation
-and production registry enforcement remain open.
+production HoH cycle or filesystem enforcement. Packet 02b supplies bounded
+synthetic filesystem evidence. [03c](receipts/03c-registry-transaction-mapping.md)
+completed the native transaction and adapter map after independent review. The
+next executable packet is [12a](packets/12a-root-vcs-observation-contract.md) for
+the trusted root/VCS observation contract; real-source preservation and
+production registry enforcement remain open.

@@ -35,7 +35,7 @@ git diff --check
 
 ## Next packet
 
-[03b](../packets/03b-registry-contract-model.md) completed executable reference-model verification in the authorized Habitat fallback. [03c](../packets/03c-registry-transaction-mapping.md) owns the native transaction and adapter mapping. [03a](../receipts/03a-registry-contract.md) records the completed contract inspection. Production integration and full parent acceptance remain separate work.
+[03b](../packets/03b-registry-contract-model.md) completed executable reference-model verification in the authorized Habitat fallback. [03c](../packets/03c-registry-transaction-mapping.md) completed the native transaction and adapter mapping. [12a](../packets/12a-root-vcs-observation-contract.md) is ready to define the missing trusted root/VCS observation boundary. [03a](../receipts/03a-registry-contract.md) records the completed contract inspection. Production integration and full parent acceptance remain separate work.
 
 ## Log
 
@@ -46,3 +46,5 @@ git diff --check
 - 2026-09-05: Inspection packet 03a completed the portable registry contract and synthetic acceptance oracle. [03b](../packets/03b-registry-contract-model.md) owns executable state/concurrency tests after the BrowserPod proof. Production transactions and adapter enforcement remain unproved.
 
 - 2026-09-05: Packet 03b completed its sandboxed reference-model checks after independent QA corrections. Outcome 03 remains in progress: transaction mapping and owning production adapters still need evidence.
+
+- 2026-09-05: Packet 03c completed source mapping and independent oracle tracing. Outcome 03 remains in progress: configured database transactions, strict JSON transport, trusted root identity, and enforceable filesystem boundaries still need implementation evidence.

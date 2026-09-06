@@ -33,6 +33,10 @@ python scripts/check_line_endings.py
 git diff --check
 ```
 
+## Next packet
+
+[12a](../packets/12a-root-vcs-observation-contract.md) is ready after the 03c source mapping. It defines the trusted observation contract and expected oracles only. Production adapter implementation, physical identity probes, and cross-process mutation enforcement remain later work. Outcome completion dependencies do not gate this independent preparation.
+
 ## Log
 
 - 2026-09-05: Initial public plan recorded. Implementation has not started.

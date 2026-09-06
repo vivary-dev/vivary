@@ -35,7 +35,7 @@ git diff --check
 
 ## Next packet
 
-[02a](../packets/02a-source-preservation-fixture.md) completed the contract and oracle. [02b](../packets/02b-restore-fixture-harness.md) completed synthetic filesystem restoration in Habitat. Real-source selection, attribution, history capture, and restoration remain open. The next ready program packet is [03c](../packets/03c-registry-transaction-mapping.md).
+[02a](../packets/02a-source-preservation-fixture.md) completed the contract and oracle. [02b](../packets/02b-restore-fixture-harness.md) completed synthetic filesystem restoration in Habitat. Real-source selection, attribution, history capture, and restoration remain open. The next ready program packet is [12a](../packets/12a-root-vcs-observation-contract.md).
 
 ## Log
 
