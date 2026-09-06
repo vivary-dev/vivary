@@ -1272,45 +1272,52 @@ const runOneFixtureCase = async (fixture, fixtureCase, caseRoot) => {
   }
 
   if (expect.receiptStatus || expect.receiptBinding || expect.verifiedPaths || expect.ownedPaths) {
-    let receipt = null;
+    const expectedManifestDigest = digestManifest(prepared.manifest);
+    if (expect.receiptBinding === "current-manifest" && actual.manifestDigest !== expectedManifestDigest) {
+      failures.push("manifest digest response");
+    }
+    if (expect.verifiedPaths && !same(actual.verifiedPaths, expect.verifiedPaths)) {
+      failures.push("verified paths response");
+    }
+    if (expect.ownedPaths && !same(actual.ownedPaths, expect.ownedPaths)) {
+      failures.push("owned paths response");
+    }
+
+    let receipt;
+    let receiptParsed = false;
     try {
       receipt = parseStrictJson(await readFile(path.join(roots.receipt, RECEIPT_FILE), "utf8"));
+      receiptParsed = true;
     } catch {
       failures.push("receipt unavailable");
     }
-    if (receipt !== null) {
+    if (receiptParsed) {
       try {
         validateReceiptShape(receipt);
       } catch {
         failures.push("receipt shape");
       }
-      if (expect.receiptStatus && receipt.status !== expect.receiptStatus) failures.push("receipt status");
-      if (expect.receiptBinding === "current-manifest") {
-        const expectedManifestDigest = digestManifest(prepared.manifest);
-        const expectedSourceTreeDigest = digestTree(await scanTree(roots.source));
-        const expectedOutputs = outputsForManifest(prepared.manifest);
-        if (actual.manifestDigest !== expectedManifestDigest) failures.push("manifest digest response");
-        if (receipt.manifestDigest !== expectedManifestDigest) failures.push("receipt binding");
-        if (receipt.sourceTreeDigest !== expectedSourceTreeDigest) failures.push("receipt source tree digest");
-        if (!same(receipt.outputs, expectedOutputs)) failures.push("receipt outputs");
-        if (receipt.status === "incomplete" &&
-            receipt.observedTargetDigest !== digestTree(await scanTree(roots.target))) {
-          failures.push("receipt target tree digest");
+      if (isObject(receipt)) {
+        if (expect.receiptStatus && receipt.status !== expect.receiptStatus) failures.push("receipt status");
+        if (expect.receiptBinding === "current-manifest") {
+          const expectedSourceTreeDigest = digestTree(await scanTree(roots.source));
+          const expectedOutputs = outputsForManifest(prepared.manifest);
+          if (receipt.manifestDigest !== expectedManifestDigest) failures.push("receipt binding");
+          if (receipt.sourceTreeDigest !== expectedSourceTreeDigest) failures.push("receipt source tree digest");
+          if (!same(receipt.outputs, expectedOutputs)) failures.push("receipt outputs");
+          if (receipt.status === "incomplete" &&
+              receipt.observedTargetDigest !== digestTree(await scanTree(roots.target))) {
+            failures.push("receipt target tree digest");
+          }
         }
+        const receiptOutputPaths = Array.isArray(receipt.outputs)
+          ? receipt.outputs.map((item) => item?.path)
+          : null;
+        if (expect.verifiedPaths && !same(receiptOutputPaths, expect.verifiedPaths)) {
+          failures.push("verified paths");
+        }
+        if (expect.ownedPaths && !same(receipt.ownedPaths, expect.ownedPaths)) failures.push("owned paths");
       }
-      if (expect.verifiedPaths && !same(actual.verifiedPaths, expect.verifiedPaths)) {
-        failures.push("verified paths response");
-      }
-      const receiptOutputPaths = Array.isArray(receipt.outputs)
-        ? receipt.outputs.map((item) => item?.path)
-        : null;
-      if (expect.verifiedPaths && !same(receiptOutputPaths, expect.verifiedPaths)) {
-        failures.push("verified paths");
-      }
-      if (expect.ownedPaths && !same(actual.ownedPaths, expect.ownedPaths)) {
-        failures.push("owned paths response");
-      }
-      if (expect.ownedPaths && !same(receipt.ownedPaths, expect.ownedPaths)) failures.push("owned paths");
     }
   }
   if (expect.privacySafeError && !new Set(["restored", "already-restored", "incomplete"]).has(actual.result)) {
@@ -1528,20 +1535,62 @@ const validateSymbolicReceipt = (reference, symbolic, fixture) => {
   }
 };
 
+const fixtureTreeRecords = (tree) => {
+  const records = new Map();
+  for (const entry of tree) {
+    const parts = pathParts(entry.path);
+    for (let index = 1; index < parts.length; index += 1) {
+      const directory = parts.slice(0, index).join("/");
+      if (!records.has(directory)) records.set(directory, { path: directory, kind: "directory" });
+    }
+    if (entry.kind === "file") {
+      const bytes = Buffer.from(entry.contentBase64, "base64");
+      records.set(entry.path, {
+        path: entry.path,
+        kind: "file",
+        size: bytes.length,
+        sha256: digestBytes(bytes),
+      });
+    } else if (entry.kind === "link") {
+      records.set(entry.path, { path: entry.path, kind: "link", target: entry.target });
+    } else {
+      records.set(entry.path, { path: entry.path, kind: "directory" });
+    }
+  }
+  return [...records.values()].sort((left, right) => left.path.localeCompare(right.path));
+};
+
+const fixtureSourceMatchesManifest = (tree, manifest) => manifest.files.every((file) => {
+  const entry = tree.find((candidate) => candidate.path === file.path && candidate.kind === "file");
+  if (!entry) return false;
+  const bytes = Buffer.from(entry.contentBase64, "base64");
+  return bytes.length === file.size && digestBytes(bytes) === file.sha256;
+});
+
 const validateFixtureFault = (fixtureCase, prepared, fixture, expect) => {
   const fault = fixtureCase.fault;
   if (!hasExactFields(fault, ["count", "op"]) || fault.op !== "interrupt-after-output" ||
       !Number.isSafeInteger(fault.count) || fault.count < 1 ||
       expect.result !== "incomplete" || expect.noWrites !== false ||
-      validateManifest(prepared.manifest) !== null) {
+      validateManifest(prepared.manifest) !== null ||
+      validatePathsAndAliases(prepared.manifest, prepared.policy) !== null ||
+      !fixtureSourceMatchesManifest(prepared.trees.source, prepared.manifest) ||
+      prepared.trees.temp.length > 0) {
     throw new Error("invalid fixture fault");
   }
   const symbolic = fixture.receipts[prepared.setup.receiptRef];
   if (symbolic !== null && symbolic.status !== "incomplete") throw new Error("invalid fixture fault");
   const prefixLength = symbolic?.ownedPaths.length ?? 0;
-  if (symbolic !== null &&
-      digestManifest(fixture.manifests[symbolic.manifestRef]) !== digestManifest(prepared.manifest)) {
-    throw new Error("invalid fixture fault");
+  if (symbolic === null) {
+    if (prepared.trees.target.length > 0) throw new Error("invalid fixture fault");
+  } else {
+    if (digestManifest(fixture.manifests[symbolic.manifestRef]) !== digestManifest(prepared.manifest) ||
+        digestTree(fixtureTreeRecords(prepared.receiptSourceEntries)) !==
+          digestTree(fixtureTreeRecords(prepared.trees.source)) ||
+        digestTree(fixtureTreeRecords(fixture.trees[symbolic.observedTargetTreeRef])) !==
+          digestTree(fixtureTreeRecords(prepared.trees.target))) {
+      throw new Error("invalid fixture fault");
+    }
   }
   if (fault.count <= prefixLength || fault.count > prepared.manifest.files.length) {
     throw new Error("invalid fixture fault");
@@ -1567,7 +1616,10 @@ const validateFixtureEnvelope = (fixture) => {
   }
   for (const manifest of Object.values(fixture.manifests)) {
     if (validateManifest(manifest) !== null ||
-        validatePathsAndAliases(manifest, fixture.defaults.policy) !== null) {
+        validatePathsAndAliases(manifest, {
+          ...fixture.defaults.policy,
+          caseSensitivity: "sensitive",
+        }) !== null) {
       invalidFixture("fixture manifest");
     }
   }
@@ -1585,6 +1637,13 @@ const validateFixtureEnvelope = (fixture) => {
     if (caseIds.has(id)) throw new Error(`duplicate fixture case id: ${id}`);
     caseIds.add(id);
     if (Object.hasOwn(fixtureCase, "setup")) validateFixtureSetup(fixtureCase.setup, fixture);
+    const selectedSetup = { ...fixture.defaults, ...(fixtureCase.setup ?? {}) };
+    if (validatePathsAndAliases(
+      fixture.manifests[selectedSetup.manifestRef],
+      selectedSetup.policy,
+    ) !== null) {
+      invalidFixture("fixture setup");
+    }
     for (const mutation of fixtureCase.mutations) validateFixtureMutationDescriptor(mutation);
     validateFixtureExpectation(fixtureCase.expect, fixture);
     const expect = { ...fixture.defaults.expect, ...fixtureCase.expect };

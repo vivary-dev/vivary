@@ -155,7 +155,8 @@ fault, expectation, and symbolic receipt fields follow the version-one schema;
 unknown fields and unresolved references are errors. Named manifests and receipt
 seeds must be valid; negative product cases use explicit mutations or malformed
 raw parser input. Each tree mutation is validated when applied, so later removal
-cannot hide an invalid intermediate entry. Fault counts must reach a new output
+cannot hide an invalid intermediate entry. Seed path aliases use the selected
+setup policy before mutations run. Fault counts must reach a new output
 and declare an incomplete result. JSON Pointer array indices are canonical
 nonnegative integers; array removal closes the gap.
 

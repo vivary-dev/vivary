@@ -509,6 +509,39 @@ test("fixture faults reject malformed or ineffective configurations before work"
   }
 });
 
+test("fixture faults reject unreachable prepared filesystem states before work", async (context) => {
+  const validationRoot = await mkdtemp(path.join(tmpdir(), "vivary-fixture-fault-state-validation-"));
+  context.after(async () => rm(validationRoot, { recursive: true, force: true }));
+  const missingWorkParent = path.join(validationRoot, "must-not-exist");
+  const invalidFixtures = [];
+
+  for (const [field, treeRef] of [
+    ["sourceTreeRef", "source-note-changed"],
+    ["targetTreeRef", "target-unexpected-bytes"],
+    ["tempTreeRef", "target-unexpected-bytes"],
+  ]) {
+    const blocked = fixtureWithOnlyCase("interrupted-after-one-output");
+    blocked.cases[0].setup = { [field]: treeRef };
+    invalidFixtures.push([blocked, field]);
+  }
+
+  const invalidResume = fixtureWithOnlyCase("interrupted-after-one-output");
+  invalidResume.cases[0].setup = {
+    receiptRef: "incomplete-base",
+    targetTreeRef: "target-empty",
+  };
+  invalidResume.cases[0].fault.count = 2;
+  invalidFixtures.push([invalidResume, "incomplete receipt target"]);
+
+  for (const [invalidFixture, label] of invalidFixtures) {
+    await assert.rejects(
+      runFixture(invalidFixture, { workParent: missingWorkParent }),
+      /invalid fixture fault/u,
+      label,
+    );
+  }
+});
+
 test("fixture pointers and link targets reject platform-ambiguous DSL before work", async (context) => {
   const validationRoot = await mkdtemp(path.join(tmpdir(), "vivary-fixture-path-validation-"));
   context.after(async () => rm(validationRoot, { recursive: true, force: true }));
@@ -565,6 +598,42 @@ test("fixture seeds, policy mutations, and raw parser cases reject hidden no-ops
       label,
     );
   }
+});
+
+test("named manifest aliases use each case's selected policy", async (context) => {
+  const validationRoot = await mkdtemp(path.join(tmpdir(), "vivary-fixture-selected-policy-"));
+  context.after(async () => rm(validationRoot, { recursive: true, force: true }));
+  const selectedPolicyFixture = fixtureWithOnlyCase("restore-empty");
+  selectedPolicyFixture.defaults.policy.caseSensitivity = "insensitive";
+  selectedPolicyFixture.manifests["case-sensitive-aliases"] = structuredClone(
+    selectedPolicyFixture.manifests.base,
+  );
+  selectedPolicyFixture.manifests["case-sensitive-aliases"].files[0].path = "A";
+  selectedPolicyFixture.manifests["case-sensitive-aliases"].files[0].destination = "A";
+  selectedPolicyFixture.manifests["case-sensitive-aliases"].files[1].path = "a";
+  selectedPolicyFixture.manifests["case-sensitive-aliases"].files[1].destination = "a";
+  selectedPolicyFixture.trees["source-case-sensitive-aliases"] = [
+    { path: "A", kind: "file", contentBase64: "YWJj" },
+    { path: "a", kind: "file", contentBase64: "" },
+  ];
+  selectedPolicyFixture.trees["target-case-sensitive-aliases"] = structuredClone(
+    selectedPolicyFixture.trees["source-case-sensitive-aliases"],
+  );
+  selectedPolicyFixture.cases[0].setup = {
+    manifestRef: "case-sensitive-aliases",
+    sourceTreeRef: "source-case-sensitive-aliases",
+    policy: {
+      ...selectedPolicyFixture.defaults.policy,
+      caseSensitivity: "sensitive",
+    },
+  };
+  selectedPolicyFixture.cases[0].expect.targetTreeRef = "target-case-sensitive-aliases";
+  selectedPolicyFixture.cases[0].expect.verifiedPaths = ["A", "a"];
+
+  await assert.rejects(
+    runFixture(selectedPolicyFixture, { workParent: path.join(validationRoot, "must-not-exist") }),
+    (error) => error?.code === "ENOENT",
+  );
 });
 
 test("strict parsing rejects malformed and nested duplicate keys before filesystem access", async () => {
@@ -956,4 +1025,22 @@ test("the fixture oracle checks response manifest and full receipt binding metad
   assert.equal(result.pass, false, "incorrect response and receipt binding metadata passed");
   assert.ok(result.failures.includes("manifest digest response"));
   assert.ok(result.failures.includes("receipt source tree digest"));
+});
+
+test("the fixture oracle rejects a parsed null receipt", async (context) => {
+  const sourcePath = fileURLToPath(new URL("../prove_multi_project_source_preservation.mjs", import.meta.url));
+  const source = await readFile(sourcePath, "utf8");
+  const mutantSource = source.replace(
+    "const text = `${canonicalJson(receipt)}\\n`;",
+    "const text = \"null\\n\";",
+  );
+  assert.notEqual(mutantSource, source, "null receipt mutation did not alter the implementation");
+  const directory = await mkdtemp(path.join(tmpdir(), "vivary-restore-null-receipt-mutant-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  const mutantPath = path.join(directory, "null-receipt-mutant.mjs");
+  await writeFile(mutantPath, mutantSource, "utf8");
+  const mutant = await import(`${pathToFileURL(mutantPath).href}?mutation=${Date.now()}`);
+  const [result] = await mutant.runFixture(fixtureWithOnlyCase("restore-empty"), { workParent: directory });
+  assert.equal(result.pass, false, "parsed null receipt survived the fixture oracle");
+  assert.ok(result.failures.includes("receipt shape"));
 });

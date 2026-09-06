@@ -149,6 +149,27 @@ class PlanCheckTests(unittest.TestCase):
                     self.replace(self.packet, '../receipts/fixture.md)', '../receipts/fixture.md#receipt)')
                 self.assert_error('done requires linked evidence receipt')
 
+    def test_unreadable_evidence_receipt_returns_validation_errors(self):
+        receipt = self.plan / 'receipts/fixture.md'
+        receipt.write_bytes(b'# Receipt\n\nEvidence-record: 02a\n\xff')
+        self.replace(self.packet, 'Status: ready-for-agent', 'Status: done')
+        self.replace(self.packet, 'Timebox: one context',
+                     'Evidence: [Fixture receipt](../receipts/fixture.md)\n'
+                     'Verification-result: passed\nTimebox: one context')
+        self.render()
+        for anchor in ('', '#receipt'):
+            with self.subTest(anchor=anchor):
+                if anchor:
+                    self.replace(self.packet, '../receipts/fixture.md)', '../receipts/fixture.md#receipt)')
+                self.assert_error('done requires linked evidence receipt')
+        original_read = Path.read_text
+        def unavailable(path, *args, **kwargs):
+            if path == receipt:
+                raise PermissionError('synthetic receipt access failure')
+            return original_read(path, *args, **kwargs)
+        with mock.patch.object(Path, 'read_text', unavailable):
+            self.assert_error('done requires linked evidence receipt')
+
     def test_structured_pass_allows_historical_failure_detail_in_log(self):
         self.replace(self.packet, 'Status: ready-for-agent', 'Status: done')
         self.replace(self.packet, 'Timebox: one context',
@@ -299,6 +320,17 @@ class PlanCheckTests(unittest.TestCase):
         (self.plan / 'fixtures').mkdir()
         (self.plan / 'fixtures/public.json').write_bytes(b'{"value":"\xff"}\n')
         self.assert_error('invalid UTF-8 JSON')
+
+    def test_deep_json_returns_privacy_or_nesting_diagnostics(self):
+        (self.plan / 'fixtures').mkdir()
+        artifact = self.plan / 'fixtures/public.json'
+        for depth, value, expected in (
+            (600, '"\\u0067hp_12345678901234567890"', 'possible private path or credential'),
+            (2000, '"ordinary"', 'JSON nesting exceeds parser limit'),
+        ):
+            with self.subTest(depth=depth):
+                artifact.write_text('{"child":' * depth + value + '}' * depth, encoding='utf-8')
+                self.assert_error(expected)
 
     def test_non_finite_json_constants_fail(self):
         (self.plan / 'fixtures').mkdir()

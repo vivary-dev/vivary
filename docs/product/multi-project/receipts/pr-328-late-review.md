@@ -21,8 +21,8 @@ to fix the review findings and merge the corrected work into dev.
 - RED: the four planning regressions failed against the accepted validator (37 tests, four failures).
 - RED: both restoration regressions failed against the accepted runner (18 tests, two failures); canonical cases still reported 47/47.
 - Independent review added six failing boundary cases to the first planning candidate (49 tests, six failures): empty gate IDs, duplicate gate fields, malformed/non-UTF-8/BOM JSON, and historical log details under the explicit result field.
-- GREEN: 54/54 planning tests and the actual public plan consistency check passed.
-- GREEN: 28/28 restoration tests and 47/47 filesystem fixture cases passed with no skipped tests.
+- GREEN: 56/56 planning tests and the actual public plan consistency check passed.
+- GREEN: 31/31 restoration tests and 47/47 filesystem fixture cases passed with no skipped tests.
 - Checks ran as the existing non-root user in the bounded Habitat image, with networking disabled, a read-only root, no host mounts, all capabilities dropped, and no new privileges.
 - The test container is limited to one CPU, 384 MiB memory, 64 processes, and a 128 MiB temporary filesystem. It uses the existing image; no dependency installation is required.
 - The empty base64 string remains valid. Invalid characters, missing or excess padding, nonzero pad bits, and malformed tree mutation entries are rejected before creating a work directory.
@@ -33,10 +33,10 @@ to fix the review findings and merge the corrected work into dev.
 
 | Artifact | SHA-256 |
 | --- | --- |
-| `scripts/check_multi_project_plan.py` | `d4ae65b36c49043f29b6e30e2e3bfd52776b33b8e9079ec9209affadb24c7e25` |
-| `scripts/tests/test_multi_project_plan.py` | `a4956c79cb332c98de3f59f7a717f3a457fe9430996bf41f4214639ff9a88b8a` |
-| `scripts/prove_multi_project_source_preservation.mjs` | `901500c89d0a08e4483025b477adedc688247f56f5d8dc1c13bab5e5ed0e3cc2` |
-| `scripts/tests/test_prove_multi_project_source_preservation.mjs` | `bcfedfec49182e0a5efcf317879d74bea1d4300bd92e5d6afaf1b8514d55a18b` |
+| `scripts/check_multi_project_plan.py` | `fb796228cb8d24000d2b044aec737fcc3e9a1e8eae0d64369ff71154bd494028` |
+| `scripts/tests/test_multi_project_plan.py` | `02903c1105024fd521f5480faf18242ed41c6e19fdff270630ae280166245438` |
+| `scripts/prove_multi_project_source_preservation.mjs` | `2ddae56ba6f2830a33a13dd4bd7eae334a40619ff1f5ccec8e8741ee27cfe6a9` |
+| `scripts/tests/test_prove_multi_project_source_preservation.mjs` | `7208aad5b55f324996c9ae835c32905eb5fce29f3d61051a32a737798df7cd20` |
 
 These checks establish fixture and planning validation behavior. They do not
 complete a product outcome, activate a factory, prove a coding runtime, or
@@ -91,3 +91,22 @@ sizes. Source preservation and every requested tree comparison remain active.
 The final bounded review also rejected transient invalid policy values, unsafe
 paths in unused manifest seeds, and positive raw input in parser-negative cases.
 The added regression group failed before those fixes and passed afterward.
+
+## Input and receipt failure handling
+
+Automated review of `9d79666` found five additional input and oracle issues:
+
+| Review | Finding | Resolution |
+| --- | --- | --- |
+| [3943074739](https://github.com/vivary-dev/vivary/pull/329#discussion_r3943074739) | Unreachable interruption faults | Check prepared source, target, temporary tree, and receipt preconditions before accepting a fault that must reach a new output. |
+| [3943074744](https://github.com/vivary-dev/vivary/pull/329#discussion_r3943074744) | Recursive JSON scanning | Traverse decoded JSON iteratively and report parser nesting limits as validation errors. |
+| [3943074748](https://github.com/vivary-dev/vivary/pull/329#discussion_r3943074748) | Null receipt assertion bypass | Reject parsed non-object receipts, including null, through receipt-shape assertions. |
+| [3943074751](https://github.com/vivary-dev/vivary/pull/329#discussion_r3943074751) | Unreadable evidence receipts | Handle decoding and I/O errors in evidence, anchor, and artifact reads without exposing a traceback. |
+| [3943074755](https://github.com/vivary-dev/vivary/pull/329#discussion_r3943074755) | Wrong policy for manifest aliases | Validate each selected seed against its setup policy; keep checks of unused seeds independent of the default case-sensitivity choice. |
+
+RED: the two planning regressions produced five error subcases in 56 tests,
+covering decoded nested secrets, parser nesting limits, plain and anchored invalid
+UTF-8 receipts, and an unavailable receipt. The three restoration regressions
+failed before their fixes (31 tests, three failures). Final passing counts and
+source hashes appear above. These checks use synthetic inputs in the same
+bounded Habitat environment.

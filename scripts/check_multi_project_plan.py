@@ -190,23 +190,27 @@ def evidence_receipt(record: dict, plan: Path) -> tuple[dict[str, str], list[str
     match = re.fullmatch(r"\[[^]]+\]\(([^)#]+)(?:#[^)]*)?\)", record["fields"].get("Evidence", ""))
     if not match:
         return None
-    target = (record["path"].parent / unquote(match.group(1))).resolve()
-    receipts = (plan / "receipts").resolve()
-    if target.suffix != ".md" or not target.is_relative_to(receipts) or not target.is_file():
+    try:
+        target = (record["path"].parent / unquote(match.group(1))).resolve()
+        receipts = (plan / "receipts").resolve()
+        if target.suffix != ".md" or not target.is_relative_to(receipts) or not target.is_file():
+            return None
+        return parse_header(target.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError):
         return None
-    return parse_header(target.read_text(encoding="utf-8"))
 
 
 def json_text_values(value):
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            yield from json_text_values(item)
-    elif isinstance(value, dict):
-        for key, item in value.items():
-            yield key
-            yield from json_text_values(item)
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            yield item
+        elif isinstance(item, (list, tuple)):
+            pending.extend(item)
+        elif isinstance(item, dict):
+            pending.extend(item)
+            pending.extend(item.values())
 
 
 def reject_json_constant(value: str):
@@ -415,6 +419,11 @@ def check(root: Path) -> list[str]:
         except UnicodeDecodeError:
             if path.suffix.lower() == ".json":
                 errors.append(f"{path.relative_to(root)}: invalid UTF-8 JSON")
+            elif path.suffix.lower() == ".md":
+                errors.append(f"{path.relative_to(root)}: invalid UTF-8 Markdown")
+            continue
+        except OSError:
+            errors.append(f"{path.relative_to(root)}: cannot read planning artifact")
             continue
         if path.suffix == ".md":
             for link in re.findall(r"\]\(([^)\n]+)\)", body):
@@ -428,7 +437,12 @@ def check(root: Path) -> list[str]:
                     if not target.is_file():
                         errors.append(f"{path.relative_to(root)}: anchor target is not a regular file {link}")
                         continue
-                    headings = re.findall(r"^#+ (.+)$", target.read_text(encoding="utf-8"), re.M)
+                    try:
+                        target_body = target.read_text(encoding="utf-8")
+                    except (OSError, UnicodeError):
+                        errors.append(f"{path.relative_to(root)}: cannot read anchor target {link}")
+                        continue
+                    headings = re.findall(r"^#+ (.+)$", target_body, re.M)
                     anchors = {re.sub(r"[^\w -]", "", h.lower()).replace(" ", "-") for h in headings}
                     if anchor not in anchors:
                         errors.append(f"{path.relative_to(root)}: missing anchor {link}")
@@ -442,6 +456,8 @@ def check(root: Path) -> list[str]:
                 )
             except json.JSONDecodeError as exc:
                 errors.append(f"{path.relative_to(root)}: invalid JSON: {exc.msg}")
+            except RecursionError:
+                errors.append(f"{path.relative_to(root)}: JSON nesting exceeds parser limit")
             except ValueError as exc:
                 errors.append(f"{path.relative_to(root)}: invalid JSON constant {exc}")
             else:
