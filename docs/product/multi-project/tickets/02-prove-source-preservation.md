@@ -35,8 +35,10 @@ git diff --check
 
 ## Next packet
 
-[02a](../packets/02a-source-preservation-fixture.md) owns the independent contract and acceptance-fixture work. Planned files are outputs. Live execution, real source import, and full parent acceptance remain separate work.
+[02a](../packets/02a-source-preservation-fixture.md) completed the contract and oracle. [02b](../packets/02b-restore-fixture-harness.md) completed synthetic filesystem restoration in Habitat. Real-source selection, attribution, history capture, and restoration remain open. The next ready program packet is [03c](../packets/03c-registry-transaction-mapping.md).
 
 ## Log
 
 - 2026-09-05: Initial public plan recorded. Implementation has not started.
+
+- 2026-09-05: Synthetic restoration is verified by 02b. This does not prove preservation of real source, ignored resources, Git history, hosted records, or runtime state.

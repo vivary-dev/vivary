@@ -19,7 +19,7 @@ close, erase, or waive any accepted evidence requirement.
 | --- | --- | --- |
 | [151](https://github.com/vivary-dev/vivary/issues/151) | Historical governed-context release map; preserve standalone package boundaries and unresolved proof | New GUI-first program controls order. Bring remaining proof into outcomes 09, 23, 24, 27, and 36 |
 | [214](https://github.com/vivary-dev/vivary/issues/214) | Historical decision map and links to earlier answers | Preserve decided answers unless explicitly superseded; its old “decisions before implementation” frontier does not override current implementation authority |
-| [148](https://github.com/vivary-dev/vivary/issues/148) | Historical platform-proof requirement | Does not authorize WSL for this work. Outcome 23 must resolve supported-platform evidence under the BrowserPod decision |
+| [148](https://github.com/vivary-dev/vivary/issues/148) | Historical platform-proof requirement | Current development uses authorized Habitat; BrowserPod is unavailable. Outcome 23 still owns supported-platform evidence |
 | [211](https://github.com/vivary-dev/vivary/issues/211) | Governed-loop dogfood and graduation evidence | Carry the unresolved proof into outcomes 23 and 36; check existing receipts before repeating it |
 | [212](https://github.com/vivary-dev/vivary/issues/212) | Repository/worktree/release hygiene | Maintenance only with ownership and preservation proof. No bulk deletion or distraction from product packets |
 | [213](https://github.com/vivary-dev/vivary/issues/213) | Restartable continuation and handoffs | Reconcile with outcomes 17 and 29; preserve native state owners |

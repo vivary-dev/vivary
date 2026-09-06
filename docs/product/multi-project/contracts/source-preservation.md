@@ -1,6 +1,6 @@
 # Source-preservation manifest contract
 
-Status: contract for synthetic fixtures. No real source preservation is proved.
+Status: synthetic filesystem contract verified in Habitat by [02b](../receipts/02b-restoration-fixture.md). No real source preservation is proved.
 Owner: outcome 02. First packet: [02a](../packets/02a-source-preservation-fixture.md).
 
 ## Manifest schema version 1
@@ -128,7 +128,7 @@ expected target tree, receipt status, and temporary tree. A harness that dispatc
 on case ID rather than these setup, mutation, fault, and expectation fields does
 not satisfy the contract.
 
-Packet 02b implements and runs this fixture harness in BrowserPod. Actual source
+Packet 02b implements and runs this fixture harness in the authorized Habitat environment. BrowserPod is unavailable. Actual source
 application follows only after path-specific rights, private selection, history
 capture, and disposable restoration evidence exist. Neither synthetic packet
 closes outcome 02.
@@ -148,3 +148,25 @@ Schema wrong types return `invalid-manifest` with `invalid-type`. Unsupported
 destination aliases return `destination-collision`. Successful unchanged partial
 resume returns `restored`. Other expected codes are named by the fixtures and
 follow the validation order above. These rules avoid case-name-specific behavior.
+
+## Executed receipt format
+
+The version-one fixture implementation writes `restore-receipt.json` in a
+separate receipt root. It records `schemaVersion`, `status`, `manifestDigest`,
+`sourceTreeDigest`, and ordered `outputs` containing destination `path`, `size`,
+and `sha256`. An incomplete receipt also records manifest-ordered `ownedPaths`
+and `observedTargetDigest`. It contains no file bytes.
+
+The source-tree digest covers selected and unselected entries, including file
+hashes, directory names, and link targets without following links. Receipt shape,
+manifest binding, whole source state, and owned output bytes are rechecked before
+resume or repeat. Matching completed repeats preserve the receipt and unrelated
+target additions. Preflight permission failures leave output trees unchanged.
+
+The implementation proves controlled interruption between file outputs and
+rollback of this call's newly created files and directories after handled I/O
+errors. It reports `rollback-failed` if cleanup cannot complete. It does not
+promise unchanged filesystem timestamps after rollback, power-loss durability,
+safe concurrent mutation of path components, or support for another platform.
+Actual source preservation must establish those requirements for its selected
+environment before this synthetic helper is used as a production importer.

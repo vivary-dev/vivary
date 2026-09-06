@@ -1,6 +1,6 @@
 # Vivary multi-project workbench
 
-Updated: 2026-09-05. Status: documented program; implementation evidence is tracked by the ticket graph. The product direction, BrowserPod preference, and subsequent Habitat fallback are approved. Ordinary reversible technical choices belong to the owning packet; explicit unresolved product, account, security, and release decisions retain their stated owners.
+Updated: 2026-09-05. Status: documented program; implementation evidence is tracked by the ticket graph. The product direction and Habitat development environment are approved. The owner confirmed BrowserPod is unavailable. Ordinary reversible technical choices belong to the owning packet; explicit unresolved product, account, security, and release decisions retain their stated owners.
 
 This is the canonical program plan. [Execution rules](execution-contract.md), [scope coverage](capability-matrix.md), [native owners](native-owners.md), and [current risks](audit.md) keep the work bounded and current. Start here, then open [the graph](graph.md), [source evidence](evidence.md), [migration map](migration.md), or [release criteria](release.md). [CONTEXT.md](CONTEXT.md) defines the terms.
 
@@ -18,19 +18,19 @@ No model, storage vendor, hosting plan, default runtime, or payment service is s
 
 ## Execution decision: 2026-09-05
 
-The owner explicitly selected BrowserPod for this work and rejected Habitat/WSL
-after the agent used the machine default. BrowserPod is the selected execution
-environment; connection readiness, toolchain compatibility, and native coding
-runtime behavior still require direct proof. Earlier Habitat checks remain
-historical evidence and do not satisfy BrowserPod acceptance. Later on the same
-date, the owner answered "ok lets continue we will have to use the other sandbox
-if necessary", then clarified "habitat or w/e its called". That explicit answer
-authorizes Habitat fallback for this development work and supersedes the earlier
-absolute prohibition. It does not establish BrowserPod compatibility. Packet 10c
-owns the new bounded Habitat proof; 10b keeps the BrowserPod proof open.
-Preferred runtime choice and standalone workspace support
-remain part of the product; this decision does not authorize account, spending,
-credential-transfer, or production-hosting changes.
+The current development environment is the bounded Habitat container named by
+the packet. On 2026-09-05 the owner first selected BrowserPod, subsequently
+authorized Habitat fallback, then explicitly corrected the active instructions:
+"we can't use browserpod". The latest answer supersedes the BrowserPod selection.
+Keep BrowserPod setup and execution out of the active task list. Packet 10b is
+unavailable and does not block Habitat implementation.
+
+[10c](receipts/10c-habitat-fallback-proof.md) records the Habitat toolchain proof.
+Each runtime packet still verifies its exact tools, containment, and behavior.
+Earlier research and receipts retain their historical environment labels.
+Runtime choice and standalone support remain part of the product. This development
+decision does not authorize account, spending, credential-transfer, scheduled
+activation, or production-hosting changes.
 
 ## Recommended architecture
 

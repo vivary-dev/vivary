@@ -42,9 +42,8 @@ graph validation, line endings, diff hygiene, site build, and Windows checks.
 That audit completed outcome 01 and inspection packets 02a and 10a.
 [03a's later receipt](receipts/03a-registry-contract.md) records completed registry
 contract inspection. Current dispatch belongs to [the generated graph](graph.md).
-These results do not prove the 33 restoration cases;
-02b must execute them in the authorized Habitat fallback established by 10c.
-10b retains the separate BrowserPod-specific capability proof.
+[02b](receipts/02b-restoration-fixture.md) subsequently proved all 33 synthetic
+restoration cases in Habitat. BrowserPod is unavailable; 10b is inactive.
 
 The [HoH comparison](research/hoh-alignment.md) adds acceptance refinements
 without advancing implementation status. Runtime-enforced roles, frozen
@@ -52,5 +51,6 @@ candidates, claim-level QA, and evidence-fed replanning remain unverified.
 
 [03b](receipts/03b-registry-contract-model.md) now records actual Habitat model
 verification and independent QA corrections. Its results do not establish the
-production HoH cycle or filesystem enforcement. The next executable packet is
-02b; independent transaction mapping is prepared as 03c.
+production HoH cycle or filesystem enforcement. Packet 02b now supplies bounded synthetic filesystem evidence. The next
+executable packet is 03c for native transaction mapping; real-source preservation
+and production registry enforcement remain open.

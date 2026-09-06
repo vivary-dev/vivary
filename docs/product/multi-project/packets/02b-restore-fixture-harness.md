@@ -1,11 +1,12 @@
 # 02b: Implement and execute the synthetic restoration harness
 Type: packet
 Parent: 02
-Status: ready-for-agent
+Status: done
 Depends-on: [02a, 10c]
-Owner: source preservation implementation agent
+Owner: Codex restore_model, sole code writer; coordinating Codex owns review and receipt
 Scope: Synthetic restoration in one disposable Habitat container root; no real source import.
 Verification-kind: runtime
+Evidence: [Restoration receipt](../receipts/02b-restoration-fixture.md)
 Timebox: One context window; at most 90 minutes, then checkpoint incomplete work.
 
 ## Goal
@@ -60,3 +61,7 @@ the failure and continue only independent in-scope work.
 - 2026-09-05: Prepared as 02a's executable successor. Source preservation and licenses remain open after fixture success.
 
 - 2026-09-05: The owner authorized Habitat fallback and 10c passed the Node/fs/crypto probe. This packet is ready after the current 03b continuation; restore behavior must still be proved by its own real filesystem tests.
+
+- 2026-09-05: Claimed after the owner requested implementation. The code writer owns the two scripts; the coordinator owns Habitat execution, independent review, receipt, and next packet.
+
+- 2026-09-05: Completed in offline Habitat after independent QA corrections: 14 canonical tests, all 33 real-filesystem cases, 10 independent checks, and deliberate CLI failures. Parent outcome 02 remains open for selected real-source provenance, rights, history, and restore evidence. Packet 03c is the next ready task. BrowserPod is unavailable under the owner's latest answer.

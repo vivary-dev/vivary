@@ -7,7 +7,7 @@ Owner: runtime integration agent
 Scope: One BrowserPod session and a synthetic fixture; no product-source import.
 Verification-kind: runtime
 Timebox: One context window and one pod session; checkpoint without repeated boots.
-Needs: A usable user-scoped BrowserPod connection on an approved probe origin, obtained through the existing connection workflow. Do not ask for a key in chat or copy host credentials.
+Needs: The owner confirmed BrowserPod is unavailable on 2026-09-05. This packet is inactive until the owner explicitly restores that option; do not request setup or attempt a boot. Continue the ready Habitat packets.
 
 ## Goal
 
@@ -21,8 +21,8 @@ Read [10a's evidence](../receipts/10a-browserpod-preflight.md), the current
 [native dependency guide](https://browserpod.io/docs/guides/working-around-native-npm-dependencies).
 Retain the exact Core version and source manifest from the preflight.
 
-Prepare the probe source and fixtures while the connection is missing. Only the
-actual boot and usage require the connection. Do not install or execute anything
+The following BrowserPod-specific procedure is retained as historical planning.
+Do not execute or prepare it while BrowserPod is unavailable. Do not install or execute anything
 in Habitat or WSL. Existing repository CI checks are regression evidence, not
 BrowserPod acceptance.
 

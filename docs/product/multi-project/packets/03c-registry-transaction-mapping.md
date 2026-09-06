@@ -1,9 +1,9 @@
 # 03c: Map registry transactions to native application seams
 Type: packet
 Parent: 03
-Status: ready-for-agent
+Status: in-progress
 Depends-on: [03b]
-Owner: registry transaction mapping agent
+Owner: Codex registry_model, sole map writer; coordinating Codex owns independent review
 Scope: Source-backed action, storage, transaction, and root-adapter map only. No production schema, action, adapter, or database selection.
 Verification-kind: inspection
 Timebox: One context window. Stop after a second reader can trace every map row to the contract and an inspected source.
@@ -163,3 +163,5 @@ this packet.
 ## Log
 
 - 2026-09-05: Prepared after 03b's deterministic registry model passed its full fixture, schedule, and deliberate-mutation checks in the authorized Habitat fallback. This packet maps future production transactions and adapters. It does not implement them or complete outcome 03.
+
+- 2026-09-05: Claimed after 02b completed. The sole map writer will inspect existing native APIs and stage the four contract tables; the coordinator owns review and graph integration. No runtime or production schema is created by this packet.

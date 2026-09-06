@@ -40,8 +40,9 @@ Do not reset dirty work, run a competing push, or take over another active write
 
 ## Execution and verification
 
-BrowserPod remains the preferred environment. The owner subsequently authorized
-Habitat fallback on 2026-09-05; see the exact answer in the design decision.
+Use the bounded Habitat development environment. The owner confirmed BrowserPod
+is unavailable on 2026-09-05; see the latest answer in the design decision.
+BrowserPod setup and execution are outside the active task list.
 Runtime packets name the environment and require its live preflight for the exact
 tools they will execute. Habitat results cannot satisfy BrowserPod-specific checks. Native CLI, Python, database, persistence, and isolation support
 remain separate capabilities until each is observed.
