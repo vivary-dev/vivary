@@ -45,6 +45,9 @@ verified.
 The sequencer owns prompt assembly, schema validation with one retry, hashes,
 test execution, no-progress detection, receipt writes, and Git stage
 checkpoints. Follow appendix A.2 when the paper conflicts with its prose. The
+sequencer also enforces the one-hour iteration deadline and five-second stop
+grace specified and tested by 20c. Its remaining duration covers every CLI,
+role-tool worker, and test process; resume cannot reset that deadline. The
 planner sees only the specification, its prompt, and prior public evidence. It
 cannot mount or inspect candidate production code. The developer receives its
 development document and a writable candidate tree. QA receives the
@@ -270,10 +273,10 @@ findmnt -T /tmp/vivary-hoh-proof -o TARGET,SOURCE,FSTYPE,OPTIONS
 findmnt -T /opt/vivary-hoh-source -o TARGET,SOURCE,FSTYPE,OPTIONS
 python tools/tests/test_hoh_loop.py
 python tools/tests/test_hoh_codex.py
-python tools/hoh_loop.py --project /tmp/vivary-hoh-proof/20b/codex/healthy/project --iterations 3 --runtime codex --receipt-dir /tmp/vivary-hoh-proof/20b/codex/healthy/receipts --reported-token-budget 100000 --usage-ledger /tmp/vivary-hoh-proof/20b/usage.json
+python tools/hoh_loop.py --project /tmp/vivary-hoh-proof/20b/codex/healthy/project --iterations 3 --runtime codex --receipt-dir /tmp/vivary-hoh-proof/20b/codex/healthy/receipts --iteration-timeout-seconds 3600 --reported-token-budget 100000 --usage-ledger /tmp/vivary-hoh-proof/20b/usage.json
 python -m unittest discover -s /tmp/vivary-hoh-proof/20b/codex/healthy/project/tests -p 'test_*.py'
-python tools/tests/hoh_fault_probe.py resume --runtime codex --project /tmp/vivary-hoh-proof/20b/codex/resume-fault/project --receipt-dir /tmp/vivary-hoh-proof/20b/codex/resume-fault/receipts --reported-token-budget 100000 --usage-ledger /tmp/vivary-hoh-proof/20b/usage.json
-python tools/tests/hoh_fault_probe.py regression --runtime codex --project /tmp/vivary-hoh-proof/20b/codex/regression-fault/project --receipt-dir /tmp/vivary-hoh-proof/20b/codex/regression-fault/receipts --reported-token-budget 100000 --usage-ledger /tmp/vivary-hoh-proof/20b/usage.json
+python tools/tests/hoh_fault_probe.py resume --runtime codex --project /tmp/vivary-hoh-proof/20b/codex/resume-fault/project --receipt-dir /tmp/vivary-hoh-proof/20b/codex/resume-fault/receipts --iteration-timeout-seconds 3600 --reported-token-budget 100000 --usage-ledger /tmp/vivary-hoh-proof/20b/usage.json
+python tools/tests/hoh_fault_probe.py regression --runtime codex --project /tmp/vivary-hoh-proof/20b/codex/regression-fault/project --receipt-dir /tmp/vivary-hoh-proof/20b/codex/regression-fault/receipts --iteration-timeout-seconds 3600 --reported-token-budget 100000 --usage-ledger /tmp/vivary-hoh-proof/20b/usage.json
 ```
 
 The resume probe must continue from the same committed developer checkpoint or
@@ -391,7 +394,7 @@ findmnt -T /opt/vivary-hoh-source -o TARGET,SOURCE,FSTYPE,OPTIONS
 Run the healthy proof and the completed candidate's product tests:
 
 ```console
-python tools/hoh_loop.py --project /tmp/vivary-hoh-proof/20a/claude/healthy/project --iterations 3 --runtime claude --receipt-dir /tmp/vivary-hoh-proof/20a/claude/healthy/receipts --reported-token-budget 100000 --usage-ledger /tmp/vivary-hoh-proof/20a/usage.json
+python tools/hoh_loop.py --project /tmp/vivary-hoh-proof/20a/claude/healthy/project --iterations 3 --runtime claude --receipt-dir /tmp/vivary-hoh-proof/20a/claude/healthy/receipts --iteration-timeout-seconds 3600 --reported-token-budget 100000 --usage-ledger /tmp/vivary-hoh-proof/20a/usage.json
 python -m unittest discover -s /tmp/vivary-hoh-proof/20a/claude/healthy/project/tests -p 'test_*.py'
 ```
 
@@ -400,8 +403,8 @@ stops after a committed developer checkpoint for resume and injects one known
 candidate fault before the QA freeze for regression. Run:
 
 ```console
-python tools/tests/hoh_fault_probe.py resume --runtime claude --project /tmp/vivary-hoh-proof/20a/claude/resume-fault/project --receipt-dir /tmp/vivary-hoh-proof/20a/claude/resume-fault/receipts --reported-token-budget 100000 --usage-ledger /tmp/vivary-hoh-proof/20a/usage.json
-python tools/tests/hoh_fault_probe.py regression --runtime claude --project /tmp/vivary-hoh-proof/20a/claude/regression-fault/project --receipt-dir /tmp/vivary-hoh-proof/20a/claude/regression-fault/receipts --reported-token-budget 100000 --usage-ledger /tmp/vivary-hoh-proof/20a/usage.json
+python tools/tests/hoh_fault_probe.py resume --runtime claude --project /tmp/vivary-hoh-proof/20a/claude/resume-fault/project --receipt-dir /tmp/vivary-hoh-proof/20a/claude/resume-fault/receipts --iteration-timeout-seconds 3600 --reported-token-budget 100000 --usage-ledger /tmp/vivary-hoh-proof/20a/usage.json
+python tools/tests/hoh_fault_probe.py regression --runtime claude --project /tmp/vivary-hoh-proof/20a/claude/regression-fault/project --receipt-dir /tmp/vivary-hoh-proof/20a/claude/regression-fault/receipts --iteration-timeout-seconds 3600 --reported-token-budget 100000 --usage-ledger /tmp/vivary-hoh-proof/20a/usage.json
 ```
 
 Record each invocation, checkpoint, injected hash, usage sample, and result in

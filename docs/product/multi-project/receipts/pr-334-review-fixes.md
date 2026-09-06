@@ -75,6 +75,9 @@ implementation. The packet owns its schema and enforcement proof.
 | [Parity cleanup](https://github.com/vivary-dev/vivary/pull/335#discussion_r3944993321) | The parity owner prepares itemized, restore-proven cleanup for explicit approval and retains archives for outcome 04 |
 | [Claimable deterministic preparation](https://github.com/vivary-dev/vivary/pull/335#discussion_r3945089814) | Packet 20c owns preparation and deterministic tests with a receipt; 20a depends on it and keeps only its actual native-call prerequisite blocked |
 | [Exact export paths](https://github.com/vivary-dev/vivary/pull/335#discussion_r3945089827) | Check each archive, manifest, and temporary output path separately for an ignore match and resolved containment before writing |
+| [Preparation cleanup gate](https://github.com/vivary-dev/vivary/pull/335#discussion_r3945141057) | Retain stopped 20c containers and persistent test trees, export and restore evidence, then request each itemized removal |
+| [Enforced deadlines](https://github.com/vivary-dev/vivary/pull/335#discussion_r3945141063) | The sequencer owns the one-hour deadline, bounded process termination, and tests for stalled descendants and restart without resetting time |
+| [Executable evidence class](https://github.com/vivary-dev/vivary/pull/335#discussion_r3945141068) | 20c uses runtime verification for offline behavioral tests and retains the separate unproved native CLI acceptance |
 
 The first remote review of `2c497d6` found five additional issues. The follow-up
 binds exports to the verified absolute Littleagent checkout and requires
@@ -113,6 +116,10 @@ The independent recheck accepted both later findings with no contradiction.
 It verified 20c ownership and its offline container boundary, 20a's dependency,
 and the actual export checks. All four archive and manifest paths matched
 Littleagent's ignore rule. Planning, line-ending, diff, and writing checks passed.
+The next independent recheck accepted the runtime classification, required
+deadline enforcement, and retained-container cleanup contract. Planning and
+diff checks passed. These are verified packet requirements; implementation
+and executable preparation evidence remain the work of 20c.
 
 The independent reader rechecked all reported execution gaps and accepted the
 final packet. Their planning, line-ending, and diff checks passed. They confirmed

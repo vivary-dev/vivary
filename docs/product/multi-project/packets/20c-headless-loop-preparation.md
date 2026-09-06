@@ -5,7 +5,7 @@ Status: ready-for-agent
 Depends-on: [10c]
 Owner: deterministic headless-loop preparation agent, sole writer
 Scope: Offline fixture, prompts, protocol, sequencer, Claude adapter test seam, and adversarial tests; no coding-runtime or model call.
-Verification-kind: inspection
+Verification-kind: runtime
 Timebox: One context window. Stop after the offline Habitat evidence and closure records are complete.
 
 ## Goal
@@ -50,10 +50,15 @@ packet, so their initial absence is not a prerequisite failure.
 Keep captured output and the source manifest under the verified preserved
 Littleagent checkout's `.tmp/hoh-proof/20c/`. Apply 20a's separate ignore and
 resolved-containment checks to every actual output and temporary filename
-before writing; refuse existing files. Record the exact source-bundle path
-privately and transfer its retention ownership to 20a, then 20b's itemized
-cleanup contract. The disposable container and its temporary candidate trees
-end with `--rm`. Private evidence and source bundles are not product source.
+before writing; refuse existing files. Record source-bundle and writable test
+paths privately. Retain each stopped task container and its test tree after
+verification. After independent acceptance and a restore-and-hash check of the
+exported evidence, the 20c owner prepares an itemized cleanup receipt and asks
+for approval for each container or path removal. Record stopped-process
+evidence, exact targets, archive hashes, owner, and a review-by date seven days
+after closure. Keep pending removals visible at the next handoff; schedule no
+job. Archives remain inputs for 20a and follow its later retention contract.
+Private evidence and source bundles are not product source.
 
 ## Done condition
 
@@ -101,6 +106,16 @@ end with `--rm`. Private evidence and source bundles are not product source.
     Python identities, exact commands and exit status, named adversarial
     observations, fault checkpoints, ledger and receipt bindings, and explicit
     absence of authentication mounts, network access, installs, and model calls.
+12. The sequencer enforces 20a's one-hour iteration deadline across native CLI,
+    role-tool worker, and deterministic test processes. Pass the remaining
+    duration to every launch, refuse work after expiry, and reject late output.
+    Stop and reap the exact owned process group and stop any owned role container
+    within a five-second grace period; retain its files and stopped container.
+    Preserve elapsed time and the original expiry across resume, and refuse a
+    backward or uncertain clock observation rather than resetting the allowance.
+    Adversarial tests use a stalled child and child-of-child to prove timeout,
+    descendant termination, incomplete receipts, retained token reservations,
+    no next-role launch, and no deadline reset after restart.
 
 ## Verify
 
@@ -114,14 +129,20 @@ docker image inspect sha256:ffdba5d54dd6f91875fa60fc15103b6b30bb23ecaaf2d8ed6555
 
 Acceptance uses a reviewed source bundle outside the production checkout,
 mounted read-only at `/opt/vivary-hoh-source`. Set `HABITAT_SOURCE_BUNDLE` to
-its verified absolute host path. From Habitat's Docker host, run the existing
-image with this exact boundary and no authentication volume:
+its verified absolute host path. Set `HABITAT_TEST_ROOT` to a fresh persistent
+task directory and `HABITAT_TEST_CONTAINER` to a unique `vivary-20c-test-` name.
+Verify both paths remain in the task's authorized Habitat work root. Refuse an
+existing test path or container name, then create that fresh directory with
+write access for the image's verified `ubuntu` UID and GID. Mount it at `/tmp`
+so stopping the container preserves candidate and test evidence. From Habitat's
+Docker host, run the existing image with this boundary and no authentication volume:
 
 ```console
-docker run --rm --pull never --name vivary-20c-test --network none --read-only --user ubuntu --cap-drop ALL --security-opt no-new-privileges --cpus 2 --memory 1g --pids-limit 128 --mount type=bind,src="$HABITAT_SOURCE_BUNDLE",dst=/opt/vivary-hoh-source,readonly --tmpfs /tmp:rw,nosuid,nodev,size=128m --workdir /opt/vivary-hoh-source sha256:ffdba5d54dd6f91875fa60fc15103b6b30bb23ecaaf2d8ed65559d3cdff05bee python3 -B -m unittest discover -s tools/tests -p 'test_hoh*.py'
+docker run --pull never --name "$HABITAT_TEST_CONTAINER" --network none --read-only --user ubuntu --cap-drop ALL --security-opt no-new-privileges --cpus 2 --memory 1g --pids-limit 128 --mount type=bind,src="$HABITAT_SOURCE_BUNDLE",dst=/opt/vivary-hoh-source,readonly --mount type=bind,src="$HABITAT_TEST_ROOT",dst=/tmp --workdir /opt/vivary-hoh-source sha256:ffdba5d54dd6f91875fa60fc15103b6b30bb23ecaaf2d8ed65559d3cdff05bee python3 -B -m unittest discover -s tools/tests -p 'test_hoh*.py'
+docker inspect "$HABITAT_TEST_CONTAINER"
 ```
 
-Record the resolved mount source, image inspection, exact container command,
+Record the resolved mount sources, image and container inspection, exact command,
 source hashes, test names/counts, stdout, stderr, and exit status. If role-tool tests
 exist, the discovery command includes them. Then run the common planning checks
 from [the execution contract](../execution-contract.md#maintaining-the-graph).
@@ -134,6 +155,8 @@ Docker socket mount. Do not create a token broker, daemon, database, queue, or
 fallback accounting service. Stop if the source bundle is writable, its hashes
 differ from the reviewed candidate, the container boundary differs from the
 recorded command, or a deterministic adversarial check fails.
+Use no `--rm`, automatic source/test-tree deletion, or cleanup job. Stop only
+task-owned processes after tests; keep removal pending until explicit approval.
 
 20c closure proves preparation only. Actual role-tool authority, authenticated
 CLI behavior, provider network path, credential isolation, OS enforcement,
@@ -148,3 +171,6 @@ this packet, and do not mark 20a done from deterministic evidence.
 - 2026-09-06: PR #335 review separated claimable deterministic preparation from
   the blocked live proof. Packet 20c owns offline implementation and adversarial
   evidence; 20a retains every live-runtime claim and token-policy gate.
+- 2026-09-06: Runtime classification now covers executable offline acceptance.
+  The sequencer must prove enforced deadlines. Containers and test trees remain
+  available for an itemized, explicitly approved cleanup after evidence export.
