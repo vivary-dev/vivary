@@ -815,7 +815,7 @@ jobs:
         run: python packages/create-vivary/tests/orientation_proof.py --receipt orientation-proof.json
       - name: preserve orientation receipt
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: orientation-proof-${{ runner.os }}
           path: orientation-proof.json
