@@ -6,7 +6,7 @@ Status: needs-info
 Depends-on: [10c, 20c]
 Owner: Claude loop proof agent
 Needs: A verified pre-admission bound on cumulative input and output for an installed Claude Code invocation, supplied by the runtime integration maintainer. Jeff owns any proposed change to this packet's hard token policy. The installed CLI has no documented bound that satisfies it.
-Scope: Run one Claude Code proof using the deterministic implementation accepted in 20c. Complete three healthy iterations and two isolated fault runs within 100,000 reported tokens. Do not run Codex parity, a GUI, an Agent-Native server, a new scheduler, or a paid API key.
+Scope: Run one Claude Code proof using the deterministic implementation frozen and source-reviewed under 20c. Complete three healthy iterations and two isolated fault runs within 100,000 reported tokens. Do not run Codex parity, a GUI, an Agent-Native server, a new scheduler, or a paid API key.
 Verification-kind: runtime
 Timebox: One context window. Stop after three healthy iterations and both fault runs, or at a stop condition, and write the receipt.
 
@@ -35,7 +35,13 @@ are in the paper's PDF appendix A.2 (arXiv 2609.01481v1, pages 22 to 25). The
 HTML omits them. The Fusepoint repository (`Flesymeb/fusepoint`, branch
 `gameloop`, `.gameloop/receipts/`) supplies the reference record shapes.
 
-Packet 20c implements the runtime-neutral role, transition, and receipt
+Packet 20c's implementation is frozen, and its independent source review closed
+all six findings recorded in the
+[preparation receipt](../receipts/20c-headless-loop-preparation.md). Its strict
+Habitat runtime acceptance remains open because the environment clock moved
+backward. Packet 20a therefore cannot start through that dependency, and it
+retains its separate need for the verified pre-admission token bound above.
+The implementation defines the runtime-neutral role, transition, and receipt
 interface in `tools/hoh/protocol.py`. Habitat has Claude Code `2.1.241`. The Claude adapter
 maps only capabilities verified from that installed CLI onto the interface.
 Record the version, model, subscription, and exact live-preflight flags. Do not
@@ -446,3 +452,7 @@ them.
 - 2026-09-06: Review tightened the expected-red starter oracle, planner isolation, tests-only fault probe, usage ceiling, and durable evidence handoff. No runtime implementation started.
 - 2026-09-06: PR #335 review required pre-admission token reservations and credential isolation. The installed Claude CLI has no documented whole-invocation token bound, so live calls remain stopped and this packet needs that concrete capability or an approved policy alternative. Offline tools and subscription authentication passed. The execution contract permits independent available work.
 - 2026-09-06: Packet 20c owns claimable deterministic preparation while only this live proof remains blocked. Export checks now bind every actual archive, manifest, and temporary output path before writing it.
+- 2026-09-06: Packet 20c froze its implementation and closed its independent
+  source findings, but its strict Habitat acceptance remains `needs-info` after
+  repeated wall-clock reversals. Packet 20a keeps its own distinct
+  pre-admission token-bound prerequisite and does not start while 20c is open.

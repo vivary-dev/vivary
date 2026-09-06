@@ -9,7 +9,7 @@ The 36 numbered outcomes preserve the complete product. Their dependencies
 gate completion. Agents execute bounded packets; a future feature or release
 decision does not block an independent packet. Packet dependencies gate starts.
 
-Frontier: 20c.
+Frontier: none.
 In progress: none.
 
 ## Execution packets
@@ -26,7 +26,7 @@ In progress: none.
 | [10c: Prove the authorized Habitat fallback toolchain](packets/10c-habitat-fallback-proof.md) | 10 | done | [10a] |
 | [12a: Define the trusted root and VCS observation boundary](packets/12a-root-vcs-observation-contract.md) | 12 | done | [03c] |
 | [20a: Prove the Claude Code headless loop on files](packets/20a-headless-loop-proof.md) | 20 | needs-info | [10c, 20c] |
-| [20c: Prepare the deterministic headless loop proof](packets/20c-headless-loop-preparation.md) | 20 | ready-for-agent | [10c] |
+| [20c: Prepare the deterministic headless loop proof](packets/20c-headless-loop-preparation.md) | 20 | needs-info | [10c] |
 | [24a: Index canonical sources and module ownership](packets/24a-source-module-navigation.md) | 24 | done | [12a] |
 
 ## Product outcomes
