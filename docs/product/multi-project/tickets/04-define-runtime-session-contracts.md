@@ -40,3 +40,5 @@ they do not prove the behavior above.
 - 2026-09-05: Initial public plan recorded. Implementation has not started.
 
 - 2026-09-05: Refined acceptance after the owner-requested [HoH comparison](../research/hoh-alignment.md). These criteria remain unimplemented and unverified.
+
+- 2026-09-06: Owner decision four in [the direction decision](../design.md#direction-decision-2026-09-06): Vivary is a layer over whichever coding agent the user is subscribed to. The runtime and session contract is an adapter contract: the same role permission sets, prompt handoff, receipt shape, and usage fields across Claude Code, Codex, and later adapters, with no model API key required for the loop. Packet [20a](../packets/20a-headless-loop-proof.md) is the first evidence input. Unimplemented and unverified.

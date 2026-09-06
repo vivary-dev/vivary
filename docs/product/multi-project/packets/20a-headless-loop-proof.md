@@ -5,7 +5,7 @@ Parent: 20
 Status: ready-for-agent
 Depends-on: [10c]
 Owner: loop proof agent
-Scope: One fixture code project and three iterations of planner, developer, and QA tester as headless subscription coding-agent sessions with files between them; no GUI, no Agent-Native server, no change under `packages/`, no new scheduler, no paid API key.
+Scope: One fixture code project and three iterations of planner, developer, and QA tester as headless subscription coding-agent sessions with files between them, run on each subscribed runtime the sandbox can authenticate (Claude Code first, Codex second) with one receipt shape; no GUI, no Agent-Native server, no change under `packages/`, no new scheduler, no paid API key.
 Verification-kind: runtime
 Timebox: One context window per iteration set. Stop after three iterations plus the two fault cases, or at a stop condition, and write the receipt.
 
@@ -40,7 +40,10 @@ the tool set per session and `codex exec --sandbox read-only` restricts writes.
 Use those flags as the role boundary and record them. A sequencer that starts
 three CLI sessions and passes files between them is not a second reasoning
 loop, transcript store, or scheduler; the coding agent keeps its own loop and
-session state.
+session state. The sequencer treats the runtime as an adapter: one module per
+CLI that maps the role's permission set, the prompt handoff, and the usage
+output onto the same receipt shape. Nothing in the loop depends on one vendor,
+per decision four in [the direction decision](../design.md#direction-decision-2026-09-06).
 
 The offline container used by 10c has no network and cannot run a coding
 agent. Use the Habitat sandbox (WSL2 distro `habitat`) through its allowlist
@@ -63,8 +66,12 @@ proxy, where the owner's Claude Code authentication was confirmed on
 
 ## Done condition
 
-1. Three iterations complete on the fixture with the same model, harness, role
-   prompts, and policy. The receipt records every version and flag.
+1. Three iterations complete on the fixture on each subscribed runtime the
+   sandbox can authenticate, Claude Code first and Codex second, with the same
+   role prompts, policy, and receipt shape. Within one runtime the model and
+   harness stay fixed. The receipt records every version and flag per runtime.
+   If a second runtime cannot authenticate in the sandbox, record it as not
+   run and name the exact prerequisite; do not substitute an API key.
 2. Each iteration binds the base candidate hash, the development document
    hash, the developer's resulting candidate hash, the frozen candidate hash
    QA assessed (equal before and after), the test results, and the QA evidence
@@ -92,13 +99,16 @@ proxy, where the owner's Claude Code authentication was confirmed on
 ## Verify
 
 ```console
-python tools/hoh_loop.py --project docs/product/multi-project/fixtures/hoh-loop --iterations 3 --runtime claude --receipt-dir .hoh
+python tools/hoh_loop.py --project docs/product/multi-project/fixtures/hoh-loop --iterations 3 --runtime claude --receipt-dir .hoh/claude
+python tools/hoh_loop.py --project docs/product/multi-project/fixtures/hoh-loop --iterations 3 --runtime codex --receipt-dir .hoh/codex
 python -m pytest docs/product/multi-project/fixtures/hoh-loop/tests -q
 python scripts/check_multi_project_plan.py --check
 ```
 
 Run in the Habitat sandbox through its allowlist proxy. Record the exact CLI
-versions, model, and flags. Then run the two fault cases from the done
+versions, model, and flags for each runtime. Compare the two runtimes' receipts
+field by field; the shape must be identical and any difference in role
+enforcement is recorded, not hidden. Then run the two fault cases from the done
 condition and record both outcomes in the receipt. A second reader traces each
 receipt claim to a hash or a command output before the packet closes.
 
@@ -116,3 +126,5 @@ sandbox after the session.
 ## Log
 
 - 2026-09-06: Packet created from the owner's loop-first and code-first decisions. Not started.
+
+- 2026-09-06: Owner clarification recorded as decision four: the loop is a layer over whichever harness the user is subscribed to. The proof now runs on Claude Code and Codex with one receipt shape and an adapter per CLI.
