@@ -33,7 +33,9 @@ room for the work. This file obeys its own law — keep it that way.
 across README/docs/templates/skills when a link will do. Choose the next source
 from [the program frontier](docs/product/multi-project/index.md) or the owning
 package README. Use `tropo graph` and module indexes when the selected source
-tree configures them.
+tree configures them. When work crosses root observation, project identity,
+native runtime, or project write-back, start at the bounded
+[source map](docs/product/multi-project/source-map/index.md).
 
 ## The operating loop (per turn)
 

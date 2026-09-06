@@ -2,11 +2,13 @@
 
 Type: packet
 Parent: 24
-Status: ready-for-agent
+Status: done
 Depends-on: [12a]
 Owner: Source-navigation agent, sole writer, with an independent retrieval reviewer
 Scope: Configure a bounded typed source graph and four module routes over canonical source references. Preserve source ownership and distinguish implemented behavior from proposals.
 Verification-kind: inspection
+Evidence: [Source module navigation receipt](../receipts/24a-source-module-navigation.md)
+Verification-result: passed
 Timebox: One context window. Stop after the source graph and four module routes pass independent retrieval checks.
 
 ## Goal
@@ -40,6 +42,7 @@ Tropo analyzes the entire tree under its configured root. Use the dedicated
 stays outside the graph. References resolve inside that tree. Source-reference
 records point to canonical files outside it through repository-relative locators.
 Their brief purpose and locator are navigation metadata, not another specification.
+Each source-reference record is the sole owner of its locator.
 
 ## Owned files
 
@@ -58,13 +61,16 @@ Their brief purpose and locator are navigation metadata, not another specificati
   commands or tested library functions. Add no parser or graph engine.
 - Update `AGENTS.md` and `docs/README.md` with a short conditional pointer to the
   source-map index. Preserve existing execution and release authorities.
+- Update `CHANGELOG.md`, then regenerate
+  `site/src/content/docs/changelog.md` and `site/public/llms-full.txt` through the
+  canonical site sync. Do not edit generated mirrors directly.
 - Update this packet, `docs/product/multi-project/tickets/24-write-product-docs-guides.md`,
   and generated `docs/product/multi-project/index.md` and `graph.md` through the
   planning renderer.
 - Create `docs/product/multi-project/receipts/24a-source-module-navigation.md` for
   commands, candidate hashes, observed edges, negative checks, and independent retrieval.
 
-| Source-reference filename | Canonical locator from repository root |
+| Source-reference filename | Initial inspected locator from repository root |
 | --- | --- |
 | `program-execution.md` | `docs/product/multi-project/execution-contract.md` |
 | `root-observation-contract.md` | `docs/product/multi-project/contracts/root-vcs-observation.md` |
@@ -77,6 +83,11 @@ Their brief purpose and locator are navigation metadata, not another specificati
 | `registry-model-tests.md` | `scripts/tests/test_registry_contract_model.mjs` |
 | `observation-receipt.md` | `docs/product/multi-project/receipts/12a-root-vcs-observation-contract.md` |
 | `registry-receipt.md` | `docs/product/multi-project/receipts/03c-registry-transaction-mapping.md` |
+
+The table freezes the initial mappings selected by source inspection. If a target
+moves, update only its owning source-reference record. The checker proves locator
+syntax, existence, and repository containment; independent inspection establishes
+that the target's content still serves the stated purpose.
 
 ## Done condition
 
@@ -164,3 +175,11 @@ No publication, account change, or product activation occurs.
 - 2026-09-06: Prepared after the owner's request for progressive disclosure,
   open knowledge, related-source navigation, specific information locations,
   and deep modules. Source graph and retrieval implementation remain pending.
+- 2026-09-06: Implemented the bounded 16-record source map, four module routes,
+  strict graph/locator checker, and 13 focused negative and movement tests.
+  Author verification passed.
+- 2026-09-06: An independent reader followed the root routes to the owning module,
+  contract, implementation, tests, and receipt without loading the full program.
+  Its adversarial review found a duplicate-edge counting defect; the focused test
+  failed first, the checker was corrected, and the reader accepted the rerun with
+  no remaining finding. Packet 24a is complete. Outcome 24 remains planned.

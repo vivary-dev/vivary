@@ -31,6 +31,7 @@ Starlight guides.
 | Document | What it covers |
 |---|---|
 | [Multi-project program](product/multi-project/design.md) | Approved GUI-first evolution, 36-ticket graph, preservation map, and unmet release gates. |
+| [Source map](product/multi-project/source-map/index.md) | Typed routes for root observation, project registry, native runtime, and project write-back work. |
 | [bellamente-memory/](bellamente-memory/) | Reconciled contract for optional Bellamente agent LTM and its typed Vivary boundary. |
 | [PRODUCT-ROADMAP.md](PRODUCT-ROADMAP.md) | Canonical outcome map behind the public [roadmap page](https://vivary.vercel.app/roadmap/). |
 

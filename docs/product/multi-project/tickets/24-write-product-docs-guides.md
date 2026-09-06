@@ -42,3 +42,7 @@ they do not prove the behavior above.
 - 2026-09-05: Preserve unresolved earlier dogfood, tutorial, and token-savings benchmark requirements through [the issue authority map](../issue-authority.md). Pilot cost metrics do not replace the separate comparative token-savings protocol.
 
 - 2026-09-06: Prepare 24a for source navigation and module ownership after the owner requested progressive disclosure and open knowledge. Product documentation acceptance remains pending.
+
+- 2026-09-06: Packet 24a implemented its bounded source graph and entered independent retrieval review. Outcome 24 remains planned with all installed-guide dependencies unchanged.
+
+- 2026-09-06: Packet 24a passed independent retrieval and adversarial checks. Its source-navigation receipt is accepted. Outcome 24 remains planned; this preparatory map does not satisfy installed-guide acceptance or remove any dependency.
