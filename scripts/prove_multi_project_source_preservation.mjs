@@ -41,6 +41,19 @@ const FILE_FIELDS = ["path", "kind", "sha256", "size", "class", "destination"];
 const HISTORY_FIELDS = ["kind", "evidenceRef", "reason"];
 const ATTRIBUTION_FIELDS = ["sourceOwner", "licenseDisposition", "reviewed"];
 const EXCLUSION_FIELDS = ["class", "reason"];
+const FIXTURE_EXPECTATION_FIELDS = new Set([
+  "issues",
+  "noWrites",
+  "ownedPaths",
+  "privacySafeError",
+  "receiptBinding",
+  "receiptStatus",
+  "result",
+  "sourceUnchanged",
+  "targetTreeRef",
+  "tempTreeRef",
+  "verifiedPaths",
+]);
 const RECEIPT_FILE = "restore-receipt.json";
 
 const isObject = (value) =>
@@ -948,7 +961,10 @@ const validateFixtureTree = (entries) => {
     paths.add(entry.path);
     if (entry.kind === "file") {
       if (!same(Object.keys(entry).sort(), ["contentBase64", "kind", "path"]) ||
-          typeof entry.contentBase64 !== "string") throw new Error("invalid fixture file");
+          typeof entry.contentBase64 !== "string" ||
+          Buffer.from(entry.contentBase64, "base64").toString("base64") !== entry.contentBase64) {
+        throw new Error("invalid fixture file");
+      }
     } else if (entry.kind === "directory") {
       if (!same(Object.keys(entry).sort(), ["kind", "path"])) throw new Error("invalid fixture directory");
     } else if (entry.kind === "link") {
@@ -1207,16 +1223,85 @@ const runOneFixtureCase = async (fixture, fixtureCase, caseRoot) => {
   return { id: fixtureCase.id, pass: failures.length === 0, failures, actual };
 };
 
+const invalidFixtureExpectation = () => {
+  throw new Error("invalid fixture expectation");
+};
+
+const validateFixtureExpectation = (expect, fixture, requireAssertions = false) => {
+  if (!isObject(expect) || Object.keys(expect).some((key) => !FIXTURE_EXPECTATION_FIELDS.has(key))) {
+    invalidFixtureExpectation();
+  }
+  for (const field of ["sourceUnchanged", "privacySafeError", "noWrites"]) {
+    if (Object.hasOwn(expect, field) && typeof expect[field] !== "boolean") invalidFixtureExpectation();
+  }
+  for (const field of ["result", "targetTreeRef", "tempTreeRef"]) {
+    if (Object.hasOwn(expect, field) &&
+        (typeof expect[field] !== "string" || expect[field].length === 0)) {
+      invalidFixtureExpectation();
+    }
+  }
+  if (Object.hasOwn(expect, "receiptStatus") &&
+      !new Set(["complete", "incomplete"]).has(expect.receiptStatus)) {
+    invalidFixtureExpectation();
+  }
+  if (Object.hasOwn(expect, "receiptBinding") && expect.receiptBinding !== "current-manifest") {
+    invalidFixtureExpectation();
+  }
+  if (Object.hasOwn(expect, "issues") &&
+      (!Array.isArray(expect.issues) ||
+       !expect.issues.every((issue) => typeof issue === "string" && issue.length > 0))) {
+    invalidFixtureExpectation();
+  }
+  for (const field of ["verifiedPaths", "ownedPaths"]) {
+    if (Object.hasOwn(expect, field) &&
+        (!Array.isArray(expect[field]) || !expect[field].every(isSafeRelativePosixPath))) {
+      invalidFixtureExpectation();
+    }
+  }
+  for (const field of ["targetTreeRef", "tempTreeRef"]) {
+    if (Object.hasOwn(expect, field) && !Object.hasOwn(fixture.trees, expect[field])) {
+      invalidFixtureExpectation();
+    }
+  }
+  if (!requireAssertions) return;
+  if (expect.sourceUnchanged !== true || expect.privacySafeError !== true ||
+      typeof expect.result !== "string" || typeof expect.noWrites !== "boolean") {
+    invalidFixtureExpectation();
+  }
+  if (expect.noWrites === false) {
+    for (const field of ["targetTreeRef", "tempTreeRef", "receiptStatus", "receiptBinding"]) {
+      if (!Object.hasOwn(expect, field)) invalidFixtureExpectation();
+    }
+    const pathsField = expect.receiptStatus === "complete" ? "verifiedPaths" : "ownedPaths";
+    if (!Object.hasOwn(expect, pathsField)) invalidFixtureExpectation();
+  }
+};
+
 const validateFixtureEnvelope = (fixture) => {
   if (!isObject(fixture) || fixture.fixtureSchemaVersion !== 1 || !isObject(fixture.defaults) ||
       !isObject(fixture.manifests) || !isObject(fixture.trees) || !isObject(fixture.receipts) ||
       !Array.isArray(fixture.cases)) throw new Error("invalid source-preservation fixture");
+  for (const tree of Object.values(fixture.trees)) validateFixtureTree(tree);
+  validateFixtureExpectation(fixture.defaults.expect, fixture);
   const caseIds = new Set();
   for (const fixtureCase of fixture.cases) {
     const id = fixtureCase?.id;
     if (typeof id !== "string" || id.length === 0) throw new Error("invalid fixture case id");
     if (caseIds.has(id)) throw new Error(`duplicate fixture case id: ${id}`);
     caseIds.add(id);
+    validateFixtureExpectation(fixtureCase.expect, fixture);
+    validateFixtureExpectation(
+      { ...fixture.defaults.expect, ...fixtureCase.expect },
+      fixture,
+      true,
+    );
+    if (Array.isArray(fixtureCase.mutations)) {
+      for (const mutation of fixtureCase.mutations) {
+        if (new Set(["tree-add", "tree-replace"]).has(mutation?.op)) {
+          validateFixtureTree([mutation.entry]);
+        }
+      }
+    }
   }
 };
 

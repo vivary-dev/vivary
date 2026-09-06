@@ -8,6 +8,7 @@ Scope: Source and primary-document inspection; no pod boot or model call.
 Verification-kind: inspection
 Timebox: One context window; end with the reviewed capability boundary.
 Evidence: [Preflight receipt](../receipts/10a-browserpod-preflight.md)
+Verification-result: passed
 
 ## Goal
 

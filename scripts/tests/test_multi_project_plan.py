@@ -36,7 +36,8 @@ class PlanCheckTests(unittest.TestCase):
         ])
         (self.plan / 'capability-matrix.md').write_text(coverage, encoding='utf-8')
         (self.plan / 'receipts').mkdir()
-        (self.plan / 'receipts/fixture.md').write_text('# Fixture receipt\n', encoding='utf-8')
+        (self.plan / 'receipts/fixture.md').write_text(
+            '# Fixture receipt\n\nEvidence-record: 02a\n', encoding='utf-8')
         self.packet = self.plan / 'packets/02a-fixture.md'
         self.packet.write_text('# 02a: fixture\n\nType: packet\nParent: 02\nStatus: ready-for-agent\nDepends-on: []\nOwner: fixture agent\nScope: isolated fixture\nTimebox: one context\nVerification-kind: runtime\n\n## Goal\nRound trip.\n## Context\nSynthetic inputs.\n## Owned files\nCreate fixture.mjs.\n## Done condition\nExact roundtrip.\n## Verify\n```console\nnode --test fixture.mjs\n```\n## Stop conditions\nNo external writes.\n## Log\nPrepared.\n', encoding='utf-8')
         self.render()
@@ -122,12 +123,70 @@ class PlanCheckTests(unittest.TestCase):
         self.render()
         self.assert_error('done requires linked evidence receipt')
 
-    def test_done_requires_recorded_verification_results(self):
+    def test_done_requires_structured_verification_result(self):
         self.replace(self.packet, 'Status: ready-for-agent', 'Status: done')
         self.replace(self.packet, 'Timebox: one context', 'Evidence: [Fixture receipt](../receipts/fixture.md)\nTimebox: one context')
         self.replace(self.packet, 'Prepared.', 'Implementation has not started.')
         self.render()
-        self.assert_error('done requires recorded verification results')
+        self.assert_error('done requires Verification-result: passed')
+
+    def test_structured_pass_allows_historical_failure_detail_in_log(self):
+        self.replace(self.packet, 'Status: ready-for-agent', 'Status: done')
+        self.replace(self.packet, 'Timebox: one context',
+                     'Evidence: [Fixture receipt](../receipts/fixture.md)\n'
+                     'Verification-result: passed\nTimebox: one context')
+        self.replace(self.packet, 'Prepared.', 'The earlier verification failed; see the receipt for the current run.')
+        self.render()
+        self.assertEqual(module.check(self.root), [])
+
+    def test_failed_structured_result_rejects_positive_log_prose(self):
+        self.replace(self.packet, 'Status: ready-for-agent', 'Status: done')
+        self.replace(self.packet, 'Timebox: one context',
+                     'Evidence: [Fixture receipt](../receipts/fixture.md)\n'
+                     'Verification-result: failed\nTimebox: one context')
+        self.replace(self.packet, 'Prepared.', 'Verification completed and passed.')
+        self.render()
+        self.assert_error('done requires Verification-result: passed')
+
+    def test_done_record_rejects_duplicate_structured_result(self):
+        self.replace(self.packet, 'Status: ready-for-agent', 'Status: done')
+        self.replace(self.packet, 'Timebox: one context',
+                     'Evidence: [Fixture receipt](../receipts/fixture.md)\n'
+                     'Verification-result: failed\n'
+                     'Verification-result: passed\nTimebox: one context')
+        self.replace(self.packet, 'Prepared.', 'Verification completed and passed.')
+        self.render()
+        self.assert_error('duplicate metadata field Verification-result')
+
+    def test_done_record_rejects_receipt_bound_to_another_record(self):
+        self.replace(self.packet, 'Status: ready-for-agent', 'Status: done')
+        self.replace(self.packet, 'Timebox: one context',
+                     'Evidence: [Fixture receipt](../receipts/fixture.md)\nVerification-result: passed\nTimebox: one context')
+        self.replace(self.packet, 'Prepared.', 'Verification completed and passed.')
+        self.replace(self.plan / 'receipts/fixture.md', 'Evidence-record: 02a', 'Evidence-record: 01')
+        self.render()
+        self.assert_error('evidence receipt does not bind record 02a')
+
+    def test_done_record_rejects_ambiguous_structured_result(self):
+        self.replace(self.packet, 'Status: ready-for-agent', 'Status: done')
+        self.replace(self.packet, 'Timebox: one context',
+                     'Evidence: [Fixture receipt](../receipts/fixture.md)\n'
+                     'Verification-result: failed; passed\nTimebox: one context')
+        self.replace(self.packet, 'Prepared.', 'Verification completed and passed.')
+        self.render()
+        self.assert_error('done requires Verification-result: passed')
+
+    def test_done_record_rejects_duplicate_receipt_binding_metadata(self):
+        self.replace(self.packet, 'Status: ready-for-agent', 'Status: done')
+        self.replace(self.packet, 'Timebox: one context',
+                     'Evidence: [Fixture receipt](../receipts/fixture.md)\n'
+                     'Verification-result: passed\nTimebox: one context')
+        self.replace(self.packet, 'Prepared.', 'Verification completed and passed.')
+        receipt = self.plan / 'receipts/fixture.md'
+        receipt.write_text(
+            '# Fixture receipt\n\nEvidence-record: 01\nEvidence-record: 02a\n', encoding='utf-8')
+        self.render()
+        self.assert_error('evidence receipt has duplicate metadata field Evidence-record')
 
     def test_done_outcome_cannot_have_unfinished_child_packet(self):
         ticket = self.ticket('02')
@@ -166,6 +225,61 @@ class PlanCheckTests(unittest.TestCase):
     def test_private_path_in_raw_evidence_fails(self):
         (self.plan / 'raw-evidence.txt').write_text('C:/Users/example/private.txt\n', encoding='utf-8')
         self.assert_error('possible private path')
+
+    def test_credential_in_json_planning_artifact_fails(self):
+        (self.plan / 'fixtures').mkdir()
+        (self.plan / 'fixtures/public.json').write_text(
+            '{"sourceId":"ghp_12345678901234567890"}\n', encoding='utf-8')
+        self.assert_error('possible private path or credential')
+
+    def test_encoded_private_values_in_json_planning_artifact_fail(self):
+        (self.plan / 'fixtures').mkdir()
+        artifact = self.plan / 'fixtures/public.json'
+        cases = [
+            '{"path":"C:\\\\Users\\\\example\\\\private.txt"}\n',
+            '{"token":"\\u0067\\u0068\\u0070\\u005f12345678901234567890"}\n',
+        ]
+        for body in cases:
+            with self.subTest(body=body):
+                artifact.write_text(body, encoding='utf-8')
+                self.assert_error('possible private path or credential')
+
+    def test_private_value_in_any_utf8_program_artifact_fails(self):
+        (self.plan / 'fixtures').mkdir()
+        cases = [
+            ('public.yaml', 'token: ghp_12345678901234567890\n'),
+            ('public.JSON', '{"path":"C:\\\\Users\\\\example\\\\private.txt"}\n'),
+        ]
+        for name, body in cases:
+            with self.subTest(name=name):
+                artifact = self.plan / 'fixtures' / name
+                artifact.write_text(body, encoding='utf-8')
+                self.assert_error('possible private path or credential')
+                artifact.unlink()
+
+    def test_encoded_private_value_in_duplicate_json_key_fails(self):
+        (self.plan / 'fixtures').mkdir()
+        (self.plan / 'fixtures/public.json').write_text(
+            '{"token":"\\u0067\\u0068\\u0070\\u005f12345678901234567890","token":"safe"}\n',
+            encoding='utf-8')
+        self.assert_error('possible private path or credential')
+
+    def test_malformed_json_planning_artifact_fails(self):
+        (self.plan / 'fixtures').mkdir()
+        (self.plan / 'fixtures/public.json').write_text('{"value":\n', encoding='utf-8')
+        self.assert_error('invalid JSON')
+
+    def test_json_with_utf8_bom_is_decoded_and_scanned(self):
+        (self.plan / 'fixtures').mkdir()
+        (self.plan / 'fixtures/public.json').write_text(
+            '\ufeff{"token":"\\u0067\\u0068\\u0070\\u005f12345678901234567890"}\n',
+            encoding='utf-8')
+        self.assert_error('possible private path or credential')
+
+    def test_non_utf8_json_planning_artifact_fails(self):
+        (self.plan / 'fixtures').mkdir()
+        (self.plan / 'fixtures/public.json').write_bytes(b'{"value":"\xff"}\n')
+        self.assert_error('invalid UTF-8 JSON')
 
     def test_duplicate_record_id_fails(self):
         (self.plan / 'tickets/01-duplicate.md').write_bytes(self.ticket('01').read_bytes())
@@ -222,6 +336,29 @@ class PlanCheckTests(unittest.TestCase):
         external.write_text(f'# External delivery dependencies\n\n## First\n{gate}\n## Duplicate\n{gate}', encoding='utf-8')
         self.replace(self.ticket('19'), 'Blocked-by: []', 'Blocked-by: []\nExternal-gates: [template-installer]')
         self.assert_error('duplicate external gate template-installer')
+
+    def test_duplicate_external_gate_header_field_fails(self):
+        external = self.plan / 'external-dependencies.md'
+        external.write_text(
+            '# External delivery dependencies\n\n## Template installer\n'
+            'Gate: template-installer\nStatus: held\nStatus: done\n'
+            'Owner: template installer program\nRequired-by: []\n', encoding='utf-8')
+        self.assert_error('external gate template-installer: duplicate metadata field Status')
+
+    def test_duplicate_gate_field_is_reported_when_last_value_is_empty(self):
+        external = self.plan / 'external-dependencies.md'
+        external.write_text(
+            '# External delivery dependencies\n\n## Template installer\n'
+            'Gate: template-installer\n' + 'Gate: ' + '\nStatus: held\n'
+            'Owner: template installer program\nRequired-by: []\n', encoding='utf-8')
+        self.assert_error('external gate section Template installer: duplicate metadata field Gate')
+
+    def test_external_gate_section_requires_gate_id(self):
+        external = self.plan / 'external-dependencies.md'
+        external.write_text(
+            '# External delivery dependencies\n\n## Template installer\n'
+            'Status: held\nOwner: template installer program\nRequired-by: []\n', encoding='utf-8')
+        self.assert_error('external gate section Template installer: missing Gate')
 
     def test_outputs_cannot_be_start_prerequisites(self):
         self.replace(self.packet, 'Create fixture.mjs.', 'Output files must exist before this ticket is actionable.')

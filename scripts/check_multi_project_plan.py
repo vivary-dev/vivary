@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 from pathlib import Path
 from urllib.parse import unquote
@@ -10,7 +11,7 @@ OUTCOME_STATES = {"planned", "in-progress", "done"}
 PACKET_STATES = {"ready-for-agent", "in-progress", "needs-info", "ready-for-human", "done"}
 REQUIRED_PACKET_HEADINGS = ("Goal", "Context", "Owned files", "Done condition", "Verify", "Stop conditions", "Log")
 EXPECTED_SCOPES = {"S-00A"} | {f"S-{n:02}" for n in range(14)}
-PRIVATE_TEXT_SUFFIXES = {".md", ".txt"}
+PRIVATE_VALUE = re.compile(r"[A-Za-z]:[\\/](?:Users|home)[\\/]|/home/[^/\s]+/|gh[pousr]_[A-Za-z0-9]{20,}")
 
 
 def parse_header(body: str) -> tuple[dict[str, str], list[str]]:
@@ -77,13 +78,19 @@ def read_external_gates(plan: Path) -> tuple[dict[str, dict[str, str]], list[str
     for section in re.split(r"(?=^## )", path.read_text(encoding="utf-8"), flags=re.M):
         if not section.startswith("## "):
             continue
-        fields, _ = parse_header(section)
-        if fields.get("Gate"):
-            gate = fields["Gate"]
-            if gate in gates:
-                errors.append(f"duplicate external gate {gate}")
-            else:
-                gates[gate] = fields
+        section_name = section.splitlines()[0].removeprefix("## ").strip()
+        fields, duplicate_fields = parse_header(section)
+        gate = fields.get("Gate", "")
+        label = gate or f"section {section_name}"
+        for field in duplicate_fields:
+            errors.append(f"external gate {label}: duplicate metadata field {field}")
+        if not gate:
+            errors.append(f"external gate section {section_name}: missing Gate")
+            continue
+        if gate in gates:
+            errors.append(f"duplicate external gate {gate}")
+        else:
+            gates[gate] = fields
     return gates, errors
 
 
@@ -178,13 +185,27 @@ def section(body: str, heading: str) -> str:
     return match.group(1).strip() if match else ""
 
 
-def has_receipt_link(record: dict, plan: Path) -> bool:
+def evidence_receipt(record: dict, plan: Path) -> tuple[dict[str, str], list[str]] | None:
     match = re.fullmatch(r"\[[^]]+\]\(([^)#]+)(?:#[^)]*)?\)", record["fields"].get("Evidence", ""))
     if not match:
-        return False
+        return None
     target = (record["path"].parent / unquote(match.group(1))).resolve()
     receipts = (plan / "receipts").resolve()
-    return target.suffix == ".md" and target.is_relative_to(receipts) and target.exists()
+    if target.suffix != ".md" or not target.is_relative_to(receipts) or not target.exists():
+        return None
+    return parse_header(target.read_text(encoding="utf-8"))
+
+
+def json_text_values(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from json_text_values(item)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from json_text_values(item)
 
 
 def check(root: Path) -> list[str]:
@@ -259,10 +280,17 @@ def check(root: Path) -> list[str]:
             log = section(body, "Log")
             if not fields.get("Evidence", "").strip() or not log:
                 errors.append(f"{key}: done requires evidence and verification log")
-            if not has_receipt_link(record, plan):
+            receipt = evidence_receipt(record, plan)
+            if receipt is None:
                 errors.append(f"{key}: done requires linked evidence receipt")
-            if not re.search(r"\b(?:passed|completed|verified|complete)\b", log, re.I):
-                errors.append(f"{key}: done requires recorded verification results")
+            else:
+                receipt_fields, duplicate_fields = receipt
+                for field in duplicate_fields:
+                    errors.append(f"{key}: evidence receipt has duplicate metadata field {field}")
+                if receipt_fields.get("Evidence-record") != key:
+                    errors.append(f"{key}: evidence receipt does not bind record {key}")
+            if fields.get("Verification-result") != "passed":
+                errors.append(f"{key}: done requires Verification-result: passed")
             if kind == "outcome" and any(records.get(dep, {}).get("fields", {}).get("Status") != "done" for dep in dependencies(record)):
                 errors.append(f"{key}: done outcome has unfinished completion dependencies")
             if kind == "outcome":
@@ -320,26 +348,35 @@ def check(root: Path) -> list[str]:
     index_path = plan / "index.md"
     if not index_path.exists() or index_path.read_text(encoding="utf-8") != render_index(plan, records):
         errors.append("frontier index drift: run python scripts/check_multi_project_plan.py --render")
-    for path in sorted(plan.rglob("*.md")):
-        body = path.read_text(encoding="utf-8")
-        for link in re.findall(r"\]\(([^)\n]+)\)", body):
-            if re.match(r"(?:https?://|mailto:)", link):
-                continue
-            name, _, anchor = unquote(link).partition("#")
-            target = (path.parent / name).resolve() if name else path.resolve()
-            if not target.is_relative_to(root.resolve()) or not target.exists():
-                errors.append(f"{path.relative_to(root)}: missing or escaping link {link}")
-            elif anchor and target.suffix == ".md":
-                headings = re.findall(r"^#+ (.+)$", target.read_text(encoding="utf-8"), re.M)
-                anchors = {re.sub(r"[^\w -]", "", h.lower()).replace(" ", "-") for h in headings}
-                if anchor not in anchors:
-                    errors.append(f"{path.relative_to(root)}: missing anchor {link}")
-        if re.search(r"[A-Za-z]:[\\/](?:Users|home)[\\/]|/home/[^/\s]+/|gh[pousr]_[A-Za-z0-9]{20,}", body):
-            errors.append(f"{path.relative_to(root)}: possible private path or credential")
-    for path in sorted(path for path in plan.rglob("*")
-                       if path.is_file() and path.suffix in PRIVATE_TEXT_SUFFIXES and path.suffix != ".md"):
-        body = path.read_text(encoding="utf-8")
-        if re.search(r"[A-Za-z]:[\\/](?:Users|home)[\\/]|/home/[^/\s]+/|gh[pousr]_[A-Za-z0-9]{20,}", body):
+    for path in sorted(path for path in plan.rglob("*") if path.is_file()):
+        try:
+            body = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            if path.suffix.lower() == ".json":
+                errors.append(f"{path.relative_to(root)}: invalid UTF-8 JSON")
+            continue
+        if path.suffix == ".md":
+            for link in re.findall(r"\]\(([^)\n]+)\)", body):
+                if re.match(r"(?:https?://|mailto:)", link):
+                    continue
+                name, _, anchor = unquote(link).partition("#")
+                target = (path.parent / name).resolve() if name else path.resolve()
+                if not target.is_relative_to(root.resolve()) or not target.exists():
+                    errors.append(f"{path.relative_to(root)}: missing or escaping link {link}")
+                elif anchor and target.suffix == ".md":
+                    headings = re.findall(r"^#+ (.+)$", target.read_text(encoding="utf-8"), re.M)
+                    anchors = {re.sub(r"[^\w -]", "", h.lower()).replace(" ", "-") for h in headings}
+                    if anchor not in anchors:
+                        errors.append(f"{path.relative_to(root)}: missing anchor {link}")
+        private_value = bool(PRIVATE_VALUE.search(body))
+        if path.suffix.lower() == ".json":
+            try:
+                decoded = json.loads(body.removeprefix("\ufeff"), object_pairs_hook=lambda pairs: pairs)
+            except json.JSONDecodeError as exc:
+                errors.append(f"{path.relative_to(root)}: invalid JSON: {exc.msg}")
+            else:
+                private_value = private_value or any(PRIVATE_VALUE.search(value) for value in json_text_values(decoded))
+        if private_value:
             errors.append(f"{path.relative_to(root)}: possible private path or credential")
     return errors
 

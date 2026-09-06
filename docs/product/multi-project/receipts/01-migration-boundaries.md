@@ -1,5 +1,6 @@
 # Ticket 01 migration-boundary receipt
 
+Evidence-record: 01
 Status: initial boundary receipt retained; current audit and packet readiness live in the generated graph.
 
 Recorded: 2026-09-05

@@ -237,6 +237,8 @@ Published registry versions remain unchanged.
 
 ### Fixed
 
+- Multi-project plan checks now require explicit successful verification and record-bound receipts, reject duplicate external gate metadata, and inspect public JSON for private values. Restoration fixture validation rejects malformed base64 and incomplete assertions before materializing files.
+
 - The `@vivary/create` npm tarball and the `vivary-mcp` and `vivary` wheel/source
   distributions now carry the repository's exact MIT license text.
 - The meta-package floor moves to `create-vivary>=0.4.2`; Python and npm scaffolder

@@ -137,3 +137,9 @@ No production database, trusted physical-root adapter, real-source import,
 coding-agent runtime, factory, outbound mail, package release, or repository
 retirement is proved by this work. The generated [frontier](../index.md) owns
 the next implementation packet. Later receipts retain their historical results.
+
+## Subsequent review
+
+Six comments posted after this batch merged are addressed in the
+[late-review receipt](pr-328-late-review.md). The 40 dispositions above describe
+this first batch.
