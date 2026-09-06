@@ -45,3 +45,7 @@ they do not prove the behavior above.
 
 - 2026-09-06: The [PR #334 correction receipt](../receipts/pr-334-review-fixes.md) separates the runtime proofs into bounded packets. [20a](../packets/20a-headless-loop-proof.md) owns the first proof and must prepare its parity continuation before closing. Full factory and cross-runtime acceptance remain open.
 - 2026-09-06: [20c](../packets/20c-headless-loop-preparation.md) keeps deterministic proof preparation claimable while 20a lacks its required native-call budget capability. Only 20a's live execution is blocked; preparation cannot establish runtime acceptance.
+- 2026-09-06: Packet 20c froze the deterministic source and closed its six
+  independent review findings. Its strict Habitat acceptance remains
+  `needs-info` after repeated wall-clock reversals, so no live-runtime or
+  factory behavior is accepted.

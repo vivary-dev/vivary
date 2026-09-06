@@ -1,9 +1,10 @@
 # 20c: Prepare the deterministic headless loop proof
 Type: packet
 Parent: 20
-Status: ready-for-agent
+Status: needs-info
 Depends-on: [10c]
 Owner: deterministic headless-loop preparation agent, sole writer
+Needs: A Habitat wall clock proven nondecreasing across one complete container and subprocess acceptance lifecycle, supplied by the Habitat environment maintainer. CPU affinity and continuous distro activity did not prevent backward steps; do not rerun the strict candidate until this environment prerequisite is met.
 Scope: Offline fixture, prompts, protocol, sequencer, Claude adapter test seam, and adversarial tests; no coding-runtime or model call.
 Verification-kind: runtime
 Timebox: One context window. Stop after the offline Habitat evidence and closure records are complete.
@@ -12,8 +13,9 @@ Timebox: One context window. Stop after the offline Habitat evidence and closure
 
 Create and verify every deterministic input and control needed by
 [20a](20a-headless-loop-proof.md), while its live Claude proof remains blocked
-on a verified whole-invocation token bound. This packet makes the blocked work
-claimable without converting fake-adapter or unit evidence into live proof.
+on a verified whole-invocation token bound. The implementation is frozen and
+its source review is complete. Runtime acceptance remains open until Habitat
+provides a stable wall clock for the unchanged strict verification wave.
 
 ## Context
 
@@ -75,6 +77,9 @@ Private evidence and source bundles are not product source.
    detection, committed developer checkpoints, QA freeze, and atomic receipt
    writes. Every receipt binds the baseline, specification, oracle, prompts,
    role inputs, candidate state, test output, and prior receipt state.
+   The retry applies only while the role's input view is unchanged. An invalid
+   developer result that changed its writable candidate fails closed, retains
+   the failed view and full reservation, and launches no retry or next role.
 4. Deterministic role doubles exercise the three-iteration structure. Planner,
    developer, and QA receive only the views defined by 20a; tests prove the
    planner cannot request candidate access and QA cannot mutate its frozen view.
@@ -138,7 +143,7 @@ so stopping the container preserves candidate and test evidence. From Habitat's
 Docker host, run the existing image with this boundary and no authentication volume:
 
 ```console
-docker run --pull never --name "$HABITAT_TEST_CONTAINER" --network none --read-only --user ubuntu --cap-drop ALL --security-opt no-new-privileges --cpus 2 --memory 1g --pids-limit 128 --mount type=bind,src="$HABITAT_SOURCE_BUNDLE",dst=/opt/vivary-hoh-source,readonly --mount type=bind,src="$HABITAT_TEST_ROOT",dst=/tmp --workdir /opt/vivary-hoh-source sha256:ffdba5d54dd6f91875fa60fc15103b6b30bb23ecaaf2d8ed65559d3cdff05bee python3 -B -m unittest discover -s tools/tests -p 'test_hoh*.py'
+docker run --pull never --name "$HABITAT_TEST_CONTAINER" --network none --read-only --user ubuntu --cap-drop ALL --security-opt no-new-privileges --cpus 2 --cpuset-cpus 0 --memory 1g --pids-limit 128 --mount type=bind,src="$HABITAT_SOURCE_BUNDLE",dst=/opt/vivary-hoh-source,readonly --mount type=bind,src="$HABITAT_TEST_ROOT",dst=/tmp --workdir /opt/vivary-hoh-source sha256:ffdba5d54dd6f91875fa60fc15103b6b30bb23ecaaf2d8ed65559d3cdff05bee python3 -B -m unittest discover -s tools/tests -p 'test_hoh*.py'
 docker inspect "$HABITAT_TEST_CONTAINER"
 ```
 
@@ -174,3 +179,10 @@ this packet, and do not mark 20a done from deterministic evidence.
 - 2026-09-06: Runtime classification now covers executable offline acceptance.
   The sequencer must prove enforced deadlines. Containers and test trees remain
   available for an itemized, explicitly approved cleanup after evidence export.
+- 2026-09-06: The implementation was frozen at a twelve-file manifest, and an
+  independent source review closed all six findings. Three unchanged strict
+  acceptance waves refused after Habitat wall-clock reversals, including runs
+  with CPU 0 affinity and continuous distro activity. Packet 20c is `needs-info`
+  until the Habitat environment maintainer supplies a nondecreasing clock across
+  the complete container and subprocess lifecycle. See the
+  [preparation receipt](../receipts/20c-headless-loop-preparation.md).
