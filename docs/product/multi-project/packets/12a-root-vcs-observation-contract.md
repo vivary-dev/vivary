@@ -2,11 +2,13 @@
 
 Type: packet
 Parent: 12
-Status: ready-for-agent
+Status: done
 Depends-on: [03c]
-Owner: root and VCS adapter agent
-Scope: Storage-neutral observation contract and deterministic expected filesystem/VCS oracles only; no registry schema, write-back, live project mutation, or production adapter activation.
+Owner: Coordinating Codex, sole writer, with an independent Codex reader
+Scope: Storage-neutral observation contract and deterministic expected filesystem/VCS oracles only. No registry schema, write-back, live project mutation, or production adapter activation.
 Verification-kind: inspection
+Evidence: [Observation contract receipt](../receipts/12a-root-vcs-observation-contract.md)
+Verification-result: passed
 Timebox: One context window. Stop when every required observation and refusal has a traceable fixture and a second reader finds no caller-controlled authority field.
 
 ## Goal
@@ -120,3 +122,20 @@ Do not create 12b in this packet.
 - 2026-09-05: Prepared from packet 03c's source inspection. The inspected Core
   and Workbench surfaces had no callable adapter providing the complete trusted
   root/VCS observation required by the registry contract.
+
+## Verification log
+
+- 2026-09-06: The sole writer inspected both repositories, the owning rules,
+  installed Core 0.176.5, preserved host/readiness source, and primary Git/Jujutsu
+  references before drafting. No physical adapter or live project was exercised.
+- 2026-09-06: Accepted 61 observation cases, 21 identity/key relations, and 15
+  boundary assertions after independent review. Corrected three unsupported
+  layouts whose content revisions still referenced no-VCS state.
+- 2026-09-06: JSON structure, exact expected relations, planning checks, line
+  endings, diff checks, and technical-writing lint passed. The separate Windows
+  planning suite ran 67 tests with two failing newline subcases in one unchanged
+  test helper. The receipt preserves that result and the prior temporary-storage
+  failures. No universal suite pass is claimed.
+- 2026-09-06: Stopped at the accepted contract checkpoint. The receipt describes
+  the later implementation session and prerequisites. No 12b, adapter, database,
+  runtime start, write-back, or production lock was created. Outcome 12 stays open.
