@@ -31,7 +31,16 @@ they do not prove the behavior above.
 
 ## Next packet
 
-[02a](../packets/02a-source-preservation-fixture.md) completed the contract and oracle. [02b](../packets/02b-restore-fixture-harness.md) completed synthetic filesystem restoration in Habitat. Real-source selection, attribution, history capture, and restoration remain open. The next ready program packet is [12a](../packets/12a-root-vcs-observation-contract.md).
+[02a](../packets/02a-source-preservation-fixture.md) completed the contract and
+oracle. [02b](../packets/02b-restore-fixture-harness.md) completed synthetic
+filesystem restoration in Habitat.
+
+[Packet 12a's
+receipt](../receipts/12a-root-vcs-observation-contract.md) records the accepted
+trusted root/VCS observation inspection. Follow [the generated
+frontier](../index.md) under [the loop-first
+direction](../design.md#direction-decision-2026-09-06). Real-source selection,
+attribution, history capture, and restoration remain open.
 
 ## Log
 

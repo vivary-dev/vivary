@@ -2,11 +2,13 @@
 
 Type: packet
 Parent: 12
-Status: ready-for-agent
+Status: done
 Depends-on: [03c]
-Owner: root and VCS adapter agent
-Scope: Storage-neutral observation contract and deterministic expected filesystem/VCS oracles only; no registry schema, write-back, live project mutation, or production adapter activation.
+Owner: Coordinating Codex, sole writer, with an independent Codex reader
+Scope: Storage-neutral observation contract and deterministic expected filesystem/VCS oracles only. No production registry schema, write-back, live project mutation, or production adapter activation.
 Verification-kind: inspection
+Evidence: [Observation contract receipt](../receipts/12a-root-vcs-observation-contract.md)
+Verification-result: passed
 Timebox: One context window. Stop when every required observation and refusal has a traceable fixture and a second reader finds no caller-controlled authority field.
 
 ## Goal
@@ -35,6 +37,17 @@ make unsupported layouts writable.
   `docs/product/multi-project/fixtures/root-vcs-observation.json`.
 - Create
   `docs/product/multi-project/receipts/12a-root-vcs-observation-contract.md`.
+- PR #333 review correction: amend the private VCS field in
+  `docs/product/multi-project/contracts/project-registry.md`, its synthetic
+  `fixtures/project-registry.json` oracle, `scripts/registry_contract_model.mjs`,
+  and `scripts/tests/test_registry_contract_model.mjs` together. This keeps the
+  observation contract and its reference consumer consistent; it adds no
+  production storage or adapter.
+- Record the bounded contract milestone in `CHANGELOG.md` and generate
+  its site/LLM-text mirrors through the existing sync script.
+- Update the maintained continuation routes in `audit.md`,
+  `tickets/02-prove-source-preservation.md`, and
+  `tickets/03-define-project-registry.md` when closing this packet.
 - Update this packet and graph only after independent review.
 
 ## Required cases
@@ -96,6 +109,7 @@ rg -n "R3|R4|R8|R10|R11|R12|R13|rootId|locationRef|repositoryId|checkoutId|mutat
 rg -n "rootId|locationRef|repositoryId|checkoutId|realpath|gitDir|commondir|canonicalCwd" apps/workbench node_modules/@agent-native/core/dist -g '*.ts' -g '*.d.ts'
 python -m json.tool docs/product/multi-project/fixtures/root-vcs-observation.json
 python -c "import json,pathlib; d=json.loads(pathlib.Path('docs/product/multi-project/fixtures/root-vcs-observation.json').read_text(encoding='utf-8')); c=d['cases']; assert d['fixtureVersion']==1 and isinstance(c,list) and c and len({x['id'] for x in c})==len(c)"
+node --test scripts/tests/test_registry_contract_model.mjs
 python scripts/check_multi_project_plan.py --check
 python scripts/check_line_endings.py
 git diff --check
@@ -120,3 +134,37 @@ Do not create 12b in this packet.
 - 2026-09-05: Prepared from packet 03c's source inspection. The inspected Core
   and Workbench surfaces had no callable adapter providing the complete trusted
   root/VCS observation required by the registry contract.
+
+## Verification log
+
+- 2026-09-06: The sole writer inspected both repositories, the owning rules,
+  installed Core 0.176.5, preserved host/readiness source, and primary Git/Jujutsu
+  references before drafting. No physical adapter or live project was exercised.
+- 2026-09-06: Accepted 61 observation cases, 21 identity/key relations, and 15
+  boundary assertions after independent review. Corrected three unsupported
+  layouts whose content revisions still referenced no-VCS state.
+- 2026-09-06: JSON structure, exact expected relations, planning checks, line
+  endings, diff checks, and technical-writing lint passed. The separate Windows
+  planning suite ran 67 tests with two failing newline subcases in one unchanged
+  test helper. The receipt preserves that result and the prior temporary-storage
+  failures. No universal suite pass is claimed.
+- 2026-09-06: Stopped at the accepted contract checkpoint. The receipt describes
+  the later implementation session and prerequisites. No 12b, adapter, database,
+  runtime start, write-back, or production lock was created. Outcome 12 stays open.
+- 2026-09-06: PR #333 review found five contract/oracle gaps. Corrected
+  scoped read-only grants, private Jujutsu administration binding, Git
+  replacement and R13 root-conflict oracles, and the frontier receipt.
+  The observation fixture now has 68 cases, 28 relations, and 19 boundary
+  assertions. The shared synthetic registry contract/model stayed in
+  sync; 39 tests and 59 fixture decisions pass after the two new cases
+  first failed under the old validator. See the receipt for review evidence.
+- 2026-09-06: The second PR review added Jujutsu working-copy administration
+  and root-association identity, positive write-access observations for all
+  three supported VCS kinds, and a bounded Unreleased changelog entry with
+  generated mirrors. The current observation fixture has 77 cases, 37
+  relations, and 21 boundary assertions. The receipt owns final verification.
+- 2026-09-06: The third PR review added private unsupported Jujutsu
+  repository diagnostics, OS-read-only positive controls, and linked-worktree
+  checkout-only replacement oracles. Maintained routes now point to the
+  accepted receipt and current frontier. The receipt owns current counts,
+  executable registry regression evidence, and independent acceptance.

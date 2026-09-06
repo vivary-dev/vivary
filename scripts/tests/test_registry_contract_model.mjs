@@ -22,8 +22,8 @@ const fixture = parseStrictJson(await readFile(fixturePath, "utf8"));
 const base = (name) => structuredClone(fixture.inputs[name]);
 const decision = (input) => evaluateRegistryOperation(structuredClone(input));
 
-test("the generic fixture DSL evaluates all 57 exact outputs, effects, and record changes", () => {
-  assert.equal(fixture.cases.length, 57);
+test("the generic fixture DSL evaluates all 63 exact outputs, effects, and record changes", () => {
+  assert.equal(fixture.cases.length, 63);
   const results = checkFixture(fixture);
   assert.deepEqual(results.filter((result) => !result.pass), []);
   for (const fixtureCase of fixture.cases) {
@@ -69,6 +69,46 @@ test("boundary validation rejects unknown fields, missing fields, types, version
     mutate(input);
     assert.deepEqual(decision(input), { output: { code: "invalid-input" }, effects: [], recordChanges: {} });
     assert.throws(() => validateRegistryInput(input), RegistryInputError);
+  }
+});
+
+test("jj-git requires valid private Jujutsu identities and other kinds reject them", () => {
+  const jjVcs = {
+    kind: "jj-git",
+    repositoryId: "repository-a",
+    checkoutId: "checkout-a",
+    jjRepositoryId: "jj-repository-a",
+    jjWorkspaceId: "jj-workspace-a",
+    mutationOwner: "jj",
+  };
+  for (const field of ["jjRepositoryId", "jjWorkspaceId"]) {
+    for (const mutate of [
+      (input) => { delete input.trusted.root.vcs[field]; },
+      (input) => { input.trusted.root.vcs[field] = null; },
+      (input) => { input.trusted.root.vcs[field] = "contains:separator"; },
+    ]) {
+      const input = base("admit");
+      input.request.requestedVcsOwner = "jj";
+      input.trusted.root.vcs = structuredClone(jjVcs);
+      input.trusted.binding.vcs = structuredClone(jjVcs);
+      mutate(input);
+      assert.equal(decision(input).output.code, "invalid-input", field);
+      assert.throws(() => validateRegistryInput(input), RegistryInputError, field);
+    }
+  }
+
+  const nonJjShapes = [
+    { kind: "none", repositoryId: null, checkoutId: null, mutationOwner: null },
+    { kind: "git", repositoryId: "repository-a", checkoutId: "checkout-a", mutationOwner: "git" },
+    { kind: "unsupported", repositoryId: null, checkoutId: null, mutationOwner: null },
+  ];
+  for (const vcs of nonJjShapes) {
+    for (const field of ["jjRepositoryId", "jjWorkspaceId"]) {
+      const input = base("admit");
+      input.trusted.root.vcs = { ...vcs, [field]: "private-jj-id" };
+      assert.equal(decision(input).output.code, "invalid-input", vcs.kind + ":" + field);
+      assert.throws(() => validateRegistryInput(input), RegistryInputError, vcs.kind + ":" + field);
+    }
   }
 });
 
@@ -666,6 +706,10 @@ const mutationDefinitions = {
     "    `${trusted.deviceId}:repository:${observed.repositoryId}`,\n",
     "",
   ),
+  "ignore-checkout-identity": (source) => source.replace(
+    '  if (!same(trusted.root.vcs, current.vcs)) return refusal("stale-binding");',
+    '  if (!same({ ...trusted.root.vcs, checkoutId: current.vcs.checkoutId }, current.vcs)) return refusal("stale-binding");',
+  ),
   "trusted-export": (source) => source.replace(
     "project: portableProjection(trusted.portable)",
     "project: structuredClone(trusted)",
@@ -694,7 +738,13 @@ test("deliberate contract mutants are killed by the fixture oracle", async (cont
       await writeFile(mutantPath, mutantSource, "utf8");
       const mutant = await import(`${pathToFileURL(mutantPath).href}?run=${Date.now()}-${name}`);
       const results = mutant.checkFixture(fixture);
-      assert.ok(results.some((result) => !result.pass), `${name} survived all 57 fixture cases`);
+      assert.ok(results.some((result) => !result.pass), `${name} survived all 63 fixture cases`);
+      if (name === "ignore-checkout-identity") {
+        assert.deepEqual(
+          results.filter((result) => !result.pass).map((result) => result.id),
+          ["git-checkout-administration-changed", "write-back-git-checkout-administration-changed"],
+        );
+      }
     });
   }
 });
