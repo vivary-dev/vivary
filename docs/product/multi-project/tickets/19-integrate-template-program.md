@@ -33,3 +33,5 @@ they do not prove the behavior above.
 ## Log
 
 - 2026-09-05: Initial public plan recorded. Implementation has not started.
+
+- 2026-09-06: Proposal for the external template program from [the alignment brief](../research/hoh-direction-brief.md): a template manifest declares its oracle, the check command or the written-expectation procedure that judges work in that workspace. A workspace without one cannot enable factory or learning runs. This is a manifest field proposal; the program's hold is unchanged.
