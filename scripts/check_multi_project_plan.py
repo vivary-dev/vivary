@@ -12,7 +12,7 @@ OUTCOME_STATES = {"planned", "in-progress", "done"}
 PACKET_STATES = {"ready-for-agent", "in-progress", "needs-info", "ready-for-human", "done"}
 REQUIRED_PACKET_HEADINGS = ("Goal", "Context", "Owned files", "Done condition", "Verify", "Stop conditions", "Log")
 EXPECTED_SCOPES = {"S-00A"} | {f"S-{n:02}" for n in range(14)}
-PRIVATE_VALUE = re.compile(r"[A-Za-z]:[\\/](?:Users|home)[\\/]|/home/[^/\s]+/|gh[pousr]_[A-Za-z0-9]{20,}")
+PRIVATE_VALUE = re.compile(r"[A-Za-z]:[\\/](?:Users|home)[\\/]|/home/[^/\s]+/|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}")
 
 
 def parse_header(body: str) -> tuple[dict[str, str], list[str]]:
@@ -36,16 +36,18 @@ def parse_header(body: str) -> tuple[dict[str, str], list[str]]:
     return fields, duplicates
 
 
-def read_records(plan: Path) -> dict[str, dict]:
+def read_records(plan: Path, texts: dict[Path, str] | None = None) -> dict[str, dict]:
     records = {}
     for directory, kind in (("tickets", "outcome"), ("packets", "packet")):
         for path in sorted((plan / directory).glob("*.md")):
-            body = path.read_text(encoding="utf-8")
+            if texts is not None and path not in texts:
+                continue
+            body = path.read_text(encoding="utf-8") if texts is None else texts[path]
             key = path.name.split("-", 1)[0]
             fields, duplicate_fields = parse_header(body)
             heading = re.match(r"^# (\d{2}[a-z]?):", body)
             records[key] = {"path": path, "body": body, "kind": kind, "fields": fields,
-                            "title": body.splitlines()[0].removeprefix("# "), "key": key,
+                            "title": body.partition("\n")[0].removeprefix("# "), "key": key,
                             "heading_id": heading.group(1) if heading else None,
                             "duplicate_fields": duplicate_fields}
     return records
@@ -70,13 +72,13 @@ def names(value: str) -> list[str]:
     return value[1:-1].split(", ")
 
 
-def read_external_gates(plan: Path) -> tuple[dict[str, dict[str, str]], list[str]]:
+def read_external_gates(plan: Path, texts: dict[Path, str]) -> tuple[dict[str, dict[str, str]], list[str]]:
     path = plan / "external-dependencies.md"
-    if not path.exists():
-        return {}, []
+    if path not in texts:
+        return {}, ["external dependencies must be a regular file"] if path.exists() else []
     gates = {}
     errors = []
-    for section in re.split(r"(?=^## )", path.read_text(encoding="utf-8"), flags=re.M):
+    for section in re.split(r"(?=^## )", texts[path], flags=re.M):
         if not section.startswith("## "):
             continue
         section_name = section.splitlines()[0].removeprefix("## ").strip()
@@ -186,7 +188,7 @@ def section(body: str, heading: str) -> str:
     return match.group(1).strip() if match else ""
 
 
-def evidence_receipt(record: dict, plan: Path) -> tuple[dict[str, str], list[str]] | None:
+def evidence_receipt(record: dict, plan: Path, texts: dict[Path, str]) -> tuple[dict[str, str], list[str]] | None:
     match = re.fullmatch(r"\[[^]]+\]\(([^)#]+)(?:#[^)]*)?\)", record["fields"].get("Evidence", ""))
     if not match:
         return None
@@ -195,7 +197,7 @@ def evidence_receipt(record: dict, plan: Path) -> tuple[dict[str, str], list[str
         receipts = (plan / "receipts").resolve()
         if target.suffix != ".md" or not target.is_relative_to(receipts) or not target.is_file():
             return None
-        return parse_header(target.read_text(encoding="utf-8"))
+        return parse_header(texts[target]) if target in texts else None
     except (OSError, UnicodeError):
         return None
 
@@ -270,13 +272,77 @@ def preflight_plan(plan: Path, root: Path) -> list[str]:
     return errors
 
 
-def check(root: Path) -> list[str]:
+def read_plan_texts(plan: Path, root: Path, *, skip: tuple[Path, ...] = ()) -> tuple[dict[Path, str], list[str]]:
+    """Read the preflighted plan once before parsing any structural documents."""
+    texts = {}
+    errors = []
+    def load_text(path):
+        try:
+            texts[path] = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            kind = "JSON" if path.suffix.lower() == ".json" else "Markdown" if path.suffix.lower() == ".md" else "planning artifact"
+            errors.append(f"{path.relative_to(root)}: invalid UTF-8 {kind}")
+        except OSError:
+            errors.append(f"{path.relative_to(root)}: cannot read planning artifact")
+
+    for path in sorted(path for path in plan.rglob("*") if path.is_file() and path not in skip):
+        load_text(path)
+    if errors:
+        return texts, errors
+    for path, body in list(texts.items()):
+        if path.suffix != ".md":
+            continue
+        for link in re.findall(r"\]\(([^)\n]+)\)", body):
+            if re.match(r"(?:https?://|mailto:)", link):
+                continue
+            name, _, anchor = unquote(link).partition("#")
+            if not anchor:
+                continue
+            try:
+                target = (path.parent / name).resolve() if name else path.resolve()
+                if not target.is_relative_to(root.resolve()):
+                    errors.append(f"{path.relative_to(root)}: escaping anchor source {link}")
+                    continue
+                if target in skip:
+                    continue
+                if not target.exists():
+                    errors.append(f"{path.relative_to(root)}: missing anchor source {link}")
+                    continue
+                if target.suffix != ".md":
+                    continue
+                if not target.is_file():
+                    errors.append(f"{path.relative_to(root)}: anchor target is not a regular file {link}")
+                    continue
+            except (OSError, ValueError):
+                errors.append(f"{path.relative_to(root)}: cannot resolve anchor source {link}")
+                continue
+            if target not in texts:
+                load_text(target)
+    return texts, errors
+
+
+def check(root: Path, *, render: bool = False) -> list[str]:
     plan = root / "docs/product/multi-project"
     preflight_errors = preflight_plan(plan, root)
     if preflight_errors:
         return preflight_errors
-    records = read_records(plan)
-    external_gates, errors = read_external_gates(plan)
+    graph_path = plan / "graph.md"
+    index_path = plan / "index.md"
+    generated_paths = (graph_path, index_path)
+    if render:
+        output_errors = []
+        for path in generated_paths:
+            if path.exists() and not path.is_file():
+                output_errors.append(f"{path.relative_to(root)}: generated output must be a regular file")
+            elif not os.access(path if path.exists() else path.parent, os.W_OK):
+                output_errors.append(f"{path.relative_to(root)}: cannot write generated output")
+        if output_errors:
+            return output_errors
+    texts, read_errors = read_plan_texts(plan, root, skip=generated_paths if render else ())
+    if read_errors:
+        return read_errors
+    records = read_records(plan, texts)
+    external_gates, errors = read_external_gates(plan, texts)
     outcomes = {key for key, rec in records.items() if rec["kind"] == "outcome"}
     expected = {f"{n:02}" for n in range(1, 37)}
     if outcomes != expected:
@@ -345,7 +411,7 @@ def check(root: Path) -> list[str]:
             log = section(body, "Log")
             if not fields.get("Evidence", "").strip() or not log:
                 errors.append(f"{key}: done requires evidence and verification log")
-            receipt = evidence_receipt(record, plan)
+            receipt = evidence_receipt(record, plan, texts)
             if receipt is None:
                 errors.append(f"{key}: done requires linked evidence receipt")
             else:
@@ -396,10 +462,10 @@ def check(root: Path) -> list[str]:
     for key in records:
         visit(key)
     coverage_path = plan / "capability-matrix.md"
-    if not coverage_path.exists():
+    if coverage_path not in texts:
         errors.append("missing capability coverage matrix")
     else:
-        coverage = coverage_path.read_text(encoding="utf-8")
+        coverage = texts[coverage_path]
         coverage_ids = re.findall(r"^\| (\d{2}) \|", coverage, re.M)
         if set(coverage_ids) != expected or len(coverage_ids) != 36:
             errors.append("capability matrix must map each of 36 outcomes exactly once")
@@ -407,25 +473,17 @@ def check(root: Path) -> list[str]:
         scopes = set(re.findall(r"\bS-\d{2}A?\b", " ".join(outcome_cells)))
         if not EXPECTED_SCOPES <= scopes:
             errors.append(f"missing retained source scope: {sorted(EXPECTED_SCOPES - scopes)}")
-    graph_path = plan / "graph.md"
-    if not graph_path.exists() or graph_path.read_text(encoding="utf-8") != render_graph(plan, records):
+    expected_graph = render_graph(plan, records)
+    expected_index = render_index(plan, records)
+    if render:
+        texts[graph_path] = expected_graph
+        texts[index_path] = expected_index
+    if texts.get(graph_path) != expected_graph:
         errors.append("graph/frontier drift: run python scripts/check_multi_project_plan.py --render")
-    index_path = plan / "index.md"
-    if not index_path.exists() or index_path.read_text(encoding="utf-8") != render_index(plan, records):
+    if texts.get(index_path) != expected_index:
         errors.append("frontier index drift: run python scripts/check_multi_project_plan.py --render")
-    for path in sorted(path for path in plan.rglob("*") if path.is_file()):
-        try:
-            body = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            if path.suffix.lower() == ".json":
-                errors.append(f"{path.relative_to(root)}: invalid UTF-8 JSON")
-            elif path.suffix.lower() == ".md":
-                errors.append(f"{path.relative_to(root)}: invalid UTF-8 Markdown")
-            else:
-                errors.append(f"{path.relative_to(root)}: invalid UTF-8 planning artifact")
-            continue
-        except OSError:
-            errors.append(f"{path.relative_to(root)}: cannot read planning artifact")
+    for path, body in texts.items():
+        if not path.is_relative_to(plan):
             continue
         if path.suffix == ".md":
             for link in re.findall(r"\]\(([^)\n]+)\)", body):
@@ -433,18 +491,17 @@ def check(root: Path) -> list[str]:
                     continue
                 name, _, anchor = unquote(link).partition("#")
                 target = (path.parent / name).resolve() if name else path.resolve()
-                if not target.is_relative_to(root.resolve()) or not target.exists():
+                virtual_output = render and target in generated_paths
+                if not target.is_relative_to(root.resolve()) or (not target.exists() and not virtual_output):
                     errors.append(f"{path.relative_to(root)}: missing or escaping link {link}")
                 elif anchor and target.suffix == ".md":
-                    if not target.is_file():
+                    if not target.is_file() and not virtual_output:
                         errors.append(f"{path.relative_to(root)}: anchor target is not a regular file {link}")
                         continue
-                    try:
-                        target_body = target.read_text(encoding="utf-8")
-                    except (OSError, UnicodeError):
+                    if target not in texts:
                         errors.append(f"{path.relative_to(root)}: cannot read anchor target {link}")
                         continue
-                    headings = re.findall(r"^#+ (.+)$", target_body, re.M)
+                    headings = re.findall(r"^#+ (.+)$", texts[target], re.M)
                     anchors = {re.sub(r"[^\w -]", "", h.lower()).replace(" ", "-") for h in headings}
                     if anchor not in anchors:
                         errors.append(f"{path.relative_to(root)}: missing anchor {link}")
@@ -466,6 +523,13 @@ def check(root: Path) -> list[str]:
                 private_value = private_value or any(PRIVATE_VALUE.search(value) for value in json_text_values(decoded))
         if private_value:
             errors.append(f"{path.relative_to(root)}: possible private path or credential")
+    if render and not errors:
+        for path in generated_paths:
+            try:
+                path.write_text(texts[path], encoding="utf-8", newline="\n")
+            except OSError:
+                errors.append(f"{path.relative_to(root)}: cannot write generated output")
+                break
     return errors
 
 
@@ -475,13 +539,7 @@ if __name__ == "__main__":
     parser.add_argument("--render", action="store_true", help="regenerate the graph from outcome and packet records")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    plan = root / "docs/product/multi-project"
-    failures = preflight_plan(plan, root) if args.render else []
-    if args.render and not failures:
-        (plan / "graph.md").write_text(render_graph(plan, read_records(plan)), encoding="utf-8", newline="\n")
-        (plan / "index.md").write_text(render_index(plan, read_records(plan)), encoding="utf-8", newline="\n")
-    if not failures:
-        failures = check(root)
+    failures = check(root, render=args.render)
     for failure in failures:
         print(f"ERROR: {failure}")
     if not failures:

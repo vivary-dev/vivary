@@ -21,7 +21,7 @@ to fix the review findings and merge the corrected work into dev.
 - RED: the four planning regressions failed against the accepted validator (37 tests, four failures).
 - RED: both restoration regressions failed against the accepted runner (18 tests, two failures); canonical cases still reported 47/47.
 - Independent review added six failing boundary cases to the first planning candidate (49 tests, six failures): empty gate IDs, duplicate gate fields, malformed/non-UTF-8/BOM JSON, and historical log details under the explicit result field.
-- GREEN: 57/57 planning tests and the actual public plan consistency check passed.
+- GREEN: 67/67 planning tests and the actual public plan consistency check passed.
 - GREEN: 32/32 restoration tests and 47/47 filesystem fixture cases passed with no skipped tests.
 - Checks ran as the existing non-root user in the bounded Habitat image, with networking disabled, a read-only root, no host mounts, all capabilities dropped, and no new privileges.
 - The test container is limited to one CPU, 384 MiB memory, 64 processes, and a 128 MiB temporary filesystem. It uses the existing image; no dependency installation is required.
@@ -33,8 +33,8 @@ to fix the review findings and merge the corrected work into dev.
 
 | Artifact | SHA-256 |
 | --- | --- |
-| `scripts/check_multi_project_plan.py` | `743196094142f77c8ee25f3a15ea908c1bf4411154262189b9ace71945bbe88c` |
-| `scripts/tests/test_multi_project_plan.py` | `bc36ebb01c96153ae0cf7f0a626cebf3e1c56e3c296d32ba8baaf7218ce8abfd` |
+| `scripts/check_multi_project_plan.py` | `b7fd0fb9088039d1973fb3f0ecd785ac770235cc04408eed53642eb380a693fa` |
+| `scripts/tests/test_multi_project_plan.py` | `22619c788abda9871fc38cb01158e98720dde3c97d741930921f5b806855e5aa` |
 | `scripts/prove_multi_project_source_preservation.mjs` | `76ad9a5a16899ce5b903488b564324f23470242510afee65b51395457eeb6a68` |
 | `scripts/tests/test_prove_multi_project_source_preservation.mjs` | `c82de35b9640294bb4c74a38f3d1749e85f7075fd6052b9358e2c7c75f14b0e6` |
 
@@ -129,3 +129,42 @@ that a particular nesting depth fails in every supported Python version. These
 checks ran in Habitat's existing Python 3.11 and Node 22 environment. No additional
 Python runtime was installed or claimed as tested. Final passing counts and source
 hashes appear above.
+
+## Structural reads and token formats
+
+Automated review of `1954075` found two remaining planning issues:
+
+| Review | Finding | Resolution |
+| --- | --- | --- |
+| [3943127256](https://github.com/vivary-dev/vivary/pull/329#discussion_r3943127256) | Structural Markdown bypasses guarded reads | Read and validate plan text before parsing records, external gates, coverage, graph, index, or receipts. Reuse those contents through the check. Invalid sources stop rendering before output writes. |
+| [3943127258](https://github.com/vivary-dev/vivary/pull/329#discussion_r3943127258) | Fine-grained GitHub token format | Detect github_pat_ values in raw text and decoded JSON strings alongside the existing token formats. |
+
+The new regressions produced 13 error subcases and three assertion failures before
+the fixes (60 planning tests). They cover invalid encoding and failed reads in six
+structural documents, empty records, raw/decoded synthetic tokens, and CLI render
+behavior. A directory substituted for external dependencies also failed its added
+regression before the cache-miss guard was fixed. The final focused suite passes 67/67 tests in Habitat.
+
+Rendering preserves its output bytes when a source cannot be read. Corrupted
+generated graph/index bytes can still be repaired from valid sources. Plan symlink
+preflight remains before content reads. The restoration implementation and
+its previously verified 32 tests and 47 filesystem cases are unchanged in this
+planning-only pass.
+
+Independent review split encoding, I/O, empty-record, file-type, render-refusal,
+and generated-file repair tests by behavior. It also found that linked Markdown
+outside the plan was read after rendering. A new CLI regression failed before the
+fix (65 tests, one failure). Anchor sources now enter the shared text cache before
+rendering. Invalid UTF-8, missing, directory, and escaping targets all preserve
+the existing output bytes. Link and privacy traversal remains scoped to plan
+documents; loading a referenced heading source does not recursively scan unrelated
+repository documentation.
+
+The final local review found that an invalid external-dependency file could still
+reach rendering before validation. The new regressions reproduced this boundary
+failure (67 tests, one failure and one error). Rendering now uses the same complete
+validation pipeline as check mode, including destination preflight and validation
+against the generated graph and index held in memory. Source errors stop the run
+before either generated output is written. Missing or corrupt generated files
+remain repairable. The final 67/67 tests pass in Habitat, and both local review
+axes report no remaining actionable findings.

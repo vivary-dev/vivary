@@ -106,7 +106,7 @@ patch. Published registry versions remain unchanged.
 
 ### Verification
 
-- The multi-project planning guard's 57 adversarial tests passed in the bounded
+- The multi-project planning guard's 67 adversarial tests passed in the bounded
   Habitat environment with Python 3.11.16. The restoration proof passed 32 tests
   and all 47 filesystem fixture cases in the same bounded environment.
 - `python packages/vivary/tests/test_vivary_cli.py` — 9/9 passed.

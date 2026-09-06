@@ -147,7 +147,8 @@ class PlanCheckTests(unittest.TestCase):
             with self.subTest(anchor=anchor):
                 if anchor:
                     self.replace(self.packet, '../receipts/fixture.md)', '../receipts/fixture.md#receipt)')
-                self.assert_error('done requires linked evidence receipt')
+                self.assert_error('anchor target is not a regular file' if anchor
+                                  else 'done requires linked evidence receipt')
 
     def test_unreadable_evidence_receipt_returns_validation_errors(self):
         receipt = self.plan / 'receipts/fixture.md'
@@ -161,14 +162,14 @@ class PlanCheckTests(unittest.TestCase):
             with self.subTest(anchor=anchor):
                 if anchor:
                     self.replace(self.packet, '../receipts/fixture.md)', '../receipts/fixture.md#receipt)')
-                self.assert_error('done requires linked evidence receipt')
+                self.assert_error('invalid UTF-8 Markdown')
         original_read = Path.read_text
         def unavailable(path, *args, **kwargs):
             if path == receipt:
                 raise PermissionError('synthetic receipt access failure')
             return original_read(path, *args, **kwargs)
         with mock.patch.object(Path, 'read_text', unavailable):
-            self.assert_error('done requires linked evidence receipt')
+            self.assert_error('cannot read planning artifact')
 
     def test_structured_pass_allows_historical_failure_detail_in_log(self):
         self.replace(self.packet, 'Status: ready-for-agent', 'Status: done')
@@ -331,6 +332,55 @@ class PlanCheckTests(unittest.TestCase):
                 finally:
                     artifact.unlink()
 
+    def test_structural_markdown_reports_encoding_errors(self):
+        paths = [self.ticket('01'), self.packet] + [self.plan / name for name in (
+            'external-dependencies.md', 'capability-matrix.md', 'graph.md', 'index.md')]
+        for artifact in paths:
+            with self.subTest(path=artifact.name):
+                before = artifact.read_bytes()
+                artifact.write_bytes(b'\xff')
+                try:
+                    self.assert_error('invalid UTF-8')
+                finally:
+                    artifact.write_bytes(before)
+
+    def test_structural_markdown_reports_io_errors(self):
+        paths = [self.ticket('01'), self.packet] + [self.plan / name for name in (
+            'external-dependencies.md', 'capability-matrix.md', 'graph.md', 'index.md')]
+        original_read = Path.read_text
+        for artifact in paths:
+            with self.subTest(path=artifact.name):
+                def unavailable(path, *args, **kwargs):
+                    if path == artifact:
+                        raise PermissionError('synthetic structural read failure')
+                    return original_read(path, *args, **kwargs)
+                with mock.patch.object(Path, 'read_text', unavailable):
+                    self.assert_error('cannot read planning artifact')
+
+    def test_empty_record_returns_validation_errors(self):
+        self.packet.write_text('', encoding='utf-8')
+        self.assert_error('missing or invalid Type')
+
+    def test_external_dependencies_directory_is_invalid(self):
+        external = self.plan / 'external-dependencies.md'
+        external.unlink()
+        external.mkdir()
+        self.assert_error('external dependencies must be a regular file')
+
+    def test_fine_grained_github_tokens_fail_raw_and_decoded_scans(self):
+        token = 'github_pat_' + 'SYNTHETIC' * 8
+        for suffix, body in (
+            ('.txt', token),
+            ('.json', '{"credential":"\\u0067' + token[1:] + '"}'),
+        ):
+            with self.subTest(suffix=suffix):
+                artifact = self.plan / f'credential{suffix}'
+                artifact.write_text(body, encoding='utf-8')
+                try:
+                    self.assert_error('possible private path or credential')
+                finally:
+                    artifact.unlink()
+
     def test_deep_json_returns_privacy_or_nesting_diagnostics(self):
         (self.plan / 'fixtures').mkdir()
         artifact = self.plan / 'fixtures/public.json'
@@ -441,6 +491,115 @@ class PlanCheckTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('symbolic link is not allowed', result.stdout)
         self.assertEqual((graph.read_bytes(), index.read_bytes()), before)
+
+    def test_render_cli_rejects_unreadable_sources(self):
+        scripts = self.root / 'scripts'
+        scripts.mkdir()
+        checker = scripts / 'check_multi_project_plan.py'
+        shutil.copyfile(module.__file__, checker)
+        graph = self.plan / 'graph.md'
+        index = self.plan / 'index.md'
+        before = (graph.read_bytes(), index.read_bytes())
+        self.packet.write_bytes(b'\xff')
+        result = subprocess.run([sys.executable, str(checker), '--render'], cwd=self.root,
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('invalid UTF-8', result.stdout)
+        self.assertNotIn('Traceback', result.stderr)
+        self.assertEqual((graph.read_bytes(), index.read_bytes()), before)
+
+    def test_render_cli_repairs_missing_or_invalid_generated_files(self):
+        scripts = self.root / 'scripts'
+        scripts.mkdir()
+        checker = scripts / 'check_multi_project_plan.py'
+        shutil.copyfile(module.__file__, checker)
+        graph = self.plan / 'graph.md'
+        index = self.plan / 'index.md'
+        before = (graph.read_bytes(), index.read_bytes())
+        for failure in ('missing', 'encoding'):
+            with self.subTest(failure=failure):
+                for path in (graph, index):
+                    if failure == 'missing':
+                        path.unlink(missing_ok=True)
+                    else:
+                        path.write_bytes(b'\xff')
+                result = subprocess.run([sys.executable, str(checker), '--render'], cwd=self.root,
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual((graph.read_bytes(), index.read_bytes()), before)
+
+    def test_render_cli_preserves_outputs_for_invalid_external_dependency_type(self):
+        scripts = self.root / 'scripts'
+        scripts.mkdir()
+        checker = scripts / 'check_multi_project_plan.py'
+        shutil.copyfile(module.__file__, checker)
+        graph = self.plan / 'graph.md'
+        index = self.plan / 'index.md'
+        graph.write_text('graph sentinel\n', encoding='utf-8')
+        index.write_text('index sentinel\n', encoding='utf-8')
+        before = (graph.read_bytes(), index.read_bytes())
+        external = self.plan / 'external-dependencies.md'
+        external.unlink()
+        external.mkdir()
+        result = subprocess.run([sys.executable, str(checker), '--render'], cwd=self.root,
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual((graph.read_bytes(), index.read_bytes()), before)
+        self.assertIn('external dependencies must be a regular file', result.stdout)
+
+    def test_render_checks_both_destinations_before_either_write(self):
+        graph = self.plan / 'graph.md'
+        index = self.plan / 'index.md'
+        graph.write_text('graph sentinel\n', encoding='utf-8')
+        index.write_text('index sentinel\n', encoding='utf-8')
+        before = (graph.read_bytes(), index.read_bytes())
+        original_access = module.os.access
+        def accessible(path, mode):
+            return False if path == index else original_access(path, mode)
+        with mock.patch.object(module.os, 'access', accessible):
+            errors = module.check(self.root, render=True)
+        self.assertTrue(any('cannot write generated output' in error for error in errors), errors)
+        self.assertEqual((graph.read_bytes(), index.read_bytes()), before)
+
+    def test_render_cli_preserves_outputs_when_external_anchor_source_is_invalid(self):
+        scripts = self.root / 'scripts'
+        scripts.mkdir()
+        checker = scripts / 'check_multi_project_plan.py'
+        shutil.copyfile(module.__file__, checker)
+        external = self.root / 'docs/shared-anchor.md'
+        ticket_before = self.ticket('01').read_bytes()
+        graph = self.plan / 'graph.md'
+        index = self.plan / 'index.md'
+        graph.write_text('graph sentinel\n', encoding='utf-8')
+        index.write_text('index sentinel\n', encoding='utf-8')
+        before = (graph.read_bytes(), index.read_bytes())
+        for failure, expected in (
+            ('encoding', 'invalid UTF-8'),
+            ('missing', 'missing anchor source'),
+            ('directory', 'anchor target is not a regular file'),
+            ('escaping', 'escaping anchor source'),
+        ):
+            with self.subTest(failure=failure):
+                if external.is_dir():
+                    external.rmdir()
+                else:
+                    external.unlink(missing_ok=True)
+                link = '../../../shared-anchor.md#checks'
+                if failure == 'encoding':
+                    external.write_bytes(b'\xff')
+                elif failure == 'directory':
+                    external.mkdir()
+                elif failure == 'escaping':
+                    link = '/outside-shared.md#checks'
+                self.ticket('01').write_bytes(ticket_before)
+                self.replace(self.ticket('01'), '```console\npython check.py\n```',
+                             f'[Shared checks]({link}).')
+                result = subprocess.run([sys.executable, str(checker), '--render'], cwd=self.root,
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertEqual((graph.read_bytes(), index.read_bytes()), before)
+                self.assertIn(expected, result.stdout)
+                self.assertNotIn('Traceback', result.stderr)
 
     def test_duplicate_record_id_fails(self):
         (self.plan / 'tickets/01-duplicate.md').write_bytes(self.ticket('01').read_bytes())
