@@ -21,8 +21,8 @@ to fix the review findings and merge the corrected work into dev.
 - RED: the four planning regressions failed against the accepted validator (37 tests, four failures).
 - RED: both restoration regressions failed against the accepted runner (18 tests, two failures); canonical cases still reported 47/47.
 - Independent review added six failing boundary cases to the first planning candidate (49 tests, six failures): empty gate IDs, duplicate gate fields, malformed/non-UTF-8/BOM JSON, and historical log details under the explicit result field.
-- GREEN: 53/53 planning tests and the actual public plan consistency check passed.
-- GREEN: 19/19 restoration tests and 47/47 filesystem fixture cases passed with no skipped tests.
+- GREEN: 54/54 planning tests and the actual public plan consistency check passed.
+- GREEN: 28/28 restoration tests and 47/47 filesystem fixture cases passed with no skipped tests.
 - Checks ran as the existing non-root user in the bounded Habitat image, with networking disabled, a read-only root, no host mounts, all capabilities dropped, and no new privileges.
 - The test container is limited to one CPU, 384 MiB memory, 64 processes, and a 128 MiB temporary filesystem. It uses the existing image; no dependency installation is required.
 - The empty base64 string remains valid. Invalid characters, missing or excess padding, nonzero pad bits, and malformed tree mutation entries are rejected before creating a work directory.
@@ -33,10 +33,10 @@ to fix the review findings and merge the corrected work into dev.
 
 | Artifact | SHA-256 |
 | --- | --- |
-| `scripts/check_multi_project_plan.py` | `6d43f48aac569e6188fea8674666aa9f9b1a658f5dc04437815dff18a88ad5d0` |
-| `scripts/tests/test_multi_project_plan.py` | `79a8f2bbe2d7b1500d949cbe5306c62738f034c68e382d28131c7cfe6f098cf4` |
-| `scripts/prove_multi_project_source_preservation.mjs` | `6f8e23817c29262a107910b0faca71d7639798d50b245280882fe3d0dac0d5f2` |
-| `scripts/tests/test_prove_multi_project_source_preservation.mjs` | `5cdc785c7a6cc69953e972b102d7aa638a4566917e21fbe3b99de0e2e7b7f270` |
+| `scripts/check_multi_project_plan.py` | `d4ae65b36c49043f29b6e30e2e3bfd52776b33b8e9079ec9209affadb24c7e25` |
+| `scripts/tests/test_multi_project_plan.py` | `a4956c79cb332c98de3f59f7a717f3a457fe9430996bf41f4214639ff9a88b8a` |
+| `scripts/prove_multi_project_source_preservation.mjs` | `901500c89d0a08e4483025b477adedc688247f56f5d8dc1c13bab5e5ed0e3cc2` |
+| `scripts/tests/test_prove_multi_project_source_preservation.mjs` | `bcfedfec49182e0a5efcf317879d74bea1d4300bd92e5d6afaf1b8514d55a18b` |
 
 These checks establish fixture and planning validation behavior. They do not
 complete a product outcome, activate a factory, prove a coding runtime, or
@@ -60,3 +60,34 @@ constant and symlink regressions failed before their fixes (51 tests, six failin
 subcases). Final passing counts are recorded above. Refused render operations
 preserve their existing graph and index. These checks use synthetic fixtures;
 they do not read real private source files.
+
+## Complete fixture validation
+
+Automated review of commit `b0f0f7e` found five remaining validation gaps. This
+pass checks the complete fixture description before filesystem setup and makes
+each declared assertion affect the result:
+
+| Review | Finding | Resolution |
+| --- | --- | --- |
+| [3942983059](https://github.com/vivary-dev/vivary/pull/329#discussion_r3942983059) | Invalid intermediate tree entries | Validate each tree mutation immediately, including entries removed by a later mutation. |
+| [3942983068](https://github.com/vivary-dev/vivary/pull/329#discussion_r3942983068) | Ignored trees under noWrites | Compare every declared target and temporary tree even when noWrites is true. |
+| [3942983073](https://github.com/vivary-dev/vivary/pull/329#discussion_r3942983073) | Missing response assertions | Check returned verifiedPaths and ownedPaths as well as the corresponding receipt values. |
+| [3942983076](https://github.com/vivary-dev/vivary/pull/329#discussion_r3942983076) | Unchecked symbolic receipts | Validate receipt fields, references, manifest binding, and described target bytes before creating a work directory. |
+| [3942983077](https://github.com/vivary-dev/vivary/pull/329#discussion_r3942983077) | Receipt directory traceback | Require regular evidence files and reject directory anchor targets with validation errors. |
+
+The evidence-directory regression failed for both plain and anchored links before
+its fix (54 planning tests, two error subcases). The four reported restoration
+regressions failed before their fixes (23 tests, four failures). The fixture audit
+added two failing test groups covering ignored setup fields and ineffective faults
+(25 tests, six failures). Final passing counts are recorded above.
+
+The audit also checked empty suites, exact setup and mutation fields, seed
+manifests, JSON Pointer escaping and array removal, relative link targets, raw
+parser input, and receipt bytes and metadata. Invalid descriptions fail before
+work-directory creation. Executed assertions check both the returned result and
+the receipt, including manifest/source binding and ordered output hashes and
+sizes. Source preservation and every requested tree comparison remain active.
+
+The final bounded review also rejected transient invalid policy values, unsafe
+paths in unused manifest seeds, and positive raw input in parser-negative cases.
+The added regression group failed before those fixes and passed afterward.

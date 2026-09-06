@@ -54,6 +54,48 @@ const FIXTURE_EXPECTATION_FIELDS = new Set([
   "tempTreeRef",
   "verifiedPaths",
 ]);
+const FIXTURE_FIELDS = [
+  "cases",
+  "defaults",
+  "fixtureSchemaVersion",
+  "manifests",
+  "purpose",
+  "receipts",
+  "trees",
+  "unproved",
+];
+const FIXTURE_DEFAULT_FIELDS = [
+  "expect",
+  "manifestRef",
+  "policy",
+  "receiptRef",
+  "sourceTreeRef",
+  "targetTreeRef",
+  "tempTreeRef",
+];
+const FIXTURE_CASE_FIELDS = new Set([
+  "expect",
+  "fault",
+  "id",
+  "mutations",
+  "rawManifestText",
+  "setup",
+]);
+const FIXTURE_SETUP_FIELDS = new Set([
+  "manifestRef",
+  "policy",
+  "receiptRef",
+  "sourceTreeRef",
+  "targetTreeRef",
+  "tempTreeRef",
+]);
+const COMPLETE_SYMBOLIC_RECEIPT_FIELDS = ["manifestRef", "status", "verifiedTargetTreeRef"];
+const INCOMPLETE_SYMBOLIC_RECEIPT_FIELDS = [
+  "manifestRef",
+  "observedTargetTreeRef",
+  "ownedPaths",
+  "status",
+];
 const RECEIPT_FILE = "restore-receipt.json";
 
 const isObject = (value) =>
@@ -884,7 +926,18 @@ const pointerParts = (pointer) => {
   if (typeof pointer !== "string" || !pointer.startsWith("/") || pointer === "/") {
     throw new Error("invalid fixture JSON Pointer");
   }
-  return pointer.slice(1).split("/").map((part) => part.replaceAll("~1", "/").replaceAll("~0", "~"));
+  const encoded = pointer.slice(1).split("/");
+  if (encoded.some((part) => /~(?:[^01]|$)/u.test(part))) {
+    throw new Error("invalid fixture JSON Pointer");
+  }
+  return encoded.map((part) => part.replaceAll("~1", "/").replaceAll("~0", "~"));
+};
+
+const fixtureArrayIndex = (array, part) => {
+  if (!/^(?:0|[1-9][0-9]*)$/u.test(part)) throw new Error("invalid fixture JSON Pointer");
+  const index = Number(part);
+  if (!Number.isSafeInteger(index) || index >= array.length) throw new Error("invalid fixture JSON Pointer");
+  return index;
 };
 
 const pointerParent = (root, pointer) => {
@@ -892,7 +945,11 @@ const pointerParent = (root, pointer) => {
   const final = parts.pop();
   let parent = root;
   for (const part of parts) {
-    if ((!isObject(parent) && !Array.isArray(parent)) || !Object.hasOwn(parent, part)) {
+    if (Array.isArray(parent)) {
+      parent = parent[fixtureArrayIndex(parent, part)];
+      continue;
+    }
+    if (!isObject(parent) || !Object.hasOwn(parent, part)) {
       throw new Error("fixture mutation parent is missing");
     }
     parent = parent[part];
@@ -916,16 +973,23 @@ const applyJsonMutation = (manifest, mutation) => {
     return;
   }
   const { parent, final } = pointerParent(manifest, mutation.pointer);
+  const finalKey = Array.isArray(parent) ? fixtureArrayIndex(parent, final) : final;
   if (mutation.op === "set-json") {
-    Object.defineProperty(parent, final, {
-      value: structuredClone(mutation.value),
-      enumerable: true,
-      configurable: true,
-      writable: true,
-    });
+    if (Array.isArray(parent)) parent[finalKey] = structuredClone(mutation.value);
+    else {
+      Object.defineProperty(parent, finalKey, {
+        value: structuredClone(mutation.value),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    }
   } else if (mutation.op === "remove-json") {
-    if (!Object.hasOwn(parent, final)) throw new Error("fixture remove target is missing");
-    delete parent[final];
+    if (Array.isArray(parent)) parent.splice(finalKey, 1);
+    else {
+      if (!Object.hasOwn(parent, finalKey)) throw new Error("fixture remove target is missing");
+      delete parent[finalKey];
+    }
   } else {
     throw new Error("unsupported fixture JSON mutation");
   }
@@ -951,6 +1015,14 @@ const mutateTree = (trees, mutation) => {
   }
 };
 
+const isFixtureLinkTarget = (value) => {
+  if (typeof value !== "string" || value.length === 0 || value.includes("\0") || value.includes("\\")) {
+    return false;
+  }
+  if (value.startsWith("/") || /^[A-Za-z]:/u.test(value)) return false;
+  return pathParts(value).every((part) => part.length > 0);
+};
+
 const validateFixtureTree = (entries) => {
   if (!Array.isArray(entries)) throw new Error("fixture tree must be an array");
   const paths = new Set();
@@ -969,7 +1041,7 @@ const validateFixtureTree = (entries) => {
       if (!same(Object.keys(entry).sort(), ["kind", "path"])) throw new Error("invalid fixture directory");
     } else if (entry.kind === "link") {
       if (!same(Object.keys(entry).sort(), ["kind", "path", "target"]) ||
-          typeof entry.target !== "string" || entry.target.length === 0) throw new Error("invalid fixture link");
+          !isFixtureLinkTarget(entry.target)) throw new Error("invalid fixture link");
     } else {
       throw new Error("unsupported fixture tree entry");
     }
@@ -1118,6 +1190,7 @@ const prepareFixtureCase = (fixture, fixtureCase) => {
       applyJsonMutation(manifest, mutation);
     } else if (new Set(["tree-add", "tree-remove", "tree-replace"]).has(mutation.op)) {
       mutateTree(trees, mutation);
+      validateFixtureTree(trees[mutation.tree]);
     } else if (mutation.op === "set-policy") {
       if (mutation.field !== "caseSensitivity") throw new Error("unsupported fixture policy mutation");
       policy[mutation.field] = structuredClone(mutation.value);
@@ -1184,18 +1257,17 @@ const runOneFixtureCase = async (fixture, fixtureCase, caseRoot) => {
     if (!same(before.target, after.target)) failures.push("target changed on refusal/recheck");
     if (!same(before.temp, after.temp)) failures.push("temporary tree changed on refusal/recheck");
     if (!same(before.receipt, after.receipt)) failures.push("receipt changed on refusal/recheck");
-  } else {
-    if (expect.targetTreeRef) {
-      const expectedTarget = selectRef(fixture, "trees", expect.targetTreeRef);
-      if (!same(await comparableTree(roots.target, expectedTarget), normalizedFixtureTree(expectedTarget))) {
-        failures.push("target tree");
-      }
+  }
+  if (expect.targetTreeRef) {
+    const expectedTarget = selectRef(fixture, "trees", expect.targetTreeRef);
+    if (!same(await comparableTree(roots.target, expectedTarget), normalizedFixtureTree(expectedTarget))) {
+      failures.push("target tree");
     }
-    if (expect.tempTreeRef) {
-      const expectedTemp = selectRef(fixture, "trees", expect.tempTreeRef);
-      if (!same(await comparableTree(roots.temp, expectedTemp), normalizedFixtureTree(expectedTemp))) {
-        failures.push("temporary tree");
-      }
+  }
+  if (expect.tempTreeRef) {
+    const expectedTemp = selectRef(fixture, "trees", expect.tempTreeRef);
+    if (!same(await comparableTree(roots.temp, expectedTemp), normalizedFixtureTree(expectedTemp))) {
+      failures.push("temporary tree");
     }
   }
 
@@ -1207,11 +1279,36 @@ const runOneFixtureCase = async (fixture, fixtureCase, caseRoot) => {
       failures.push("receipt unavailable");
     }
     if (receipt !== null) {
+      try {
+        validateReceiptShape(receipt);
+      } catch {
+        failures.push("receipt shape");
+      }
       if (expect.receiptStatus && receipt.status !== expect.receiptStatus) failures.push("receipt status");
-      if (expect.receiptBinding === "current-manifest" &&
-          receipt.manifestDigest !== digestManifest(prepared.manifest)) failures.push("receipt binding");
-      if (expect.verifiedPaths && !same(receipt.outputs?.map((item) => item.path), expect.verifiedPaths)) {
+      if (expect.receiptBinding === "current-manifest") {
+        const expectedManifestDigest = digestManifest(prepared.manifest);
+        const expectedSourceTreeDigest = digestTree(await scanTree(roots.source));
+        const expectedOutputs = outputsForManifest(prepared.manifest);
+        if (actual.manifestDigest !== expectedManifestDigest) failures.push("manifest digest response");
+        if (receipt.manifestDigest !== expectedManifestDigest) failures.push("receipt binding");
+        if (receipt.sourceTreeDigest !== expectedSourceTreeDigest) failures.push("receipt source tree digest");
+        if (!same(receipt.outputs, expectedOutputs)) failures.push("receipt outputs");
+        if (receipt.status === "incomplete" &&
+            receipt.observedTargetDigest !== digestTree(await scanTree(roots.target))) {
+          failures.push("receipt target tree digest");
+        }
+      }
+      if (expect.verifiedPaths && !same(actual.verifiedPaths, expect.verifiedPaths)) {
+        failures.push("verified paths response");
+      }
+      const receiptOutputPaths = Array.isArray(receipt.outputs)
+        ? receipt.outputs.map((item) => item?.path)
+        : null;
+      if (expect.verifiedPaths && !same(receiptOutputPaths, expect.verifiedPaths)) {
         failures.push("verified paths");
+      }
+      if (expect.ownedPaths && !same(actual.ownedPaths, expect.ownedPaths)) {
+        failures.push("owned paths response");
       }
       if (expect.ownedPaths && !same(receipt.ownedPaths, expect.ownedPaths)) failures.push("owned paths");
     }
@@ -1254,7 +1351,8 @@ const validateFixtureExpectation = (expect, fixture, requireAssertions = false) 
   }
   for (const field of ["verifiedPaths", "ownedPaths"]) {
     if (Object.hasOwn(expect, field) &&
-        (!Array.isArray(expect[field]) || !expect[field].every(isSafeRelativePosixPath))) {
+        (!Array.isArray(expect[field]) || !expect[field].every(isSafeRelativePosixPath) ||
+         new Set(expect[field]).size !== expect[field].length)) {
       invalidFixtureExpectation();
     }
   }
@@ -1275,28 +1373,234 @@ const validateFixtureExpectation = (expect, fixture, requireAssertions = false) 
     const pathsField = expect.receiptStatus === "complete" ? "verifiedPaths" : "ownedPaths";
     if (!Object.hasOwn(expect, pathsField)) invalidFixtureExpectation();
   }
+  if (!Object.hasOwn(expect, "receiptStatus")) {
+    if (["receiptBinding", "verifiedPaths", "ownedPaths"].some((field) => Object.hasOwn(expect, field))) {
+      invalidFixtureExpectation();
+    }
+  } else if (expect.receiptStatus === "complete") {
+    if (!Object.hasOwn(expect, "receiptBinding") || !Object.hasOwn(expect, "verifiedPaths") ||
+        Object.hasOwn(expect, "ownedPaths")) {
+      invalidFixtureExpectation();
+    }
+  } else if (!Object.hasOwn(expect, "receiptBinding") || !Object.hasOwn(expect, "ownedPaths") ||
+      Object.hasOwn(expect, "verifiedPaths")) {
+    invalidFixtureExpectation();
+  }
+};
+
+const hasExactFields = (value, fields) =>
+  isObject(value) && same(Object.keys(value).sort(), [...fields].sort());
+
+const invalidFixture = (kind = "source-preservation fixture") => {
+  throw new Error(`invalid ${kind}`);
+};
+
+const validateFixturePolicySeed = (policy) => {
+  if (!hasExactFields(policy, ["caseSensitivity", "noFollow", "pathStyle", "rejectUnknownFields"]) ||
+      policy.pathStyle !== "posix-relative" || policy.noFollow !== true ||
+      policy.rejectUnknownFields !== true ||
+      !new Set(["sensitive", "insensitive"]).has(policy.caseSensitivity)) {
+    invalidFixture("fixture policy");
+  }
+};
+
+const validateFixtureSetup = (setup, fixture, requireAll = false) => {
+  const allowedFields = requireAll
+    ? new Set([...FIXTURE_SETUP_FIELDS, "expect"])
+    : FIXTURE_SETUP_FIELDS;
+  if (!isObject(setup) || Object.keys(setup).some((field) => !allowedFields.has(field))) {
+    invalidFixture("fixture setup");
+  }
+  const references = [
+    ["manifestRef", "manifests"],
+    ["sourceTreeRef", "trees"],
+    ["targetTreeRef", "trees"],
+    ["tempTreeRef", "trees"],
+    ["receiptRef", "receipts"],
+  ];
+  for (const [field, collection] of references) {
+    if (requireAll && !Object.hasOwn(setup, field)) invalidFixture("fixture defaults");
+    if (Object.hasOwn(setup, field) &&
+        (typeof setup[field] !== "string" || setup[field].length === 0 ||
+         !Object.hasOwn(fixture[collection], setup[field]))) {
+      if (field === "receiptRef") throw new Error("invalid symbolic receipt reference");
+      invalidFixture("fixture setup");
+    }
+  }
+  if (requireAll && !Object.hasOwn(setup, "policy")) invalidFixture("fixture defaults");
+  if (Object.hasOwn(setup, "policy")) validateFixturePolicySeed(setup.policy);
+};
+
+const validateFixtureMutationDescriptor = (mutation) => {
+  if (!isObject(mutation) || typeof mutation.op !== "string") invalidFixture("fixture mutation");
+  const fieldsByOp = {
+    "append-json": ["op", "pointer", "value"],
+    "remove-json": ["op", "pointer"],
+    "set-json": ["op", "pointer", "value"],
+    "set-policy": ["field", "op", "value"],
+    "tree-add": ["entry", "op", "path", "tree"],
+    "tree-remove": ["op", "path", "tree"],
+    "tree-replace": ["entry", "op", "path", "tree"],
+  };
+  const fields = fieldsByOp[mutation.op];
+  if (!fields || !hasExactFields(mutation, fields)) invalidFixture("fixture mutation");
+  if (new Set(["append-json", "remove-json", "set-json"]).has(mutation.op)) {
+    pointerParts(mutation.pointer);
+  } else if (new Set(["tree-add", "tree-remove", "tree-replace"]).has(mutation.op)) {
+    if (!new Set(["source", "target", "temp"]).has(mutation.tree) ||
+        !isSafeRelativePosixPath(mutation.path)) invalidFixture("fixture mutation");
+  } else if (mutation.field !== "caseSensitivity" ||
+      !new Set(["sensitive", "insensitive"]).has(mutation.value)) {
+    invalidFixture("fixture mutation");
+  }
+};
+
+const rawManifestFixtureResult = (text) => {
+  try {
+    return isObject(parseStrictJson(text)) ? null : "invalid-manifest-root";
+  } catch (error) {
+    return error instanceof StrictJsonError &&
+      new Set(["invalid-json", "duplicate-json-key"]).has(error.code)
+      ? error.code
+      : null;
+  }
+};
+
+const targetTreeMatchesManifestOutputs = (tree, manifest, count = manifest.files.length) => {
+  const outputs = outputsForManifest(manifest).slice(0, count);
+  const allowedDirectories = new Set();
+  for (const output of outputs) {
+    const parts = pathParts(output.path);
+    for (let index = 1; index < parts.length; index += 1) {
+      allowedDirectories.add(parts.slice(0, index).join("/"));
+    }
+  }
+  const files = tree.filter((entry) => entry.kind === "file");
+  if (files.length !== outputs.length ||
+      tree.some((entry) => entry.kind === "link" ||
+        (entry.kind === "directory" && !allowedDirectories.has(entry.path)))) return false;
+  return outputs.every((output) => {
+    const entry = files.find((candidate) => candidate.path === output.path);
+    if (!entry) return false;
+    const bytes = Buffer.from(entry.contentBase64, "base64");
+    return bytes.length === output.size && digestBytes(bytes) === output.sha256;
+  });
+};
+
+const validateSymbolicReceipt = (reference, symbolic, fixture) => {
+  if (reference === "none") {
+    if (symbolic !== null) throw new Error("invalid symbolic receipt");
+    return;
+  }
+  const fields = symbolic?.status === "complete"
+    ? COMPLETE_SYMBOLIC_RECEIPT_FIELDS
+    : symbolic?.status === "incomplete"
+      ? INCOMPLETE_SYMBOLIC_RECEIPT_FIELDS
+      : null;
+  if (fields === null || !hasExactFields(symbolic, fields) ||
+      typeof symbolic.manifestRef !== "string" ||
+      !Object.hasOwn(fixture.manifests, symbolic.manifestRef)) {
+    throw new Error("invalid symbolic receipt");
+  }
+  const manifest = fixture.manifests[symbolic.manifestRef];
+  if (validateManifest(manifest) !== null) throw new Error("invalid symbolic receipt manifest");
+  if (symbolic.status === "complete") {
+    if (typeof symbolic.verifiedTargetTreeRef !== "string" ||
+        !Object.hasOwn(fixture.trees, symbolic.verifiedTargetTreeRef) ||
+        !targetTreeMatchesManifestOutputs(fixture.trees[symbolic.verifiedTargetTreeRef], manifest)) {
+      throw new Error("invalid symbolic receipt");
+    }
+    return;
+  }
+  if (typeof symbolic.observedTargetTreeRef !== "string" ||
+      !Object.hasOwn(fixture.trees, symbolic.observedTargetTreeRef) ||
+      !Array.isArray(symbolic.ownedPaths) ||
+      symbolic.ownedPaths.some((ownedPath) => !isSafeRelativePosixPath(ownedPath)) ||
+      new Set(symbolic.ownedPaths).size !== symbolic.ownedPaths.length ||
+      !same(symbolic.ownedPaths, manifest.files.slice(0, symbolic.ownedPaths.length)
+        .map((file) => file.destination)) ||
+      !targetTreeMatchesManifestOutputs(
+        fixture.trees[symbolic.observedTargetTreeRef],
+        manifest,
+        symbolic.ownedPaths.length,
+      )) {
+    throw new Error("invalid symbolic receipt");
+  }
+};
+
+const validateFixtureFault = (fixtureCase, prepared, fixture, expect) => {
+  const fault = fixtureCase.fault;
+  if (!hasExactFields(fault, ["count", "op"]) || fault.op !== "interrupt-after-output" ||
+      !Number.isSafeInteger(fault.count) || fault.count < 1 ||
+      expect.result !== "incomplete" || expect.noWrites !== false ||
+      validateManifest(prepared.manifest) !== null) {
+    throw new Error("invalid fixture fault");
+  }
+  const symbolic = fixture.receipts[prepared.setup.receiptRef];
+  if (symbolic !== null && symbolic.status !== "incomplete") throw new Error("invalid fixture fault");
+  const prefixLength = symbolic?.ownedPaths.length ?? 0;
+  if (symbolic !== null &&
+      digestManifest(fixture.manifests[symbolic.manifestRef]) !== digestManifest(prepared.manifest)) {
+    throw new Error("invalid fixture fault");
+  }
+  if (fault.count <= prefixLength || fault.count > prepared.manifest.files.length) {
+    throw new Error("invalid fixture fault");
+  }
 };
 
 const validateFixtureEnvelope = (fixture) => {
-  if (!isObject(fixture) || fixture.fixtureSchemaVersion !== 1 || !isObject(fixture.defaults) ||
-      !isObject(fixture.manifests) || !isObject(fixture.trees) || !isObject(fixture.receipts) ||
-      !Array.isArray(fixture.cases)) throw new Error("invalid source-preservation fixture");
+  if (!hasExactFields(fixture, FIXTURE_FIELDS) || fixture.fixtureSchemaVersion !== 1 ||
+      typeof fixture.purpose !== "string" || fixture.purpose.length === 0 ||
+      !isObject(fixture.defaults) || !isObject(fixture.manifests) ||
+      Object.keys(fixture.manifests).length === 0 || !isObject(fixture.trees) ||
+      Object.keys(fixture.trees).length === 0 || !isObject(fixture.receipts) ||
+      !Array.isArray(fixture.cases) || fixture.cases.length === 0 ||
+      !Array.isArray(fixture.unproved) ||
+      !fixture.unproved.every((item) => typeof item === "string" && item.length > 0)) {
+    throw new Error("invalid source-preservation fixture");
+  }
   for (const tree of Object.values(fixture.trees)) validateFixtureTree(tree);
+  if (!hasExactFields(fixture.defaults, FIXTURE_DEFAULT_FIELDS)) invalidFixture("fixture defaults");
+  validateFixtureSetup(fixture.defaults, fixture, true);
+  for (const [reference, symbolic] of Object.entries(fixture.receipts)) {
+    validateSymbolicReceipt(reference, symbolic, fixture);
+  }
+  for (const manifest of Object.values(fixture.manifests)) {
+    if (validateManifest(manifest) !== null ||
+        validatePathsAndAliases(manifest, fixture.defaults.policy) !== null) {
+      invalidFixture("fixture manifest");
+    }
+  }
   validateFixtureExpectation(fixture.defaults.expect, fixture);
   const caseIds = new Set();
   for (const fixtureCase of fixture.cases) {
+    if (!isObject(fixtureCase) ||
+        Object.keys(fixtureCase).some((field) => !FIXTURE_CASE_FIELDS.has(field)) ||
+        !Object.hasOwn(fixtureCase, "id") || !Object.hasOwn(fixtureCase, "mutations") ||
+        !Object.hasOwn(fixtureCase, "expect") || !Array.isArray(fixtureCase.mutations)) {
+      invalidFixture("fixture case");
+    }
     const id = fixtureCase?.id;
     if (typeof id !== "string" || id.length === 0) throw new Error("invalid fixture case id");
     if (caseIds.has(id)) throw new Error(`duplicate fixture case id: ${id}`);
     caseIds.add(id);
+    if (Object.hasOwn(fixtureCase, "setup")) validateFixtureSetup(fixtureCase.setup, fixture);
+    for (const mutation of fixtureCase.mutations) validateFixtureMutationDescriptor(mutation);
     validateFixtureExpectation(fixtureCase.expect, fixture);
-    validateFixtureExpectation(
-      { ...fixture.defaults.expect, ...fixtureCase.expect },
-      fixture,
-      true,
-    );
+    const expect = { ...fixture.defaults.expect, ...fixtureCase.expect };
+    validateFixtureExpectation(expect, fixture, true);
+    if (Object.hasOwn(fixtureCase, "rawManifestText")) {
+      const rawResult = typeof fixtureCase.rawManifestText === "string"
+        ? rawManifestFixtureResult(fixtureCase.rawManifestText)
+        : null;
+      if (fixtureCase.mutations.length > 0 || Object.hasOwn(fixtureCase, "fault") ||
+          rawResult === null || expect.result !== rawResult) {
+        invalidFixture("fixture raw manifest text");
+      }
+    }
     const prepared = prepareFixtureCase(fixture, fixtureCase);
     for (const tree of Object.values(prepared.trees)) validateFixtureTree(tree);
+    if (Object.hasOwn(fixtureCase, "fault")) validateFixtureFault(fixtureCase, prepared, fixture, expect);
   }
 };
 

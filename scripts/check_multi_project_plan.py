@@ -192,7 +192,7 @@ def evidence_receipt(record: dict, plan: Path) -> tuple[dict[str, str], list[str
         return None
     target = (record["path"].parent / unquote(match.group(1))).resolve()
     receipts = (plan / "receipts").resolve()
-    if target.suffix != ".md" or not target.is_relative_to(receipts) or not target.exists():
+    if target.suffix != ".md" or not target.is_relative_to(receipts) or not target.is_file():
         return None
     return parse_header(target.read_text(encoding="utf-8"))
 
@@ -425,6 +425,9 @@ def check(root: Path) -> list[str]:
                 if not target.is_relative_to(root.resolve()) or not target.exists():
                     errors.append(f"{path.relative_to(root)}: missing or escaping link {link}")
                 elif anchor and target.suffix == ".md":
+                    if not target.is_file():
+                        errors.append(f"{path.relative_to(root)}: anchor target is not a regular file {link}")
+                        continue
                     headings = re.findall(r"^#+ (.+)$", target.read_text(encoding="utf-8"), re.M)
                     anchors = {re.sub(r"[^\w -]", "", h.lower()).replace(" ", "-") for h in headings}
                     if anchor not in anchors:

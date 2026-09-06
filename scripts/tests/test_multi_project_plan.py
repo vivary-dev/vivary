@@ -134,6 +134,21 @@ class PlanCheckTests(unittest.TestCase):
         self.render()
         self.assert_error('done requires Verification-result: passed')
 
+    def test_evidence_receipt_directory_returns_validation_errors(self):
+        receipt = self.plan / 'receipts/fixture.md'
+        receipt.unlink()
+        receipt.mkdir()
+        self.replace(self.packet, 'Status: ready-for-agent', 'Status: done')
+        self.replace(self.packet, 'Timebox: one context',
+                     'Evidence: [Fixture receipt](../receipts/fixture.md)\n'
+                     'Verification-result: passed\nTimebox: one context')
+        self.render()
+        for anchor in ('', '#receipt'):
+            with self.subTest(anchor=anchor):
+                if anchor:
+                    self.replace(self.packet, '../receipts/fixture.md)', '../receipts/fixture.md#receipt)')
+                self.assert_error('done requires linked evidence receipt')
+
     def test_structured_pass_allows_historical_failure_detail_in_log(self):
         self.replace(self.packet, 'Status: ready-for-agent', 'Status: done')
         self.replace(self.packet, 'Timebox: one context',
