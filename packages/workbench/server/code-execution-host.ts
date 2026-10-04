@@ -69,6 +69,10 @@ export type CleanupTarget =
 /** A Linux boot id, which the kernel prints as a UUID. */
 export const BOOT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export const WINDOWS_SCAN_FAILURES = ["timeout", "aborted", "access-denied", "command-not-found",
+  "command-failed", "output-limit", "invalid-output", "tracking-overflow"] as const;
+export type WindowsScanFailure = typeof WINDOWS_SCAN_FAILURES[number];
+
 /**
  * One observation of a target. `hidden` is Linux only. The group exists and may hold a member Vivary could not read,
  * for example under `hidepid=1`, beside any it lists. A Windows `target` also tracks every process the scan found.
@@ -76,7 +80,7 @@ export const BOOT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}
 export type CleanupCheck =
   | { result: "clean" }
   | { result: "remaining"; remaining: LeftoverProcess[]; hidden: boolean; target: CleanupTarget }
-  | { result: "unavailable" };
+  | { result: "unavailable"; reason?: WindowsScanFailure };
 
 /** A failed stop's target, null on a platform Vivary cannot check, and the one check taken right after the failure. */
 export type WorkerLeftovers = { target: CleanupTarget | null; check: Exclude<CleanupCheck, { result: "clean" }> };
@@ -562,7 +566,8 @@ function countedLines(text: string): string[] | null {
 /** Issue #121. Every process on this Windows host by PID, parent PID, creation time, and image name. */
 export async function scanWindowsProcesses(signal?: AbortSignal): Promise<WindowsProcessRow[]> {
   const rows = parseWindowsProcessRows(await runPowerShell(WINDOWS_PROCESS_SCAN, signal));
-  if (!rows) throw new Error("The Windows process scan printed output Vivary cannot read.");
+  if (!rows) throw Object.assign(new Error("The Windows process scan printed output Vivary cannot read."),
+    { code: "VIVARY_WINDOWS_SCAN_OUTPUT" });
   return rows;
 }
 
@@ -764,11 +769,26 @@ async function rebootedSince(target: Extract<CleanupTarget, { platform: "linux" 
   return target.bootId !== null && bootId !== null && target.bootId !== bootId;
 }
 
+/** Keep only a fixed diagnostic category. Child-process errors can contain commands and stderr. */
+function windowsScanFailure(error: unknown): WindowsScanFailure {
+  if (error instanceof Error && error.name === "AbortError") return "aborted";
+  if (error && typeof error === "object") {
+    if ("code" in error) {
+      if (error.code === "EPERM" || error.code === "EACCES") return "access-denied";
+      if (error.code === "ENOENT") return "command-not-found";
+      if (error.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") return "output-limit";
+      if (error.code === "VIVARY_WINDOWS_SCAN_OUTPUT") return "invalid-output";
+    }
+    if ("killed" in error && error.killed === true) return "timeout";
+  }
+  return "command-failed";
+}
+
 async function scanWindowsTarget(target: Extract<CleanupTarget, { platform: "win32" }>, io: CleanupIo,
 ): Promise<CleanupCheck> {
-  if (target.overflow) return { result: "unavailable" };
+  if (target.overflow) return { result: "unavailable", reason: "tracking-overflow" };
   let rows: WindowsProcessRow[];
-  try { rows = await io.windowsProcesses(); } catch { return { result: "unavailable" }; }
+  try { rows = await io.windowsProcesses(); } catch (error) { return { result: "unavailable", reason: windowsScanFailure(error) }; }
   const { remaining, tracked, traced, overflow } = windowsLeftovers(rows, target.tracked, target.traced);
   return remaining.length === 0 ? { result: "clean" } : { result: "remaining", remaining, hidden: false,
     target: { platform: "win32", tracked, traced, ...(overflow ? { overflow: true as const } : {}) } };

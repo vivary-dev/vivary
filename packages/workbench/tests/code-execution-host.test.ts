@@ -322,7 +322,7 @@ test("a Windows target with more live processes than its cap reads unavailable, 
   const [first, ...later] = await checksOf([liveWorker], [
     [scanRow(100, 50, 2_000), ...children, scanRow(9_000, 1_249, 4_000)], [scanRow(9_000, 1_249, 4_000)], []]);
   assert.equal(first?.result === "remaining" && first.remaining.length, 252);
-  assert.deepEqual(later, [{ result: "unavailable" }, { result: "unavailable" }],
+  assert.deepEqual(later, [{ result: "unavailable", reason: "tracking-overflow" }, { result: "unavailable", reason: "tracking-overflow" }],
     "a target that could not keep every identity never reads clean");
 });
 
@@ -855,7 +855,7 @@ process.send({ type: "vivary:code-worker:ready" });
     assert.ok(failure instanceof VivaryCodeWorkerCleanupError);
     assert.equal(failure.cause?.step, "worker-exited");
     // This host has no `powershell.exe`, so the check after the failed stop could not scan.
-    assert.deepEqual(failure.leftovers?.check, { result: "unavailable" });
+    assert.deepEqual(failure.leftovers?.check, { result: "unavailable", reason: "command-not-found" });
   } finally {
     process.chdir(originalCwd);
     await rm(fixture, { recursive: true, force: true });
@@ -1229,3 +1229,36 @@ for (const scenario of ["orphan", "direct", "reused", "scan-held-at-stop", "fina
       await rm(proof.fixture, { recursive: true, force: true });
     }
   });
+
+// Uses real scanner subprocesses. Error text must never enter a stored cleanup diagnostic.
+test("Windows scan failure categories survive cleanup verification", {
+  timeout: 20_000, skip: process.platform === "win32",
+}, async () => {
+  const fixture = await mkdtemp(path.join(tmpdir(), "vivary-scan-diagnostic-"));
+  const scanner = path.join(fixture, "System32", "WindowsPowerShell", "v1.0");
+  await mkdir(scanner, { recursive: true });
+  // guard:allow-env-credential - Restored synthetic system directory for scanner subprocesses.
+  const previous = process.env.SystemRoot;
+  // guard:allow-env-credential - Selects only the disposable scanner executable.
+  process.env.SystemRoot = fixture; // guard:allow-env-mutation - Test-local executable fixture.
+  const target: CleanupTarget = { platform: "win32",
+    tracked: [{ pid: 41002, createdFrom: 1, createdTo: 1, childrenTo: 2 }], traced: [] };
+  try {
+    const cases = [
+      { script: "printf 'private-error-must-not-persist' >&2; exit 1", reason: "command-failed" },
+      { script: "printf 'incomplete scan\\n'", reason: "invalid-output" },
+      { script: "exec sleep 30", reason: "timeout" },
+    ];
+    for (const scenario of cases) {
+      await writeFile(path.join(scanner, "powershell.exe"), "#!/bin/sh\n" + scenario.script + "\n", { mode: 0o755 });
+      assert.deepEqual(await checkWorkerCleanup(target), { result: "unavailable", reason: scenario.reason });
+    }
+    await writeFile(path.join(scanner, "powershell.exe"),
+      "#!/bin/sh\nprintf '4\\t0\\t\\tSystem\\nEND\\t1\\n'\n", { mode: 0o755 });
+    assert.deepEqual(await checkWorkerCleanup(target), { result: "clean" }, "a complete empty target scan still passes");
+  } finally {
+    // guard:allow-env-credential - Restores the real system directory after the isolated test.
+    if (previous === undefined) delete process.env.SystemRoot; else process.env.SystemRoot = previous;
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
