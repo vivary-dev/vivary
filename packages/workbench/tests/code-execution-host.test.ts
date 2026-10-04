@@ -1230,6 +1230,22 @@ for (const scenario of ["orphan", "direct", "reused", "scan-held-at-stop", "fina
     }
   });
 
+test("Windows cleanup distinguishes deadline timeouts from plain aborts", async () => {
+  const target: CleanupTarget = { platform: "win32",
+    tracked: [{ pid: 41002, createdFrom: 1, createdTo: 1, childrenTo: 2 }], traced: [] };
+  const timeout = new DOMException("scan deadline expired", "TimeoutError");
+  const cases = [
+    { error: timeout, reason: "timeout" },
+    { error: Object.assign(new Error("scan aborted", { cause: timeout }), { name: "AbortError" }), reason: "timeout" },
+    { error: Object.assign(new Error("scan aborted"), { name: "AbortError" }), reason: "aborted" },
+  ];
+  for (const { error, reason } of cases) {
+    const io = { bootId: async () => null, proc: procReader(async () => assert.fail("Linux was scanned")),
+      windowsProcesses: async () => { throw error; }, windowsEnd: async () => [] };
+    assert.deepEqual(await checkWorkerCleanup(target, io), { result: "unavailable", reason });
+  }
+});
+
 // Uses real scanner subprocesses. Error text must never enter a stored cleanup diagnostic.
 test("Windows scan failure categories survive cleanup verification", {
   timeout: 20_000, skip: process.platform === "win32",

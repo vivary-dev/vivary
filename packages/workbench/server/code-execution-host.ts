@@ -771,7 +771,12 @@ async function rebootedSince(target: Extract<CleanupTarget, { platform: "linux" 
 
 /** Keep only a fixed diagnostic category. Child-process errors can contain commands and stderr. */
 function windowsScanFailure(error: unknown): WindowsScanFailure {
-  if (error instanceof Error && error.name === "AbortError") return "aborted";
+  if (error instanceof Error) {
+    const cause = error.cause;
+    if (error.name === "TimeoutError" || (error.name === "AbortError" && cause && typeof cause === "object"
+      && "name" in cause && cause.name === "TimeoutError")) return "timeout";
+    if (error.name === "AbortError") return "aborted";
+  }
   if (error && typeof error === "object") {
     if ("code" in error) {
       if (error.code === "EPERM" || error.code === "EACCES") return "access-denied";

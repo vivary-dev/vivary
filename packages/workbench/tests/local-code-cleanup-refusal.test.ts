@@ -362,7 +362,7 @@ test("a Windows target refuses by name, lifts once the scan misses it, and falls
     assert.equal((metadataOf("windows-unscanned").cleanupRefusal as { scanFailure?: string }).scanFailure, "command-failed");
     await agent.recheckVivaryCodeCleanup();
     assert.equal((metadataOf("windows-unscanned").cleanupRefusal as { scanFailure?: string }).scanFailure,
-      "command-failed", "a persisted and reloaded refusal retains its safe category");
+      "command-failed", "a recheck reparses the stored refusal and keeps refusing with its category");
 
     assert.equal((await continueAnyway()).cleanup, null);
     const lift = metadataOf("windows-unscanned").cleanupLifted as Record<string, unknown>;
