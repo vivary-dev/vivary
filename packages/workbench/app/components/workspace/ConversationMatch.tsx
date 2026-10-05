@@ -2,7 +2,9 @@ import { useEffect, useState, type RefObject } from "react";
 import { useSearchParams } from "react-router";
 
 /** Core renders stable message anchors asynchronously; settle the match after its own layout work. */
-export function ConversationMatch({ container, messageId }: { container: RefObject<HTMLElement | null>; messageId: string | null }) {
+export function ConversationMatch({ container, messageId, canReturnToLatest = true, archived = false }: {
+  container: RefObject<HTMLElement | null>; messageId: string | null; canReturnToLatest?: boolean; archived?: boolean;
+}) {
   const [params, setParams] = useSearchParams();
   const [found, setFound] = useState(false), [waiting, setWaiting] = useState(true);
   useEffect(() => {
@@ -71,7 +73,8 @@ export function ConversationMatch({ container, messageId }: { container: RefObje
   if (!params.get("message") && !params.get("event")) return null;
   return <div className="local-agent-notice" role={waiting || found ? "status" : "alert"}>
     <span>{found ? "Matching message highlighted." : waiting ? "Opening matching message…" : "This match could not be shown. It may have changed. Search again."}</span>
-    <button type="button" onClick={() => setParams(current => {
+    {archived && <span>Restore this conversation from Archived conversations, then reopen it to continue.</span>}
+    <button type="button" disabled={!canReturnToLatest} onClick={() => setParams(current => {
       const next = new URLSearchParams(current); next.delete("message"); next.delete("event"); next.delete("eventOffset"); return next;
     }, { replace: true })}>Return to latest conversation</button>
   </div>;

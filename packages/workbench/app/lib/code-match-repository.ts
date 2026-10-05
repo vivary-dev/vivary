@@ -13,7 +13,18 @@ export function codeMatchRepository(events: CodeAgentTranscriptEvent[], referenc
     status: { type: "complete" as const, reason: "stop" as const },
     metadata: { unstable_state: null, unstable_annotations: [], unstable_data: [], steps: [],
       custom: { codeAgentTranscriptEventIds: [event.id] } } };
-  return { ...repository, messages: [...repository.messages, { message, parentId: repository.headId ?? null }], headId: message.id };
+  // Core's rows can combine several visible events. Locate the first later row
+  // from saved event order, keeping the canonical rows and their content intact.
+  const matchIndex = events.indexOf(event);
+  const predecessor = events.slice(0, matchIndex).reverse()
+    .map(event => codeMatchMessageId(repository, event.id)).find(id => id !== null);
+  const successor = events.slice(matchIndex + 1)
+    .map(event => codeMatchMessageId(repository, event.id)).find(id => id !== null && id !== predecessor);
+  const insertionIndex = successor ? repository.messages.findIndex(entry => entry.message.id === successor) : repository.messages.length;
+  const messages = [...repository.messages];
+  messages.splice(insertionIndex, 0, { message, parentId: messages[insertionIndex - 1]?.message.id ?? null });
+  if (successor) messages[insertionIndex + 1] = { ...messages[insertionIndex + 1], parentId: message.id };
+  return { ...repository, messages, headId: successor ? repository.headId : message.id };
 }
 export function codeMatchMessageId(repository: Repository, referenceId: string): string | null {
   return repository.messages.find(entry => {

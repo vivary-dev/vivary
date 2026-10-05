@@ -36,3 +36,20 @@ test("a normally visible Code user event retains its canonical row instead of ad
   assert.equal(codeMatchMessageId(replay, events[0].id), original.messages[0].message.id);
   assert.deepEqual(replay, original);
 });
+
+for (const position of [0, 1, 2]) test(`hidden Code event at position ${position} keeps chronological context and the parent chain`, () => {
+  const event = (id, kind, message) => ({ schemaVersion: 1, id, runId: "saved-run", kind, message,
+    createdAt: "2026-01-01T00:00:00.000Z" });
+  const events = [event("before", "user", "Earlier turn"), event("after", "user", "Later turn")];
+  events.splice(position, 0, event("hidden", "status", "Saved status"));
+  const before = JSON.stringify(events), original = builder(events);
+  const replay = codeMatchRepository(events, "hidden");
+  const ids = replay.messages.map(entry => entry.message.id);
+  const expected = original.messages.map(entry => entry.message.id);
+  expected.splice(position, 0, "code-search-hidden");
+  assert.deepEqual(ids, expected);
+  assert.deepEqual(replay.messages.map(entry => entry.parentId), [null, ...ids.slice(0, -1)]);
+  assert.equal(replay.headId, ids.at(-1));
+  assert.equal(JSON.stringify(events), before);
+  assert.deepEqual(builder(events), original, "replay must not change the normal builder's repository");
+});

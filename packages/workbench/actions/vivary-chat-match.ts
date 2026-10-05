@@ -23,13 +23,23 @@ export default defineAction({
       : { kind: "project", projectId: input.projectId, label: project?.label ?? "Personal workspace" });
     await listThreads(owner, { scope: identity.scope, orgId, includeExternal: false, limit: 1 });
     // Unlike Native's general thread route, this predicate checks the requested scope before returning the blob.
-    const { rows } = await getDbExec().execute({ sql: `SELECT thread_data FROM chat_threads WHERE id = ?
+    const { rows } = await getDbExec().execute({ sql: `SELECT thread_data, archived_at FROM chat_threads WHERE id = ?
       AND LOWER(owner_email) = ? AND (org_id = ? OR org_id IS NULL) AND scope_type = ? AND scope_id = ?
       AND source_platform IS NULL AND length(thread_data) <= ?`,
       args: [input.threadId, owner, orgId, identity.scope.type, identity.scope.id, 8 * 1024 * 1024] });
     const threadData = rows[0]?.thread_data;
-    if (typeof threadData !== "string" || !JSON.parse(threadData).messages?.some((entry: { message?: { id?: string } }) =>
-      entry.message?.id === input.referenceId)) fail("This matching message is no longer available. Search again.", { statusCode: 404 });
-    return { threadData };
+    let repository: unknown;
+    try { repository = typeof threadData === "string" ? JSON.parse(threadData) : null; }
+    catch { repository = null; }
+    const available = repository !== null && typeof repository === "object" && "messages" in repository
+      && Array.isArray(repository.messages) && repository.messages.every(entry => entry !== null
+        && typeof entry === "object" && entry.message !== null && typeof entry.message === "object"
+        && typeof entry.message.id === "string"
+        && (entry.parentId === undefined || entry.parentId === null || typeof entry.parentId === "string"))
+      && (!("headId" in repository) || repository.headId === null || typeof repository.headId === "string")
+      && repository.messages.some(entry => entry.message.id === input.referenceId);
+    if (!available)
+      fail("This matching message is no longer available. Search again.", { statusCode: 404 });
+    return { threadData, archived: rows[0].archived_at != null };
   },
 });

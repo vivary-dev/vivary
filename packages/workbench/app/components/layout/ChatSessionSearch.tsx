@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { useSession } from "@agent-native/core/client/hooks";
-import { agentNativePath } from "@agent-native/core/client/api-path";
 import { sessionToken } from "@/lib/native-state";
+import { useNativeActionReader } from "@/lib/native-actions";
 import type { VivaryChatIdentity } from "@/lib/chat-scope";
 import type { ChatSearchHit, ChatSearchPage } from "@/lib/chat-search-schema";
 import { chatSearchHref } from "@/lib/chat-search-location";
@@ -16,6 +16,7 @@ export function ChatSessionSearch({ identity, enabled = true, onActiveChange }: 
   identity: VivaryChatIdentity; enabled?: boolean; onActiveChange?: (active: boolean) => void;
 }) {
   const session = useSession(), location = useLocation(), inputId = useId();
+  const readAction = useNativeActionReader();
   const [query, setQuery] = useState("");
   const [includeArchived, setIncludeArchived] = useState(false);
   const [retry, setRetry] = useState(0);
@@ -50,10 +51,7 @@ export function ChatSessionSearch({ identity, enabled = true, onActiveChange }: 
             const params = new URLSearchParams({ query: term, unassigned: String(identity.kind === "unassigned"), includeArchived: String(includeArchived) });
             if (identity.kind !== "unassigned" && identity.projectId) params.set("projectId", identity.projectId);
             if (after) params.set("after", after);
-            const response = await fetch(agentNativePath("/_agent-native/actions/vivary-chat-search") + "?" + params, {
-              credentials: "same-origin", signal: abort.signal,
-              headers: { "X-Agent-Native-Frontend": "1", ...(token ? { "X-Vivary-Session": token } : {}) },
-            });
+            const response = await readAction("vivary-chat-search", params, abort.signal);
             if (!response.ok) { if (response.status === 400 && valid()) setExpired(true); throw new Error("Search could not finish."); }
             return await response.json() as ChatSearchPage;
           },
@@ -75,7 +73,7 @@ export function ChatSessionSearch({ identity, enabled = true, onActiveChange }: 
       } catch { if (valid()) setStatus("error"); }
     }, delay);
     return () => { clearTimeout(timer); abort.abort(); };
-  }, [requestKey, retry, enabled, session.status, token]);
+  }, [requestKey, retry, enabled, session.status, token, readAction]);
   const current = pages?.key === requestKey ? pages : undefined;
   const progress = current ? `Searched ${current.searched}${current.total === undefined ? "" : ` of ${current.total}`} conversations…` : "Searching conversations…";
   return <div className="chat-session-search" aria-label={identity.kind === "unassigned" ? "Search unassigned history" : "Search project conversations"}>

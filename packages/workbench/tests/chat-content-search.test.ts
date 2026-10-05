@@ -72,6 +72,33 @@ test.before(async () => {
 });
 test.after(async () => { await closeDbExec(); await rm(temporary, { recursive: true, force: true }); });
 
+test("Native match parse and shape failures return the same stale-result 404", async () => {
+  const action = (await import("../actions/vivary-chat-match.ts")).default;
+  await native("stale-match", "Saved match", { scope: legacy.scope });
+  for (const threadData of ["{broken", "null", "[]", '{"messages":{}}', '{"messages":[null]}',
+    '{"messages":[{"message":null}]}', '{"messages":[{"message":{"id":"stale-match-old"}},null]}']) {
+    await getDbExec().execute({ sql: "UPDATE chat_threads SET thread_data=? WHERE id=?", args: [threadData, "stale-match"] });
+    await assert.rejects(action.run({ projectId: null, unassigned: true, threadId: "stale-match",
+      referenceId: "stale-match-old" }, { caller: "frontend", userEmail: owner, orgId }), error => {
+      assert.equal((error as { statusCode?: number }).statusCode, 404, threadData);
+      assert.match((error as Error).message, /no longer available\. Search again/);
+      return true;
+    });
+  }
+});
+
+test("Native match reports authoritative archive state and does not restore the thread", async () => {
+  const action = (await import("../actions/vivary-chat-match.ts")).default;
+  await native("archive-state-match", "Saved match", { scope: legacy.scope });
+  const input = { projectId: null, unassigned: true, threadId: "archive-state-match", referenceId: "archive-state-match-old" };
+  const ctx = { caller: "frontend" as const, userEmail: owner, orgId };
+  await setThreadArchived(input.threadId, true, { ownerEmail: owner });
+  assert.equal((await action.run(input, ctx)).archived, true);
+  assert.equal((await action.run(input, ctx)).archived, true, "reading history must not clear archive state");
+  await setThreadArchived(input.threadId, false, { ownerEmail: owner });
+  assert.equal((await action.run(input, ctx)).archived, false);
+});
+
 async function all(input: Record<string, unknown> = {}, target = identity) {
   let after: string | undefined, results: Awaited<ReturnType<typeof search>>["results"] = [];
   for (let page = 0; page < 100; page++) {

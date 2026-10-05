@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { parseArgs } from "node:util";
 import { createCodeAgentRunRecord, updateCodeAgentRunRecord, codeAgentRunTranscriptPath } from "@agent-native/core/code-agents";
 import { OWNER, send, startBuiltApp } from "./built-app.mjs";
@@ -109,6 +110,15 @@ try {
   assert.deepEqual((await search({ projectId: null, unassigned: true })).map(hit => hit.sessionId), ["zz-native-unassigned"]);
   const restored = await getAction("vivary-chat-match", { projectId, threadId: nativeHit.sessionId, referenceId: nativeHit.referenceId });
   assert.ok(JSON.parse(restored.threadData).messages.some(entry => entry.message.id === nativeHit.referenceId));
+  assert.equal(restored.archived, false);
+  const archivedMatch = { projectId, threadId: "zz-native-archived", referenceId: "zz-native-archived-old" };
+  assert.equal((await getAction("vivary-chat-match", archivedMatch)).archived, true);
+  assert.equal((await getAction("vivary-chat-match", archivedMatch)).archived, true, "reading a match never restores it");
+  await request("POST", "/_agent-native/actions/vivary-native-archive", {
+    operation: "restore", projectId, threadId: archivedMatch.threadId,
+  });
+  assert.equal((await getAction("vivary-chat-match", archivedMatch)).archived, false);
+  await request("POST", "/_agent-native/agent-chat/threads/zz-native-archived/archive" + scopeParams(identity.scope), { archived: true });
   const usual = await getAction("vivary-code-state", { projectId });
   assert.equal(usual.runs.length, 20);
   assert.ok(!usual.runs.some(run => run.id === codeHit.sessionId));
@@ -125,13 +135,33 @@ try {
   const contextIndex = context.run.events.findIndex(event => event.id === contextHit.referenceId);
   assert.ok(contextIndex > 0 && contextIndex < context.run.events.length - 1);
   assert.ok(context.run.events.length <= 400);
+  // Corrupt a retained row after its hit was returned, as can happen to legacy
+  // data. Use the launcher's disposable database; the production HTTP read owns
+  // the stale-result response. Restore the fixture for subsequent browser QA.
+  const staleHit = results.find(hit => hit.sessionId === "zz-native-duplicate");
+  assert.ok(staleHit);
+  const db = new DatabaseSync(path.join(data, "auth.sqlite"));
+  const saved = db.prepare("SELECT thread_data FROM chat_threads WHERE id=?").get(staleHit.sessionId).thread_data;
+  try {
+    for (const threadData of ["{broken", "null", '{"messages":{}}', '{"messages":[null]}']) {
+      db.prepare("UPDATE chat_threads SET thread_data=? WHERE id=?").run(threadData, staleHit.sessionId);
+      const route = "/_agent-native/actions/vivary-chat-match?" + new URLSearchParams({ projectId,
+        threadId: staleHit.sessionId, referenceId: staleHit.referenceId });
+      const response = await send(server.port, "GET", route, { cookie, origin, "sec-fetch-site": "same-origin" });
+      assert.equal(response.status, 404, `Malformed retained match (${threadData}): ${response.body}`);
+      assert.match(response.body, /no longer available\. Search again/);
+    }
+  } finally {
+    db.prepare("UPDATE chat_threads SET thread_data=? WHERE id=?").run(saved, staleHit.sessionId);
+    db.close();
+  }
   const nativePath = `/?runtime=native&history=project&thread=${nativeHit.sessionId}&message=${nativeHit.referenceId}`;
   const codePath = `/?history=project&run=${codeHit.sessionId}&event=${codeHit.referenceId}&eventOffset=${codeHit.eventOffset}`;
   for (const route of [nativePath, codePath]) assert.equal((await send(server.port, "GET", route, { cookie })).status, 200);
   await writeFile(path.join(data, "chat-search-fixture.json"), JSON.stringify({ projectId, nativePath, codePath,
     codeContextPath: `/?history=project&run=${contextHit.sessionId}&event=${contextHit.referenceId}&eventOffset=${contextHit.eventOffset}`,
     nativeBranchPath: "/?runtime=native&history=project&thread=zz-native-old&message=zz-native-old-branch" }, null, 2) + "\n");
-  console.log("PASS: real built-app owner search, archive/unassigned filters, retained Native match, and anchored Code event beyond 20/400.");
+  console.log("PASS: real built-app owner search, archive/unassigned filters, authoritative archive state, stale-match 404s, retained Native match, and anchored Code event beyond 20/400.");
   console.log("GUI fixture data:", data, "(select Chat search fixture in Projects)");
   console.log("Native route:", nativePath); console.log("Code route:", codePath);
 } finally {
