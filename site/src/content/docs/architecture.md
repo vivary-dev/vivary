@@ -251,9 +251,8 @@ No documentation route reads arbitrary host files.
 Contributor working style in `AGENTS.md`. A new "How we work" section records Jeff's
 2026-10-05 direction: own the outcome, ask at real forks, explore boldly and ship
 narrowly, self-correct, prove improvements against a measured baseline, keep
-benchmarks as both experiment metrics and ratcheting CI budgets, measure and shorten
-the development loop itself, check the
-execution environment before expensive work, and fix what a person would notice in
+benchmarks as both experiment metrics and ratcheting CI budgets, shorten the
+development loop itself, check the execution environment before expensive work, and fix what a person would notice in
 the built app. A model-roles bullet names Sol for implementation and Opus 5.5 for
 coordination and independent review; the integration's own model calls keep GPT-6
 Astra. This changes how agents plan and report work, not any runtime component,

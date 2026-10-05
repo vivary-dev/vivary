@@ -54,13 +54,14 @@ the external-action gates in Delivery and authority.
   regressions.
 - **Keep benchmarks honest.** A kept benchmark both guides experiments and guards
   the win in CI. Set its budget from measured noise, and ratchet a latency budget
-  down only after an improvement is proven. Repair or retire a benchmark that is
-  flaky or does not track user-visible latency. Fix the regression rather than
-  loosening the budget or weakening the test.
-- **Shorten our own loop.** Measure development the same way: time to a working
-  result, time blocked, repeated work, and review-to-fix turnaround. Prefer fewer
+  down each time an improvement is proven. Repair or retire a benchmark that is
+  flaky or does not track the user outcome it stands for. Fix the regression
+  rather than loosening the budget or weakening the test.
+- **Shorten our own loop.** Judge development the same way: time to a working
+  result, time blocked, repeated work, and review-to-fix turnaround, estimated from
+  existing session, PR, and CI timestamps rather than new tracking. Prefer fewer
   handoffs, early environment checks, focused experiments, and reusable evidence,
-  and fix the largest bottleneck before adding process.
+  and fix the largest bottleneck instead of adding process.
 - **Check the environment first.** Before the first install, build, or heavy run
   in a new execution context, verify the runtime, package manager, installed
   dependencies, and sandbox limits there. Fix setup before expensive work starts.
