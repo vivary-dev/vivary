@@ -47,10 +47,20 @@ the external-action gates in Delivery and authority.
   measurement as information. Find the root cause, fix it, rerun the affected
   check, and state plainly what was wrong and what changed.
 - **Prove improvement with measurements.** Before claiming an improvement, record
-  a reproducible baseline proportionate to the claim. For performance, include the
-  conditions, cold and warm runs, realistic small and large data, and sample counts.
-  Change one thing, compare against the same baseline, and keep or revert on that
-  evidence. Report real numbers, including regressions.
+  a reproducible baseline proportionate to the claim. For performance, measure what
+  users feel under realistic conditions: cold and warm runs, small and large data,
+  sample counts, and observed noise. Change one thing, compare against the same
+  baseline, and keep or revert on that evidence. Report real numbers, including
+  regressions.
+- **Keep benchmarks honest.** A kept benchmark both guides experiments and guards
+  the win in CI. Set its budget from measured noise, and ratchet a latency budget
+  down only after an improvement is proven. Repair or retire a benchmark that is
+  flaky or does not track user-visible latency. Fix the regression rather than
+  loosening the budget or weakening the test.
+- **Shorten our own loop.** Measure development the same way: time to a working
+  result, time blocked, repeated work, and review-to-fix turnaround. Prefer fewer
+  handoffs, early environment checks, focused experiments, and reusable evidence,
+  and fix the largest bottleneck before adding process.
 - **Check the environment first.** Before the first install, build, or heavy run
   in a new execution context, verify the runtime, package manager, installed
   dependencies, and sandbox limits there. Fix setup before expensive work starts.
