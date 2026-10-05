@@ -33,56 +33,19 @@ type Dependencies = {
   invalidate: () => void;
 };
 
-function actionUrl(name: string, dependencies: Pick<Dependencies, "locationHref" | "nativePath">) {
-  const location = new URL(dependencies.locationHref());
-  const root = new URL(dependencies.nativePath("/_agent-native"), location);
-  const target = new URL(dependencies.nativePath("/_agent-native/actions/" + name), location);
-  if (root.origin !== location.origin || target.origin !== location.origin
-    || !root.pathname.endsWith("/_agent-native")
-    || target.pathname !== root.pathname + "/actions/" + name
-    || root.search || root.hash || target.search || target.hash) {
-    throw new Error("The action endpoint must be on this Vivary instance.");
-  }
-  return target;
-}
-
-type NativeReadAction = "vivary-chat-search" | "vivary-chat-match";
-export function createNativeActionReader(dependencies: Omit<Dependencies, "cookieAction">) {
-  return async (name: NativeReadAction, params: URLSearchParams, signal?: AbortSignal): Promise<Response> => {
-    const target = actionUrl(name, dependencies);
-    target.search = params.toString();
-    const token = sessionToken(dependencies.getSession());
-    if (token !== null && isRejectedSessionToken(token)) throw new Error("Retry after the Native session refreshes.");
-    const response = await dependencies.fetch(target.href, {
-      method: "GET", credentials: "same-origin", redirect: "error", signal,
-      headers: { "X-Agent-Native-Frontend": "1", ...(token ? { "X-Vivary-Session": token } : {}) },
-    });
-    if (response.status === 401) {
-      if (token !== null) rejectSessionToken(token);
-      dependencies.invalidate();
-    }
-    return response;
-  };
-}
-
-export function useNativeActionReader() {
-  const session = useSession();
-  const latest = useRef(session);
-  latest.current = session;
-  return useCallback(createNativeActionReader({
-    getSession: () => latest.current,
-    fetch: (input, init) => fetch(input, init),
-    locationHref: () => window.location.href,
-    nativePath: agentNativePath,
-    invalidate: notifySessionInvalidated,
-  }), []);
-}
-
 export function createNativeActionCaller(dependencies: Dependencies): NativeActionCaller {
   return async <T>(name: VivaryOwnerAction, params: Record<string, unknown>,
     options?: { keepalive?: boolean }): Promise<T> => {
     if (!VIVARY_OWNER_ACTIONS.includes(name)) throw new Error("This action is not available through the owner transport.");
-    const target = actionUrl(name, dependencies);
+    const location = new URL(dependencies.locationHref());
+    const root = new URL(dependencies.nativePath("/_agent-native"), location);
+    const target = new URL(dependencies.nativePath("/_agent-native/actions/" + name), location);
+    if (root.origin !== location.origin || target.origin !== location.origin
+      || !root.pathname.endsWith("/_agent-native")
+      || target.pathname !== root.pathname + "/actions/" + name
+      || root.search || root.hash || target.search || target.hash) {
+      throw new Error("The action endpoint must be on this Vivary instance.");
+    }
     const body = JSON.stringify(params);
     if (body === undefined) throw new Error("Action inputs must be JSON.");
     // Leave room for other in-flight browser keepalive requests. Larger drafts

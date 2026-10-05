@@ -59,64 +59,6 @@ Use the installed Toolkit resizable components. Proposed desktop starting dimens
 
 The [W3C splitter pattern](https://www.w3.org/WAI/ARIA/apg/patterns/windowsplitter/) informs keyboard and accessibility behavior; validate the actual component and its caveats. Do not treat a splitter role or a passing typecheck as accessibility proof.
 
-## Conversation content search
-
-Project conversations and Unassigned conversations each have a search input for
-words in titles or saved messages. Include archived is explicit. Unassigned
-follows the existing Native history list; project-less Code runs belong to
-Personal workspace. Results show project, runtime, title, a highlighted excerpt
-and relative message/session time. Stable IDs remain in links and data attributes,
-so duplicate titles have distinct destinations without showing internal IDs.
-
-Typing waits briefly; Enter starts immediately. An active query replaces the
-ordinary list; Clear or Escape restores it. The client automatically continues
-up to twelve bounded requests, a page of 25 hits, completion or three seconds
-(checked between requests). Progress counts authorized conversations and offers
-Cancel. Search more history appears when automatic work stops with a cursor.
-Retry and Resume retain earlier hits and continue at the same cursor. A new query,
-filter or scope cancels previous work and rejects stale replies. Expired cursors
-explicitly offer Start again.
-
-Opening a result preserves project context and focuses a visibly marked message,
-with a brief arrival fade that respects reduced motion. Scroll settling leaves
-Core's follow-bottom mode and yields to subsequent user scrolling. Native replay
-imports the head path containing the match, or the branch through it to its newest
-retained leaf. Code replay loads up to 400 events around the checked byte anchor,
-including up to 60 preceding events, with the normal assistant deduplication.
-The ordinary twenty-run list and latest-400-event window remain unchanged. Match
-views disable the composer, omit saved queues and refuse runtime execution,
-including retry/edit paths. Core's standalone Native replay has no persistence
-opt-out; its supported cleanup API removes the transient session-storage import
-on exit. Search and replay always read the authoritative stores, including after
-restart. Forgotten or removed active-memory facts can remain findable in history.
-
-Native match reads verify archive state before Return to latest conversation can
-open an editable view. Return stays disabled while the read is loading and for a
-proven-archived match. Project and Personal matches explain that the user must
-restore the conversation from Archived conversations, then reopen it to continue.
-Unassigned history has no restore control: its archived match notice and disabled
-composer say, "This conversation is archived and read-only here."
-If the match read fails, a short explanation offers Return or another search.
-Return removes the unread thread and all match anchors, then uses the existing
-saved-selection restore, which refuses archived threads. Read-only replay preserves
-the saved latest selection; returning from a verified active match keeps that thread.
-
-Each request returns at most 25 hits and scans at most 25 authorized sessions,
-500 messages and 16 MiB of store bytes. Native repositories above 8 MiB, Native
-message text above 64 Ki characters, Code records above 64 KiB and transcript
-lines above 256 KiB are skipped with a coverage notice. Native JSON is parsed once
-per session page; malformed repositories are skipped without blocking the cursor.
-Code metadata checks precede the session cap and transcript access, with a separate
-4 MiB metadata budget and 10,000 directory-entry cap. Foreign runs contribute no
-public counts or excerpts. An incomplete final transcript line retains its offset
-until its writer appends a newline. Each runtime scans newest sessions first using
-updated time and stable ID; cursors retain the ordering key and search start time.
-The client merges retrieved hits by session recency across runtimes. Cursors bind
-owner, organization, scope, filters and query, and expire at server restart. Native
-results remain available when the Personal Code workspace is unavailable, with a
-specific notice. There is no derived index, new transcript owner or project-folder
-copy.
-
 ## Harness choice and observed availability
 
 The control presents a grouped list. Group headings identify the harness, use a small reviewed logo or a neutral fallback, and expose readiness when it affects selection. Rows show models actually observed through that harness. Different registered instances remain distinguishable by a short account/endpoint label when needed, without exposing credentials. The selected harness owns its tools, MCP configuration, models and native permission semantics. Vivary does not provide a second general tool picker.
