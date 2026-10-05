@@ -19,15 +19,19 @@ is a separate delivery target.
 
 Before merging, resolve review findings and require passing applicable CI plus
 one approval. The `required review gate` check (`.github/workflows/review-gate.yml`) runs the
-gate script from the pull request's base commit, so a pull request cannot change
-the gate that reviews it. It stays pending while the Codex review of the exact
-head commit runs, fails when that review covers an earlier commit or predates a
-base-branch change, and fails on any unresolved review thread, outdated ones
-included. GitHub refuses a merge on it only after branch protection marks it
-required; changes to `.github/` still need an owner's review, because a pull
-request can edit workflow files. Before merging: comment `@codex review` after the final
-push, wait for it to complete, answer and resolve every thread, then re-run the
-check, because no event re-runs it when a thread is resolved. Since 2026-09-24 the Entire gate counts the author's approval, so
+gate script from the pull request's base commit, or from the commit pinned in the workflow
+when the base has no script yet, so a pull request cannot change the gate that reviews it.
+It requires a completed independent review of the exact head and base, published by the
+server-side `vivary-independent-review` tool, which runs outside the repository on the
+Vivary host and opens one review thread per finding. It stays pending while that review
+or a Codex review of the exact head runs, fails when the review is failed or covers another
+head or base, and fails on any unresolved review thread, outdated ones included. GitHub
+refuses a merge on it only after branch protection marks it required; changes to
+`.github/` still need an owner's review, because a pull request can edit workflow files,
+and the reviewer adds a finding whenever the gate's own files change. Before merging: run
+`vivary-independent-review --pr N` after the final push, publish a fix or an evidence-backed
+rejection for every finding, resolve each thread only after its disposition is verified,
+then re-run the check, because no event re-runs it when a thread is resolved. Since 2026-09-24 the Entire gate counts the author's approval, so
 Jeff can approve his own trail. An agent can add technical review but never
 records a human approval. Zo is the standing owner-approved CI host. Run the
 applicable workflow commands and gates on Zo against the exact PR commit. GitHub

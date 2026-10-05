@@ -3,7 +3,10 @@
 from pathlib import Path
 import io
 import json
+import re
+import subprocess
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from unittest import mock
@@ -178,11 +181,39 @@ class ReviewGate(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("retrying after API error", out)
 
+    def test_bootstrap_runs_only_when_the_base_has_no_gate_script(self):
+        real = (Path(__file__).resolve().parents[2] / ".github/workflows/review-gate.yml").read_text(encoding="utf-8")
+        script = real.split("run: |\n", 1)[1]
+        script = "\n".join(line[10:] for line in script.splitlines())
+        for base_has_script, expected in ((True, "base/scripts"), (False, "bootstrap/scripts")):
+            with tempfile.TemporaryDirectory() as root:
+                for side in ("base", "bootstrap"):
+                    folder = Path(root, side, "scripts")
+                    folder.mkdir(parents=True)
+                    if side == "bootstrap" or base_has_script:
+                        (folder / "check_review_gate.py").write_text(f"import sys; print('{side}/scripts', sys.argv[1:])\n")
+                result = subprocess.run(["bash", "-e", "-c", script.replace("python ", sys.executable + " ")],
+                                        cwd=root, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(expected, result.stdout)
+                self.assertIn("'--wait-seconds', '2400'", result.stdout)
+                self.assertEqual("pinned bootstrap" in result.stdout, not base_has_script)
+
+    def test_bootstrap_failure_fails_the_step(self):
+        real = (Path(__file__).resolve().parents[2] / ".github/workflows/review-gate.yml").read_text(encoding="utf-8")
+        script = "\n".join(line[10:] for line in real.split("run: |\n", 1)[1].splitlines())
+        with tempfile.TemporaryDirectory() as root:
+            Path(root, "bootstrap", "scripts").mkdir(parents=True)
+            Path(root, "bootstrap", "scripts", "check_review_gate.py").write_text("raise SystemExit(1)\n")
+            result = subprocess.run(["bash", "-e", "-c", script.replace("python ", sys.executable + " ")], cwd=root)
+            self.assertEqual(result.returncode, 1)
+
     def test_review_workflow_contract_rejects_weakening(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         import check_ci_workflow as contract
         real = (Path(__file__).resolve().parents[2] / ".github/workflows/review-gate.yml").read_text(encoding="utf-8")
         contract.check_review_workflow(real)
+        BOOTSTRAP = re.search(r"ref: ([0-9a-f]{40})\n", real).group(1)
         weakened = {
             "push": real.replace("on:\n  pull_request:\n", "on:\n  push:\n  pull_request:\n"),
             "dispatch": real + "  workflow_dispatch:\n",
@@ -194,6 +225,9 @@ class ReviewGate(unittest.TestCase):
             "no edited": real.replace(", edited]", "]"),
             "extra step": real.replace("      - uses: actions/setup-python@v7\n", "      - run: echo exit 0 > scripts/check_review_gate.py\n      - uses: actions/setup-python@v7\n"),
             "head checkout": real.replace("persist-credentials: false", "persist-credentials: true"),
+            "bootstrap from head": real.replace("ref: " + BOOTSTRAP, "ref: ${{ github.event.pull_request.head.sha }}"),
+            "bootstrap branch": real.replace("ref: " + BOOTSTRAP, "ref: dev"),
+            "head script": real.replace("gate=bootstrap/scripts/check_review_gate.py", "gate=scripts/check_review_gate.py"),
             "no concurrency": real.replace("concurrency:\n", "noconcurrency:\n"),
         }
         for label, text in weakened.items():

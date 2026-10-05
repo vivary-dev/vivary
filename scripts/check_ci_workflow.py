@@ -31,6 +31,8 @@ CANONICAL_REVIEW_WORKFLOW = """name: review gate
 # The required review gate runs only for pull requests, so pushes to long-lived
 # branches never publish its check. It runs the gate script from the pull request's
 # base commit, so edits to that script take effect only after review and merge.
+# When the base has no gate script yet, it runs the script from the commit pinned
+# below, never from the pull request.
 # A pull request can still edit this workflow file, so .github changes need owner review.
 on:
   pull_request:
@@ -54,6 +56,12 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: d15b7d6166ce5be97a57f75d659fbf74fbc54c3b
+          path: bootstrap
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
@@ -64,7 +72,13 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python scripts/check_review_gate.py --wait-seconds 2400 --interval 30
+        run: |
+          gate=base/scripts/check_review_gate.py
+          if [ ! -f "$gate" ]; then
+            echo "required review gate: base has no gate script; using the pinned bootstrap script"
+            gate=bootstrap/scripts/check_review_gate.py
+          fi
+          python "$gate" --wait-seconds 2400 --interval 30
 """
 
 
@@ -72,7 +86,7 @@ def check_review_workflow(text: str) -> None:
     """The required review gate workflow is exactly the reviewed canonical text."""
     if text != CANONICAL_REVIEW_WORKFLOW:
         raise SystemExit(f"{REVIEW_WORKFLOW}: must match the canonical required review gate workflow "
-                         "in scripts/check_ci_workflow.py (pull requests only, base-revision script, real wait)")
+                         "in scripts/check_ci_workflow.py (pull requests only, base-revision or pinned bootstrap script, real wait)")
 
 
 def job_block(text: str, name: str) -> str:
