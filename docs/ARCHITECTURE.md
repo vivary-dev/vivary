@@ -245,6 +245,19 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Issue #188, round 3 measurement harness. `packages/workbench/tests/perf/responsiveness.mjs`
+drives the normal built app in system Chrome against a seeded disposable history and times
+what a person waits for: startup to a usable list, conversation switches until messages and the
+current composer or provider state are usable, search until the expected conversation is listed,
+idle requests and bytes, server event-loop delay and memory, with crash-safe per-switch memory
+traces. It is a measurement tool, not a CI gate. The opt-in `server/plugins/04-perf.ts` Nitro
+plugin logs per-second event-loop delay and RSS only when `VIVARY_PERF_METRICS=1`; ordinary
+launches create no timer or histogram. `tests/built-app.mjs` also returns the spawned server's PID
+and readiness time. Seeding uses the existing owner routes and Code run store, and the harness
+blocks provider requests. Runtime composition, persistence and trust boundaries are unchanged, so
+the design above remains accurate. Reviewed the plugin's gating and shutdown, the harness's routes
+and fixture writes, and the [harness notes](../packages/workbench/tests/perf/README.md).
+
 Issue #11 second reintroduction, PR #194 Native start-snapshot fix. New searches
 use one scoped metadata aggregate to include Native saves whose monotonic update
 timestamps lead the wall clock. Continuations retain their snapshot and ordering

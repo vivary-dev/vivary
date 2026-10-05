@@ -32,6 +32,7 @@ export function send(port, method, route, headers, body) {
 
 export async function startBuiltApp(args, data, { env = {}, headers = port => ({ host: `127.0.0.1:${port}` }) } = {}) {
   const port = await freePort();
+  const spawnedAt = performance.now();
   const child = spawn(process.execPath, ['bin/start.mjs', '--port', String(port), '--data-dir', data, ...args], {
     cwd: root,
     detached: true,
@@ -58,7 +59,7 @@ export async function startBuiltApp(args, data, { env = {}, headers = port => ({
     if (Date.now() > deadline) { await stop(); throw new Error(`Vivary readiness timed out:\n${output}`); }
     await new Promise(resolve => setTimeout(resolve, 200));
   }
-  return { port, stop, output: () => output };
+  return { port, stop, pid: child.pid, readyMs: performance.now() - spawnedAt, output: () => output };
 }
 
 // Native's MCP dev-open mode trusted a loopback caller that names the owner, with no session.
