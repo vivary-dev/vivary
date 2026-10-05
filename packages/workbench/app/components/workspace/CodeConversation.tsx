@@ -6,7 +6,6 @@ import {
   AssistantChat,
   removeAgentChatContextItem,
   ChatHistoryList,
-  buildRepositoryFromCodeAgentTranscript,
   isCodeAgentRunActive,
   type AssistantChatHandle,
   type AssistantChatProps,
@@ -24,6 +23,10 @@ import { useProjects } from "../projects/ProjectContext";
 import "@agent-native/toolkit/chat-history.css";
 import "../../local-agent.css";
 import mascotUrl from "../../assets/vivary-mascot.svg";
+import { ConversationMatch } from "./ConversationMatch";
+import { createHistoryReadAdapter } from "@/lib/history-read-adapter";
+import { codeMatchRepository, codeMatchMessageId } from "@/lib/code-match-repository";
+import "../../chat-search.css";
 
 import { previewInspectionContext, type PreviewChatTarget } from "@/lib/workbench-preview";
 
@@ -49,11 +52,13 @@ export default function CodeConversation({ previewScope, onPreviewChatTarget }: 
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
-  const projectId = activeProject?.projectId ?? null;
-  const projectScope = [catalog?.scopeKey, projectId ?? "personal"].join(":");
+  const unassigned = searchParams.get("history") === "unassigned";
+  const canReadHistory = unassigned || historyAvailable;
+  const projectId = unassigned ? null : activeProject?.projectId ?? null;
+  const projectScope = [catalog?.scopeKey, unassigned ? "unassigned" : projectId ?? "personal"].join(":");
   const selectionKey = SELECTION_PREFIX + projectScope;
   const selection = useQuery({
-    queryKey: [selectionKey], enabled: historyAvailable && !checking,
+    queryKey: [selectionKey], enabled: canReadHistory && !checking,
     staleTime: Infinity, retry: false,
     queryFn: async ({ signal }) => {
       const parsed = conversationSelectionSchema.safeParse(await readClientAppState(selectionKey, { signal }));
@@ -120,7 +125,7 @@ export default function CodeConversation({ previewScope, onPreviewChatTarget }: 
     return true;
   }
 
-  if (checking || sessionStatus === "loading" || (historyAvailable && selection.isPending)) {
+  if (checking || sessionStatus === "loading" || (canReadHistory && selection.isPending)) {
     return <div className="local-agent-chat-skeleton" aria-busy="true">
       <Skeleton className="h-8 w-48" /><Skeleton className="h-5 w-3/4" />
       <Skeleton className="mt-auto h-28 w-full" />
@@ -137,7 +142,7 @@ export default function CodeConversation({ previewScope, onPreviewChatTarget }: 
         && <Button variant="ghost" size="sm" onClick={retrySession}>Retry session</Button>}
     </div>
   </section>;
-  if (!historyAvailable) return null;
+  if (!canReadHistory) return null;
   if (selection.isError) return <section className="local-agent-page" aria-label="Vivary agent">
     <div className="local-agent-notice" role="alert">
       <span>Your conversation selection could not be loaded.</span>
@@ -171,6 +176,12 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedRun = searchParams.get("run");
   const requestedDraft = searchParams.get("draft");
+  const unassigned = searchParams.get("history") === "unassigned";
+  const requestedEvent = searchParams.get("event");
+  const requestedOffset = searchParams.get("eventOffset");
+  const matchContainer = useRef<HTMLElement>(null);
+  const anchor = requestedEvent && requestedOffset !== null && /^\d+$/.test(requestedOffset)
+    ? { eventId: requestedEvent, eventOffset: Number(requestedOffset) } : undefined;
   const requestKey = requestedRun === "new" ? "new:" + requestedDraft : requestedRun;
   const handledRequest = useRef<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -184,22 +195,28 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
-  const state = useActionQuery<VivaryCodeState>("vivary-code-state", { projectId: projectId ?? undefined }, {
+  const state = useActionQuery<VivaryCodeState>("vivary-code-state", { projectId: projectId ?? undefined, ...(unassigned ? { unassigned: true } : {}) }, {
     refetchInterval: 1000,
     placeholderData: previous => previous?.projectId === projectId ? previous : undefined,
   });
   const codeState = state.data?.projectId === projectId ? state.data : undefined;
   const draftList = useChatDraftList({ kind: "code", projectId }, draftScopeKey, !!codeState);
   const runToLoad = requestedRun === "new" ? null : requestedRun ?? selection?.runId;
-  const selectedState = useActionQuery<VivaryCodeState>("vivary-code-state", { projectId: projectId ?? undefined, runId: runToLoad ?? undefined }, {
-    enabled: !!runToLoad && runToLoad !== codeState?.run?.id,
+  const selectedState = useActionQuery<VivaryCodeState>("vivary-code-state", { projectId: projectId ?? undefined, runId: runToLoad ?? undefined,
+    ...(unassigned ? { unassigned: true } : {}), ...anchor }, {
+    enabled: !!runToLoad && (runToLoad !== codeState?.run?.id || !!anchor),
     refetchInterval: 1000,
   });
   const selectedRun = selectedState.data?.projectId === projectId ? selectedState.data.run : null;
   const { call } = useNativeActionCaller();
   const stop = useMutation({ mutationFn: (params: {runId: string; projectId?: string}) => call<VivaryCodeState>("vivary-code-stop", params) });
-  const run = selection?.runId === codeState?.run?.id ? codeState?.run
+  const run = anchor && selection?.runId === selectedRun?.id ? selectedRun
+    : !anchor && selection?.runId === codeState?.run?.id ? codeState?.run
     : selection?.runId === selectedRun?.id ? selectedRun : null;
+  const matchMessageId = useMemo(() => {
+    if (!requestedEvent || !run) return null;
+    return codeMatchMessageId(codeMatchRepository(run.events, requestedEvent), requestedEvent);
+  }, [requestedEvent, run?.events]);
   // A saved run selected from history uses its run ID as the temporary
   // selection key. Wait for its detail before mounting a draft owner with
   // that fallback ID. A newly started run keeps its original draft UUID
@@ -207,7 +224,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
   const openingSavedRun = !!selection?.runId && selection.key === selection.runId && !run;
   const activeRun = codeState?.activeRun;
   const error = notice ?? codeState?.error
-    ?? (selectedState.isError && selection?.runId !== codeState?.run?.id ? "This conversation could not be loaded. Choose a conversation from history or retry." : undefined)
+    ?? (selectedState.isError && (anchor || selection?.runId !== codeState?.run?.id) ? "This conversation could not be loaded. Choose a conversation from history or retry." : undefined)
     ?? (state.data && !codeState ? "The project changed. Refresh this workspace before continuing." : undefined)
     ?? actionErrorMessage(state.error)
     ?? (state.error ? "The workspace could not be loaded." : undefined);
@@ -217,6 +234,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
     handledRequest.current = next.runId ?? "new:" + next.key;
     setSearchParams(current => {
       const params = new URLSearchParams(current);
+      if (params.get("run") !== next.runId) { params.delete("event"); params.delete("eventOffset"); }
       params.set("run", next.runId ?? "new");
       if (next.runId) params.delete("draft");
       else params.set("draft", next.key);
@@ -334,7 +352,8 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
     </div>}
   </>;
 
-  return <section className="local-agent-page" aria-label="Vivary agent">
+  return <section ref={matchContainer} className="local-agent-page" aria-label="Vivary agent">
+    <ConversationMatch key={requestedRun + ":" + requestedEvent} container={matchContainer} messageId={matchMessageId} />
     <header className="local-agent-header">
       <div className="local-agent-heading">
         <h2>{run?.title ?? "New conversation"}</h2>
@@ -370,6 +389,8 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
           state={run && selectedState.data?.projectId === projectId && selectedState.data.run?.id === run.id
             ? { ...codeState, engines: selectedState.data.engines } : codeState}
           workspaceAvailable={workspaceAvailable}
+          viewingMatch={!!requestedEvent || unassigned}
+          matchedEventId={requestedEvent}
           active={codeState.busy} streaming={streaming} onStreaming={setStreaming}
           onStarted={runId => onStarted(selection.key, runId)}
           onChoice={choice => setSelection(current => current ? { ...current, choice } : current)}
@@ -387,6 +408,8 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
 }
 
 type LocalCodeConversationProps = PreviewChatProps & {
+  viewingMatch?: boolean;
+  matchedEventId?: string | null;
   notices: ReactNode;
   ownerKey: string;
   projectId: string | null;
@@ -465,7 +488,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     // Canonical replay uses different message IDs. Import only while history owns
     // this view; replacing live IDs invalidates mounted assistant-ui bindings.
     if (adapterOwnsMessages.current) return null;
-    return buildRepositoryFromCodeAgentTranscript(latest.current.run?.events ?? []);
+    return codeMatchRepository(latest.current.run?.events ?? [], latest.current.matchedEventId);
   }, []);
   const availableModels = useMemo(() => props.state.engines
     .filter(engine => !props.selection.runId || engine.engine === choice.engine)
@@ -485,7 +508,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   }, [availableDraftModel, choice.engine]);
   const runtime = selectedEngine?.runtime;
   const events = props.run?.events ?? [];
-  const snapshotKey = events.length + ":" + (events.at(-1)?.id ?? "") + ":" + (props.run?.status ?? "");
+  const snapshotKey = events.length + ":" + (events.at(-1)?.id ?? "") + ":" + (props.run?.status ?? "") + ":" + (props.matchedEventId ?? "");
   const viewKey = useRef(snapshotKey);
   // A live turn and its canonical transcript use different message IDs. Replace
   // the view at that ownership boundary, never the repository beneath mounted rows.
@@ -494,7 +517,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     && events.findLast(event => event.kind === "status")?.metadata?.reason === "user";
   const runtimeReady = selectedEngine?.configured === true;
   // Issue #121. Leftover coding processes refuse every send, so the composer waits for the host strip's choice.
-  const disabled = !props.workspaceAvailable || props.active || props.streaming || !runtimeReady
+  const disabled = props.viewingMatch || !props.workspaceAvailable || props.active || props.streaming || !runtimeReady
     || (!!props.selection.runId && !props.run) || !!props.state.cleanup;
 
   function chooseRuntime(engineName: string) {
@@ -512,7 +535,8 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     hostComposerDraft={draft.hostComposerDraft}
     contextNamespace={previewContextKey}
     showHeader={false} className="local-agent-transcript"
-    createAdapter={createAdapter} loadHistoryRepository={loadHistoryRepository}
+    createAdapter={props.viewingMatch ? createHistoryReadAdapter : createAdapter} loadHistoryRepository={loadHistoryRepository}
+    approvalActions={props.viewingMatch ? { alwaysAllowScope: "exact-command" } : undefined}
     isThreadStateLoading={!!props.selection.runId && !props.run && !props.streaming}
     externalStreaming={!!props.run && isCodeAgentRunActive(props.run)}
     externalUserStopped={stoppedByUser}
@@ -522,7 +546,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       return false;
     }}
     composerDisabled={disabled}
-    composerDisabledPlaceholder={props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.state.pendingApproval ? "Review the pending request above. Approve or deny before sending another message." : !runtimeReady ? "Connect a runtime in Settings to start." : "The agent is working. Stop it before sending another message."}
+    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.state.pendingApproval ? "Review the pending request above. Approve or deny before sending another message." : !runtimeReady ? "Connect a runtime in Settings to start." : "The agent is working. Stop it before sending another message."}
     selectedEngine={choice.engine} selectedModel={choice.model} defaultModel={props.state.defaultModel}
     availableModels={availableModels} onModelChange={(model, engine) => {
       const selected = props.state.engines.find(item => item.engine === engine);
