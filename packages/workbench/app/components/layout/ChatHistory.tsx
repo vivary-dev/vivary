@@ -5,12 +5,10 @@ import { useLocation, useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import type { VivaryChatIdentity as ChatIdentity } from "@/lib/chat-scope";
 import { useChatDraftList } from "@/lib/chat-draft";
-import { ChatSessionSearch } from "./ChatSessionSearch";
 
 export function ChatHistory({ identity }: { identity: ChatIdentity }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const [searchActive, setSearchActive] = useState(false);
   const [error, setError] = useState<string>();
   const {
     threads,
@@ -99,8 +97,6 @@ export function ChatHistory({ identity }: { identity: ChatIdentity }) {
 
   return (
     <section className="vivary-chat-history" aria-label="Chat history">
-      <ChatSessionSearch identity={identity} onActiveChange={setSearchActive} />
-      <div hidden={searchActive}>
       {(threadsLoadError || draftList.isError) && <div role="alert">
         <p>Some conversations could not be loaded. Your history is preserved.</p>
         <Button variant="ghost" size="sm" onClick={() => {
@@ -142,7 +138,6 @@ export function ChatHistory({ identity }: { identity: ChatIdentity }) {
           {error}
         </p>
       )}
-      </div>
     </section>
   );
 }
