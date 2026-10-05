@@ -181,6 +181,9 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'\n"
         "    steps:\n"
         "      - name: require the dispatched head to be this run's commit\n"
+        "        if: github.event_name == 'workflow_dispatch'\n"
+        "        env:\n"
+        "          HEAD_SHA: ${{ inputs.head_sha }}\n"
         "        run: test \"$GITHUB_SHA\" = \"$HEAD_SHA\"\n"
         "      - name: wait for completed reviews and resolved threads\n"
         "        env:\n"
@@ -258,6 +261,8 @@ def test_required_review_gate_must_exist_and_wait():
         (workflow.replace("--wait-seconds 2400 --interval 30\n", "--wait-seconds 2400 --interval 30 || true\n"), "wait for the Codex review"),
         (workflow.replace("  review-gate:\n", "  review-gate:\n    continue-on-error: true\n"), "must fail the check"),
         (workflow.replace("      - name: wait for completed reviews and resolved threads\n", "      - name: wait for completed reviews and resolved threads\n        if: false\n"), "must not be conditional"),
+        (workflow.replace("        if: github.event_name == 'workflow_dispatch'\n        env:\n          HEAD_SHA: ${{ inputs.head_sha }}\n",
+                          "        if: false\n        env:\n          HEAD_SHA: ${{ inputs.head_sha }}\n"), "refuse a dispatched head"),
         (workflow.replace("  review-gate:\n    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'\n",
                           "  review-gate:\n    if: github.event_name == 'pull_request'\n"), "manual dispatch"),
     ):
