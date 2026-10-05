@@ -95,7 +95,7 @@ open an editable view. Return stays disabled while the read is loading and for a
 proven-archived match. Project and Personal matches explain that the user must
 restore the conversation from Archived conversations, then reopen it to continue.
 Unassigned history has no restore control: its archived match notice and disabled
-composer state, "This conversation is archived and read-only here."
+composer say, "This conversation is archived and read-only here."
 If the match read fails, a short explanation offers Return or another search.
 Return removes the unread thread and all match anchors, then uses the existing
 saved-selection restore, which refuses archived threads. Read-only replay preserves

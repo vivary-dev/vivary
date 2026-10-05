@@ -245,6 +245,8 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Wording fix in the unified-workspace contract's archived-match sentence; no behavior or design change.
+
 Issue #11 reintroduction, final small review fixes. Unassigned archived replay now
 states that the conversation is archived and read-only here in both its notice and
 disabled composer. A failed Native match read enables Return with a short recovery
