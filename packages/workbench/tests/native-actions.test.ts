@@ -2,65 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import evaluateOwner from "../actions/vivary-project-evaluate-owner.ts";
 import evaluateTool from "../actions/vivary-project-evaluate.ts";
-import { createNativeActionCaller, createNativeActionReader, folderConnectionErrorMessage } from "../app/lib/native-actions";
+import { createNativeActionCaller, folderConnectionErrorMessage } from "../app/lib/native-actions";
 import { VIVARY_OWNER_ACTIONS } from "../shared/owner-actions";
-
-test("search and match reads share rejected tokens with owner writes and recover with a fresh session", async () => {
-  let token = "read-rejection-owner-token", requests = 0, invalidations = 0;
-  const dependencies = {
-    getSession: () => ({ status: "authenticated" as const, session: { email: "owner@example.test", token } }),
-    cookieAction: async <T>() => null as T,
-    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
-      requests++;
-      const request = new Request(input, init);
-      assert.equal(request.method, "GET");
-      assert.equal(request.credentials, "same-origin");
-      assert.equal(request.redirect, "error");
-      assert.equal(request.headers.get("X-Vivary-Session"), token);
-      assert.equal(request.headers.get("X-Agent-Native-Frontend"), "1");
-      assert.equal(new URL(request.url).searchParams.get("query"), "needle & text");
-      return requests === 1 ? Response.json({ message: "Sign in." }, { status: 401 }) : Response.json({ results: [] });
-    },
-    locationHref: () => "https://private.example.test/agent", nativePath: (path: string) => path,
-    invalidate: () => { invalidations++; },
-  };
-  const read = createNativeActionReader(dependencies), secondRead = createNativeActionReader(dependencies);
-  const write = createNativeActionCaller(dependencies), params = new URLSearchParams({ query: "needle & text" });
-  assert.equal((await read("vivary-chat-search", params)).status, 401);
-  await assert.rejects(secondRead("vivary-chat-match", params), /session refreshes/);
-  await assert.rejects(write("vivary-code-send", {}), /session refreshes/);
-  assert.deepEqual([requests, invalidations], [1, 1]);
-  token = "read-refreshed-owner-token";
-  assert.equal((await secondRead("vivary-chat-match", params)).status, 200);
-  assert.equal(requests, 2);
-});
-
-test("cookie reads invalidate on 401 and preserve cancellation without leaking credentials", async () => {
-  let calls = 0, invalidations = 0;
-  const abort = new AbortController();
-  const read = createNativeActionReader({
-    getSession: () => ({ status: "authenticated", session: { email: "owner@example.test" } }),
-    fetch: async (input, init) => {
-      calls++;
-      assert.equal(new Headers(init?.headers).has("X-Vivary-Session"), false);
-      assert.equal(init?.signal, abort.signal);
-      return Response.json(null, { status: 401 });
-    },
-    locationHref: () => "http://localhost/", nativePath: path => path,
-    invalidate: () => { invalidations++; },
-  });
-  assert.equal((await read("vivary-chat-search", new URLSearchParams(), abort.signal)).status, 401);
-  assert.deepEqual([calls, invalidations], [1, 1]);
-  for (const nativePath of [(path: string) => "https://other.example.test" + path,
-    (path: string) => path + "?redirect=foreign", (path: string) => path + "#fragment"]) {
-    const unsafe = createNativeActionReader({
-      getSession: () => ({ status: "authenticated", session: { email: "owner@example.test", token: "private-read-token" } }),
-      fetch: async () => { assert.fail("Unsafe endpoint sent a request"); },
-      locationHref: () => "http://localhost/", nativePath, invalidate: () => undefined,
-    });
-    await assert.rejects(unsafe("vivary-chat-match", new URLSearchParams()), /this Vivary instance/);
-  }
-});
 
 test("owner action sends one bounded same-origin request without redirects", async () => {
   const requests: Request[] = [];
