@@ -232,6 +232,19 @@ class ReviewGate(unittest.TestCase):
         code, _ = self._main(refuse)
         self.assertEqual(code, 1)
 
+    def test_rate_limited_403_is_retried(self):
+        for headers in ({"x-ratelimit-remaining": "0"}, {"retry-after": "60"}):
+            calls = iter([gate.urllib.error.HTTPError("u", 403, "Forbidden", headers, None),
+                          {"head": {"sha": HEAD}, "base": {"sha": BASE}, "draft": False}])
+            def pull(*a):
+                item = next(calls)
+                if isinstance(item, Exception):
+                    raise item
+                return item
+            code, out = self._main(pull)
+            self.assertEqual(code, 0, headers)
+            self.assertIn("retrying after API error: HTTP 403", out)
+
     def test_transient_pull_lookup_error_is_retried(self):
         calls = iter([OSError("reset"), {"head": {"sha": HEAD}, "base": {"sha": BASE}, "draft": False}])
         def pull(*a):

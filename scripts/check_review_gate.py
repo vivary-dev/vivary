@@ -212,6 +212,13 @@ def evaluate(comments: list[dict], threads: list[dict], head_sha: str, base_sha:
     return complete is True and not unresolved, complete is False, messages
 
 
+def _rate_limited(error: urllib.error.HTTPError) -> bool:
+    """GitHub signals an exhausted rate limit with 429, or with 403 and a retry or remaining-zero header."""
+    headers = error.headers or {}
+    return error.code == 429 or (error.code == 403 and (headers.get("retry-after") is not None
+                                                        or headers.get("x-ratelimit-remaining") == "0"))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repository", default=os.environ.get("REPOSITORY"))
@@ -239,7 +246,7 @@ def main() -> int:
             base_sha = pull.get("base", {}).get("sha")
             comments, threads = fetch(args.repository, args.pr, token)
         except urllib.error.HTTPError as error:
-            if 400 <= error.code < 500 and error.code != 429:
+            if 400 <= error.code < 500 and not _rate_limited(error):
                 print(f"required review gate: GitHub API refused the request: HTTP {error.code}", file=sys.stderr)
                 return 1
             if time.monotonic() >= deadline:
