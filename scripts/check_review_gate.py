@@ -10,9 +10,10 @@ opens one review thread per finding. A pull request is ready only when:
 - every review thread is resolved, outdated ones included, so each finding has an answered
   disposition.
 
-A running result waits. A failed result, or one for another head or base, blocks until the
-final commit is reviewed again. A Codex connector review that is still running on the exact
-head also waits; Codex quota notices and Codex reviews of other commits are ignored.
+A running result, or none yet for the exact head, waits. A failed result for the head, or one
+against another base, blocks until the final commit is reviewed again. A Codex connector
+review still in progress on the exact head also waits; finished, failed or quota-limited
+Codex reviews, quota notices and Codex reviews of other commits are ignored.
 
 With --wait-seconds the check polls while a review is running, so its CI status stays
 pending instead of passing early. No GitHub event re-runs the check when a thread is
@@ -63,6 +64,8 @@ COMMENTS_QUERY = """query($owner: String!, $name: String!, $number: Int!, $after
   }
 }"""
 STALE = "stale"
+# Row statuses that mean a Codex review is still in progress; any other status is terminal.
+CODEX_IN_PROGRESS = ("Running", "In progress", "Queued", "Pending", "\U0001f504")
 # Marks a comment whose last editor could not be read; such a comment never counts as a result.
 UNKNOWN_EDITOR = object()
 
@@ -75,7 +78,7 @@ def codex_running(comments: list[dict], head_sha: str) -> str | None:
         return None
     body = max(summaries, key=lambda c: c.get("updated_at") or "")["body"]
     for row in ROW.finditer(body):
-        if head_sha.startswith(row.group("commit")) and "Completed" not in row.group("status"):
+        if head_sha.startswith(row.group("commit")) and any(word in row.group("status") for word in CODEX_IN_PROGRESS):
             return f"Codex {row.group('review')} is still running on {head_sha[:7]}"
     return None
 
@@ -109,8 +112,9 @@ def review_status(comments: list[dict], head_sha: str, base_sha: str,
     current = [(t, s) for t, s in results if s.get("headSha") == head_sha]
     if not current:
         latest = max(results, key=lambda r: r[0])[1]
-        return STALE, (f"the latest independent review covers {str(latest.get('headSha'))[:7]}, not head {head_sha[:7]}; "
-                       "review the final commit")
+        # Waiting, not failing: a push always leaves an older result, and the new review starts after it.
+        return False, (f"the latest independent review covers {str(latest.get('headSha'))[:7]}, not head {head_sha[:7]}; "
+                       "waiting for a review of the final commit")
     state = max(current, key=lambda r: r[0])[1]
     if state.get("baseSha") != base_sha:
         return STALE, f"the independent review of {head_sha[:7]} used base {str(state.get('baseSha'))[:7]}, not {base_sha[:7]}"

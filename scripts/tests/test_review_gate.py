@@ -30,10 +30,13 @@ def independent(status: str, sha: str = HEAD, base: str = BASE, login: str = "Je
             "updated_at": at, "user": {"login": login, "type": "User"}, "editor": editor}
 
 
+ICONS = {"Completed": "✅", "Running": "🔄", "Queued": "🔄"}
+
+
 def summary(status: str, sha: str, security: str | None = None) -> dict:
     """A Codex summary comment as the connector writes it (PR #191 / #192 shapes)."""
     state = "completed" if status == "Completed" and (security or "Completed") == "Completed" else "running"
-    rows = [f"| 📝 **Code Review** | {'✅' if status == 'Completed' else '🔄'} **{status}** "
+    rows = [f"| 📝 **Code Review** | {ICONS.get(status, '❌')} **{status}** "
             f"<relative-time datetime=\"2026-10-05T17:08:39Z\">2026-10-05T17:08:39Z</relative-time> | `{sha[:7]}` | PR opened |"]
     if security:
         rows.append(f"| 🔒 **Security Review** | **{security}** <relative-time datetime=\"2026-10-05T17:08:40Z\">x</relative-time> | `{sha[:7]}` | PR opened |")
@@ -71,11 +74,27 @@ class ReviewGate(unittest.TestCase):
         self.assertFalse(pending)
         self.assertIn("failed", messages[0])
 
-    def test_review_of_an_earlier_head_is_stale(self):
+    def test_review_of_an_earlier_head_never_passes_and_waits_for_the_final_commit(self):
         ready, pending, messages = self.check([independent("completed", sha=NEXT)])
         self.assertFalse(ready)
-        self.assertFalse(pending)
+        self.assertTrue(pending)
         self.assertIn("not head 90765bc", messages[0])
+
+    def test_cli_blocks_when_the_final_commit_is_never_reviewed(self):
+        code, out = self._main({"head": {"sha": HEAD}, "base": {"sha": BASE}, "draft": False},
+                               lambda *a: ([independent("completed", sha=NEXT)], [thread(True)]), wait="0")
+        self.assertEqual(code, 1)
+        self.assertIn("BLOCKED", out)
+
+    def test_finished_failed_or_quota_limited_codex_rows_are_ignored(self):
+        for status in ("Failed", "Usage limit reached", "Skipped", "Error"):
+            ready, _, _ = self.check([independent("completed"), summary(status, HEAD, status)])
+            self.assertTrue(ready, status)
+
+    def test_queued_codex_review_on_the_head_waits(self):
+        ready, pending, _ = self.check([independent("completed"), summary("Queued", HEAD)])
+        self.assertFalse(ready)
+        self.assertTrue(pending)
 
     def test_review_against_another_base_is_stale(self):
         ready, pending, messages = self.check([independent("completed", base=OTHER_BASE)])
@@ -164,7 +183,7 @@ class ReviewGate(unittest.TestCase):
         self.assertTrue(ready)
         self.assertFalse(pending)
 
-    def _main(self, pull, fetch=None):
+    def _main(self, pull, fetch=None, wait="600"):
         env = {"GH_TOKEN": "x", "REPOSITORY": "o/r", "PR_NUMBER": "1", "HEAD_SHA": HEAD}
         fetch = fetch or (lambda *a: ([independent("completed")], [thread(True)]))
         pulls = pull if callable(pull) else (lambda *a: pull)
@@ -172,7 +191,7 @@ class ReviewGate(unittest.TestCase):
                 mock.patch.object(gate, "fetch", side_effect=fetch), \
                 mock.patch.object(gate, "fetch_pull", side_effect=pulls), \
                 mock.patch.object(gate.time, "sleep"), \
-                mock.patch.object(sys, "argv", ["check_review_gate.py", "--wait-seconds", "600", "--interval", "1"]), \
+                mock.patch.object(sys, "argv", ["check_review_gate.py", "--wait-seconds", wait, "--interval", "1"]), \
                 redirect_stdout(io.StringIO()) as out:
             return gate.main(), out.getvalue()
 
