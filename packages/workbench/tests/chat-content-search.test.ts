@@ -580,6 +580,101 @@ test("malformed Native repositories are skipped per session and continuation adv
   assert.equal(page.limited, true); assert.equal(page.continueAfter, null);
 });
 
+for (const runtime of ["native", "code"] as const)
+  test(`partly-read ${runtime} sessions finish after their update time passes the snapshot`, async t => {
+    const projectId = `active-update-${runtime}`;
+    const target = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId, label: "Active update" });
+    const { searchChatContent } = await import("../server/chat-content-search.ts");
+    const actor = { ownerEmail: owner, orgId, identity: target, codeScope: { ...scope, projectId } };
+    const input = { projectId, query: "activeupdateneedle", unassigned: false, includeArchived: false };
+    const id = runtime === "native" ? "active-update-native" : "zz-active-update-20200101000000-00000000";
+    t.after(async () => {
+      if (runtime === "native") await getDbExec().execute({ sql: "DELETE FROM chat_threads WHERE id=?", args: [id] });
+      else {
+        await rm(path.join(codeAgentRunsDir(), id + ".json"), { force: true });
+        await rm(codeAgentRunTranscriptPath(id), { force: true });
+      }
+    });
+    const time = Date.now() - 10_000;
+    if (runtime === "native") {
+      await createThread(owner, { id, orgId, scope: target.scope });
+      const messages = Array.from({ length: 27 }, (_, i) => ({ parentId: i ? `active-${i - 1}` : null,
+        message: { id: `active-${i}`, role: "user", content: [{ type: "text", text: input.query }] } }));
+      await updateThreadData(id, JSON.stringify({ headId: "active-26", messages }), "Active update", "Recent", messages.length);
+      await getDbExec().execute({ sql: "UPDATE chat_threads SET updated_at=? WHERE id=?", args: [time, id] });
+    } else {
+      run(id, { projectId }); updateCodeAgentRunRecord(id, { updatedAt: new Date(time).toISOString() });
+      const events = Array.from({ length: 27 }, (_, i) => ({ id: `active-${i}`, runId: id, kind: "user", message: input.query }));
+      await writeFile(codeAgentRunTranscriptPath(id), events.map(event => JSON.stringify(event) + "\n").join(""));
+    }
+    const first = await searchChatContent(actor, input);
+    assert.deepEqual(first.results.map(hit => hit.referenceId), Array.from({ length: 25 }, (_, i) => `active-${i}`));
+    assert.ok(first.continueAfter);
+    const changedAt = Date.now() + 60_000;
+    if (runtime === "native") await getDbExec().execute({ sql: "UPDATE chat_threads SET updated_at=? WHERE id=?", args: [changedAt, id] });
+    else updateCodeAgentRunRecord(id, { updatedAt: new Date(changedAt).toISOString() });
+    const continued = await searchChatContent(actor, { ...input, after: first.continueAfter });
+    assert.deepEqual(continued.results.map(hit => hit.referenceId), ["active-25", "active-26"], "an admitted session must retain its remaining matches");
+    assert.ok(continued.results.every(hit => hit.sessionUpdatedAt === first.results[0].sessionUpdatedAt), "the admitted ordering key stays fixed");
+    assert.equal(continued.searchedSessions, 1);
+    assert.equal(continued.continueAfter, null);
+  });
+
+for (const runtime of ["native", "code"] as const)
+  test(`unadmitted ${runtime} updates after the snapshot report incomplete coverage`, async t => {
+    const projectId = `skipped-update-${runtime}`;
+    const target = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId, label: "Skipped update" });
+    const { searchChatContent } = await import("../server/chat-content-search.ts");
+    const actor = { ownerEmail: owner, orgId, identity: target, codeScope: { ...scope, projectId } };
+    const input = { projectId, query: "skippedupdateneedle", unassigned: false, includeArchived: false };
+    const anchor = `skipped-update-anchor-${runtime}`, changed = `skipped-update-${runtime}`;
+    t.after(async () => {
+      await getDbExec().execute({ sql: "DELETE FROM chat_threads WHERE id=?", args: [anchor] });
+      if (runtime === "native") await getDbExec().execute({ sql: "DELETE FROM chat_threads WHERE id=?", args: [changed] });
+      else {
+        await rm(path.join(codeAgentRunsDir(), changed + ".json"), { force: true });
+        await rm(codeAgentRunTranscriptPath(changed), { force: true });
+      }
+    });
+    const time = Date.now() - 10_000;
+    await createThread(owner, { id: anchor, orgId, scope: target.scope });
+    const messages = Array.from({ length: 27 }, (_, i) => ({ parentId: i ? `anchor-${i - 1}` : null,
+      message: { id: `anchor-${i}`, role: "user", content: [{ type: "text", text: input.query }] } }));
+    await updateThreadData(anchor, JSON.stringify({ headId: "anchor-26", messages }), "Anchor", "Recent", messages.length);
+    await getDbExec().execute({ sql: "UPDATE chat_threads SET updated_at=? WHERE id=?", args: [time + 1, anchor] });
+    if (runtime === "native") {
+      await native(changed, input.query, { scope: target.scope });
+      await getDbExec().execute({ sql: "UPDATE chat_threads SET updated_at=? WHERE id=?", args: [time, changed] });
+    } else {
+      // Legacy names lack a creation timestamp and retain the existing metadata path.
+      run(changed, { projectId }); updateCodeAgentRunRecord(changed, { updatedAt: new Date(time).toISOString() });
+      await writeFile(codeAgentRunTranscriptPath(changed), JSON.stringify({ id: "changed-code", runId: changed, kind: "user", message: input.query }) + "\n");
+    }
+    const first = await searchChatContent(actor, input);
+    assert.equal(first.results.length, 25); assert.ok(first.continueAfter);
+    assert.ok(first.results.every(hit => hit.sessionId === anchor), "the changed conversation has not been admitted yet");
+    assert.equal(first.limited, false);
+    const changedAt = Date.now() + 60_000;
+    if (runtime === "native") await getDbExec().execute({ sql: "UPDATE chat_threads SET updated_at=? WHERE id=?", args: [changedAt, changed] });
+    else updateCodeAgentRunRecord(changed, { updatedAt: new Date(changedAt).toISOString() });
+    const continued = await searchChatContent(actor, { ...input, after: first.continueAfter });
+    assert.equal(continued.limited, true, "skipping a changed conversation must produce the coverage notice");
+    assert.deepEqual(continued.results.map(hit => hit.referenceId), ["anchor-25", "anchor-26"]);
+    assert.equal(continued.continueAfter, null);
+    // A new search can include it once the new snapshot reaches its update time.
+    const freshTime = Date.now();
+    if (runtime === "native") await getDbExec().execute({ sql: "UPDATE chat_threads SET updated_at=? WHERE id=?", args: [freshTime, changed] });
+    else updateCodeAgentRunRecord(changed, { updatedAt: new Date(freshTime).toISOString() });
+    const hits = [];
+    let after: string | undefined;
+    for (let i = 0; i < 3; i++) {
+      const page = await searchChatContent(actor, { ...input, after }); hits.push(...page.results);
+      if (!page.continueAfter) break;
+      after = page.continueAfter;
+    }
+    assert.ok(hits.some(hit => hit.sessionId === changed), "starting again includes the changed conversation");
+  });
+
 test("recency cursors keep tie order, exact retry position and a fixed search snapshot", async () => {
   const projectId = "recency-project", target = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId, label: "Recent" });
   const timestamp = Date.now() - 10_000;

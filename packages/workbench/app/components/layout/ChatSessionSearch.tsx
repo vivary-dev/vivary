@@ -109,7 +109,8 @@ export function ChatSessionSearch({ identity, enabled = true, onActiveChange }: 
       })}</ul>
       {current.cursor && status === "ready" && <button type="button" onClick={() => setRetry(value => value + 1)}>Search more history</button>}
       {current.codeUnavailable && <p>Native history is available. Code history is unavailable until the Personal workspace is connected.</p>}
-      {current.limited && <p>Some malformed or oversized records were skipped, or the history scan limit was reached.</p>}
+      {current.limited && <p>Some conversations changed during this search, malformed or oversized records were skipped,
+        or the history scan limit was reached. Start the search again to include changed conversations.</p>}
     </>}
     {term.length >= 2 && <p className="chat-search-boundary">Forgotten or removed active-memory facts can remain findable in chat history.</p>}
   </div>;

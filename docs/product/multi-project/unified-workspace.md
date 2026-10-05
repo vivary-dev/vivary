@@ -113,6 +113,12 @@ remains incomplete. Foreign runs contribute no
 public counts or excerpts. An incomplete final transcript line retains its offset
 until its writer appends a newline. Each runtime scans newest sessions first using
 updated time and stable ID; cursors retain the ordering key and search start time.
+A search covers conversations as of when it started. New conversations wait for
+a new search. Existing conversations changed before admission are skipped until
+the search is started again; the coverage notice explains this and says to start
+again. A partly-read, admitted conversation finishes even if it changes, using
+its original ordering key and current authorized content. Ownership, scope,
+archive and size checks still apply.
 The client merges retrieved hits by session recency across runtimes. Cursors bind
 owner, organization, scope, filters and query, and expire at server restart. Native
 results remain available when the Personal Code workspace is unavailable, with a

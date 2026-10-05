@@ -110,16 +110,22 @@ export async function searchChatContent(owner: SearchOwner, input: ChatSearchInp
   const count = await db.execute({ sql: `SELECT COUNT(*) AS count FROM chat_threads WHERE ${where} AND message_count > 0 AND updated_at <= ?`,
     args: [...args, cursor.snapshot] });
   const nativeTotal = Number(count.rows[0]?.count ?? 0);
+  // Flag existing conversations that changed outside this search's admission window.
+  // The active session still finishes below; this probe reads no transcript content.
+  const changed = await db.execute({ sql: `SELECT 1 FROM chat_threads WHERE ${where} AND message_count > 0
+    AND created_at <= ? AND updated_at > ? AND id <> ? LIMIT 1`,
+    args: [...args, cursor.snapshot, cursor.snapshot, cursor.phase === "native" && cursor.active ? cursor.session : ""] });
+  page.limited ||= changed.rows.length > 0;
   if (input.unassigned || !owner.codeScope) page.totalSessions = nativeTotal;
   if (cursor.phase === "native") {
     while (canStartSession()) {
       signal?.throwIfAborted();
-      const selection = cursor.active ? "AND id = ?" : "AND (updated_at < ? OR (updated_at = ? AND id > ?))";
+      const selection = cursor.active ? "AND id = ?" : "AND updated_at <= ? AND (updated_at < ? OR (updated_at = ? AND id > ?))";
       const headers = await db.execute({ sql: `SELECT id, title, archived_at, updated_at,
         ${isPostgres() ? "octet_length(thread_data)" : "length(CAST(thread_data AS BLOB))"} AS repository_size
-        FROM chat_threads WHERE ${where} AND message_count > 0 AND updated_at <= ? ${selection}
+        FROM chat_threads WHERE ${where} AND message_count > 0 ${selection}
         ORDER BY updated_at DESC, id LIMIT 1`,
-        args: [...args, cursor.snapshot, ...(cursor.active ? [cursor.session] : [cursor.time, cursor.time, cursor.session])] });
+        args: [...args, ...(cursor.active ? [cursor.session] : [cursor.snapshot, cursor.time, cursor.time, cursor.session])] });
       const header = headers.rows[0];
       if (!header) {
         if (cursor.active) { finishSession(); continue; }
@@ -204,7 +210,9 @@ export async function searchChatContent(owner: SearchOwner, input: ChatSearchInp
         if (!record || typeof record !== "object" || record.id + ".json" !== name || typeof record.title !== "string"
           || !isOwnedRun(record, owner.ownerEmail, owner.orgId, owner.codeScope!)) continue;
         const time = Date.parse(record.updatedAt);
-        if (Number.isFinite(time) && time <= cursor.snapshot) owned.push({ record, time, bytes: bytesRead });
+        if (!Number.isFinite(time)) continue;
+        if (time <= cursor.snapshot || (cursor.active && record.id === cursor.session)) owned.push({ record, time, bytes: bytesRead });
+        else page.limited = true;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
         // A malformed metadata file cannot establish ownership; it contributes no public counts.

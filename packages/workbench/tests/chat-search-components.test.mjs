@@ -254,6 +254,20 @@ test("project switch clears Native and Code match anchors before admitting the n
   for (const key of ["runtime", "history", "thread", "message", "event", "eventOffset"]) assert.equal(params.has(key), false, key);
   assert.equal(params.get("unrelated"), "keep");
 });
+test("limited search coverage explains changed conversations and starting again", async () => {
+  globalThis.fetch = async () => Response.json({ results: [], continueAfter: null, searchedSessions: 1,
+    limited: true, limits: { results: 25 } });
+  await render("search");
+  const input = host.querySelector("input[type=search]");
+  await act(async () => {
+    input.value = "needle";
+    const props = input[Object.keys(input).find(key => key.startsWith("__reactProps$"))];
+    props.onChange({ target: input });
+  });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)); });
+  assert.match(host.textContent, /conversations changed during this search/i);
+  assert.match(host.textContent, /start the search again/i);
+});
 for (const kind of ["search", "native"]) test(`${kind} GET invalidates a rejected owner session`, async () => {
   searchFixture.session.session.token = `rejected-${kind}-component-token`;
   let requests = 0;
