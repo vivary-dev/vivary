@@ -46,7 +46,7 @@ const report = { schema: 'vivary.responsiveness/v2', conditions: {
   timings: 'monotonic wall time; click includes actionability; visible means rendered in viewport; no model calls',
   cold: 'First visit in a browser context; small history starts another context when distinct entries run out',
   ready: 'Code: target last event visible and composer enabled. Native: target last message visible and the provider state settled (enabled composer or the Connect AI card)',
-  search: 'Enter until the expected conversation is listed, clicking "Search more history" as a user would; complete when no search is running; every hit must belong to the expected conversation',
+  search: 'Enter until the expected conversation is listed, clicking "Search more history" as a user would, at most 10 times (beyond that the sample is reported not found, not timed); settled when no search is running; every hit must belong to the expected conversation',
 }, runs: [] };
 const tracePath = path.resolve(values.output).replace(/\.json$/, '') + '.trace.jsonl';
 
@@ -229,6 +229,7 @@ function scenario(entries) {
     others: stats(rest.map(entry => entry.ms)) });
   return result;
 }
+const MAX_MORE_CLICKS = 10;
 async function searchFor(page, item) {
   const box = page.locator('.chat-session-search:visible').first();
   const input = box.getByRole('searchbox', { name: 'Search conversations' });
@@ -236,21 +237,22 @@ async function searchFor(page, item) {
   await input.fill(`perfneedle ${item.id}`);
   const start = performance.now(); await input.press('Enter');
   const hit = box.locator(`.chat-search-result[data-session-id="${item.id}"]`), more = box.getByRole('button', { name: 'Search more history', exact: true });
-  let moreClicks = 0;
+  let moreClicks = 0, found = true;
   for (;;) {
     await hit.or(more).first().waitFor();
     if (await hit.first().isVisible()) break;
-    // The automatic budget stopped before this conversation; a person would ask for more.
+    // The automatic budget stopped before this conversation; a person would ask for more, but
+    // not indefinitely. Past the cap the sample is "not found", never a time.
+    if (moreClicks === MAX_MORE_CLICKS) { found = false; break; }
     await more.click(); moreClicks++;
-    assert.ok(moreClicks <= 500, `Search never reached ${item.id}`);
   }
   const firstMs = performance.now() - start;
   await box.getByRole('button', { name: 'Cancel', exact: true }).waitFor({ state: 'hidden' });
   const settledMs = performance.now() - start;
   const ids = await box.locator('.chat-search-result').evaluateAll(links => links.map(link => link.dataset.sessionId));
-  assert.ok(ids.length && ids.every(id => id === item.id), `Search for ${item.id} listed ${[...new Set(ids)].join(', ')}`);
+  assert.ok((!found || ids.length) && ids.every(id => id === item.id), `Search for ${item.id} listed ${[...new Set(ids)].join(', ')}`);
   await box.getByRole('button', { name: 'Clear search', exact: true }).click();
-  return { firstMs, settledMs, moreClicks, hits: ids.length };
+  return { found, firstMs, settledMs, moreClicks, hits: ids.length };
 }
 async function measure(size, repeat) {
   const data = await mkdtemp(path.join(os.tmpdir(), 'vivary-perf188-'));
@@ -327,9 +329,11 @@ async function measure(size, repeat) {
       const item = list[Math.min(list.length - 1, Math.floor(((i >> 1) + 0.5) * list.length / slots))];
       results.push({ target: item.id, ...await searchFor(current.page, item) });
     }
-    run.scenarios.searchFirstMs = { ...stats(results.map(result => result.firstMs)), targets: results.map(result => result.target) };
-    run.scenarios.searchSettledMs = stats(results.map(result => result.settledMs));
-    run.search = results.map(({ target, moreClicks, hits }) => ({ target, moreClicks, hits }));
+    const found = results.filter(result => result.found);
+    run.scenarios.searchFirstMs = { ...stats(found.map(result => result.firstMs)), targets: found.map(result => result.target) };
+    run.scenarios.searchSettledMs = stats(found.map(result => result.settledMs));
+    run.search = { notFoundWithinClicks: MAX_MORE_CLICKS, notFound: results.filter(result => !result.found).map(result => result.target),
+      samples: results.map(({ target, found, moreClicks, hits, firstMs }) => ({ target, found, moreClicks, hits, ms: firstMs })) };
     // Idle on the longest Code run: its one-second polls are the steady-state cost.
     phase = 'idle';
     await clickConversation(current.page, fixture.code[1]);
@@ -361,7 +365,10 @@ async function measure(size, repeat) {
     run.status = 'complete';
   } catch (error) {
     // A crashed renderer is a measured outcome; record where it happened and keep the other runs.
-    if (!run || !(current?.crashed || /Target crashed/.test(String(error?.message)))) throw error;
+    if (!run || !(current?.crashed || /Target crashed/.test(String(error?.message)))) {
+      if (run) Object.assign(run, { status: 'failed', failure: { phase, message: String(error?.message ?? error).split('\n')[0] } });
+      throw error;
+    }
     run.status = 'crashed';
     run.crash = { phase, message: String(error?.message ?? error).split('\n')[0], lastMemory };
   } finally {
@@ -380,9 +387,10 @@ async function saveReport() {
   for (const size of sizes) {
     const runs = report.runs.filter(run => run.size === size && run.status === 'complete');
     for (const run of report.runs.filter(run => run.size === size && run.status !== 'complete'))
-      lines.push(`| ${size} | run ${run.repeat} ${run.status} | | ${run.crash ? `${run.crash.phase}: ${run.crash.message}` : ''} | | |`);
+      lines.push(`| ${size} | run ${run.repeat} ${run.status} | | ${run.crash ? `${run.crash.phase}: ${run.crash.message}` : run.failure ? `${run.failure.phase}: ${run.failure.message}` : ''} | | |`);
     if (!runs.length) continue;
     const row = (name, per) => {
+      if (per.some(entry => !entry.n)) return lines.push(`| ${size} | ${name} | ${per.map(entry => entry.n).join(', ')} | n/a | n/a | n/a |`);
       const p50 = per.map(entry => entry.p50), p90 = per.map(entry => entry.p90);
       lines.push(`| ${size} | ${name} | ${per[0].n} | ${p50.map(v => v.toFixed(0)).join(', ')} | ${p90.map(v => v.toFixed(0)).join(', ')} | ${Math.min(...p50).toFixed(0)}–${Math.max(...p50).toFixed(0)} |`);
     };
@@ -396,7 +404,7 @@ async function saveReport() {
         row(`${key} (others)`, runs.map(run => run.scenarios[key].others));
       }
     }
-    lines.push('', ...runs.map(run => `${size} run ${run.repeat}: idle 30s ${run.idle.requests} requests / ${run.idle.bytes} wire bytes; loop delay p90 median ${run.idle.eventLoopMs.perSecondP90.p50.toFixed(1)}ms, max ${run.idle.eventLoopMs.max.toFixed(1)}ms; server RSS ${mib(run.memory.serverRssBytes)}; after journey JS heap ${mib(run.memory.afterJourney?.jsHeapUsedBytes)}, renderer RSS ${mib(run.memory.afterJourney?.rendererRssBytes)}, DOM nodes ${run.memory.afterJourney?.domNodes}.`), '');
+    lines.push('', ...runs.map(run => `${size} run ${run.repeat}: search not found within ${run.search.notFoundWithinClicks} more-clicks: ${run.search.notFound.length}/${run.search.samples.length}; idle 30s ${run.idle.requests} requests / ${run.idle.bytes} wire bytes; loop delay p90 median ${run.idle.eventLoopMs.perSecondP90.p50.toFixed(1)}ms, max ${run.idle.eventLoopMs.max.toFixed(1)}ms; server RSS ${mib(run.memory.serverRssBytes)}; after journey JS heap ${mib(run.memory.afterJourney?.jsHeapUsedBytes)}, renderer RSS ${mib(run.memory.afterJourney?.rendererRssBytes)}, DOM nodes ${run.memory.afterJourney?.domNodes}.`), '');
   }
   const target = path.resolve(values.output); await mkdir(path.dirname(target), { recursive: true });
   await writeFile(target, JSON.stringify(report, null, 2) + '\n');

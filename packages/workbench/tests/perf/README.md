@@ -38,8 +38,13 @@ and nothing is sent. The fixture never reads your profile or credentials. PRNG s
   shortest listed conversation of the other runtime. Pools are the conversations a person can reach
   in the bounded sidebar. Results split the longest conversations from the others.
 - Search: Enter until the expected conversation is listed, clicking "Search more history" as a person
-  would when the automatic budget stops; settled when no search is running. Every listed hit must
-  belong to the expected conversation. Targets alternate runtimes and span newest to oldest.
+  would when the automatic budget stops, at most 10 times; beyond that the sample is reported as not
+  found rather than timed. Settled means no search is running. Every listed hit must belong to the
+  expected conversation. Targets alternate runtimes and span newest to oldest. A search page reads at
+  most 25 conversations or 500 messages, so finding old conversations in a large history needs many
+  pages; the not-found count shows that cost.
+- A run that fails for a reason other than a renderer crash is recorded as `failed` with its phase
+  and error, and the harness exits nonzero.
 - Idle: 30 seconds on a long Code run: requests and transferred bytes (CDP), per-second server event
   loop delay (opt-in `VIVARY_PERF_METRICS=1` plugin) and server RSS.
 - Memory journey, last: 30 switches between the longest Native thread and a long Code run. After
