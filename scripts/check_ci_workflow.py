@@ -69,7 +69,7 @@ jobs:
       - if: steps.base.outputs.missing == 'true'
         uses: actions/checkout@v7.0.1
         with:
-          ref: 4e0c16753db70b4a3ca5dd903299e54f191a5890
+          ref: 80370e094248c84c55da663d977efc7601d17e84
           path: bootstrap
           persist-credentials: false
       - uses: actions/setup-python@v7
