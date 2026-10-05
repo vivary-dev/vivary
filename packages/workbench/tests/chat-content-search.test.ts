@@ -598,6 +598,24 @@ test("malformed Native repositories are skipped per session and continuation adv
   assert.equal(page.limited, true); assert.equal(page.continueAfter, null);
 });
 
+for (const skewMs of [1, 25])
+  test(`new Native searches admit saves ${skewMs} ms ahead of the wall clock`, async t => {
+    const projectId = `native-clock-skew-${skewMs}`, id = projectId;
+    const target = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId, label: "Native clock skew" });
+    const { searchChatContent } = await import("../server/chat-content-search.ts");
+    t.after(async () => { await getDbExec().execute({ sql: "DELETE FROM chat_threads WHERE id=?", args: [id] }); });
+    await native(id, "clockskewneedle", { scope: target.scope });
+    const now = Date.now();
+    // Keep the search inside the skew window regardless of database/runner speed.
+    t.mock.method(Date, "now", () => now);
+    await getDbExec().execute({ sql: "UPDATE chat_threads SET updated_at=? WHERE id=?", args: [now + skewMs, id] });
+    const page = await searchChatContent({ ownerEmail: owner, orgId, identity: target, codeScope: { ...scope, projectId } },
+      { projectId, query: "clockskewneedle", unassigned: false, includeArchived: false });
+    assert.deepEqual(page.results.map(hit => hit.sessionId), [id]);
+    assert.equal(page.limited, false, "a save before this search is not a change during it");
+    assert.equal(page.continueAfter, null);
+  });
+
 for (const runtime of ["native", "code"] as const)
   test(`partly-read ${runtime} sessions finish after their update time passes the snapshot`, async t => {
     const projectId = `active-update-${runtime}`;

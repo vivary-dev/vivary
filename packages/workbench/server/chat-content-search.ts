@@ -113,6 +113,12 @@ export async function searchChatContent(owner: SearchOwner, input: ChatSearchInp
     ${input.includeArchived ? "" : "AND archived_at IS NULL"}`;
   const args = [owner.ownerEmail.toLowerCase(), owner.orgId, owner.identity.scope.type, owner.identity.scope.id];
   await listThreads(owner.ownerEmail, { scope: owner.identity.scope, orgId: owner.orgId, includeExternal: false, limit: 1 });
+  if (!input.after) {
+    // Core's monotonic Native save timestamps can lead the wall clock; include saves already present.
+    const latest = await db.execute({ sql: `SELECT MAX(updated_at) AS updated_at FROM chat_threads WHERE ${where} AND message_count > 0`, args });
+    const snapshot = Math.max(Date.now(), Number(latest.rows[0]?.updated_at ?? 0));
+    cursor = { ...cursor, snapshot, time: snapshot };
+  }
   const count = await db.execute({ sql: `SELECT COUNT(*) AS count FROM chat_threads WHERE ${where} AND message_count > 0 AND updated_at <= ?`,
     args: [...args, cursor.snapshot] });
   const nativeTotal = Number(count.rows[0]?.count ?? 0);

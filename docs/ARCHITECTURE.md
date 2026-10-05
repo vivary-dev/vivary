@@ -245,6 +245,14 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Issue #11 second reintroduction, PR #194 Native start-snapshot fix. New searches
+use one scoped metadata aggregate to include Native saves whose monotonic update
+timestamps lead the wall clock. Continuations retain their snapshot and ordering
+key; later unadmitted updates still report incomplete coverage, and admitted
+sessions finish. Clock-skew regressions cover 1 ms and 25 ms alongside the existing
+continuation cases. The search contract records the start watermark; runtime
+flow 6, authoritative owners, scan caps, Code admission and Unicode excerpts remain accurate.
+
 Issue #11 second reintroduction, PR #194 Unicode excerpt fix. Client highlights
 and server excerpt windows now share a mapping from lowercase match positions
 to original code-point offsets. Ambiguous contextual matches stay unhighlighted,
