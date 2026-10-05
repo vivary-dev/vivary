@@ -97,6 +97,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "        run: python scripts/check_ci_workflow.py\n"
         "      - name: CI workflow contract tests\n"
         "        run: python scripts/tests/test_ci_workflow.py\n"
+        "        run: python scripts/tests/test_review_gate.py\n"
         "      - name: source navigation contract\n"
         "        run: python -B scripts/check-source-navigation.py --check\n"
         "      - name: source navigation contract tests\n"
@@ -175,6 +176,11 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'\n"
         "    steps: []\n"
         "\n"
+        "  review-gate:\n"
+        "    steps:\n"
+        "      - env:\n"
+        "          HEAD_SHA: ${{ github.event.pull_request.head.sha }}\n"
+        "        run: python scripts/check_review_gate.py --wait-seconds 2400\n"
         "  site:\n"
         "    needs: changes\n"
         "    steps:\n"
@@ -235,6 +241,16 @@ def test_ci_contract_regression_suite_must_run():
     message = _run(workflow)
     assert message, "CI must execute the contract's negative regression suite"
     assert CONTRACT_TEST_COMMAND in message
+
+
+def test_required_review_gate_must_exist_and_wait():
+    workflow = _workflow(INSTALL + AUDIT)
+    removed = workflow.replace("  review-gate:\n", "  review-gate-disabled:\n")
+    message = _run(removed)
+    assert message and "review-gate" in message, "removing the required review gate must fail the contract"
+    no_wait = workflow.replace("check_review_gate.py --wait-seconds 2400", "check_review_gate.py")
+    message = _run(no_wait)
+    assert message and "wait for the Codex review" in message, "the gate must wait for a running review"
 
 
 def test_source_navigation_contract_must_run():

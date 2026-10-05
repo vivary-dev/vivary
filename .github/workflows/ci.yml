@@ -109,6 +109,8 @@ jobs:
         run: python scripts/check_ci_workflow.py
       - name: CI workflow contract tests
         run: python scripts/tests/test_ci_workflow.py
+      - name: required review gate tests
+        run: python scripts/tests/test_review_gate.py
       - name: source navigation contract
         run: python -B scripts/check-source-navigation.py --check
       - name: source navigation contract tests
@@ -938,6 +940,30 @@ jobs:
         run: python packages/tropo/tropo.py check --root sandboxes/ci-ws
       - name: ozone review (gate)
         run: python packages/ozone/ozone.py review --root sandboxes/ci-ws --strict
+
+  review-gate:
+    name: required review gate
+    # Stays pending while the Codex review of the exact head commit runs, then fails on any
+    # unresolved review thread. Merge only when this check passes on the final commit.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: wait for completed reviews and resolved threads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/check_review_gate.py --wait-seconds 2400 --interval 30
 
   site:
     name: site build

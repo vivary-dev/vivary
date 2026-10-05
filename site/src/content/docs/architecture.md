@@ -249,6 +249,8 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Required review gate in CI. PRs #189 and #191 merged while automated review findings were open or a Codex review was still running. A new `review-gate` job (`scripts/check_review_gate.py`) reads the Codex connector's summary comment and the pull request's review threads. It stays pending while the Code or Security Review for the exact head commit is running, fails when the latest review covers an earlier commit, and fails on any unresolved review thread. `scripts/tests/test_review_gate.py` covers those decisions, and the CI workflow contract requires the job and its wait. Run against the real pull requests, it reports BLOCKED for #191 (review of `90765bc`, head `d2c4819`, four unresolved findings) and #189, and pending for #192 while its review runs. GitHub only refuses a merge on this check once branch protection marks it required; until then it blocks the documented merge procedure and Entire's CI-checks gate. No runtime component changed.
+
 Wording fix in the unified-workspace contract's archived-match sentence; no behavior or design change.
 
 Issue #11 reintroduction, final small review fixes. Unassigned archived replay now

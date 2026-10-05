@@ -18,7 +18,10 @@ is a separate delivery target.
   (`entire`). Source mirroring does not establish agent-session capture.
 
 Before merging, resolve review findings and require passing applicable CI plus
-one approval. Since 2026-09-24 the Entire gate counts the author's approval, so
+one approval. The `required review gate` check enforces review completion: it stays
+pending while the Codex review of the exact head commit runs and fails on any
+unresolved review thread. A push after that review needs a new `@codex review`
+of the final commit. Merge only when this check passes on the final head. Since 2026-09-24 the Entire gate counts the author's approval, so
 Jeff can approve his own trail. An agent can add technical review but never
 records a human approval. Zo is the standing owner-approved CI host. Run the
 applicable workflow commands and gates on Zo against the exact PR commit. GitHub
