@@ -207,7 +207,7 @@ export function Workspace() {
     }
     if (readyProjectKey === currentProjectKey) return;
     const routeKeys = ["panel", "path", "project", "runtime", "thread", "history",
-      "run", "draft", "line"];
+      "run", "draft", "line", "message", "event", "eventOffset"];
     if (routeKeys.some(key => params.has(key))) {
       setMaximized(false);
       setParams(current => {

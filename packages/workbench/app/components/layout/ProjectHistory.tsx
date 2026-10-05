@@ -16,6 +16,7 @@ import { focusAfterRemoval } from "@/lib/row-focus";
 import { useProjects } from "../projects/ProjectContext";
 import { useVivaryChatIdentity } from "./use-vivary-chat-identity";
 import { CodeHistory } from "./CodeHistory";
+import { ChatSessionSearch } from "./ChatSessionSearch";
 
 // One navigation token for every mounted sidebar. The hidden desktop sidebar stays mounted beside the narrow sheet,
 // so the latest navigation from either one must cancel a pending navigation in the other.
@@ -33,6 +34,7 @@ export function ProjectHistory() {
 
 function SessionHistory({ identity }: { identity: VivaryChatIdentity }) {
   const { activeProject, checking, workspaceAvailable, historyAvailable } = useProjects();
+  const [searchActive, setSearchActive] = useState(false);
   const projectId = activeProject?.projectId ?? null;
   const location = useLocation();
   const navigate = useNavigate();
@@ -209,6 +211,8 @@ function SessionHistory({ identity }: { identity: VivaryChatIdentity }) {
   }
   const loading = checking || (state.isLoading && native.isLoading);
   return <section ref={historySection} className="vivary-chat-history" aria-label="Project conversations">
+    <ChatSessionSearch identity={identity} enabled={historyAvailable} onActiveChange={setSearchActive} />
+    <div hidden={searchActive}>
     {failedAction && <div role="alert">
       <p>{failedAction.message}</p>
       <Button variant="ghost" size="sm" onClick={() => void updateNative(failedAction.retry, failedAction.message)}>Retry change</Button>
@@ -253,6 +257,7 @@ function SessionHistory({ identity }: { identity: VivaryChatIdentity }) {
       </div>
       <ArchivedConversations storageKey={identity.storageKey} projectId={identity.projectId}
         onRestore={restoreNative} onOpen={openNative} />
+    </div>
   </section>;
 }
 

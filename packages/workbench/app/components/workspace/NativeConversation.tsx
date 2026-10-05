@@ -1,4 +1,4 @@
-import { AgentChatSurface } from "@agent-native/core/client/agent-chat";
+import { AgentChatSurface, AssistantChat, clearChatStorage } from "@agent-native/core/client/agent-chat";
 import { Skeleton } from "@agent-native/toolkit/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -9,9 +9,13 @@ import { useVivaryChatIdentity } from "@/components/layout/use-vivary-chat-ident
 import { resolveNativeHistoryKind } from "@/lib/native-history-route";
 import { registerSelectionCloseFlush, trackSelectionWrite, useNativeChatDraft } from "@/lib/chat-draft";
 import { nativeChatSelectionKey, savedNativeThreadIsAvailable } from "@/lib/native-chat-selection";
-import { useNativeActionCaller } from "@/lib/native-actions";
+import { useNativeActionCaller, useNativeActionReader } from "@/lib/native-actions";
 import { useAppStateWriter } from "@/lib/native-state";
 import { useProjects } from "../projects/ProjectContext";
+import { nativeMatchRepository } from "@/lib/native-match-repository";
+import { createHistoryReadAdapter } from "@/lib/history-read-adapter";
+import { ConversationMatch } from "./ConversationMatch";
+import "../../chat-search.css";
 
 export default function NativeConversation() {
   const [params] = useSearchParams();
@@ -76,6 +80,53 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
   const location = useLocation();
   const navigate = useNavigate();
   const selectedThread = params.get("thread");
+  const matchContainer = useRef<HTMLElement>(null);
+  const requestedMessage = params.get("message");
+  const readAction = useNativeActionReader();
+  const matchKey = JSON.stringify([identity.storageKey, selectedThread, requestedMessage]);
+  const matchRequestSequence = useRef(0);
+  // Navigation and unmount invalidate pending reads, including a return to the same key.
+  useLayoutEffect(() => () => { matchRequestSequence.current++; }, [matchKey]);
+  const [matchVisit, setMatchVisit] = useState({ key: matchKey, id: 0 });
+  const [matchStatus, setMatchStatus] = useState<
+    { visit: number; state: "loaded"; archived: boolean } | { visit: number; state: "failed" } | null>(null);
+  // A new visit must render pending; only its own authoritative read can enable Return.
+  if (matchVisit.key !== matchKey) {
+    setMatchVisit({ key: matchKey, id: matchVisit.id + 1 });
+    setMatchStatus(null);
+  }
+  const currentMatch = matchVisit.key === matchKey && matchStatus?.visit === matchVisit.id ? matchStatus : null;
+  const matchArchived = currentMatch?.state === "loaded" && currentMatch.archived;
+  const matchReadFailed = currentMatch?.state === "failed";
+  useEffect(() => {
+    if (!requestedMessage || !selectedThread) return;
+    const tabId = "vivary-history-match:" + selectedThread;
+    // Standalone Core replay has no persistence opt-out. Its supported cleanup API removes
+    // the transient import on exit; authoritative history always comes from the scoped action.
+    clearChatStorage(tabId);
+    return () => clearChatStorage(tabId);
+  }, [requestedMessage, selectedThread]);
+  const loadMatchingHistory = useCallback(async () => {
+    if (!selectedThread || !requestedMessage) return null;
+    const req = ++matchRequestSequence.current;
+    const scopeParams = new URLSearchParams({ threadId: selectedThread, referenceId: requestedMessage,
+      unassigned: String(unassigned) });
+    if (!unassigned && identity.projectId) scopeParams.set("projectId", identity.projectId);
+    try {
+      const response = await readAction("vivary-chat-match", scopeParams, AbortSignal.timeout(15_000));
+      if (!response.ok) throw new Error("This matching conversation could not be opened.");
+      const thread = await response.json() as { threadData: string; archived: boolean };
+      const repository = nativeMatchRepository(thread.threadData, requestedMessage);
+      // Do not enable editing before the authoritative read verifies archive state.
+      if (matchRequestSequence.current === req)
+        setMatchStatus({ visit: matchVisit.id, state: "loaded", archived: thread.archived !== false });
+      return repository;
+    } catch (error) {
+      // A failed read can return through saved-selection validation, never edit this unread thread.
+      if (matchRequestSequence.current === req) setMatchStatus({ visit: matchVisit.id, state: "failed" });
+      throw error;
+    }
+  }, [selectedThread, requestedMessage, identity.projectId, unassigned, readAction, matchVisit.id]);
   const selectionKey = nativeChatSelectionKey(identity.storageKey);
   const queryClient = useQueryClient();
   const selection = useQuery({
@@ -147,10 +198,11 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
   }, [selectedThread, selection.isSuccess, savedThread,
     savedThreadCheck.isSuccess, savedThreadCheck.isFetching, savedThreadCheck.data, setParams]);
   useLayoutEffect(() => {
-    if (!selectedThread) return;
+    // Read-only search replay must not replace the saved conversation used by Return on failure.
+    if (!selectedThread || requestedMessage) return;
     latestThread.current = selectedThread;
     void saveLatestThread().catch(() => {});
-  }, [selectedThread, saveLatestThread]);
+  }, [selectedThread, requestedMessage, saveLatestThread]);
   const draft = useNativeChatDraft({ kind: identity.kind, projectId: identity.projectId }, ownerKey);
   const [restoreReview, setRestoreReview] = useState<string | null>(null);
   useEffect(() => { setRestoreReview(null); }, [selectedThread]);
@@ -172,7 +224,10 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
       void selection.refetch(); void savedThreadCheck.refetch();
     }}>Retry history</Button>
   </div>;
-  return <section aria-label="Native chat" className="flex h-full min-h-0 w-full flex-col">
+  return <section ref={matchContainer} aria-label="Native chat" className="flex h-full min-h-0 w-full flex-col">
+    <ConversationMatch key={selectedThread} container={matchContainer} messageId={requestedMessage}
+      canReturnToLatest={currentMatch !== null && !matchArchived} archived={matchArchived}
+      unassigned={unassigned} readFailed={matchReadFailed} />
     {selectionSaveError && <div className="local-agent-notice" role="alert">
       <span>Your conversation selection could not be saved.</span>
       <Button variant="outline" size="sm" onClick={() => void saveLatestThread().catch(() => {})}>Retry selection</Button>
@@ -202,6 +257,16 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
           </Button>)}
       <Button variant="ghost" size="sm" onClick={() => void draft.discard(selectedThread)}>Discard draft</Button>
     </div>}
+    {requestedMessage && selectedThread ? <AssistantChat key={selectedThread + ":" + requestedMessage}
+      tabId={"vivary-history-match:" + selectedThread} contextScope={identity.scope} isolateHistoryByScope
+      className="min-h-0 flex-1" contextNamespace={`vivary-native:${identity.storageKey}`}
+      loadHistoryRepository={loadMatchingHistory} historyReloadKey={selectedThread + ":" + requestedMessage}
+      createAdapter={createHistoryReadAdapter} approvalActions={{ alwaysAllowScope: "exact-command" }}
+      composerDisabled composerDisabledPlaceholder={matchArchived
+        ? unassigned ? "This conversation is archived and read-only here."
+          : "Reading archived history. Restore this conversation from Archived conversations to continue."
+        : "Reading saved history. Return to the latest conversation to continue."}
+      showHeader={false} showModelSelector={false} providerStatusChecksEnabled={false} /> :
     <AgentChatSurface key={identity.storageKey} mode="page" className="min-h-0 flex-1"
       storageKey={identity.storageKey} scope={identity.scope} isolateHistoryByScope
       contextNamespace={`vivary-native:${identity.storageKey}`}
@@ -210,6 +275,6 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
       composerDisabled={!unassigned && !workspaceAvailable}
       composerDisabledPlaceholder="Reconnect this project before continuing. Saved history remains available."
       showHeader={false} showTabBar={false} restoreActiveThread={false}
-      threadUrlSync={threadUrlSync} />
+      threadUrlSync={threadUrlSync} />}
   </section>;
 }
