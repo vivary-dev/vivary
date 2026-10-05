@@ -84,11 +84,9 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
   const requestedMessage = params.get("message");
   const readAction = useNativeActionReader();
   const matchKey = JSON.stringify([identity.storageKey, selectedThread, requestedMessage]);
-  const latestMatchKey = useRef<string | null>(matchKey);
-  useLayoutEffect(() => {
-    latestMatchKey.current = matchKey;
-    return () => { latestMatchKey.current = null; };
-  }, [matchKey]);
+  const matchRequestSequence = useRef(0);
+  // Navigation and unmount invalidate pending reads, including a return to the same key.
+  useLayoutEffect(() => () => { matchRequestSequence.current++; }, [matchKey]);
   const [matchStatus, setMatchStatus] = useState<
     { key: string; state: "loaded"; archived: boolean } | { key: string; state: "failed" } | null>(null);
   const currentMatch = matchStatus?.key === matchKey ? matchStatus : null;
@@ -104,6 +102,7 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
   }, [requestedMessage, selectedThread]);
   const loadMatchingHistory = useCallback(async () => {
     if (!selectedThread || !requestedMessage) return null;
+    const req = ++matchRequestSequence.current;
     const scopeParams = new URLSearchParams({ threadId: selectedThread, referenceId: requestedMessage,
       unassigned: String(unassigned) });
     if (!unassigned && identity.projectId) scopeParams.set("projectId", identity.projectId);
@@ -113,12 +112,12 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
       const thread = await response.json() as { threadData: string; archived: boolean };
       const repository = nativeMatchRepository(thread.threadData, requestedMessage);
       // Do not enable editing before the authoritative read verifies archive state.
-      if (latestMatchKey.current === matchKey)
+      if (matchRequestSequence.current === req)
         setMatchStatus({ key: matchKey, state: "loaded", archived: thread.archived !== false });
       return repository;
     } catch (error) {
       // A failed read can return through saved-selection validation, never edit this unread thread.
-      if (latestMatchKey.current === matchKey) setMatchStatus({ key: matchKey, state: "failed" });
+      if (matchRequestSequence.current === req) setMatchStatus({ key: matchKey, state: "failed" });
       throw error;
     }
   }, [selectedThread, requestedMessage, identity.projectId, unassigned, readAction, matchKey]);

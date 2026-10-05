@@ -441,6 +441,60 @@ test("Code metadata cap retains recent timestamp runs and stable continuation", 
   }
 });
 
+test("new Code run names cannot evict a partly-read session from the snapshot metadata window", async () => {
+  const projectId = "metadata-snapshot-project";
+  const target = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId, label: "Metadata snapshot" });
+  const { searchChatContent } = await import("../server/chat-content-search.ts");
+  const actor = { ownerEmail: owner, orgId, identity: target, codeScope: { ...scope, projectId } };
+  const input = { projectId, query: "no-snapshot-matches", unassigned: false, includeArchived: false };
+  const ids: string[] = [];
+  const runId = (time: string) => `zz-snapshot-${time.replace(/[^0-9]/g, "").slice(0, 14)}-00000000`;
+  try {
+    let metadataBytes = 0;
+    for (let i = 0; i < 81; i++) {
+      const time = new Date(Date.UTC(2020, 0, 1, 0, 0, i)).toISOString();
+      const id = runId(time); ids.push(id);
+      run(id, { projectId, padding: "x".repeat(60_000) });
+      updateCodeAgentRunRecord(id, { updatedAt: time });
+      const bytes = Buffer.byteLength(await readFile(path.join(codeAgentRunsDir(), id + ".json")));
+      assert.ok(bytes < 64 * 1024); metadataBytes += bytes;
+      const events = Array.from({ length: 27 }, (_, index) => ({ id: `evt-snapshot-${i}-${index}`, runId: id,
+        kind: "user", message: `snapshotneedle-${i}-` }));
+      await writeFile(codeAgentRunTranscriptPath(id), events.map(event => JSON.stringify(event) + "\n").join(""));
+    }
+    assert.ok(metadataBytes > 4 * 1024 * 1024, "the fixture must exceed the real metadata cap");
+    const probe = await searchChatContent(actor, input);
+    assert.equal(probe.limited, true);
+    assert.ok(probe.totalSessions! > 50 && probe.totalSessions! < ids.length);
+    // Discover the oldest admitted session through the public count, rather
+    // than pinning the test to metadata serialization sizes.
+    const oldest = ids.length - probe.totalSessions!;
+    const query = `snapshotneedle-${oldest}-`;
+    let page = await searchChatContent(actor, { ...input, query });
+    for (let i = 0; page.results.length === 0 && page.continueAfter && i < 5; i++)
+      page = await searchChatContent(actor, { ...input, query, after: page.continueAfter });
+    assert.deepEqual(page.results.map(hit => hit.referenceId), Array.from({ length: 25 }, (_, i) => `evt-snapshot-${oldest}-${i}`));
+    assert.ok(page.continueAfter, "the oldest admitted session remains partly read");
+    const baseline = await searchChatContent(actor, { ...input, query, after: page.continueAfter });
+    assert.deepEqual(baseline.results.map(hit => hit.referenceId), [`evt-snapshot-${oldest}-25`, `evt-snapshot-${oldest}-26`]);
+
+    const time = new Date(Date.now() + 60_000).toISOString();
+    const id = runId(time); ids.push(id);
+    run(id, { projectId, padding: "x".repeat(60_000) });
+    updateCodeAgentRunRecord(id, { updatedAt: time });
+    await writeFile(codeAgentRunTranscriptPath(id), "INVALID NEW TRANSCRIPT\n");
+    const continued = await searchChatContent(actor, { ...input, query, after: page.continueAfter });
+    assert.deepEqual(continued.results, baseline.results, "a post-snapshot run must not shift metadata admission or lose the active session");
+    assert.equal(continued.totalSessions, baseline.totalSessions);
+    assert.equal(continued.continueAfter, baseline.continueAfter);
+  } finally {
+    for (const id of ids) {
+      await rm(path.join(codeAgentRunsDir(), id + ".json"), { force: true });
+      await rm(codeAgentRunTranscriptPath(id), { force: true });
+    }
+  }
+});
+
 test("Personal Native search survives an unavailable Code workspace", async () => {
   const target = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: null, label: "Personal workspace" });
   await native("personal-workspace-missing", "personalneedle", { scope: target.scope });

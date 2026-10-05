@@ -249,6 +249,14 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Issue #11 second reintroduction, final P3 fixes. Native replay status now belongs
+to each read's sequence, so A to B to A navigation cannot apply an older A reply.
+Code metadata admission skips parseable run-name timestamps newer than the search
+snapshot before reading or spending budget; other names keep their existing path.
+Fail-before regressions cover late success/failure and a new run displacing a
+partly-read session under the metadata cap. Runtime flow 6 remains accurate:
+authoritative stores, archive checks, scan limits and cursor ordering are unchanged.
+
 PR #191 automated-review follow-up, issue #11. Regressions confirmed that a
 superseded Native match response could replace the current replay status,
 incomplete retained messages could reach replay, the match read's SQL cap counted

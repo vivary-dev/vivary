@@ -182,6 +182,11 @@ export async function searchChatContent(owner: SearchOwner, input: ChatSearchInp
     // authorized candidates still use updated-time/ID ordering below.
     for (const name of names.sort().reverse()) {
       signal?.throwIfAborted();
+      // Post-snapshot runs must not spend metadata budget or displace a partly-read session.
+      const timestamp = /-(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})-[^.]+\.json$/.exec(name);
+      const createdAt = timestamp
+        ? Date.parse(`${timestamp[1]}-${timestamp[2]}-${timestamp[3]}T${timestamp[4]}:${timestamp[5]}:${timestamp[6]}Z`) : NaN;
+      if (createdAt > cursor.snapshot) continue;
       if (metadataBytes + MAX_RECORD_BYTES + 1 > 4 * 1024 * 1024 || budgetBytes + MAX_RECORD_BYTES + 1 > LIMITS.bytes) {
         page.limited = true; break;
       }

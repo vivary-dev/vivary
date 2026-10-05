@@ -181,6 +181,28 @@ for (const sameThread of [false, true]) for (const outcome of ["active", "archiv
     await act(async () => button("Return to latest conversation").click());
     assert.ok(host.querySelector(`[data-editable-thread="${currentThread}"]`));
   });
+for (const outcome of ["active", "archived", "failure"])
+  test(`returning to the same Native match ignores its older ${outcome} reply`, async () => {
+    const pending = [];
+    globalThis.fetch = async () => await new Promise((resolve, reject) => pending.push({ resolve, reject }));
+    const route = "/?runtime=native&history=project&thread=first&message=match";
+    await render("native", route);
+    await act(async () => searchFixture.navigate("/?runtime=native&history=project&thread=second&message=match"));
+    await act(async () => searchFixture.navigate(route));
+    assert.equal(pending.length, 3, "A to B to A starts a new read for the same match key");
+    const archived = outcome === "active";
+    await act(async () => pending[2].resolve(Response.json({ threadData, archived })));
+    assert.equal(button("Return to latest conversation").disabled, archived);
+    await act(async () => pending[1].resolve(Response.json({ threadData, archived: false })));
+    await act(async () => {
+      if (outcome === "failure") pending[0].reject(new TypeError("First A request failed"));
+      else pending[0].resolve(Response.json({ threadData, archived: outcome === "archived" }));
+    });
+    assert.equal(button("Return to latest conversation").disabled, archived, "the second A read owns Return status");
+    assert.doesNotMatch(host.textContent, /matching conversation could not be opened/i);
+    if (archived) assert.match(host.textContent, /Restore.*Archived conversations/);
+    else assert.doesNotMatch(host.textContent, /Restore.*Archived conversations/);
+  });
 for (const failure of ["404", "401", "network"]) test(`failed Native match (${failure}) can return without retaining the unread thread`, async () => {
   globalThis.fetch = async () => {
     if (failure === "network") throw new TypeError("Network unavailable");
