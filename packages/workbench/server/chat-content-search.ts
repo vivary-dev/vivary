@@ -14,6 +14,7 @@ import { createVivaryChatIdentity } from "./chat-identity";
 const LIMITS = { sessions: 25, messages: 500, bytes: 16 * 1024 * 1024, results: 25 };
 const MAX_RUN_NAMES = 10_000;
 const MAX_RECORD_BYTES = 64 * 1024;
+const MAX_METADATA_BYTES = 4 * 1024 * 1024;
 const MAX_MESSAGE_CHARS = 64 * 1024;
 const MAX_REPOSITORY_BYTES = 8 * 1024 * 1024;
 // Opaque process-local cursors keep authorized scan positions private.
@@ -160,7 +161,9 @@ export async function searchChatContent(owner: SearchOwner, input: ChatSearchInp
     }
   }
   if (cursor.phase === "code" && (input.unassigned || !owner.codeScope)) { page.searchedSessions = cursor.searched; return page; }
-  if (cursor.phase === "code" && canStartSession()) {
+  // Defer Code until its full metadata window and one transcript page fit the remaining budget.
+  if (cursor.phase === "code" && canStartSession()
+    && budgetBytes + MAX_METADATA_BYTES + TRANSCRIPT_PAGE_BYTES <= LIMITS.bytes) {
     const names: string[] = [];
     let directory;
     try { directory = await opendir(codeAgentRunsDir()); }
@@ -187,7 +190,7 @@ export async function searchChatContent(owner: SearchOwner, input: ChatSearchInp
       const createdAt = timestamp
         ? Date.parse(`${timestamp[1]}-${timestamp[2]}-${timestamp[3]}T${timestamp[4]}:${timestamp[5]}:${timestamp[6]}Z`) : NaN;
       if (createdAt > cursor.snapshot) continue;
-      if (metadataBytes + MAX_RECORD_BYTES + 1 > 4 * 1024 * 1024 || budgetBytes + MAX_RECORD_BYTES + 1 > LIMITS.bytes) {
+      if (metadataBytes + MAX_RECORD_BYTES + 1 > MAX_METADATA_BYTES) {
         page.limited = true; break;
       }
       let handle;

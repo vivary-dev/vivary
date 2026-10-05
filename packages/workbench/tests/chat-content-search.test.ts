@@ -388,6 +388,60 @@ test("foreign Code runs do not consume the session cap or public counts", async 
   assert.equal(page.limited, false); assert.equal(page.continueAfter, null);
 });
 
+test("Code metadata waits for a fresh page budget after large Native repositories", async t => {
+  const projectId = "mixed-page-budget-project";
+  const target = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId, label: "Mixed page budget" });
+  const { searchChatContent } = await import("../server/chat-content-search.ts");
+  const actor = { ownerEmail: owner, orgId, identity: target, codeScope: { ...scope, projectId } };
+  const input = { projectId, query: "mixedbudgetneedle", unassigned: false, includeArchived: false };
+  const threadIds: string[] = [], runIds: string[] = [];
+  t.after(async () => {
+    for (const id of threadIds) await getDbExec().execute({ sql: "DELETE FROM chat_threads WHERE id=?", args: [id] });
+    for (const id of runIds) {
+      await rm(path.join(codeAgentRunsDir(), id + ".json"), { force: true });
+      await rm(codeAgentRunTranscriptPath(id), { force: true });
+    }
+  });
+  let nativeBytes = 0;
+  for (let i = 0; i < 2; i++) {
+    const id = `mixed-budget-native-${i}`; threadIds.push(id);
+    await createThread(owner, { id, orgId, scope: target.scope });
+    const messages = Array.from({ length: 120 }, (_, index) => ({ parentId: index ? `${id}-${index - 1}` : null,
+      message: { id: `${id}-${index}`, role: "user", content: [{ type: "text", text: "Ordinary saved text. ".repeat(3000) }] } }));
+    await updateThreadData(id, JSON.stringify({ headId: `${id}-119`, messages }), "Large saved conversation", "Recent", messages.length);
+    const stored = await getDbExec().execute({ sql: "SELECT length(CAST(thread_data AS BLOB)) AS bytes FROM chat_threads WHERE id=?", args: [id] });
+    const bytes = Number(stored.rows[0].bytes);
+    assert.ok(bytes < 8 * 1024 * 1024, "each repository fits the normal Native read cap");
+    nativeBytes += bytes;
+  }
+  let metadataBytes = 0;
+  const time = Date.now() - 60_000;
+  for (let i = 0; i < 50; i++) {
+    const id = `zz-page-budget-${String(i).padStart(2, "0")}`; runIds.push(id);
+    // Higher-sorting foreign metadata spends the remaining shared budget before
+    // the two owned runs, although all fifty records fit the full metadata window.
+    run(id, { projectId: i < 2 ? projectId : "foreign-budget-project", padding: "x".repeat(60_000) });
+    updateCodeAgentRunRecord(id, { updatedAt: new Date(time + i * 1000).toISOString() });
+    metadataBytes += Buffer.byteLength(await readFile(path.join(codeAgentRunsDir(), id + ".json")));
+    if (i < 2) await writeFile(codeAgentRunTranscriptPath(id), JSON.stringify({ id: `evt-page-budget-${i}`, runId: id,
+      kind: "user", message: "mixedbudgetneedle" }) + "\n");
+  }
+  assert.ok(metadataBytes < 4 * 1024 * 1024);
+  assert.ok(nativeBytes + metadataBytes > 16 * 1024 * 1024, "sharing a page would cut the metadata window");
+  const first = await searchChatContent(actor, input);
+  assert.equal(first.scannedSessions, 2);
+  assert.equal(first.scannedMessages, 240, "the Native phase finishes within its session and message limits");
+  assert.deepEqual(first.results, []);
+  assert.ok(first.continueAfter, "Code must continue on a fresh page rather than report truncated admission as complete");
+  const final = await searchChatContent(actor, { ...input, after: first.continueAfter });
+  assert.deepEqual(final.results.map(hit => hit.referenceId), ["evt-page-budget-1", "evt-page-budget-0"]);
+  assert.equal(final.scannedSessions, 2, "a page starting in Code makes progress without rescanning Native");
+  assert.equal(final.searchedSessions, 4);
+  assert.equal(final.continueAfter, null, "the continuation searches both Code matches and completes");
+  assert.equal(final.limited, false);
+  for (const page of [first, final]) assert.ok(page.readBytes <= page.limits.bytes);
+});
+
 test("Code metadata cap retains recent timestamp runs and stable continuation", async () => {
   const projectId = "metadata-budget-project";
   const target = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId, label: "Metadata budget" });

@@ -249,6 +249,13 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Issue #11 second reintroduction, PR #194 page-budget fix. Code search defers to
+a continuation when Native reads leave insufficient room for the full 4 MiB
+metadata window plus one transcript page. A fail-before regression covers large
+Native repositories, missed Code matches, progress on the fresh Code page and
+final completion. Runtime flow 6 and the separate metadata budget remain accurate;
+authoritative stores, ownership checks, scan caps and ordering are unchanged.
+
 Issue #11 second reintroduction, final P3 fixes. Native replay status now belongs
 to each read's sequence, so A to B to A navigation cannot apply an older A reply.
 Code metadata admission skips parseable run-name timestamps newer than the search
