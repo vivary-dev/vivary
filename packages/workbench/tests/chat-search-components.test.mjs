@@ -65,13 +65,16 @@ for (const [path, name] of [["../projects/ProjectFiles", "ProjectFiles"], ["../p
 for (const path of ["../../routes/files", "./CodeConversation"]) stubs.set(path, "export default function Empty() { return null; }");
 const bundle = await build({ stdin: { contents: `
     import { createElement } from "react";
-    import { MemoryRouter, useLocation } from "react-router";
+    import { MemoryRouter, useLocation, useNavigate } from "react-router";
     import { QueryClient, QueryClientProvider, notifyManager } from "@tanstack/react-query";
     notifyManager.setScheduler(callback => queueMicrotask(callback));
     import NativeConversation from "./app/components/workspace/NativeConversation";
     import { Workspace } from "./app/components/workspace/Workspace";
     import { ChatSessionSearch } from "./app/components/layout/ChatSessionSearch";
-    function Location() { return createElement("output", { id: "route" }, useLocation().search); }
+    function Location() {
+      globalThis.searchFixture.navigate = useNavigate();
+      return createElement("output", { id: "route" }, useLocation().search);
+    }
     export function view(kind, route) {
       const child = kind === "native" ? createElement(NativeConversation) : kind === "workspace" ? createElement(Workspace)
         : createElement(ChatSessionSearch, { identity: globalThis.searchFixture.identity });
@@ -152,6 +155,32 @@ test("Native return stays disabled while authoritative archive state is loading"
   await act(async () => { finish(Response.json({ threadData, archived: false })); });
   assert.equal(button("Return to latest conversation").disabled, false);
 });
+for (const sameThread of [false, true]) for (const outcome of ["active", "archived", "failure"])
+  test(`superseded Native match ${outcome} cannot replace current status (same thread=${sameThread})`, async () => {
+    const pending = [];
+    // Deliberately ignore cancellation: even a response already being decoded
+    // when navigation occurs must not change the current match's status.
+    globalThis.fetch = async () => await new Promise((resolve, reject) => pending.push({ resolve, reject }));
+    await render("native", "/?runtime=native&history=project&thread=first&message=match");
+    assert.equal(pending.length, 1);
+    const currentThread = sameThread ? "first" : "second";
+    await act(async () => searchFixture.navigate(`/?runtime=native&history=project&thread=${currentThread}&message=new-match`));
+    assert.equal(pending.length, 2);
+    assert.equal(button("Return to latest conversation").disabled, true);
+    const currentData = JSON.stringify({ headId: "new-match", messages: [
+      { message: { id: "new-match", role: "user", content: [{ type: "text", text: "Current match" }] }, parentId: null },
+    ] });
+    await act(async () => pending[1].resolve(Response.json({ threadData: currentData, archived: false })));
+    assert.equal(button("Return to latest conversation").disabled, false);
+    await act(async () => {
+      if (outcome === "failure") pending[0].reject(new TypeError("Old request failed"));
+      else pending[0].resolve(Response.json({ threadData, archived: outcome === "archived" }));
+    });
+    assert.equal(button("Return to latest conversation").disabled, false, "late reply must preserve current loaded status");
+    assert.doesNotMatch(host.textContent, /could not be opened|Restore.*Archived conversations/);
+    await act(async () => button("Return to latest conversation").click());
+    assert.ok(host.querySelector(`[data-editable-thread="${currentThread}"]`));
+  });
 for (const failure of ["404", "401", "network"]) test(`failed Native match (${failure}) can return without retaining the unread thread`, async () => {
   globalThis.fetch = async () => {
     if (failure === "network") throw new TypeError("Network unavailable");

@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createCodeAgentRunRecord, codeAgentRunTranscriptPath, updateCodeAgentRunRecord } from "@agent-native/core/code-agents";
+import { createCodeAgentRunRecord, codeAgentRunTranscriptPath, codeAgentRunsDir, updateCodeAgentRunRecord } from "@agent-native/core/code-agents";
 
 const temporary = await mkdtemp(path.join(os.tmpdir(), "vivary-chat-search-"));
 const database = "file:" + path.join(temporary, "history.sqlite");
@@ -97,6 +97,73 @@ test("Native match reports authoritative archive state and does not restore the 
   assert.equal((await action.run(input, ctx)).archived, true, "reading history must not clear archive state");
   await setThreadArchived(input.threadId, false, { ownerEmail: owner });
   assert.equal((await action.run(input, ctx)).archived, false);
+});
+
+test("Native match rejects incomplete message shapes found by title search", async t => {
+  const action = (await import("../actions/vivary-chat-match.ts")).default;
+  const id = "incomplete-match", referenceId = `${id}-old`;
+  await native(id, "Saved match", { scope: legacy.scope });
+  t.after(async () => { await getDbExec().execute({ sql: "DELETE FROM chat_threads WHERE id=?", args: [id] }); });
+  const input = { projectId: null, unassigned: true, threadId: id, referenceId };
+  const ctx = { caller: "frontend" as const, userEmail: owner, orgId };
+  for (const [name, message] of [
+    ["missing role and content", { id: referenceId }],
+    ["missing role", { id: referenceId, content: [] }],
+    ["missing content", { id: referenceId, role: "user" }],
+    ["invalid role", { id: referenceId, role: "invalid", content: [] }],
+    ["null content", { id: referenceId, role: "user", content: null }],
+    ["object content", { id: referenceId, role: "user", content: {} }],
+  ] as const) await t.test(name, async () => {
+    const threadData = JSON.stringify({ headId: referenceId, messages: [{ message, parentId: null }] });
+    await getDbExec().execute({ sql: "UPDATE chat_threads SET thread_data=?, title=? WHERE id=?",
+      args: [threadData, "incompleteneedle", id] });
+    const hit = (await search({ projectId: null, unassigned: true, query: "incompleteneedle" }, legacy)).results[0];
+    assert.equal(hit?.referenceId, referenceId, "a title hit can refer to an incomplete saved message");
+    await assert.rejects(action.run(input, ctx), { statusCode: 404, message: "This matching message is no longer available. Search again." });
+  });
+  // Older retained messages can lack timestamps or assistant status. Their
+  // required role/content fields still make them readable.
+  for (const role of ["user", "assistant", "system"]) {
+    const threadData = JSON.stringify({ headId: referenceId, messages: [
+      { message: { id: referenceId, role, content: [] }, parentId: null },
+    ] });
+    await getDbExec().execute({ sql: "UPDATE chat_threads SET thread_data=? WHERE id=?", args: [threadData, id] });
+    assert.equal((await action.run(input, ctx)).threadData, threadData);
+  }
+});
+
+test("Native match enforces the repository cap in UTF-8 bytes before parsing", async t => {
+  const action = (await import("../actions/vivary-chat-match.ts")).default;
+  const id = "byte-capped-match", referenceId = `${id}-old`, cap = 8 * 1024 * 1024;
+  await native(id, "Saved match", { scope: legacy.scope });
+  t.after(async () => { await getDbExec().execute({ sql: "DELETE FROM chat_threads WHERE id=?", args: [id] }); });
+  const input = { projectId: null, unassigned: true, threadId: id, referenceId };
+  const ctx = { caller: "frontend" as const, userEmail: owner, orgId };
+  const repository = (text: string) => JSON.stringify({ headId: referenceId, messages: [
+    { message: { id: referenceId, role: "user", content: [{ type: "text", text }] }, parentId: null },
+  ] });
+  const overhead = Buffer.byteLength(repository(""));
+  for (const [name, text, accepted] of [
+    ["emoji over cap despite fewer characters", "😀".repeat(Math.ceil(cap / 4)), false],
+    ["CJK over cap despite fewer characters", "界".repeat(Math.ceil(cap / 3)), false],
+    ["exact byte cap", "界".repeat(Math.floor((cap - overhead) / 3)) + "x".repeat((cap - overhead) % 3), true],
+    ["one byte over cap", "x".repeat(cap - overhead + 1), false],
+  ] as const) await t.test(name, async () => {
+    const threadData = repository(text);
+    await getDbExec().execute({ sql: "UPDATE chat_threads SET thread_data=? WHERE id=?", args: [threadData, id] });
+    const sizes = await getDbExec().execute({ sql: "SELECT length(thread_data) AS chars, length(CAST(thread_data AS BLOB)) AS bytes FROM chat_threads WHERE id=?", args: [id] });
+    assert.equal(Number(sizes.rows[0].bytes), Buffer.byteLength(threadData));
+    if (name.includes("despite")) assert.ok(Number(sizes.rows[0].chars) < cap && Number(sizes.rows[0].bytes) > cap);
+    if (accepted) assert.equal((await action.run(input, ctx)).threadData, threadData);
+    else {
+      const parse = JSON.parse;
+      let parses = 0;
+      JSON.parse = ((data: string, ...args: []) => { if (data === threadData) parses++; return parse(data, ...args); }) as typeof JSON.parse;
+      try { await assert.rejects(action.run(input, ctx), { statusCode: 404 }); }
+      finally { JSON.parse = parse; }
+      assert.equal(parses, 0, "oversized content must be rejected by the database predicate before parsing");
+    }
+  });
 });
 
 async function all(input: Record<string, unknown> = {}, target = identity) {
@@ -319,6 +386,59 @@ test("foreign Code runs do not consume the session cap or public counts", async 
   assert.equal(page.results[0]?.referenceId, "evt-only-owned");
   assert.equal(page.scannedSessions, 1); assert.equal(page.totalSessions, 1);
   assert.equal(page.limited, false); assert.equal(page.continueAfter, null);
+});
+
+test("Code metadata cap retains recent timestamp runs and stable continuation", async () => {
+  const projectId = "metadata-budget-project";
+  const target = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId, label: "Metadata budget" });
+  const ids: string[] = [];
+  const { searchChatContent } = await import("../server/chat-content-search.ts");
+  const actor = { ownerEmail: owner, orgId, identity: target, codeScope: { ...scope, projectId } };
+  const input = { projectId, query: "metadataneedle", unassigned: false, includeArchived: false };
+  let metadataBytes = 0;
+  try {
+    for (let i = 0; i < 81; i++) {
+      const time = new Date(Date.UTC(2020, 0, 1, 0, 0, i)).toISOString();
+      const id = `vivary-local-code-${time.replace(/[^0-9]/g, "")}-fixture`;
+      ids.push(id);
+      run(id, { projectId: i === 80 ? "foreign-project" : projectId, padding: "x".repeat(60_000) });
+      updateCodeAgentRunRecord(id, { updatedAt: time });
+      const bytes = Buffer.byteLength(await readFile(path.join(codeAgentRunsDir(), id + ".json")));
+      assert.ok(bytes < 64 * 1024); metadataBytes += bytes;
+      const events = Array.from({ length: i === 79 ? 27 : 1 }, (_, index) => ({
+        id: `evt-metadata-${i}-${index}`, runId: id, kind: "user",
+        message: i >= 78 ? "metadataneedle" : "Ordinary old conversation",
+      }));
+      await writeFile(codeAgentRunTranscriptPath(id), i === 80 ? "INVALID PRIVATE TRANSCRIPT\n"
+        : events.map(event => JSON.stringify(event) + "\n").join(""));
+    }
+    assert.ok(metadataBytes > 4 * 1024 * 1024, "the fixture must exhaust the real metadata budget");
+    const first = await searchChatContent(actor, input);
+    assert.deepEqual(first.results.map(hit => hit.referenceId), Array.from({ length: 25 }, (_, i) => `evt-metadata-79-${i}`));
+    assert.equal(first.limited, true); assert.ok(first.continueAfter);
+    assert.ok(first.readBytes <= first.limits.bytes && first.scannedSessions <= first.limits.sessions);
+    const second = await searchChatContent(actor, { ...input, after: first.continueAfter });
+    const retry = await searchChatContent(actor, { ...input, after: first.continueAfter });
+    assert.deepEqual(retry.results, second.results, "retry retains the exact message position");
+    assert.deepEqual(second.results.map(hit => hit.referenceId), ["evt-metadata-79-25", "evt-metadata-79-26", "evt-metadata-78-0"]);
+    const hits = [...first.results, ...second.results];
+    let after = second.continueAfter;
+    for (let i = 0; after && i < 10; i++) {
+      const page = await searchChatContent(actor, { ...input, after });
+      assert.equal(page.limited, true);
+      assert.ok(page.readBytes <= page.limits.bytes && page.scannedSessions <= page.limits.sessions);
+      hits.push(...page.results); after = page.continueAfter;
+    }
+    assert.equal(after, null);
+    assert.equal(hits.length, 28);
+    assert.ok(hits.every(hit => hit.sessionId === ids[79] || hit.sessionId === ids[78]), "foreign metadata admits no transcript or hit");
+    assert.equal(new Set(hits.map(hit => hit.referenceId)).size, 28);
+  } finally {
+    for (const id of ids) {
+      await rm(path.join(codeAgentRunsDir(), id + ".json"), { force: true });
+      await rm(codeAgentRunTranscriptPath(id), { force: true });
+    }
+  }
 });
 
 test("Personal Native search survives an unavailable Code workspace", async () => {

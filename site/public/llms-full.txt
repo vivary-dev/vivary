@@ -7519,6 +7519,25 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+PR #191 automated-review follow-up, issue #11. Regressions confirmed that a
+superseded Native match response could replace the current replay status,
+incomplete retained messages could reach replay, the match read's SQL cap counted
+characters instead of bytes, and ascending Code metadata admission excluded
+recent timestamp-named runs when its budget filled. The existing route now guards
+both successful and failed status updates against the current match. The match
+action requires the saved message role and content array and uses search's same
+SQLite BLOB-length/PostgreSQL octet-length predicate before reading the repository.
+Code metadata is admitted in descending filename order, then authorized candidates
+retain the existing updated-time/ID ordering and cursor positions. The metadata,
+directory, repository and transcript caps and ownership-before-content checks
+remain in force; metadata outside the budget remains incomplete coverage.
+The maintained chat-search route covers all four failures, exact byte boundaries,
+late success/failure, and capped Code continuation/retry. The built-app HTTP
+fixture also checks stale-result 404s and recent Code hits under the metadata cap.
+These changes preserve the authoritative stores, replay execution refusal, saved
+selection and archive restoration owners described above. Browser interaction
+and independent coordinator review remain separate acceptance checks.
+
 Wording fix in the unified-workspace contract's archived-match sentence; no behavior or design change.
 
 Issue #11 reintroduction, final small review fixes. Unassigned archived replay now

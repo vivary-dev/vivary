@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { parseArgs } from "node:util";
-import { createCodeAgentRunRecord, updateCodeAgentRunRecord, codeAgentRunTranscriptPath } from "@agent-native/core/code-agents";
+import { createCodeAgentRunRecord, updateCodeAgentRunRecord, codeAgentRunTranscriptPath, codeAgentRunsDir } from "@agent-native/core/code-agents";
 import { OWNER, send, startBuiltApp } from "./built-app.mjs";
 
 const { values } = parseArgs({ options: { "data-dir": { type: "string" }, "keep-data": { type: "boolean" } } });
@@ -143,7 +143,13 @@ try {
   const db = new DatabaseSync(path.join(data, "auth.sqlite"));
   const saved = db.prepare("SELECT thread_data FROM chat_threads WHERE id=?").get(staleHit.sessionId).thread_data;
   try {
-    for (const threadData of ["{broken", "null", '{"messages":{}}', '{"messages":[null]}']) {
+    const incompleteMessages = [
+      { id: staleHit.referenceId }, { id: staleHit.referenceId, role: "user" },
+      { id: staleHit.referenceId, content: [] }, { id: staleHit.referenceId, role: "invalid", content: [] },
+      { id: staleHit.referenceId, role: "user", content: null }, { id: staleHit.referenceId, role: "user", content: {} },
+    ];
+    for (const threadData of ["{broken", "null", '{"messages":{}}', '{"messages":[null]}',
+      ...incompleteMessages.map(message => JSON.stringify({ messages: [{ message, parentId: null }] }))]) {
       db.prepare("UPDATE chat_threads SET thread_data=? WHERE id=?").run(threadData, staleHit.sessionId);
       const route = "/_agent-native/actions/vivary-chat-match?" + new URLSearchParams({ projectId,
         threadId: staleHit.sessionId, referenceId: staleHit.referenceId });
@@ -151,9 +157,60 @@ try {
       assert.equal(response.status, 404, `Malformed retained match (${threadData}): ${response.body}`);
       assert.match(response.body, /no longer available\. Search again/);
     }
+    console.log("PASS: built-app Native match rejects 10 malformed/incomplete repositories with stale-result 404.");
+    const cap = 8 * 1024 * 1024;
+    const repository = text => JSON.stringify({ headId: staleHit.referenceId, messages: [
+      { message: { id: staleHit.referenceId, role: "user", content: [{ type: "text", text }] }, parentId: null },
+    ] });
+    const overhead = Buffer.byteLength(repository(""));
+    for (const [name, text, expectedStatus] of [
+      ["emoji", "😀".repeat(Math.ceil(cap / 4)), 404],
+      ["CJK", "界".repeat(Math.ceil(cap / 3)), 404],
+      ["exact byte cap", "界".repeat(Math.floor((cap - overhead) / 3)) + "x".repeat((cap - overhead) % 3), 200],
+      ["one byte over", "x".repeat(cap - overhead + 1), 404],
+    ]) {
+      const threadData = repository(text);
+      db.prepare("UPDATE chat_threads SET thread_data=? WHERE id=?").run(threadData, staleHit.sessionId);
+      const route = "/_agent-native/actions/vivary-chat-match?" + new URLSearchParams({ projectId,
+        threadId: staleHit.sessionId, referenceId: staleHit.referenceId });
+      const response = await send(server.port, "GET", route, { cookie, origin, "sec-fetch-site": "same-origin" });
+      assert.equal(response.status, expectedStatus, `${name}: ${Buffer.byteLength(threadData)} repository bytes`);
+      if (expectedStatus === 200) assert.equal(JSON.parse(response.body).threadData, threadData);
+      else assert.match(response.body, /no longer available\. Search again/);
+    }
+    console.log("PASS: built-app Native match byte cap rejects oversized emoji/CJK and cap+1; accepts exactly 8 MiB.");
   } finally {
     db.prepare("UPDATE chat_threads SET thread_data=? WHERE id=?").run(saved, staleHit.sessionId);
     db.close();
+  }
+  // Exhaust the real metadata budget with timestamp-named records, then search
+  // through the normal HTTP action. Remove this stress fixture before browser QA.
+  const cappedRuns = [];
+  try {
+    for (let i = 0; i < 81; i++) {
+      const time = new Date(Date.UTC(2020, 0, 1, 0, 0, i)).toISOString();
+      const id = `vivary-local-code-${time.replace(/[^0-9]/g, "")}-fixture`;
+      cappedRuns.push(id);
+      createCodeAgentRunRecord({ id, goalId: "vivary-local-code", title: "Metadata budget fixture", status: "completed",
+        cwd: path.join(data, "workspace"), metadata: { app: "vivary-workbench-local-code", ownerEmail: OWNER,
+          orgId, projectId: i === 80 ? "foreign-project" : projectId, bindingId: registration.bindingId,
+          workspaceRoot: path.join(data, "workspace"), engine: "claude-cli", model: "sonnet", padding: "x".repeat(60_000) } });
+      updateCodeAgentRunRecord(id, { updatedAt: time });
+      const events = Array.from({ length: i === 79 ? 27 : 1 }, (_, index) => ({
+        schemaVersion: 1, id: `evt-metadata-${i}-${index}`, runId: id, kind: "user",
+        message: i >= 78 ? "metadataneedle" : "Ordinary old conversation", createdAt: time,
+      }));
+      await writeFile(codeAgentRunTranscriptPath(id), i === 80 ? "INVALID PRIVATE TRANSCRIPT\n"
+        : events.map(event => JSON.stringify(event) + "\n").join(""));
+    }
+    const hits = await search({ query: "metadataneedle" });
+    assert.deepEqual(hits.map(hit => hit.referenceId), [...Array.from({ length: 27 }, (_, i) => `evt-metadata-79-${i}`), "evt-metadata-78-0"]);
+    console.log("PASS: built-app metadata budget retains 28 recent Code hits across continuation and excludes foreign transcripts.");
+  } finally {
+    for (const id of cappedRuns) {
+      await rm(path.join(codeAgentRunsDir(), id + ".json"), { force: true });
+      await rm(codeAgentRunTranscriptPath(id), { force: true });
+    }
   }
   const nativePath = `/?runtime=native&history=project&thread=${nativeHit.sessionId}&message=${nativeHit.referenceId}`;
   const codePath = `/?history=project&run=${codeHit.sessionId}&event=${codeHit.referenceId}&eventOffset=${codeHit.eventOffset}`;

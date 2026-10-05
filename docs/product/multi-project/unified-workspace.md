@@ -107,7 +107,9 @@ message text above 64 Ki characters, Code records above 64 KiB and transcript
 lines above 256 KiB are skipped with a coverage notice. Native JSON is parsed once
 per session page; malformed repositories are skipped without blocking the cursor.
 Code metadata checks precede the session cap and transcript access, with a separate
-4 MiB metadata budget and 10,000 directory-entry cap. Foreign runs contribute no
+4 MiB metadata budget and 10,000 directory-entry cap. Metadata admission favors
+newest timestamp-based run filenames within that budget; coverage outside it
+remains incomplete. Foreign runs contribute no
 public counts or excerpts. An incomplete final transcript line retains its offset
 until its writer appends a newline. Each runtime scans newest sessions first using
 updated time and stable ID; cursors retain the ordering key and search start time.

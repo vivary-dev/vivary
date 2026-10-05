@@ -84,6 +84,11 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
   const requestedMessage = params.get("message");
   const readAction = useNativeActionReader();
   const matchKey = JSON.stringify([identity.storageKey, selectedThread, requestedMessage]);
+  const latestMatchKey = useRef<string | null>(matchKey);
+  useLayoutEffect(() => {
+    latestMatchKey.current = matchKey;
+    return () => { latestMatchKey.current = null; };
+  }, [matchKey]);
   const [matchStatus, setMatchStatus] = useState<
     { key: string; state: "loaded"; archived: boolean } | { key: string; state: "failed" } | null>(null);
   const currentMatch = matchStatus?.key === matchKey ? matchStatus : null;
@@ -108,11 +113,12 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
       const thread = await response.json() as { threadData: string; archived: boolean };
       const repository = nativeMatchRepository(thread.threadData, requestedMessage);
       // Do not enable editing before the authoritative read verifies archive state.
-      setMatchStatus({ key: matchKey, state: "loaded", archived: thread.archived !== false });
+      if (latestMatchKey.current === matchKey)
+        setMatchStatus({ key: matchKey, state: "loaded", archived: thread.archived !== false });
       return repository;
     } catch (error) {
       // A failed read can return through saved-selection validation, never edit this unread thread.
-      setMatchStatus({ key: matchKey, state: "failed" });
+      if (latestMatchKey.current === matchKey) setMatchStatus({ key: matchKey, state: "failed" });
       throw error;
     }
   }, [selectedThread, requestedMessage, identity.projectId, unassigned, readAction, matchKey]);

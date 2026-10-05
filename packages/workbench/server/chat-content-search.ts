@@ -177,7 +177,10 @@ export async function searchChatContent(owner: SearchOwner, input: ChatSearchInp
     // Its own byte cap also bounds stores containing many unrelated projects.
     const owned: Array<{ record: CodeAgentRunRecord; time: number; bytes: number }> = [];
     let metadataBytes = 0;
-    for (const name of names.sort()) {
+    // Native's generated run IDs contain creation timestamps. Admit recent
+    // metadata first when this bounded scan cannot cover the entire directory;
+    // authorized candidates still use updated-time/ID ordering below.
+    for (const name of names.sort().reverse()) {
       signal?.throwIfAborted();
       if (metadataBytes + MAX_RECORD_BYTES + 1 > 4 * 1024 * 1024 || budgetBytes + MAX_RECORD_BYTES + 1 > LIMITS.bytes) {
         page.limited = true; break;
