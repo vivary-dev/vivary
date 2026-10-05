@@ -280,6 +280,10 @@ def main() -> None:
             "review-gate must also run on manual dispatch so it cannot be skipped into green")
     require("continue-on-error" not in review_gate_job and "|| true" not in review_gate_job,
             "review-gate failures must fail the check")
+    require('run: test "$GITHUB_SHA" = "$HEAD_SHA"' in review_gate_job,
+            "review-gate must refuse a dispatched head that is not the run's commit")
+    gate_step = review_gate_job[review_gate_job.index("- name: wait for completed reviews and resolved threads"):]
+    require("\n        if:" not in gate_step, "the review-gate step must not be conditional")
     print(f"{WORKFLOW}: CI workflow contract passed")
 
 

@@ -26,6 +26,7 @@ import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.request
 
 SUMMARY_MARKER = "<!-- codex-pull-request-review-summary -->"
@@ -100,6 +101,11 @@ def _request(url: str, token: str, payload: dict | None = None) -> object:
         return json.load(response)
 
 
+def fetch_pull(repository: str, number: int, token: str) -> dict:
+    api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+    return _request(f"{api}/repos/{repository}/pulls/{number}", token)
+
+
 def fetch(repository: str, number: int, token: str) -> tuple[list[dict], list[dict]]:
     api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
     comments, page = [], 1
@@ -144,10 +150,33 @@ def main() -> int:
     if not (args.repository and args.pr and args.head_sha and token):
         print("required review gate: missing repository, PR number, head SHA or token", file=sys.stderr)
         return 2
+    # The check attaches to the commit it ran on; never let an input name another commit.
+    try:
+        pull = fetch_pull(args.repository, args.pr, token)
+    except urllib.error.HTTPError as error:
+        print(f"required review gate: cannot read PR #{args.pr}: HTTP {error.code}", file=sys.stderr)
+        return 1
+    live = pull.get("head", {}).get("sha")
+    if live != args.head_sha:
+        print(f"required review gate: head {args.head_sha[:7]} is not PR #{args.pr}'s live head {str(live)[:7]}; BLOCKED")
+        return 1
+    if pull.get("draft"):
+        print(f"required review gate: PR #{args.pr} is a draft; Codex reviews start when it is marked ready. BLOCKED")
+        return 1
     deadline = time.monotonic() + args.wait_seconds
     while True:
         try:
             comments, threads = fetch(args.repository, args.pr, token)
+        except urllib.error.HTTPError as error:
+            if 400 <= error.code < 500 and error.code != 429:
+                print(f"required review gate: GitHub API refused the request: HTTP {error.code}", file=sys.stderr)
+                return 1
+            if time.monotonic() >= deadline:
+                print(f"required review gate: GitHub API unavailable: HTTP {error.code}", file=sys.stderr)
+                return 1
+            print(f"required review gate: retrying after API error: HTTP {error.code}")
+            time.sleep(args.interval)
+            continue
         except (OSError, RuntimeError, ValueError) as error:
             if time.monotonic() >= deadline:
                 print(f"required review gate: GitHub API unavailable: {error}", file=sys.stderr)

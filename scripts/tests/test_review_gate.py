@@ -91,11 +91,40 @@ class ReviewGate(unittest.TestCase):
         env = {"GH_TOKEN": "x", "REPOSITORY": "o/r", "PR_NUMBER": "1", "HEAD_SHA": HEAD}
         with mock.patch.dict("os.environ", env, clear=False), \
                 mock.patch.object(gate, "fetch", side_effect=fetch), \
+                mock.patch.object(gate, "fetch_pull", return_value={"head": {"sha": HEAD}, "draft": False}), \
                 mock.patch.object(gate.time, "sleep"), \
                 mock.patch.object(sys, "argv", ["check_review_gate.py", "--wait-seconds", "600"]), \
                 redirect_stdout(io.StringIO()) as out:
             self.assertEqual(gate.main(), 0)
         self.assertIn("retrying after API error", out.getvalue())
+
+    def _main(self, pull, fetch=None):
+        env = {"GH_TOKEN": "x", "REPOSITORY": "o/r", "PR_NUMBER": "1", "HEAD_SHA": HEAD}
+        fetch = fetch or (lambda *a: ([summary("Completed", HEAD, "Completed")], []))
+        with mock.patch.dict("os.environ", env, clear=False), \
+                mock.patch.object(gate, "fetch", side_effect=fetch), \
+                mock.patch.object(gate, "fetch_pull", return_value=pull), \
+                mock.patch.object(gate.time, "sleep"), \
+                mock.patch.object(sys, "argv", ["check_review_gate.py", "--wait-seconds", "600"]), \
+                redirect_stdout(io.StringIO()) as out:
+            return gate.main(), out.getvalue()
+
+    def test_dispatch_input_that_is_not_the_live_head_is_blocked(self):
+        code, out = self._main({"head": {"sha": NEXT}, "draft": False})
+        self.assertEqual(code, 1)
+        self.assertIn("not PR #1's live head", out)
+
+    def test_draft_pull_request_is_blocked_without_waiting(self):
+        code, out = self._main({"head": {"sha": HEAD}, "draft": True})
+        self.assertEqual(code, 1)
+        self.assertIn("draft", out)
+
+    def test_client_error_fails_without_retrying(self):
+        def refuse(*a):
+            raise gate.urllib.error.HTTPError("u", 403, "Forbidden", {}, None)
+        with redirect_stdout(io.StringIO()):
+            code, _ = self._main({"head": {"sha": HEAD}, "draft": False}, refuse)
+        self.assertEqual(code, 1)
 
     def test_completed_review_with_resolved_threads_is_ready(self):
         ready, pending, _ = gate.evaluate([summary("Completed", HEAD, "Completed")], [thread(True)], HEAD)
@@ -113,6 +142,7 @@ class ReviewGate(unittest.TestCase):
         env = {"GH_TOKEN": "x", "REPOSITORY": "o/r", "PR_NUMBER": "1", "HEAD_SHA": HEAD}
         with mock.patch.dict("os.environ", env, clear=False), \
                 mock.patch.object(gate, "fetch", side_effect=lambda *a: next(responses)), \
+                mock.patch.object(gate, "fetch_pull", return_value={"head": {"sha": HEAD}, "draft": False}), \
                 mock.patch.object(gate.time, "sleep"), \
                 mock.patch.object(sys, "argv", ["check_review_gate.py", "--wait-seconds", "600", "--interval", "1"]), \
                 redirect_stdout(io.StringIO()) as out:
@@ -127,6 +157,7 @@ class ReviewGate(unittest.TestCase):
         env = {"GH_TOKEN": "x", "REPOSITORY": "o/r", "PR_NUMBER": "1", "HEAD_SHA": HEAD}
         with mock.patch.dict("os.environ", env, clear=False), \
                 mock.patch.object(gate, "fetch", side_effect=fetch), \
+                mock.patch.object(gate, "fetch_pull", return_value={"head": {"sha": HEAD}, "draft": False}), \
                 mock.patch.object(gate.time, "sleep"), \
                 mock.patch.object(sys, "argv", ["check_review_gate.py", "--wait-seconds", "600"]), \
                 redirect_stdout(io.StringIO()) as out:

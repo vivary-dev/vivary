@@ -959,6 +959,11 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
+      - name: require the dispatched head to be this run's commit
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          HEAD_SHA: ${{ inputs.head_sha }}
+        run: test "$GITHUB_SHA" = "$HEAD_SHA"
       - name: wait for completed reviews and resolved threads
         env:
           GH_TOKEN: ${{ github.token }}
