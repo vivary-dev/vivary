@@ -109,6 +109,8 @@ jobs:
         run: python scripts/check_ci_workflow.py
       - name: CI workflow contract tests
         run: python scripts/tests/test_ci_workflow.py
+      - name: required review gate tests
+        run: python scripts/tests/test_review_gate.py
       - name: source navigation contract
         run: python -B scripts/check-source-navigation.py --check
       - name: source navigation contract tests
