@@ -3469,10 +3469,27 @@ index fabdbf2e838d8a147cb9e438cea8dcefeaf60006..e1b09cd21ea7f7ee34caa3535180a5dc
      });
  }
 diff --git a/dist/client/chat/message-components.d.ts b/dist/client/chat/message-components.d.ts
-index 78f2051e8470f1cbe1789520828320e1cb06e620..8f8a3958185a04f589097af88b42646c96f0dfcc 100644
+index 78f2051e8470f1cbe1789520828320e1cb06e620..231a8b1d862ba609f25cc9e90a191a19dd9e2634 100644
 --- a/dist/client/chat/message-components.d.ts
 +++ b/dist/client/chat/message-components.d.ts
-@@ -234,6 +234,10 @@ export declare function shouldShowInlineRunError({ runError, bannerRunErrorKey,
+@@ -10,7 +10,7 @@
+     short: string;
+     full: string;
+ }
+-export declare function formatMessageTimestamp(value: unknown, locale?: string, yesterdayLabel?: string): FormattedMessageTimestamp | null;
++export declare function formatMessageTimestamp(value: unknown, locale?: string, yesterdayLabel?: string | (() => string)): FormattedMessageTimestamp | null;
+ export declare function MessageTimestamp({ timestamp, className, }: {
+     timestamp: FormattedMessageTimestamp;
+     className?: string;
+@@ -122,6 +122,7 @@
+     onRevert?: () => void;
+     threadId?: string;
+ }): React.JSX.Element;
++export declare function observeUserMessageExpandability(element: Element, onChange: (expandable: boolean) => void): () => void;
+ export declare function UserMessage(): React.JSX.Element | null;
+ export declare function messageTextFromContent(content: unknown): string;
+ export declare function isMissingFinalResponseWarningText(text: string): boolean;
+@@ -234,6 +235,10 @@ export declare function shouldShowInlineRunError({ runError, bannerRunErrorKey,
      runError: RunErrorInfo | null;
      bannerRunErrorKey: string | null | undefined;
  }): boolean;
@@ -3483,7 +3500,7 @@ index 78f2051e8470f1cbe1789520828320e1cb06e620..8f8a3958185a04f589097af88b42646c
  export declare function InlineRunErrorNotice({ info, durationMs, onRetry, }: {
      info: RunErrorInfo;
      durationMs?: number | null;
-@@ -246,3 +250,8 @@ export declare function RunningActivityStatus({ label }: {
+@@ -246,3 +251,8 @@ export declare function RunningActivityStatus({ label }: {
  export declare function ThinkingIndicator({ label }?: {
      label?: string;
  }): React.JSX.Element;
@@ -3493,10 +3510,138 @@ index 78f2051e8470f1cbe1789520828320e1cb06e620..8f8a3958185a04f589097af88b42646c
 +    scopeKey?: string;
 +}): React.JSX.Element | null;
 diff --git a/dist/client/chat/message-components.js b/dist/client/chat/message-components.js
-index 440c93db05d0b21745e8c74db76af0ec2de27761..c8d321d12b2dbc72d8acb9641efef96d8c9983b0 100644
+index 440c93db05d0b21745e8c74db76af0ec2de27761..c7af25d71d6b2bbe2499c75eb791a3ee7fc172b0 100644
 --- a/dist/client/chat/message-components.js
 +++ b/dist/client/chat/message-components.js
-@@ -966,10 +966,36 @@ export function shouldShowInlineRunError({ runError, bannerRunErrorKey, }) {
+@@ -10,6 +10,7 @@
+ import React, { useState, useEffect, useCallback, useRef } from "react";
+ import { splitAgentChatContextFromMessage } from "../../shared/agent-chat-context.js";
+ import { DEFAULT_THINKING_DISPLAY, } from "../../shared/thinking-display.js";
++import { getDateTimeFormatter } from "../date-time-format.js";
+ import { getActiveRun } from "../active-run-state.js";
+ import { agentNativePath } from "../api-path.js";
+ import { writeClipboardText } from "../clipboard.js";
+@@ -66,7 +67,7 @@
+     const now = new Date();
+     const yesterday = new Date(now);
+     yesterday.setDate(now.getDate() - 1);
+-    const time = new Intl.DateTimeFormat(locale, {
++    const time = getDateTimeFormatter(locale, {
+         hour: "numeric",
+         minute: "2-digit",
+     }).format(date);
+@@ -75,16 +76,18 @@
+         short = time;
+     }
+     else if (isSameCalendarDay(date, yesterday)) {
+-        short = `${yesterdayLabel} ${time}`;
++        // Catalog updates stay live; translate only when Yesterday is displayed.
++        const label = typeof yesterdayLabel === "function" ? yesterdayLabel() : yesterdayLabel;
++        short = `${label} ${time}`;
+     }
+     else if (date.getFullYear() === now.getFullYear()) {
+-        short = `${new Intl.DateTimeFormat(locale, {
++        short = `${getDateTimeFormatter(locale, {
+             month: "short",
+             day: "numeric",
+         }).format(date)}, ${time}`;
+     }
+     else {
+-        short = `${new Intl.DateTimeFormat(locale, {
++        short = `${getDateTimeFormatter(locale, {
+             month: "short",
+             day: "numeric",
+             year: "numeric",
+@@ -92,7 +95,7 @@
+     }
+     return {
+         short,
+-        full: new Intl.DateTimeFormat(locale, {
++        full: getDateTimeFormatter(locale, {
+             weekday: "short",
+             month: "short",
+             day: "numeric",
+@@ -412,7 +415,7 @@
+     const [copied, setCopied] = useState(null);
+     const messageRuntime = useMessageRuntime();
+     const actionsCtx = React.useContext(MessageActionsContext);
+-    const timestamp = formatMessageTimestamp(messageRuntime.getState().createdAt, locale, t("agentChat.history.yesterday"));
++    const timestamp = formatMessageTimestamp(messageRuntime.getState().createdAt, locale, () => t("agentChat.history.yesterday"));
+     const handleCopyMessage = useCallback(() => {
+         const m = messageRuntime.getState();
+         const text = m.content
+@@ -513,15 +516,34 @@
+     return (_jsxs(Popover, { open: open, onOpenChange: handleOpenChange, children: [_jsx(TooltipProvider, { delayDuration: 400, children: _jsxs(Tooltip, { children: [_jsx(TooltipTrigger, { asChild: true, children: _jsx(PopoverTrigger, { asChild: true, children: _jsx("button", { type: "button", "aria-label": t("agentChat.message.revertHere"), className: cn("flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-colors duration-150 hover:bg-accent hover:text-foreground", messageFooterFadeClassName, open && "bg-accent text-foreground"), children: _jsx(IconArrowBackUp, { className: "h-3.5 w-3.5" }) }) }) }), _jsx(TooltipContent, { side: "top", className: "text-xs", children: t("agentChat.message.revertHere") })] }) }), _jsx(PopoverContent, { side: "top", align: "start", sideOffset: 6, className: "w-56 rounded-lg border-border p-3 shadow-xl", children: state === "confirming" ? (_jsxs("div", { className: "grid gap-2", children: [_jsx("p", { className: "text-xs font-medium text-foreground", children: t("agentChat.message.restoreQuestion") }), _jsxs("div", { className: "flex justify-end gap-1.5", children: [_jsx("button", { type: "button", onClick: () => setOpen(false), className: "rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground", children: t("agentChat.common.cancel") }), _jsx("button", { type: "button", onClick: () => void handleRestore(), className: "rounded-md bg-destructive px-2 py-1 text-xs font-medium text-destructive-foreground hover:bg-destructive/90", children: t("agentChat.message.revertHere") })] })] })) : state === "restoring" ? (_jsxs("span", { className: "flex items-center gap-1.5 text-xs text-muted-foreground", children: [_jsx(IconLoader2, { className: "h-3 w-3 animate-spin" }), t("agentChat.message.restoring")] })) : (_jsxs("div", { className: "grid gap-2", children: [_jsx("p", { className: "text-xs text-destructive", children: error ?? t("agentChat.message.restoreRequestFailed") }), _jsx("button", { type: "button", onClick: () => setOpen(false), className: "justify-self-end rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground", children: t("agentChat.common.dismiss") })] })) })] }));
+ }
+ // ─── UserMessage ──────────────────────────────────────────────────────────────
++export function observeUserMessageExpandability(element, onChange) {
++    let disconnected = false;
++    const observer = new ResizeObserver((entries) => {
++        for (const entry of entries) {
++            if (disconnected)
++                return;
++            if (entry.target === element)
++                onChange(entry.contentRect.height > 200);
++        }
++    });
++    // Observe the unclipped inner text, so collapsing its parent cannot change
++    // the measured height. Skipped content waits until the browser lays it out.
++    observer.observe(element);
++    return () => {
++        disconnected = true;
++        observer.disconnect();
++    };
++}
+ export function UserMessage() {
+     const t = useT();
+     const locale = useOptionalLocale()?.locale ?? DEFAULT_LOCALE;
+     const [expanded, setExpanded] = useState(false);
+-    const [isExpandable, setIsExpandable] = useState(false);
++    // Cap unmeasured text until skipped content receives its first observation.
++    const [isExpandable, setIsExpandable] = useState(null);
+     const contentRef = useRef(null);
+     const messageRuntime = useMessageRuntime();
+     const message = messageRuntime.getState();
+-    const timestamp = formatMessageTimestamp(message.createdAt, locale, t("agentChat.history.yesterday"));
++    const timestamp = formatMessageTimestamp(message.createdAt, locale, () => t("agentChat.history.yesterday"));
+     const isEditing = useComposer((state) => state.isEditing);
+     const chatRunning = React.useContext(ChatRunningContext);
+     const hidden = isHiddenUserMessage(message);
+@@ -533,17 +555,12 @@
+             .some((part) => displayableUserMessageText(part.text).length > 0) ??
+             false);
+     useEffect(() => {
++        setIsExpandable(null);
+         const el = contentRef.current;
+-        if (!el || !hasDisplayableText)
++        if (!el || !hasDisplayableText || isEditing)
+             return;
+-        const measure = () => {
+-            setIsExpandable(el.scrollHeight > 200);
+-        };
+-        measure();
+-        const observer = new ResizeObserver(measure);
+-        observer.observe(el);
+-        return () => observer.disconnect();
+-    }, [hasDisplayableText]);
++        return observeUserMessageExpandability(el, setIsExpandable);
++    }, [hasDisplayableText, isEditing]);
+     if (hidden)
+         return null;
+     // When in edit mode, show the inline edit composer instead of the message bubble.
+@@ -565,9 +582,9 @@
+                         const div = document.createElement("div");
+                         div.appendChild(fragment);
+                         e.clipboardData.setData("text/plain", div.textContent || "");
+-                    }, children: [_jsx("div", { ref: contentRef, className: cn("whitespace-pre-wrap break-words", !expanded && isExpandable && "max-h-[200px] overflow-hidden"), children: _jsx(MessagePrimitive.Parts, { components: {
++                    }, children: [_jsx("div", { className: cn("whitespace-pre-wrap break-words", !expanded && isExpandable !== false && "max-h-[200px] overflow-hidden"), children: _jsx("div", { ref: contentRef, children: _jsx(MessagePrimitive.Parts, { components: {
+                                     Text: UserMessageText,
+-                                } }) }), !expanded && isExpandable && (_jsx("div", { className: "pointer-events-none absolute inset-x-0 bottom-0 h-14 rounded-b-lg bg-gradient-to-t from-accent via-accent/90 to-transparent" })), !chatRunning && hasDisplayableText && (_jsx(TooltipProvider, { delayDuration: 400, children: _jsxs(Tooltip, { children: [_jsx(TooltipTrigger, { asChild: true, children: _jsx(ActionBarPrimitive.Edit, { asChild: true, children: _jsx("button", { type: "button", "aria-label": t("agentChat.message.edit"), className: "absolute -left-8 top-1 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground/0 transition-colors duration-150 group-hover:text-muted-foreground/70 group-hover:hover:bg-accent group-hover:hover:text-foreground", children: _jsx(IconPencil, { className: "h-3.5 w-3.5" }) }) }) }), _jsx(TooltipContent, { side: "left", className: "text-xs", children: t("agentChat.message.edit") })] }) }))] })), hasDisplayableText && isExpandable && (_jsxs("button", { type: "button", onClick: () => setExpanded((prev) => !prev), className: "mt-1 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground", children: [_jsx(IconChevronDown, { className: cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180") }), expanded
++                                } }) }) }), !expanded && isExpandable && (_jsx("div", { className: "pointer-events-none absolute inset-x-0 bottom-0 h-14 rounded-b-lg bg-gradient-to-t from-accent via-accent/90 to-transparent" })), !chatRunning && hasDisplayableText && (_jsx(TooltipProvider, { delayDuration: 400, children: _jsxs(Tooltip, { children: [_jsx(TooltipTrigger, { asChild: true, children: _jsx(ActionBarPrimitive.Edit, { asChild: true, children: _jsx("button", { type: "button", "aria-label": t("agentChat.message.edit"), className: "absolute -left-8 top-1 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground/0 transition-colors duration-150 group-hover:text-muted-foreground/70 group-hover:hover:bg-accent group-hover:hover:text-foreground", children: _jsx(IconPencil, { className: "h-3.5 w-3.5" }) }) }) }), _jsx(TooltipContent, { side: "left", className: "text-xs", children: t("agentChat.message.edit") })] }) }))] })), hasDisplayableText && isExpandable && (_jsxs("button", { type: "button", onClick: () => setExpanded((prev) => !prev), className: "mt-1 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground", children: [_jsx(IconChevronDown, { className: cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180") }), expanded
+                             ? t("agentChat.common.collapse")
+                             : t("agentChat.common.expand")] })), _jsxs("div", { className: "mt-1 flex items-center justify-end gap-1", children: [_jsx(MessageBranchPicker, {}), timestamp && (_jsx(MessageTimestamp, { timestamp: timestamp, className: messageFooterFadeClassName }))] })] }) }));
+ }
+@@ -966,10 +983,36 @@ export function shouldShowInlineRunError({ runError, bannerRunErrorKey, }) {
          return false;
      return runErrorKey(runError) !== bannerRunErrorKey;
  }
@@ -3533,7 +3678,7 @@ index 440c93db05d0b21745e8c74db76af0ec2de27761..c8d321d12b2dbc72d8acb9641efef96d
      const headline = runErrorHeadline(info, {
          recoverable: t("agentChat.error.stopped"),
          terminal: t("agentChat.error.failed"),
-@@ -980,11 +1006,89 @@ export function InlineRunErrorNotice({ info, durationMs, onRetry, }) {
+@@ -980,11 +1023,89 @@ export function InlineRunErrorNotice({ info, durationMs, onRetry, }) {
              duration: formatDuration(durationMs),
          })
          : headline;
@@ -3624,7 +3769,16 @@ index 440c93db05d0b21745e8c74db76af0ec2de27761..c8d321d12b2dbc72d8acb9641efef96d
  export function AssistantMessage() {
      const t = useT();
      const locale = useOptionalLocale()?.locale ?? DEFAULT_LOCALE;
-@@ -1042,15 +1146,14 @@ export function AssistantMessage() {
+@@ -1001,7 +1122,7 @@
+     const msg = messageRuntime.getState();
+     const isMissingCredential = isMissingCredentialAssistantMessage(msg);
+     const persistedDurationMs = getAssistantRunDurationMs(msg);
+-    const timestamp = formatMessageTimestamp(msg.createdAt, locale, t("agentChat.history.yesterday"));
++    const timestamp = formatMessageTimestamp(msg.createdAt, locale, () => t("agentChat.history.yesterday"));
+     const isLast = msg.isLast;
+     const wasLiveRef = useRef(false);
+     const messageRunId = assistantMessageRunId(msg);
+@@ -1042,15 +1163,14 @@ export function AssistantMessage() {
              userStoppedRun: isUserStoppedRun,
          });
      const showMissingFinalResponse = useSettledFlag(missingFinalResponseCandidate, isLast ? MISSING_FINAL_RESPONSE_SETTLE_MS : 0);
@@ -3647,7 +3801,7 @@ index 440c93db05d0b21745e8c74db76af0ec2de27761..c8d321d12b2dbc72d8acb9641efef96d
      const animateMissingFinalResponse = Boolean(!isUserStoppedRun &&
          isLast &&
          missingFinalResponseNoticeText &&
-@@ -1079,7 +1182,9 @@ export function AssistantMessage() {
+@@ -1079,7 +1199,9 @@ export function AssistantMessage() {
      const responseConnectionContext = React.useMemo(() => {
          let parentId = msg.parentId;
          while (parentId) {
@@ -3658,7 +3812,7 @@ index 440c93db05d0b21745e8c74db76af0ec2de27761..c8d321d12b2dbc72d8acb9641efef96d
              if (parentMessage.role === "user" &&
                  !isHiddenUserMessage(parentMessage)) {
                  return displayableUserMessageText(messageTextFromContent(parentMessage.content));
-@@ -1087,12 +1192,14 @@ export function AssistantMessage() {
+@@ -1087,12 +1209,14 @@ export function AssistantMessage() {
              parentId = parentMessage.parentId;
          }
          return "";
@@ -3675,7 +3829,7 @@ index 440c93db05d0b21745e8c74db76af0ec2de27761..c8d321d12b2dbc72d8acb9641efef96d
              if (parentMessage.role === "user" &&
                  !isHiddenUserMessage(parentMessage)) {
                  turnStartedAt = parentMessage.createdAt;
-@@ -1269,7 +1376,10 @@ export function AssistantMessage() {
+@@ -1269,7 +1393,10 @@ export function AssistantMessage() {
          chatRunning,
          isLast,
      });
@@ -3687,7 +3841,7 @@ index 440c93db05d0b21745e8c74db76af0ec2de27761..c8d321d12b2dbc72d8acb9641efef96d
          return null;
      return (_jsxs("div", { className: "group relative", style: { contentVisibility: isComplete ? "auto" : "visible" }, children: [_jsxs("div", { className: "w-full max-w-[95%] text-sm leading-relaxed text-foreground", children: [isComplete && (_jsx(McpConnectionSuggestion, { text: responseConnectionText, contextText: responseConnectionContext, variant: "response" })), _jsx(ToolCallStackMotion, { children: _jsx(MessagePrimitive.GroupedParts, { groupBy: groupWorkParts, children: ({ part, children }) => {
                                  switch (part.type) {
-@@ -1289,15 +1399,19 @@ export function AssistantMessage() {
+@@ -1289,15 +1416,19 @@ export function AssistantMessage() {
                                      case "group-ran-tools":
                                          return (_jsx(RanToolsSummary, { toolCount: assistantToolSummary.hiddenToolCount, motionKey: `assistant-${msg.id}`, children: children }));
                                      case "text":
@@ -3708,7 +3862,7 @@ index 440c93db05d0b21745e8c74db76af0ec2de27761..c8d321d12b2dbc72d8acb9641efef96d
                                      case "reasoning":
                                          return _jsx(ReasoningMessagePart, {});
                                      case "tool-call":
-@@ -1307,9 +1421,12 @@ export function AssistantMessage() {
+@@ -1307,9 +1438,12 @@ export function AssistantMessage() {
                                      default:
                                          return null;
                                  }
@@ -3976,11 +4130,55 @@ index e043637cb79c273483b22e3d6871107a2ec77360..3fca972cbe5536c442d02f27e7af3733
          useConnectFlow: useBuilderConnectFlow,
          BuilderConnectPopover,
          tryDelegateBuildRequest: tryDelegateBuildRequestToBuilder,
+diff --git a/dist/client/date-time-format.js b/dist/client/date-time-format.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..4498cd18bb6ea67c4725a4d9601ca6506974f477 100644
+--- /dev/null
++++ b/dist/client/date-time-format.js
+@@ -0,0 +1,30 @@
++// Share expensive Intl formatters across messages and locale formatDate calls.
++// FIFO eviction bounds retention without tracking message or translation state.
++const DATE_TIME_FORMAT_CACHE_LIMIT = 64;
++const dateTimeFormatters = new Map();
++export function getDateTimeFormatter(locale, options) {
++    // Keep Intl's coercion for locale lists and options with inherited values.
++    if ((locale !== undefined && typeof locale !== "string") ||
++        (options !== undefined && (options === null || typeof options !== "object" ||
++            (Object.getPrototypeOf(options) !== Object.prototype && Object.getPrototypeOf(options) !== null)))) {
++        return new Intl.DateTimeFormat(locale, options);
++    }
++    const entries = Object.entries(Object.getOwnPropertyDescriptors(options ?? {}))
++        .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
++    // Inspect descriptors without invoking getters. Primitive data properties
++    // make a stable key; other inputs go through Intl on every call as before.
++    if (entries.some(([, descriptor]) => !Object.hasOwn(descriptor, "value") ||
++        (descriptor.value !== undefined && typeof descriptor.value !== "string" &&
++            typeof descriptor.value !== "boolean" && !Number.isFinite(descriptor.value)))) {
++        return new Intl.DateTimeFormat(locale, options);
++    }
++    const key = JSON.stringify([locale, entries.map(([name, descriptor]) => [name, descriptor.value])]);
++    const cached = dateTimeFormatters.get(key);
++    if (cached) return cached;
++    const formatter = new Intl.DateTimeFormat(locale, options);
++    if (dateTimeFormatters.size >= DATE_TIME_FORMAT_CACHE_LIMIT) {
++        dateTimeFormatters.delete(dateTimeFormatters.keys().next().value);
++    }
++    dateTimeFormatters.set(key, formatter);
++    return formatter;
++}
 diff --git a/dist/client/i18n.js b/dist/client/i18n.js
-index dade1f26162201e4858aa7b12828351dd7fd1540..5c19b427aaaad58941226bc939acff13cb8c67f1 100644
+index dade1f26162201e4858aa7b12828351dd7fd1540..21738376d95380d4fb52ac93f013957282a3a380 100644
 --- a/dist/client/i18n.js
 +++ b/dist/client/i18n.js
-@@ -471,6 +471,8 @@ const CORE_FALLBACK_MESSAGES = {
+@@ -11,6 +11,7 @@
+ import { injectedAgentNativeConfig } from "./app-config.js";
+ import { setClientAppState } from "./application-state.js";
+ import { callAction } from "./use-action.js";
++import { getDateTimeFormatter } from "./date-time-format.js";
+ import { cn } from "./utils.js";
+ export { DEFAULT_LOCALE, LOCALE_HYDRATION_GLOBAL, LOCALE_METADATA, LOCALE_STORAGE_KEY, SUPPORTED_LOCALES, localeDirection, normalizeLocaleCode, normalizeLocalePreference, normalizeLocalizationPreference, resolveLocaleFromCandidates, resolveLocaleFromPreference, } from "../localization/shared.js";
+ export { getLocaleInitScript } from "../localization/server.js";
+@@ -471,6 +472,8 @@ const CORE_FALLBACK_MESSAGES = {
      "codeRequired.title": "Code changes required",
      "codeRequired.subtitleWithFeature": '"{{feature}}" creates or modifies source code, which needs Desktop or Builder from this surface.',
      "codeRequired.subtitle": "This action creates or modifies source code, which needs Desktop or Builder from this surface.",
@@ -3989,6 +4187,15 @@ index dade1f26162201e4858aa7b12828351dd7fd1540..5c19b427aaaad58941226bc939acff13
      "codeRequired.desktopTitle": "Use Agent-Native Desktop",
      "codeRequired.desktopDescription": "Open the project in the desktop app to enable source edits and CLI access.",
      "codeRequired.builderAgentTitle": "Use Builder.io Agent",
+@@ -586,7 +589,7 @@
+     const locale = context?.locale ?? DEFAULT_LOCALE;
+     return useMemo(() => ({
+         formatDate(value, options) {
+-            return new Intl.DateTimeFormat(locale, options).format(value instanceof Date ? value : new Date(value));
++            return getDateTimeFormatter(locale, options).format(value instanceof Date ? value : new Date(value));
+         },
+         formatNumber(value, options) {
+             return new Intl.NumberFormat(locale, options).format(value);
 diff --git a/dist/client/integrations/webhook-url.d.ts b/dist/client/integrations/webhook-url.d.ts
 index 39d13fc2e3f8c26057d51c9c8600e769435ba688..76cfbaa13f9a82de7541f7758ee40782cac6a517 100644
 --- a/dist/client/integrations/webhook-url.d.ts

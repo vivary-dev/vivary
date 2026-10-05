@@ -11,6 +11,32 @@ Core package. Issue #9 also applies `@agent-native__toolkit@0.19.3.patch` to the
 pinned Toolkit package. The lockfile records both patch hashes. Install with
 `pnpm install --frozen-lockfile` from `packages/workbench`.
 
+## Long Native conversation rendering
+
+Issue [#188](https://github.com/vivary-dev/vivary/issues/188), round 3 experiment 1.
+The coordinator's Chrome profile at `8b1d1e4` found 8.6 seconds in timestamp
+formatting and 7.0 seconds in synchronous user-message collapse measurements
+while opening 2,000 messages. Cold opens took about 27–30 seconds, compared with
+5.6 seconds for 200 messages. These are baseline observations; candidate browser
+measurements remain required before claiming an improvement.
+
+Core shares up to 64 Intl date formatters by locale and sorted primitive options,
+with FIFO eviction. Exotic options retain Intl's original coercion. Timestamp
+output and locale resolution stay the same. The Yesterday translation resolves
+only when displayed and remains live across catalog changes.
+
+UserMessage observes an unclipped inner text element, using delivered
+`contentRect.height > 200` without synchronous layout reads. Its outer text
+container keeps the existing 200 px cap while unmeasured, so skipped off-screen
+messages can await layout without first appearing fully expanded. Later deliveries
+re-evaluate expandability; cleanup rejects callbacks from a retired observation.
+Editing or removing text disconnects it, and returning text gets a new observation.
+
+Run `pnpm --dir packages/workbench run test:conversation-perf`; `test:maintained`
+includes these socket-free regressions. Remove these hunks and the shared helper
+when pinned upstream Core preserves the same formatting, bounded constructor
+reuse, and deferred collapse behavior and passes these tests without the patch.
+
 ## Email BCC delivery
 
 Issue [#112](https://github.com/vivary-dev/vivary/issues/112) fixes an email action

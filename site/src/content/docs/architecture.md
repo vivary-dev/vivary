@@ -249,6 +249,22 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Issue #188, round 3 experiment 1. The maintained Native Core patch now shares a
+bounded Intl formatter cache between message timestamps and locale `formatDate`,
+and defers Yesterday translation until its label is displayed. UserMessage obtains
+expandability from ResizeObserver geometry on unclipped inner text; its existing
+outer cap also applies while awaiting the first delivery. Observation cleanup
+rejects retired callbacks and reconnects after text or edit-mode transitions.
+Native still owns message rendering, transcripts and run lifecycle; the Workbench
+composition, persistence and trust boundaries described above remain accurate.
+Reviewed the coordinator's long-thread CPU profile, the original Core formatting
+and collapse paths, and ten socket-free regressions for output equality, constant
+constructor work, bounded eviction, lazy live translation and observer lifecycle.
+The [patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#long-native-conversation-rendering)
+own the implementation contract and removal condition. Candidate browser latency,
+scrolling and visual behavior remain unverified until the coordinator tests the
+built app; deterministic guards alone do not establish a user-felt improvement.
+
 Issue #188, round 3 measurement harness. `packages/workbench/tests/perf/responsiveness.mjs`
 drives the normal built app in system Chrome against a seeded disposable history and times
 what a person waits for: startup to a usable list, conversation switches until messages and the
