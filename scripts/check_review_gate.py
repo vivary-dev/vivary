@@ -33,7 +33,9 @@ import urllib.request
 
 SUMMARY_MARKER = "<!-- codex-pull-request-review-summary -->"
 INDEPENDENT_MARKER = re.compile(r"<!-- vivary-independent-review:v1 (\{.*?\}) -->")
-# Identities allowed to publish independent review results. Pull request content cannot act as them.
+# Identities allowed to publish independent review results. A workflow's GITHUB_TOKEN acts as
+# github-actions, so pull request code cannot act as them; anyone holding one of these accounts'
+# credentials can, which is why the owner's Entire approval stays required before merging.
 REVIEW_PUBLISHERS = {"Jeff-Kazzee"}
 CODEX_BOT = "chatgpt-codex-connector[bot]"
 STATE_MARKER = re.compile(r"<!-- codex-security-review:v1 (\{.*?\}) -->")
@@ -43,14 +45,26 @@ THREADS_QUERY = """query($owner: String!, $name: String!, $number: Int!, $after:
     pullRequest(number: $number) {
       reviewThreads(first: 100, after: $after) {
         pageInfo { hasNextPage endCursor }
-        nodes { isResolved comments(first: 1) { nodes { url author { login } } } }
+        nodes { isResolved comments(first: 1) { nodes { databaseId url author { login } } } }
       }
     }
   }
 }"""
 
 
+COMMENTS_QUERY = """query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      comments(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { databaseId editor { login } }
+      }
+    }
+  }
+}"""
 STALE = "stale"
+# Marks a comment whose last editor could not be read; such a comment never counts as a result.
+UNKNOWN_EDITOR = object()
 
 
 def codex_running(comments: list[dict], head_sha: str) -> str | None:
@@ -66,7 +80,15 @@ def codex_running(comments: list[dict], head_sha: str) -> str | None:
     return None
 
 
-def review_status(comments: list[dict], head_sha: str, base_sha: str) -> tuple[bool | str, str]:
+def _trusted(comment: dict) -> bool:
+    """Written by an allowed publisher and, if edited, last edited by one."""
+    editor = comment.get("editor", UNKNOWN_EDITOR)
+    return ((comment.get("user") or {}).get("login") in REVIEW_PUBLISHERS
+            and (editor is None or editor in REVIEW_PUBLISHERS))
+
+
+def review_status(comments: list[dict], head_sha: str, base_sha: str,
+                  threads: list[dict] | None = None) -> tuple[bool | str, str]:
     """Return (True | False | STALE, reason) for the required independent review of head and base.
 
     False means pending (missing or running); STALE means a failed result or one for another
@@ -74,7 +96,7 @@ def review_status(comments: list[dict], head_sha: str, base_sha: str) -> tuple[b
     """
     results = []
     for comment in comments:
-        if (comment.get("user") or {}).get("login") not in REVIEW_PUBLISHERS:
+        if not _trusted(comment):
             continue
         for match in INDEPENDENT_MARKER.finditer(comment.get("body") or ""):
             try:
@@ -83,7 +105,7 @@ def review_status(comments: list[dict], head_sha: str, base_sha: str) -> tuple[b
                 continue
             results.append((comment.get("updated_at") or "", state))
     if not results:
-        return False, "no independent review yet; run tools/vivary-review/vivary-independent-review on the final head"
+        return False, "no independent review yet; run `vivary-independent-review --pr N` on the Vivary host for the final head"
     current = [(t, s) for t, s in results if s.get("headSha") == head_sha]
     if not current:
         latest = max(results, key=lambda r: r[0])[1]
@@ -97,9 +119,18 @@ def review_status(comments: list[dict], head_sha: str, base_sha: str) -> tuple[b
         return False, f"the independent review of {head_sha[:7]} is still running"
     if status != "completed":
         return STALE, f"the independent review of {head_sha[:7]} is {status}; run it again"
-    if not isinstance(state.get("findings"), int) or state.get("threads") != state["findings"]:
+    posted = state.get("threadComments")
+    if not isinstance(state.get("findings"), int) or not isinstance(posted, list) or len(posted) != state["findings"]:
         return STALE, (f"the independent review of {head_sha[:7]} reported {state.get('findings')} finding(s) but "
-                       f"{state.get('threads')} review thread(s); every finding needs a thread to resolve")
+                       f"recorded {len(posted) if isinstance(posted, list) else 'no'} review thread(s); "
+                       "every finding needs a thread to resolve")
+    started = {(((t.get("comments") or {}).get("nodes") or [{}])[0].get("databaseId")) for t in (threads or [])
+               if ((((t.get("comments") or {}).get("nodes") or [{}])[0].get("author") or {}).get("login")
+                   in REVIEW_PUBLISHERS)}
+    missing = [i for i in posted if i not in started]
+    if missing:
+        return STALE, (f"the independent review of {head_sha[:7]} lists {len(missing)} review thread(s) that do not exist "
+                       "on the pull request; run the review again")
     reason = codex_running(comments, head_sha)
     if reason:
         return False, reason
@@ -142,6 +173,19 @@ def fetch(repository: str, number: int, token: str) -> tuple[list[dict], list[di
             break
         page += 1
     owner, name = repository.split("/", 1)
+    editors, after = {}, None
+    while True:
+        result = _request(f"{api}/graphql", token, {"query": COMMENTS_QUERY, "variables": {
+            "owner": owner, "name": name, "number": number, "after": after}})
+        if result.get("errors"):
+            raise RuntimeError(f"GraphQL error: {result['errors']}")
+        page_data = result["data"]["repository"]["pullRequest"]["comments"]
+        editors.update({node["databaseId"]: (node.get("editor") or {}).get("login") for node in page_data["nodes"]})
+        if not page_data["pageInfo"]["hasNextPage"]:
+            break
+        after = page_data["pageInfo"]["endCursor"]
+    for comment in comments:
+        comment["editor"] = editors.get(comment.get("id"), UNKNOWN_EDITOR)
     threads, after = [], None
     while True:
         result = _request(f"{api}/graphql", token, {"query": THREADS_QUERY, "variables": {
@@ -158,7 +202,7 @@ def fetch(repository: str, number: int, token: str) -> tuple[list[dict], list[di
 
 def evaluate(comments: list[dict], threads: list[dict], head_sha: str, base_sha: str) -> tuple[bool, bool, list[str]]:
     """Return (ready, review_pending, messages)."""
-    complete, reason = review_status(comments, head_sha, base_sha)
+    complete, reason = review_status(comments, head_sha, base_sha, threads)
     unresolved = unresolved_threads(threads)
     messages = [reason] + [f"unresolved review thread: {item}" for item in unresolved]
     return complete is True and not unresolved, complete is False, messages

@@ -21,12 +21,13 @@ OTHER_BASE = "396b5f77f82ddd8773935d7a2ed303d65552da0f"
 
 
 def independent(status: str, sha: str = HEAD, base: str = BASE, login: str = "Jeff-Kazzee",
-                at: str = "2026-10-05T18:30:00Z", findings: int = 1, threads: int = 1) -> dict:
+                at: str = "2026-10-05T18:30:00Z", findings: int = 1, posted: tuple = (501,),
+                editor: object = "Jeff-Kazzee") -> dict:
     """An independent review result comment as vivary-independent-review publishes it."""
     state = {"headSha": sha, "baseSha": base, "status": status, "engine": "claude", "model": "claude-opus-5-5",
-             "findings": findings, "threads": threads}
+             "findings": findings, "threads": len(posted), "threadComments": list(posted)}
     return {"body": f"<!-- vivary-independent-review:v1 {json.dumps(state)} -->\n## Independent review\n",
-            "updated_at": at, "user": {"login": login, "type": "User"}}
+            "updated_at": at, "user": {"login": login, "type": "User"}, "editor": editor}
 
 
 def summary(status: str, sha: str, security: str | None = None) -> dict:
@@ -44,12 +45,13 @@ def summary(status: str, sha: str, security: str | None = None) -> dict:
             "user": {"login": "chatgpt-codex-connector[bot]", "type": "Bot"}}
 
 
-def thread(resolved: bool, login: str = "chatgpt-codex-connector[bot]") -> dict:
-    return {"isResolved": resolved, "comments": {"nodes": [{"url": f"https://example.invalid/{login}", "author": {"login": login}}]}}
+def thread(resolved: bool, login: str = "Jeff-Kazzee", first: int = 501) -> dict:
+    return {"isResolved": resolved, "comments": {"nodes": [{"databaseId": first, "url": f"https://example.invalid/{login}",
+                                                            "author": {"login": login}}]}}
 
 
 class ReviewGate(unittest.TestCase):
-    def check(self, comments, threads=(), head=HEAD, base=BASE):
+    def check(self, comments, threads=(thread(True),), head=HEAD, base=BASE):
         return gate.evaluate(list(comments), list(threads), head, base)
 
     def test_missing_independent_review_is_pending(self):
@@ -105,13 +107,54 @@ class ReviewGate(unittest.TestCase):
         self.assertTrue(ready)
 
     def test_finding_without_a_thread_blocks(self):
-        ready, pending, messages = self.check([independent("completed", findings=2, threads=1)], [thread(True)])
+        ready, pending, messages = self.check([independent("completed", findings=2)], [thread(True)])
         self.assertFalse(ready)
         self.assertFalse(pending)
         self.assertIn("every finding needs a thread", messages[0])
 
+    def test_recorded_thread_that_does_not_exist_blocks(self):
+        ready, pending, messages = self.check([independent("completed", findings=2, posted=(501, 777))], [thread(True)])
+        self.assertFalse(ready)
+        self.assertFalse(pending)
+        self.assertIn("do not exist", messages[0])
+
+    def test_recorded_thread_started_by_another_identity_blocks(self):
+        ready, _, messages = self.check([independent("completed")], [thread(True, login="random")])
+        self.assertFalse(ready)
+        self.assertIn("do not exist", messages[0])
+
+    def test_result_edited_by_another_identity_is_ignored(self):
+        ready, pending, _ = self.check([independent("completed", editor="github-actions")])
+        self.assertFalse(ready)
+        self.assertTrue(pending)
+
+    def test_result_whose_editor_is_unknown_is_ignored(self):
+        comment = independent("completed")
+        del comment["editor"]
+        ready, pending, _ = self.check([comment])
+        self.assertFalse(ready)
+        self.assertTrue(pending)
+
+    def test_review_with_no_findings_needs_no_thread(self):
+        ready, _, _ = self.check([independent("completed", findings=0, posted=())], [])
+        self.assertTrue(ready)
+
+    def test_fetch_attaches_last_editor_from_graphql(self):
+        responses = iter([
+            [{"id": 11, "body": "x", "user": {"login": "Jeff-Kazzee"}}, {"id": 12, "body": "y", "user": {"login": "Jeff-Kazzee"}}],
+            {"data": {"repository": {"pullRequest": {"comments": {"pageInfo": {"hasNextPage": False, "endCursor": None},
+                "nodes": [{"databaseId": 11, "editor": None}, {"databaseId": 12, "editor": {"login": "github-actions"}}]}}}}},
+            {"data": {"repository": {"pullRequest": {"reviewThreads": {"pageInfo": {"hasNextPage": False, "endCursor": None},
+                "nodes": []}}}}},
+        ])
+        with mock.patch.object(gate, "_request", side_effect=lambda *a: next(responses)):
+            comments, threads = gate.fetch("o/r", 1, "x")
+        self.assertIsNone(comments[0]["editor"])
+        self.assertEqual(comments[1]["editor"], "github-actions")
+        self.assertEqual(threads, [])
+
     def test_unresolved_finding_blocks_a_completed_review(self):
-        ready, pending, messages = self.check([independent("completed")], [thread(True), thread(False)])
+        ready, pending, messages = self.check([independent("completed")], [thread(True), thread(False, login="chatgpt-codex-connector[bot]", first=9)])
         self.assertFalse(ready)
         self.assertFalse(pending)
         self.assertTrue(any("unresolved review thread" in m for m in messages))
@@ -123,7 +166,7 @@ class ReviewGate(unittest.TestCase):
 
     def _main(self, pull, fetch=None):
         env = {"GH_TOKEN": "x", "REPOSITORY": "o/r", "PR_NUMBER": "1", "HEAD_SHA": HEAD}
-        fetch = fetch or (lambda *a: ([independent("completed")], []))
+        fetch = fetch or (lambda *a: ([independent("completed")], [thread(True)]))
         pulls = pull if callable(pull) else (lambda *a: pull)
         with mock.patch.dict("os.environ", env, clear=False), \
                 mock.patch.object(gate, "fetch", side_effect=fetch), \
