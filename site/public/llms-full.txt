@@ -7519,6 +7519,8 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Search test coverage in maintained CI. The six socket-free search and replay test files added with issue #11 (`chat-content-search.test.ts`, `chat-search-client.test.ts`, `chat-search-navigation.test.ts`, `code-transcript-page.test.ts`, `chat-search-code-replay.test.mjs`, `chat-search-components.test.mjs`) were not referenced by CI, so earlier green checks did not run them. They now run as `test:chat-search`, which `test:maintained` and the maintained workbench checks job execute. The built-app check `tests/chat-search-app.mjs` still needs a production build, which the CI route does not perform, so it remains a recorded built-app check like the other built-app tests. No runtime behavior changed.
+
 PR #189 follow-up, issue #11. Review confirmed five gaps in exact-match replay:
 an archived Native hit could enable editing without Restore, hidden Code events
 appeared after later turns, malformed Native match data escaped as a server error,
