@@ -1,7 +1,8 @@
-"""Exercise the required review gate with real Codex summary comment shapes."""
+"""Exercise the required review gate with independent-review and Codex comment shapes."""
 
 from pathlib import Path
 import io
+import json
 import sys
 import unittest
 from contextlib import redirect_stdout
@@ -12,6 +13,17 @@ import check_review_gate as gate  # noqa: E402
 
 HEAD = "90765bc2383862ba4690e549bbf48dc8880bde2f"
 NEXT = "d2c481901c30ce24a148a0c1d3edb947c7b275ae"
+BASE = "b1836a9f126d88fb5162ff34984d31d13d909518"
+OTHER_BASE = "396b5f77f82ddd8773935d7a2ed303d65552da0f"
+
+
+def independent(status: str, sha: str = HEAD, base: str = BASE, login: str = "Jeff-Kazzee",
+                at: str = "2026-10-05T18:30:00Z", findings: int = 1, threads: int = 1) -> dict:
+    """An independent review result comment as vivary-independent-review publishes it."""
+    state = {"headSha": sha, "baseSha": base, "status": status, "engine": "claude", "model": "claude-opus-5-5",
+             "findings": findings, "threads": threads}
+    return {"body": f"<!-- vivary-independent-review:v1 {json.dumps(state)} -->\n## Independent review\n",
+            "updated_at": at, "user": {"login": login, "type": "User"}}
 
 
 def summary(status: str, sha: str, security: str | None = None) -> dict:
@@ -34,113 +46,129 @@ def thread(resolved: bool, login: str = "chatgpt-codex-connector[bot]") -> dict:
 
 
 class ReviewGate(unittest.TestCase):
-    def test_running_review_is_pending_and_blocks(self):
-        ready, pending, messages = gate.evaluate([summary("Running", HEAD)], [], HEAD)
-        self.assertFalse(ready)
-        self.assertTrue(pending)
-        self.assertIn("not complete", messages[0])
+    def check(self, comments, threads=(), head=HEAD, base=BASE):
+        return gate.evaluate(list(comments), list(threads), head, base)
 
-    def test_missing_summary_is_pending_and_blocks(self):
-        ready, pending, messages = gate.evaluate([{"body": "LGTM", "updated_at": "x"}], [], HEAD)
+    def test_missing_independent_review_is_pending(self):
+        ready, pending, messages = self.check([summary("Completed", HEAD, "Completed")])
         self.assertFalse(ready)
-        self.assertTrue(pending)
-        self.assertIn("@codex review", messages[0])
+        self.assertTrue(pending, "a Codex review alone does not satisfy the required independent review")
+        self.assertIn("no independent review", messages[0])
 
-    def test_review_of_an_earlier_commit_fails_without_waiting(self):
-        ready, pending, messages = gate.evaluate([summary("Completed", HEAD, "Completed")], [], NEXT)
-        self.assertFalse(ready)
-        self.assertFalse(pending, "only a new @codex review can change a stale review; do not hold a runner")
-        self.assertIn("not head d2c4819", messages[0])
-
-    def test_forged_summary_from_another_user_is_ignored(self):
-        forged = summary("Completed", NEXT, "Completed")
-        forged["user"] = {"login": "random", "type": "User"}
-        forged["updated_at"] = "2026-10-05T18:00:00Z"
-        ready, pending, _ = gate.evaluate([summary("Running", NEXT, "Running"), forged], [], NEXT)
-        self.assertFalse(ready)
-        self.assertTrue(pending)
-        ready, pending, messages = gate.evaluate([forged], [], NEXT)
-        self.assertFalse(ready)
-        self.assertIn("no Codex review summary", messages[0])
-
-    def test_security_marker_without_security_row_blocks(self):
-        comment = summary("Completed", HEAD)
-        ready, _, messages = gate.evaluate([comment], [], HEAD)
-        self.assertFalse(ready)
-        self.assertIn("no Security Review row", messages[0])
-
-    def test_running_security_review_blocks_even_when_code_review_completed(self):
-        ready, pending, _ = gate.evaluate([summary("Completed", HEAD, "Running")], [], HEAD)
+    def test_running_independent_review_is_pending(self):
+        ready, pending, _ = self.check([independent("running")])
         self.assertFalse(ready)
         self.assertTrue(pending)
 
-    def test_unresolved_finding_blocks_completed_review(self):
-        ready, pending, messages = gate.evaluate(
-            [summary("Completed", HEAD, "Completed")], [thread(True), thread(False)], HEAD)
+    def test_failed_independent_review_blocks_without_waiting(self):
+        ready, pending, messages = self.check([independent("failed")])
         self.assertFalse(ready)
-        self.assertFalse(pending, "an unresolved finding needs a disposition, not more waiting")
+        self.assertFalse(pending)
+        self.assertIn("failed", messages[0])
+
+    def test_review_of_an_earlier_head_is_stale(self):
+        ready, pending, messages = self.check([independent("completed", sha=NEXT)])
+        self.assertFalse(ready)
+        self.assertFalse(pending)
+        self.assertIn("not head 90765bc", messages[0])
+
+    def test_review_against_another_base_is_stale(self):
+        ready, pending, messages = self.check([independent("completed", base=OTHER_BASE)])
+        self.assertFalse(ready)
+        self.assertFalse(pending)
+        self.assertIn("used base 396b5f7", messages[0])
+
+    def test_forged_result_from_another_identity_is_ignored(self):
+        ready, pending, _ = self.check([independent("completed", login="random")])
+        self.assertFalse(ready)
+        self.assertTrue(pending)
+
+    def test_latest_result_for_the_head_wins(self):
+        old = independent("completed", at="2026-10-05T18:00:00Z")
+        ready, pending, _ = self.check([old, independent("running", at="2026-10-05T18:40:00Z")])
+        self.assertFalse(ready)
+        self.assertTrue(pending)
+
+    def test_running_codex_review_on_the_head_keeps_the_gate_pending(self):
+        ready, pending, messages = self.check([independent("completed"), summary("Running", HEAD, "Running")])
+        self.assertFalse(ready)
+        self.assertTrue(pending)
+        self.assertIn("Codex", messages[0])
+
+    def test_codex_quota_notice_and_older_codex_review_are_ignored(self):
+        quota = {"body": "You have reached your Codex usage limits for code reviews.", "updated_at": "x",
+                 "user": {"login": "chatgpt-codex-connector[bot]", "type": "Bot"}}
+        ready, _, _ = self.check([independent("completed"), quota, summary("Running", NEXT, "Running")])
+        self.assertTrue(ready)
+
+    def test_finding_without_a_thread_blocks(self):
+        ready, pending, messages = self.check([independent("completed", findings=2, threads=1)], [thread(True)])
+        self.assertFalse(ready)
+        self.assertFalse(pending)
+        self.assertIn("every finding needs a thread", messages[0])
+
+    def test_unresolved_finding_blocks_a_completed_review(self):
+        ready, pending, messages = self.check([independent("completed")], [thread(True), thread(False)])
+        self.assertFalse(ready)
+        self.assertFalse(pending)
         self.assertTrue(any("unresolved review thread" in m for m in messages))
 
-    def test_cli_retries_transient_api_errors(self):
-        responses = iter([OSError("503"), ([summary("Completed", HEAD, "Completed")], [])])
-        def fetch(*args):
-            item = next(responses)
-            if isinstance(item, Exception):
-                raise item
-            return item
-        env = {"GH_TOKEN": "x", "REPOSITORY": "o/r", "PR_NUMBER": "1", "HEAD_SHA": HEAD}
-        with mock.patch.dict("os.environ", env, clear=False), \
-                mock.patch.object(gate, "fetch", side_effect=fetch), \
-                mock.patch.object(gate, "fetch_pull", return_value={"head": {"sha": HEAD}, "draft": False}), \
-                mock.patch.object(gate, "fetch_timeline", return_value=[]), \
-                mock.patch.object(gate.time, "sleep"), \
-                mock.patch.object(sys, "argv", ["check_review_gate.py", "--wait-seconds", "600"]), \
-                redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(gate.main(), 0)
-        self.assertIn("retrying after API error", out.getvalue())
+    def test_completed_review_with_resolved_threads_is_ready(self):
+        ready, pending, _ = self.check([independent("completed")], [thread(True)])
+        self.assertTrue(ready)
+        self.assertFalse(pending)
 
     def _main(self, pull, fetch=None):
         env = {"GH_TOKEN": "x", "REPOSITORY": "o/r", "PR_NUMBER": "1", "HEAD_SHA": HEAD}
-        fetch = fetch or (lambda *a: ([summary("Completed", HEAD, "Completed")], []))
+        fetch = fetch or (lambda *a: ([independent("completed")], []))
+        pulls = pull if callable(pull) else (lambda *a: pull)
         with mock.patch.dict("os.environ", env, clear=False), \
                 mock.patch.object(gate, "fetch", side_effect=fetch), \
-                mock.patch.object(gate, "fetch_pull", side_effect=pull if callable(pull) else (lambda *a: pull)), \
-                mock.patch.object(gate, "fetch_timeline", return_value=[]), \
+                mock.patch.object(gate, "fetch_pull", side_effect=pulls), \
                 mock.patch.object(gate.time, "sleep"), \
-                mock.patch.object(sys, "argv", ["check_review_gate.py", "--wait-seconds", "600"]), \
+                mock.patch.object(sys, "argv", ["check_review_gate.py", "--wait-seconds", "600", "--interval", "1"]), \
                 redirect_stdout(io.StringIO()) as out:
             return gate.main(), out.getvalue()
 
-    def test_dispatch_input_that_is_not_the_live_head_is_blocked(self):
-        code, out = self._main({"head": {"sha": NEXT}, "draft": False})
+    def test_cli_waits_while_running_then_passes(self):
+        results = iter([([independent("running")], []), ([independent("completed")], [thread(True)])])
+        code, out = self._main({"head": {"sha": HEAD}, "base": {"sha": BASE}, "draft": False}, lambda *a: next(results))
+        self.assertEqual(code, 0)
+        self.assertIn("READY", out)
+
+    def test_cli_fails_without_waiting_on_unresolved_threads(self):
+        calls = []
+        def fetch(*a):
+            calls.append(a)
+            return [independent("completed")], [thread(False)]
+        code, out = self._main({"head": {"sha": HEAD}, "base": {"sha": BASE}, "draft": False}, fetch)
+        self.assertEqual(code, 1)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("BLOCKED", out)
+
+    def test_cli_binds_review_to_the_live_base(self):
+        code, out = self._main({"head": {"sha": HEAD}, "base": {"sha": OTHER_BASE}, "draft": False})
+        self.assertEqual(code, 1)
+        self.assertIn("used base", out)
+
+    def test_head_that_is_not_the_live_head_is_blocked(self):
+        code, out = self._main({"head": {"sha": NEXT}, "base": {"sha": BASE}, "draft": False})
         self.assertEqual(code, 1)
         self.assertIn("not PR #1's live head", out)
 
-    def test_draft_pull_request_is_blocked_without_waiting(self):
-        code, out = self._main({"head": {"sha": HEAD}, "draft": True})
+    def test_draft_pull_request_is_blocked(self):
+        code, out = self._main({"head": {"sha": HEAD}, "base": {"sha": BASE}, "draft": True})
         self.assertEqual(code, 1)
         self.assertIn("draft", out)
 
     def test_client_error_fails_without_retrying(self):
         def refuse(*a):
             raise gate.urllib.error.HTTPError("u", 403, "Forbidden", {}, None)
-        with redirect_stdout(io.StringIO()):
-            code, _ = self._main({"head": {"sha": HEAD}, "draft": False}, refuse)
+        code, _ = self._main(refuse)
         self.assertEqual(code, 1)
 
-    def test_review_before_base_retarget_is_stale(self):
-        done = summary("Completed", HEAD, "Completed")  # completed at 2026-10-05T17:08:39Z
-        events = [{"event": "base_ref_changed", "created_at": "2026-10-05T17:30:00Z"}]
-        ready, pending, messages = gate.evaluate([done], [], HEAD, gate.latest_base_change(events))
-        self.assertFalse(ready)
-        self.assertFalse(pending)
-        self.assertIn("base branch changed", messages[0])
-        ready, _, _ = gate.evaluate([done], [], HEAD, gate.latest_base_change(
-            [{"event": "base_ref_changed", "created_at": "2026-10-05T17:00:00Z"}]))
-        self.assertTrue(ready, "a retarget before the review completed keeps the review valid")
-
     def test_transient_pull_lookup_error_is_retried(self):
-        calls = iter([OSError("reset"), {"head": {"sha": HEAD}, "draft": False}])
+        calls = iter([OSError("reset"), {"head": {"sha": HEAD}, "base": {"sha": BASE}, "draft": False}])
         def pull(*a):
             item = next(calls)
             if isinstance(item, Exception):
@@ -171,57 +199,6 @@ class ReviewGate(unittest.TestCase):
         for label, text in weakened.items():
             with self.assertRaises(SystemExit, msg=label):
                 contract.check_review_workflow(text)
-
-    def test_unreadable_completion_time_fails_closed(self):
-        for value, expected in (("not-a-time", "finished before the base branch changed"),
-                                ("2026-13-45T99:99:99Z", "unreadable completion time")):
-            bad = summary("Completed", HEAD, "Completed")
-            bad["body"] = bad["body"].replace('datetime="2026-10-05T17:08:39Z"', f'datetime="{value}"')
-            ready, pending, messages = gate.evaluate([bad], [], HEAD, "2026-10-05T17:00:00Z")
-            self.assertFalse(ready, value)
-            self.assertFalse(pending, value)
-            self.assertIn(expected, messages[0])
-
-    def test_completed_review_with_resolved_threads_is_ready(self):
-        ready, pending, _ = gate.evaluate([summary("Completed", HEAD, "Completed")], [thread(True)], HEAD)
-        self.assertTrue(ready)
-        self.assertFalse(pending)
-
-    def test_latest_summary_wins(self):
-        old = summary("Completed", NEXT, "Completed")
-        old["updated_at"] = "2026-10-05T16:00:00Z"
-        ready, _, _ = gate.evaluate([old, summary("Running", NEXT)], [], NEXT)
-        self.assertFalse(ready)
-
-    def test_cli_waits_while_pending_then_passes_when_review_completes(self):
-        responses = iter([([summary("Running", HEAD)], []), ([summary("Completed", HEAD, "Completed")], [thread(True)])])
-        env = {"GH_TOKEN": "x", "REPOSITORY": "o/r", "PR_NUMBER": "1", "HEAD_SHA": HEAD}
-        with mock.patch.dict("os.environ", env, clear=False), \
-                mock.patch.object(gate, "fetch", side_effect=lambda *a: next(responses)), \
-                mock.patch.object(gate, "fetch_pull", return_value={"head": {"sha": HEAD}, "draft": False}), \
-                mock.patch.object(gate, "fetch_timeline", return_value=[]), \
-                mock.patch.object(gate.time, "sleep"), \
-                mock.patch.object(sys, "argv", ["check_review_gate.py", "--wait-seconds", "600", "--interval", "1"]), \
-                redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(gate.main(), 0)
-        self.assertIn("READY", out.getvalue())
-
-    def test_cli_fails_without_waiting_on_unresolved_threads(self):
-        calls = []
-        def fetch(*args):
-            calls.append(args)
-            return [summary("Completed", HEAD, "Completed")], [thread(False)]
-        env = {"GH_TOKEN": "x", "REPOSITORY": "o/r", "PR_NUMBER": "1", "HEAD_SHA": HEAD}
-        with mock.patch.dict("os.environ", env, clear=False), \
-                mock.patch.object(gate, "fetch", side_effect=fetch), \
-                mock.patch.object(gate, "fetch_pull", return_value={"head": {"sha": HEAD}, "draft": False}), \
-                mock.patch.object(gate, "fetch_timeline", return_value=[]), \
-                mock.patch.object(gate.time, "sleep"), \
-                mock.patch.object(sys, "argv", ["check_review_gate.py", "--wait-seconds", "600"]), \
-                redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(gate.main(), 1)
-        self.assertEqual(len(calls), 1)
-        self.assertIn("BLOCKED", out.getvalue())
 
 
 if __name__ == "__main__":
