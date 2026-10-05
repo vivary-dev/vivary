@@ -48,11 +48,6 @@ def main() -> None:
     orientation_job = job_block(text, "orientation-proof")
     review_job = job_block(text, "review")
     site_job = job_block(text, "site")
-    review_gate_job = job_block(text, "review-gate")
-    require("python scripts/check_review_gate.py --wait-seconds" in review_gate_job,
-            "review-gate job must wait for the Codex review of the exact head commit")
-    require("HEAD_SHA: ${{ github.event.pull_request.head.sha }}" in review_gate_job,
-            "review-gate must check the pull request head, not the synthetic merge")
     require("python scripts/tests/test_review_gate.py" in test_job,
             "tests job must exercise the required review gate")
 
@@ -276,6 +271,15 @@ def main() -> None:
         "site dependency audit must follow the locked npm install",
     )
 
+    review_gate_job = job_block(text, "review-gate")
+    require("run: python scripts/check_review_gate.py --wait-seconds 2400 --interval 30\n" in review_gate_job,
+            "review-gate job must wait for the Codex review of the exact head commit")
+    require("HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha }}" in review_gate_job,
+            "review-gate must check the pull request head, not the synthetic merge")
+    require("if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'" in review_gate_job,
+            "review-gate must also run on manual dispatch so it cannot be skipped into green")
+    require("continue-on-error" not in review_gate_job and "|| true" not in review_gate_job,
+            "review-gate failures must fail the check")
     print(f"{WORKFLOW}: CI workflow contract passed")
 
 

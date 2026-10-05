@@ -6,13 +6,16 @@ covers and whether it is still running. A pull request is ready only when:
 
 - the Codex Code Review (and the Security Review, when listed) is Completed for the
   pull request's exact head commit, and
-- every review thread is resolved, so each finding has an answered disposition.
+- every review thread is resolved, outdated ones included, so each finding has an answered
+  disposition.
 
 Reviews run when a pull request opens, becomes ready, or someone comments
 "@codex review"; a later push needs a new review of the final commit.
 
-With --wait-seconds the check polls while a review is pending, so its CI status stays
-pending instead of passing early. It exits 0 only when both conditions hold.
+With --wait-seconds the check polls while a review is running, so its CI status stays
+pending instead of passing early. A review of an earlier commit or an unresolved thread fails
+at once. No GitHub event re-runs the check when a thread is resolved or a review finishes
+later: re-run the check right before merging. It exits 0 only when both conditions hold.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ import time
 import urllib.request
 
 SUMMARY_MARKER = "<!-- codex-pull-request-review-summary -->"
+CODEX_BOT = "chatgpt-codex-connector[bot]"
 STATE_MARKER = re.compile(r"<!-- codex-security-review:v1 (\{.*?\}) -->")
 ROW = re.compile(r"^\|\s*[^|]*\*\*(?P<review>Code Review|Security Review)\*\*\s*\|(?P<status>[^|]*)\|\s*`(?P<commit>[0-9a-f]{7,40})`\s*\|", re.M)
 THREADS_QUERY = """query($owner: String!, $name: String!, $number: Int!, $after: String) {
@@ -40,9 +44,18 @@ THREADS_QUERY = """query($owner: String!, $name: String!, $number: Int!, $after:
 }"""
 
 
-def review_status(comments: list[dict], head_sha: str) -> tuple[bool, str]:
-    """Return (complete, reason) for the Codex reviews of head_sha from issue comments."""
-    summaries = [c for c in comments if SUMMARY_MARKER in (c.get("body") or "")]
+STALE = "stale"
+
+
+def review_status(comments: list[dict], head_sha: str) -> tuple[bool | str, str]:
+    """Return (True | False | STALE, reason) for the Codex reviews of head_sha.
+
+    False means a review is pending (running or not started); STALE means the latest
+    review covers another commit and only a new "@codex review" can change that.
+    """
+    # Only the connector's own comment counts; anyone can post text containing the marker.
+    summaries = [c for c in comments if SUMMARY_MARKER in (c.get("body") or "")
+                 and (c.get("user") or {}).get("login") == CODEX_BOT and (c.get("user") or {}).get("type") == "Bot"]
     if not summaries:
         return False, "no Codex review summary yet; open the PR for review or comment \"@codex review\""
     body = max(summaries, key=lambda c: c.get("updated_at") or "")["body"]
@@ -51,15 +64,17 @@ def review_status(comments: list[dict], head_sha: str) -> tuple[bool, str]:
         return False, "the Codex summary lists no Code Review"
     for name, row in rows.items():
         if not head_sha.startswith(row.group("commit")):
-            return False, f"Codex {name} covers {row.group('commit')}, not head {head_sha[:7]}; comment \"@codex review\" on the final commit"
+            return STALE, f"Codex {name} covers {row.group('commit')}, not head {head_sha[:7]}; comment \"@codex review\" on the final commit"
         if "Completed" not in row.group("status"):
             status = re.sub(r"<[^>]+>|\*", "", row.group("status")).strip()
             return False, f"Codex {name} for {head_sha[:7]} is not complete ({status})"
     marker = STATE_MARKER.search(body)
+    if marker and "Security Review" not in rows:
+        return False, "the Codex summary has a security-review marker but no Security Review row"
     if marker:
         state = json.loads(marker.group(1))
         if state.get("headSha") and state["headSha"] != head_sha:
-            return False, f"Codex review state is for {state['headSha'][:7]}, not head {head_sha[:7]}"
+            return STALE, f"Codex review state is for {state['headSha'][:7]}, not head {head_sha[:7]}"
         if state.get("status") not in (None, "completed"):
             return False, f"Codex review state is {state.get('status')}"
     return True, f"Codex reviews completed for {head_sha[:7]}"
@@ -114,7 +129,7 @@ def evaluate(comments: list[dict], threads: list[dict], head_sha: str) -> tuple[
     complete, reason = review_status(comments, head_sha)
     unresolved = unresolved_threads(threads)
     messages = [reason] + [f"unresolved review thread: {item}" for item in unresolved]
-    return complete and not unresolved, not complete, messages
+    return complete is True and not unresolved, complete is False, messages
 
 
 def main() -> int:
@@ -131,7 +146,15 @@ def main() -> int:
         return 2
     deadline = time.monotonic() + args.wait_seconds
     while True:
-        comments, threads = fetch(args.repository, args.pr, token)
+        try:
+            comments, threads = fetch(args.repository, args.pr, token)
+        except (OSError, RuntimeError, ValueError) as error:
+            if time.monotonic() >= deadline:
+                print(f"required review gate: GitHub API unavailable: {error}", file=sys.stderr)
+                return 1
+            print(f"required review gate: retrying after API error: {error}")
+            time.sleep(args.interval)
+            continue
         ready, pending, messages = evaluate(comments, threads, args.head_sha)
         for message in messages:
             print(f"required review gate: {message}")

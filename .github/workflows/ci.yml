@@ -3,6 +3,7 @@ name: ci
 # Validate topic PRs, integration commits, and reviewed promotions.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [dev, main]
   workflow_dispatch:
@@ -945,7 +946,8 @@ jobs:
     name: required review gate
     # Stays pending while the Codex review of the exact head commit runs, then fails on any
     # unresolved review thread. Merge only when this check passes on the final commit.
-    if: github.event_name == 'pull_request'
+    # A manual dispatch evaluates the same PR, so the check cannot be skipped into green.
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -961,8 +963,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ inputs.pull_request_number || github.event.pull_request.number }}
+          HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha }}
         run: python scripts/check_review_gate.py --wait-seconds 2400 --interval 30
 
   site:

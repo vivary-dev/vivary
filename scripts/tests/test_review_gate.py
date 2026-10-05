@@ -25,7 +25,8 @@ def summary(status: str, sha: str, security: str | None = None) -> dict:
             f'<!-- codex-security-review:v1 {{"headSha":"{sha}","mergeGateEnabled":false,"status":"{state}"}} -->\n'
             "## Codex Review Summary\n\n| Review | Status | Commit | Review trigger |\n| --- | --- | --- | --- |\n"
             + "\n".join(rows) + "\n")
-    return {"body": body, "updated_at": "2026-10-05T17:08:40Z"}
+    return {"body": body, "updated_at": "2026-10-05T17:08:40Z",
+            "user": {"login": "chatgpt-codex-connector[bot]", "type": "Bot"}}
 
 
 def thread(resolved: bool, login: str = "chatgpt-codex-connector[bot]") -> dict:
@@ -45,11 +46,28 @@ class ReviewGate(unittest.TestCase):
         self.assertTrue(pending)
         self.assertIn("@codex review", messages[0])
 
-    def test_review_of_an_earlier_commit_blocks_the_final_commit(self):
+    def test_review_of_an_earlier_commit_fails_without_waiting(self):
         ready, pending, messages = gate.evaluate([summary("Completed", HEAD, "Completed")], [], NEXT)
         self.assertFalse(ready)
-        self.assertTrue(pending)
+        self.assertFalse(pending, "only a new @codex review can change a stale review; do not hold a runner")
         self.assertIn("not head d2c4819", messages[0])
+
+    def test_forged_summary_from_another_user_is_ignored(self):
+        forged = summary("Completed", NEXT, "Completed")
+        forged["user"] = {"login": "random", "type": "User"}
+        forged["updated_at"] = "2026-10-05T18:00:00Z"
+        ready, pending, _ = gate.evaluate([summary("Running", NEXT, "Running"), forged], [], NEXT)
+        self.assertFalse(ready)
+        self.assertTrue(pending)
+        ready, pending, messages = gate.evaluate([forged], [], NEXT)
+        self.assertFalse(ready)
+        self.assertIn("no Codex review summary", messages[0])
+
+    def test_security_marker_without_security_row_blocks(self):
+        comment = summary("Completed", HEAD)
+        ready, _, messages = gate.evaluate([comment], [], HEAD)
+        self.assertFalse(ready)
+        self.assertIn("no Security Review row", messages[0])
 
     def test_running_security_review_blocks_even_when_code_review_completed(self):
         ready, pending, _ = gate.evaluate([summary("Completed", HEAD, "Running")], [], HEAD)
@@ -62,6 +80,22 @@ class ReviewGate(unittest.TestCase):
         self.assertFalse(ready)
         self.assertFalse(pending, "an unresolved finding needs a disposition, not more waiting")
         self.assertTrue(any("unresolved review thread" in m for m in messages))
+
+    def test_cli_retries_transient_api_errors(self):
+        responses = iter([OSError("503"), ([summary("Completed", HEAD, "Completed")], [])])
+        def fetch(*args):
+            item = next(responses)
+            if isinstance(item, Exception):
+                raise item
+            return item
+        env = {"GH_TOKEN": "x", "REPOSITORY": "o/r", "PR_NUMBER": "1", "HEAD_SHA": HEAD}
+        with mock.patch.dict("os.environ", env, clear=False), \
+                mock.patch.object(gate, "fetch", side_effect=fetch), \
+                mock.patch.object(gate.time, "sleep"), \
+                mock.patch.object(sys, "argv", ["check_review_gate.py", "--wait-seconds", "600"]), \
+                redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(gate.main(), 0)
+        self.assertIn("retrying after API error", out.getvalue())
 
     def test_completed_review_with_resolved_threads_is_ready(self):
         ready, pending, _ = gate.evaluate([summary("Completed", HEAD, "Completed")], [thread(True)], HEAD)
