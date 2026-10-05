@@ -4,7 +4,8 @@ name: review gate
 # branches never publish its check. It runs the gate script from the pull request's
 # base commit, so edits to that script take effect only after review and merge.
 # Only while the base has no gate script does it fetch and run the script from the
-# commit pinned below, never from the pull request.
+# commit pinned below. For PR #193, which introduced the gate, that is its own reviewed
+# commit; after that merge it is in dev's history, and main uses it until main has the script.
 # A pull request can still edit this workflow file, so .github changes need owner review.
 on:
   pull_request:
