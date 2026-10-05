@@ -60,7 +60,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v7.0.1
         with:
-          ref: d15b7d6166ce5be97a57f75d659fbf74fbc54c3b
+          ref: fb04377ef737a5b7eea4ac7c3031bd34f47e1339
           path: bootstrap
           persist-credentials: false
       - uses: actions/setup-python@v7
