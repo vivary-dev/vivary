@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 WORKFLOW = Path(".github/workflows/ci.yml")
+REVIEW_WORKFLOW = Path(".github/workflows/review-gate.yml")
 ARTIFACT_CHECKER = Path("scripts/check_release_artifacts.py")
 
 
@@ -21,6 +22,25 @@ def release_build_commands() -> tuple[str, ...]:
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise SystemExit(f"{WORKFLOW}: {message}")
+
+
+def check_review_workflow(text: str) -> None:
+    """The required review gate: pull requests only, base-revision script, real wait."""
+    def need(condition: bool, message: str) -> None:
+        if not condition:
+            raise SystemExit(f"{REVIEW_WORKFLOW}: {message}")
+    need("on:\n  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review, edited]\n" in text,
+         "must run only for pull requests, including ready-for-review and base edits")
+    for trigger in ("push:", "workflow_dispatch", "pull_request_target", "schedule:"):
+        need(trigger not in text, f"must not run on {trigger.rstrip(':')} (it would publish the check outside a pull request)")
+    need("    name: required review gate\n" in text, "must publish the check named `required review gate`")
+    need("ref: ${{ github.event.pull_request.base.sha }}" in text and "persist-credentials: false" in text,
+         "must run the gate script from the pull request's base commit")
+    need("run: python scripts/check_review_gate.py --wait-seconds 2400 --interval 30\n" in text,
+         "must wait for the Codex review of the exact head commit")
+    need("HEAD_SHA: ${{ github.event.pull_request.head.sha }}" in text, "must check the pull request head")
+    need("continue-on-error" not in text and "|| true" not in text, "gate failures must fail the check")
+    need(re.search(r"(?m)^\s*(-\s+)?if:", text) is None, "the gate must not be conditional")
 
 
 def job_block(text: str, name: str) -> str:
@@ -271,20 +291,7 @@ def main() -> None:
         "site dependency audit must follow the locked npm install",
     )
 
-    review_gate_job = job_block(text, "review-gate")
-    require("run: python scripts/check_review_gate.py --wait-seconds 2400 --interval 30\n" in review_gate_job,
-            "review-gate job must wait for the Codex review of the exact head commit")
-    require("HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha }}" in review_gate_job,
-            "review-gate must check the pull request head, not the synthetic merge")
-    require("if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'" in review_gate_job,
-            "review-gate must also run on manual dispatch so it cannot be skipped into green")
-    require("continue-on-error" not in review_gate_job and "|| true" not in review_gate_job,
-            "review-gate failures must fail the check")
-    require("if: github.event_name == 'workflow_dispatch'\n        env:\n          HEAD_SHA: ${{ inputs.head_sha }}\n"
-            '        run: test "$GITHUB_SHA" = "$HEAD_SHA"' in review_gate_job,
-            "review-gate must refuse a dispatched head that is not the run's commit")
-    gate_step = review_gate_job[review_gate_job.index("- name: wait for completed reviews and resolved threads"):]
-    require("\n        if:" not in gate_step, "the review-gate step must not be conditional")
+    check_review_workflow(REVIEW_WORKFLOW.read_text(encoding="utf-8"))
     print(f"{WORKFLOW}: CI workflow contract passed")
 
 

@@ -1,0 +1,35 @@
+name: review gate
+
+# The required review gate runs only for pull requests, so pushes to long-lived
+# branches never publish its check. It checks out and runs the gate script from the
+# pull request's base commit: a pull request's own edits to the gate do not take
+# effect until they are reviewed and merged. It never runs pull request code.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  review-gate:
+    name: required review gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: wait for completed reviews and resolved threads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/check_review_gate.py --wait-seconds 2400 --interval 30

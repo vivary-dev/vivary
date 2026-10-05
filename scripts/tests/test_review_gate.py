@@ -20,7 +20,7 @@ def summary(status: str, sha: str, security: str | None = None) -> dict:
     rows = [f"| 📝 **Code Review** | {'✅' if status == 'Completed' else '🔄'} **{status}** "
             f"<relative-time datetime=\"2026-10-05T17:08:39Z\">2026-10-05T17:08:39Z</relative-time> | `{sha[:7]}` | PR opened |"]
     if security:
-        rows.append(f"| 🔒 **Security Review** | **{security}** | `{sha[:7]}` | PR opened |")
+        rows.append(f"| 🔒 **Security Review** | **{security}** <relative-time datetime=\"2026-10-05T17:08:40Z\">x</relative-time> | `{sha[:7]}` | PR opened |")
     body = ("<!-- codex-pull-request-review-summary -->\n"
             f'<!-- codex-security-review:v1 {{"headSha":"{sha}","mergeGateEnabled":false,"status":"{state}"}} -->\n'
             "## Codex Review Summary\n\n| Review | Status | Commit | Review trigger |\n| --- | --- | --- | --- |\n"
@@ -92,6 +92,7 @@ class ReviewGate(unittest.TestCase):
         with mock.patch.dict("os.environ", env, clear=False), \
                 mock.patch.object(gate, "fetch", side_effect=fetch), \
                 mock.patch.object(gate, "fetch_pull", return_value={"head": {"sha": HEAD}, "draft": False}), \
+                mock.patch.object(gate, "fetch_timeline", return_value=[]), \
                 mock.patch.object(gate.time, "sleep"), \
                 mock.patch.object(sys, "argv", ["check_review_gate.py", "--wait-seconds", "600"]), \
                 redirect_stdout(io.StringIO()) as out:
@@ -103,7 +104,8 @@ class ReviewGate(unittest.TestCase):
         fetch = fetch or (lambda *a: ([summary("Completed", HEAD, "Completed")], []))
         with mock.patch.dict("os.environ", env, clear=False), \
                 mock.patch.object(gate, "fetch", side_effect=fetch), \
-                mock.patch.object(gate, "fetch_pull", return_value=pull), \
+                mock.patch.object(gate, "fetch_pull", side_effect=pull if callable(pull) else (lambda *a: pull)), \
+                mock.patch.object(gate, "fetch_timeline", return_value=[]), \
                 mock.patch.object(gate.time, "sleep"), \
                 mock.patch.object(sys, "argv", ["check_review_gate.py", "--wait-seconds", "600"]), \
                 redirect_stdout(io.StringIO()) as out:
@@ -126,6 +128,47 @@ class ReviewGate(unittest.TestCase):
             code, _ = self._main({"head": {"sha": HEAD}, "draft": False}, refuse)
         self.assertEqual(code, 1)
 
+    def test_review_before_base_retarget_is_stale(self):
+        done = summary("Completed", HEAD, "Completed")  # completed at 2026-10-05T17:08:39Z
+        events = [{"event": "base_ref_changed", "created_at": "2026-10-05T17:30:00Z"}]
+        ready, pending, messages = gate.evaluate([done], [], HEAD, gate.latest_base_change(events))
+        self.assertFalse(ready)
+        self.assertFalse(pending)
+        self.assertIn("base branch changed", messages[0])
+        ready, _, _ = gate.evaluate([done], [], HEAD, gate.latest_base_change(
+            [{"event": "base_ref_changed", "created_at": "2026-10-05T17:00:00Z"}]))
+        self.assertTrue(ready, "a retarget before the review completed keeps the review valid")
+
+    def test_transient_pull_lookup_error_is_retried(self):
+        calls = iter([OSError("reset"), {"head": {"sha": HEAD}, "draft": False}])
+        def pull(*a):
+            item = next(calls)
+            if isinstance(item, Exception):
+                raise item
+            return item
+        code, out = self._main(pull)
+        self.assertEqual(code, 0)
+        self.assertIn("retrying after API error", out)
+
+    def test_review_workflow_contract_rejects_weakening(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        import check_ci_workflow as contract
+        real = (Path(__file__).resolve().parents[2] / ".github/workflows/review-gate.yml").read_text(encoding="utf-8")
+        contract.check_review_workflow(real)
+        weakened = {
+            "push": real.replace("on:\n  pull_request:\n", "on:\n  push:\n  pull_request:\n"),
+            "dispatch": real + "  workflow_dispatch:\n",
+            "base script": real.replace("ref: ${{ github.event.pull_request.base.sha }}", "ref: ${{ github.event.pull_request.head.sha }}"),
+            "no wait": real.replace("--wait-seconds 2400", "--wait-seconds 0"),
+            "or true": real.replace("--interval 30\n", "--interval 30 || true\n"),
+            "conditional": real.replace("      - name: wait for completed reviews", "      - if: false\n        name: wait for completed reviews"),
+            "renamed": real.replace("name: required review gate", "name: review gate (optional)"),
+            "no edited": real.replace(", edited]", "]"),
+        }
+        for label, text in weakened.items():
+            with self.assertRaises(SystemExit, msg=label):
+                contract.check_review_workflow(text)
+
     def test_completed_review_with_resolved_threads_is_ready(self):
         ready, pending, _ = gate.evaluate([summary("Completed", HEAD, "Completed")], [thread(True)], HEAD)
         self.assertTrue(ready)
@@ -143,6 +186,7 @@ class ReviewGate(unittest.TestCase):
         with mock.patch.dict("os.environ", env, clear=False), \
                 mock.patch.object(gate, "fetch", side_effect=lambda *a: next(responses)), \
                 mock.patch.object(gate, "fetch_pull", return_value={"head": {"sha": HEAD}, "draft": False}), \
+                mock.patch.object(gate, "fetch_timeline", return_value=[]), \
                 mock.patch.object(gate.time, "sleep"), \
                 mock.patch.object(sys, "argv", ["check_review_gate.py", "--wait-seconds", "600", "--interval", "1"]), \
                 redirect_stdout(io.StringIO()) as out:
@@ -158,6 +202,7 @@ class ReviewGate(unittest.TestCase):
         with mock.patch.dict("os.environ", env, clear=False), \
                 mock.patch.object(gate, "fetch", side_effect=fetch), \
                 mock.patch.object(gate, "fetch_pull", return_value={"head": {"sha": HEAD}, "draft": False}), \
+                mock.patch.object(gate, "fetch_timeline", return_value=[]), \
                 mock.patch.object(gate.time, "sleep"), \
                 mock.patch.object(sys, "argv", ["check_review_gate.py", "--wait-seconds", "600"]), \
                 redirect_stdout(io.StringIO()) as out:

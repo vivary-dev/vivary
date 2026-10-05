@@ -21,6 +21,7 @@ later: re-run the check right before merging. It exits 0 only when both conditio
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -48,7 +49,14 @@ THREADS_QUERY = """query($owner: String!, $name: String!, $number: Int!, $after:
 STALE = "stale"
 
 
-def review_status(comments: list[dict], head_sha: str) -> tuple[bool | str, str]:
+COMPLETED_AT = re.compile(r'datetime="([0-9T:.\-+Z]+)"')
+
+
+def _instant(text: str) -> datetime.datetime:
+    return datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def review_status(comments: list[dict], head_sha: str, base_changed_at: str | None = None) -> tuple[bool | str, str]:
     """Return (True | False | STALE, reason) for the Codex reviews of head_sha.
 
     False means a review is pending (running or not started); STALE means the latest
@@ -69,6 +77,10 @@ def review_status(comments: list[dict], head_sha: str) -> tuple[bool | str, str]
         if "Completed" not in row.group("status"):
             status = re.sub(r"<[^>]+>|\*", "", row.group("status")).strip()
             return False, f"Codex {name} for {head_sha[:7]} is not complete ({status})"
+        # Retargeting a pull request changes what was reviewed without changing the head.
+        done = COMPLETED_AT.search(row.group("status"))
+        if base_changed_at and (not done or _instant(done.group(1)) < _instant(base_changed_at)):
+            return STALE, f"Codex {name} finished before the base branch changed at {base_changed_at}; comment \"@codex review\""
     marker = STATE_MARKER.search(body)
     if marker and "Security Review" not in rows:
         return False, "the Codex summary has a security-review marker but no Security Review row"
@@ -106,6 +118,17 @@ def fetch_pull(repository: str, number: int, token: str) -> dict:
     return _request(f"{api}/repos/{repository}/pulls/{number}", token)
 
 
+def fetch_timeline(repository: str, number: int, token: str) -> list[dict]:
+    api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+    events, page = [], 1
+    while True:
+        batch = _request(f"{api}/repos/{repository}/issues/{number}/timeline?per_page=100&page={page}", token)
+        events += batch
+        if len(batch) < 100:
+            return events
+        page += 1
+
+
 def fetch(repository: str, number: int, token: str) -> tuple[list[dict], list[dict]]:
     api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
     comments, page = [], 1
@@ -130,9 +153,16 @@ def fetch(repository: str, number: int, token: str) -> tuple[list[dict], list[di
     return comments, threads
 
 
-def evaluate(comments: list[dict], threads: list[dict], head_sha: str) -> tuple[bool, bool, list[str]]:
+def latest_base_change(events: list[dict]) -> str | None:
+    """ISO time of the latest base-branch change in a pull request timeline, if any."""
+    times = [e.get("created_at") for e in events if e.get("event") == "base_ref_changed" and e.get("created_at")]
+    return max(times) if times else None
+
+
+def evaluate(comments: list[dict], threads: list[dict], head_sha: str,
+             base_changed_at: str | None = None) -> tuple[bool, bool, list[str]]:
     """Return (ready, review_pending, messages)."""
-    complete, reason = review_status(comments, head_sha)
+    complete, reason = review_status(comments, head_sha, base_changed_at)
     unresolved = unresolved_threads(threads)
     messages = [reason] + [f"unresolved review thread: {item}" for item in unresolved]
     return complete is True and not unresolved, complete is False, messages
@@ -150,23 +180,20 @@ def main() -> int:
     if not (args.repository and args.pr and args.head_sha and token):
         print("required review gate: missing repository, PR number, head SHA or token", file=sys.stderr)
         return 2
-    # The check attaches to the commit it ran on; never let an input name another commit.
-    try:
-        pull = fetch_pull(args.repository, args.pr, token)
-    except urllib.error.HTTPError as error:
-        print(f"required review gate: cannot read PR #{args.pr}: HTTP {error.code}", file=sys.stderr)
-        return 1
-    live = pull.get("head", {}).get("sha")
-    if live != args.head_sha:
-        print(f"required review gate: head {args.head_sha[:7]} is not PR #{args.pr}'s live head {str(live)[:7]}; BLOCKED")
-        return 1
-    if pull.get("draft"):
-        print(f"required review gate: PR #{args.pr} is a draft; Codex reviews start when it is marked ready. BLOCKED")
-        return 1
     deadline = time.monotonic() + args.wait_seconds
     while True:
         try:
+            pull = fetch_pull(args.repository, args.pr, token)
+            # The check attaches to the commit it ran on; never let an input name another commit.
+            live = pull.get("head", {}).get("sha")
+            if live != args.head_sha:
+                print(f"required review gate: head {args.head_sha[:7]} is not PR #{args.pr}'s live head {str(live)[:7]}; BLOCKED")
+                return 1
+            if pull.get("draft"):
+                print(f"required review gate: PR #{args.pr} is a draft; Codex reviews start when it is marked ready. BLOCKED")
+                return 1
             comments, threads = fetch(args.repository, args.pr, token)
+            base_changed_at = latest_base_change(fetch_timeline(args.repository, args.pr, token))
         except urllib.error.HTTPError as error:
             if 400 <= error.code < 500 and error.code != 429:
                 print(f"required review gate: GitHub API refused the request: HTTP {error.code}", file=sys.stderr)
@@ -177,14 +204,14 @@ def main() -> int:
             print(f"required review gate: retrying after API error: HTTP {error.code}")
             time.sleep(args.interval)
             continue
-        except (OSError, RuntimeError, ValueError) as error:
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
             if time.monotonic() >= deadline:
                 print(f"required review gate: GitHub API unavailable: {error}", file=sys.stderr)
                 return 1
             print(f"required review gate: retrying after API error: {error}")
             time.sleep(args.interval)
             continue
-        ready, pending, messages = evaluate(comments, threads, args.head_sha)
+        ready, pending, messages = evaluate(comments, threads, args.head_sha, base_changed_at)
         for message in messages:
             print(f"required review gate: {message}")
         # Wait only while a review is still running; unresolved threads need people, not time.

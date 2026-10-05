@@ -18,11 +18,14 @@ is a separate delivery target.
   (`entire`). Source mirroring does not establish agent-session capture.
 
 Before merging, resolve review findings and require passing applicable CI plus
-one approval. The `required review gate` check stays pending while the Codex review of the
-exact head commit runs, fails when that review covers an earlier commit, and
-fails on any unresolved review thread, outdated ones included. GitHub refuses a
-merge on it only after branch protection marks it required; until then it is the
-merge procedure's gate. Before merging: comment `@codex review` after the final
+one approval. The `required review gate` check (`.github/workflows/review-gate.yml`) runs the
+gate script from the pull request's base commit, so a pull request cannot change
+the gate that reviews it. It stays pending while the Codex review of the exact
+head commit runs, fails when that review covers an earlier commit or predates a
+base-branch change, and fails on any unresolved review thread, outdated ones
+included. GitHub refuses a merge on it only after branch protection marks it
+required; changes to `.github/` still need an owner's review, because a pull
+request can edit workflow files. Before merging: comment `@codex review` after the final
 push, wait for it to complete, answer and resolve every thread, then re-run the
 check, because no event re-runs it when a thread is resolved. Since 2026-09-24 the Entire gate counts the author's approval, so
 Jeff can approve his own trail. An agent can add technical review but never
