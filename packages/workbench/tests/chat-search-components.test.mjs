@@ -203,6 +203,67 @@ for (const outcome of ["active", "archived", "failure"])
     if (archived) assert.match(host.textContent, /Restore.*Archived conversations/);
     else assert.doesNotMatch(host.textContent, /Restore.*Archived conversations/);
   });
+test("loaded A then pending B then A requires fresh archive evidence", async () => {
+  const pending = [];
+  globalThis.fetch = async () => new Promise(resolve => pending.push(resolve));
+  const a = "/?runtime=native&history=project&thread=first&message=match";
+  await render("native", a);
+  await act(async () => pending[0](Response.json({ threadData, archived: false })));
+  assert.equal(button("Return to latest conversation").disabled, false, "initial A is verified active");
+  await act(async () => searchFixture.navigate("/?runtime=native&history=project&thread=second&message=match"));
+  assert.equal(button("Return to latest conversation").disabled, true, "pending B is unread");
+  await act(async () => searchFixture.navigate(a));
+  assert.equal(pending.length, 3);
+  const returnEnabledBeforeFreshRead = !button("Return to latest conversation").disabled;
+  if (returnEnabledBeforeFreshRead)
+    await act(async () => button("Return to latest conversation").click());
+  const editableBeforeFreshRead = Boolean(host.querySelector('[data-editable-thread="first"]'));
+  await act(async () => {
+    pending[1](Response.json({ threadData, archived: false }));
+    pending[2](Response.json({ threadData, archived: true }));
+  });
+  assert.equal(returnEnabledBeforeFreshRead, false, "Return must wait for the new A archive read");
+  assert.equal(editableBeforeFreshRead, false, "unverified A must remain read-only");
+  assert.equal(button("Return to latest conversation").disabled, true);
+  assert.equal(Boolean(host.querySelector('[data-editable-thread="first"]')), false);
+});
+test("fresh archived A response restores the read-only state", async () => {
+  const pending = [];
+  globalThis.fetch = async () => new Promise(resolve => pending.push(resolve));
+  const a = "/?runtime=native&history=project&thread=first&message=match";
+  await render("native", a);
+  await act(async () => pending[0](Response.json({ threadData, archived: false })));
+  await act(async () => searchFixture.navigate("/?runtime=native&history=project&thread=second&message=match"));
+  await act(async () => searchFixture.navigate(a));
+  await act(async () => pending[2](Response.json({ threadData, archived: true })));
+  assert.equal(button("Return to latest conversation").disabled, true);
+  assert.equal(Boolean(host.querySelector('[data-editable-thread="first"]')), false);
+  assert.match(host.querySelector("[data-replay]").dataset.placeholder, /Restore.*Archived conversations/);
+  await act(async () => pending[1](Response.json({ threadData, archived: false })));
+  assert.equal(button("Return to latest conversation").disabled, true);
+  assert.equal(Boolean(host.querySelector('[data-editable-thread="first"]')), false);
+  assert.match(host.textContent, /Restore.*Archived conversations/);
+});
+test("fresh active A response enables Return after a new visit", async () => {
+  const pending = [];
+  globalThis.fetch = async () => new Promise(resolve => pending.push(resolve));
+  const a = "/?runtime=native&history=project&thread=first&message=match";
+  await render("native", a);
+  await act(async () => pending[0](Response.json({ threadData, archived: true })));
+  assert.equal(button("Return to latest conversation").disabled, true);
+  await act(async () => searchFixture.navigate("/?runtime=native&history=project&thread=second&message=match"));
+  await act(async () => searchFixture.navigate(a));
+  assert.equal(pending.length, 3);
+  assert.equal(button("Return to latest conversation").disabled, true, "the new visit starts pending");
+  assert.equal(Boolean(host.querySelector('[data-editable-thread="first"]')), false);
+  await act(async () => pending[2](Response.json({ threadData, archived: false })));
+  assert.equal(button("Return to latest conversation").disabled, false, "fresh active evidence enables Return");
+  await act(async () => pending[1](Response.json({ threadData, archived: true })));
+  assert.equal(button("Return to latest conversation").disabled, false, "late B cannot replace the current visit's evidence");
+  assert.doesNotMatch(host.textContent, /Restore.*Archived conversations/);
+  await act(async () => button("Return to latest conversation").click());
+  assert.ok(host.querySelector('[data-editable-thread="first"]'));
+});
 for (const failure of ["404", "401", "network"]) test(`failed Native match (${failure}) can return without retaining the unread thread`, async () => {
   globalThis.fetch = async () => {
     if (failure === "network") throw new TypeError("Network unavailable");

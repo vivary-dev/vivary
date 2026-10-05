@@ -87,9 +87,15 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
   const matchRequestSequence = useRef(0);
   // Navigation and unmount invalidate pending reads, including a return to the same key.
   useLayoutEffect(() => () => { matchRequestSequence.current++; }, [matchKey]);
+  const [matchVisit, setMatchVisit] = useState({ key: matchKey, id: 0 });
   const [matchStatus, setMatchStatus] = useState<
-    { key: string; state: "loaded"; archived: boolean } | { key: string; state: "failed" } | null>(null);
-  const currentMatch = matchStatus?.key === matchKey ? matchStatus : null;
+    { visit: number; state: "loaded"; archived: boolean } | { visit: number; state: "failed" } | null>(null);
+  // A new visit must render pending; only its own authoritative read can enable Return.
+  if (matchVisit.key !== matchKey) {
+    setMatchVisit({ key: matchKey, id: matchVisit.id + 1 });
+    setMatchStatus(null);
+  }
+  const currentMatch = matchVisit.key === matchKey && matchStatus?.visit === matchVisit.id ? matchStatus : null;
   const matchArchived = currentMatch?.state === "loaded" && currentMatch.archived;
   const matchReadFailed = currentMatch?.state === "failed";
   useEffect(() => {
@@ -113,14 +119,14 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
       const repository = nativeMatchRepository(thread.threadData, requestedMessage);
       // Do not enable editing before the authoritative read verifies archive state.
       if (matchRequestSequence.current === req)
-        setMatchStatus({ key: matchKey, state: "loaded", archived: thread.archived !== false });
+        setMatchStatus({ visit: matchVisit.id, state: "loaded", archived: thread.archived !== false });
       return repository;
     } catch (error) {
       // A failed read can return through saved-selection validation, never edit this unread thread.
-      if (matchRequestSequence.current === req) setMatchStatus({ key: matchKey, state: "failed" });
+      if (matchRequestSequence.current === req) setMatchStatus({ visit: matchVisit.id, state: "failed" });
       throw error;
     }
-  }, [selectedThread, requestedMessage, identity.projectId, unassigned, readAction, matchKey]);
+  }, [selectedThread, requestedMessage, identity.projectId, unassigned, readAction, matchVisit.id]);
   const selectionKey = nativeChatSelectionKey(identity.storageKey);
   const queryClient = useQueryClient();
   const selection = useQuery({

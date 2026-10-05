@@ -249,6 +249,13 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Issue #11 second reintroduction, PR #194 match-visit fix. Native replay status now
+belongs to a visit, with a synchronous reset and render guard on navigation.
+Returning to an earlier match waits for that visit's archive read before enabling
+Return; the request-sequence guard still rejects late replies. The audit regression
+failed before the fix, and archived/active reload cases check both outputs. Runtime
+flow 6 remains accurate; replay, archive restoration and server scan owners are unchanged.
+
 Issue #11 second reintroduction, PR #194 snapshot continuation fix. Admitted Native
 and Code sessions now finish after an update without moving their cursor ordering
 key. Skipped updates to existing conversations set the coverage notice, whose text
