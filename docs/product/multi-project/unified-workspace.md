@@ -90,6 +90,17 @@ opt-out; its supported cleanup API removes the transient session-storage import
 on exit. Search and replay always read the authoritative stores, including after
 restart. Forgotten or removed active-memory facts can remain findable in history.
 
+Native match reads verify archive state before Return to latest conversation can
+open an editable view. Return stays disabled while the read is loading and for a
+proven-archived match. Project and Personal matches explain that the user must
+restore the conversation from Archived conversations, then reopen it to continue.
+Unassigned history has no restore control: its archived match notice and disabled
+composer state, "This conversation is archived and read-only here."
+If the match read fails, a short explanation offers Return or another search.
+Return removes the unread thread and all match anchors, then uses the existing
+saved-selection restore, which refuses archived threads. Read-only replay preserves
+the saved latest selection; returning from a verified active match keeps that thread.
+
 Each request returns at most 25 hits and scans at most 25 authorized sessions,
 500 messages and 16 MiB of store bytes. Native repositories above 8 MiB, Native
 message text above 64 Ki characters, Code records above 64 KiB and transcript

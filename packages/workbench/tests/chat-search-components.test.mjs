@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { readFile } from "node:fs/promises";
 import { compileFunction } from "node:vm";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -27,8 +28,9 @@ const ui = `import { createElement } from "react";
 const stubs = new Map([
   ["@agent-native/core/client/hooks", `export const useSession = () => globalThis.searchFixture.session;
     export const notifySessionInvalidated = () => { globalThis.searchFixture.invalidations++; };
-    export const readClientAppState = async () => null;
-    export const writeClientAppState = async () => null;
+    export const readClientAppState = async key => key.startsWith("vivary-chat-selection-v1:")
+      ? globalThis.searchFixture.savedSelection ?? null : null;
+    export const writeClientAppState = async (key, value) => { globalThis.searchFixture.writes.push({ key, value }); return value; };
     export const actionErrorMessage = () => null;
     export const callAction = async () => null;
     export const tryCallActionKeepalive = () => ({ accepted: false });`],
@@ -39,13 +41,11 @@ const stubs = new Map([
       useEffect(() => {
         props.loadHistoryRepository().catch(() => {});
       }, [props.loadHistoryRepository]);
-      return createElement("div", { "data-replay": "true", "data-disabled": String(props.composerDisabled) });
+      return createElement("div", { "data-replay": "true", "data-disabled": String(props.composerDisabled),
+        "data-placeholder": props.composerDisabledPlaceholder });
     }
     export const AgentChatSurface = props => createElement("div", { "data-editable-thread": props.threadUrlSync.routeThreadId });`],
   ["@agent-native/toolkit/ui", ui], ["@/components/ui/button", ui],
-  ["@tanstack/react-query", `const client = { setQueryData() {} };
-    export const useQueryClient = () => client;
-    export const useQuery = () => ({ data: null, isSuccess: true, isPending: false, refetch() {} });`],
   ["@/components/layout/use-vivary-chat-identity", `export const useVivaryChatIdentity = () => ({ identity: globalThis.searchFixture.identity });`],
   ["../projects/ProjectContext", `export const useProjects = () => globalThis.searchFixture.projects;`],
   ["@/lib/chat-draft", `export const registerSelectionCloseFlush = () => () => {};
@@ -66,6 +66,8 @@ for (const path of ["../../routes/files", "./CodeConversation"]) stubs.set(path,
 const bundle = await build({ stdin: { contents: `
     import { createElement } from "react";
     import { MemoryRouter, useLocation } from "react-router";
+    import { QueryClient, QueryClientProvider, notifyManager } from "@tanstack/react-query";
+    notifyManager.setScheduler(callback => queueMicrotask(callback));
     import NativeConversation from "./app/components/workspace/NativeConversation";
     import { Workspace } from "./app/components/workspace/Workspace";
     import { ChatSessionSearch } from "./app/components/layout/ChatSessionSearch";
@@ -73,7 +75,10 @@ const bundle = await build({ stdin: { contents: `
     export function view(kind, route) {
       const child = kind === "native" ? createElement(NativeConversation) : kind === "workspace" ? createElement(Workspace)
         : createElement(ChatSessionSearch, { identity: globalThis.searchFixture.identity });
-      return createElement(MemoryRouter, { initialEntries: [route] }, child, createElement(Location));
+      const client = globalThis.searchFixture.queryClient ??= new QueryClient({
+        defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+      return createElement(QueryClientProvider, { client },
+        createElement(MemoryRouter, { initialEntries: [route] }, child, createElement(Location)));
     }`, loader: "tsx", resolveDir: workbench }, bundle: true, write: false, format: "cjs", platform: "node",
   jsx: "automatic", external: ["react", "react/*", "react-dom/*", "react-router"], loader: { ".css": "empty" },
   plugins: [{ name: "host-services", setup(build) {
@@ -87,7 +92,7 @@ const threadData = JSON.stringify({ headId: "match", messages: [
   { message: { id: "match", role: "user", content: [{ type: "text", text: "Saved match" }] }, parentId: null },
 ] });
 test.beforeEach(() => {
-  globalThis.searchFixture = { invalidations: 0,
+  globalThis.searchFixture = { invalidations: 0, writes: [],
     session: { status: "authenticated", session: { email: "owner@example.test", token: undefined }, retry() {} },
     identity: { kind: "project", projectId: "alpha", storageKey: "alpha", scope: { type: "project", id: "alpha" } },
     projects: { activeProject: { projectId: "alpha", displayName: "Alpha" }, catalog: { scopeKey: "owner" },
@@ -95,7 +100,7 @@ test.beforeEach(() => {
   };
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
 });
-test.afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
+test.afterEach(async () => { await act(async () => root.unmount()); searchFixture.queryClient?.clear(); host.remove(); });
 const render = (kind, route = "/") => act(async () => { root.render(module.exports.view(kind, route)); });
 const button = name => [...host.querySelectorAll("button")].find(item => item.textContent === name);
 
@@ -108,6 +113,27 @@ test("archived Native match cannot leave replay for an editable archived thread"
   assert.equal(Boolean(host.querySelector('[data-editable-thread="archived"]')), false);
   assert.ok(host.querySelector("[data-replay]"), "archived history remains readable until explicit restoration");
   assert.match(host.textContent, /Restore.*Archived conversations/);
+  assert.match(host.querySelector("[data-replay]").dataset.placeholder, /Restore.*Archived conversations/);
+});
+test("archived Unassigned match describes read-only history without an unavailable restore path", async () => {
+  searchFixture.identity = { kind: "unassigned", projectId: null, storageKey: "unassigned",
+    scope: { type: "workspace-app", id: "unassigned" } };
+  globalThis.fetch = async () => Response.json({ threadData, archived: true });
+  await render("native", "/?runtime=native&history=unassigned&thread=archived&message=match");
+  assert.equal(button("Return to latest conversation").disabled, true);
+  const placeholder = host.querySelector("[data-replay]").dataset.placeholder;
+  for (const text of [host.textContent, placeholder]) {
+    assert.match(text, /archived.*read-only here/i);
+    assert.doesNotMatch(text, /Restore|Archived conversations/);
+  }
+});
+test("archived Personal match retains the available Archived conversations restore guidance", async () => {
+  searchFixture.identity = { ...searchFixture.identity, projectId: null, storageKey: "personal" };
+  globalThis.fetch = async () => Response.json({ threadData, archived: true });
+  await render("native", "/?runtime=native&history=project&thread=archived&message=match");
+  assert.equal(button("Return to latest conversation").disabled, true);
+  assert.match(host.textContent, /Restore.*Archived conversations/);
+  assert.match(host.querySelector("[data-replay]").dataset.placeholder, /Restore.*Archived conversations/);
 });
 test("active Native match can still return to the latest editable conversation", async () => {
   globalThis.fetch = async () => Response.json({ threadData, archived: false });
@@ -125,6 +151,47 @@ test("Native return stays disabled while authoritative archive state is loading"
   assert.equal(button("Return to latest conversation").disabled, true);
   await act(async () => { finish(Response.json({ threadData, archived: false })); });
   assert.equal(button("Return to latest conversation").disabled, false);
+});
+for (const failure of ["404", "401", "network"]) test(`failed Native match (${failure}) can return without retaining the unread thread`, async () => {
+  globalThis.fetch = async () => {
+    if (failure === "network") throw new TypeError("Network unavailable");
+    return Response.json({ message: "Unavailable" }, { status: Number(failure) });
+  };
+  await render("native", "/?runtime=native&history=project&thread=unread&message=match&event=stale&eventOffset=123&panel=files");
+  assert.equal(button("Return to latest conversation").disabled, false);
+  assert.match(host.textContent, /matching conversation could not be opened/i);
+  await act(async () => button("Return to latest conversation").click());
+  const params = new URLSearchParams(host.querySelector("#route").textContent);
+  for (const key of ["thread", "message", "event", "eventOffset"]) assert.equal(params.has(key), false, key);
+  assert.equal(params.get("runtime"), "native");
+  assert.equal(params.get("history"), "project");
+  assert.equal(params.get("panel"), "files");
+  assert.equal(Boolean(host.querySelector("[data-replay]")), false);
+});
+for (const archived of [false, true]) test(`failed Native match preserves saved selection and restores only active threads (archived=${archived})`, async () => {
+  searchFixture.savedSelection = { storageKey: "alpha", threadId: "saved" };
+  let selectionReads = 0;
+  globalThis.fetch = async input => {
+    if (String(input).includes("/agent-chat/threads/saved")) {
+      selectionReads++;
+      return Response.json({ id: "saved", archivedAt: archived ? 123 : null });
+    }
+    return Response.json({ message: "Match no longer available" }, { status: 404 });
+  };
+  await render("native", "/?runtime=native&history=project&thread=unread&message=match");
+  assert.equal(searchFixture.writes.length, 0, "read-only replay must preserve the saved latest conversation");
+  assert.equal(button("Return to latest conversation").disabled, false);
+  await act(async () => button("Return to latest conversation").click());
+  assert.equal(selectionReads, 1, "Return reuses the authoritative saved-selection check");
+  const params = new URLSearchParams(host.querySelector("#route").textContent);
+  assert.equal(params.get("thread"), archived ? null : "saved");
+  assert.equal(params.has("message"), false);
+  assert.equal(Boolean(host.querySelector('[data-editable-thread="unread"]')), false);
+  assert.equal(Boolean(host.querySelector('[data-editable-thread="saved"]')), !archived);
+});
+test("maintained chat-search tests have a 60-second timeout", async () => {
+  const { scripts } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.ok(scripts["test:chat-search"].split(/\s+/).includes("--test-timeout=60000"));
 });
 test("project switch clears Native and Code match anchors before admitting the next conversation", async () => {
   globalThis.fetch = async () => Response.json({ threadData, archived: false });
