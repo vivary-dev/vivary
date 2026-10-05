@@ -264,11 +264,14 @@ limit, process identity checks and cleanup decisions are unchanged. Subprocess r
 command, malformed output, timeout and a complete successful scan. A recheck reparses the stored refusal and
 keeps refusing with its category.
 
-Code state reads run status and transcript after awaited runtime discovery, permission and host-state work.
-Runtime metadata and the recorded Codex model retained for follow-up come from the refreshed selection,
-including when a newer conversation becomes the default.
-One of three held-discovery regressions reproduces a run becoming errored during that wait and checks that
-both selected status and history report the terminal record. This fixes the reproduced stale response. It does
+Code state re-probes the selected runtime after awaited model discovery and permission work, updating both
+the selected readiness and its engine entry's configured state. If a newer default conversation changes the
+engine during that probe, it probes the new selection before returning. Run status, transcript and host
+activity are then read synchronously, so a terminal run cannot retain an earlier busy or active-run snapshot.
+The recorded Codex model retained for follow-up comes from the refreshed selection.
+The state snapshot regressions cover terminal history after held discovery, a changed default engine or model,
+runtime sign-out during discovery and host activity when a run finishes during awaited work. These changes
+preserve the runtime, host cleanup and persistence owners described above. They fix reproduced stale responses and do
 not establish the cause of the earlier packaged scan failure or complete Windows acceptance. Packaged
 retesting remains pending.
 

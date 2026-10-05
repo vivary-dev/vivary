@@ -797,6 +797,10 @@ export async function getVivaryCodeHostState(
   orgId?: string,
 ): Promise<VivaryCodeHostState> {
   await ensureVivaryCodeHostInitialized();
+  return readVivaryCodeHostState(ownerEmail, orgId);
+}
+
+function readVivaryCodeHostState(ownerEmail: string, orgId?: string): VivaryCodeHostState {
   const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID);
   const owned = runs.filter(run => isOwnedIdentity(run, ownerEmail, orgId));
   const active = owned.find(run => activeRuns.has(run.id));
@@ -875,11 +879,20 @@ export async function getVivaryCodeState(
   }));
 
   const permissionMode = await getCodePermissionMode(ownerEmail, orgId);
-  const host = await getVivaryCodeHostState(ownerEmail, orgId);
-  // Discovery can outlast a run. Read its status and transcript together after the awaited work.
-  runs = ownedRuns(ownerEmail, orgId, workspace);
-  selected = runId ? requireOwnedRun(runId, ownerEmail, orgId, workspace) : runs[0] ?? null;
-  const selectedEngine = selected ? engineFromRun(selected) : VIVARY_CODE_DEFAULT_ENGINE;
+  let selectedEngine: VivaryCodeEngine;
+  let runtime: VivaryRuntimeStatus;
+  do {
+    runs = ownedRuns(ownerEmail, orgId, workspace);
+    selected = runId ? requireOwnedRun(runId, ownerEmail, orgId, workspace) : runs[0] ?? null;
+    selectedEngine = selected ? engineFromRun(selected) : VIVARY_CODE_DEFAULT_ENGINE;
+    // Discovery may outlast the runtime-status cache. Probe again before taking the final snapshot.
+    runtime = await getVivaryRuntimeStatus(selectedEngine);
+    runs = ownedRuns(ownerEmail, orgId, workspace);
+    selected = runId ? requireOwnedRun(runId, ownerEmail, orgId, workspace) : runs[0] ?? null;
+    // A newer default conversation can select another engine while its predecessor's probe awaits.
+  } while ((selected ? engineFromRun(selected) : VIVARY_CODE_DEFAULT_ENGINE) !== selectedEngine);
+  // No awaits separate run status, transcript and host activity in the returned snapshot.
+  const host = readVivaryCodeHostState(ownerEmail, orgId);
   const selectedRuntime = engines.find(engine => engine.engine === selectedEngine);
   if (!selectedRuntime) fail("Choose an available coding runtime.", {
     errorCode: "vivary_code_runtime_unavailable", statusCode: 503,
@@ -887,7 +900,9 @@ export async function getVivaryCodeState(
   if (selected && selectedEngine === "codex-cli" && !selectedRuntime.models.includes(modelFromRun(selected))) {
     selectedRuntime.models.push(modelFromRun(selected));
   }
-  const runtime = selectedRuntime.runtime;
+  selectedRuntime.runtime = runtime;
+  selectedRuntime.configured = runtime.status === "ready"
+    && (selectedEngine !== "codex-cli" || selectedRuntime.modelCatalog?.status === "ready");
 
   return {
     ...host,
