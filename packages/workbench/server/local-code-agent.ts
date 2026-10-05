@@ -1,5 +1,10 @@
 import { getCodePermissionMode, type CodePermissionMode } from "./code-permissions";
 import { readCodeTranscriptWindow } from "./code-transcript-page";
+import {
+  getIndexedLegacyCodeDraftId,
+  listIndexedCodeRuns as listCodeAgentRunRecords,
+  listIndexedCodeTranscript as listCodeAgentTranscriptEvents,
+} from "./code-run-index";
 import { codexApprovalResponse, supportsCodexRequest, type CodexApprovalDecision } from "./codex-approval";
 import type { CodexActionRequest } from "./code-execution-protocol";
 import { createHash } from "node:crypto";
@@ -13,8 +18,6 @@ import {
   createCodeAgentRunRecord,
   getCodeAgentRunRecord,
   isActiveCodeAgentRun,
-  listCodeAgentRunRecords,
-  listCodeAgentTranscriptEvents,
   updateCodeAgentRunRecord,
   type CodeAgentRunRecord,
   type CodeAgentTranscriptEvent,
@@ -1396,22 +1399,12 @@ function metadataNumber(run: Pick<CodeAgentRunRecord, "metadata">, key: string):
   return typeof value === "number" && Number.isInteger(value) ? value : null;
 }
 
-const legacyRunDraftIds = new Map<string, { updatedAt: string; draftThreadId: string | null }>();
-
 function runDraftThreadId(run: CodeAgentRunRecord): string | null {
   const projectId = metadataString(run, "projectId");
   const prefix = "vivary-code:" + (projectId ? "project:" + projectId + ":" : "");
   let candidate = metadataString(run, "draftThreadId");
   if (!candidate) {
-    let cached = legacyRunDraftIds.get(run.id);
-    if (!cached || cached.updatedAt !== run.updatedAt) {
-      const first = listCodeAgentTranscriptEvents(run.id).find(event =>
-        event.kind === "user" && typeof event.metadata?.draftThreadId === "string");
-      cached = { updatedAt: run.updatedAt, draftThreadId: typeof first?.metadata?.draftThreadId === "string"
-        ? first.metadata.draftThreadId : null };
-      legacyRunDraftIds.set(run.id, cached);
-    }
-    candidate = cached.draftThreadId;
+    candidate = getIndexedLegacyCodeDraftId(run.id);
   }
   return candidate?.startsWith(prefix) && /^[A-Za-z0-9_-]{1,128}$/.test(candidate.slice(prefix.length))
     ? candidate : null;

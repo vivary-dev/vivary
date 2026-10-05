@@ -45,6 +45,29 @@ Workbench composes Agent-Native's application, chat, run, action, and storage ow
 
 The selected coding runtime owns execution, tools, model access, and native session continuity. Workbench currently supports Claude Code and Codex through Native Code records and the local Code host. Codex uses its app-server and account-effective model catalog. Workbench relays native approvals, progress, child activity, and Stop. Native provider chat uses Native's chat owner with a project send guard. The [harness adapter contract](product/multi-project/specification/harness-adapters.md), [Native owner map](product/multi-project/native-owners.md), and [runtime source map](product/multi-project/source-map/modules/native-runtime/index.md) describe the distinct owners.
 
+The local Code host reads Native's run files through a Workbench process cache
+in [`code-run-index.ts`](../packages/workbench/server/code-run-index.ts). Each
+listing reads directory membership and checks every file's device, inode/file
+ID, size, nanosecond modification time and change time before reusing Core's
+parsed record. Authorized transcript reads use the same identity check, including
+legacy draft-link lookup. Core still owns parsing, validation and persistence;
+the cache writes no files and uses no TTL. Records retain at most 4,096 entries
+and 16 MiB of charged contents, transcripts at most 64 entries and 64 MiB.
+Legacy draft links retain a separate identity-checked memo of at most one small
+entry per valid stored run, pruned on every listing and cleared on store changes.
+Memo keys and draft IDs are capped at 512 characters; larger values are returned
+normally without retention. This avoids re-parsing all legacy transcripts when
+an unmatched draft lookup exceeds the full transcript cache's working set.
+Charges include eight times file bytes, per-entry overhead and per-event
+overhead; they bound retained contents rather than measuring the JavaScript heap.
+Eviction costs a fresh read. Identity checks on both sides of a cold read prevent
+a concurrent replacement from tagging old contents with the replacement's
+identity. The host still refreshes its listing after awaited discovery, applies
+owner/organization/project admission before transcript access, and returns the
+same twenty-run list and deduplicated latest 400 events. Directory scans, file
+stats, sorting and response assembly still scale with the store; built-app
+measurements determine the user-visible benefit.
+
 ### Original engine
 
 The original engine remains a package family, not another agent loop. `vivary-core` owns pure validation and projection while callers retain execution, persistence, and human approval. Tropo observes, builds typed graph context, and retrieves. Strato evaluates policy. Ozone verifies evidence and proposes gated repairs. Exo projects claims, dependencies, and handoffs. `create-vivary` creates and adopts workspaces. The optional MCP and semantic-memory adapters are outside the default package path. The `vivary` front door routes ten verbs to their package owners. The Workbench bundles this Python runtime and calls its established commands rather than reimplementing their decisions. See [the command reference](COMMANDS.md) and [package manifests](../packages).
@@ -244,6 +267,26 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+Issue #188, round 3 experiment 2. The local Code host now reuses parsed run
+records and transcripts only while their on-disk identities match. The shared,
+bounded Workbench cache wraps Core's exported readers; it does not create a
+second persistent store or change clients, polling, response shapes, admission,
+execution or host controls. The legacy draft-ID memo now checks transcript
+identity, retains only a small entry per stored run and prunes deleted records,
+so transcript-only changes and store-root changes cannot leave it stale. Round 2
+review caught full-transcript cache thrashing in unmatched draft lookups; a
+1,000-run legacy fixture verifies zero transcript reads/parses on the second
+lookup and refreshes only the changed transcript, without growing that cache.
+Reviewed Core's record/transcript parsers
+and atomic writer, local Code ownership and discovery ordering, and deterministic
+tests covering a 1,000-run cold/warm poll, in-place edits with preserved size and
+mtime, replacements during reads, directory membership, transcript changes,
+scope isolation, byte-identical response assembly and bounded eviction. Existing
+state snapshot tests retain coverage for runs and runtime readiness changing
+during discovery. Experiment 1 remains intact. Browser latency, renderer memory
+and Windows/macOS filesystem behavior await coordinator validation; zero warm
+content reads alone does not establish conversation-switch independence.
 
 Issue #188, round 3 experiment 1. The maintained Native Core patch now shares a
 bounded Intl formatter cache between message timestamps and locale `formatDate`,
