@@ -31,8 +31,8 @@ CANONICAL_REVIEW_WORKFLOW = """name: review gate
 # The required review gate runs only for pull requests, so pushes to long-lived
 # branches never publish its check. It runs the gate script from the pull request's
 # base commit, so edits to that script take effect only after review and merge.
-# When the base has no gate script yet, it runs the script from the commit pinned
-# below, never from the pull request.
+# Only while the base has no gate script does it fetch and run the script from the
+# commit pinned below, never from the pull request.
 # A pull request can still edit this workflow file, so .github changes need owner review.
 on:
   pull_request:
@@ -58,7 +58,16 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
           persist-credentials: false
-      - uses: actions/checkout@v7.0.1
+      - name: find the base commit's gate script
+        id: base
+        run: |
+          if [ -f base/scripts/check_review_gate.py ]; then
+            echo "missing=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "missing=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.base.outputs.missing == 'true'
+        uses: actions/checkout@v7.0.1
         with:
           ref: fb04377ef737a5b7eea4ac7c3031bd34f47e1339
           path: bootstrap

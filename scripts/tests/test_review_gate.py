@@ -226,7 +226,7 @@ class ReviewGate(unittest.TestCase):
 
     def test_bootstrap_runs_only_when_the_base_has_no_gate_script(self):
         real = (Path(__file__).resolve().parents[2] / ".github/workflows/review-gate.yml").read_text(encoding="utf-8")
-        script = real.split("run: |\n", 1)[1]
+        script = real.rsplit("run: |\n", 1)[1]
         script = "\n".join(line[10:] for line in script.splitlines())
         for base_has_script, expected in ((True, "base/scripts"), (False, "bootstrap/scripts")):
             with tempfile.TemporaryDirectory() as root:
@@ -242,9 +242,23 @@ class ReviewGate(unittest.TestCase):
                 self.assertIn("'--wait-seconds', '2400'", result.stdout)
                 self.assertEqual("pinned bootstrap" in result.stdout, not base_has_script)
 
+    def test_bootstrap_checkout_runs_only_when_the_base_lacks_the_script(self):
+        real = (Path(__file__).resolve().parents[2] / ".github/workflows/review-gate.yml").read_text(encoding="utf-8")
+        probe = real.split("      - name: find the base commit's gate script\n", 1)[1].split("run: |\n", 1)[1]
+        probe = "\n".join(line[10:] for line in probe.split("      - if:", 1)[0].splitlines())
+        for base_has_script, expected in ((True, "missing=false"), (False, "missing=true")):
+            with tempfile.TemporaryDirectory() as root:
+                Path(root, "base", "scripts").mkdir(parents=True)
+                if base_has_script:
+                    Path(root, "base", "scripts", "check_review_gate.py").write_text("")
+                output = Path(root, "out")
+                result = subprocess.run(["bash", "-e", "-c", probe], cwd=root, env={"GITHUB_OUTPUT": str(output)})
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(output.read_text().strip(), expected)
+
     def test_bootstrap_failure_fails_the_step(self):
         real = (Path(__file__).resolve().parents[2] / ".github/workflows/review-gate.yml").read_text(encoding="utf-8")
-        script = "\n".join(line[10:] for line in real.split("run: |\n", 1)[1].splitlines())
+        script = "\n".join(line[10:] for line in real.rsplit("run: |\n", 1)[1].splitlines())
         with tempfile.TemporaryDirectory() as root:
             Path(root, "bootstrap", "scripts").mkdir(parents=True)
             Path(root, "bootstrap", "scripts", "check_review_gate.py").write_text("raise SystemExit(1)\n")
@@ -257,6 +271,7 @@ class ReviewGate(unittest.TestCase):
         real = (Path(__file__).resolve().parents[2] / ".github/workflows/review-gate.yml").read_text(encoding="utf-8")
         contract.check_review_workflow(real)
         BOOTSTRAP = re.search(r"ref: ([0-9a-f]{40})\n", real).group(1)
+        self.assertIn("      - if: steps.base.outputs.missing == 'true'\n        uses: actions/checkout@v7.0.1\n        with:\n          ref: " + BOOTSTRAP, real)
         weakened = {
             "push": real.replace("on:\n  pull_request:\n", "on:\n  push:\n  pull_request:\n"),
             "dispatch": real + "  workflow_dispatch:\n",
@@ -270,6 +285,8 @@ class ReviewGate(unittest.TestCase):
             "head checkout": real.replace("persist-credentials: false", "persist-credentials: true"),
             "bootstrap from head": real.replace("ref: " + BOOTSTRAP, "ref: ${{ github.event.pull_request.head.sha }}"),
             "bootstrap branch": real.replace("ref: " + BOOTSTRAP, "ref: dev"),
+            "unconditional bootstrap": real.replace("      - if: steps.base.outputs.missing == 'true'\n        uses:", "      - uses:"),
+            "always missing": real.replace('echo "missing=false"', 'echo "missing=true"'),
             "head script": real.replace("gate=bootstrap/scripts/check_review_gate.py", "gate=scripts/check_review_gate.py"),
             "no concurrency": real.replace("concurrency:\n", "noconcurrency:\n"),
         }
