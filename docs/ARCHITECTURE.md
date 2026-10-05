@@ -245,6 +245,14 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Issue #11 second reintroduction, PR #194 Unicode excerpt fix. Client highlights
+and server excerpt windows now share a mapping from lowercase match positions
+to original code-point offsets. Ambiguous contextual matches stay unhighlighted,
+and excerpt cuts preserve surrogate pairs. Fail-before regressions cover expanding
+lowercase characters, astral characters, contextual lowering and repeated ASCII
+matches. Runtime flow 6 remains accurate; admission, pagination, budgets, ownership
+checks and replay behavior are unchanged.
+
 Issue #11 second reintroduction, PR #194 match-visit fix. Native replay status now
 belongs to a visit, with a synchronous reset and render guard on navigation.
 Returning to an earlier match waits for that visit's archive read before enabling

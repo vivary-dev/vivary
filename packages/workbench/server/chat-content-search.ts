@@ -7,6 +7,7 @@ import { listThreads } from "@agent-native/core/server";
 import { codeAgentRunsDir, type CodeAgentRunRecord } from "@agent-native/core/code-agents";
 import type { VivaryChatIdentity } from "../app/lib/chat-scope";
 import type { ChatSearchHit, ChatSearchInput, ChatSearchPage } from "../app/lib/chat-search-schema";
+import { lowercaseMatches } from "../app/lib/chat-search-matches";
 import { isOwnedRun, type VivaryCodeReadScope } from "./local-code-agent";
 import { readCodeTranscriptPage, TRANSCRIPT_PAGE_BYTES } from "./code-transcript-page";
 import { createVivaryChatIdentity } from "./chat-identity";
@@ -46,10 +47,15 @@ const initialPosition = (): Position => {
     active: false, message: 0, offset: 0, discardLine: false, titleDone: false };
 };
 function excerpt(text: string, query: string): string {
-  const index = text.toLowerCase().indexOf(query.toLowerCase());
-  const start = Math.max(0, index - 70);
-  const slice = text.slice(start, start + 234).replace(/\s+/g, " ");
-  return `${start ? "…" : ""}${slice}${start + 234 < text.length ? "…" : ""}`;
+  const match = lowercaseMatches(text, query).next();
+  const index = match.done ? -1 : match.value.start;
+  let start = Math.max(0, index - 70);
+  // Move cuts before a surrogate pair so the excerpt retains whole code points.
+  if (start > 0 && text.codePointAt(start - 1)! > 0xffff) start--;
+  let end = Math.min(text.length, start + 234);
+  if (end > 0 && end < text.length && text.codePointAt(end - 1)! > 0xffff) end--;
+  const slice = text.slice(start, end).replace(/\s+/g, " ");
+  return `${start ? "…" : ""}${slice}${end < text.length ? "…" : ""}`;
 }
 function messageText(message: { content?: unknown }): string {
   if (typeof message.content === "string") return message.content;

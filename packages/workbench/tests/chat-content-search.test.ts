@@ -206,6 +206,24 @@ test("scope and owner checks precede content; duplicate titles retain exact old 
     after = page.continueAfter;
   }
 });
+for (const [name, text] of [
+  ["expanding lowercase prefix", "İ".repeat(250) + " 🧪 mappedneedle tail"],
+  ["leading surrogate boundary", "x".repeat(99) + "🧪" + "x".repeat(69) + "mappedneedle tail"],
+  ["trailing surrogate boundary", "x".repeat(70) + "mappedneedle" + "x".repeat(151) + "🧪 tail"],
+]) test(`Unicode excerpt windows preserve matches and characters (${name})`, async t => {
+  const projectId = `unicode-excerpt-${name.replaceAll(" ", "-")}`;
+  const target = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId, label: "Unicode excerpt" });
+  const id = projectId;
+  t.after(async () => { await getDbExec().execute({ sql: "DELETE FROM chat_threads WHERE id=?", args: [id] }); });
+  await native(id, text, { scope: target.scope });
+  const { searchChatContent } = await import("../server/chat-content-search.ts");
+  const page = await searchChatContent({ ownerEmail: owner, orgId, identity: target, codeScope: { ...scope, projectId } },
+    { projectId, query: "mappedneedle", unassigned: false, includeArchived: false });
+  assert.equal(page.results.length, 1);
+  assert.ok(page.results[0].excerpt.includes("mappedneedle"), "the mapped excerpt window must retain the whole match");
+  assert.equal(page.results[0].excerpt.isWellFormed(), true, "excerpt boundaries must not split surrogate pairs");
+  assert.ok(page.results[0].excerpt.length <= 240);
+});
 test("retained Code matches beyond twenty runs and four hundred events open an anchored transcript page", async () => {
   const hit = (await all()).find(hit => hit.runtime === "code")!;
   assert.equal(hit.sessionId, "run-000");

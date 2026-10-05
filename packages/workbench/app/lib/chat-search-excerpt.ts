@@ -1,14 +1,15 @@
 import { createElement, type ReactNode } from "react";
+import { lowercaseMatches } from "./chat-search-matches";
 
 /** Literal, case-insensitive highlighting. React escapes every text fragment, including markup. */
 export function highlightedExcerpt(text: string, query: string): ReactNode[] {
   if (!query) return [text];
-  const lower = text.toLowerCase(), term = query.toLowerCase();
   const nodes: ReactNode[] = [];
-  let start = 0, index: number;
-  while ((index = lower.indexOf(term, start)) !== -1) {
-    nodes.push(text.slice(start, index), createElement("mark", { key: index }, text.slice(index, index + term.length)));
-    start = index + term.length;
+  let start = 0;
+  for (const match of lowercaseMatches(text, query)) {
+    if (!match.highlightable) continue;
+    nodes.push(text.slice(start, match.start), createElement("mark", { key: match.start }, text.slice(match.start, match.end)));
+    start = match.end;
   }
   nodes.push(text.slice(start)); return nodes;
 }

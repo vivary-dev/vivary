@@ -48,3 +48,17 @@ test("excerpt terms produce literal safe marks and human dates", () => {
   assert.equal(chatMatchTime("2026-01-01T00:00:00Z", undefined, Date.parse("2026-01-02T00:00:00Z")).label, "yesterday");
   assert.equal(chatMatchTime().label, "Saved conversation");
 });
+
+for (const [name, text, query, expected] of [
+  ["expanding lowercase prefix", "İİ needle", "needle", "İİ <mark>needle</mark>"],
+  ["expanding prefix and astral emoji", "İİİ 🧪 needle after", "needle", "İİİ 🧪 <mark>needle</mark> after"],
+  ["ASCII repeated matches", "Needle then needle.", "needle", "<mark>Needle</mark> then <mark>needle</mark>."],
+  ["astral repeated matches", "İİİ 🧪🧪", "🧪", "İİİ <mark>🧪</mark><mark>🧪</mark>"],
+  ["partial surrogate is not highlighted", "🧪", "\ud83e", "🧪"],
+  ["context-dependent final sigma stays unmarked", "ΟΣ", "ς", "ΟΣ"],
+  ["context-dependent lowering outside the match", "ΟΣ İİ needle", "needle", "ΟΣ İİ <mark>needle</mark>"],
+]) test(`Unicode highlighting preserves original characters (${name})`, () => {
+  const html = renderToStaticMarkup(createElement("span", null, highlightedExcerpt(text, query)));
+  assert.equal(html, `<span>${expected}</span>`);
+  assert.equal(html.isWellFormed(), true, "marks must not split surrogate pairs");
+});
