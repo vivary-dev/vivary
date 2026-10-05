@@ -79,7 +79,11 @@ def review_status(comments: list[dict], head_sha: str, base_changed_at: str | No
             return False, f"Codex {name} for {head_sha[:7]} is not complete ({status})"
         # Retargeting a pull request changes what was reviewed without changing the head.
         done = COMPLETED_AT.search(row.group("status"))
-        if base_changed_at and (not done or _instant(done.group(1)) < _instant(base_changed_at)):
+        try:
+            stale = bool(base_changed_at) and (not done or _instant(done.group(1)) < _instant(base_changed_at))
+        except ValueError:
+            return STALE, f"Codex {name} has an unreadable completion time; comment \"@codex review\""
+        if stale:
             return STALE, f"Codex {name} finished before the base branch changed at {base_changed_at}; comment \"@codex review\""
     marker = STATE_MARKER.search(body)
     if marker and "Security Review" not in rows:

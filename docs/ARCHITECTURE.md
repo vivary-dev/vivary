@@ -244,6 +244,8 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+The required review gate workflow is pinned to exact canonical text by the CI workflow contract, so an added step, job, trigger or condition fails CI; it cancels superseded runs per pull request and fails closed on an unreadable review time. `.github/CODEOWNERS` assigns `.github/` and the gate scripts to the owner; with branch protection requiring code-owner review, a pull request that edits the gate workflow needs the owner's review. No runtime change.
+
 Review gate hardening after its own Codex review. The gate moved to `.github/workflows/review-gate.yml`, which runs only for pull requests (so pushes never publish the check) and checks out the gate script from the pull request's base commit, so a pull request's edits to the script take effect only after review and merge. Because a pull request can still edit workflow files, owner review of `.github/` changes remains necessary. The gate re-runs on base edits and treats a review that finished before the latest base change as stale, and transient errors while reading the pull request are retried. On its own pull request the Codex review completed and the gate then reported BLOCKED on the unresolved findings, which is the rejection this change was built to make. No runtime component changed.
 
 The CI workflow contract also pins the condition of the review gate's dispatched-head check, so disabling that check fails the contract. No runtime change.

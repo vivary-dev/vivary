@@ -1,12 +1,16 @@
 name: review gate
 
 # The required review gate runs only for pull requests, so pushes to long-lived
-# branches never publish its check. It checks out and runs the gate script from the
-# pull request's base commit: a pull request's own edits to the gate do not take
-# effect until they are reviewed and merged. It never runs pull request code.
+# branches never publish its check. It runs the gate script from the pull request's
+# base commit, so edits to that script take effect only after review and merge.
+# A pull request can still edit this workflow file, so .github changes need owner review.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, edited]
+
+concurrency:
+  group: review-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

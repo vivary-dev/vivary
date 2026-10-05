@@ -24,23 +24,55 @@ def require(condition: bool, message: str) -> None:
         raise SystemExit(f"{WORKFLOW}: {message}")
 
 
+# The required review gate workflow must match this text exactly, so no extra step, job,
+# trigger or condition can weaken it unnoticed. Change both together, with owner review.
+CANONICAL_REVIEW_WORKFLOW = """name: review gate
+
+# The required review gate runs only for pull requests, so pushes to long-lived
+# branches never publish its check. It runs the gate script from the pull request's
+# base commit, so edits to that script take effect only after review and merge.
+# A pull request can still edit this workflow file, so .github changes need owner review.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+concurrency:
+  group: review-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  review-gate:
+    name: required review gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: wait for completed reviews and resolved threads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/check_review_gate.py --wait-seconds 2400 --interval 30
+"""
+
+
 def check_review_workflow(text: str) -> None:
-    """The required review gate: pull requests only, base-revision script, real wait."""
-    def need(condition: bool, message: str) -> None:
-        if not condition:
-            raise SystemExit(f"{REVIEW_WORKFLOW}: {message}")
-    need("on:\n  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review, edited]\n" in text,
-         "must run only for pull requests, including ready-for-review and base edits")
-    for trigger in ("push:", "workflow_dispatch", "pull_request_target", "schedule:"):
-        need(trigger not in text, f"must not run on {trigger.rstrip(':')} (it would publish the check outside a pull request)")
-    need("    name: required review gate\n" in text, "must publish the check named `required review gate`")
-    need("ref: ${{ github.event.pull_request.base.sha }}" in text and "persist-credentials: false" in text,
-         "must run the gate script from the pull request's base commit")
-    need("run: python scripts/check_review_gate.py --wait-seconds 2400 --interval 30\n" in text,
-         "must wait for the Codex review of the exact head commit")
-    need("HEAD_SHA: ${{ github.event.pull_request.head.sha }}" in text, "must check the pull request head")
-    need("continue-on-error" not in text and "|| true" not in text, "gate failures must fail the check")
-    need(re.search(r"(?m)^\s*(-\s+)?if:", text) is None, "the gate must not be conditional")
+    """The required review gate workflow is exactly the reviewed canonical text."""
+    if text != CANONICAL_REVIEW_WORKFLOW:
+        raise SystemExit(f"{REVIEW_WORKFLOW}: must match the canonical required review gate workflow "
+                         "in scripts/check_ci_workflow.py (pull requests only, base-revision script, real wait)")
 
 
 def job_block(text: str, name: str) -> str:

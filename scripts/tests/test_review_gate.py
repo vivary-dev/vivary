@@ -164,10 +164,23 @@ class ReviewGate(unittest.TestCase):
             "conditional": real.replace("      - name: wait for completed reviews", "      - if: false\n        name: wait for completed reviews"),
             "renamed": real.replace("name: required review gate", "name: review gate (optional)"),
             "no edited": real.replace(", edited]", "]"),
+            "extra step": real.replace("      - uses: actions/setup-python@v7\n", "      - run: echo exit 0 > scripts/check_review_gate.py\n      - uses: actions/setup-python@v7\n"),
+            "head checkout": real.replace("persist-credentials: false", "persist-credentials: true"),
+            "no concurrency": real.replace("concurrency:\n", "noconcurrency:\n"),
         }
         for label, text in weakened.items():
             with self.assertRaises(SystemExit, msg=label):
                 contract.check_review_workflow(text)
+
+    def test_unreadable_completion_time_fails_closed(self):
+        for value, expected in (("not-a-time", "finished before the base branch changed"),
+                                ("2026-13-45T99:99:99Z", "unreadable completion time")):
+            bad = summary("Completed", HEAD, "Completed")
+            bad["body"] = bad["body"].replace('datetime="2026-10-05T17:08:39Z"', f'datetime="{value}"')
+            ready, pending, messages = gate.evaluate([bad], [], HEAD, "2026-10-05T17:00:00Z")
+            self.assertFalse(ready, value)
+            self.assertFalse(pending, value)
+            self.assertIn(expected, messages[0])
 
     def test_completed_review_with_resolved_threads_is_ready(self):
         ready, pending, _ = gate.evaluate([summary("Completed", HEAD, "Completed")], [thread(True)], HEAD)
