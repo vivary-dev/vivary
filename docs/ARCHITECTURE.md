@@ -247,6 +247,18 @@ No documentation route reads arbitrary host files.
 
 Issue #11 adds retained content search and exact-message replay. The final review fixes synchronous per-message Native JSON traversal, foreign Code runs consuming the session cap, missing Personal workspace fallback, malformed/partial records, recency ordering and retry cursors. Focused tests cover one parse of a >4 MiB thread per page, foreign owner/org/project exclusion, Native-only Unassigned, old messages/runs/events, context/deduplication and full Native branch paths. Client tests cover bounded automatic continuation, cancellation, retry at the failed cursor and safely rendered excerpt marks. The GUI adds human time context, theme-aware focus/marking, scroll settling and hiding the ordinary list during search. Core exposes no standalone replay persistence opt-out; its public cleanup API removes the transient Native import on exit. The runtime flow and trust boundary above reflect these changes; authoritative stores, read-only actions, scope admission and default history windows remain intact. The coordinator's earlier build/typecheck and regressions passed outside the sandbox; this round's revised build, real-app HTTP and desktop/390 px acceptance remain with the coordinator.
 
+Contributor working style in `AGENTS.md`. A new "How we work" section records Jeff's
+2026-10-05 direction: own the outcome, ask at real forks, explore boldly and ship
+narrowly, self-correct, prove improvements against a measured baseline, keep
+benchmarks as both experiment metrics and ratcheting CI budgets, shorten the
+development loop itself, check the execution environment before expensive work, and fix what a person would notice in
+the built app. A model-roles bullet names Sol for implementation and Opus 5.5 for
+coordination and independent review; the integration's own model calls keep GPT-6
+Astra. This changes how agents plan and report work, not any runtime component,
+contract, data flow, or trust boundary, so the architecture described here still
+holds. Checked by reading the changed sections against ENGINEERING.md and the
+Delivery and authority gates, which remain unchanged.
+
 Windows Code cleanup/status source closeout. The
 [2026-10-04 receipt](product/multi-project/receipts/windows-code-cleanup-status-source-2026-10-04.md)
 records distinct VPS executions of the scanner/refusal and awaited-discovery

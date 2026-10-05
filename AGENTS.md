@@ -28,6 +28,49 @@ and original Vivary contracts. Reuse Native execution and connectors.
 Read [ENGINEERING.md](ENGINEERING.md). It is the governing engineering policy.
 Older packet and runtime instructions cannot restore heavier process defaults.
 
+## How we work
+
+Jeff set this working style on 2026-10-05. It operates inside ENGINEERING.md and
+the external-action gates in Delivery and authority.
+
+- **Own the outcome.** Carry a chosen issue from understanding to a tested,
+  reviewed PR that Jeff can inspect, merge, or return with requested changes, then
+  through his review to closure. Make routine technical decisions yourself and
+  record the reason where reviewers will see it.
+- **Ask at real forks.** Bring Jeff a concise choice when scope changes
+  materially, a risk is consequential or hard to reverse, or a trade-off needs his
+  product judgment. Otherwise decide and keep moving.
+- **Explore boldly, ship narrowly.** Unusual ideas are welcome when they could make
+  Vivary clearly better. Prototype cheaply, keep what earns its place, and split
+  what must ship now from follow-ups so discovery helps finish the release.
+- **Self-correct.** Treat a failed check, a review finding, or a surprising
+  measurement as information. Find the root cause, fix it, rerun the affected
+  check, and state plainly what was wrong and what changed.
+- **Prove improvement with measurements.** Before claiming an improvement, record
+  a reproducible baseline proportionate to the claim. For performance, measure what
+  users feel under realistic conditions: cold and warm runs, small and large data,
+  sample counts, and observed noise. Change one thing, compare against the same
+  baseline, and keep or revert on that evidence. Report real numbers, including
+  regressions.
+- **Keep benchmarks honest.** A kept benchmark both guides experiments and guards
+  the win in CI. Set its budget from measured noise, and ratchet a latency budget
+  down each time an improvement is proven. Repair or retire a benchmark that is
+  flaky or does not track the user outcome it stands for. Fix the regression
+  rather than loosening the budget or weakening the test.
+- **Shorten our own loop.** Judge development the same way: time to a working
+  result, time blocked, repeated work, and review-to-fix turnaround, estimated from
+  existing session, PR, and CI timestamps rather than new tracking. Prefer fewer
+  handoffs, early environment checks, focused experiments, and reusable evidence,
+  and fix the largest bottleneck instead of adding process.
+- **Check the environment first.** Before the first install, build, or heavy run
+  in a new execution context, verify the runtime, package manager, installed
+  dependencies, and sandbox limits there. Fix setup before expensive work starts.
+- **Feel it in the product.** Fix what a person would notice in the built app even
+  when tests pass.
+- **Model roles.** GPT-6.1 Sol at xhigh reasoning effort implements. Claude Opus 5.5
+  coordinates and performs independent reviews in separate subagents or sessions
+  that do not edit the change.
+
 ## Working practices: Zo, CI, and clean checkpoints
 
 Jeff confirmed these practices on 2026-09-16. They apply to this repository.
@@ -55,8 +98,9 @@ Jeff confirmed these practices on 2026-09-16. They apply to this repository.
   fixtures, and evidence. Make source fixes on Zo and rebuild there.
 - Use the existing supported coding runtime's subscription, tools, skills, and
   configured connections. Do not assemble a duplicate tool system in Vivary.
-  Use GPT-6 Astra for this integration's model calls and delegated reviews unless
-  Jeff explicitly changes that choice. OpenCode remains a separate integration.
+  Use GPT-6 Astra for this integration's own model calls unless Jeff explicitly
+  changes that choice. Agent roles are in How we work. OpenCode remains a separate
+  integration.
 - Carry an authorized slice through implementation, review, fixes, automated
   checks, and affected real UI testing. Routine reversible work needs no new
   phase confirmation. Do not merge or publish merely because tests pass.
