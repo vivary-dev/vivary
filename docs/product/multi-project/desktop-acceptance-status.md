@@ -721,6 +721,13 @@ The fixes after the packaged check ran on Zo only; `e50ae89c` is not final-head 
 
 ## Capability and acceptance gaps
 
+The Windows Code cleanup/status follow-up at `e240f31` has a
+[source-verification receipt](receipts/windows-code-cleanup-status-source-2026-10-04.md)
+with fresh Linux VPS test results. The historical packaged scanner failure
+was not reproduced and its cause remains unknown. Replacement-package identity
+and transfer, real desktop cleanup, Stop, and restart remain pending laptop
+acceptance; this source result does not extend the packaged evidence below.
+
 | Area | Verified now | Still required |
 | --- | --- | --- |
 | Code conversations | Windows `2f4a5df` file work, session continuity, MCP call, real subagent card, 125.19-second command, native Allow/Decline, active-command Stop, and shutdown | Linked conversations, and broader cross-runtime work under [issue #38](https://github.com/vivary-dev/Vivary-New/issues/38) |

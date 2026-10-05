@@ -359,6 +359,11 @@ test("a Windows target refuses by name, lifts once the scan misses it, and falls
       + "claude, or node processes from that run and end them, then choose Continue anyway.");
     assert.equal(unscanned.cleanup?.canEnd, false);
     assert.equal((metadataOf("windows-unscanned").cleanupRefusal as { scan?: string }).scan, "unavailable");
+    assert.equal((metadataOf("windows-unscanned").cleanupRefusal as { scanFailure?: string }).scanFailure, "command-failed");
+    await agent.recheckVivaryCodeCleanup();
+    assert.equal((metadataOf("windows-unscanned").cleanupRefusal as { scanFailure?: string }).scanFailure,
+      "command-failed", "a recheck reparses the stored refusal and keeps refusing with its category");
+
     assert.equal((await continueAnyway()).cleanup, null);
     const lift = metadataOf("windows-unscanned").cleanupLifted as Record<string, unknown>;
     assert.equal(lift.how, "owner-confirmed");
@@ -379,6 +384,8 @@ test("a Windows scan whose rows lack creation times, as under Constrained Langua
     await agent.recheckVivaryCodeCleanup();
     assert.equal("cleanupLifted" in metadataOf("windows-untimed"), false, "a scan it cannot trust lifts nothing");
     assert.equal((metadataOf("windows-untimed").cleanupRefusal as { scan?: string }).scan, "unavailable");
+    assert.equal((metadataOf("windows-untimed").cleanupRefusal as { scanFailure?: string }).scanFailure, "invalid-output");
+
     assert.equal((await agent.getVivaryCodeHostState(OWNER)).cleanup?.heading,
       "Vivary could not confirm that an earlier run's coding processes stopped");
   } finally {

@@ -23,6 +23,7 @@ import { getCodexModels, type CodexModelCatalog } from "./codex-models";
 import { projectReconnectionPending } from "./project-reconnection-admission.mjs";
 
 import {
+  WINDOWS_SCAN_FAILURES, type WindowsScanFailure,
   BOOT_ID_PATTERN, checkWorkerCleanup, endWorkerLeftovers, executeVivaryCodeWorker, isTraced, VivaryCodeWorkerCleanupError,
   type CleanupCheck, type CleanupFailure, type CleanupTarget, type EndAttempt, type EndOutcome, type LeftoverProcess,
 } from "./code-execution-host";
@@ -197,6 +198,7 @@ export type CleanupRefusal = {
   hidden: boolean;
   /** Whether the last check could scan. `not-recorded` is a marker that never had a target. */
   scan: CleanupScan;
+  scanFailure?: WindowsScanFailure;
   step: CleanupFailure["step"] | null;
   refusedAt: string;
   checkedAt: string;
@@ -236,6 +238,7 @@ const storedCleanupRefusalSchema = z.object({
   fingerprint: z.string().regex(/^[0-9a-f]{64}$/).nullable().default(null),
   hidden: z.boolean(),
   scan: z.enum(["done", "unavailable", "not-recorded"]),
+  scanFailure: z.enum(WINDOWS_SCAN_FAILURES).optional(),
   step: z.enum(["taskkill", "exit", "group", "worker-exited"]).nullable(),
   refusedAt: z.string(),
   checkedAt: z.string(),
@@ -503,14 +506,14 @@ function cleanupRefusalFromRun(run: CodeAgentRunRecord): CleanupRefusal | null {
 }
 
 function storedCleanupRefusal(refusal: CleanupRefusal): Omit<CleanupRefusal, "runId"> {
-  const { target, remaining, total, fingerprint, hidden, scan, step, refusedAt, checkedAt, ends } = refusal;
-  return { target, remaining, total, fingerprint, hidden, scan, step, refusedAt, checkedAt, ends };
+  const { target, remaining, total, fingerprint, hidden, scan, scanFailure, step, refusedAt, checkedAt, ends } = refusal;
+  return { target, remaining, total, fingerprint, hidden, scan, ...(scanFailure ? { scanFailure } : {}), step, refusedAt, checkedAt, ends };
 }
 
 /** What a refusal records from a check that found processes. It lists at most `MAX_CLEANUP_LISTED` and counts them all. */
 function listedFromCheck(check: Extract<CleanupCheck, { result: "remaining" }>) {
   return { target: check.target, remaining: check.remaining.slice(0, MAX_CLEANUP_LISTED), total: check.remaining.length,
-    fingerprint: leftoverFingerprint(check.remaining, check.hidden), hidden: check.hidden, scan: "done" as const };
+    fingerprint: leftoverFingerprint(check.remaining, check.hidden), hidden: check.hidden, scan: "done" as const, scanFailure: undefined };
 }
 
 /** Records one check of a refusal. A check keeps the run's place in history, and only a lift adds to its transcript. */
@@ -521,7 +524,7 @@ function recordCleanupCheck(refusal: CleanupRefusal, check: CleanupCheck): void 
     return;
   }
   writeCleanupRefusal(check.result === "remaining" ? { ...refusal, ...listedFromCheck(check), checkedAt }
-    : { ...refusal, scan: "unavailable", checkedAt });
+    : { ...refusal, scan: "unavailable", scanFailure: check.reason, checkedAt });
 }
 
 /**
@@ -588,7 +591,7 @@ function cleanupRefusalFromFailedStop(runId: string, error: VivaryCodeWorkerClea
   const common = { runId, step: error.cause?.step ?? null, refusedAt: refusedAt ?? now, checkedAt: now, ends: [] };
   return check?.result === "remaining" ? { ...common, ...listedFromCheck(check) }
     : { ...common, target: error.leftovers?.target ?? null, remaining: [], total: 0, fingerprint: null, hidden: false,
-      scan: "unavailable" };
+      scan: "unavailable", ...(check?.reason ? { scanFailure: check.reason } : {}) };
 }
 
 function cleanupPlatform(refusal: CleanupRefusal): "linux" | "win32" {
@@ -794,6 +797,10 @@ export async function getVivaryCodeHostState(
   orgId?: string,
 ): Promise<VivaryCodeHostState> {
   await ensureVivaryCodeHostInitialized();
+  return readVivaryCodeHostState(ownerEmail, orgId);
+}
+
+function readVivaryCodeHostState(ownerEmail: string, orgId?: string): VivaryCodeHostState {
   const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID);
   const owned = runs.filter(run => isOwnedIdentity(run, ownerEmail, orgId));
   const active = owned.find(run => activeRuns.has(run.id));
@@ -855,8 +862,8 @@ export async function getVivaryCodeState(
 ): Promise<VivaryCodeState> {
   const workspace = selectedWorkspace ?? await resolveWorkspace();
   await ensureVivaryCodeHostInitialized();
-  const runs = ownedRuns(ownerEmail, orgId, workspace);
-  const selected = runId
+  let runs = ownedRuns(ownerEmail, orgId, workspace);
+  let selected = runId
     ? requireOwnedRun(runId, ownerEmail, orgId, workspace)
     : runs[0] ?? null;
 
@@ -867,23 +874,44 @@ export async function getVivaryCodeState(
       ? await getCodexModels(discoveryRoot) : null;
     const models = engine === "claude-cli" ? [...VIVARY_CODE_MODELS]
       : modelCatalog?.status === "ready" ? modelCatalog.models.map(model => model.id) : [];
-    if (selected && engine === "codex-cli" && engineFromRun(selected) === engine && !models.includes(modelFromRun(selected))) {
-      models.push(modelFromRun(selected));
-    }
     return { engine, label: engine === "claude-cli" ? "Claude Code" : "Codex", models, modelCatalog,
       configured: runtime.status === "ready" && (engine !== "codex-cli" || modelCatalog?.status === "ready"), runtime };
   }));
-  const selectedEngine = selected ? engineFromRun(selected) : VIVARY_CODE_DEFAULT_ENGINE;
-  const runtime = await getVivaryRuntimeStatus(selectedEngine);
+
+  const permissionMode = await getCodePermissionMode(ownerEmail, orgId);
+  let selectedEngine: VivaryCodeEngine;
+  let runtime: VivaryRuntimeStatus;
+  do {
+    runs = ownedRuns(ownerEmail, orgId, workspace);
+    selected = runId ? requireOwnedRun(runId, ownerEmail, orgId, workspace) : runs[0] ?? null;
+    selectedEngine = selected ? engineFromRun(selected) : VIVARY_CODE_DEFAULT_ENGINE;
+    // Discovery may outlast the runtime-status cache. Probe again before taking the final snapshot.
+    runtime = await getVivaryRuntimeStatus(selectedEngine);
+    runs = ownedRuns(ownerEmail, orgId, workspace);
+    selected = runId ? requireOwnedRun(runId, ownerEmail, orgId, workspace) : runs[0] ?? null;
+    // A newer default conversation can select another engine while its predecessor's probe awaits.
+  } while ((selected ? engineFromRun(selected) : VIVARY_CODE_DEFAULT_ENGINE) !== selectedEngine);
+  // No awaits separate run status, transcript and host activity in the returned snapshot.
+  const host = readVivaryCodeHostState(ownerEmail, orgId);
+  const selectedRuntime = engines.find(engine => engine.engine === selectedEngine);
+  if (!selectedRuntime) fail("Choose an available coding runtime.", {
+    errorCode: "vivary_code_runtime_unavailable", statusCode: 503,
+  });
+  if (selected && selectedEngine === "codex-cli" && !selectedRuntime.models.includes(modelFromRun(selected))) {
+    selectedRuntime.models.push(modelFromRun(selected));
+  }
+  selectedRuntime.runtime = runtime;
+  selectedRuntime.configured = runtime.status === "ready"
+    && (selectedEngine !== "codex-cli" || selectedRuntime.modelCatalog?.status === "ready");
 
   return {
-    ...await getVivaryCodeHostState(ownerEmail, orgId),
+    ...host,
     projectId: workspace.projectId ?? null,
     workspaceLabel: workspace.label,
     defaultEngine: VIVARY_CODE_DEFAULT_ENGINE,
     engines,
     runtime,
-    permissionMode: await getCodePermissionMode(ownerEmail, orgId),
+    permissionMode,
     engineLabel: selected ? engineLabelFromRun(selected) : "Claude Code",
     models: VIVARY_CODE_MODELS,
     defaultModel: VIVARY_CODE_DEFAULT_MODEL,
