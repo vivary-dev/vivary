@@ -26,7 +26,7 @@ In-progress snapshot: none.
 | [03b: Execute the portable registry contract against a deterministic model](packets/03b-registry-contract-model.md) | 03 | done | [03a, 10c] |
 | [03c: Map registry transactions to native application seams](packets/03c-registry-transaction-mapping.md) | 03 | done | [03b] |
 | [04a: Bind every chat session to its project](packets/04a-project-chat-sessions.md) | 04 | done | [03c] |
-| [04b: Search the contents of project chat sessions](packets/04b-search-chat-content.md) | 04 | needs-info | [04a] |
+| [04b: Search the contents of project chat sessions](packets/04b-search-chat-content.md) | 04 | ready-for-human | [04a] |
 | [04c: Retain provider sessions outside project folders](packets/04c-native-provider-session-logs.md) | 04 | needs-info | [04a] |
 | [06f: Integrate the working Workbench into canonical Vivary](packets/06f-workbench-source-integration.md) | 06 | needs-info | [06g, 04a, 07d] |
 | [06g: Save project and conversation selections reliably](packets/06g-reliable-local-and-hosted-state.md) | 06 | done | [03c] |
