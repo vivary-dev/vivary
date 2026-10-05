@@ -1,5 +1,4 @@
 import { getCodePermissionMode, type CodePermissionMode } from "./code-permissions";
-import { readCodeTranscriptWindow } from "./code-transcript-page";
 import { codexApprovalResponse, supportsCodexRequest, type CodexApprovalDecision } from "./codex-approval";
 import type { CodexActionRequest } from "./code-execution-protocol";
 import { createHash } from "node:crypto";
@@ -102,8 +101,7 @@ export type VivaryCodeWorkspace = Readonly<{
   policyRevision?: number;
 }>;
 
-export type VivaryCodeReadScope = VivaryCodeProjectHistory | VivaryCodeWorkspace
-  | Readonly<{ kind: "unassigned"; label: string; projectId?: never }>;
+export type VivaryCodeReadScope = VivaryCodeProjectHistory | VivaryCodeWorkspace;
 
 export type VivaryCodePendingApproval = CodexActionRequest & {
   runId: string;
@@ -861,7 +859,6 @@ export async function getVivaryCodeState(
   selectedWorkspace?: VivaryCodeReadScope,
   orgId?: string,
   modelDiscoveryRoot?: string,
-  anchor?: { eventId: string; eventOffset: number },
 ): Promise<VivaryCodeState> {
   const workspace = selectedWorkspace ?? await resolveWorkspace();
   await ensureVivaryCodeHostInitialized();
@@ -907,13 +904,6 @@ export async function getVivaryCodeState(
   selectedRuntime.configured = runtime.status === "ready"
     && (selectedEngine !== "codex-cli" || selectedRuntime.modelCatalog?.status === "ready");
 
-  // A search link opens a retained page after the same ownership check as the default transcript.
-  // The stable ID checks the byte hint against edits or deletion; a stale link never opens a different event.
-  const anchored = selected && anchor ? await readCodeTranscriptWindow(selected.id, anchor.eventOffset, MAX_TRANSCRIPT_EVENTS) : null;
-  if (anchor && (!runId || anchored?.anchor?.id !== anchor.eventId)) {
-    fail("This matching event is no longer available. Search again.", { statusCode: 404 });
-  }
-
   return {
     ...host,
     projectId: workspace.projectId ?? null,
@@ -929,7 +919,7 @@ export async function getVivaryCodeState(
     run: selected
       ? {
           ...toRunSummary(selected),
-          events: anchored ? dedupeAdjacentAssistantEvents(anchored.entries.map(entry => entry.event), anchor?.eventId) : dedupeAdjacentAssistantEvents(
+          events: dedupeAdjacentAssistantEvents(
             listCodeAgentTranscriptEvents(selected.id),
           ).slice(-MAX_TRANSCRIPT_EVENTS),
         }
@@ -1328,7 +1318,7 @@ function isVivaryProjectHistoryRun(
     && metadataString(run, "bindingId") === project.bindingId;
 }
 
-export function isOwnedRun(
+function isOwnedRun(
   run: CodeAgentRunRecord,
   ownerEmail: string,
   orgId: string | undefined,
@@ -1336,9 +1326,7 @@ export function isOwnedRun(
 ): boolean {
   // Reconnection changes the local root epoch, not the saved conversation.
   // Approval still checks the newly staged workspace tuple with sameWorkspace.
-  const belongsToScope = "kind" in scope
-    ? false // Unassigned history is Native-only; project-less Code runs belong to Personal workspace.
-    : "root" in scope
+  const belongsToScope = "root" in scope
     ? scope.projectId && scope.bindingId
       ? run.cwd === scope.root
         && metadataString(run, "workspaceRoot") === scope.root
@@ -1591,7 +1579,6 @@ export function buildVivaryCodeFollowUpPrompt(
 
 function dedupeAdjacentAssistantEvents(
   events: CodeAgentTranscriptEvent[],
-  anchorId?: string,
 ): CodeAgentTranscriptEvent[] {
   const result: CodeAgentTranscriptEvent[] = [];
   for (const event of events) {
@@ -1604,7 +1591,7 @@ function dedupeAdjacentAssistantEvents(
       previous.metadata?.itemId === event.metadata?.itemId &&
       previous.message.trim() === event.message.trim()
     ) {
-      if (previous.id !== anchorId) result[result.length - 1] = event;
+      result[result.length - 1] = event;
       continue;
     }
     result.push(event);
@@ -1616,7 +1603,7 @@ function isAssistantEvent(event: CodeAgentTranscriptEvent): boolean {
   return event.kind === "system" && event.metadata?.role === "assistant";
 }
 
-export async function resolveWorkspace(): Promise<VivaryCodeWorkspace> {
+async function resolveWorkspace(): Promise<VivaryCodeWorkspace> {
   // guard:allow-env-credential - Deployment-level filesystem path for the private preview.
   const configured = process.env.VIVARY_LOCAL_AGENT_WORKSPACE?.trim();
   if (!configured || !path.isAbsolute(configured)) {

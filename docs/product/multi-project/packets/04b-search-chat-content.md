@@ -2,12 +2,12 @@
 Type: packet
 GitHub-issue: https://github.com/vivary-dev/Vivary-New/issues/11
 Parent: 04
-Status: ready-for-human
+Status: needs-info
 Depends-on: [04a]
 Owner: Root-assigned Workbench session-search integrator
 Scope: Search authorized Native chat and Code transcript content with source links and pagination.
 Verification-kind: runtime
-Needs: Coordinator rebuild, real-app HTTP rerun and final desktop/390 px GUI acceptance.
+Needs: 04a accepted with stable project/session references and the legacy-history placement defined.
 Timebox: One session-search increment with focused authorization and real-history checks.
 
 ## Goal
@@ -19,16 +19,16 @@ session in its owning project.
 
 Read [the desktop release target](../desktop-release.md),
 [ENGINEERING.md](../../../../ENGINEERING.md), and [Native owners](../native-owners.md).
-Vivary now scans owner-scoped Native messages and retained Code transcripts through
-`vivary-chat-search`, independently of the twenty-run list and 400-event display.
-Native records remain authoritative; this slice creates no derived index.
+Native's public chat hook already exposes searchThreads and loadMoreThreads.
+Code history currently filters titles from only twenty returned runs.
+Native records remain authoritative. A search index is derived and rebuildable.
 
 ## Owned files
 
-- Search and exact-match actions under `packages/workbench/actions/`, with bounded store readers under `server/`.
-- Shared search, replay and match-marking components in the existing history and conversation surfaces.
-- `packages/workbench/server/local-code-agent.ts` for authorized event-page reads; default windows stay unchanged.
-- Focused search/replay tests and `tests/chat-search-app.mjs` for the normal built-app HTTP check and GUI seed.
+- `packages/workbench/app/routes/agent.tsx`, `chat.tsx`, and 04a session navigation.
+- A focused session-search action and helper under `packages/workbench/actions/` and `server/`.
+- `packages/workbench/server/local-code-agent.ts` only for authorized history pagination.
+- Existing `chat-scope.test.ts` and `local-code-agent.test.ts`. Add focused search cases.
 
 ## Done condition
 
@@ -67,23 +67,6 @@ or bypass Native access rules. Do not require an embedding service for text sear
 ## Log
 
 - 2026-09-13: Drafted. Depends on accepted project-session bindings from 04a.
-- 2026-10-05: #6 is accepted. Implemented owner-scoped title/content search,
-  explicit archive/unassigned filters, bounded cursors, cancellation and exact
-  Native/Code replay beyond the ordinary history windows. Coordinator checks
-  outside the sandbox passed the build/typecheck, Code history (16/16) and Native
-  chat (96/96); the first GUI pass identified usability fixes.
-- 2026-10-05: Final review replaces per-message Native JSON traversal with one
-  capped parse per session page and admits Code scope before the session cap.
-  Search automatically continues with progress/Cancel, recent-first results,
-  human dates and safe excerpt marks; retries keep hits/cursors. Clear/Escape
-  restores the ordinary list. Match replay focuses a theme-visible mark, settles
-  scrolling, includes the complete Native path and surrounding deduplicated Code
-  context, and clears the transient Native browser import on exit. Malformed
-  repositories and partial transcript lines no longer block/lose history; Native
-  Personal results survive unavailable Code workspace. Focused socket-free
-  regressions and typecheck support this round. Coordinator rebuild, HTTP rerun
-  and final desktop/390 px GUI acceptance remain pending. No model calls, index,
-  project-folder transcript copies or additional dependencies.
 
 ## Shared desktop and web behavior
 
