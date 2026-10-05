@@ -1,5 +1,1 @@
-# The owner reviews changes to CI workflows and the required review gate, because a
-# pull request can edit workflow files that the gate itself cannot protect.
-/.github/ @Jeff-Kazzee
-/scripts/check_review_gate.py @Jeff-Kazzee
-/scripts/check_ci_workflow.py @Jeff-Kazzee
+* @Jeff-Kazzee
