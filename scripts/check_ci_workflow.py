@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 WORKFLOW = Path(".github/workflows/ci.yml")
+REVIEW_WORKFLOW = Path(".github/workflows/review-gate.yml")
 ARTIFACT_CHECKER = Path("scripts/check_release_artifacts.py")
 
 
@@ -21,6 +22,81 @@ def release_build_commands() -> tuple[str, ...]:
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise SystemExit(f"{WORKFLOW}: {message}")
+
+
+# The required review gate workflow must match this text exactly, so no extra step, job,
+# trigger or condition can weaken it unnoticed. Change both together, with owner review.
+CANONICAL_REVIEW_WORKFLOW = """name: review gate
+
+# The required review gate runs only for pull requests, so pushes to long-lived
+# branches never publish its check. It runs the gate script from the pull request's
+# base commit, so edits to that script take effect only after review and merge.
+# Only while the base has no gate script does it fetch and run the script from the
+# commit pinned below. For PR #193, which introduced the gate, that is its own reviewed
+# commit; after that merge it is in dev's history, and main uses it until main has the script.
+# A pull request can still edit this workflow file, so .github changes need owner review.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+concurrency:
+  group: review-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  review-gate:
+    name: required review gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+      - name: find the base commit's gate script
+        id: base
+        run: |
+          if [ -f base/scripts/check_review_gate.py ]; then
+            echo "missing=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "missing=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.base.outputs.missing == 'true'
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: 80370e094248c84c55da663d977efc7601d17e84
+          path: bootstrap
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: wait for completed reviews and resolved threads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gate=base/scripts/check_review_gate.py
+          if [ ! -f "$gate" ]; then
+            echo "required review gate: base has no gate script; using the pinned bootstrap script"
+            gate=bootstrap/scripts/check_review_gate.py
+          fi
+          python "$gate" --wait-seconds 2400 --interval 30
+"""
+
+
+def check_review_workflow(text: str) -> None:
+    """The required review gate workflow is exactly the reviewed canonical text."""
+    if text != CANONICAL_REVIEW_WORKFLOW:
+        raise SystemExit(f"{REVIEW_WORKFLOW}: must match the canonical required review gate workflow "
+                         "in scripts/check_ci_workflow.py (pull requests only, base-revision or pinned bootstrap script, real wait)")
 
 
 def job_block(text: str, name: str) -> str:
@@ -48,6 +124,8 @@ def main() -> None:
     orientation_job = job_block(text, "orientation-proof")
     review_job = job_block(text, "review")
     site_job = job_block(text, "site")
+    require("python scripts/tests/test_review_gate.py" in test_job,
+            "tests job must exercise the required review gate")
 
     require("python scripts/tests/test_hldd.py" in test_job,
             "tests job must exercise the HLDD gate")
@@ -269,6 +347,7 @@ def main() -> None:
         "site dependency audit must follow the locked npm install",
     )
 
+    check_review_workflow(REVIEW_WORKFLOW.read_text(encoding="utf-8"))
     print(f"{WORKFLOW}: CI workflow contract passed")
 
 

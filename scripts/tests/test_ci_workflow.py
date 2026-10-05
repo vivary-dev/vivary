@@ -97,6 +97,8 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "        run: python scripts/check_ci_workflow.py\n"
         "      - name: CI workflow contract tests\n"
         "        run: python scripts/tests/test_ci_workflow.py\n"
+        "      - name: required review gate tests\n"
+        "        run: python scripts/tests/test_review_gate.py\n"
         "      - name: source navigation contract\n"
         "        run: python -B scripts/check-source-navigation.py --check\n"
         "      - name: source navigation contract tests\n"

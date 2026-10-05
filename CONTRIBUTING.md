@@ -18,7 +18,23 @@ is a separate delivery target.
   (`entire`). Source mirroring does not establish agent-session capture.
 
 Before merging, resolve review findings and require passing applicable CI plus
-one approval. Since 2026-09-24 the Entire gate counts the author's approval, so
+one approval. The `required review gate` check (`.github/workflows/review-gate.yml`) runs the
+gate script from the pull request's base commit, or, while the base has no script (`main`
+before its next promotion), from the commit pinned in the workflow, so a pull request's
+edits to the script apply only after merge. PR #193, which introduced the gate, ran its own
+earlier commit, whose script is identical to its reviewed final script.
+It requires a completed independent review of the exact head and base, published by the
+server-side `vivary-independent-review` tool, which runs outside the repository on the
+Vivary host and opens one review thread per finding. It stays pending while that review
+or a Codex review of the exact head runs, fails when the review failed, covers another head
+or base, or lacks a thread for a finding, and fails on any unresolved review thread,
+outdated ones included. It is not a security boundary: a pull request can edit its own
+workflow, and the allowed publisher is the owner's account. The reviewer therefore adds a
+finding whenever CI, agent or instruction files change, and the owner's Entire approval
+remains required. Never post or edit a review result by hand. Before merging: run
+`vivary-independent-review --pr N` after the final push, publish a fix or an evidence-backed
+rejection for every finding, resolve each thread only after its disposition is verified,
+then re-run the check, because no event re-runs it when a thread is resolved. Since 2026-09-24 the Entire gate counts the author's approval, so
 Jeff can approve his own trail. An agent can add technical review but never
 records a human approval. Zo is the standing owner-approved CI host. Run the
 applicable workflow commands and gates on Zo against the exact PR commit. GitHub

@@ -1,0 +1,63 @@
+name: review gate
+
+# The required review gate runs only for pull requests, so pushes to long-lived
+# branches never publish its check. It runs the gate script from the pull request's
+# base commit, so edits to that script take effect only after review and merge.
+# Only while the base has no gate script does it fetch and run the script from the
+# commit pinned below. For PR #193, which introduced the gate, that is its own reviewed
+# commit; after that merge it is in dev's history, and main uses it until main has the script.
+# A pull request can still edit this workflow file, so .github changes need owner review.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+concurrency:
+  group: review-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  review-gate:
+    name: required review gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+      - name: find the base commit's gate script
+        id: base
+        run: |
+          if [ -f base/scripts/check_review_gate.py ]; then
+            echo "missing=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "missing=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.base.outputs.missing == 'true'
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: 80370e094248c84c55da663d977efc7601d17e84
+          path: bootstrap
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: wait for completed reviews and resolved threads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gate=base/scripts/check_review_gate.py
+          if [ ! -f "$gate" ]; then
+            echo "required review gate: base has no gate script; using the pinned bootstrap script"
+            gate=bootstrap/scripts/check_review_gate.py
+          fi
+          python "$gate" --wait-seconds 2400 --interval 30
