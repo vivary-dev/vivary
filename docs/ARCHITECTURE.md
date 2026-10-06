@@ -268,6 +268,20 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Issue #188, E2 correctness follow-up. The process cache caps legacy draft links
+at 4,096 entries with bounded IDs and FIFO eviction. A Workbench Nitro plugin
+releases run records, parsed transcripts and legacy links after successful Core
+BYOA sign-out. It identifies an existing framework cookie or bearer session
+before revocation without invoking the application session resolver; anonymous,
+invalid-token and failed sign-outs leave the cache warm. A session lookup failure
+does not block Core logout; successful logout then clears contents conservatively.
+Core still owns revocation and scope admission. Ten public-reader/API regressions
+pass, including Core's production mount shim, POST/GET, trailing-slash and base-path
+logout aliases, all three retention
+categories, byte/count eviction, edits, deletion and owner/org/project isolation.
+The legacy-bound and sign-out regressions failed before their fixes. Built-app
+E2 measurements and final review remain pending.
+
 Issue #188, E1 correctness follow-up. The shared formatter cache now pins its key
 and formatter to the effective timezone. It resolves the system default once per
 synchronous rendering batch, then releases that memo in a microtask so a later

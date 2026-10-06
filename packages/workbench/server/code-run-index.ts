@@ -71,6 +71,17 @@ type StoreCache = { root: string; runs: FileContentCache<CodeAgentRunRecord | nu
 // A store change releases all entries; no private contents cross store roots.
 const key = Symbol.for("vivary.workbench.code-run-index");
 const processState = globalThis as typeof globalThis & { [key]?: StoreCache };
+
+/** Release private contents after sign-out, including references held by a reader. */
+export function clearCodeRunIndex(): void {
+  const cache = processState[key];
+  if (!cache) return;
+  cache.runs.entries.clear(); cache.runs.bytes = 0;
+  cache.transcripts.entries.clear(); cache.transcripts.bytes = 0;
+  cache.legacyDraftIds.clear();
+  delete processState[key];
+}
+
 function storeCache(): StoreCache {
   const root = codeAgentRunsDir();
   if (processState[key]?.root !== root) processState[key] = { root,
@@ -120,10 +131,13 @@ export function getIndexedLegacyCodeDraftId(runId: string): string | null {
   const first = listIndexedCodeTranscript(runId).find(event =>
     event.kind === "user" && typeof event.metadata?.draftThreadId === "string");
   const draftThreadId = typeof first?.metadata?.draftThreadId === "string" ? first.metadata.draftThreadId : null;
-  // One small entry per stored run; listings prune deletions and store changes
-  // clear the map. Oversized IDs keep the same response but are not retained.
+  // Retain at most 4096 small links, evicting in insertion order. Listings prune
+  // deletions; oversized IDs keep the same response but are not retained.
   if (before === (identity(file)?.token ?? null) && runId.length <= MAX_LEGACY_DRAFT_ID_CHARS
     && (draftThreadId === null || draftThreadId.length <= MAX_LEGACY_DRAFT_ID_CHARS)) {
+    if (cache.legacyDraftIds.size >= RUN_LIMITS.entries) {
+      cache.legacyDraftIds.delete(cache.legacyDraftIds.keys().next().value!);
+    }
     cache.legacyDraftIds.set(runId, { identity: before, draftThreadId });
   }
   return draftThreadId;

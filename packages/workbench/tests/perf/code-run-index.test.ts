@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { compileFunction } from "node:vm";
 import test, { after, type TestContext } from "node:test";
-import { transformSync } from "esbuild";
 import {
   codeAgentRunsDir, codeAgentRunTranscriptPath, listCodeAgentRunRecords,
   listCodeAgentTranscriptEvents, type CodeAgentRunRecord, type CodeAgentTranscriptEvent,
@@ -120,6 +118,23 @@ test("unmatched draft lookup across 1,000 legacy runs reads no warm transcripts 
   writeTranscript("legacy-0", [{ ...event("legacy-0", 0), metadata: { draftThreadId: oversizedId } }]);
   assert.equal(getIndexedLegacyCodeDraftId("legacy-0"), oversizedId, "oversized values keep their reader result");
   assert.equal(cache.legacyDraftIds.has("legacy-0"), false, "oversized draft IDs are not retained in the small memo");
+});
+
+// A retained draft link must have an eviction bound independent of store size.
+// Observe re-reading an evicted link through the reader, not a private cache map.
+test("legacy draft links evict old entries after the 4,096-run retention bound", t => {
+  store(t);
+  const counts = countReads(t);
+  for (let i = 0; i < 4097; i++) {
+    const id = `bounded-legacy-${i}`, draft = `vivary-code:draft-${i}`;
+    writeTranscript(id, [{ ...event(id, 0), metadata: { draftThreadId: draft } }]);
+    assert.equal(getIndexedLegacyCodeDraftId(id), draft);
+  }
+  const before = counts.transcriptReads;
+  assert.equal(getIndexedLegacyCodeDraftId("bounded-legacy-4096"), "vivary-code:draft-4096");
+  assert.equal(counts.transcriptReads, before, "recent links remain cached");
+  assert.equal(getIndexedLegacyCodeDraftId("bounded-legacy-0"), "vivary-code:draft-0");
+  assert.equal(counts.transcriptReads, before + 1, "the oldest evicted link is read again without changing its result");
 });
 
 test("membership, preserved-mtime same-size rewrite, atomic rename, malformed replacement and missing directory", t => {
@@ -239,98 +254,165 @@ test("fresh scope admission precedes transcript reads for owner, org, project an
   await assert.rejects(getVivaryCodeState("a@test", "mine", scope, "a"), { statusCode: 404 });
 });
 
-// Execute the production response and scope helpers with either Core's readers
-// or the cache. Fixed discovery/host inputs make byte equality deterministic.
-const localSource = fs.readFileSync(new URL("../../server/local-code-agent.ts", import.meta.url), "utf8");
-function functionSource(name: string): string {
-  const match = new RegExp(`^(?:export )?(?:async )?function ${name}\\(`, "m").exec(localSource);
-  assert.ok(match, name);
-  return localSource.slice(match.index, localSource.indexOf("\n}", match.index) + 2).replace(/^export /, "");
-}
-const functions = ["getVivaryCodeState", "ownedRuns", "requireOwnedRun", "isOwnedRun", "isOwnedIdentity",
-  "isVivaryAppRun", "isVivaryProjectHistoryRun", "metadataString", "metadataNumber", "runDraftThreadId",
-  "toRunSummary", "engineFromRun", "engineLabelFromRun", "modelFromRun", "dedupeAdjacentAssistantEvents", "isAssistantEvent"];
-const { code: stateCode } = transformSync(functions.map(functionSource).join("\n"), { loader: "ts" });
-function stateReader(cached: boolean) {
-  const inputs = { listCodeAgentRunRecords: cached ? listIndexedCodeRuns : listCodeAgentRunRecords,
-    listCodeAgentTranscriptEvents: cached ? listIndexedCodeTranscript : listCodeAgentTranscriptEvents,
-    getIndexedLegacyCodeDraftId: cached ? getIndexedLegacyCodeDraftId : (runId: string) => {
-      const first = listCodeAgentTranscriptEvents(runId).find(event =>
-        event.kind === "user" && typeof event.metadata?.draftThreadId === "string");
-      return typeof first?.metadata?.draftThreadId === "string" ? first.metadata.draftThreadId : null;
-    },
-    ensureVivaryCodeHostInitialized: async () => {},
-    getVivaryRuntimeStatus: async () => ({ status: "ready", checkedAt: "fixed" }),
-    getCodexModels: async () => ({ status: "ready", models: [{ id: "fixture-model" }] }),
-    getCodePermissionMode: async () => "auto-edit", activeRuns: new Map(),
-    isActiveCodeAgentRun: (run: CodeAgentRunRecord) => ["running", "needs-approval"].includes(run.status),
-    readVivaryCodeHostState: () => ({ activeRun: null, pendingApproval: null, recentRun: null, busy: false, cleanup: null }),
-    VIVARY_CODE_ENGINES: ["claude-cli", "codex-cli"], VIVARY_CODE_DEFAULT_ENGINE: "claude-cli",
-    VIVARY_CODE_MODELS: ["sonnet", "opus", "fable"], VIVARY_CODE_DEFAULT_MODEL: "sonnet",
-    VIVARY_CODE_GOAL_ID: "vivary-local-code", VIVARY_CODE_APP_MARKER: "vivary-workbench-local-code",
-    MAX_RUNS: 20, MAX_TRANSCRIPT_EVENTS: 400, fail: (message: string, details: object) => { throw Object.assign(new Error(message), details); } };
-  return compileFunction(stateCode + "\nreturn getVivaryCodeState;", Object.keys(inputs))(...Object.values(inputs));
-}
-
-test("cached responses are byte-identical to Core readers, including legacy draft links, normalization, dedupe and latest 400", async t => {
-  const root = store(t);
-  for (let i = 0; i < 25; i++) {
-    const run = record(`run-${i}`); delete run.metadata!.draftThreadId; writeRun(run);
-    const events = Array.from({ length: 450 }, (_, j) => event(run.id, j));
-    events[0].metadata = { draftThreadId: "vivary-code:legacy" };
-    events.push({ ...event(run.id, 450), kind: "system", message: "Same", metadata: { role: "assistant" } },
-      { ...event(run.id, 451), kind: "system", message: "Same", metadata: { role: "assistant" } });
-    const file = writeTranscript(run.id, events);
-    fs.appendFileSync(file, 'broken\n{"schemaVersion":1,"id":"normalized","runId":"' + run.id
-      + '","role":"human","text":"Normalized","createdAt":"fixed"}\n');
-  }
+// Exercise the admitted state API itself: hand-written expected events also catch
+// regressions in response assembly, which a copied implementation cannot detect.
+test("admitted state keeps the latest 400 events, legacy links, dedupe and fresh edits", async t => {
+  const root = store(t), run = record("conversation");
+  delete run.metadata!.draftThreadId;
+  writeRun(run);
+  const events = Array.from({ length: 450 }, (_, i) => event(run.id, i));
+  events[0].metadata = { draftThreadId: "vivary-code:legacy" };
+  events.push({ ...event(run.id, 450), kind: "system", message: "Same", metadata: { role: "assistant" } },
+    { ...event(run.id, 451), kind: "system", message: "Same", metadata: { role: "assistant" } });
+  const file = writeTranscript(run.id, events);
+  fs.appendFileSync(file, 'broken\n' + JSON.stringify({ schemaVersion: 1, id: 'normalized',
+    runId: run.id, role: 'human', text: 'Normalized', createdAt: 'fixed' }) + '\n');
   writeRun({ ...record("foreign"), metadata: { ...record("foreign").metadata, ownerEmail: "b@test" } });
   writeRun({ ...record("other-goal"), goalId: "other" });
-  writeRun(record("tied-id"), "different-name");
-  fs.writeFileSync(path.join(codeAgentRunsDir(), "bad.json"), "broken");
-  assert.equal(JSON.stringify(listIndexedCodeRuns()), JSON.stringify(listCodeAgentRunRecords()));
-  assert.equal(JSON.stringify(listIndexedCodeRuns("vivary-local-code")), JSON.stringify(listCodeAgentRunRecords("vivary-local-code")));
-  const cached = stateReader(true), direct = stateReader(false), scope = { root, label: "Fixture" };
-  for (const id of [undefined, "run-24", "run-0"]) {
-    assert.equal(JSON.stringify(await cached("a@test", id, scope, "a")),
-      JSON.stringify(await direct("a@test", id, scope, "a")));
+  const scope = { root, label: "Fixture" };
+  const poll = () => getVivaryCodeState("a@test", run.id, scope, "a");
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const state = await poll();
+    assert.deepEqual(state.runs.map(item => item.id), [run.id]);
+    assert.equal(state.run?.events.length, 400);
+    assert.equal(state.run?.events[0].id, "conversation-52");
+    assert.equal(state.run?.events.at(-1)?.id, "normalized");
+    assert.equal(state.run?.events.filter(item => item.message === "Same").length, 1);
+    assert.equal(state.run?.events.at(-1)?.kind, "user", "legacy human roles are normalized on cold and warm reads");
+    assert.equal(state.run?.events.at(-1)?.message, "Normalized", "legacy text remains visible");
+    assert.equal(linkedCodeDraftRuns("a@test", "a", scope, ["vivary-code:legacy"]).get("vivary-code:legacy")?.id, run.id);
   }
+  fs.appendFileSync(file, JSON.stringify(event(run.id, 452)) + "\n");
+  const fresh = await poll();
+  assert.equal(fresh.run?.events.length, 400);
+  assert.equal(fresh.run?.events[0].id, "conversation-53");
+  assert.equal(fresh.run?.events.at(-1)?.message, "Message 452");
 });
 
-test("production retention budgets cap entries and charged bytes; evicted/oversized files are re-read", async t => {
+test("transcript retention evicts old entries and oversized contents are always read fresh", t => {
   store(t);
-  const source = fs.readFileSync(new URL("../../server/code-run-index.ts", import.meta.url), "utf8");
-  const start = source.indexOf("class FileContentCache");
-  const end = source.indexOf("\ntype StoreCache", start);
-  const { code } = transformSync(source.slice(start, end), { loader: "ts" });
-  const Cache = compileFunction(code + "\nreturn FileContentCache;", ["identity"])((file: string) => {
-    const info = fs.statSync(file, { bigint: true });
-    return { token: `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`, bytes: Number(info.size) };
-  });
-  const files = ["one", "two", "three"].map(id => writeRun(record(id)));
-  let reads = 0;
-  const reader = () => { reads++; return "parsed"; };
-  const cache = new Cache({ entries: 2, bytes: 100_000 });
-  for (const file of files) cache.read(file, reader);
-  assert.equal(cache.entries.size, 2); assert.ok(cache.bytes <= cache.limits.bytes);
-  cache.read(files[0], reader); assert.equal(reads, 4, "entry eviction costs a re-read");
-  const byteCache = new Cache({ entries: 64, bytes: fs.statSync(files[0]).size * 8 + 512 });
-  for (const file of files) byteCache.read(file, reader);
-  assert.equal(byteCache.entries.size, 1); assert.ok(byteCache.bytes <= byteCache.limits.bytes);
-  fs.writeFileSync(files[0], "x".repeat(20_000));
-  reads = 0; byteCache.read(files[0], reader); byteCache.read(files[0], reader);
-  assert.equal(reads, 2, "oversized content is returned fresh without retention");
-  const runFile = writeRun(record("current"));
-  listIndexedCodeRuns(); writeTranscript("current", [event("current", 0)]); listIndexedCodeTranscript("current");
-  type CacheState = { root: string; runs: { limits: { entries: number; bytes: number }; bytes: number };
-    transcripts: { limits: { entries: number; bytes: number }; bytes: number } };
-  const state = (globalThis as unknown as Record<symbol, CacheState>)[Symbol.for("vivary.workbench.code-run-index")];
-  assert.deepEqual(state.runs.limits, { entries: 4096, bytes: 16 * 1024 * 1024 });
-  assert.deepEqual(state.transcripts.limits, { entries: 64, bytes: 64 * 1024 * 1024 });
-  assert.ok(state.runs.bytes <= state.runs.limits.bytes); assert.ok(state.transcripts.bytes <= state.transcripts.limits.bytes);
-  fs.rmSync(runFile);
+  const counts = countReads(t);
+  for (let i = 0; i < 65; i++) {
+    const id = `retained-${i}`;
+    writeTranscript(id, [event(id, 0)]);
+    assert.equal(listIndexedCodeTranscript(id)[0].message, "Message 0");
+  }
+  assert.equal(counts.transcriptReads, 65);
+  listIndexedCodeTranscript("retained-64");
+  assert.equal(counts.transcriptReads, 65, "recent contents are reused");
+  listIndexedCodeTranscript("retained-0");
+  assert.equal(counts.transcriptReads, 66, "the 65th entry evicts the oldest of the 64 retained transcripts");
+
+  // Three 3 MiB transcripts exceed the 64 MiB charged-content budget (8x raw bytes),
+  // even though they fit the entry count. Observe eviction through the public reader.
+  for (let i = 0; i < 3; i++) {
+    const id = `large-${i}`;
+    writeTranscript(id, [{ ...event(id, 0), message: "x".repeat(3 * 1024 * 1024) }]);
+    listIndexedCodeTranscript(id);
+  }
+  const beforeEvictionRead = counts.transcriptReads;
+  assert.equal(listIndexedCodeTranscript("large-0")[0].message.length, 3 * 1024 * 1024);
+  assert.equal(counts.transcriptReads, beforeEvictionRead + 1, "byte pressure also evicts contents");
+  writeTranscript("oversized", [{ ...event("oversized", 0), message: "x".repeat(9 * 1024 * 1024) }]);
+  const beforeOversized = counts.transcriptReads;
+  for (let i = 0; i < 2; i++) assert.equal(listIndexedCodeTranscript("oversized")[0].message.length, 9 * 1024 * 1024);
+  assert.equal(counts.transcriptReads, beforeOversized + 2, "oversized responses stay correct without retention");
+
   const nextRoot = fs.mkdtempSync(path.join(data, "store-swap-"));
   fs.mkdirSync(path.join(nextRoot, "runs"));
   process.env.AGENT_NATIVE_CODE_AGENTS_HOME = nextRoot; // guard:allow-env-credential - Test host-store transition.
-  assert.deepEqual(listIndexedCodeRuns(), [], "a different store cannot reuse any previous contents");
+  assert.deepEqual(listIndexedCodeRuns(), [], "a different store cannot reuse previous records");
+  assert.deepEqual(listIndexedCodeTranscript("retained-0"), [], "a different store cannot reuse previous private text");
+});
+
+
+test("successful Core sign-out clears retained run, transcript and legacy-link contents", async t => {
+  store(t);
+  const { H3, H3Event } = await import("h3");
+  const { autoMountAuth, addSession, getSessionEmail, COOKIE_NAME, getH3App, awaitBootstrap } = await import("@agent-native/core/server");
+  const { default: cacheLifecycle } = await import("../../server/plugins/05-code-cache.ts");
+  const callbacks = new Map<string, ((...args: any[]) => unknown)[]>();
+  const hooks = { hook(name: string, callback: (...args: any[]) => unknown) {
+    callbacks.set(name, [...(callbacks.get(name) ?? []), callback]);
+  } };
+  const fire = async (name: string, ...args: unknown[]) => {
+    for (const callback of callbacks.get(name) ?? []) await callback(...args);
+  };
+  const app = new H3({ silent: true, onRequest: event => fire("request", event),
+    onResponse: (response, event) => fire("response", response, event) });
+  // Exercise Core's production mount shim, without bootstrapping unrelated jobs.
+  const switches = {
+    AGENT_NATIVE_DISABLED_PLUGINS: "agent-chat,auth,context-xray,core-routes,integrations,observational-memory,onboarding,org,resources,sentry,terminal",
+    AGENT_NATIVE_DISABLE_RECURRING_JOBS: "1", AGENT_NATIVE_DISABLE_INPROCESS_SWEEPS: "1",
+    AGENT_NATIVE_DISABLE_KEEP_WARM: "1", VITE_APP_BASE_PATH: "/fixture",
+  };
+  const previous = Object.fromEntries(Object.keys(switches).map(key => [key, process.env[key]]));
+  Object.assign(process.env, switches); // guard:allow-env-credential - Synthetic mount fixture, no credentials.
+  t.after(() => { for (const [key, value] of Object.entries(previous)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value; // guard:allow-env-credential - Restore test framework configuration.
+  } });
+  const nitroApp = { h3: app, hooks };
+  await cacheLifecycle(nitroApp);
+  await autoMountAuth(getH3App(nitroApp), { getSession: async () => null, rootAuth: false });
+  await awaitBootstrap(nitroApp);
+  app.get("/unrelated", () => ({ ok: true }));
+  writeRun(record("one"));
+  writeRun(record("legacy"));
+  writeTranscript("one", [event("one", 0)]);
+  writeTranscript("legacy", [{ ...event("legacy", 0), metadata: { draftThreadId: "vivary-code:legacy" } }]);
+  for (let i = 0; i < 65; i++) writeTranscript(`evict-${i}`, [event(`evict-${i}`, 0)]);
+  const counts = countReads(t);
+  const read = () => {
+    assert.deepEqual(listIndexedCodeRuns().map(run => run.id).sort(), ["legacy", "one"]);
+    assert.equal(listIndexedCodeTranscript("one")[0].id, "one-0");
+    assert.equal(getIndexedLegacyCodeDraftId("legacy"), "vivary-code:legacy");
+  };
+  const warm = () => {
+    read();
+    // Keep the legacy link warm while evicting its parsed transcript. A later
+    // read then distinguishes the small link memo from the full-content cache.
+    for (let i = 0; i < 65; i++) listIndexedCodeTranscript(`evict-${i}`);
+    read();
+  };
+  let logoutCase = 0;
+  for (const [method, logoutPath] of [
+    ["POST", "/_agent-native/auth/logout"], ["GET", "/_agent-native/auth/logout"],
+    ["GET", "/_agent-native/auth/logout/"], ["POST", "/_agent-native/auth/logout/child"],
+    ["GET", "/fixture/_agent-native/auth/logout/"],
+  ]) {
+    warm();
+    const before = { ...counts };
+    read();
+    assert.deepEqual(counts, before, "unchanged public reads reuse all three cache categories");
+    assert.equal((await app.request("http://localhost/unrelated")).status, 200);
+    const token = `synthetic-code-cache-logout-${method}-${++logoutCase}`;
+    await addSession(token, "owner@example.test");
+    const authenticatedHeaders = method === "POST" ? { authorization: `Bearer ${token}` }
+      : { cookie: `${COOKIE_NAME}=${token}` };
+    const failedEvent = new H3Event(new Request("http://localhost" + logoutPath, {
+      method, headers: authenticatedHeaders,
+    }));
+    await fire("request", failedEvent);
+    await fire("response", new Response(null, { status: 403 }), failedEvent);
+    read();
+    assert.deepEqual(counts, before, "unrelated or failed responses do not clear retained contents");
+    for (const headers of [{}, { authorization: "Bearer invalid-synthetic-token" }]) {
+      const anonymous = await app.request("http://localhost" + logoutPath, { method, headers });
+      assert.equal(anonymous.status, 200);
+      read();
+      assert.deepEqual(counts, before, "anonymous sign-out cannot flush another session's warm cache");
+    }
+    assert.equal(await getSessionEmail(token), "owner@example.test");
+    const response = await app.request("http://localhost" + logoutPath, {
+      method, headers: authenticatedHeaders,
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.equal(await getSessionEmail(token), null, "Core revokes the actual synthetic session");
+    read();
+    assert.equal(counts.runReads, before.runReads + 2, "sign-out clears retained records");
+    assert.equal(counts.transcriptReads, before.transcriptReads + 2,
+      "sign-out clears both parsed transcripts and the separate legacy-link memo");
+  }
 });
