@@ -36,7 +36,11 @@ records passing installed checks, browser acceptance and isolated copied-output
 acceptance without a provider call.
 
 Only the documented short default cwd/UUID location is supported, without scans
-or client paths. Input caps are 256 KiB, 2,048 complete lines, 32 KiB per line and
+or client paths. SDK-compatible provider key and cwd metadata normalization is
+NFC on Darwin only; filesystem canonical-path/link checks retain their original
+spelling and Linux NFC/NFD identities remain distinct. The public Unicode
+regression is prepared; updated frozen-install/runtime validation is pending.
+Input caps are 256 KiB, 2,048 complete lines, 32 KiB per line and
 nesting depth 32 before JSON parsing. Links, hardlinks, changed snapshots, identity
 mismatch and cyclic parents fail safely. The official SDK interprets opaque
 entries via a read-only store in a terminable worker with a three-second deadline

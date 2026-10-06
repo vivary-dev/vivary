@@ -12427,7 +12427,7 @@ diff --git a/dist/cli/claude-session-log.js b/dist/cli/claude-session-log.js
 new file mode 100644
 --- /dev/null
 +++ b/dist/cli/claude-session-log.js
-@@ -0,0 +1,236 @@
+@@ -0,0 +1,246 @@
 +import { constants } from "node:fs";
 +import { lstat, open, realpath } from "node:fs/promises";
 +import os from "node:os";
@@ -12453,7 +12453,9 @@ new file mode 100644
 +        || run.metadata?.claudeConfigDir || run.metadata?.claudeProjectDirName || run.metadata?.claudeSessionStore) return result;
 +    const cwd = run.cwd;
 +    if (typeof cwd !== "string" || !path.isAbsolute(cwd) || path.resolve(cwd) !== cwd) return result;
-+    const projectKey = cwd.replace(/[^a-zA-Z0-9]/g, "-");
++    // Match SDK provider identity only; filesystem paths remain byte-exact below.
++    const providerCwd = claudeCwdIdentity(cwd);
++    const projectKey = providerCwd.replace(/[^a-zA-Z0-9]/g, "-");
 +    if (projectKey.length > 200) return result;
 +    const home = options.homeDirectory ?? os.homedir();
 +    if (!path.isAbsolute(home)) return result;
@@ -12492,10 +12494,10 @@ new file mode 100644
 +        await file.close();
 +        file = undefined;
 +        let entries;
-+        try { entries = frameEntries(buffer.subarray(0, length), sessionId, cwd); }
++        try { entries = frameEntries(buffer.subarray(0, length), sessionId, providerCwd); }
 +        catch (error) { return { ...result, status: error.message === "limit" ? "too-large" : "malformed" }; }
 +        if (!entries.length) return { ...result, status: "malformed" };
-+        const interpreted = await interpretSnapshot({ entries, cwd, projectKey, sessionId });
++        const interpreted = await interpretSnapshot({ entries, cwd, providerCwd, projectKey, sessionId });
 +        return { ...result, ...interpreted };
 +    } catch (error) {
 +        return { ...result, status: error?.code === "ENOENT" ? "missing" : "unavailable" };
@@ -12503,6 +12505,11 @@ new file mode 100644
 +        await file?.close().catch(() => undefined);
 +        inspectionActive = false;
 +    }
++}
++
++// SDK 0.3.288 normalizes provider cwd on Darwin only; Linux names stay distinct.
++function claudeCwdIdentity(cwd) {
++    return process.platform === "darwin" ? cwd.normalize("NFC") : cwd;
 +}
 +
 +function inside(root, target) {
@@ -12556,11 +12563,12 @@ new file mode 100644
 +            || typeof entry.type !== "string" || entry.type.length > 64) throw new Error("entry");
 +        // These are defensive identity/resource checks, not a semantic transcript parser.
 +        // Metadata-only entries may omit identity; message records must prove both scopes.
++        const entryCwd = typeof entry.cwd === "string" ? claudeCwdIdentity(entry.cwd) : undefined;
 +        if ((entry.sessionId !== undefined && entry.sessionId !== sessionId)
 +            || (entry.session_id !== undefined && entry.session_id !== sessionId)
-+            || (entry.cwd !== undefined && entry.cwd !== cwd)) throw new Error("identity");
++            || (entry.cwd !== undefined && entryCwd !== cwd)) throw new Error("identity");
 +        if ((entry.type === "user" || entry.type === "assistant")
-+            && (entry.sessionId !== sessionId || entry.cwd !== cwd || !UUID.test(entry.uuid ?? ""))) throw new Error("identity");
++            && (entry.sessionId !== sessionId || entryCwd !== cwd || !UUID.test(entry.uuid ?? ""))) throw new Error("identity");
 +        for (const key of ["uuid", "parentUuid", "logicalParentUuid"]) {
 +            if (entry[key] !== undefined && entry[key] !== null
 +                && (typeof entry[key] !== "string" || entry[key].length > 128)) throw new Error("identifier");
@@ -12631,7 +12639,7 @@ new file mode 100644
 +async function sdkReaderWorker() {
 +    const { parentPort, workerData } = await import("node:worker_threads");
 +    try {
-+        const { entries, cwd, projectKey, sessionId, sdkUrl } = workerData;
++        const { entries, cwd, providerCwd, projectKey, sessionId, sdkUrl } = workerData;
 +        const { getSessionInfo, getSessionMessages } = await import(sdkUrl);
 +        const sessionStore = {
 +            async load(key) {
@@ -12641,7 +12649,9 @@ new file mode 100644
 +            async append() { throw new Error("read only"); },
 +        };
 +        const info = await getSessionInfo(sessionId, { dir: cwd, sessionStore });
-+        if (!info || info.sessionId !== sessionId || info.cwd !== cwd) {
++        const infoCwd = process.platform === "darwin" && typeof info?.cwd === "string"
++            ? info.cwd.normalize("NFC") : info?.cwd;
++        if (!info || info.sessionId !== sessionId || infoCwd !== providerCwd) {
 +            parentPort.postMessage({ status: "malformed", messages: [] });
 +            return;
 +        }

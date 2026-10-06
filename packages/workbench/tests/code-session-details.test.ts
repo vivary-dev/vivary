@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { link, mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -72,7 +72,7 @@ test("session details reads a bounded Native log only for its conversation owner
 });
 
 test("Native Claude inspection rejects unscoped, linked and resource-limited snapshots", async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "vivary-claude-reader-"));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "vivary-claude-reader-")));
   const project = path.join(root, "project-a");
   const home = path.join(root, "home");
   await mkdir(project);
@@ -203,11 +203,12 @@ test("Native Claude inspection rejects unscoped, linked and resource-limited sna
   }
 });
 
-test("authorized details interpret a default Claude log with the official reader and redact before shortening", async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "vivary-claude-details-"));
-  const project = path.join(root, "project");
+test("authorized details read a decomposed Unicode Claude project and redact before shortening", async t => {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "vivary-claude-details-")));
+  const projectPath = path.join(root, "Cafe\u0301");
   const home = path.join(root, "home");
-  await mkdir(project);
+  await mkdir(projectPath);
+  const project = await realpath(projectPath);
   t.mock.method(os, "homedir", () => home);
   const previous = { store: process.env.AGENT_NATIVE_CODE_AGENTS_HOME,
     workspace: process.env.VIVARY_LOCAL_AGENT_WORKSPACE, // guard:allow-env-credential - Nonsecret fixture workspace, restored below.
@@ -243,14 +244,18 @@ test("authorized details interpret a default Claude log with the official reader
   const run = createCodeAgentRunRecord({ goalId: "vivary-local-code", title: "Claude log fixture", cwd: project,
     status: "paused", metadata: { app: "vivary-workbench-local-code", engine: "claude-cli",
       ownerEmail: "owner@example.test", orgId: "fixture-org", workspaceRoot: project, claudeSessionId: sessionId } });
-  const directory = path.join(home, ".claude", "projects", project.replace(/[^a-zA-Z0-9]/g, "-"));
+  // SDK 0.3.288 normalizes Darwin cwd to NFC: Cafe + combining accent -> Caf-.
+  // Linux keeps the decomposed spelling, whose documented encoded suffix is Cafe-.
+  const projectKey = root.replace(/[^a-zA-Z0-9]/g, "-") + (process.platform === "darwin" ? "-Caf-" : "-Cafe-");
+  const directory = path.join(home, ".claude", "projects", projectKey);
+  const recordedCwd = process.platform === "darwin" ? project.normalize("NFC") : project;
   await mkdir(directory, { recursive: true });
   const userId = "00000000-0000-4000-8000-000000000011";
   const assistantId = "00000000-0000-4000-8000-000000000012";
   const providerEntries = [
-    { type: "user", uuid: userId, parentUuid: null, sessionId, cwd: project,
+    { type: "user", uuid: userId, parentUuid: null, sessionId, cwd: recordedCwd,
       timestamp: "2026-10-06T00:00:00.000Z", message: { role: "user", content: "Read my saved conversation." } },
-    { type: "assistant", uuid: assistantId, parentUuid: userId, sessionId, cwd: project,
+    { type: "assistant", uuid: assistantId, parentUuid: userId, sessionId, cwd: recordedCwd,
       timestamp: "2026-10-06T00:00:01.000Z", message: { role: "assistant", content: [
         { type: "text", text: "x".repeat(1_490) + " ghp_0123456789abcdef0123456789abcdef0123" },
         { type: "thinking", thinking: "PRIVATE_THINKING_SENTINEL" },
@@ -278,6 +283,26 @@ test("authorized details interpret a default Claude log with the official reader
     assert.equal(heldDetails.providerLog.truncated, true);
     assert.equal(heldDetails.providerLog.excerpt.includes(heldCredential.slice(0, 10)), false);
     assert.match(heldDetails.providerLog.excerpt, /\[redacted/);
+  });
+  await t.test("an encoded-name collision cannot supply another project's Unicode metadata", async () => {
+    const other = path.join(root, process.platform === "darwin" ? "Caf\u00e8" : "Cafe_");
+    await mkdir(other);
+    const foreignEntries = providerEntries.map(entry => ({ ...entry, cwd: other }));
+    await writeFile(path.join(directory, sessionId + ".jsonl"), foreignEntries.map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    const foreignDetails = await codeStateAction.run(input, context) as VivaryCodeSessionDetails;
+    assert.equal(foreignDetails.providerLog.status, "malformed");
+    assert.equal(foreignDetails.sessionId, sessionId);
+    assert.equal(foreignDetails.providerLog.excerpt, "");
+  });
+  await t.test("Linux keeps distinct NFC and NFD project identities", { skip: process.platform !== "linux" }, async () => {
+    const composed = path.join(root, "Caf\u00e9");
+    await mkdir(composed);
+    assert.notEqual(await realpath(composed), project);
+    const foreignEntries = providerEntries.map(entry => ({ ...entry, cwd: composed }));
+    await writeFile(path.join(directory, sessionId + ".jsonl"), foreignEntries.map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    const foreignDetails = await codeStateAction.run(input, context) as VivaryCodeSessionDetails;
+    assert.equal(foreignDetails.providerLog.status, "malformed");
+    assert.equal(foreignDetails.providerLog.excerpt, "");
   });
   await assert.rejects(() => codeStateAction.run(input, { ...context, userEmail: "other@example.test" }), /not found/i);
   await assert.rejects(() => codeStateAction.run(input, { ...context, orgId: "other-org" }), /not found/i);

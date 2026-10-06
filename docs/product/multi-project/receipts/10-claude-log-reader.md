@@ -1,9 +1,10 @@
 # Issue #10 Claude provider log reader
 
-2026-10-06. Verified working-tree increment on `fix/provider-log-details`, based
-on `5e2642e80020266e5c57cc875a1be471b0f73a3b`. The forthcoming PR will identify
-the reviewed commit. Issue #10 remains open; this receipt accepts the described
-Claude read behavior, not a new release or the whole issue.
+2026-10-06. [PR #198](https://github.com/vivary-dev/vivary/pull/198) on
+`fix/provider-log-details` records the preceding reviewed increment at
+`2d29b16c31b3f49d8164669088fd469b27a1520f`, based on
+`5e2642e80020266e5c57cc875a1be471b0f73a3b`. The PR records final exact-head CI and review for the Unicode correction below. Issue #10 remains open; preceding acceptance
+covers the described Claude read behavior, not a new release or the whole issue.
 
 ## Implemented contract
 
@@ -15,7 +16,10 @@ canonical cwd and UUID without scanning. Custom storage and encoded names over
 linked parents/files, hardlinks and changed file snapshots are refused. Matching
 session and source cwd metadata prevent authorization by lossy directory encoding.
 An absent project folder permits authorized retained history; existing project
-components still require canonical identity and link checks.
+components still require canonical identity and link checks. Provider key and
+entry/session-info cwd comparisons apply SDK-compatible NFC normalization only
+on Darwin. Filesystem checks retain exact canonical spelling; Linux NFC/NFD
+directories remain distinct.
 
 The complete input is bounded to 256 KiB, 2,048 complete lines, 32 KiB per line
 and JSON nesting depth 32 before parsing. Invalid UTF-8, incomplete/malformed
@@ -39,7 +43,36 @@ The UI labels provider and Native sources separately. Missing, malformed,
 unsupported, unavailable and resource-limited provider logs keep the session ID
 and Native transcript available.
 
-## Verified evidence
+## Darwin Unicode compatibility correction
+
+The required published review found that decomposed macOS cwd names derived a
+different project key from SDK 0.3.288. Native now follows its Darwin-only NFC
+provider identity rule without normalizing filesystem authorization paths.
+The maintained public details fixture uses a decomposed `Cafe` plus combining
+accent directory and the independently specified encoded suffix (`Caf-` on
+Darwin, `Cafe-` elsewhere). It checks entry/session-info compatibility, owner/org
+denial and another project's encoded-name collision. A Linux-only regression
+checks that separate NFC/NFD directories cannot supply one another's metadata.
+No production platform override or semantic parser mock is added.
+
+After the updated frozen install, preflight passes all nine checks. The maintained
+focused suite passes 52 tests with one existing installed-policy skip; typecheck
+and the 65.59-second production build pass with the credential guard enforced.
+A private disposable probe uses the actual Native reader and SDK with Darwin
+platform behavior simulated in the controller and worker. It returns `missing`
+before the correction and `available` afterward, and rejects a foreign cwd as
+`malformed`. This observed red/green result covers the normalization boundary;
+it does not establish native macOS filesystem acceptance. The maintained public
+action tests on Linux also reject distinct NFC/NFD project metadata.
+
+The corrected copied standalone output passes real retained-session readiness,
+owner action and browser display at 19:09:28 UTC. It shows the same 2,949-character
+excerpt, unchanged provider-file checksum and zero provider calls/browser errors;
+server and browser stopped. Both independent delta reviews found no actionable
+finding. Native macOS acceptance remains unrun. The earlier acceptance below
+remains tied to its original increment; the PR owns final commit/check results.
+
+## Verified evidence before the Unicode correction
 
 | Check | Observed result |
 | --- | --- |
@@ -94,6 +127,7 @@ stored-thread RPC evidence is retained, but current details return unsupported
 for Codex provider logs. A bounded stored-thread view remains necessary to close
 issue #10. The current Windows candidate is unrun and no fresh release is claimed.
 
-Final independent review, reviewed commit, required CI at that commit, Entire
-capture/delivery verification and owner approval remain pending. This Claude PR
-increment can proceed through those existing gates while issue #10 stays open.
+The Unicode correction has affected runtime/build acceptance and independent
+delta review. Its final committed head still requires the published independent
+review, exact-head CI, Entire capture/delivery verification and owner approval. This Claude PR increment can
+proceed through those existing gates while issue #10 stays open.
