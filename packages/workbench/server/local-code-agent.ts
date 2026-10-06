@@ -1085,7 +1085,9 @@ export async function getVivaryCodeSessionDetails(
     const messages = provider.messages.map(message => ({ role: message.role,
       text: redactCredentialsInValue(message.text)
         // Match web URLs first so their scheme/path stay intact, including credential placeholders.
-        .replace(/https?:\/\/(?:\[redacted [A-Za-z0-9_.:-]{1,64}\]|[^\s<>"'])+|(?<![A-Za-z0-9_+.-])file:[^\s<>"']+|(?:[A-Za-z]:[\\/]|\\\\)[^\s<>"']+|(?<![A-Za-z0-9:])\/[^\s<>"']+/gi, value => /^https?:\/\//i.test(value) ? value : "[path]") }));
+        // Host paths consume through line end: spaces/apostrophes may be filename characters,
+        // so ambiguous trailing prose is also hidden. The next line stays intact.
+        .replace(/https?:\/\/(?:\[redacted [A-Za-z0-9_.:-]{1,64}\]|[^\s<>"'])+|(?<![A-Za-z0-9_+.-])file:[^\r\n]+|(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+|(?<![A-Za-z0-9:])\/[^\r\n]+/gi, value => /^https?:\/\//i.test(value) ? value : "[path]") }));
     const excerpt = messages.slice(-40).map(message => `${message.role}: ${message.text.slice(0, 1_500)}`).join("\n\n");
     details.providerLog = { reference: provider.reference, status: provider.status, excerpt: excerpt.slice(-20_000),
       truncated: messages.length > 40 || messages.some(message => message.text.length > 1_500) || excerpt.length > 20_000 };

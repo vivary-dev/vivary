@@ -418,9 +418,10 @@ const continuityLabels: Record<VivaryCodeSessionDetails["continuity"], string> =
 
 function CodeSessionDetails({ runId, projectId, active }: { runId: string; projectId: string | null; active: boolean }) {
   const [open, setOpen] = useState(false);
+  // Completed output may arrive while closed; reopening must revalidate the cached snapshot.
   const details = useActionQuery<VivaryCodeSessionDetails>("vivary-code-state", {
     projectId: projectId ?? undefined, runId, details: true,
-  }, { enabled: open, retry: false, refetchInterval: open && active ? 2_000 : false });
+  }, { enabled: open, retry: false, staleTime: 0, refetchInterval: open && active ? 2_000 : false });
   const finalRefresh = useRef({ runId, projectId, wasActive: active, pending: false });
   useEffect(() => {
     const refresh = finalRefresh.current;

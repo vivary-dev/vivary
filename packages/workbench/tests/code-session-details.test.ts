@@ -356,6 +356,40 @@ test("authorized details read a decomposed Unicode Claude project and redact bef
     assert.equal(result.providerLog.excerpt.includes(heldCredential), false);
     assert.match(result.providerLog.excerpt, /https:\/\/reader:\[redacted[^\]]*\]@example\.test\/C:\/docs\?api_key=\[redacted/);
   });
+  await t.test("spaced host paths hide suffixes through line end without changing web links", async () => {
+    const paths = [
+      "/home/O'Brien Smith/PRIVATE_SPACED_FILENAME_SENTINEL.txt",
+      "C:\\Users\\O'Brien Smith\\PRIVATE_SPACED_FILENAME_SENTINEL.txt",
+      "C:/Users/Alice Smith/PRIVATE_SPACED_FILENAME_SENTINEL.txt",
+      "\\\\fixture-host\\Private Share\\O'Brien Smith\\PRIVATE_SPACED_FILENAME_SENTINEL.txt",
+      "file:///home/O'Brien Smith/PRIVATE_SPACED_FILENAME_SENTINEL.txt",
+      "file:///C:/Users/Alice Smith/PRIVATE_SPACED_FILENAME_SENTINEL.txt",
+      "file://fixture-host/Private Share/PRIVATE_SPACED_FILENAME_SENTINEL.txt",
+      "file:/home/Alice Smith/PRIVATE_SPACED_FILENAME_SENTINEL.txt",
+    ];
+    const links = ["https://github.com/vivary-dev/vivary/pull/198", "http://example.test/docs?q=read#usage"];
+    const credentialUrl = `https://reader:unknownFixturePassword@example.test/C:/docs?api_key=${heldCredential}`;
+    // Exercise unquoted paths and both quote styles, keeping each message below its output cap.
+    for (const quote of ["", '"', "'"]) {
+      const text = [...paths.map(hostPath => `${quote}${hostPath}${quote} AMBIGUOUS_TRAILING_PROSE`),
+        "PUBLIC_NEXT_LINE_MARKER", "profile:default", ...links, credentialUrl].join("\n");
+      const entries = [providerEntries[0], { ...providerEntries[1], message: { role: "assistant", content: text } }];
+      await writeFile(path.join(directory, sessionId + ".jsonl"), entries.map(entry => JSON.stringify(entry)).join("\n") + "\n");
+      const result = await codeStateAction.run(input, context) as VivaryCodeSessionDetails;
+      assert.equal(result.providerLog.status, "available");
+      assert.equal(result.providerLog.truncated, false);
+      assert.equal(result.providerLog.excerpt.includes("PRIVATE_SPACED_FILENAME_SENTINEL"), false);
+      assert.equal(result.providerLog.excerpt.includes("O'Brien Smith"), false);
+      assert.equal(result.providerLog.excerpt.includes("AMBIGUOUS_TRAILING_PROSE"), false);
+      assert.equal(result.providerLog.excerpt.match(/\[path\]/g)?.length, paths.length);
+      assert.ok(result.providerLog.excerpt.includes("PUBLIC_NEXT_LINE_MARKER"));
+      assert.ok(result.providerLog.excerpt.includes("profile:default"));
+      for (const link of links) assert.ok(result.providerLog.excerpt.includes(link));
+      assert.equal(result.providerLog.excerpt.includes("unknownFixturePassword"), false);
+      assert.equal(result.providerLog.excerpt.includes(heldCredential), false);
+      assert.match(result.providerLog.excerpt, /https:\/\/reader:\[redacted[^\]]*\]@example\.test\/C:\/docs\?api_key=\[redacted/);
+    }
+  });
   await t.test("aggregate provider bounds retain the newest redacted text", async () => {
     const entries = Array.from({ length: 24 }, (_, index) => ({
       type: index % 2 === 0 ? "user" : "assistant",
