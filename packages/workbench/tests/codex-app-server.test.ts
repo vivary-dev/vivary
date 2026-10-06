@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createCodeAgentRunRecord, executeCodeAgentRun, getCodeAgentRunRecord } from "@agent-native/core/code-agents";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -123,6 +124,31 @@ rl.on("line",line=>{
   return { root, options, calls, resolved, notifications,
     receipt: async () => JSON.parse(await readFile(receipt, "utf8")) };
 }
+
+test("Native Code records Codex continuity on the existing run", async t => {
+  const f = await fixture(t);
+  const native = await mkdtemp(path.join(tmpdir(), "vivary-codex-session-record-"));
+  const previous = process.env.AGENT_NATIVE_CODE_AGENTS_HOME;
+  process.env.AGENT_NATIVE_CODE_AGENTS_HOME = native;
+  t.after(async () => {
+    if (previous === undefined) delete process.env.AGENT_NATIVE_CODE_AGENTS_HOME;
+    else process.env.AGENT_NATIVE_CODE_AGENTS_HOME = previous;
+    await rm(native, { recursive: true, force: true });
+  });
+  const run = createCodeAgentRunRecord({ title: "Fixture", goalId: "vivary-local-code", cwd: f.root,
+    permissionMode: "auto-edit", metadata: { engine: "codex-cli" } });
+  const codexCli = { ...f.options, permissionMode: "normal" as const, configMode: "native" as const };
+  const first = await executeCodeAgentRun({ runId: run.id, prompt: "First question", model: "gpt-6-astra", codexCli,
+    streamToolOutputToStdout: false });
+  assert.equal(first?.metadata?.codexSessionId, "native-thread-1");
+  assert.equal(first?.metadata?.providerSessionMode, "new-session");
+  assert.equal(getCodeAgentRunRecord(run.id)?.metadata?.codexSessionId, "native-thread-1");
+  const second = await executeCodeAgentRun({ runId: run.id, prompt: "Follow up", codexCli,
+    streamToolOutputToStdout: false });
+  assert.equal(second?.metadata?.codexSessionId, "native-thread-1");
+  assert.equal(second?.metadata?.providerSessionMode, "native-resume");
+  assert.equal((await f.receipt()).messages.some(message => message.method === "thread/start"), false);
+});
 
 test("app-server starts a bounded native thread and preserves commentary and agent notifications", async t => {
   const f = await fixture(t);

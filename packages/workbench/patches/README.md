@@ -11,6 +11,40 @@ Core package. Issue #9 also applies `@agent-native__toolkit@0.19.3.patch` to the
 pinned Toolkit package. The lockfile records both patch hashes. Install with
 `pnpm install --frozen-lockfile` from `packages/workbench`.
 
+## Claude provider session continuity
+
+Issue [#10](https://github.com/vivary-dev/vivary/issues/10) connects the pinned
+Core Claude participant's existing session options to the Native Code executor.
+The executor enables persistence and records a validated UUID from the init event
+on the existing Native run, before Stop can interrupt it. Later turns request
+resume with that UUID. A different or invalid event session stops the turn and
+leaves the recorded reference intact. Init and result records require a valid
+UUID even when their identity is missing, numeric, null or empty. Ordinary
+content/tool events may omit it; any explicitly supplied identity is checked
+before its output is attached. A failed request remains `resume-requested` until
+a matching valid init confirms the same session. Rejecting a later result does
+not erase that earlier confirmation; transcript replay never confirms resume.
+Codex retains its app-server owner and thread validation and records the same
+continuity vocabulary.
+
+Runs without a validated provider ID reconstruct bounded Native transcript
+context. A new reported session then supports native resume on later turns.
+Provider-native files and credential roots keep their CLI owner and location.
+The scoped Workbench details read returns only a bounded redacted Native
+transcript excerpt and a logical reference. Provider-native files are unavailable
+in that view.
+
+Run `pnpm --dir packages/workbench exec tsx --test --test-concurrency=1
+tests/claude-session-continuity.test.mjs tests/code-session-details.test.ts
+tests/local-code-agent.test.ts tests/codex-executor.test.mjs`. The Claude fixture
+uses the public executor, real participant and Native store with an inert CLI on
+its PATH, including malformed init/result identities, explicit invalid content
+identities and compatible ID-less content/tool events. Its executable fixture is
+POSIX-only. These checks make no provider calls and do not replace real provider
+or packaged Windows acceptance. Remove the
+executor hunks when a pinned upstream Core version preserves and validates
+Claude session references and passes these regressions without the patch.
+
 ## Email BCC delivery
 
 Issue [#112](https://github.com/vivary-dev/vivary/issues/112) fixes an email action
