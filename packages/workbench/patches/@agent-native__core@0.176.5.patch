@@ -12427,7 +12427,7 @@ diff --git a/dist/cli/claude-session-log.js b/dist/cli/claude-session-log.js
 new file mode 100644
 --- /dev/null
 +++ b/dist/cli/claude-session-log.js
-@@ -0,0 +1,246 @@
+@@ -0,0 +1,275 @@
 +import { constants } from "node:fs";
 +import { lstat, open, realpath } from "node:fs/promises";
 +import os from "node:os";
@@ -12439,7 +12439,10 @@ new file mode 100644
 +const MAX_LINE_BYTES = 32 * 1024;
 +const MAX_DEPTH = 32;
 +const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++const MAX_WAITING_INSPECTIONS = 4;
++const MAX_INSPECTION_WAIT_MS = 15_000;
 +let inspectionActive = false;
++const inspectionQueue = [];
 +
 +/** Host-only entry point: callers authorize the retained Native run before calling. */
 +export async function readClaudeCodeSessionLog(run, options = {}) {
@@ -12461,8 +12464,7 @@ new file mode 100644
 +    if (!path.isAbsolute(home)) return result;
 +    const config = path.join(home, ".claude");
 +    if (inside(cwd, config)) return result;
-+    if (inspectionActive) return { ...result, status: "unavailable" };
-+    inspectionActive = true;
++    if (!await acquireInspection()) return { ...result, status: "unavailable" };
 +    let file;
 +    try {
 +        // Retained history may outlive its project. Check every existing component
@@ -12502,9 +12504,36 @@ new file mode 100644
 +    } catch (error) {
 +        return { ...result, status: error?.code === "ENOENT" ? "missing" : "unavailable" };
 +    } finally {
-+        await file?.close().catch(() => undefined);
-+        inspectionActive = false;
++        try { await file?.close().catch(() => undefined); }
++        finally { releaseInspection(); }
 +    }
++}
++
++// Keep one reader/worker active. Ordinary overlapping clients wait in FIFO order;
++// overload and a stalled predecessor cannot retain an unbounded queue or wait.
++function acquireInspection() {
++    if (!inspectionActive) {
++        inspectionActive = true;
++        return Promise.resolve(true);
++    }
++    if (inspectionQueue.length >= MAX_WAITING_INSPECTIONS) return Promise.resolve(false);
++    return new Promise(resolve => {
++        const waiter = { resolve, timer: undefined };
++        waiter.timer = setTimeout(() => {
++            const index = inspectionQueue.indexOf(waiter);
++            if (index !== -1) inspectionQueue.splice(index, 1);
++            resolve(false);
++        }, MAX_INSPECTION_WAIT_MS);
++        inspectionQueue.push(waiter);
++    });
++}
++
++function releaseInspection() {
++    const next = inspectionQueue.shift();
++    if (next) {
++        clearTimeout(next.timer);
++        next.resolve(true);
++    } else inspectionActive = false;
 +}
 +
 +// SDK 0.3.288 normalizes provider cwd on Darwin only; Linux names stay distinct.

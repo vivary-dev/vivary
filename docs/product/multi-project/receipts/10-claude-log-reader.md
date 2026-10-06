@@ -3,7 +3,9 @@
 2026-10-06. [PR #198](https://github.com/vivary-dev/vivary/pull/198) on
 `fix/provider-log-details` records the preceding reviewed increment at
 `2d29b16c31b3f49d8164669088fd469b27a1520f`, based on
-`5e2642e80020266e5c57cc875a1be471b0f73a3b`. The PR records final exact-head CI and review for the Unicode correction below. Issue #10 remains open; preceding acceptance
+`5e2642e80020266e5c57cc875a1be471b0f73a3b`. The Unicode checkpoint is `16fdc8747f38fe0c6520d4d3590b9b95c0ca0579`.
+The later concurrency/excerpt/polling correction has the runtime evidence below;
+the PR records final exact-head review and CI gates. Issue #10 remains open; preceding acceptance
 covers the described Claude read behavior, not a new release or the whole issue.
 
 ## Implemented contract
@@ -29,6 +31,9 @@ opaque entries through a read-only custom SessionStore. No query, start, resume
 or provider turn is invoked. See the [official session API](https://code.claude.com/docs/en/agent-sdk/sessions)
 and [default transcript location](https://code.claude.com/docs/en/sessions#where-transcripts-are-stored).
 
+Native admits one active inspection and up to four FIFO waiters. Waiting is
+limited to 15 seconds; queue overload or expiry returns unavailable without
+reading a file or starting another worker. Admission is released on every outcome.
 One terminable Node worker bounds semantic processing to three seconds, with
 64 MiB old heap and 16 MiB young heap. Its empty environment removes inherited
 environment values; it is **not an OS sandbox** and retains filesystem,
@@ -37,11 +42,57 @@ records an actual harmless canary with the same settings. That canary does not
 establish SDK malicious-code or hook containment.
 
 Only allowlisted user/assistant text is returned. Workbench redacts complete text
-before limiting it to 1,500 characters per message, 40 messages and 20,000 excerpt
-characters; tools, thinking, authentication metadata and host paths are omitted.
+before limiting it to 1,500 characters per message and the latest 40 messages,
+then retaining the newest 20,000 aggregate characters. Tools, thinking,
+authentication metadata and host paths are omitted.
 The UI labels provider and Native sources separately. Missing, malformed,
 unsupported, unavailable and resource-limited provider logs keep the session ID
-and Native transcript available.
+and Native transcript available. The panel fetches on open, polls every two
+seconds only while its selected run is active, refreshes once on active-to-settled
+transition while open, and offers manual Refresh. Other runs' activity does not
+start this panel's polling; parent host/status polling is unchanged. The final
+refresh stays pending while an older details request is in flight, then starts
+once after that fetch finishes. Closing the panel, changing run/project scope or
+returning to active state clears that intent.
+
+## Concurrent inspection, latest excerpt and settled-history correction
+
+Three supported review findings are corrected in source: ordinary overlapping
+readers serialize instead of receiving a false unavailable status; aggregate
+truncation retains the newest redacted text; and settled history no longer starts
+SDK workers every two seconds. The bounded FIFO has no cache or additional client
+inputs. Maintained public-reader/action cases cover overlapping same/different
+logs, a malformed predecessor followed by a valid read, bounded overload/recovery
+and a greater-than-20,000-character excerpt retaining its newest marker and held
+credential redaction. After frozen install and all nine preflight checks pass,
+the focused suite passes 57 tests with one existing installed-policy skip.
+The 36-test redaction suite, typecheck and 64.48-second guarded build also pass.
+
+The official SDK keeps a rooted transcript row's session ID when projecting a
+queued message, with cross-session provenance in separate origin metadata. A
+root-owned queued attachment fixture exercises that semantic path and rejects an
+explicitly foreign containing-row session ID. Strict session/cwd guards remain;
+this adds no child-log discovery or arbitrary sidechain support.
+
+A disposable public-reader probe observed concurrent calls return available /
+unavailable before the queue fix and available / available afterward. The
+maintained actual-SDK queued-origin fixture passes without relaxing authority.
+No new latency improvement or browser red-before-green result is claimed.
+
+The copied standalone application passes affected browser acceptance at
+19:42:27 UTC: settled history makes zero additional details requests over 4.6
+seconds; manual Refresh works and keeps the panel open; active polling and one
+final settlement refresh work, followed by zero idle polls. Holding the first
+response across completion produces a second request and the fresh excerpt.
+Activity transitions use a synthetic phase-only transport response; details
+still use the actual built server and SDK. This is not a new provider journey.
+The real retained log's checksum remains unchanged, the same 2,949-character
+excerpt is visible, and there are zero provider calls/browser errors. Server and
+browser stopped. Failed fixture attempts and their diagnoses remain preserved:
+query selection, incomplete active metadata, and status-triggered chat remounts
+initially prevented the intended still-open scenario. No production regression
+was inferred from those fixture failures. Earlier acceptance below retains its
+original scope and results.
 
 ## Darwin Unicode compatibility correction
 
@@ -127,7 +178,9 @@ stored-thread RPC evidence is retained, but current details return unsupported
 for Codex provider logs. A bounded stored-thread view remains necessary to close
 issue #10. The current Windows candidate is unrun and no fresh release is claimed.
 
-The Unicode correction has affected runtime/build acceptance and independent
-delta review. Its final committed head still requires the published independent
-review, exact-head CI, Entire capture/delivery verification and owner approval. This Claude PR increment can
-proceed through those existing gates while issue #10 stays open.
+The earlier Unicode correction has affected runtime/build acceptance and
+independent delta review. The concurrency/excerpt/polling correction has affected
+installed tests and built-browser acceptance. Its reviewed commit, published
+independent review, exact-head CI, Entire capture/delivery verification and owner
+approval remain the final PR gates. This Claude PR increment can proceed through
+those existing gates while issue #10 stays open.

@@ -109,6 +109,52 @@ test("Native Claude inspection rejects unscoped, linked and resource-limited sna
     assert.equal(result.status, "available");
     assert.deepEqual(result.messages, [{ role: "user", text: "Fixture prompt" }, { role: "assistant", text: "Fixture reply" }]);
   });
+  await t.test("overlapping readers of the same intact log both succeed", async () => {
+    await save();
+    const results = await Promise.all([read(), read()]);
+    assert.deepEqual(results.map(result => result.status), ["available", "available"]);
+    for (const result of results) assert.equal(result.messages.at(-1)?.text, "Fixture reply");
+  });
+  await t.test("different logs serialize and a malformed predecessor releases admission", async () => {
+    const otherSession = "00000000-0000-4000-8000-000000000099";
+    const otherRun = { ...run, metadata: { ...run.metadata, claudeSessionId: otherSession } };
+    const otherEntries = entries.map(entry => ({ ...entry, sessionId: otherSession,
+      message: { ...entry.message, content: entry.type === "user" ? "Other prompt" : "Other reply" } }));
+    await writeFile(path.join(directory, otherSession + ".jsonl"), otherEntries.map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    const otherRead = () => readClaudeCodeSessionLog(otherRun, { homeDirectory: home });
+    await save();
+    const valid = await Promise.all([read(), otherRead()]);
+    assert.deepEqual(valid.map(result => result.status), ["available", "available"]);
+    assert.equal(valid[0].messages.at(-1)?.text, "Fixture reply");
+    assert.equal(valid[1].messages.at(-1)?.text, "Other reply");
+    await writeFile(logPath, "{\n");
+    const afterFailure = await Promise.all([read(), otherRead()]);
+    assert.deepEqual(afterFailure.map(result => result.status), ["malformed", "available"]);
+    assert.equal(afterFailure[1].messages.at(-1)?.text, "Other reply");
+  });
+  await t.test("reader overload stays bounded and admission recovers afterward", async () => {
+    await save();
+    const results = await Promise.all(Array.from({ length: 6 }, () => read()));
+    assert.deepEqual(results.slice(0, 5).map(result => result.status), Array(5).fill("available"));
+    assert.equal(results[5].status, "unavailable");
+    assert.deepEqual(results[5].messages, []);
+    assert.equal((await read()).status, "available");
+  });
+  await t.test("root-owned queued text keeps cross-session provenance separate from authority", async () => {
+    const foreignSession = "00000000-0000-4000-8000-000000000098";
+    const queued = { type: "attachment", uuid: "00000000-0000-4000-8000-000000000013",
+      parentUuid: assistantId, sessionId, cwd: project, timestamp: "2026-10-06T00:00:02.000Z",
+      attachment: { type: "queued_command", prompt: "Root-owned queued note",
+        origin: { kind: "peer", from: "fixture-sender", fromSession: foreignSession } } };
+    await save([...entries, queued]);
+    const result = await read();
+    assert.equal(result.status, "available");
+    assert.equal(result.messages.at(-1)?.role, "user");
+    assert.equal(result.messages.at(-1)?.text, "Root-owned queued note");
+    assert.equal(JSON.stringify(result).includes(foreignSession), false);
+    await save([...entries, { ...queued, sessionId: foreignSession }]);
+    assert.equal((await read()).status, "malformed");
+  });
   await t.test("retained history reads an intact log after its project folder disappears", async () => {
     await save();
     const moved = project + "-removed";
@@ -283,6 +329,26 @@ test("authorized details read a decomposed Unicode Claude project and redact bef
     assert.equal(heldDetails.providerLog.truncated, true);
     assert.equal(heldDetails.providerLog.excerpt.includes(heldCredential.slice(0, 10)), false);
     assert.match(heldDetails.providerLog.excerpt, /\[redacted/);
+  });
+  await t.test("aggregate provider bounds retain the newest redacted text", async () => {
+    const entries = Array.from({ length: 24 }, (_, index) => ({
+      type: index % 2 === 0 ? "user" : "assistant",
+      uuid: `00000000-0000-4000-8000-${String(100 + index).padStart(12, "0")}`,
+      parentUuid: index === 0 ? null : `00000000-0000-4000-8000-${String(99 + index).padStart(12, "0")}`,
+      sessionId, cwd: recordedCwd, timestamp: `2026-10-06T00:00:${String(index).padStart(2, "0")}.000Z`,
+      message: { role: index % 2 === 0 ? "user" : "assistant", content: index === 23
+        ? "NEWEST_PROVIDER_MARKER " + heldCredential + " " + "z".repeat(1_400)
+        : (index === 0 ? "OLDEST_PROVIDER_MARKER " : "") + "x".repeat(1_400) },
+    }));
+    await writeFile(path.join(directory, sessionId + ".jsonl"), entries.map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    const latest = await codeStateAction.run(input, context) as VivaryCodeSessionDetails;
+    assert.equal(latest.providerLog.status, "available");
+    assert.equal(latest.providerLog.truncated, true);
+    assert.equal(latest.providerLog.excerpt.length, 20_000);
+    assert.match(latest.providerLog.excerpt, /NEWEST_PROVIDER_MARKER/);
+    assert.equal(latest.providerLog.excerpt.includes("OLDEST_PROVIDER_MARKER"), false);
+    assert.equal(latest.providerLog.excerpt.includes(heldCredential), false);
+    assert.match(latest.providerLog.excerpt, /\[redacted/);
   });
   await t.test("an encoded-name collision cannot supply another project's Unicode metadata", async () => {
     const other = path.join(root, process.platform === "darwin" ? "Caf\u00e8" : "Cafe_");

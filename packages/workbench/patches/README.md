@@ -39,15 +39,24 @@ Only the documented short default cwd/UUID location is supported, without scans
 or client paths. SDK-compatible provider key and cwd metadata normalization is
 NFC on Darwin only; filesystem canonical-path/link checks retain their original
 spelling and Linux NFC/NFD identities remain distinct. The public Unicode
-regression is prepared; updated frozen-install/runtime validation is pending.
+regression passes installed Linux checks; native macOS acceptance remains unrun.
 Input caps are 256 KiB, 2,048 complete lines, 32 KiB per line and
 nesting depth 32 before JSON parsing. Links, hardlinks, changed snapshots, identity
 mismatch and cyclic parents fail safely. The official SDK interprets opaque
 entries via a read-only store in a terminable worker with a three-second deadline
-and bounded heap. Workbench redacts allowlisted user/assistant text before
-truncation. The worker clears its environment but retains OS filesystem,
+and bounded heap. A bounded FIFO admits one active inspection and four waiters,
+with a 15-second wait limit and unavailable status for overload/expiry; every
+outcome releases admission. Workbench redacts allowlisted user/assistant text
+before per-message limits and keeps the newest 20,000 aggregate characters.
+The worker clears its environment but retains OS filesystem,
 subprocess and network rights; it is not an OS sandbox. Missing canonical project
 folders permit retained history; existing linked project paths remain refused.
+Session details polls only its selected active run, refreshes once when that run
+settles while open, and offers manual Refresh. Parent host/status queries are
+unchanged. New concurrent-read, overload, queued-origin and newest-excerpt
+regressions pass after the updated frozen install. The reader receipt records
+the affected built-browser polling and held-response acceptance, with synthetic
+activity transitions distinguished from real provider execution.
 
 `packageExtensions` declares Agent SDK 0.3.288 as a Native peer. Workbench pins
 that SDK, API SDK 0.93.0 and MCP SDK 1.30.0; Core retains API 0.90.0 and root Zod

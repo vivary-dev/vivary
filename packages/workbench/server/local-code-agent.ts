@@ -1086,7 +1086,7 @@ export async function getVivaryCodeSessionDetails(
       text: redactCredentialsInValue(message.text)
         .replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\s<>"']+|(?<![A-Za-z0-9:])\/[^\s<>"']+/g, "[path]") }));
     const excerpt = messages.slice(-40).map(message => `${message.role}: ${message.text.slice(0, 1_500)}`).join("\n\n");
-    details.providerLog = { reference: provider.reference, status: provider.status, excerpt: excerpt.slice(0, 20_000),
+    details.providerLog = { reference: provider.reference, status: provider.status, excerpt: excerpt.slice(-20_000),
       truncated: messages.length > 40 || messages.some(message => message.text.length > 1_500) || excerpt.length > 20_000 };
   }
   let file;

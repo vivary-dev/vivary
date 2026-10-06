@@ -360,7 +360,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
         <p>{run ? run.engineLabel + " / " + run.model : projectLabel ?? "Personal workspace"}</p>
       </div>
       <div className="local-agent-header-actions">
-        {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} />}
+        {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} active={isCodeAgentRunActive(run)} />}
         {activeRun && <Badge variant="secondary" role="status" title={activeRun.title}>Working{activeRun.projectId !== projectId ? " in another project" : ""}</Badge>}
         <Popover open={historyOpen} onOpenChange={setHistoryOpen}>
           <PopoverTrigger asChild>
@@ -416,16 +416,37 @@ const continuityLabels: Record<VivaryCodeSessionDetails["continuity"], string> =
   "not-recorded": "Continuity for the last turn was not recorded.",
 };
 
-function CodeSessionDetails({ runId, projectId }: { runId: string; projectId: string | null }) {
+function CodeSessionDetails({ runId, projectId, active }: { runId: string; projectId: string | null; active: boolean }) {
   const [open, setOpen] = useState(false);
   const details = useActionQuery<VivaryCodeSessionDetails>("vivary-code-state", {
     projectId: projectId ?? undefined, runId, details: true,
-  }, { enabled: open, retry: false, refetchInterval: open ? 2_000 : false });
+  }, { enabled: open, retry: false, refetchInterval: open && active ? 2_000 : false });
+  const finalRefresh = useRef({ runId, projectId, wasActive: active, pending: false });
+  useEffect(() => {
+    const refresh = finalRefresh.current;
+    const scopeChanged = refresh.runId !== runId || refresh.projectId !== projectId;
+    const settled = !scopeChanged && refresh.wasActive && !active;
+    refresh.runId = runId;
+    refresh.projectId = projectId;
+    refresh.wasActive = active;
+    if (!open || scopeChanged || active) refresh.pending = false;
+    else if (settled) refresh.pending = true;
+    // Refetch during the first request can deduplicate into its older snapshot.
+    // Retain the final update until it can start a fresh request, then consume it once.
+    if (refresh.pending && !details.isFetching) {
+      refresh.pending = false;
+      void details.refetch();
+    }
+  }, [active, open, runId, projectId, details.isFetching, details.refetch]);
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild><Button variant="ghost" size="sm">Session details</Button></PopoverTrigger>
     <PopoverContent align="end" className="w-[min(32rem,calc(100vw-2rem))] max-h-[75vh] overflow-y-auto space-y-3 text-sm"
       aria-label="Session details">
-      <h3 className="font-medium">Session details</h3>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="font-medium">Session details</h3>
+        <Button variant="ghost" size="sm" disabled={details.isFetching}
+          onClick={() => { void details.refetch(); }}>Refresh</Button>
+      </div>
       {details.isLoading && <p role="status">Loading session details…</p>}
       {details.isError && <div role="alert"><p>Session details could not be loaded.</p>
         <Button variant="ghost" size="sm" onClick={() => { void details.refetch(); }}>Retry</Button></div>}
