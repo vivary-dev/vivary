@@ -260,6 +260,23 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+PR #197 CI repair. Compatible version replacements in the site and Workbench
+locks update 28 existing entries in each: sharp and its platform packages to
+0.35.5, libvips packages to 1.3.4, and source-map-js to 1.2.2, addressing the two
+preexisting high CI advisories. Package membership, manifests, Core/Toolkit pins
+and patch hashes, and unrelated dependency values are preserved. The retained
+dependency review records matching SHA-512 integrity, publication more than
+72 hours earlier, and no lifecycle scripts or binding.gyp actions. Workbench
+sharp is Core's optional runtime dependency; its exported ingestion/media helpers
+have no current application callers and are absent from the inspected `.output`.
+
+The cleanup self-process exclusion confirms a PID-dependent fixture hazard; the
+actual CI host PID was not logged. The hidden-group wording fixture derives
+distinct synthetic identities from the host PID while retaining traced/none/mixed
+assertions and production PID/start and self-process protections. These dependency
+and fixture fixes leave runtime launcher policies and the described design unchanged.
+Final install/audit/build and affected test verification remain pending.
+
 Issue #10 malformed Claude session review fix. The independently reproduced
 numeric init/result bypass led to a narrow event guard: init/result frames require
 a valid UUID, and any other frame with an explicit identity is checked before

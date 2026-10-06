@@ -7,8 +7,12 @@ It establishes neither whole-product OS containment nor release acceptance.
 
 ## Inspection identity
 
-Source: base `8b1d1e4eed9331095343366dbba387525d8209e8` on
-`fix/provider-session-continuity`, with the uncommitted #10 slice present.
+Source inspected: `1c3f114e14b12ad8b34b60e52548f2c341874489` on
+`fix/provider-session-continuity`. The site and Workbench dependency lock
+follow-ups and synthetic cleanup-test identity repair leave runtime launcher
+policies unchanged.
+The dated probes below retain their stated scope; no new probe was run for these
+follow-ups.
 Recheck against the final candidate; this is not an exact-head approval.
 The inspected Workbench pins `@agent-native/core` **0.176.5** with the
 [maintained patch](../../../../packages/workbench/patches/README.md), and Toolkit
@@ -141,7 +145,16 @@ applicable checks on the exact Windows package; Linux observations do not prove
 Windows containment. No new policy, login, hook configuration or model allowance
 is authorized by these proof descriptions.
 
+The coordinator's retained `session10-ui-results.json` records fixture browser
+checks at **15:33:06.905 UTC** on 2026-10-06, against the reviewed uncommitted #10
+slice based on `8b1d1e4`. Synthetic persisted Native sessions passed desktop
+1440×1000 and narrow 390×844 layouts, keyboard Enter/Escape and focus restoration,
+loading/error/Retry and missing/empty-log states, and conversation switches
+without retaining the previous run's ID. Authenticated details, read-time
+redaction and foreign-owner refusal also passed. These checks made **no provider
+calls**; they do not verify actual provider-native logs or provider continuity.
+
 #10 still needs real provider start/follow-up/Stop/full-host-restart/resume,
-provider-native log placement and safe availability, and the actual Session
-details UI on desktop/narrow layouts with keyboard, error and project-switch
-checks. Final #23 acceptance remains tied to the exact packaged artifact.
+provider-native log placement and safe availability, and actual project-switch UI
+checks. Windows/Electron and phone-hardware checks remain omitted from this fixture
+journey. Final #23 acceptance remains tied to the exact packaged artifact.
