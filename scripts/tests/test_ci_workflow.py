@@ -43,7 +43,7 @@ RELEASE_BUILD_COMMANDS = _load().release_build_commands()
 
 
 def _workflow(site_steps: str, trailing_job: str = "") -> str:
-    return (
+    workflow = (
         "name: ci\n"
         "on:\n"
         "  workflow_dispatch:\n"
@@ -183,6 +183,14 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         f"{site_steps}"
         f"{trailing_job}"
     )
+
+
+    # These fixtures mutate other contracts. Reuse the reviewed paired job and
+    # scope so they remain valid inputs to the complete workflow checker.
+    actual = REAL_WORKFLOW.read_text()
+    module = _load()
+    workflow = workflow.replace(module.job_block(workflow, "changes"), module.job_block(actual, "changes"))
+    return workflow + "\n" + module.job_block(actual, "workbench-responsiveness")
 
 
 INSTALL = (
@@ -527,6 +535,43 @@ def test_hldd_must_use_the_actual_pr_head():
     )
     message = _run(workflow)
     assert message and "actual PR head" in message
+
+
+def test_responsiveness_job_is_required():
+    workflow = REAL_WORKFLOW.read_text()
+    block = _load().job_block(workflow, "workbench-responsiveness")
+    assert _run(workflow.replace(block, "")), "CI must not silently lose its latency guard"
+
+
+def test_responsiveness_rejects_weakened_execution_and_provenance():
+    workflow = REAL_WORKFLOW.read_text()
+    block = _load().job_block(workflow, "workbench-responsiveness")
+    for old, new in (
+        ("needs: changes", "needs: test"),
+        ("always() && (needs.changes.result != 'success' || needs.changes.outputs.workbench == 'true')", "false"),
+        ("run: exit 1", "run: echo validation skipped"),
+        ("ref: ${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}", "ref: dev"),
+        ("ref: 8b1d1e4eed9331095343366dbba387525d8209e8", "ref: dev"),
+        ("git -C baseline apply", "echo baseline apply"),
+        ("--size large --switches-only", "--size small"),
+        ('responsiveness-budget.json "$EXPECTED_HEAD" | tee evidence/comparison.json',
+         'responsiveness-budget.json "$EXPECTED_HEAD" | tee evidence/comparison.json || true'),
+        ("if: always()\n        uses: actions/upload-artifact", "if: success()\n        uses: actions/upload-artifact"),
+    ):
+        assert old in block, old
+        assert _run(workflow.replace(block, block.replace(old, new))), f"Guard accepted weakened {old}"
+
+
+def test_responsiveness_scope_cannot_silently_skip_changes():
+    workflow = REAL_WORKFLOW.read_text()
+    block = _load().job_block(workflow, "changes")
+    for old, new in (
+        ("workbench: ${{ steps.scope.outputs.workbench }}", "omitted: true"),
+        ('echo "workbench=true"', 'echo "workbench=false"'),
+        ("packages/workbench/", "unrelated/"),
+    ):
+        assert old in block, old
+        assert _run(workflow.replace(block, block.replace(old, new))), f"Guard accepted missing {old}"
 
 
 if __name__ == "__main__":

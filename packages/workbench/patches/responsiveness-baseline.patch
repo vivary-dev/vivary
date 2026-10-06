@@ -1,0 +1,67 @@
+diff --git a/packages/workbench/package.json b/packages/workbench/package.json
+index bbff4d9..b50fa69 100644
+--- a/packages/workbench/package.json
++++ b/packages/workbench/package.json
+@@ -66,7 +66,8 @@
+     "vitest": "4.1.11",
+     "tsx": "4.23.13",
+     "typescript": "7.0.2",
+-    "esbuild": "0.28.2"
++    "esbuild": "0.28.2",
++    "playwright-core": "1.63.0"
+   },
+   "bin": {
+     "vivary-gui": "bin/start.mjs"
+diff --git a/packages/workbench/pnpm-lock.yaml b/packages/workbench/pnpm-lock.yaml
+index d821bce..b7cdddc 100644
+--- a/packages/workbench/pnpm-lock.yaml
++++ b/packages/workbench/pnpm-lock.yaml
+@@ -88,6 +88,9 @@ importers:
+       esbuild:
+         specifier: 0.28.2
+         version: 0.28.2
++      playwright-core:
++        specifier: 1.63.0
++        version: 1.63.0
+       tailwindcss:
+         specifier: 4.3.3
+         version: 4.3.3
+diff --git a/packages/workbench/tests/built-app.mjs b/packages/workbench/tests/built-app.mjs
+index 3d17c50..e403ebe 100644
+--- a/packages/workbench/tests/built-app.mjs
++++ b/packages/workbench/tests/built-app.mjs
+@@ -32,6 +32,7 @@ export function send(port, method, route, headers, body) {
+ 
+ export async function startBuiltApp(args, data, { env = {}, headers = port => ({ host: `127.0.0.1:${port}` }) } = {}) {
+   const port = await freePort();
++  const spawnedAt = performance.now();
+   const child = spawn(process.execPath, ['bin/start.mjs', '--port', String(port), '--data-dir', data, ...args], {
+     cwd: root,
+     detached: true,
+@@ -41,14 +42,15 @@ export async function startBuiltApp(args, data, { env = {}, headers = port => ({
+   let output = '';
+   child.stdout.on('data', chunk => { output += chunk; });
+   child.stderr.on('data', chunk => { output += chunk; });
+-  const stop = async () => {
++  let stopPromise;
++  const stop = () => stopPromise ??= (async () => {
+     if (child.exitCode !== null || child.signalCode !== null) return;
+     await new Promise(resolve => {
+       const timer = setTimeout(() => process.kill(-child.pid, 'SIGKILL'), 10_000);
+       child.once('exit', () => { clearTimeout(timer); resolve(); });
+       process.kill(-child.pid, 'SIGTERM');
+     });
+-  };
++  })();
+   const deadline = Date.now() + 60_000;
+   for (;;) {
+     if (child.exitCode !== null) throw new Error(`Vivary exited before readiness:\n${output}`);
+@@ -58,7 +60,7 @@ export async function startBuiltApp(args, data, { env = {}, headers = port => ({
+     if (Date.now() > deadline) { await stop(); throw new Error(`Vivary readiness timed out:\n${output}`); }
+     await new Promise(resolve => setTimeout(resolve, 200));
+   }
+-  return { port, stop, output: () => output };
++  return { port, stop, pid: child.pid, readyMs: performance.now() - spawnedAt, output: () => output };
+ }
+ 
+ // Native's MCP dev-open mode trusted a loopback caller that names the owner, with no session.

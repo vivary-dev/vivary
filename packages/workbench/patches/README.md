@@ -17,8 +17,10 @@ Issue [#188](https://github.com/vivary-dev/vivary/issues/188), round 3 experimen
 The coordinator's Chrome profile at `8b1d1e4` found 8.6 seconds in timestamp
 formatting and 7.0 seconds in synchronous user-message collapse measurements
 while opening 2,000 messages. Cold opens took about 27–30 seconds, compared with
-5.6 seconds for 200 messages. These are baseline observations; candidate browser
-measurements remain required before claiming an improvement.
+5.6 seconds for 200 messages. These exploratory observations differ from the
+subsequent repeated full-harness baseline. The
+[measurement receipt](../../../docs/product/multi-project/receipts/188-conversation-responsiveness.md)
+records corrected E1 gains, regressions, noise and remaining targets.
 
 Core shares up to 64 Intl date formatters by locale and sorted primitive options,
 with FIFO eviction. A default timezone is resolved once per synchronous rendering
@@ -40,6 +42,14 @@ Run `pnpm --dir packages/workbench run test:conversation-perf`; `test:maintained
 includes these socket-free regressions. Remove these hunks and the shared helper
 when pinned upstream Core preserves the same formatting, bounded constructor
 reuse, and deferred collapse behavior and passes these tests without the patch.
+
+## Responsiveness baseline overlay
+
+`responsiveness-baseline.patch` is applied only to the fixed pre-E1 checkout by
+the paired CI guard. It adds the pinned Playwright importer and built-app helper
+metadata/idempotent shutdown. It is not a pnpm package patch and contains no E1
+runtime change. The baseline also receives the current harness and opt-in metrics
+plugin. The guard’s recorded dirty-source hash binds this exact overlay.
 
 ## Email BCC delivery
 

@@ -1,0 +1,15 @@
+{
+  "baselineCommit": "8b1d1e4eed9331095343366dbba387525d8209e8",
+  "baselineDirtyHash": "2c9acdaa8f9174aed24ce8969d442d611f9a6452047265f18e815fd7e620f5eb",
+  "maxRatio": {
+    "codeWarmMs": 0.76,
+    "nativeWarmMs": 0.75
+  },
+  "calibration": {
+    "baseline": "8b1d1e4eed9331095343366dbba387525d8209e8",
+    "candidate": "9b688f95cfea6068b3b2ed0b5f370d5918c49694",
+    "harnessSha256": "49293f49b88f55973b082527a2ecbf1635e6e67a3a30f4da4b03e2661c44e2b5",
+    "rule": "Candidate/baseline median ratio plus the larger full between-repeat range/median; rounded upward to 0.01. Ratchet down for proven wins; never raise to pass a regression.",
+    "baselineDirtyHash": "00e16eedeaeac390930d1bc65a3fb019321d3ed464e545d3cc79594ca046da31"
+  }
+}

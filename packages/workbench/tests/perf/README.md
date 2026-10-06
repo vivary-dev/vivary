@@ -4,7 +4,7 @@ A repeatable measurement of what a person waits for in the real built app: start
 conversation list, switching conversations until messages and the current composer state are
 usable, search until the correct conversation is listed, idle network and server load, and memory.
 The full mode guides performance experiments. Deterministic, socket-free regressions
-(`pnpm test:conversation-perf`) protect formatter construction and file-read counts.
+(`pnpm test:conversation-perf`) protect bounded formatter construction and observer-driven expandability.
 The shorter `--size large --switches-only` mode reuses the same setup and switch
 measurements, but limits timed Native targets to 200 messages and skips search, idle
 and the memory journey. It times three fixed targets per runtime, repeating in
@@ -14,8 +14,12 @@ fit the fifteen-row expanded sidebar independently of seeding speed. Each contex
 explicitly opens untimed Code 5 before measuring Code 1–3 and Native 196/195/194;
 this avoids reopening a timed target from the server's saved selection. Native 193
 is the other untimed hop. These are first visits within a browser context, with
-server caches retained. Its paired latency budgets and CI integration are awaiting
-calibration; do not treat an uncalibrated threshold as a passing performance gate.
+server caches retained. Its paired revisit ceilings are 0.76× baseline for Code
+and 0.75× for Native, derived from the measured ratio plus the larger full
+between-repeat range/median, rounded upward to 0.01. The
+[measurement receipt](../../../../docs/product/multi-project/receipts/188-conversation-responsiveness.md)
+records calibration and remaining verification gates. Ratchet ceilings downward
+for proven wins; diagnose a regression rather than raising its budget.
 
 ```sh
 pnpm build
@@ -73,3 +77,26 @@ The shorter mode is a separate calibration of this harness, not a replacement ba
 A paired budget compares fresh baseline/candidate measurements on the same runner;
 `responsiveness-budget.mjs` rejects incomplete runs and mismatched conditions,
 recomputes medians from raw samples and refuses a different candidate commit.
+
+## CI pair and interruption
+
+The `workbench-responsiveness` job builds fixed baseline `8b1d1e4` and the exact
+candidate head in separate directories. The baseline receives only
+[`responsiveness-baseline.patch`](../../patches/responsiveness-baseline.patch),
+the current harness and opt-in metrics plugin. The overlay adds Playwright and
+launcher timing/cleanup support; it never copies candidate application patches.
+The budget binds its exact dirty-source hash and requires a clean candidate.
+Both runs use the same host, browser, flags and target sequence. Evidence lives
+outside both checkouts and is uploaded even when a check fails.
+
+SIGTERM/SIGINT mark an interrupted run failed, retain available raw/trace evidence
+and close that run's browser/server. Handlers remain active through cleanup;
+pending server startup has its own 60-second readiness bound. CI allows 90 seconds
+of termination grace before enforcing its hard limit. Interruption is never a
+passing or completed latency result. Normal fixture data is disposable; raw
+results are retained outside it.
+
+```sh
+node tests/perf/responsiveness-budget.mjs baseline.json candidate.json \
+  tests/perf/responsiveness-budget.json EXPECTED_CANDIDATE_SHA
+```

@@ -42,14 +42,15 @@ export async function startBuiltApp(args, data, { env = {}, headers = port => ({
   let output = '';
   child.stdout.on('data', chunk => { output += chunk; });
   child.stderr.on('data', chunk => { output += chunk; });
-  const stop = async () => {
+  let stopPromise;
+  const stop = () => stopPromise ??= (async () => {
     if (child.exitCode !== null || child.signalCode !== null) return;
     await new Promise(resolve => {
       const timer = setTimeout(() => process.kill(-child.pid, 'SIGKILL'), 10_000);
       child.once('exit', () => { clearTimeout(timer); resolve(); });
       process.kill(-child.pid, 'SIGTERM');
     });
-  };
+  })();
   const deadline = Date.now() + 60_000;
   for (;;) {
     if (child.exitCode !== null) throw new Error(`Vivary exited before readiness:\n${output}`);

@@ -30,6 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       site: ${{ steps.scope.outputs.site }}
+      workbench: ${{ steps.scope.outputs.workbench }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -51,7 +52,7 @@ jobs:
           LIVE_BASE=$(gh pr view "$PR_NUMBER" --json baseRefOid --jq .baseRefOid)
           test "$LIVE_HEAD" = "$HEAD_SHA"
           test "$LIVE_BASE" = "$BASE_SHA"
-      - name: detect site inputs
+      - name: detect site and workbench inputs
         id: scope
         shell: bash
         env:
@@ -60,11 +61,13 @@ jobs:
         run: |
           if [ -z "$BASE_SHA" ] || [[ "$BASE_SHA" =~ ^0+$ ]]; then
             echo "site=true" >> "$GITHUB_OUTPUT"
+            echo "workbench=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           if ! changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"; then
             echo "site=true" >> "$GITHUB_OUTPUT"
+            echo "workbench=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -73,6 +76,13 @@ jobs:
             echo "site=true" >> "$GITHUB_OUTPUT"
           else
             echo "site=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if printf '%s\n' "$changed" | grep -Eq \
+            '^(packages/workbench/|docs/ARCHITECTURE\.md$|scripts/check_ci_workflow\.py$|scripts/tests/test_ci_workflow\.py$|\.github/workflows/ci\.yml$)'; then
+            echo "workbench=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "workbench=false" >> "$GITHUB_OUTPUT"
           fi
 
   test:
@@ -726,6 +736,65 @@ jobs:
           pnpm --dir packages/workbench install --frozen-lockfile
       - name: maintained workbench checks
         run: pnpm --dir packages/workbench test:maintained
+
+  workbench-responsiveness:
+    name: conversation responsiveness
+    needs: changes
+    if: ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.workbench == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - name: require changed-path and dispatch validation
+        if: needs.changes.result != 'success'
+        run: exit 1
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: 8b1d1e4eed9331095343366dbba387525d8209e8
+          path: baseline
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24.21.0"
+      - name: prepare identical measurement harness
+        shell: bash
+        run: |
+          npm install --global pnpm@10.33.2
+          mkdir -p evidence baseline/packages/workbench/tests/perf baseline/packages/workbench/server/plugins
+          git -C baseline apply ../candidate/packages/workbench/patches/responsiveness-baseline.patch
+          cp candidate/packages/workbench/tests/perf/responsiveness.mjs baseline/packages/workbench/tests/perf/
+          cp candidate/packages/workbench/server/plugins/04-perf.ts baseline/packages/workbench/server/plugins/
+          google-chrome --version
+      - name: measure baseline then candidate
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git -C candidate rev-parse HEAD)" = "$EXPECTED_HEAD"
+          evidence="$GITHUB_WORKSPACE/evidence"
+          for checkout in baseline candidate; do
+            pnpm --dir "$checkout/packages/workbench" install --frozen-lockfile 2>&1 | tee "$evidence/$checkout-install.log"
+            pnpm --dir "$checkout/packages/workbench" build 2>&1 | tee "$evidence/$checkout-build.log"
+            (
+              cd "$checkout/packages/workbench"
+              timeout --kill-after=90s 1800 node tests/perf/responsiveness.mjs --size large --switches-only --output "$evidence/$checkout.json"
+            ) 2>&1 | tee "$evidence/$checkout.log"
+          done
+          test -z "$(git -C candidate status --porcelain)"
+          node candidate/packages/workbench/tests/perf/responsiveness-budget.mjs \
+            evidence/baseline.json evidence/candidate.json \
+            candidate/packages/workbench/tests/perf/responsiveness-budget.json "$EXPECTED_HEAD" | tee evidence/comparison.json
+      - name: retain raw measurements and failures
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: conversation-responsiveness-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
 
   governed-platform-proof:
     name: governed verification (Windows)

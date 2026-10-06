@@ -267,20 +267,34 @@ async function searchFor(page, item) {
 }
 async function measure(size, repeat) {
   const data = await mkdtemp(path.join(os.tmpdir(), 'vivary-perf188-'));
-  let server, browser, current, run, phase = 'setup', lastMemory = null;
+  let server, browser, current, run, phase = 'setup', lastMemory = null, interruption;
+  // Close only this run's handles. A signal during startup is checked as soon as
+  // the pending launcher returns; its own readiness wait is bounded to 60s.
+  const interrupt = signal => {
+    if (interruption) return;
+    interruption = new Error(`Measurement interrupted by ${signal}`);
+    void Promise.allSettled([browser?.close(), server?.stop()]);
+  };
+  const onTerm = () => interrupt('SIGTERM'), onInt = () => interrupt('SIGINT');
+  const checkInterrupted = () => { if (interruption) throw interruption; };
+  process.on('SIGTERM', onTerm); process.on('SIGINT', onInt);
   try {
     const env = await fakeRuntime(data);
     server = await startBuiltApp([], data, { env });
+    checkInterrupted();
     const fixture = await seed(server, data, size);
+    checkInterrupted();
     // Setup writes are outside every measurement.
     await server.stop();
     server = await startBuiltApp([], data, { env });
+    checkInterrupted();
     const cookie = await authenticate(server, data);
     const origin = `http://127.0.0.1:${server.port}`;
     // Selection persists on the server, so a fresh context alone can reopen a
     // timed target. The guard explicitly opens its untimed Code hop instead.
     const startUrl = switchesOnly ? `${origin}/?runtime=code&run=${fixture.code[5].id}` : origin;
     browser = await chromium.launch({ executablePath, headless: true });
+    checkInterrupted();
     report.conditions.chrome = browser.version();
     run = { size, repeat, status: 'running', loadAverage: os.loadavg(), fixture: fixture.counts,
       startup: { serverReadyMs: server.readyMs, pageToListMs: [], pageToComposerMs: [] }, scenarios: {}, memory: {} };
@@ -407,9 +421,19 @@ async function measure(size, repeat) {
     run.status = 'crashed';
     run.crash = { phase, message: String(error?.message ?? error).split('\n')[0], lastMemory };
   } finally {
-    if (run) { report.runs.push(run); await saveReport(); }
-    await current?.context.close().catch(() => {}); await browser?.close(); await server?.stop();
-    await rm(data, { recursive: true, force: true });
+    try {
+      if (!run) run = { size, repeat, status: 'failed', failure: { phase, message: interruption?.message ?? 'Setup did not complete' } };
+      if (interruption) Object.assign(run, { status: 'failed', failure: { phase, message: interruption.message } });
+      report.runs.push(run); await saveReport();
+    } finally {
+      try {
+        const cleanup = await Promise.allSettled([browser?.close(), server?.stop()]);
+        await rm(data, { recursive: true, force: true });
+        const failures = cleanup.filter(result => result.status === 'rejected').map(result => result.reason);
+        if (failures.length) throw new AggregateError(failures, 'Measurement cleanup failed');
+        checkInterrupted();
+      } finally { process.off('SIGTERM', onTerm); process.off('SIGINT', onInt); }
+    }
   }
 }
 const mib = bytes => bytes == null ? 'n/a' : `${(bytes / 2 ** 20).toFixed(0)} MiB`;

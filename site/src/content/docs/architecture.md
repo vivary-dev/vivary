@@ -265,25 +265,33 @@ Corrected E1 remains: long Native first-pass medians improved from 77,989 to
 36,602 ms and revisit from 39,945 to 19,248 ms above the recorded noise rule.
 The 12-second long-thread target remains unmet. All six corrected E1 runs
 completed; one baseline memory journey crashed, so stability comparisons have
-that limit. Startup/load qualifications, actual UI acceptance and calibrated CI
-coverage remain separate. These decisions preserve the component and trust
+that limit. Startup/load qualifications remain in the receipt. Actual UI checks and guard
+calibration are complete; final CI verification and owner acceptance remain separate. These decisions preserve the component and trust
 boundaries above and remove the rejected experiment's additional retention.
 
-Issue #188, latency guard preparation. The existing built-app harness now offers
-an ordinary-switch mode using fixed targets in the large history fixture, with
-three fresh servers and at least fifteen first-visit/revisit samples. Each fresh
-browser context explicitly opens an untimed Code run because the server's saved
-selection would otherwise pre-open a measured target. Timed targets and untimed
-hops are disjoint; first visit refers to the browser context, not cold server
-caches. This setup still needs real browser calibration. The mode shares
-setup, readiness and cleanup with the full acceptance measurement; it does not
-replace long-thread, search or memory acceptance. The paired evidence checker
-recomputes medians from raw samples, requires matching workloads and host/browser
-conditions, and binds clean candidate source plus the baseline's explicit harness
-overlay. Four regressions reject lost gains, misleading summaries, incomplete or
-mismatched results and incorrect overlays. Calibration and CI integration remain
-pending; no latency threshold is claimed yet. These verification-only changes do
-not change application runtime or the component and trust boundaries above.
+Issue #188, calibrated latency guard and timeout cleanup. The existing built-app
+harness offers an ordinary-switch mode with fixed disjoint targets and explicit
+untimed startup selection, three fresh servers and fifteen first-visit/revisit
+samples per runtime. Paired calibration at clean `9b688f9` records Code revisit
+3,174→2,237 ms and Native 3,288→2,353 ms. The predeclared ratio-plus-repeat-spread
+rule sets ceilings 0.76 and 0.75 respectively; these must not rise to hide later
+failures. The new CI job builds pinned baseline and exact candidate separately,
+applies only the baseline’s measurement overlay, fails closed on validation,
+compares raw paired evidence and retains artifacts on failure. Its workflow
+contract has 31 passing tests, including demonstrated negative cases for a missing
+or weakened guard. Final exact-head paired/CI verification remains pending.
+
+The timeout path now handles repeated signals through owned browser/server
+cleanup, waits for both cleanup attempts and preserves failed evidence even when
+interrupted during setup. The launcher’s stop is idempotent. A real CLI probe
+first reproduced a detached server surviving SIGTERM; corrected setup and active
+browser probes each passed after three signals with no recorded descendants left.
+Actual desktop/narrow message-control and search-anchor checks at `9b688f9` also
+passed outside timing windows. These changes affect verification only; application
+runtime, component ownership and trust boundaries remain unchanged. The
+[measurement receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/188-conversation-responsiveness.md)
+owns full numbers, provenance, rejected E2, target gaps and remaining gates. The
+short guard does not replace long-thread, search, idle or memory acceptance.
 
 Issue #188, E1 correctness follow-up. The shared formatter cache now pins its key
 and formatter to the effective timezone. It resolves the system default once per
@@ -295,8 +303,8 @@ The timezone regression first reproduced a stale UTC result after switching to
 New York. The installed maintained patch passes nine formatter/observer checks
 and twenty rendered-component tests, including timezone changes, non-enumerable
 options and eight shared formatters plus one timezone resolver per rendering batch.
-The corrected built-app measurements are recorded above; actual UI acceptance
-and the final latency guard remain pending.
+The corrected built-app measurements and actual UI acceptance are recorded above;
+final exact-head latency/CI verification remains pending.
 
 Issue #188, round 3 experiment 1. The maintained Native Core patch now shares a
 bounded Intl formatter cache between message timestamps and locale `formatDate`,
@@ -311,15 +319,16 @@ and collapse paths, and ten socket-free regressions for output equality, constan
 constructor work, bounded eviction, lazy live translation and observer lifecycle.
 The [patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#long-native-conversation-rendering)
 own the implementation contract and removal condition. Corrected E1 browser
-latency is measured as recorded above. Scrolling and visual acceptance remain
-pending; deterministic guards alone do not establish those product behaviors.
+latency and desktop/narrow scrolling/visual checks are recorded above. These
+checks used synthetic saved messages and do not establish real provider execution.
 
 Issue #188, round 3 measurement harness. `packages/workbench/tests/perf/responsiveness.mjs`
 drives the normal built app in system Chrome against a seeded disposable history and times
 what a person waits for: startup to a usable list, conversation switches until messages and the
 current composer or provider state are usable, search until the expected conversation is listed,
 idle requests and bytes, server event-loop delay and memory, with crash-safe per-switch memory
-traces. It is a measurement tool, not a CI gate. The opt-in `server/plugins/04-perf.ts` Nitro
+traces. Full mode guides experiments; its shorter paired mode now supplies the
+CI latency guard described above. The opt-in `server/plugins/04-perf.ts` Nitro
 plugin logs per-second event-loop delay and RSS only when `VIVARY_PERF_METRICS=1`; ordinary
 launches create no timer or histogram. `tests/built-app.mjs` also returns the spawned server's PID
 and readiness time. Seeding uses the existing owner routes and Code run store, and the harness

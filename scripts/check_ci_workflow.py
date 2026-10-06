@@ -114,6 +114,44 @@ def job_block(text: str, name: str) -> str:
     return jobs[start:end]
 
 
+
+def check_responsiveness_workflow(text: str) -> None:
+    """Keep the paired real-app guard blocking and bound to reviewed source."""
+    changes = job_block(text, "changes")
+    job = job_block(text, "workbench-responsiveness")
+    require("workbench: ${{ steps.scope.outputs.workbench }}" in changes,
+            "responsiveness scope must be exposed by changes")
+    require(changes.count('echo "workbench=true"') == 3,
+            "responsiveness scope must run on relevant paths and both unknown-diff fallbacks")
+    for path in ("packages/workbench/", r"docs/ARCHITECTURE\.md$",
+                 r"scripts/check_ci_workflow\.py$", r"scripts/tests/test_ci_workflow\.py$",
+                 r"\.github/workflows/ci\.yml$"):
+        require(path in changes, f"responsiveness scope must include {path}")
+    for contract in (
+        "needs: changes",
+        "if: ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.workbench == 'true') }}",
+        "if: needs.changes.result != 'success'",
+        "run: exit 1",
+        "ref: ${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}",
+        "ref: 8b1d1e4eed9331095343366dbba387525d8209e8",
+        "git -C baseline apply ../candidate/packages/workbench/patches/responsiveness-baseline.patch",
+        "cp candidate/packages/workbench/tests/perf/responsiveness.mjs baseline/packages/workbench/tests/perf/",
+        "cp candidate/packages/workbench/server/plugins/04-perf.ts baseline/packages/workbench/server/plugins/",
+        'test "$(git -C candidate rev-parse HEAD)" = "$EXPECTED_HEAD"',
+        'test -z "$(git -C candidate status --porcelain)"',
+        "for checkout in baseline candidate; do",
+        "timeout --kill-after=90s 1800 node tests/perf/responsiveness.mjs --size large --switches-only",
+        "node candidate/packages/workbench/tests/perf/responsiveness-budget.mjs",
+        "if: always()\n        uses: actions/upload-artifact@v7",
+        "path: evidence/",
+    ):
+        require(contract in job, f"responsiveness job must retain {contract}")
+    require(job.count("shell: bash") == 2 and "continue-on-error:" not in job,
+            "responsiveness build/measurement pipelines must propagate failures")
+    require('candidate/packages/workbench/tests/perf/responsiveness-budget.json "$EXPECTED_HEAD" | tee evidence/comparison.json'
+            in [line.strip() for line in job.splitlines()],
+            "responsiveness budget failure must remain blocking")
+
 def main() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     changes_job = job_block(text, "changes")
@@ -347,6 +385,7 @@ def main() -> None:
         "site dependency audit must follow the locked npm install",
     )
 
+    check_responsiveness_workflow(text)
     check_review_workflow(REVIEW_WORKFLOW.read_text(encoding="utf-8"))
     print(f"{WORKFLOW}: CI workflow contract passed")
 
