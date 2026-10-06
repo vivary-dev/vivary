@@ -12,9 +12,12 @@ import { chromium } from 'playwright-core';
 import { OWNER, send, startBuiltApp } from '../built-app.mjs';
 
 const { values } = parseArgs({ options: { output: { type: 'string' }, size: { type: 'string', default: 'both' },
-  repeats: { type: 'string', default: '3' }, samples: { type: 'string', default: '15' } } });
+  repeats: { type: 'string', default: '3' }, samples: { type: 'string', default: '15' },
+  'switches-only': { type: 'boolean', default: false } } });
 assert.ok(values.output, 'Required: --output /path/result.json');
 assert.ok(['small', 'large', 'both'].includes(values.size));
+const switchesOnly = values['switches-only'];
+assert.ok(!switchesOnly || values.size === 'large', '--switches-only requires --size large');
 const repeats = Number(values.repeats), samples = Number(values.samples);
 assert.ok(Number.isInteger(repeats) && repeats >= 3, 'Use at least three fresh servers per size');
 assert.ok(Number.isInteger(samples) && samples >= 15, 'Use at least 15 switches per scenario');
@@ -43,8 +46,9 @@ const report = { schema: 'vivary.responsiveness/v2', conditions: {
   node: process.version, chromePath: executablePath, cpuCount: os.cpus().length, totalMemoryBytes: os.totalmem(),
   cpu: os.cpus()[0]?.model, loadAverage: os.loadavg(), platform: `${os.platform()} ${os.release()}`,
   seed: 188, repeats, samples, viewport: { width: 1440, height: 1000 },
+  mode: switchesOnly ? 'ordinary-switches' : 'full',
   timings: 'monotonic wall time; click includes actionability; visible means rendered in viewport; no model calls',
-  cold: 'First visit in a browser context; small history starts another context when distinct entries run out',
+  cold: 'First-pass clicks, not guaranteed first visits: startup selection and untimed hops can visit targets first; another context starts when distinct entries run out',
   ready: 'Code: target last event visible and composer enabled. Native: target last message visible and the provider state settled (enabled composer or the Connect AI card)',
   search: 'Enter until the expected conversation is listed, clicking "Search more history" as a user would, at most 10 times (beyond that the sample is reported not found, not timed); settled when no search is running; every hit must belong to the expected conversation',
 }, runs: [] };
@@ -124,9 +128,14 @@ async function seed(server, data, size) {
     const events = Array.from({ length: count }, (_, j) => ({ schemaVersion: 1, id: `${id}-evt-${j}`, runId: id,
       kind: j % 2 ? 'system' : 'user', metadata: j % 2 ? { role: 'assistant' } : {},
       message: j === count - 1 ? last : `perfneedle ${id} ${j} ${payload()}`, createdAt: new Date(baseTime + j).toISOString() }));
+    // The guard reserves six of the 15 expanded sidebar slots for recent Code
+    // runs. The remaining nine expose its fixed Native targets and hop regardless
+    // of machine-dependent API seeding speed. The full fixture is unchanged.
+    const updatedAt = switchesOnly ? (i < 6 ? codeNewest + 6 - i : baseTime - i * 100)
+      : codeNewest - i * 100;
     await writeFile(path.join(store, 'runs', id + '.json'), JSON.stringify({ schemaVersion: 1, id, goalId: 'vivary-local-code',
       title, status: 'completed', phase: 'completed', cwd: path.join(data, 'workspace'),
-      createdAt: new Date(codeNewest - i * 100 - 60_000).toISOString(), updatedAt: new Date(codeNewest - i * 100).toISOString(),
+      createdAt: new Date(updatedAt - 60_000).toISOString(), updatedAt: new Date(updatedAt).toISOString(),
       metadata: { app: 'vivary-workbench-local-code', ownerEmail: OWNER, orgId, projectId,
         bindingId: registration.bindingId, workspaceRoot: path.join(data, 'workspace'), engine: 'claude-cli', model: 'sonnet' } }));
     await writeFile(path.join(store, 'transcripts', id + '.jsonl'), events.map(event => JSON.stringify(event)).join('\n') + '\n');
@@ -298,11 +307,22 @@ async function measure(size, repeat) {
       // number of rows). Leave through the shortest listed conversation of the other runtime, so
       // the untimed hop neither dominates the run nor keeps another long history in memory.
       const visible = await listed();
-      const leave = (runtime === 'code' ? fixture.native : fixture.code).filter(item => visible.has(item.title))
-        .sort((a, b) => a.count - b.count)[0];
+      const ordinaryNative = fixture.native.filter(item => item.count === 200);
+      const leave = switchesOnly
+        ? (runtime === 'code' ? ordinaryNative.at(-4) : fixture.code[5])
+        : (runtime === 'code' ? fixture.native : fixture.code).filter(item => visible.has(item.title))
+          .sort((a, b) => a.count - b.count)[0];
       assert.ok(leave, `No listed ${runtime === 'code' ? 'Native' : 'Code'} conversation to leave through`);
-      const pool = (runtime === 'code' ? fixture.code : [...fixture.native].reverse())
-        .filter(item => visible.has(item.title) && item.title !== leave.title).slice(0, 15);
+      // A paired guard must time the same targets even when seeding speed changes
+      // the sidebar's interleaving. Fail if these recent fixed targets are absent.
+      const pool = switchesOnly
+        ? (runtime === 'code' ? fixture.code.slice(0, 3) : ordinaryNative.slice(-3).reverse())
+        : (runtime === 'code' ? fixture.code : [...fixture.native].reverse())
+          .filter(item => visible.has(item.title) && item.title !== leave.title).slice(0, 15);
+      if (switchesOnly) {
+        assert.ok([leave, ...pool].every(item => visible.has(item.title)), 'Guard targets are not listed');
+        (run.switchTargets ??= {})[runtime] = { leave: leave.id, pool: pool.map(item => item.id) };
+      }
       if (pool.length < 3) throw new Error(`Only ${pool.length} ${runtime} conversations are listed`);
       const cold = [], warm = [];
       for (let i = 0; i < samples; i++) {
@@ -320,6 +340,10 @@ async function measure(size, repeat) {
       }
       run.scenarios[`${runtime}ColdMs`] = scenario(cold); run.scenarios[`${runtime}WarmMs`] = scenario(warm);
       run.memory[`after${runtime === 'code' ? 'Code' : 'Native'}`] = await checkpoint(`after-${runtime}`);
+    }
+    if (switchesOnly) {
+      run.status = 'complete';
+      return; // The same finally block records results and releases browser/server/data.
     }
     phase = 'search';
     const results = [];
@@ -365,7 +389,7 @@ async function measure(size, repeat) {
     run.status = 'complete';
   } catch (error) {
     // A crashed renderer is a measured outcome; record where it happened and keep the other runs.
-    if (!run || !(current?.crashed || /Target crashed/.test(String(error?.message)))) {
+    if (switchesOnly || !run || !(current?.crashed || /Target crashed/.test(String(error?.message)))) {
       if (run) Object.assign(run, { status: 'failed', failure: { phase, message: String(error?.message ?? error).split('\n')[0] } });
       throw error;
     }
@@ -404,7 +428,7 @@ async function saveReport() {
         row(`${key} (others)`, runs.map(run => run.scenarios[key].others));
       }
     }
-    lines.push('', ...runs.map(run => `${size} run ${run.repeat}: search not found within ${run.search.notFoundWithinClicks} more-clicks: ${run.search.notFound.length}/${run.search.samples.length}; idle 30s ${run.idle.requests} requests / ${run.idle.bytes} wire bytes; loop delay p90 median ${run.idle.eventLoopMs.perSecondP90.p50.toFixed(1)}ms, max ${run.idle.eventLoopMs.max.toFixed(1)}ms; server RSS ${mib(run.memory.serverRssBytes)}; after journey JS heap ${mib(run.memory.afterJourney?.jsHeapUsedBytes)}, renderer RSS ${mib(run.memory.afterJourney?.rendererRssBytes)}, DOM nodes ${run.memory.afterJourney?.domNodes}.`), '');
+    if (!switchesOnly) lines.push('', ...runs.map(run => `${size} run ${run.repeat}: search not found within ${run.search.notFoundWithinClicks} more-clicks: ${run.search.notFound.length}/${run.search.samples.length}; idle 30s ${run.idle.requests} requests / ${run.idle.bytes} wire bytes; loop delay p90 median ${run.idle.eventLoopMs.perSecondP90.p50.toFixed(1)}ms, max ${run.idle.eventLoopMs.max.toFixed(1)}ms; server RSS ${mib(run.memory.serverRssBytes)}; after journey JS heap ${mib(run.memory.afterJourney?.jsHeapUsedBytes)}, renderer RSS ${mib(run.memory.afterJourney?.rendererRssBytes)}, DOM nodes ${run.memory.afterJourney?.domNodes}.`), '');
   }
   const target = path.resolve(values.output); await mkdir(path.dirname(target), { recursive: true });
   await writeFile(target, JSON.stringify(report, null, 2) + '\n');

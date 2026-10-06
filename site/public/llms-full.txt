@@ -7542,6 +7542,18 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Issue #188, latency guard preparation. The existing built-app harness now offers
+an ordinary-switch mode using fixed targets in the large history fixture, with
+three fresh servers and at least fifteen first-pass/revisit samples. It shares
+setup, readiness and cleanup with the full acceptance measurement; it does not
+replace long-thread, search or memory acceptance. The paired evidence checker
+recomputes medians from raw samples, requires matching workloads and host/browser
+conditions, and binds clean candidate source plus the baseline's explicit harness
+overlay. Four regressions reject lost gains, misleading summaries, incomplete or
+mismatched results and incorrect overlays. Calibration and CI integration remain
+pending; no latency threshold is claimed yet. These verification-only changes do
+not change application runtime or the component and trust boundaries above.
+
 Issue #188, E2 correctness follow-up. The process cache caps legacy draft links
 at 4,096 entries with bounded IDs and FIFO eviction. A Workbench Nitro plugin
 releases run records, parsed transcripts and legacy links after successful Core
