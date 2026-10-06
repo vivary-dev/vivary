@@ -360,7 +360,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
         <p>{run ? run.engineLabel + " / " + run.model : projectLabel ?? "Personal workspace"}</p>
       </div>
       <div className="local-agent-header-actions">
-        {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} active={isCodeAgentRunActive(run)} />}
+        {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} engine={run.engine} active={isCodeAgentRunActive(run)} />}
         {activeRun && <Badge variant="secondary" role="status" title={activeRun.title}>Working{activeRun.projectId !== projectId ? " in another project" : ""}</Badge>}
         <Popover open={historyOpen} onOpenChange={setHistoryOpen}>
           <PopoverTrigger asChild>
@@ -416,12 +416,12 @@ const continuityLabels: Record<VivaryCodeSessionDetails["continuity"], string> =
   "not-recorded": "Continuity for the last turn was not recorded.",
 };
 
-function CodeSessionDetails({ runId, projectId, active }: { runId: string; projectId: string | null; active: boolean }) {
+function CodeSessionDetails({ runId, projectId, engine, active }: { runId: string; projectId: string | null; engine: VivaryCodeRunState["engine"]; active: boolean }) {
   const [open, setOpen] = useState(false);
   // Completed output may arrive while closed; reopening must revalidate the cached snapshot.
   const details = useActionQuery<VivaryCodeSessionDetails>("vivary-code-state", {
     projectId: projectId ?? undefined, runId, details: true,
-  }, { enabled: open, retry: false, staleTime: 0, refetchInterval: open && active ? 2_000 : false });
+  }, { enabled: open, retry: false, staleTime: 0, refetchInterval: open && active && engine === "claude-cli" ? 2_000 : false });
   const finalRefresh = useRef({ runId, projectId, wasActive: active, pending: false });
   useEffect(() => {
     const refresh = finalRefresh.current;
@@ -448,6 +448,9 @@ function CodeSessionDetails({ runId, projectId, active }: { runId: string; proje
         <Button variant="ghost" size="sm" disabled={details.isFetching}
           onClick={() => { void details.refetch(); }}>Refresh</Button>
       </div>
+      {engine === "codex-cli" && active && <p className="text-xs text-muted-foreground">
+        Use Refresh to update Codex session details while this run is active.
+      </p>}
       {details.isLoading && <p role="status">Loading session details…</p>}
       {details.isError && <div role="alert"><p>Session details could not be loaded.</p>
         <Button variant="ghost" size="sm" onClick={() => { void details.refetch(); }}>Retry</Button></div>}

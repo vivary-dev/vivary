@@ -1,13 +1,17 @@
 import { spawn } from "node:child_process";
 import type { CodexSessionLogLifecycle } from "@agent-native/core/code-agents";
-import { CLEANUP_EXIT_RESERVE_MS, CLEANUP_TIMEOUT_MS, checkWorkerCleanup, cleanupIo, hardStopWorkerTree,
+import { CLEANUP_EXIT_RESERVE_MS, CLEANUP_TIMEOUT_MS, checkWorkerCleanup, cleanupIo, endWindowsProcesses, endWorkerLeftovers, hardStopWorkerTree,
   scanWindowsProcesses, waitForLinuxWorkerGroupExit, windowsLeftovers, windowsWorkerTarget,
   workerCleanupTarget, VivaryCodeWorkerCleanupError, type CleanupTarget } from "./code-execution-host";
 import { resolveVivaryRuntimeCommand } from "./local-runtime-setup";
 
 const PRE_STOP_OBSERVATION_TIMEOUT_MS = 3_000;
+const GRACEFUL_EXIT_MS = 1_000;
 
-type ReaderProcess = NonNullable<Awaited<ReturnType<CodexSessionLogLifecycle["open"]>>>;
+type ReaderProcess = NonNullable<Awaited<ReturnType<CodexSessionLogLifecycle["open"]>>> & {
+  // Keep this live after close returns: an escaped helper may still own inherited output descriptors.
+  pipesClosed: () => boolean;
+};
 type ReaderHost = {
   closing: boolean;
   shutdown: Promise<void> | null;
@@ -24,11 +28,11 @@ const host = readerProcess[readerHostKey] ??= {
 
 async function checkRetainedCleanup(): Promise<boolean> {
   for (const [owner, target] of host.unconfirmed) {
-    if (target === "uncheckable") continue;
+    if (target === "uncheckable" || !owner.pipesClosed()) continue;
     const check = await checkWorkerCleanup(target).catch(() => null);
     // A concurrent close may have replaced this owner's target while the check awaited IO.
     if (host.unconfirmed.get(owner) !== target) continue;
-    if (check?.result === "clean") host.unconfirmed.delete(owner);
+    if (check?.result === "clean" && owner.pipesClosed()) host.unconfirmed.delete(owner);
     else if (check?.result === "remaining") host.unconfirmed.set(owner, check.target);
   }
   return host.unconfirmed.size === 0;
@@ -98,7 +102,7 @@ async function openReader(cwd: string | undefined): Promise<ReaderProcess | null
   };
   observeWindows();
   let closing: Promise<boolean> | undefined;
-  const owned: ReaderProcess = { child, close: () => closing ??= (async () => {
+  const owned: ReaderProcess = { child, pipesClosed: () => didClose, close: () => closing ??= (async () => {
     const deadline = Date.now() + CLEANUP_TIMEOUT_MS;
     trackingStopped = true;
     clearTimeout(scanTimer);
@@ -113,16 +117,23 @@ async function openReader(cwd: string | undefined): Promise<ReaderProcess | null
         void pendingScan.then(result => { clearTimeout(timer); resolve(result); });
       });
     }
-    try {
-      await hardStopWorkerTree(child, exitedAt !== null, Math.max(1, deadline - Date.now() - CLEANUP_EXIT_RESERVE_MS));
-      if (process.platform === "linux" && child.pid) await waitForLinuxWorkerGroupExit(child.pid, undefined, deadline - Date.now());
-    } catch { /* The retained identity scan below is authoritative even when the stop reports failure. */ }
-    child.stdin.destroy();
-    await pendingScan;
-    await new Promise<void>(resolve => {
-      const timer = setTimeout(resolve, Math.max(0, deadline - Date.now()));
+    const waitForClosure = (timeoutMs: number) => new Promise<void>(resolve => {
+      const timer = setTimeout(resolve, Math.max(0, timeoutMs));
       void closed.then(() => { clearTimeout(timer); resolve(); });
     });
+    // The supported app-server teardown starts with EOF; drain output so buffered writes cannot block its exit.
+    child.stdout.resume();
+    child.stderr.resume();
+    child.stdin.once("error", () => undefined);
+    child.stdin.end();
+    await waitForClosure(Math.min(GRACEFUL_EXIT_MS, Math.max(0, deadline - Date.now() - CLEANUP_EXIT_RESERVE_MS)));
+    if (!didClose && (process.platform !== "win32" || exitedAt === null)) {
+      try {
+        await hardStopWorkerTree(child, exitedAt !== null, Math.max(1, deadline - Date.now() - CLEANUP_EXIT_RESERVE_MS));
+      } catch { /* Retained identities and pipe closure determine the result after a failed fallback. */ }
+    }
+    child.stdin.destroy();
+    await pendingScan;
     if (windowsTarget && child.pid && exitedAt !== null) {
       const seed = windowsWorkerTarget(child.pid, from, to, exitedAt).tracked[0];
       windowsTarget.tracked = windowsTarget.tracked.map(identity => identity.pid === seed.pid
@@ -132,17 +143,40 @@ async function openReader(cwd: string | undefined): Promise<ReaderProcess | null
     if (!observationConfirmed) {
       // A later root-only snapshot cannot recover ancestry lost before observation; never clear this with that scan.
       host.unconfirmed.set(owned, "uncheckable");
+      await waitForClosure(deadline - Date.now());
       return false;
     }
     const target = windowsTarget ?? await workerCleanupTarget(child.pid, from, to, exitedAt).catch(() => null);
     if (target) {
       // Keep the target while the final scan is pending, including across shutdown and duplicated modules.
       host.unconfirmed.set(owned, target);
-      const remaining = deadline - Date.now();
-      const check = remaining <= 0 ? null : await checkWorkerCleanup(target, target.platform === "win32"
-        ? { ...cleanupIo, windowsProcesses: () => scanWindowsProcesses(AbortSignal.timeout(remaining)) } : undefined).catch(() => null);
+      const remainingSignal = () => {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw new DOMException("Reader cleanup deadline expired.", "TimeoutError");
+        return AbortSignal.timeout(remaining);
+      };
+      const io = target.platform === "win32" ? { ...cleanupIo,
+        windowsProcesses: () => scanWindowsProcesses(remainingSignal()),
+        windowsEnd: (processes: Parameters<typeof endWindowsProcesses>[0]) => endWindowsProcesses(processes, remainingSignal()),
+      } : cleanupIo;
+      let check = Date.now() >= deadline ? null : await checkWorkerCleanup(target, io).catch(() => null);
+      if (check?.result === "remaining" && Date.now() < deadline) {
+        host.unconfirmed.set(owned, check.target);
+        if (target.platform === "win32") {
+          // An exited root cannot receive taskkill /T; end only retained, safely traced PID/creation identities.
+          check = await endWorkerLeftovers(check.target, check.remaining, io).then(result => result.check, () => null);
+        } else {
+          // EOF can close the root's pipes while an ordinary same-group helper remains.
+          try {
+            await hardStopWorkerTree(child, exitedAt !== null, Math.max(1, deadline - Date.now() - CLEANUP_EXIT_RESERVE_MS));
+            if (child.pid) await waitForLinuxWorkerGroupExit(child.pid, undefined, deadline - Date.now());
+          } catch { /* The identity recheck remains authoritative. */ }
+          check = await checkWorkerCleanup(check.target, io).catch(() => null);
+        }
+      }
+      await waitForClosure(deadline - Date.now());
       if (didClose && check?.result === "clean") { host.unconfirmed.delete(owned); return true; }
-      host.unconfirmed.set(owned, check?.result === "remaining" ? check.target : target);
+      host.unconfirmed.set(owned, check?.result === "remaining" ? check.target : host.unconfirmed.get(owned) ?? target);
       return false;
     }
     if (didClose && !child.pid) return true;

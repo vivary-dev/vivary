@@ -7,7 +7,7 @@ import { registerHooks } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import test from "node:test";
+import test, { mock } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const role = process.argv[2];
@@ -115,6 +115,78 @@ if (role === "preview-service-server") {
   process.on("message", message => {
     if (message.type === "shutdown-server") server.send({ type: "shutdown" });
   });
+} else if (role === "reader-pipe-refusal" || role === "reader-graceful-eof") {
+  const directory = process.argv[3];
+  const bin = path.join(directory, "bin");
+  const pidsFile = path.join(directory, "pipe-pids");
+  await mkdir(bin);
+  await writeFile(path.join(bin, "codex"), "#!" + process.execPath + (role === "reader-graceful-eof" ? String.raw`
+const { writeFileSync } = require("node:fs");
+writeFileSync(${JSON.stringify(pidsFile)}, JSON.stringify({ reader: process.pid }));
+process.stdin.resume();
+process.stdin.once("end", () => {
+  writeFileSync(${JSON.stringify(path.join(directory, "eof-completed"))}, "EOF");
+  process.stdout.write("drained output\n".repeat(16_384), () => process.exit(0));
+});
+` : String.raw`
+const { spawn } = require("node:child_process");
+const { existsSync, writeFileSync } = require("node:fs");
+if (!existsSync(${JSON.stringify(pidsFile)})) {
+  // A different process group keeps the reader's actual output descriptors open.
+  const helper = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"],
+    { detached: true, stdio: ["ignore", "inherit", "inherit"] });
+  helper.unref();
+  writeFileSync(${JSON.stringify(pidsFile)}, JSON.stringify({ reader: process.pid, helper: helper.pid }));
+}
+setInterval(() => {}, 1000);
+`), { mode: 0o755 });
+  // guard:allow-env-credential - Selects the harmless CLI owned by this disposable fork process.
+  process.env.PATH = bin + path.delimiter + process.env.PATH; // guard:allow-env-mutation - Disposable fork selects its inert pipe fixture; setting ends with that process.
+  const owner = await import("../server/codex-session-process.ts");
+  const { checkWorkerCleanup, workerCleanupTarget, CLEANUP_TIMEOUT_MS } = await import("../server/code-execution-host.ts");
+  let reader;
+  let nextReader;
+  let closing;
+  let pids;
+  let pipesClosed = false;
+  try {
+    reader = await owner.codexSessionLogLifecycle.open(directory);
+    assert.ok(reader, "the real owner opens the inert reader");
+    reader.child.once("close", () => { pipesClosed = true; });
+    await until(() => readFile(pidsFile).then(() => true, () => false), "escaped output helper starts");
+    pids = JSON.parse(await readFile(pidsFile, "utf8"));
+    assert.equal(pids.reader, reader.child.pid);
+    const started = performance.now();
+    closing = reader.close();
+    if (role === "reader-graceful-eof") {
+      assert.equal(await closing, true, "EOF shutdown confirms the normal reader closed");
+      assert.equal(await readFile(path.join(directory, "eof-completed"), "utf8"), "EOF");
+      assert.equal(reader.child.exitCode, 0, "the reader completed its own teardown");
+      assert.equal(reader.child.signalCode, null, "the normal reader was not force-killed");
+      await owner.shutdownCodexSessionReaders();
+    } else {
+      assert.equal(await closing, false, "open inherited pipes prevent confirmed close");
+      assert.ok(performance.now() - started < CLEANUP_TIMEOUT_MS + 2000, "close has a bounded wait");
+      assert.equal(pipesClosed, false, "the escaped helper still holds the output descriptors");
+      assert.ok(await isRunning(pids.helper), "the harmless helper remains alive for the assertions");
+      const target = await workerCleanupTarget(reader.child.pid, 0, 0, Date.now());
+      assert.ok(target);
+      assert.equal((await checkWorkerCleanup(target)).result, "clean", "the original Linux group is actually clean");
+      nextReader = await owner.codexSessionLogLifecycle.open(directory);
+      assert.equal(nextReader, null, "clean group alone must not clear a pipe-closure refusal");
+      await assert.rejects(owner.shutdownCodexSessionReaders(), /could not be stopped completely/,
+        "shutdown must preserve the still-open pipe refusal");
+    }
+  } finally {
+    pids ??= await readFile(pidsFile, "utf8").then(JSON.parse, () => null);
+    if (pids?.helper) {
+      try { process.kill(-pids.helper, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+      await until(async () => !await isRunning(pids.helper), "escaped fixture helper ends");
+    }
+    if (reader) { await reader.close(); await until(() => pipesClosed, "fixture output descriptors close after helper cleanup"); }
+    if (nextReader) await nextReader.close();
+    await closing;
+  }
 } else if (role?.startsWith("reader-observation-")) {
   // Real reader/stop owners and subprocesses; only external Windows executable output is simulated.
   const directory = process.argv[3];
@@ -131,14 +203,29 @@ if (first) writeFileSync(${JSON.stringify(receipt("first-scan"))}, "");
 process.once("SIGTERM", () => process.exit(0));
 if (first) while (!existsSync(${JSON.stringify(receipt("release-scan"))}) || ${JSON.stringify(role)} === "reader-observation-timeout") await delay(10);
 if (first && ${JSON.stringify(role)} === "reader-observation-unavailable") { process.stdout.write("incomplete scan"); process.exit(0); }
+const command = process.argv.at(-1);
+if (command.includes("Stop-Process") && ${JSON.stringify(role)}.startsWith("reader-observation-early")) {
+  const targets = command.match(/foreach \(\$target in '([^']+)'\.Split/)[1].split(";");
+  writeFileSync(${JSON.stringify(receipt("ended-targets"))}, JSON.stringify(targets));
+  writeFileSync(${JSON.stringify(receipt("helper-ended"))}, "");
+  for (const target of targets) process.stdout.write(target.split(":")[0] + "\tended\n");
+  process.stdout.write("END\t" + targets.length + "\n");
+  process.exit(0);
+}
 const { pid, at } = JSON.parse(readFileSync(${JSON.stringify(receipt("reader-identity"))}, "utf8"));
-const stopped = existsSync(${JSON.stringify(receipt("stopped"))});
-const rows = stopped ? [[41002, 41001, at + 2, "orphan.exe"]]
-  : [[pid, 1, at, "reader.exe"], [41001, pid, at + 1, "intermediate.exe"], [41002, 41001, at + 2, "orphan.exe"]];
+const stopped = existsSync(${JSON.stringify(receipt("stopped"))}) || existsSync(${JSON.stringify(receipt("root-exited"))});
+const ended = existsSync(${JSON.stringify(receipt("helper-ended"))});
+const rows = ended ? [] : stopped ? [[41002, ${JSON.stringify(role)} === "reader-observation-early-reused" ? 77 : 41001,
+    at + (${JSON.stringify(role)} === "reader-observation-early-reused" ? 20 : 2), "orphan.exe"]]
+  : [[pid, 1, at, "reader.exe"], [41001, pid, at + 1, "intermediate.exe"],
+    ...(${JSON.stringify(role)} === "reader-observation-early-untraced" ? [] : [[41002, 41001, at + 2, "orphan.exe"]])];
+// A whole Windows snapshot still contains unrelated processes after the owned tree ends.
+rows.push([4, 0, at - 60_000, "System"]);
 for (const [id, parent, created, name] of rows) {
   process.stdout.write([id, parent, String(BigInt(created) * 10000n + 116444736000000000n), name].join("\t") + "\n");
 }
 process.stdout.write("END\t" + rows.length + "\n");
+if (first) writeFileSync(${JSON.stringify(receipt("first-observed"))}, "");
 `);
   await writeFile(path.join(scanner, "powershell.exe"),
     "#!/bin/sh\nexec " + JSON.stringify(process.execPath) + " " + JSON.stringify(path.join(scanner, "scanner.mjs")) + ' "$@"\n', { mode: 0o755 });
@@ -152,27 +239,65 @@ process.stdout.write("END\t" + rows.length + "\n");
   const { CLEANUP_TIMEOUT_MS } = await import("../server/code-execution-host.ts");
   const platform = Object.getOwnPropertyDescriptor(process, "platform");
   let reader;
+  let recoveredReader;
   let closing;
   try {
     Object.defineProperty(process, "platform", { ...platform, value: "win32" });
-    reader = await owner.codexSessionLogLifecycle.open(directory);
+    // The simulated root creation time must match the owner's actual launch window,
+    // not a later timestamp after open() has also started its PowerShell observer.
+    const at = Date.now();
+    const launchClock = mock.method(Date, "now", () => at);
+    try { reader = await owner.codexSessionLogLifecycle.open(directory); }
+    finally { launchClock.mock.restore(); } // Cleanup/scan deadlines keep using real time.
     assert.ok(reader, "real reader owner launches the inert app-server");
-    await writeFile(receipt("reader-identity"), JSON.stringify({ pid: reader.child.pid, at: Date.now() }));
+    await writeFile(receipt("reader-identity"), JSON.stringify({ pid: reader.child.pid, at }));
     await until(() => readFile(receipt("first-scan")).then(() => true, () => false), "first scan starts");
     const started = performance.now();
-    closing = reader.close();
-    await delay(100);
-    assert.equal(await readFile(receipt("stopped")).then(() => true, () => false), false,
-      "reader termination must wait for the bounded in-flight ancestry observation");
-    await writeFile(receipt("release-scan"), "");
-    assert.equal(await closing, false, "escaped ancestry or uncertain observation cannot report clean");
-    assert.ok(performance.now() - started < CLEANUP_TIMEOUT_MS + 1000, "the entire close is bounded");
-    assert.equal(await owner.codexSessionLogLifecycle.open(directory), null,
-      "a later root-only scan cannot clear escaped or unobserved ancestry");
-    await assert.rejects(owner.shutdownCodexSessionReaders(), /could not be stopped completely/);
+    if (role.startsWith("reader-observation-early")) {
+      await writeFile(receipt("release-scan"), "");
+      await until(() => readFile(receipt("first-observed")).then(() => true, () => false), "live ancestry observation completes");
+      const exited = new Promise(resolve => reader.child.once("exit", resolve));
+      process.kill(reader.child.pid, "SIGTERM");
+      await exited;
+      await writeFile(receipt("root-exited"), "");
+      const recoverable = role !== "reader-observation-early-untraced";
+      assert.equal(await reader.close(), recoverable, "only verified recoverable leftovers permit success");
+      if (role === "reader-observation-early-exit") {
+        const targets = JSON.parse(await readFile(receipt("ended-targets"), "utf8"));
+        assert.equal(targets.length, 1);
+        const { at } = JSON.parse(await readFile(receipt("reader-identity"), "utf8"));
+        assert.equal(targets[0], "41002:" + (BigInt(at + 2) * 10000n + 116444736000000000n),
+          "the end primitive receives the traced helper's original creation identity");
+      } else {
+        assert.equal(await readFile(receipt("ended-targets")).then(() => true, () => false), false,
+          "untraced or reused PID identities are never sent to the end primitive");
+      }
+      assert.equal(await readFile(receipt("stopped")).then(() => true, () => false), false, "an exited root is not passed to taskkill");
+      recoveredReader = await owner.codexSessionLogLifecycle.open(directory);
+      if (recoverable) {
+        assert.ok(recoveredReader, "verified cleanup permits a later reader");
+        assert.equal(await recoveredReader.close(), true);
+        await owner.shutdownCodexSessionReaders();
+      } else {
+        assert.equal(recoveredReader, null, "an untraced leftover keeps admission closed");
+        await assert.rejects(owner.shutdownCodexSessionReaders(), /could not be stopped completely/);
+      }
+    } else {
+      closing = reader.close();
+      await delay(100);
+      assert.equal(await readFile(receipt("stopped")).then(() => true, () => false), false,
+        "reader termination must wait for the bounded in-flight ancestry observation");
+      await writeFile(receipt("release-scan"), "");
+      assert.equal(await closing, false, "escaped ancestry or uncertain observation cannot report clean");
+      assert.ok(performance.now() - started < CLEANUP_TIMEOUT_MS + 1000, "the entire close is bounded");
+      assert.equal(await owner.codexSessionLogLifecycle.open(directory), null,
+        "a later root-only scan cannot clear escaped or unobserved ancestry");
+      await assert.rejects(owner.shutdownCodexSessionReaders(), /could not be stopped completely/);
+    }
   } finally {
     await writeFile(receipt("release-scan"), "");
     await closing;
+    if (recoveredReader) await recoveredReader.close();
     if (reader?.child.pid) { try { process.kill(reader.child.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; } }
     Object.defineProperty(process, "platform", platform);
   }
@@ -439,7 +564,33 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
   });
   }
 
-  for (const scenario of ["ancestry", "unavailable", "timeout"]) {
+  for (const scenario of ["reader-pipe-refusal", "reader-graceful-eof"]) test(
+    scenario === "reader-pipe-refusal" ? "reader cleanup rechecks retain escaped-helper pipe closure" : "reader completes graceful EOF shutdown without force kill",
+    { timeout: 45000, skip: process.platform !== "linux" }, async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-reader-pipes-"));
+    const child = fork(fileURLToPath(import.meta.url), [scenario, directory], {
+      execArgv: ["--import", "tsx"], stdio: ["ignore", "ignore", "pipe", "ipc"],
+    });
+    let stderr = "";
+    child.stderr.on("data", chunk => { stderr += chunk; });
+    let result;
+    const exited = new Promise(resolve => child.once("exit", (code, signal) => { result = { code, signal }; resolve(result); }));
+    try {
+      await until(() => result, "reader pipe fixture finishes: " + stderr, 35000);
+      assert.deepEqual(await exited, { code: 0, signal: null }, stderr);
+    } finally {
+      if (!result) { child.kill("SIGKILL"); await exited; }
+      const pids = await readFile(path.join(directory, "pipe-pids"), "utf8").then(JSON.parse, () => null);
+      if (pids?.helper && await isRunning(pids.helper)) {
+        try { process.kill(-pids.helper, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+        await until(async () => !await isRunning(pids.helper), "recorded escaped fixture group ends");
+      }
+      if (pids?.reader && await isRunning(pids.reader)) process.kill(pids.reader, "SIGKILL");
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  for (const scenario of ["ancestry", "unavailable", "timeout", "early-exit", "early-reused", "early-untraced"]) {
     test("reader pre-stop Windows observation: " + scenario, { timeout: 25000, skip: process.platform !== "linux" }, async () => {
       const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-reader-observation-"));
       const child = fork(fileURLToPath(import.meta.url), ["reader-observation-" + scenario, directory], {

@@ -57,9 +57,19 @@ A 10-second protocol deadline, one active inspection, four FIFO waiters and a
 15-second admission deadline bound runtime work. Workbench supplies the trusted
 fixed CLI launch and filtered environment, and retains process-tree custody
 through existing `code-execution-host` stop and identity-check primitives.
-Cleanup has its existing 15-second budget. Every result requires confirmed pipe
+Cleanup has its existing 15-second budget. After the bounded pre-stop observation,
+stdin receives EOF and stdout/stderr drain, with up to one second for graceful
+closure, following the pinned [upstream shutdown sequence](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server/tests/common/test_app_server.rs#L201-L210). The existing tree stop is a fallback, not the initial teardown step.
+Windows remaining-process checks feed the existing identity-checked end primitive
+for safely traced PID/creation identities, including after the root has exited.
+Both end and recheck use the remaining deadline; PID-reused and untraced rows
+are never selected for termination. Every result requires confirmed pipe
 closure and a clean identity scan. Checkable cleanup failures retain their targets
-and refuse subsequent spawns until new checks prove them clean. Plugin and action
+and their live pipe-closure condition. Subsequent admission and shutdown rechecks
+require closed pipes as well as a clean identity scan. A clean original Linux
+group cannot clear refusal while another group retains inherited stdout/stderr.
+This enforces pipe closure without establishing general escaped-process
+containment. Plugin and action
 module instances share one process-global reader registry. Normal host shutdown
 closes reader admission first, including queued inspections, awaits active
 process cleanup and pending opens, and propagates cleanup refusal. Repeated close
@@ -82,7 +92,11 @@ Workbench shares the Claude reader's full credential/path redaction before any
 per-message or aggregate shortening, retains the newest 20k excerpt and carries
 Native's truncation flag. URLs and next-line text retain the PR #198 behavior;
 filesystem paths consume ambiguous prose through their line end. UI source labels,
-active-only polling, final/open refresh and manual Refresh remain unchanged.
+Claude active polling remains every two seconds. Codex automatic active polling
+is suppressed to avoid repeatedly initializing its configured app-server. Opening,
+reopening, manual Refresh and one final settled refresh remain, including the
+in-flight final-refresh handling; active Codex details show concise Refresh
+guidance. Parent status/live-chat polling is unchanged.
 
 Wire/page/time bounds do not bound the provider's internal storage-file parsing.
 The app-server retains OS filesystem/subprocess/network rights; this is not an
@@ -103,9 +117,11 @@ status/resource/UTF-8 failures, privacy/truncation, concurrent reads, unexpected
 requests, timeout, child cleanup and missing project history. Root applied the maintained Native patch through the supported resolver and
 frozen offline install without dependency versions or edges changing. Root then
 passed the tracer (13), focused suite (112 with one existing installed-policy
-skip), redaction suite (36), desktop/package tests, typecheck and doctor.
+skip), redaction suite (36), desktop/package tests and typecheck.
 Final lifecycle checks passed 67 tests with four native-Windows-only skips;
-the details tracer passed 13, and typecheck and Doctor completed. The guarded
+the details tracer passed 13 and typecheck completed. The earlier plain `pnpm doctor`
+invoked pnpm's builtin, so it is not Native guard evidence. The current explicit
+`pnpm --dir packages/workbench run doctor` passed all Native guards. The guarded
 production build then caught five missing test-fixture environment-mutation
 annotations. These were corrected using the existing guard convention without
 changing behavior or disabling the guard; the pinned Node 24.19.0 build passed
@@ -148,3 +164,78 @@ captured implementation history.
 Existing real Codex continuity/stored-thread evidence is retained in the
 [acceptance register](../desktop-acceptance-status.md); it is separate from this
 new reader's completed retained-thread/browser checks and pending private packaged Windows acceptance.
+
+## PR #199 findings and verified corrections
+
+Exact-head CI at `8c8d335` failed two automation quit owner fixtures because their
+module stand-ins omitted the new reader shutdown boundary. The maintained fixture
+now stubs that owner, records reader-first admission and checks that every owner
+starts and failure waits for automation settlement. Production imports and guard
+configuration are unchanged.
+
+The required publisher completed at the same head with a supported P2: a retained
+original-group target could later scan clean while inherited output pipes remained
+open in a helper from another group. Retained owners now preserve a live closure
+condition, and both admission and shutdown require that condition plus a clean
+scan before dropping refusal. A bounded Linux actual-owner regression launches a
+harmless detached helper with inherited stdout/stderr, proves the original group
+clean while pipes remain open, checks refused admission and failed shutdown, then
+ends the recorded fixture helper and waits for output closure. The test is
+maintained in the existing desktop lifecycle file. It does not claim general OS
+containment, and the existing Windows observation behavior is unchanged.
+
+All 45 automation quit tests now pass, including both previous CI failures.
+The full affected lifecycle and details run passed 109 tests with four native
+Windows-only skips and zero failures. This includes the actual escaped-pipe
+regression; a clean original group cannot clear refusal while pipes remain open.
+The prior CI and review failures remain preserved and must be superseded by
+passing checks on the new exact head. The old `8c8d335` private package is held.
+
+## Remaining runtime corrections and acceptance limits
+
+External comments 4201210907/4201210918/4201210927 are addressed in source. Root's
+actual built `8c8d335` browser demonstrated the polling regression before this UI
+correction: five details requests versus three baseline after 5.5 seconds. Its
+same built-browser controller now passes with zero additional requests over the
+same 5.5-second active interval, one manual Refresh, one final settlement refresh,
+quiet settled details and fresh reopening. Selected activity is a transport fixture;
+the details server, reader and UI are real. The unaffected first-response settlement
+race and Claude polling retain their prior accepted evidence; they were not rerun.
+No duplicate component/browser harness was added.
+
+The maintained lifecycle file adds an EOF completion fixture with buffered output,
+asserting normal exit and no termination signal. Existing held/stubborn readers
+and the escaped-pipe refusal still exercise bounded fallback. Actual reader-owner
+fixtures with simulated Windows executables cover early root exit, verified
+helper end and later admission/shutdown, plus PID-reused and untraced identities
+that are never selected for termination. Native Windows acceptance is unrun.
+Initial EOF and early-exit cases were authored before the corresponding reader
+implementation; the PID-reuse/untraced safety cases were added afterward. No
+red-before-implementation is claimed for them. The first runtime run passed four
+cases and failed the early-exit fixture: its synthetic creation time was assigned
+after the actual launch window. Pinning only launch time exposed a second fixture
+defect: an empty whole-system snapshot. A stable unrelated process now keeps the
+snapshot valid. Neither correction weakens production identity or parser checks.
+All corrected cases pass in the 109-test affected run; both failures remain retained. The Native patch, lock and dependencies are unchanged,
+no startup-task test flag or new provider turn is introduced, and neither graceful
+shutdown nor safe observed cleanup establishes general OS containment.
+
+The current correction also passes typecheck, explicit Native Doctor and the guarded
+Node 24.19.0 production build (68.06 seconds). Independent Spec and Standards source
+reviews report no findings. Built desktop and 390-pixel checks pass project isolation,
+redaction and summary labels, with inspected screenshots. During a held read, normal
+host shutdown leaves neither reader nor ordinary child alive (1.06 seconds, request
+ECONNRESET); browser and server stopped. These fixture timings are observations,
+not a new performance benchmark or packaged Windows acceptance.
+
+A fresh public-action inspection of the actual retained source-work Codex session
+returned an available 20,000-character redacted summary in 1.819 seconds, with the
+same provider-file checksum before and after and zero requested provider turns.
+This is read-only stored-thread evidence, not a new Vivary provider lifecycle journey.
+The recorded executables exited and their PIDs were absent after the trace. Startup
+helpers and outbound attempts remain outside an established OS containment boundary.
+
+Root updated these factual results after the sole captured writer stopped. Final
+commit-bound publisher review, CI, owner approval and the existing Windows controller's
+private packaged acceptance remain pending. Issue #10 stays open; no release or merge
+is implied by source and server checks.
