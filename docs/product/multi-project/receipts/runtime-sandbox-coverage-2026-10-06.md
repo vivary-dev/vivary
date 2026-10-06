@@ -28,6 +28,20 @@ publishing host paths, credentials or transcripts.
 
 ## Source-backed coverage and uncovered access
 
+Issue #10's Claude reader uses a terminable Node worker with an empty environment
+and bounded heap/deadline. A harmless canary using the same environment/resource
+settings observed zero environment entries, a successful read outside the project,
+an inert Node child exiting zero and a successful loopback connection
+(`reader-worker-boundary.json`). These settings **do not form an OS sandbox**:
+the worker retains host filesystem, subprocess and network rights.
+
+The official SDK receives a read-only SessionStore without query/start/resume.
+Actual retained-log inspection observed no provider execution/network; API
+selection and that observation do not establish OS access denial. The canary is
+not an SDK malicious attempt or proof of hook containment. The
+[reader receipt](10-claude-log-reader.md) records accepted read behavior; the dated
+launcher observations below remain unchanged.
+
 | Surface | Actual configuration and source owner | Coverage limit / verification state |
 | --- | --- | --- |
 | Codex Code tools and their subprocesses | `Core/cli/codex-app-server-executor.js`, `permissionSettings` and `validateThread`: Normal requests `workspace-write`, project writable root, network off and `on-request` approval; Read-only requests `read-only`, network off and `never`; YOLO requests `danger-full-access`. Returned thread/project/policy metadata is checked before a turn. [Worker](../../../../packages/workbench/server/code-execution-worker.ts) selects native configuration. | These are requested CLI policies, not a project read allowlist or proof of enforced OS restrictions. Normal can request owner-approved escalation; YOLO has full host access. A new effective-policy filesystem/network/subprocess probe is **UNRUN**, including Windows. Protocol fixtures prove request handling only. |

@@ -444,7 +444,17 @@ function CodeSessionDetails({ runId, projectId }: { runId: string; projectId: st
             tabIndex={0} aria-label="Native transcript excerpt">{details.data.log.excerpt}</pre>
           : <p>No complete transcript entries are available.</p>}
         {details.data.log.truncated && <p className="text-xs">Showing a bounded excerpt. Some entries or text were omitted.</p>}
-        <p className="text-xs text-muted-foreground">Provider-native log files remain with the runtime. They are unavailable in this view.</p>
+        <h4 className="font-medium">Provider session log</h4>
+        {details.data.providerLog.reference && <p className="text-xs font-mono break-all">{details.data.providerLog.reference}</p>}
+        {details.data.providerLog.status === "available"
+          ? details.data.providerLog.excerpt ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs"
+            tabIndex={0} aria-label="Provider session excerpt">{details.data.providerLog.excerpt}</pre>
+            : <p>No user or assistant text is available.</p>
+          : <p>{({ missing: "The provider session log is missing.", unavailable: "The provider session log is unavailable.",
+            unsupported: "This provider log location or format is not supported.", malformed: "The provider session log could not be safely interpreted.",
+            "too-large": "The provider session log exceeds the inspection limit." })[details.data.providerLog.status]}</p>}
+        {details.data.providerLog.truncated && <p className="text-xs">Showing a bounded excerpt. Some messages or text were omitted.</p>}
+        <p className="text-xs text-muted-foreground">Provider logs remain with the runtime. Tools, thinking, and private metadata are omitted.</p>
       </>}
     </PopoverContent>
   </Popover>;

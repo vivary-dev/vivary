@@ -10,6 +10,9 @@
   "dependencies": {
     "@agent-native/core": "0.176.5",
     "@agent-native/toolkit": "0.19.3",
+    "@anthropic-ai/claude-agent-sdk": "0.3.288",
+    "@anthropic-ai/sdk": "0.93.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@ai-sdk/cohere": "3.0.60",
     "@ai-sdk/google": "3.0.121",
     "@ai-sdk/groq": "3.0.64",

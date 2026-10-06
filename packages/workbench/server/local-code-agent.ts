@@ -17,6 +17,7 @@ import {
   isActiveCodeAgentRun,
   listCodeAgentRunRecords,
   listCodeAgentTranscriptEvents,
+  readClaudeCodeSessionLog,
   updateCodeAgentRunRecord,
   type CodeAgentRunRecord,
   type CodeAgentTranscriptEvent,
@@ -1054,9 +1055,11 @@ export type VivaryCodeSessionDetails = {
   continuity: "new-session" | "reconstructed-context" | "resume-requested" | "native-resume" | "not-recorded";
   nextTurn: "native-resume" | "reconstructed-context";
   log: { reference: string; status: "available" | "missing" | "unavailable"; excerpt: string; truncated: boolean };
+  providerLog: { reference: string | null; status: "available" | "missing" | "unavailable" | "unsupported" | "malformed" | "too-large";
+    excerpt: string; truncated: boolean };
 };
 
-/** Read only this owned run's Native log. Provider files and credentials keep their CLI owner. */
+/** Authorize the run before Native opens its provider log; the client supplies no path. */
 export async function getVivaryCodeSessionDetails(
   ownerEmail: string, runId: string, selectedWorkspace?: VivaryCodeReadScope, orgId?: string,
 ): Promise<VivaryCodeSessionDetails> {
@@ -1071,8 +1074,21 @@ export async function getVivaryCodeSessionDetails(
     runId: run.id, engineLabel: engineLabelFromRun(run), sessionId, continuity,
     nextTurn: sessionId ? "native-resume" : "reconstructed-context",
     log: { reference: `native-transcript:${run.id}`, status: "unavailable", excerpt: "", truncated: false },
+    providerLog: { reference: sessionId ? `${engineFromRun(run) === "claude-cli" ? "claude-session" : "codex-thread"}:${sessionId}` : null,
+      status: "unsupported", excerpt: "", truncated: false },
   };
   await refreshHeldCredentials();
+  if (engineFromRun(run) === "claude-cli" && sessionId) {
+    const provider = await readClaudeCodeSessionLog(run);
+    // Redact each whole text before any output truncation, including a secret
+    // that crosses the excerpt boundary. Paths and opaque provider data stay private.
+    const messages = provider.messages.map(message => ({ role: message.role,
+      text: redactCredentialsInValue(message.text)
+        .replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\s<>"']+|(?<![A-Za-z0-9:])\/[^\s<>"']+/g, "[path]") }));
+    const excerpt = messages.slice(-40).map(message => `${message.role}: ${message.text.slice(0, 1_500)}`).join("\n\n");
+    details.providerLog = { reference: provider.reference, status: provider.status, excerpt: excerpt.slice(0, 20_000),
+      truncated: messages.length > 40 || messages.some(message => message.text.length > 1_500) || excerpt.length > 20_000 };
+  }
   let file;
   try {
     const logPath = codeAgentRunTranscriptPath(run.id);
