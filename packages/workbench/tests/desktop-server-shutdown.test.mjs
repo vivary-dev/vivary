@@ -204,7 +204,7 @@ process.once("SIGTERM", () => process.exit(0));
 if (first) while (!existsSync(${JSON.stringify(receipt("release-scan"))}) || ${JSON.stringify(role)} === "reader-observation-timeout") await delay(10);
 if (first && ${JSON.stringify(role)} === "reader-observation-unavailable") { process.stdout.write("incomplete scan"); process.exit(0); }
 const command = process.argv.at(-1);
-if (command.includes("Stop-Process") && ${JSON.stringify(role)}.startsWith("reader-observation-early")) {
+if (command.includes("Stop-Process") && /reader-observation-(early|first)/.test(${JSON.stringify(role)})) {
   const targets = command.match(/foreach \(\$target in '([^']+)'\.Split/)[1].split(";");
   writeFileSync(${JSON.stringify(receipt("ended-targets"))}, JSON.stringify(targets));
   writeFileSync(${JSON.stringify(receipt("helper-ended"))}, "");
@@ -215,12 +215,15 @@ if (command.includes("Stop-Process") && ${JSON.stringify(role)}.startsWith("read
 const { pid, at } = JSON.parse(readFileSync(${JSON.stringify(receipt("reader-identity"))}, "utf8"));
 const stopped = existsSync(${JSON.stringify(receipt("stopped"))}) || existsSync(${JSON.stringify(receipt("root-exited"))});
 const ended = existsSync(${JSON.stringify(receipt("helper-ended"))});
-const rows = ended ? [] : stopped ? [[41002, ${JSON.stringify(role)} === "reader-observation-early-reused" ? 77 : 41001,
+const rows = ended ? [] : stopped ? [[41002, ${JSON.stringify(role)} === "reader-observation-early-reused" || ${JSON.stringify(role)}.startsWith("reader-observation-first") ? 77 : 41001,
     at + (${JSON.stringify(role)} === "reader-observation-early-reused" ? 20 : 2), "orphan.exe"]]
   : [[pid, 1, at, "reader.exe"], [41001, pid, at + 1, "intermediate.exe"],
     ...(${JSON.stringify(role)} === "reader-observation-early-untraced" ? [] : [[41002, 41001, at + 2, "orphan.exe"]])];
 // A whole Windows snapshot still contains unrelated processes after the owned tree ends.
 rows.push([4, 0, at - 60_000, "System"]);
+if (stopped && ${JSON.stringify(role)} === "reader-observation-first-reused-root") {
+  rows.push([pid, 1, at + 1_000, "reused-reader.exe"]);
+}
 for (const [id, parent, created, name] of rows) {
   process.stdout.write([id, parent, String(BigInt(created) * 10000n + 116444736000000000n), name].join("\t") + "\n");
 }
@@ -253,7 +256,21 @@ if (first) writeFileSync(${JSON.stringify(receipt("first-observed"))}, "");
     await writeFile(receipt("reader-identity"), JSON.stringify({ pid: reader.child.pid, at }));
     await until(() => readFile(receipt("first-scan")).then(() => true, () => false), "first scan starts");
     const started = performance.now();
-    if (role.startsWith("reader-observation-early")) {
+    if (role.startsWith("reader-observation-first")) {
+      const exited = new Promise(resolve => reader.child.once("exit", resolve));
+      process.kill(reader.child.pid, "SIGTERM");
+      await exited;
+      await writeFile(receipt("root-exited"), "");
+      closing = reader.close();
+      await writeFile(receipt("release-scan"), "");
+      await until(() => readFile(receipt("first-observed")).then(() => true, () => false), "rootless first snapshot completes");
+      assert.equal(await closing, false, "a complete scan without the original root cannot confirm cleanup");
+      assert.equal(await readFile(receipt("ended-targets")).then(() => true, () => false), false,
+        "disconnected or reused identities must not be ended");
+      assert.equal(await readFile(receipt("stopped")).then(() => true, () => false), false, "the exited root is not killed again");
+      assert.equal(await owner.codexSessionLogLifecycle.open(directory), null, "unestablished ancestry keeps admission closed");
+      await assert.rejects(owner.shutdownCodexSessionReaders(), /could not be stopped completely/);
+    } else if (role.startsWith("reader-observation-early")) {
       await writeFile(receipt("release-scan"), "");
       await until(() => readFile(receipt("first-observed")).then(() => true, () => false), "live ancestry observation completes");
       const exited = new Promise(resolve => reader.child.once("exit", resolve));
@@ -273,12 +290,24 @@ if (first) writeFileSync(${JSON.stringify(receipt("first-observed"))}, "");
           "untraced or reused PID identities are never sent to the end primitive");
       }
       assert.equal(await readFile(receipt("stopped")).then(() => true, () => false), false, "an exited root is not passed to taskkill");
-      recoveredReader = await owner.codexSessionLogLifecycle.open(directory);
       if (recoverable) {
+        // A second real reader needs its own live root snapshot, not the first reader's ended identities.
+        for (const name of ["root-exited", "helper-ended", "first-scan", "first-observed", "release-scan"]) {
+          await rm(receipt(name), { force: true });
+        }
+        const recoveredAt = Date.now();
+        const recoveredClock = mock.method(Date, "now", () => recoveredAt);
+        try { recoveredReader = await owner.codexSessionLogLifecycle.open(directory); }
+        finally { recoveredClock.mock.restore(); }
         assert.ok(recoveredReader, "verified cleanup permits a later reader");
+        await writeFile(receipt("reader-identity"), JSON.stringify({ pid: recoveredReader.child.pid, at: recoveredAt }));
+        await until(() => readFile(receipt("first-scan")).then(() => true, () => false), "recovered reader scan starts");
+        await writeFile(receipt("release-scan"), "");
+        await until(() => readFile(receipt("first-observed")).then(() => true, () => false), "recovered reader root is observed");
         assert.equal(await recoveredReader.close(), true);
         await owner.shutdownCodexSessionReaders();
       } else {
+        recoveredReader = await owner.codexSessionLogLifecycle.open(directory);
         assert.equal(recoveredReader, null, "an untraced leftover keeps admission closed");
         await assert.rejects(owner.shutdownCodexSessionReaders(), /could not be stopped completely/);
       }
@@ -590,7 +619,7 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
     }
   });
 
-  for (const scenario of ["ancestry", "unavailable", "timeout", "early-exit", "early-reused", "early-untraced"]) {
+  for (const scenario of ["ancestry", "unavailable", "timeout", "early-exit", "early-reused", "early-untraced", "first-rootless", "first-reused-root"]) {
     test("reader pre-stop Windows observation: " + scenario, { timeout: 25000, skip: process.platform !== "linux" }, async () => {
       const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-reader-observation-"));
       const child = fork(fileURLToPath(import.meta.url), ["reader-observation-" + scenario, directory], {

@@ -79,6 +79,8 @@ async function openReader(cwd: string | undefined): Promise<ReaderProcess | null
   const closed = new Promise<void>(resolve => child.once("close", () => { didClose = true; resolve(); }));
   // Retain ancestry while it is live: post-stop scans cannot reconstruct an already exited intermediate.
   let windowsTarget = process.platform === "win32" && child.pid ? windowsWorkerTarget(child.pid, from, to, null) : null;
+  const windowsRoot = windowsTarget?.tracked[0];
+  let rootObserved = false;
   let scanTimer: ReturnType<typeof setTimeout> | undefined;
   let scanAbort: AbortController | undefined;
   let activeScan: Promise<boolean> | undefined;
@@ -90,6 +92,10 @@ async function openReader(cwd: string | undefined): Promise<ReaderProcess | null
     scanAbort = controller;
     activeScan = scanWindowsProcesses(controller.signal).then(rows => {
       if (controller.signal.aborted || !windowsTarget) { lastObservationSucceeded = false; return false; }
+      // A valid whole-system scan alone cannot establish ancestry after the original root has vanished.
+      rootObserved ||= rows.some(row => windowsRoot && row.pid === windowsRoot.pid && row.created !== null
+        && row.created >= windowsRoot.createdFrom && row.created <= windowsRoot.createdTo);
+      if (!rootObserved) { lastObservationSucceeded = false; return false; }
       const observed = windowsLeftovers(rows, windowsTarget.tracked, windowsTarget.traced);
       windowsTarget = { platform: "win32", tracked: observed.tracked, traced: observed.traced,
         ...(windowsTarget.overflow || observed.overflow ? { overflow: true } : {}) };

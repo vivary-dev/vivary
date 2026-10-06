@@ -75,10 +75,14 @@ closes reader admission first, including queued inspections, awaits active
 process cleanup and pending opens, and propagates cleanup refusal. Repeated close
 hooks share the same shutdown promise, including failure; admission stays closed.
 Windows scans retain observed PID/creation identities while the reader is live,
-including ancestry whose intermediate parent later exits. Close lets an in-flight
+including ancestry whose intermediate parent later exits. Before trusting that
+ancestry, a complete live snapshot must establish the original root PID within
+the retained launch creation-time window. A different creation identity for the
+same PID does not count. Once established, later root-absent snapshots can use
+the retained identities. Close lets an in-flight
 observation finish before termination, waiting at most three seconds and reserving
 the rest of the same cleanup budget for tree stop, pipe closure and verification.
-A pending scan that fails or times out, or a reader with no successful observation,
+A pending scan that fails or times out, or a reader whose original root was never observed,
 retains an uncheckable refusal. Later root-only scans cannot reconstruct the lost
 ancestry and do not clear that refusal. A timed-out observation is aborted; its
 bounded scanner settles before completion. Retained identities
@@ -239,3 +243,24 @@ Root updated these factual results after the sole captured writer stopped. Final
 commit-bound publisher review, CI, owner approval and the existing Windows controller's
 private packaged acceptance remain pending. Issue #10 stays open; no release or merge
 is implied by source and server checks.
+
+## Original-root observation correction
+
+Required review found that a syntactically valid first Windows snapshot could
+contain only unrelated processes and a disconnected grandchild after both the
+root and intermediate parent exited. Such a snapshot now retains an uncheckable
+refusal unless the original root identity was established in a prior live scan.
+The original creation window is unchanged; a reused root PID cannot establish it.
+Observed-root early-exit cleanup remains supported through retained identities.
+
+The maintained actual-owner scanner fixture adds root exit before the first
+snapshot is released, both with no root row and with a mismatched root creation
+identity. Each requires false close, no unsafe end selection, refused admission
+and failed shutdown. The later-open fixture supplies the new reader's own live
+root snapshot. All eight observation regressions and both shared-shutdown tests
+pass, along with typecheck and explicit Native Doctor. Independent source reviews
+pass. No red-before-implementation result is claimed for these new fixtures.
+The Linux reader/UI behavior is unchanged, so earlier retained-read and browser
+evidence is reused without repeating unaffected journeys. These Windows rows
+are simulated on Linux and do not establish native packaged Windows acceptance
+or OS containment. Renewed exact-head review/CI and Windows acceptance remain pending.
