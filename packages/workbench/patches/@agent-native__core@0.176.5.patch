@@ -1456,7 +1456,7 @@ index 57a2f6cba8abdb513bc0155a607e47ff84068793..4a48e7b668f406eefa3984c1bc3ecd20
      attachments?: AgentPromptAttachment[];
      stdout?: NodeJS.WritableStream;
 diff --git a/dist/cli/code-agent-executor.js b/dist/cli/code-agent-executor.js
-index 911ded5d652659602d5f6050563d27e4c00e8de3..afa97e17fd5870f993ebe16e7f9b5a4e7e772cd0 100644
+index 911ded5d652659602d5f6050563d27e4c00e8de3..8fb1b22b4396f775a471527f26590940cf19e97c 100644
 --- a/dist/cli/code-agent-executor.js
 +++ b/dist/cli/code-agent-executor.js
 @@ -1,4 +1,5 @@
@@ -1473,22 +1473,78 @@ index 911ded5d652659602d5f6050563d27e4c00e8de3..afa97e17fd5870f993ebe16e7f9b5a4e
              stdout: options.stdout,
              streamToolOutputToStdout,
              signal: options.signal,
-@@ -1219,7 +1221,87 @@ function normalizeOpenCodeVariant(effort) {
+@@ -488,6 +490,13 @@ async function executeClaudeCliRun(options) {
+         process.env.AGENT_NATIVE_CODE_AGENT_STRUCTURED_STDOUT !== "1";
+     const assistantText = [];
+     const claudeToolNames = new Map();
++    const storedSessionId = metadataString(options.run, "claudeSessionId");
++    const resumeSessionId = isClaudeSessionId(storedSessionId) ? storedSessionId : undefined;
++    let confirmedSessionId = resumeSessionId;
++    const sessionMode = resumeSessionId ? "resume-requested"
++        : listCodeAgentTranscriptEvents(options.run.id).filter(event => event.kind === "user").length > 1
++            ? "reconstructed-context" : "new-session";
++    updateCodeAgentRunRecord(options.run.id, { metadata: { providerSessionMode: sessionMode } });
+     appendCodeAgentTranscriptEvent({
+         runId: options.run.id,
+         kind: "status",
+@@ -512,8 +521,25 @@ async function executeClaudeCliRun(options) {
+             cwd,
+             model,
+             effort: reasoningEffort,
++            session: { persist: true, ...(resumeSessionId ? { resumeSessionId } : {}) },
+             signal: options.signal,
+             onEvent: (event) => {
++                // Init/result records must identify the session; ordinary content
++                // and tool events may omit it, but any supplied ID must be valid.
++                const requiresSessionId = event.type === "result" ||
++                    (event.type === "system" && event.subtype === "init");
++                if (requiresSessionId || Object.hasOwn(event, "session_id")) {
++                    if (!isClaudeSessionId(event.session_id) || (confirmedSessionId && event.session_id !== confirmedSessionId)) {
++                        throw new Error("Claude Code reported a different or invalid session. This turn was stopped.");
++                    }
++                    if (event.type === "system" && event.subtype === "init") {
++                        confirmedSessionId = event.session_id;
++                        updateCodeAgentRunRecord(options.run.id, {
++                            metadata: { claudeSessionId: confirmedSessionId,
++                                providerSessionMode: resumeSessionId ? "native-resume" : sessionMode },
++                        });
++                    }
++                }
+                 const text = appendClaudeParticipantTranscriptEvents(options.run.id, event, claudeToolNames);
+                 if (!text)
+                     return;
+@@ -639,6 +665,9 @@ async function executeClaudeCliRun(options) {
+         });
+     }
+ }
++function isClaudeSessionId(value) {
++    return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
++}
+ function buildClaudeCliPrompt(run, prompt) {
+     const permissionMode = run.permissionMode ?? "full-auto";
+     const mode = permissionMode === "auto-edit" || permissionMode === "full-auto"
+@@ -1219,7 +1248,93 @@ function normalizeOpenCodeVariant(effort) {
          return undefined;
      return effort;
  }
 +async function executeCodexAppServerRun(options) {
 +    const native = options.codexCli;
 +    const model = normalizeCodexCliModel(options.model);
++    const sessionId = metadataString(options.run, "codexSessionId");
++    const sessionMode = sessionId ? "resume-requested"
++        : listCodeAgentTranscriptEvents(options.run.id).filter(event => event.kind === "user").length > 1
++            ? "reconstructed-context" : "new-session";
++    updateCodeAgentRunRecord(options.run.id, { metadata: { providerSessionMode: sessionMode } });
 +    let effectiveModel = model;
 +    const result = await runCodexAppServer({
 +        ...native, cwd: options.run.cwd || process.cwd(), prompt: options.prompt, model,
-+        threadId: metadataString(options.run, "codexSessionId") ?? undefined,
++        threadId: sessionId ?? undefined,
 +        signal: options.signal,
 +        onThread: thread => {
 +            effectiveModel = thread.model;
 +            updateCodeAgentRunRecord(options.run.id, {
-+                metadata: { codexSessionId: thread.threadId, model: thread.model },
++                metadata: { codexSessionId: thread.threadId, model: thread.model,
++                    providerSessionMode: sessionId ? "native-resume" : sessionMode },
 +            });
 +        },
 +        onNotification: (method, params) => appendCodexAppServerTranscriptEvent(options.run.id, method, params),
@@ -1561,7 +1617,7 @@ index 911ded5d652659602d5f6050563d27e4c00e8de3..afa97e17fd5870f993ebe16e7f9b5a4e
      const cwd = options.run.cwd || process.cwd();
      const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-native-code-codex-"));
      const outputPath = path.join(outputDir, "last-message.txt");
-@@ -1241,8 +1323,7 @@ async function executeCodexCliRun(options) {
+@@ -1241,8 +1356,7 @@ async function executeCodexCliRun(options) {
          "--cd",
          cwd,
          "exec",
@@ -1571,7 +1627,7 @@ index 911ded5d652659602d5f6050563d27e4c00e8de3..afa97e17fd5870f993ebe16e7f9b5a4e
          "--json",
          "--skip-git-repo-check",
          "--ignore-user-config",
-@@ -1269,6 +1350,7 @@ async function executeCodexCliRun(options) {
+@@ -1269,6 +1383,7 @@ async function executeCodexCliRun(options) {
          const result = await runCodexCliProcess({
              args,
              cwd,
@@ -1579,7 +1635,7 @@ index 911ded5d652659602d5f6050563d27e4c00e8de3..afa97e17fd5870f993ebe16e7f9b5a4e
              prompt: buildCodexCliPrompt(options.run, options.prompt),
              stdout: options.stdout,
              streamToolOutputToStdout,
-@@ -1363,6 +1445,7 @@ async function executeCodexCliRun(options) {
+@@ -1363,6 +1478,7 @@ async function executeCodexCliRun(options) {
                  attachments: pendingFollowUp.attachments ??
                      userPromptAttachmentsForEvent(options.run.id, pendingFollowUp.eventId),
                  appendUserEvent: false,
@@ -1587,7 +1643,7 @@ index 911ded5d652659602d5f6050563d27e4c00e8de3..afa97e17fd5870f993ebe16e7f9b5a4e
                  stdout: options.stdout,
                  streamToolOutputToStdout: options.streamToolOutputToStdout,
                  signal: options.signal,
-@@ -1406,10 +1489,14 @@ function runCodexCliProcess(options) {
+@@ -1406,10 +1522,14 @@ function runCodexCliProcess(options) {
          let stderr = "";
          let pendingJson = "";
          let settled = false;
@@ -1604,7 +1660,7 @@ index 911ded5d652659602d5f6050563d27e4c00e8de3..afa97e17fd5870f993ebe16e7f9b5a4e
          });
          const finish = (result) => {
              if (settled)
-@@ -1455,7 +1542,7 @@ function runCodexCliProcess(options) {
+@@ -1455,7 +1575,7 @@ function runCodexCliProcess(options) {
                          : String(err),
              });
          });

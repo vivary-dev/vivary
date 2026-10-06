@@ -1,9 +1,24 @@
 # Desktop acceptance status
 
-Updated 2026-10-02. This page is the current tracked acceptance register for the
+Updated 2026-10-06. This page is the current tracked acceptance register for the
 Windows desktop and self-hosted Workbench. GitHub issues still own task
 scope and lifecycle. Dated receipts preserve detailed evidence. This page states
 what a new contributor or tester can rely on now.
+
+## Runtime sandbox coverage, October 6
+
+The [runtime coverage receipt](receipts/runtime-sandbox-coverage-2026-10-06.md)
+separates launcher configuration from coordinator-run Linux probes. The dev Node
+adapter denied outside reads/writes and spawn, allowing temp writes and loopback.
+Direct explicit Codex profiles allowed sibling reads, restricted writes and denied
+loopback for parent and ordinary child; these are not actual app-server proof.
+Direct QuickJS lacked process/require/fetch and denied Node import, while its
+approved host bridge read the outside canary. Full chat code execution defaults
+off. Claude's file-tool launcher enables no explicit OS sandbox. CLI hooks/MCP,
+Claude access, actual production composition and Windows checks remain UNRUN.
+Correlated capture metadata outside writer roots is not a controlled hook escape
+test. Electron renderer isolation does not contain host processes. This partial
+evidence establishes neither whole-product OS containment nor #10/#23 acceptance.
 
 ## Windows first launch and packaged runtime, September 23
 

@@ -3,13 +3,15 @@ import { readCodeTranscriptWindow } from "./code-transcript-page";
 import { codexApprovalResponse, supportsCodexRequest, type CodexApprovalDecision } from "./codex-approval";
 import type { CodexActionRequest } from "./code-execution-protocol";
 import { createHash } from "node:crypto";
-import { lstat, realpath, readdir, readFile, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, realpath, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 
 import { fail, type ActionRunContext } from "@agent-native/core/action";
 import {
   appendCodeAgentTranscriptEvent,
+  codeAgentRunTranscriptPath,
   createCodeAgentRunRecord,
   getCodeAgentRunRecord,
   isActiveCodeAgentRun,
@@ -1045,6 +1047,76 @@ export async function sendVivaryCodeMessage(input: {
   return getVivaryCodeState(input.ownerEmail, run.id, workspace, input.orgId);
 }
 
+export type VivaryCodeSessionDetails = {
+  runId: string;
+  engineLabel: string;
+  sessionId: string | null;
+  continuity: "new-session" | "reconstructed-context" | "resume-requested" | "native-resume" | "not-recorded";
+  nextTurn: "native-resume" | "reconstructed-context";
+  log: { reference: string; status: "available" | "missing" | "unavailable"; excerpt: string; truncated: boolean };
+};
+
+/** Read only this owned run's Native log. Provider files and credentials keep their CLI owner. */
+export async function getVivaryCodeSessionDetails(
+  ownerEmail: string, runId: string, selectedWorkspace?: VivaryCodeReadScope, orgId?: string,
+): Promise<VivaryCodeSessionDetails> {
+  const workspace = selectedWorkspace ?? await resolveWorkspace();
+  const run = requireOwnedRun(runId, ownerEmail, orgId, workspace);
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(run.id)) fail("Local Vivary code run not found.", { statusCode: 404 });
+  const sessionId = providerSessionId(run, engineFromRun(run));
+  const mode = metadataString(run, "providerSessionMode");
+  const continuity = mode === "new-session" || mode === "reconstructed-context" ? mode
+    : sessionId && (mode === "native-resume" || mode === "resume-requested") ? mode : "not-recorded";
+  const details: VivaryCodeSessionDetails = {
+    runId: run.id, engineLabel: engineLabelFromRun(run), sessionId, continuity,
+    nextTurn: sessionId ? "native-resume" : "reconstructed-context",
+    log: { reference: `native-transcript:${run.id}`, status: "unavailable", excerpt: "", truncated: false },
+  };
+  await refreshHeldCredentials();
+  let file;
+  try {
+    const logPath = codeAgentRunTranscriptPath(run.id);
+    const before = await lstat(logPath, { bigint: true });
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) return details;
+    file = await open(logPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const opened = await file.stat({ bigint: true });
+    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.nlink !== 1n || opened.size > BigInt(Number.MAX_SAFE_INTEGER)) return details;
+    // Read the final 64 KiB once. A partial first/last line is omitted, never parsed as another event.
+    const size = Number(opened.size);
+    const offset = Math.max(0, size - 64 * 1024);
+    const buffer = Buffer.alloc(Math.min(size, 64 * 1024));
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, offset);
+    let text = buffer.subarray(0, bytesRead).toString("utf8");
+    if (offset) text = text.includes("\n") ? text.slice(text.indexOf("\n") + 1) : "";
+    const lines = text.split("\n").slice(0, -1);
+    const messages: string[] = [];
+    let truncated = offset > 0 || bytesRead < size;
+    for (const line of lines) {
+      let event;
+      try { event = JSON.parse(line); } catch { truncated = true; continue; }
+      if (!event || event.runId !== run.id || typeof event.message !== "string"
+          || !["user", "system", "note", "artifact", "status"].includes(event.kind)) continue;
+      if (event.message.length > 1_500) truncated = true;
+      messages.push(`${event.kind}: ${redactCredentialsInValue(event.message).slice(0, 1_500)}`);
+    }
+    if (messages.length > 40) truncated = true;
+    const excerpt = messages.slice(-40).join("\n\n");
+    details.log = { ...details.log, status: "available", excerpt: excerpt.slice(-20_000),
+      truncated: truncated || excerpt.length > 20_000 };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") details.log.status = "missing";
+  } finally { await file?.close(); }
+  return details;
+}
+
+function providerSessionId(run: CodeAgentRunRecord, engine: VivaryCodeEngine): string | null {
+  if (metadataString(run, "engine") !== engine) return null;
+  const id = metadataString(run, engine === "claude-cli" ? "claudeSessionId" : "codexSessionId");
+  return id && (engine === "claude-cli"
+    ? /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    : /^[A-Za-z0-9_-]{1,128}$/.test(id)) ? id : null;
+}
+
 export async function approveVivaryCodeMessage(input: {
   ownerEmail: string; orgId?: string; runId: string; requestId: string; workspace?: VivaryCodeWorkspace;
   revalidateWorkspace?: () => Promise<VivaryCodeWorkspace | undefined>;
@@ -1519,12 +1591,10 @@ function recordStoppingRun(
 }
 
 /**
- * The engine prompt for one message. A new run and a resumed Codex thread
- * get the raw message. Other follow-ups quote the transcript, because each
- * Claude turn is a fresh CLI session. Every turn of every engine gets the
- * full project block first. A resumed Codex thread therefore holds one block
- * per turn, which is accepted so a thread never relies on a block Codex may
- * have compacted away.
+ * The engine prompt for one message. A new run and a saved provider session
+ * get the raw message. Legacy follow-ups without a provider ID quote the
+ * transcript. Every turn gets the full project block, so a resumed session
+ * never relies on a block its provider may have compacted away.
  */
 export function buildVivaryCodeExecutionPrompt(
   existing: CodeAgentRunRecord | null,
@@ -1532,8 +1602,8 @@ export function buildVivaryCodeExecutionPrompt(
   message: string,
   projectContext?: ProjectContextBlock,
 ): string {
-  const resumesCodexThread = engine === "codex-cli" && existing !== null && metadataString(existing, "codexSessionId") !== null;
-  const prompt = existing && !resumesCodexThread
+  const resumesProviderSession = existing !== null && providerSessionId(existing, engine) !== null;
+  const prompt = existing && !resumesProviderSession
     ? buildVivaryCodeFollowUpPrompt(listCodeAgentTranscriptEvents(existing.id), message) : message;
   return projectContext ? `${projectContext}\n\n${prompt}` : prompt;
 }

@@ -16,7 +16,7 @@ import { useAppStateWriter } from "@/lib/native-state";
 import { registerSelectionCloseFlush, trackSelectionWrite, useChatDraftList, useNativeChatDraft } from "@/lib/chat-draft";
 import { Badge, Button, Popover, PopoverContent, PopoverTrigger, Skeleton } from "@agent-native/toolkit/ui";
 import { IconHistory, IconPlus, IconSettings, IconSquare } from "@tabler/icons-react";
-import type { VivaryCodeRunState, VivaryCodeState } from "../../../server/local-code-agent";
+import type { VivaryCodeRunState, VivaryCodeSessionDetails, VivaryCodeState } from "../../../server/local-code-agent";
 import { codeDraftSelectionKey, codeDraftThreadId } from "../../../shared/code-draft";
 import { createLocalCodeChatAdapter } from "../../lib/local-code-chat-adapter";
 import { useProjects } from "../projects/ProjectContext";
@@ -360,6 +360,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
         <p>{run ? run.engineLabel + " / " + run.model : projectLabel ?? "Personal workspace"}</p>
       </div>
       <div className="local-agent-header-actions">
+        {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} />}
         {activeRun && <Badge variant="secondary" role="status" title={activeRun.title}>Working{activeRun.projectId !== projectId ? " in another project" : ""}</Badge>}
         <Popover open={historyOpen} onOpenChange={setHistoryOpen}>
           <PopoverTrigger asChild>
@@ -405,6 +406,48 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
 
     </div>
   </section>;
+}
+
+const continuityLabels: Record<VivaryCodeSessionDetails["continuity"], string> = {
+  "new-session": "This turn requested a new provider session.",
+  "reconstructed-context": "This turn reconstructed context from the saved conversation.",
+  "resume-requested": "This turn requested native resume; the runtime has not confirmed it.",
+  "native-resume": "The runtime confirmed native resume for this turn.",
+  "not-recorded": "Continuity for the last turn was not recorded.",
+};
+
+function CodeSessionDetails({ runId, projectId }: { runId: string; projectId: string | null }) {
+  const [open, setOpen] = useState(false);
+  const details = useActionQuery<VivaryCodeSessionDetails>("vivary-code-state", {
+    projectId: projectId ?? undefined, runId, details: true,
+  }, { enabled: open, retry: false, refetchInterval: open ? 2_000 : false });
+  return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger asChild><Button variant="ghost" size="sm">Session details</Button></PopoverTrigger>
+    <PopoverContent align="end" className="w-[min(32rem,calc(100vw-2rem))] max-h-[75vh] overflow-y-auto space-y-3 text-sm"
+      aria-label="Session details">
+      <h3 className="font-medium">Session details</h3>
+      {details.isLoading && <p role="status">Loading session details…</p>}
+      {details.isError && <div role="alert"><p>Session details could not be loaded.</p>
+        <Button variant="ghost" size="sm" onClick={() => { void details.refetch(); }}>Retry</Button></div>}
+      {details.data && !details.isError && <>
+        <p>{details.data.engineLabel} · <span className="font-mono break-all">{details.data.runId}</span></p>
+        <p>{continuityLabels[details.data.continuity]}</p>
+        <p>Provider session: {details.data.sessionId ? <code className="break-all">{details.data.sessionId}</code> : "Not reported"}</p>
+        <p>{details.data.nextTurn === "native-resume"
+          ? "The next message will request resume of this provider session."
+          : "The next message will reconstruct context from the saved conversation."}</p>
+        <h4 className="font-medium">Native transcript</h4>
+        <p className="text-xs font-mono break-all">{details.data.log.reference}</p>
+        {details.data.log.status === "missing" ? <p>The transcript log is missing.</p>
+          : details.data.log.status === "unavailable" ? <p>The transcript log is unavailable.</p>
+          : details.data.log.excerpt ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs"
+            tabIndex={0} aria-label="Native transcript excerpt">{details.data.log.excerpt}</pre>
+          : <p>No complete transcript entries are available.</p>}
+        {details.data.log.truncated && <p className="text-xs">Showing a bounded excerpt. Some entries or text were omitted.</p>}
+        <p className="text-xs text-muted-foreground">Provider-native log files remain with the runtime. They are unavailable in this view.</p>
+      </>}
+    </PopoverContent>
+  </Popover>;
 }
 
 type LocalCodeConversationProps = PreviewChatProps & {

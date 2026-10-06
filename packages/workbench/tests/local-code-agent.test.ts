@@ -622,7 +622,7 @@ process.send({type:"vivary:code-worker:ready"});
     }
   });
 
-  it("gives every turn the full block, a resumed Codex thread without quoting, and a personal run no block", async () => {
+  it("gives every turn the full block, saved provider sessions without quoting, and a personal run no block", async () => {
     const store = await mkdtemp(path.join(os.tmpdir(), "vivary-code-context-codex-"));
     temporaryRoots.push(store);
     const previousStore = process.env.AGENT_NATIVE_CODE_AGENTS_HOME; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
@@ -643,6 +643,12 @@ process.send({type:"vivary:code-worker:ready"});
       appendCodeAgentTranscriptEvent({ runId: claude.id, kind: "user", message: "Earlier question" });
       assert.match(buildVivaryCodeExecutionPrompt(claude, "claude-cli", "Next question", block),
         /^<project-context>[\s\S]*<\/project-context>\n\n# Previous conversation\n/);
+      const resumedClaude = createCodeAgentRunRecord({ id: "claude-native-resume", goalId: "vivary-local-code", title: "Claude",
+        status: "paused", cwd: store, metadata: { app: "vivary-workbench-local-code", engine: "claude-cli",
+          claudeSessionId: "00000000-0000-4000-8000-000000000010" } });
+      appendCodeAgentTranscriptEvent({ runId: resumedClaude.id, kind: "user", message: "Earlier question" });
+      assert.equal(buildVivaryCodeExecutionPrompt(resumedClaude, "claude-cli", "Next question", block), `${block}\n\nNext question`);
+      assert.match(buildVivaryCodeExecutionPrompt(resumedClaude, "codex-cli", "Next question", block), /# Previous conversation/);
       assert.equal(buildVivaryCodeExecutionPrompt(null, "claude-cli", "Personal question"), "Personal question");
     } finally {
       if (previousStore === undefined) delete process.env.AGENT_NATIVE_CODE_AGENTS_HOME; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
