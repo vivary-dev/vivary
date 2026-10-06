@@ -360,7 +360,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
         <p>{run ? run.engineLabel + " / " + run.model : projectLabel ?? "Personal workspace"}</p>
       </div>
       <div className="local-agent-header-actions">
-        {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} />}
+        {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} active={isCodeAgentRunActive(run)} />}
         {activeRun && <Badge variant="secondary" role="status" title={activeRun.title}>Working{activeRun.projectId !== projectId ? " in another project" : ""}</Badge>}
         <Popover open={historyOpen} onOpenChange={setHistoryOpen}>
           <PopoverTrigger asChild>
@@ -416,16 +416,38 @@ const continuityLabels: Record<VivaryCodeSessionDetails["continuity"], string> =
   "not-recorded": "Continuity for the last turn was not recorded.",
 };
 
-function CodeSessionDetails({ runId, projectId }: { runId: string; projectId: string | null }) {
+function CodeSessionDetails({ runId, projectId, active }: { runId: string; projectId: string | null; active: boolean }) {
   const [open, setOpen] = useState(false);
+  // Completed output may arrive while closed; reopening must revalidate the cached snapshot.
   const details = useActionQuery<VivaryCodeSessionDetails>("vivary-code-state", {
     projectId: projectId ?? undefined, runId, details: true,
-  }, { enabled: open, retry: false, refetchInterval: open ? 2_000 : false });
+  }, { enabled: open, retry: false, staleTime: 0, refetchInterval: open && active ? 2_000 : false });
+  const finalRefresh = useRef({ runId, projectId, wasActive: active, pending: false });
+  useEffect(() => {
+    const refresh = finalRefresh.current;
+    const scopeChanged = refresh.runId !== runId || refresh.projectId !== projectId;
+    const settled = !scopeChanged && refresh.wasActive && !active;
+    refresh.runId = runId;
+    refresh.projectId = projectId;
+    refresh.wasActive = active;
+    if (!open || scopeChanged || active) refresh.pending = false;
+    else if (settled) refresh.pending = true;
+    // Refetch during the first request can deduplicate into its older snapshot.
+    // Retain the final update until it can start a fresh request, then consume it once.
+    if (refresh.pending && !details.isFetching) {
+      refresh.pending = false;
+      void details.refetch();
+    }
+  }, [active, open, runId, projectId, details.isFetching, details.refetch]);
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild><Button variant="ghost" size="sm">Session details</Button></PopoverTrigger>
     <PopoverContent align="end" className="w-[min(32rem,calc(100vw-2rem))] max-h-[75vh] overflow-y-auto space-y-3 text-sm"
       aria-label="Session details">
-      <h3 className="font-medium">Session details</h3>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="font-medium">Session details</h3>
+        <Button variant="ghost" size="sm" disabled={details.isFetching}
+          onClick={() => { void details.refetch(); }}>Refresh</Button>
+      </div>
       {details.isLoading && <p role="status">Loading session details…</p>}
       {details.isError && <div role="alert"><p>Session details could not be loaded.</p>
         <Button variant="ghost" size="sm" onClick={() => { void details.refetch(); }}>Retry</Button></div>}
@@ -444,7 +466,17 @@ function CodeSessionDetails({ runId, projectId }: { runId: string; projectId: st
             tabIndex={0} aria-label="Native transcript excerpt">{details.data.log.excerpt}</pre>
           : <p>No complete transcript entries are available.</p>}
         {details.data.log.truncated && <p className="text-xs">Showing a bounded excerpt. Some entries or text were omitted.</p>}
-        <p className="text-xs text-muted-foreground">Provider-native log files remain with the runtime. They are unavailable in this view.</p>
+        <h4 className="font-medium">Provider session log</h4>
+        {details.data.providerLog.reference && <p className="text-xs font-mono break-all">{details.data.providerLog.reference}</p>}
+        {details.data.providerLog.status === "available"
+          ? details.data.providerLog.excerpt ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs"
+            tabIndex={0} aria-label="Provider session excerpt">{details.data.providerLog.excerpt}</pre>
+            : <p>No user or assistant text is available.</p>
+          : <p>{({ missing: "The provider session log is missing.", unavailable: "The provider session log is unavailable.",
+            unsupported: "This provider log location or format is not supported.", malformed: "The provider session log could not be safely interpreted.",
+            "too-large": "The provider session log exceeds the inspection limit." })[details.data.providerLog.status]}</p>}
+        {details.data.providerLog.truncated && <p className="text-xs">Showing a bounded excerpt. Some messages or text were omitted.</p>}
+        <p className="text-xs text-muted-foreground">Provider logs remain with the runtime. Tools, thinking, and private metadata are omitted.</p>
       </>}
     </PopoverContent>
   </Popover>;

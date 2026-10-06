@@ -5,6 +5,22 @@ Windows desktop and self-hosted Workbench. GitHub issues still own task
 scope and lifecycle. Dated receipts preserve detailed evidence. This page states
 what a new contributor or tester can rely on now.
 
+## Claude provider log reader, October 6
+
+The [reader receipt](receipts/10-claude-log-reader.md) records verified Native-owned
+Claude inspection through the official SDK and scoped details action. Installed
+focused checks passed 50 with one existing policy skip; redaction passed 36,
+details 15 and desktop host 20. Typecheck/build, desktop/narrow browser and an
+isolated copied production server passed. A retained real log preserved its hash;
+inspection made zero provider calls. SDK notices are packaged and eight optional
+executors excluded. The worker is not an OS sandbox.
+
+Prior PR #197 Claude Stop/restart/resume acceptance remains unchanged. Issue #10
+stays open: Codex provider-log details are unsupported pending a bounded
+stored-thread view, and current Windows candidate acceptance is unrun. Final
+independent review, reviewed commit, exact-commit CI, Entire verification and
+owner approval remain pending; no new release or publication is accepted here.
+
 ## Runtime sandbox coverage, October 6
 
 The [runtime coverage receipt](receipts/runtime-sandbox-coverage-2026-10-06.md)

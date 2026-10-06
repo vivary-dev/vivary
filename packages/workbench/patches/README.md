@@ -28,11 +28,56 @@ Codex retains its app-server owner and thread validation and records the same
 continuity vocabulary.
 
 Runs without a validated provider ID reconstruct bounded Native transcript
-context. A new reported session then supports native resume on later turns.
-Provider-native files and credential roots keep their CLI owner and location.
-The scoped Workbench details read returns only a bounded redacted Native
-transcript excerpt and a logical reference. Provider-native files are unavailable
-in that view.
+context. Valid IDs support later native resume. Provider files and credentials
+retain their runtime owner and location. The scoped Workbench details action adds
+a separately labeled Claude excerpt through Native's public
+`readClaudeCodeSessionLog`. The [reader receipt](../../../docs/product/multi-project/receipts/10-claude-log-reader.md)
+records passing installed checks, browser acceptance and isolated copied-output
+acceptance without a provider call.
+
+Only the documented short default cwd/UUID location is supported, without scans
+or client paths. SDK-compatible provider key and cwd metadata normalization is
+NFC on Darwin only; filesystem canonical-path/link checks retain their original
+spelling and Linux NFC/NFD identities remain distinct. The public Unicode
+regression passes installed Linux checks; native macOS acceptance remains unrun.
+Input caps are 256 KiB, 2,048 complete lines, 32 KiB per line and
+nesting depth 32 before JSON parsing. Links, hardlinks, changed snapshots, identity
+mismatch and cyclic parents fail safely. The official SDK interprets opaque
+entries via a read-only store in a terminable worker with a three-second deadline
+and bounded heap. A bounded FIFO admits one active inspection and four waiters,
+with a 15-second wait limit and unavailable status for overload/expiry; every
+outcome releases admission. Workbench redacts allowlisted user/assistant text
+before per-message limits and keeps the newest 20,000 aggregate characters.
+The worker clears its environment but retains OS filesystem,
+subprocess and network rights; it is not an OS sandbox. Missing canonical project
+folders permit retained history; existing linked project paths remain refused.
+Session details polls only its selected active run, refreshes once when that run
+settles while open, and offers manual Refresh. Parent host/status queries are
+unchanged. New concurrent-read, overload, queued-origin and newest-excerpt
+regressions pass after the updated frozen install. The reader receipt records
+the affected built-browser polling and held-response acceptance, with synthetic
+activity transitions distinguished from real provider execution.
+
+`packageExtensions` declares Agent SDK 0.3.288 as a Native peer. Workbench pins
+that SDK, API SDK 0.93.0 and MCP SDK 1.30.0; Core retains API 0.90.0 and root Zod
+4.5.4 satisfies its reader peer. Exactly eight optional SDK executors are excluded
+through `ignoredOptionalDependencies`. The frozen install and dependency audit
+passed; installed package files are not edited.
+
+The production `nitro.config.ts` seeds the resolved SDK worker entry through
+Nitro's supported `traceOpts.hooks.traceStart` and traces only its full package
+through `traceDeps`, retaining resources and notices. This covers the opaque
+worker import while preserving Core/app peer bundling; full peer tracing can mix
+installed versions. Existing worker chunk emission is preserved and no custom
+copier is used. The isolated server's readiness, scoped action and browser passed,
+with the SDK notice present and no optional executors.
+
+Preserve the proprietary SDK license and notices. The
+[official README](https://github.com/anthropics/claude-agent-sdk-typescript/blob/main/README.md#license-and-terms)
+and [Commercial Terms](https://www.anthropic.com/legal/commercial-terms) cover
+normal customer-product integration; no additional vendor approval gate has been
+established. This grants no MIT or unrestricted relicensing rights. Existing
+release acceptance and publication approval remain required.
 
 Run `pnpm --dir packages/workbench exec tsx --test --test-concurrency=1
 tests/claude-session-continuity.test.mjs tests/code-session-details.test.ts

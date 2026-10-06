@@ -12423,3 +12423,312 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
      const costX100 = resolvedCostSource === "unavailable"
          ? 0
          : (costCentsX100 ??
+diff --git a/dist/cli/claude-session-log.js b/dist/cli/claude-session-log.js
+new file mode 100644
+--- /dev/null
++++ b/dist/cli/claude-session-log.js
+@@ -0,0 +1,275 @@
++import { constants } from "node:fs";
++import { lstat, open, realpath } from "node:fs/promises";
++import os from "node:os";
++import path from "node:path";
++import { Worker } from "node:worker_threads";
++
++const MAX_BYTES = 256 * 1024;
++const MAX_LINES = 2048;
++const MAX_LINE_BYTES = 32 * 1024;
++const MAX_DEPTH = 32;
++const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++const MAX_WAITING_INSPECTIONS = 4;
++const MAX_INSPECTION_WAIT_MS = 15_000;
++let inspectionActive = false;
++const inspectionQueue = [];
++
++/** Host-only entry point: callers authorize the retained Native run before calling. */
++export async function readClaudeCodeSessionLog(run, options = {}) {
++    const sessionId = run.metadata?.claudeSessionId;
++    const result = { reference: typeof sessionId === "string" && UUID.test(sessionId)
++        ? `claude-session:${sessionId}` : null, status: "unsupported", messages: [] };
++    if (run.metadata?.engine !== "claude-cli" || typeof sessionId !== "string" || !UUID.test(sessionId)) return result;
++    // Custom naming/configuration has no recorded, supported exact-location reference yet.
++    // Do not scan directories or guess a hash for long project names.
++    if (process.env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_CODE_PROJECT_DIR_NAME
++        || run.metadata?.claudeConfigDir || run.metadata?.claudeProjectDirName || run.metadata?.claudeSessionStore) return result;
++    const cwd = run.cwd;
++    if (typeof cwd !== "string" || !path.isAbsolute(cwd) || path.resolve(cwd) !== cwd) return result;
++    // Match SDK provider identity only; filesystem paths remain byte-exact below.
++    const providerCwd = claudeCwdIdentity(cwd);
++    const projectKey = providerCwd.replace(/[^a-zA-Z0-9]/g, "-");
++    if (projectKey.length > 200) return result;
++    const home = options.homeDirectory ?? os.homedir();
++    if (!path.isAbsolute(home)) return result;
++    const config = path.join(home, ".claude");
++    if (inside(cwd, config)) return result;
++    if (!await acquireInspection()) return { ...result, status: "unavailable" };
++    let file;
++    try {
++        // Retained history may outlive its project. Check every existing component
++        // for links, but never confuse an absent project with an absent log.
++        const project = await inspectPath(cwd, true);
++        if (project && !project.at(-1).isDirectory()) return { ...result, status: "unavailable" };
++        const logPath = path.join(config, "projects", projectKey, sessionId + ".jsonl");
++        const before = await inspectPath(logPath);
++        const target = before.at(-1);
++        if (!target.isFile() || target.nlink !== 1n) return { ...result, status: "unavailable" };
++        if (target.size > BigInt(MAX_BYTES)) return { ...result, status: "too-large" };
++        file = await open(logPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
++        const opened = await file.stat({ bigint: true });
++        if (!sameFile(target, opened)) return { ...result, status: "unavailable" };
++        // A whole snapshot only: a tail cannot establish the official parent-message chain.
++        const buffer = Buffer.alloc(MAX_BYTES + 1);
++        let length = 0;
++        while (length < buffer.length) {
++            const { bytesRead } = await file.read(buffer, length, buffer.length - length, length);
++            if (!bytesRead) break;
++            length += bytesRead;
++        }
++        const after = await inspectPath(logPath);
++        if (!sameFile(opened, await file.stat({ bigint: true })) || before.length !== after.length
++            || before.some((entry, index) => !sameFile(entry, after[index])) || BigInt(length) !== opened.size) {
++            return { ...result, status: "unavailable" };
++        }
++        if (length > MAX_BYTES) return { ...result, status: "too-large" };
++        await file.close();
++        file = undefined;
++        let entries;
++        try { entries = frameEntries(buffer.subarray(0, length), sessionId, providerCwd); }
++        catch (error) { return { ...result, status: error.message === "limit" ? "too-large" : "malformed" }; }
++        if (!entries.length) return { ...result, status: "malformed" };
++        const interpreted = await interpretSnapshot({ entries, cwd, providerCwd, projectKey, sessionId });
++        return { ...result, ...interpreted };
++    } catch (error) {
++        return { ...result, status: error?.code === "ENOENT" ? "missing" : "unavailable" };
++    } finally {
++        try { await file?.close().catch(() => undefined); }
++        finally { releaseInspection(); }
++    }
++}
++
++// Keep one reader/worker active. Ordinary overlapping clients wait in FIFO order;
++// overload and a stalled predecessor cannot retain an unbounded queue or wait.
++function acquireInspection() {
++    if (!inspectionActive) {
++        inspectionActive = true;
++        return Promise.resolve(true);
++    }
++    if (inspectionQueue.length >= MAX_WAITING_INSPECTIONS) return Promise.resolve(false);
++    return new Promise(resolve => {
++        const waiter = { resolve, timer: undefined };
++        waiter.timer = setTimeout(() => {
++            const index = inspectionQueue.indexOf(waiter);
++            if (index !== -1) inspectionQueue.splice(index, 1);
++            resolve(false);
++        }, MAX_INSPECTION_WAIT_MS);
++        inspectionQueue.push(waiter);
++    });
++}
++
++function releaseInspection() {
++    const next = inspectionQueue.shift();
++    if (next) {
++        clearTimeout(next.timer);
++        next.resolve(true);
++    } else inspectionActive = false;
++}
++
++// SDK 0.3.288 normalizes provider cwd on Darwin only; Linux names stay distinct.
++function claudeCwdIdentity(cwd) {
++    return process.platform === "darwin" ? cwd.normalize("NFC") : cwd;
++}
++
++function inside(root, target) {
++    const relative = path.relative(root, target);
++    return relative === "" || (!relative.startsWith(".." + path.sep) && relative !== ".." && !path.isAbsolute(relative));
++}
++
++async function inspectPath(target, allowMissing = false) {
++    const root = path.parse(target).root;
++    const components = target.slice(root.length).split(path.sep);
++    if (components.length > 128) throw new Error("unsupported path");
++    const snapshots = [];
++    let current = root;
++    for (const component of ["", ...components]) {
++        if (component) current = path.join(current, component);
++        let entry;
++        try { entry = await lstat(current, { bigint: true }); }
++        catch (error) {
++            if (allowMissing && error?.code === "ENOENT") return null;
++            throw error;
++        }
++        if (entry.isSymbolicLink() || (current !== target && !entry.isDirectory())) throw new Error("linked path");
++        snapshots.push(entry);
++    }
++    try {
++        if (await realpath(target) !== target) throw new Error("noncanonical path");
++    } catch (error) {
++        if (allowMissing && error?.code === "ENOENT") return null;
++        throw error;
++    }
++    return snapshots;
++}
++
++function sameFile(a, b) {
++    return a.dev === b.dev && a.ino === b.ino && a.mode === b.mode && a.nlink === b.nlink
++        && a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
++}
++
++function frameEntries(buffer, sessionId, cwd) {
++    const text = new TextDecoder("utf-8", { fatal: true }).decode(buffer);
++    if (!text.endsWith("\n")) throw new Error("incomplete");
++    const lines = text.slice(0, -1).split("\n");
++    if (lines.length > MAX_LINES) throw new Error("limit");
++    const entries = [];
++    const parents = new Map();
++    for (const line of lines) {
++        if (Buffer.byteLength(line) > MAX_LINE_BYTES) throw new Error("limit");
++        checkDepth(line);
++        const entry = JSON.parse(line);
++        if (!entry || typeof entry !== "object" || Array.isArray(entry)
++            || typeof entry.type !== "string" || entry.type.length > 64) throw new Error("entry");
++        // These are defensive identity/resource checks, not a semantic transcript parser.
++        // Metadata-only entries may omit identity; message records must prove both scopes.
++        const entryCwd = typeof entry.cwd === "string" ? claudeCwdIdentity(entry.cwd) : undefined;
++        if ((entry.sessionId !== undefined && entry.sessionId !== sessionId)
++            || (entry.session_id !== undefined && entry.session_id !== sessionId)
++            || (entry.cwd !== undefined && entryCwd !== cwd)) throw new Error("identity");
++        if ((entry.type === "user" || entry.type === "assistant")
++            && (entry.sessionId !== sessionId || entryCwd !== cwd || !UUID.test(entry.uuid ?? ""))) throw new Error("identity");
++        for (const key of ["uuid", "parentUuid", "logicalParentUuid"]) {
++            if (entry[key] !== undefined && entry[key] !== null
++                && (typeof entry[key] !== "string" || entry[key].length > 128)) throw new Error("identifier");
++        }
++        if (entry.uuid !== undefined) {
++            if (typeof entry.uuid !== "string" || parents.has(entry.uuid)) throw new Error("duplicate identity");
++            parents.set(entry.uuid, entry.parentUuid ?? null);
++        }
++        entries.push(entry);
++    }
++    const done = new Set();
++    for (const id of parents.keys()) {
++        const chain = new Set();
++        let current = id;
++        while (parents.has(current) && !done.has(current)) {
++            if (chain.has(current)) throw new Error("cycle");
++            chain.add(current);
++            current = parents.get(current);
++        }
++        for (const visited of chain) done.add(visited);
++    }
++    return entries;
++}
++
++function checkDepth(line) {
++    let depth = 0, quoted = false, escaped = false;
++    for (const character of line) {
++        if (quoted) {
++            if (escaped) escaped = false;
++            else if (character === "\\") escaped = true;
++            else if (character === '"') quoted = false;
++        } else if (character === '"') quoted = true;
++        else if (character === "{" || character === "[") {
++            if (++depth > MAX_DEPTH) throw new Error("limit");
++        } else if (character === "}" || character === "]") depth--;
++    }
++}
++
++async function interpretSnapshot(snapshot) {
++    // The SDK's opaque semantic graph runs off the server thread. Termination, not
++    // Promise.race, bounds a parser stall. env:{} removes inherited environment
++    // values only; this Node worker retains OS filesystem/network rights and is not a sandbox.
++    const sdkUrl = import.meta.resolve("@anthropic-ai/claude-agent-sdk");
++    const worker = new Worker(`(${sdkReaderWorker.toString()})()`, {
++        eval: true, workerData: { ...snapshot, sdkUrl }, env: {}, execArgv: [],
++        resourceLimits: { maxOldGenerationSizeMb: 64, maxYoungGenerationSizeMb: 16, stackSizeMb: 2 },
++        stdout: true, stderr: true,
++    });
++    // SDK diagnostics are private and never become the excerpt.
++    worker.stdout.resume();
++    worker.stderr.resume();
++    let timer;
++    try {
++        return await new Promise(resolve => {
++            timer = setTimeout(() => resolve({ status: "too-large", messages: [] }), 3000);
++            worker.once("message", resolve);
++            worker.once("error", () => resolve({ status: "unavailable", messages: [] }));
++            worker.once("exit", () => resolve({ status: "unavailable", messages: [] }));
++        });
++    } finally {
++        clearTimeout(timer);
++        await worker.terminate();
++    }
++}
++
++// Self-contained authored adapter, serialized into a Node worker so packaging
++// needs no second executable or external worker-file location.
++async function sdkReaderWorker() {
++    const { parentPort, workerData } = await import("node:worker_threads");
++    try {
++        const { entries, cwd, providerCwd, projectKey, sessionId, sdkUrl } = workerData;
++        const { getSessionInfo, getSessionMessages } = await import(sdkUrl);
++        const sessionStore = {
++            async load(key) {
++                if (key.sessionId !== sessionId || key.projectKey !== projectKey || key.subpath !== undefined) throw new Error("scope");
++                return entries;
++            },
++            async append() { throw new Error("read only"); },
++        };
++        const info = await getSessionInfo(sessionId, { dir: cwd, sessionStore });
++        const infoCwd = process.platform === "darwin" && typeof info?.cwd === "string"
++            ? info.cwd.normalize("NFC") : info?.cwd;
++        if (!info || info.sessionId !== sessionId || infoCwd !== providerCwd) {
++            parentPort.postMessage({ status: "malformed", messages: [] });
++            return;
++        }
++        const messages = await getSessionMessages(sessionId, { dir: cwd, sessionStore, includeSystemMessages: false });
++        const safe = [];
++        let characters = 0;
++        if (messages.length > 2048) throw new Error("output limit");
++        for (const entry of messages) {
++            if (entry.session_id !== sessionId) throw new Error("identity");
++            if (entry.type !== "user" && entry.type !== "assistant") continue;
++            const content = entry.message?.content;
++            const text = typeof content === "string" ? content : Array.isArray(content)
++                ? content.filter(block => block?.type === "text" && typeof block.text === "string").map(block => block.text).join("\n") : "";
++            characters += text.length;
++            if (characters > 256 * 1024) throw new Error("output limit");
++            if (text) safe.push({ role: entry.type, text });
++        }
++        parentPort.postMessage({ status: "available", messages: safe });
++    } catch {
++        parentPort.postMessage({ status: "malformed", messages: [] });
++    }
++}
+diff --git a/dist/cli/claude-session-log.d.ts b/dist/cli/claude-session-log.d.ts
+new file mode 100644
+--- /dev/null
++++ b/dist/cli/claude-session-log.d.ts
+@@ -0,0 +1,8 @@
++import type { CodeAgentRunRecord } from "./code-agent-runs.js";
++export type ClaudeCodeSessionLog = {
++    reference: string | null;
++    status: "available" | "missing" | "unavailable" | "unsupported" | "malformed" | "too-large";
++    messages: Array<{ role: "user" | "assistant"; text: string }>;
++};
++/** Authorize the run before calling. homeDirectory is trusted host configuration, never client input. */
++export declare function readClaudeCodeSessionLog(run: CodeAgentRunRecord, options?: { homeDirectory?: string }): Promise<ClaudeCodeSessionLog>;
+diff --git a/dist/code-agents/index.js b/dist/code-agents/index.js
+--- a/dist/code-agents/index.js
++++ b/dist/code-agents/index.js
+@@ -8,3 +8,4 @@
+ export { executeCodeAgentRun, executeExistingCodeAgentRun, executePendingCodeAgentApproval, } from "../cli/code-agent-executor.js";
+ export { codeAgentSchedulesPath, createCodeAgentSchedule, deleteCodeAgentSchedule, getCodeAgentSchedule, isCodeAgentScheduleDue, listCodeAgentSchedules, markCodeAgentScheduleRun, nextCodeAgentScheduleRunAt, updateCodeAgentSchedule, } from "../cli/code-agent-schedules.js";
+ export { createCodeAgentThread, listCodeAgentThreadSummaries, messageCodeAgentThread, } from "../cli/code-agent-collaboration.js";
++export { readClaudeCodeSessionLog } from "../cli/claude-session-log.js";
+diff --git a/dist/code-agents/index.d.ts b/dist/code-agents/index.d.ts
+--- a/dist/code-agents/index.d.ts
++++ b/dist/code-agents/index.d.ts
+@@ -8,3 +8,4 @@
+ export { executeCodeAgentRun, executeExistingCodeAgentRun, executePendingCodeAgentApproval, type ExecuteCodeAgentRunOptions, } from "../cli/code-agent-executor.js";
+ export { codeAgentSchedulesPath, createCodeAgentSchedule, deleteCodeAgentSchedule, getCodeAgentSchedule, isCodeAgentScheduleDue, listCodeAgentSchedules, markCodeAgentScheduleRun, nextCodeAgentScheduleRunAt, updateCodeAgentSchedule, type CodeAgentScheduleRecord, type CodeAgentScheduleRunPatch, type CodeAgentScheduleScope, type CodeAgentScheduleStatus, type CreateCodeAgentScheduleInput, type UpdateCodeAgentScheduleInput, } from "../cli/code-agent-schedules.js";
+ export { createCodeAgentThread, listCodeAgentThreadSummaries, messageCodeAgentThread, type CodeAgentThreadSummary, type CreateCodeAgentThreadInput, type CreateCodeAgentThreadResult, type MessageCodeAgentThreadInput, type MessageCodeAgentThreadResult, } from "../cli/code-agent-collaboration.js";
++export { readClaudeCodeSessionLog, type ClaudeCodeSessionLog } from "../cli/claude-session-log.js";

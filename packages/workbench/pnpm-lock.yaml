@@ -4,7 +4,7 @@ settings:
   excludeLinksFromLockfile: false
 patchedDependencies:
   '@agent-native/core@0.176.5':
-    hash: 5143359a798f7452b7a8f62b36004af8f08e6c12f4d5cf2ea82986940c787f14
+    hash: 07e21a1c9a8cdd860afd45e92c4ec584774fb3b9774bfac4bab395d0d462d720
     path: patches/@agent-native__core@0.176.5.patch
   '@agent-native/toolkit@0.19.3':
     hash: 0f67553a6b26e76bcb0a07b5228c628ff6cf24eb5d865e0f4ac41d5238d22801
@@ -14,7 +14,7 @@ importers:
     dependencies:
       '@agent-native/core':
         specifier: 0.176.5
-        version: 0.176.5(patch_hash=5143359a798f7452b7a8f62b36004af8f08e6c12f4d5cf2ea82986940c787f14)(14ba03a0448bf5b261ff31be916baf2d)
+        version: 0.176.5(patch_hash=07e21a1c9a8cdd860afd45e92c4ec584774fb3b9774bfac4bab395d0d462d720)(1d7db17d621489a62dbf2df23ea81eba)
       '@agent-native/toolkit':
         specifier: 0.19.3
         version: 0.19.3(patch_hash=0f67553a6b26e76bcb0a07b5228c628ff6cf24eb5d865e0f4ac41d5238d22801)(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@tiptap/extension-list@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@tiptap/extensions@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))
@@ -33,9 +33,18 @@ importers:
       '@ai-sdk/openai':
         specifier: 3.0.108
         version: 3.0.108(zod@4.5.4)
+      '@anthropic-ai/claude-agent-sdk':
+        specifier: 0.3.288
+        version: 0.3.288(@anthropic-ai/sdk@0.93.0(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(zod@4.5.4)
+      '@anthropic-ai/sdk':
+        specifier: 0.93.0
+        version: 0.93.0(zod@4.5.4)
       '@fontsource-variable/inter':
         specifier: 5.3.0
         version: 5.3.0
+      '@modelcontextprotocol/sdk':
+        specifier: 1.30.0
+        version: 1.30.0(zod@4.5.4)
       '@openrouter/ai-sdk-provider':
         specifier: 2.10.0
         version: 2.10.0(ai@6.0.258(zod@4.5.4))(zod@4.5.4)
@@ -142,6 +151,7 @@ packages:
       tailwindcss: '>=4'
       vite: '>=7'
       ws: '>=8'
+      '@anthropic-ai/claude-agent-sdk': 0.3.288
     peerDependenciesMeta:
       '@ai-sdk/anthropic':
         optional: true
@@ -6346,14 +6356,12 @@ packages:
   uuid@10.0.0:
     resolution:
       integrity: sha512-8XkAphELsDnEGrDxUOHB3RGvXz6TeuYSGEZBOjtTtPm2lwhGBjLgOzLHB63IUWfBpNucQjND6d3AOudO+H3RWQ==
-    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but
-      be aware this version will likely be deprecated in 2028).
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
   uuid@8.3.2:
     resolution:
       integrity: sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==
-    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but
-      be aware this version will likely be deprecated in 2028).
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
   valibot@1.4.2:
     resolution:
@@ -6803,12 +6811,31 @@ packages:
     - x64
     os:
     - win32
+  '@anthropic-ai/claude-agent-sdk@0.3.288':
+    resolution:
+      integrity: sha512-W0axvKSBKC8E1rMvriV8NVMFfNv8uwN3HnJxUiFLJOQcJLp1MDp0SoAugkAKTn3WLx3JnqCxxME6bGvfNJzJoA==
+    engines:
+      node: '>=18.0.0'
+    peerDependencies:
+      '@anthropic-ai/sdk': '>=0.93.0'
+      '@modelcontextprotocol/sdk': ^1.29.0
+      zod: ^4.0.0
+  '@anthropic-ai/sdk@0.93.0':
+    resolution:
+      integrity: sha512-q9vaSZQVFx6B/gPxetGYfLXSJD5v0sOmh0OpZDq7yCrTSA+Rscvrtyol7JJTW40wEpQB4U1B4JXzxQitbQ3CAA==
+    hasBin: true
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
+    peerDependenciesMeta:
+      zod:
+        optional: true
 snapshots:
-  ? '@agent-native/core@0.176.5(patch_hash=5143359a798f7452b7a8f62b36004af8f08e6c12f4d5cf2ea82986940c787f14)(14ba03a0448bf5b261ff31be916baf2d)'
+  ? '@agent-native/core@0.176.5(patch_hash=07e21a1c9a8cdd860afd45e92c4ec584774fb3b9774bfac4bab395d0d462d720)(1d7db17d621489a62dbf2df23ea81eba)'
   : dependencies:
       '@agent-native/recap-cli': 0.5.25
       '@agent-native/toolkit': 0.19.3(patch_hash=0f67553a6b26e76bcb0a07b5228c628ff6cf24eb5d865e0f4ac41d5238d22801)(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@tiptap/extension-list@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@tiptap/extensions@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))
       '@amplitude/analytics-browser': 2.45.8
+      '@anthropic-ai/claude-agent-sdk': 0.3.288(@anthropic-ai/sdk@0.93.0(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(zod@4.5.4)
       '@anthropic-ai/sdk': 0.90.0(zod@4.5.4)
       '@anthropic-ai/tokenizer': 0.0.4
       '@assistant-ui/react': 0.12.28(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))
@@ -11812,3 +11839,23 @@ snapshots:
     optional: true
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
+  ? '@anthropic-ai/claude-agent-sdk@0.3.288(@anthropic-ai/sdk@0.93.0(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(zod@4.5.4)'
+  : dependencies:
+      '@anthropic-ai/sdk': 0.93.0(zod@4.5.4)
+      '@modelcontextprotocol/sdk': 1.30.0(zod@4.5.4)
+      zod: 4.5.4
+  '@anthropic-ai/sdk@0.93.0(zod@4.5.4)':
+    dependencies:
+      json-schema-to-ts: 3.1.1
+    optionalDependencies:
+      zod: 4.5.4
+packageExtensionsChecksum: sha256-5afwoDjnrcA3Xj410YtDCh7Wr20eAlayPUyqmc//pao=
+ignoredOptionalDependencies:
+- '@anthropic-ai/claude-agent-sdk-darwin-arm64'
+- '@anthropic-ai/claude-agent-sdk-darwin-x64'
+- '@anthropic-ai/claude-agent-sdk-linux-arm64'
+- '@anthropic-ai/claude-agent-sdk-linux-arm64-musl'
+- '@anthropic-ai/claude-agent-sdk-linux-x64'
+- '@anthropic-ai/claude-agent-sdk-linux-x64-musl'
+- '@anthropic-ai/claude-agent-sdk-win32-arm64'
+- '@anthropic-ai/claude-agent-sdk-win32-x64'
