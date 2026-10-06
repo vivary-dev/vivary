@@ -330,6 +330,32 @@ test("authorized details read a decomposed Unicode Claude project and redact bef
     assert.equal(heldDetails.providerLog.excerpt.includes(heldCredential.slice(0, 10)), false);
     assert.match(heldDetails.providerLog.excerpt, /\[redacted/);
   });
+  await t.test("provider excerpts preserve web links but redact host paths and URL credentials", async () => {
+    const links = ["https://github.com/vivary-dev/vivary/pull/198", "http://example.test/docs?q=read#usage",
+      "HTTPS://example.test/guide"];
+    const paths = [
+      "/home/fixture/private.txt", "C:\\Users\\Fixture\\private.txt",
+      "C:/Users/Fixture/private.txt", "\\\\fixture-host\\share\\private.txt",
+      "file:///home/fixture/private.txt", "file:///C:/Users/Fixture/private.txt",
+      "file://fixture-host/share/private.txt", "file:/home/fixture/private.txt"
+    ];
+    const credentialUrl = `https://reader:unknownFixturePassword@example.test/C:/docs?api_key=${heldCredential}`;
+    const entries = [providerEntries[0], { ...providerEntries[1], message: { role: "assistant",
+      content: [...links, "profile:default", ...paths, credentialUrl].join("\n") } }];
+    await writeFile(path.join(directory, sessionId + ".jsonl"), entries.map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    const result = await codeStateAction.run(input, context) as VivaryCodeSessionDetails;
+    assert.equal(result.providerLog.status, "available");
+    for (const link of links) assert.ok(result.providerLog.excerpt.includes(link), `Web link retained: ${link}`);
+    for (const hostPath of paths) assert.equal(result.providerLog.excerpt.includes(hostPath), false);
+    assert.equal(result.providerLog.excerpt.includes("private.txt"), false);
+    assert.equal(result.providerLog.excerpt.includes("fixture-host"), false);
+    assert.equal(result.providerLog.excerpt.includes("file:/"), false);
+    assert.ok(result.providerLog.excerpt.includes("profile:default"));
+    assert.equal(result.providerLog.excerpt.match(/\[path\]/g)?.length, paths.length);
+    assert.equal(result.providerLog.excerpt.includes("unknownFixturePassword"), false);
+    assert.equal(result.providerLog.excerpt.includes(heldCredential), false);
+    assert.match(result.providerLog.excerpt, /https:\/\/reader:\[redacted[^\]]*\]@example\.test\/C:\/docs\?api_key=\[redacted/);
+  });
   await t.test("aggregate provider bounds retain the newest redacted text", async () => {
     const entries = Array.from({ length: 24 }, (_, index) => ({
       type: index % 2 === 0 ? "user" : "assistant",
