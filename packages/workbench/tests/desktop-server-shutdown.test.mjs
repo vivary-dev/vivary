@@ -620,7 +620,7 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
   ]) {
     test(`desktop lifecycle: ${scenario}`, {
       timeout: scenario.startsWith("codex-reader") ? 30000 : nativeWindows ? 20000 : 10000,
-      skip: scenario === "windows-root-only-kill" && !nativeWindows || scenario.startsWith("codex-reader") && nativeWindows,
+      skip: scenario === "windows-root-only-kill" && !nativeWindows || scenario.startsWith("codex-reader") && process.platform !== "linux",
     }, async () => {
       const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-shutdown-"));
       const environment = { ...process.env };

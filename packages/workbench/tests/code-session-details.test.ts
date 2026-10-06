@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import childProcess from "node:child_process";
 import { link, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -72,8 +74,28 @@ test("session details reads a bounded Native log only for its conversation owner
   }
 });
 
+test("unsupported Codex reader platforms refuse inspection without launching a process", async t => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  assert.ok(platform);
+  const launch = t.mock.method(childProcess, "spawn", () => {
+    throw new Error("Unsupported inspection must not launch a process.");
+  });
+  syncBuiltinESMExports();
+  try {
+    for (const unsupported of ["darwin", "freebsd"]) {
+      Object.defineProperty(process, "platform", { ...platform, value: unsupported });
+      assert.equal(await codexSessionLogLifecycle.open(undefined), null);
+    }
+    assert.equal(launch.mock.calls.length, 0);
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    launch.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
 test("owned Codex stored-thread details return user and assistant text without executing a turn",
-  { skip: process.platform === "win32", timeout: 90_000 }, async t => {
+  { skip: process.platform !== "linux", timeout: 90_000 }, async t => {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "vivary codex details ")));
   const project = path.join(root, "project");
   const provider = path.join(root, "provider");
