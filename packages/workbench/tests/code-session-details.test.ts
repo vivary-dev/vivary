@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
-import { link, mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { appendCodeAgentTranscriptEvent, codeAgentRunTranscriptPath, createCodeAgentRunRecord,
-  readClaudeCodeSessionLog } from "@agent-native/core/code-agents";
+  readClaudeCodeSessionLog, readCodexCodeSessionLog } from "@agent-native/core/code-agents";
 import { getVivaryCodeSessionDetails, type VivaryCodeSessionDetails } from "../server/local-code-agent.ts";
 import codeStateAction from "../actions/vivary-code-state.ts";
+import { codexSessionLogLifecycle } from "../server/codex-session-process.ts";
 
 const sessionId = "00000000-0000-4000-8000-000000000010";
 
@@ -69,6 +70,261 @@ test("session details reads a bounded Native log only for its conversation owner
     assert.equal(linked.log.status, "unavailable");
     assert.equal(JSON.stringify(linked).includes("PRIVATE_CREDENTIAL_SENTINEL"), false);
   }
+});
+
+test("owned Codex stored-thread details return user and assistant text without executing a turn",
+  { skip: process.platform === "win32", timeout: 90_000 }, async t => {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "vivary codex details ")));
+  const project = path.join(root, "project");
+  const provider = path.join(root, "provider");
+  const bin = path.join(root, "bin");
+  const responseFile = path.join(root, "responses.json");
+  const pidFile = path.join(root, "child-pid");
+  const requestFile = path.join(root, "requests.jsonl");
+  const threadId = "00000000-0000-4000-8000-000000000020";
+  const previousStore = process.env.AGENT_NATIVE_CODE_AGENTS_HOME;
+  const previousDatabase = process.env.DATABASE_URL;
+  const previousUnpooled = process.env.DATABASE_URL_UNPOOLED;
+  const previousWorkspace = process.env.VIVARY_LOCAL_AGENT_WORKSPACE; // guard:allow-env-credential - Preserve the nonsecret fixture workspace setting.
+  const previousPath = process.env.PATH; // guard:allow-env-credential - Preserve the executable search path for fixture restoration.
+  const previousMode = process.env.VIVARY_ACCESS_MODE; // guard:allow-env-credential - Preserve the deployment mode for fixture restoration.
+  const previousCodexHome = process.env.CODEX_HOME; // guard:allow-env-credential - Preserve the runtime data location without reading or moving credentials.
+  t.after(async () => {
+    if (previousStore === undefined) delete process.env.AGENT_NATIVE_CODE_AGENTS_HOME;
+    else process.env.AGENT_NATIVE_CODE_AGENTS_HOME = previousStore;
+    if (previousDatabase === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previousDatabase;
+    if (previousUnpooled === undefined) delete process.env.DATABASE_URL_UNPOOLED;
+    else process.env.DATABASE_URL_UNPOOLED = previousUnpooled;
+    if (previousWorkspace === undefined) delete process.env.VIVARY_LOCAL_AGENT_WORKSPACE; // guard:allow-env-credential - Restore only the prior fixture workspace setting.
+    else process.env.VIVARY_LOCAL_AGENT_WORKSPACE = previousWorkspace; // guard:allow-env-credential - Restore only the prior fixture workspace setting.
+    if (previousPath === undefined) delete process.env.PATH; // guard:allow-env-credential - Restore only the prior executable search path.
+    else process.env.PATH = previousPath; // guard:allow-env-credential - Restore only the prior executable search path.
+    if (previousMode === undefined) delete process.env.VIVARY_ACCESS_MODE; // guard:allow-env-credential - Restore only the prior deployment mode.
+    else process.env.VIVARY_ACCESS_MODE = previousMode; // guard:allow-env-credential - Restore only the prior deployment mode.
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME; // guard:allow-env-credential - Restore only the prior runtime data location.
+    else process.env.CODEX_HOME = previousCodexHome; // guard:allow-env-credential - Restore only the prior runtime data location.
+    await rm(root, { recursive: true, force: true });
+  });
+  await mkdir(project);
+  await mkdir(bin);
+  await mkdir(path.join(root, "provider"));
+  await writeFile(requestFile, "");
+  const thread = { id: threadId, sessionId: threadId, projectId: null, cwd: project, path: path.join(provider, "stored-thread.jsonl"),
+    cliVersion: "0.160.0", createdAt: 1_791_244_800, updatedAt: 1_791_244_801,
+    ephemeral: false, modelProvider: "openai", preview: "PRIVATE_THREAD_METADATA",
+    source: "cli", status: { type: "notLoaded" }, turns: [] };
+  const page = { data: [{ id: "00000000-0000-4000-8000-000000000021", status: "completed", itemsView: "summary",
+    items: [
+      { id: "user-1", type: "userMessage", content: [{ type: "text", text: "CODEX_STORED_USER_MARKER", text_elements: [] }] },
+      { id: "agent-1", type: "agentMessage", text: "CODEX_STORED_ASSISTANT_MARKER", phase: "final_answer" },
+    ] }], nextCursor: null, backwardsCursor: null };
+  // Only the external CLI transport is synthetic; Native run ownership, launch resolution and the action are real.
+  await writeFile(path.join(bin, "codex"), String.raw`#!/usr/bin/env node
+const readline = require("node:readline");
+const { appendFileSync } = require("node:fs");
+if (!process.argv.slice(2).includes("app-server")) process.exit(2);
+const { readFileSync } = require("node:fs");
+const responses = JSON.parse(readFileSync(${JSON.stringify(responseFile)}, "utf8"));
+if (responses.fixtureMode === "child") {
+  const { spawn } = require("node:child_process");
+  const { writeFileSync } = require("node:fs");
+  const helper = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  writeFileSync(${JSON.stringify(pidFile)}, String(helper.pid));
+}
+readline.createInterface({ input: process.stdin }).on("line", line => {
+  const request = JSON.parse(line);
+  appendFileSync(${JSON.stringify(requestFile)}, JSON.stringify(request) + "\n");
+  if (request.id === undefined) return;
+  if (responses.fixtureMode === "timeout") return;
+  if (responses.fixtureMode === "unexpected" && request.method === "thread/read") {
+    process.stdout.write(JSON.stringify({ id: 99, method: "item/commandExecution/requestApproval", params: {} }) + "\n");
+    return;
+  }
+  if (responses.fixtureMode === "invalid-utf8" && request.method === "thread/read") {
+    process.stdout.write(Buffer.from([123, 34, 120, 34, 58, 34, 255, 34, 125, 10]));
+    return;
+  }
+  if (responses.fixtureMode === "incomplete" && request.method === "thread/read") {
+    process.stdout.write('{"id":2,"result":', () => process.exit(0));
+    return;
+  }
+  if (responses.fixtureMode === "raw" && request.method === "thread/read") {
+    process.stdout.write(responses.raw);
+    return;
+  }
+  const response = Object.hasOwn(responses, request.method)
+    ? responses[request.method].error ? { id: request.id, error: responses[request.method].error }
+      : { id: request.id, result: responses[request.method] }
+    : { id: request.id, error: { code: -32601, message: "Fixture refuses this method" } };
+  process.stdout.write(JSON.stringify(response) + "\n");
+});
+`, { mode: 0o755 });
+  process.env.AGENT_NATIVE_CODE_AGENTS_HOME = path.join(root, "native");
+  process.env.DATABASE_URL = "file:" + path.join(root, "fixture.sqlite");
+  process.env.DATABASE_URL_UNPOOLED = process.env.DATABASE_URL;
+  process.env.VIVARY_LOCAL_AGENT_WORKSPACE = project; // guard:allow-env-credential - Use only this disposable workspace.
+  process.env.PATH = bin + path.delimiter + (previousPath ?? ""); // guard:allow-env-credential - Resolve the disposable external CLI before installed executables.
+  process.env.VIVARY_ACCESS_MODE = "local"; // guard:allow-env-credential - Use local runtime resolution for the public action fixture.
+  process.env.CODEX_HOME = path.join(root, "provider"); // guard:allow-env-credential - Isolate disposable provider data; no credentials are copied or relocated.
+  const run = createCodeAgentRunRecord({ goalId: "vivary-local-code", title: "Stored Codex fixture", cwd: project,
+    status: "paused", metadata: { app: "vivary-workbench-local-code", engine: "codex-cli", ownerEmail: "owner@example.test",
+      orgId: "fixture-org", workspaceRoot: project, codexSessionId: threadId, providerSessionMode: "native-resume" } });
+  const input = codeStateAction.schema.parse({ runId: run.id, details: true });
+  const responses = { initialize: { userAgent: "disposable-codex-fixture" }, "thread/read": { thread }, "thread/turns/list": page };
+  await writeFile(responseFile, JSON.stringify(responses));
+  const context = { userEmail: "owner@example.test", orgId: "fixture-org" };
+  // Authorization failures must happen before the synthetic external process receives anything.
+  await assert.rejects(() => codeStateAction.run(input, { ...context, userEmail: "other@example.test" }), /not found/i);
+  await assert.rejects(() => codeStateAction.run(input, { ...context, orgId: "other-org" }), /not found/i);
+  await assert.rejects(() => getVivaryCodeSessionDetails(context.userEmail, run.id,
+    { root: provider, label: "Other project", projectId: "other-project", bindingId: "other-binding" }, context.orgId), /not found/i);
+  assert.equal(await readFile(requestFile, "utf8"), "");
+  appendCodeAgentTranscriptEvent({ runId: run.id, kind: "status", message: "NATIVE_CODEX_HISTORY_MARKER" });
+  const details = await codeStateAction.run(input, context) as VivaryCodeSessionDetails;
+  // Root observed unsupported != available on the unchanged action before implementation.
+  assert.equal(details.providerLog.status, "available");
+  assert.equal(details.sessionId, threadId);
+  assert.equal(details.providerLog.reference, `codex-thread:${threadId}`);
+  assert.match(details.providerLog.excerpt, /user: CODEX_STORED_USER_MARKER\s+assistant: CODEX_STORED_ASSISTANT_MARKER/);
+  assert.equal(details.providerLog.truncated, false);
+  assert.equal(JSON.stringify(details).includes(root), false);
+  assert.equal(details.providerLog.excerpt.includes("PRIVATE_THREAD_METADATA"), false);
+  const requests = (await readFile(requestFile, "utf8")).trim().split("\n").filter(Boolean)
+    .map(line => JSON.parse(line) as { method: string; params?: Record<string, unknown> });
+  assert.ok(requests.some(request => request.method === "thread/read"));
+  assert.ok(requests.some(request => request.method === "thread/turns/list"));
+  assert.equal(requests.some(request => ["thread/start", "thread/resume", "turn/start"].includes(request.method)), false);
+  assert.ok(requests.every(request => ["initialize", "initialized", "thread/read", "thread/turns/list"].includes(request.method)));
+  for (const request of requests.filter(request => request.method === "thread/read")) {
+    assert.equal(request.params?.threadId, threadId);
+    assert.equal(request.params?.includeTurns, false);
+  }
+  for (const request of requests.filter(request => request.method === "thread/turns/list")) {
+    assert.equal(request.params?.threadId, threadId);
+    assert.equal(request.params?.sortDirection, "desc");
+    assert.equal(request.params?.itemsView, "summary");
+    assert.ok(Number.isInteger(request.params?.limit) && Number(request.params?.limit) > 0 && Number(request.params?.limit) <= 40);
+  }
+  const read = async (value: unknown) => {
+    await writeFile(responseFile, JSON.stringify(value));
+    return await codeStateAction.run(input, context) as VivaryCodeSessionDetails;
+  };
+  for (const [name, metadata] of [
+    ["foreign thread", { ...thread, id: "different-thread" }],
+    ["foreign cwd", { ...thread, cwd: provider }],
+    ["store inside project", { ...thread, path: path.join(project, "private.jsonl") }],
+  ] as const) {
+    await t.test(name, async () => {
+      const result = await read({ ...responses, "thread/read": { thread: metadata } });
+      assert.ok(["malformed", "unavailable"].includes(result.providerLog.status));
+      assert.equal(result.providerLog.excerpt, "");
+      assert.equal(result.sessionId, threadId);
+      assert.match(result.log.excerpt, /NATIVE_CODEX_HISTORY_MARKER/);
+    });
+  }
+  await t.test("only exact supported missing errors retain a missing status", async () => {
+    const cases = [
+      ["thread/read", -32600, `thread not loaded: ${threadId}`, "missing"],
+      ["thread/turns/list", -32600, `thread not loaded: ${threadId}`, "missing"],
+      ["thread/turns/list", -32600, `no rollout found for thread id ${threadId}`, "missing"],
+      ["thread/read", -32601, "Unsupported method", "unsupported"],
+      ["thread/turns/list", -32601, "Unsupported method", "unsupported"],
+      ["thread/read", -32600, "PRIVATE_PROVIDER_ERROR", "unavailable"],
+      ["thread/read", -32602, `thread not loaded: ${threadId}`, "unavailable"],
+      ["thread/read", -32600, "thread not loaded: different-thread", "unavailable"],
+      ["thread/turns/list", -32600, "no rollout found for thread id different-thread", "unavailable"],
+      ["thread/read", -32600, `no rollout found for thread id ${threadId}`, "unavailable"],
+      ["thread/read", -32000, "Thread not found", "unavailable"],
+    ] as const;
+    for (const [method, code, message, status] of cases) {
+      const result = await read({ ...responses, [method]: { error: { code, message } } });
+      assert.equal(result.providerLog.status, status, `${method} code ${code}: ${message}`);
+      assert.equal(result.providerLog.reference, `codex-thread:${threadId}`);
+      assert.equal(result.sessionId, threadId);
+      assert.equal(result.providerLog.excerpt, "");
+      assert.match(result.log.excerpt, /NATIVE_CODEX_HISTORY_MARKER/);
+      assert.equal(JSON.stringify(result).includes("PRIVATE_PROVIDER_ERROR"), false);
+    }
+  });
+  await t.test("wire bytes, UTF-8 and depth are bounded before parsing", async () => {
+    for (const [raw, status] of [["not json\n", "malformed"],
+      ['{"id":2,"result":{"text":"' + "é".repeat(70_000) + '"}}\n', "too-large"],
+      ['{"id":2,"result":' + "[".repeat(33) + "0" + "]".repeat(33) + '}\n', "too-large"]] as const) {
+      const result = await read({ ...responses, fixtureMode: "raw", raw });
+      assert.equal(result.providerLog.status, status);
+      assert.equal(result.providerLog.excerpt, "");
+      assert.match(result.log.excerpt, /NATIVE_CODEX_HISTORY_MARKER/);
+    }
+  });
+  await t.test("older cursor is honest and output uses shared credential/path redaction", async () => {
+    const result = await read({ ...responses, "thread/turns/list": { ...page, nextCursor: "older-page", data: [{ ...page.data[0],
+      items: [...page.data[0].items, { type: "agentMessage", id: "private-agent", text:
+        "ghp_0123456789abcdef0123456789abcdef0123\n/home/Alice Smith/PRIVATE_CODEX_FILENAME.txt\nhttps://example.test/guide" }] }] } });
+    assert.equal(result.providerLog.status, "available");
+    assert.equal(result.providerLog.truncated, true);
+    assert.equal(result.providerLog.excerpt.includes("ghp_012345"), false);
+    assert.equal(result.providerLog.excerpt.includes("PRIVATE_CODEX_FILENAME"), false);
+    assert.match(result.providerLog.excerpt, /https:\/\/example\.test\/guide/);
+  });
+  await t.test("unexpected approvals are denied and the next read succeeds", async () => {
+    assert.equal((await read({ ...responses, fixtureMode: "unexpected" })).providerLog.status, "unavailable");
+    assert.equal((await read(responses)).providerLog.status, "available");
+  });
+  await t.test("Native public reader and concurrent owner reads retain text", async () => {
+    await writeFile(responseFile, JSON.stringify(responses));
+    const native = await readCodexCodeSessionLog(run, codexSessionLogLifecycle);
+    assert.equal(native.status, "available");
+    assert.deepEqual(native.messages, [
+      { role: "user", text: "CODEX_STORED_USER_MARKER" },
+      { role: "assistant", text: "CODEX_STORED_ASSISTANT_MARKER" },
+    ]);
+    const results = await Promise.all([codeStateAction.run(input, context), codeStateAction.run(input, context)]) as VivaryCodeSessionDetails[];
+    assert.deepEqual(results.map(result => result.providerLog.status), ["available", "available"]);
+  });
+  await t.test("fatal UTF-8 failure keeps Native history", async () => {
+    const result = await read({ ...responses, fixtureMode: "invalid-utf8" });
+    assert.equal(result.providerLog.status, "malformed");
+    assert.match(result.log.excerpt, /NATIVE_CODEX_HISTORY_MARKER/);
+  });
+  await t.test("timeout releases admission and process-tree cleanup stops an ordinary child", async () => {
+    assert.equal((await read({ ...responses, fixtureMode: "timeout" })).providerLog.status, "unavailable");
+    assert.equal((await read({ ...responses, fixtureMode: "child" })).providerLog.status, "available");
+    const pid = Number(await readFile(pidFile, "utf8"));
+    let alive = false;
+    try {
+      process.kill(pid, 0);
+      alive = process.platform !== "linux" || !/^State:\s+Z/m.test(await readFile(`/proc/${pid}/status`, "utf8"));
+    } catch { /* The exact fixture process no longer exists. */ }
+    assert.equal(alive, false, "stored-thread inspection left its CLI helper running");
+    assert.equal((await read(responses)).providerLog.status, "available");
+  });
+  await t.test("incomplete closed response and unconfirmed lifecycle never expose an excerpt", async () => {
+    assert.equal((await read({ ...responses, fixtureMode: "incomplete" })).providerLog.status, "malformed");
+    await writeFile(responseFile, JSON.stringify(responses));
+    const result = await readCodexCodeSessionLog(run, { open: async cwd => {
+      const process = await codexSessionLogLifecycle.open(cwd);
+      return process && { child: process.child, close: async () => { await process.close(); return false; } };
+    } });
+    assert.equal(result.status, "unavailable");
+    assert.deepEqual(result.messages, []);
+  });
+  await t.test("missing project retains exact stored identity", async () => {
+    await rm(project, { recursive: true });
+    await writeFile(responseFile, JSON.stringify(responses));
+    // History supplies retained scope; the unregistered workspace fallback requires an existing folder.
+    const result = await getVivaryCodeSessionDetails(context.userEmail, run.id,
+      { root: project, label: "Retained Codex project" }, context.orgId);
+    assert.equal(result.providerLog.status, "available");
+    assert.equal(result.sessionId, threadId);
+    assert.equal(result.providerLog.reference, `codex-thread:${threadId}`);
+    assert.match(result.providerLog.excerpt, /CODEX_STORED_ASSISTANT_MARKER/);
+  });
+  const allRequests = (await readFile(requestFile, "utf8")).trim().split("\n").filter(Boolean)
+    .map(line => JSON.parse(line) as { method?: string; error?: { code?: number } });
+  assert.ok(allRequests.every(request => request.method
+    ? ["initialize", "initialized", "thread/read", "thread/turns/list"].includes(request.method)
+    : request.error?.code === -32601));
 });
 
 test("Native Claude inspection rejects unscoped, linked and resource-limited snapshots", async t => {

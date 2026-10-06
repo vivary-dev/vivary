@@ -86,11 +86,18 @@ call. The unchanged executor retains PR #197's real four-turn, 137-second Claude
 Stop/restart/resume acceptance. Init/result UUID validation and ID-less ordinary
 content behavior remain covered by the maintained continuity tests.
 
-Issue #10 remains open. Existing Codex continuity and stored-thread RPC evidence
-is retained, but provider-log details are currently unsupported for Codex; a
-bounded stored-thread view remains required. Current Windows candidate acceptance
-is unrun. This Claude increment still requires final independent review, reviewed
-commit, exact-commit CI, Entire verification and owner approval before delivery.
+PR #198's Claude increment merged at `df354d0` with passing postmerge CI.
+Issue #10 remains open. Native's read-only Codex stored-thread reader and the
+existing scoped details integration are now implemented in source; the
+[Codex receipt](../receipts/10-codex-stored-thread-reader.md) records the supported
+summary API, limits and validation. The initial unsupported-status tracer failed
+before implementation. Corrected lifecycle/detail regressions, actual retained-thread
+read, guarded build and desktop/narrow built-browser checks pass; independent Spec
+and Standards source reviews pass. The local maintained suite timed out at its
+wrapper limit and remains incomplete. Private packaged Windows acceptance,
+commit-bound publisher review, exact-head CI, Entire verification and owner approval
+remain required. Existing real provider journeys are reused without another model
+turn; no release or main promotion is accepted.
 
 ## Log
 

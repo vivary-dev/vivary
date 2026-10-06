@@ -4,7 +4,7 @@ settings:
   excludeLinksFromLockfile: false
 patchedDependencies:
   '@agent-native/core@0.176.5':
-    hash: 07e21a1c9a8cdd860afd45e92c4ec584774fb3b9774bfac4bab395d0d462d720
+    hash: ffabc3ec26ad6d797b2d22c1d036799d1c35187a2369a0a492bbfa7b9a16f3f1
     path: patches/@agent-native__core@0.176.5.patch
   '@agent-native/toolkit@0.19.3':
     hash: 0f67553a6b26e76bcb0a07b5228c628ff6cf24eb5d865e0f4ac41d5238d22801
@@ -14,7 +14,7 @@ importers:
     dependencies:
       '@agent-native/core':
         specifier: 0.176.5
-        version: 0.176.5(patch_hash=07e21a1c9a8cdd860afd45e92c4ec584774fb3b9774bfac4bab395d0d462d720)(1d7db17d621489a62dbf2df23ea81eba)
+        version: 0.176.5(patch_hash=ffabc3ec26ad6d797b2d22c1d036799d1c35187a2369a0a492bbfa7b9a16f3f1)(1d7db17d621489a62dbf2df23ea81eba)
       '@agent-native/toolkit':
         specifier: 0.19.3
         version: 0.19.3(patch_hash=0f67553a6b26e76bcb0a07b5228c628ff6cf24eb5d865e0f4ac41d5238d22801)(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@tiptap/extension-list@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@tiptap/extensions@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))
@@ -6830,7 +6830,7 @@ packages:
       zod:
         optional: true
 snapshots:
-  ? '@agent-native/core@0.176.5(patch_hash=07e21a1c9a8cdd860afd45e92c4ec584774fb3b9774bfac4bab395d0d462d720)(1d7db17d621489a62dbf2df23ea81eba)'
+  ? '@agent-native/core@0.176.5(patch_hash=ffabc3ec26ad6d797b2d22c1d036799d1c35187a2369a0a492bbfa7b9a16f3f1)(1d7db17d621489a62dbf2df23ea81eba)'
   : dependencies:
       '@agent-native/recap-cli': 0.5.25
       '@agent-native/toolkit': 0.19.3(patch_hash=0f67553a6b26e76bcb0a07b5228c628ff6cf24eb5d865e0f4ac41d5238d22801)(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@tiptap/extension-list@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@tiptap/extensions@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))
@@ -7147,38 +7147,32 @@ snapshots:
       '@ai-sdk/provider': 3.0.15
       '@ai-sdk/provider-utils': 4.0.50(zod@4.5.4)
       zod: 4.5.4
-    optional: true
   '@ai-sdk/gateway@3.0.176(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.15
       '@ai-sdk/provider-utils': 4.0.46(zod@4.5.4)
       '@vercel/oidc': 3.2.0
       zod: 4.5.4
-    optional: true
   '@ai-sdk/google@3.0.121(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.15
       '@ai-sdk/provider-utils': 4.0.50(zod@4.5.4)
       zod: 4.5.4
-    optional: true
   '@ai-sdk/groq@3.0.64(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.15
       '@ai-sdk/provider-utils': 4.0.50(zod@4.5.4)
       zod: 4.5.4
-    optional: true
   '@ai-sdk/mistral@3.0.63(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.15
       '@ai-sdk/provider-utils': 4.0.50(zod@4.5.4)
       zod: 4.5.4
-    optional: true
   '@ai-sdk/openai@3.0.108(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.15
       '@ai-sdk/provider-utils': 4.0.50(zod@4.5.4)
       zod: 4.5.4
-    optional: true
   '@ai-sdk/provider-utils@4.0.46(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.15
@@ -7186,7 +7180,6 @@ snapshots:
       eventsource-parser: 3.1.1
       undici: 6.28.1
       zod: 4.5.4
-    optional: true
   '@ai-sdk/provider-utils@4.0.50(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.15
@@ -7194,11 +7187,9 @@ snapshots:
       eventsource-parser: 3.1.1
       undici: 6.28.1
       zod: 4.5.4
-    optional: true
   '@ai-sdk/provider@3.0.15':
     dependencies:
       json-schema: 0.4.0
-    optional: true
   '@amplitude/analytics-browser@2.45.8':
     dependencies:
       '@amplitude/analytics-core': 2.55.0
@@ -7978,7 +7969,6 @@ snapshots:
     dependencies:
       ai: 6.0.258(zod@4.5.4)
       zod: 4.5.4
-    optional: true
   '@opentelemetry/api-logs@0.214.0':
     dependencies:
       '@opentelemetry/api': 1.9.1
@@ -9330,8 +9320,7 @@ snapshots:
     - '@codemirror/lint'
     - '@codemirror/search'
   '@ungap/structured-clone@1.4.0': {}
-  '@vercel/oidc@3.2.0':
-    optional: true
+  '@vercel/oidc@3.2.0': {}
   '@vitest/expect@4.1.11':
     dependencies:
       '@standard-schema/spec': 1.1.0
@@ -9399,7 +9388,6 @@ snapshots:
       ollama: 0.6.3
     transitivePeerDependencies:
     - zod
-    optional: true
   ai@6.0.258(zod@4.5.4):
     dependencies:
       '@ai-sdk/gateway': 3.0.176(zod@4.5.4)
@@ -9407,7 +9395,6 @@ snapshots:
       '@ai-sdk/provider-utils': 4.0.46(zod@4.5.4)
       '@opentelemetry/api': 1.9.1
       zod: 4.5.4
-    optional: true
   ajv-formats@3.0.1(ajv@8.20.0):
     optionalDependencies:
       ajv: 8.20.0
@@ -10176,11 +10163,9 @@ snapshots:
       ts-algebra: 2.0.0
   json-schema-traverse@1.0.0: {}
   json-schema-typed@8.0.2: {}
-  json-schema@0.4.0:
-    optional: true
+  json-schema@0.4.0: {}
   json5@2.2.3: {}
-  jsonrepair@3.15.0:
-    optional: true
+  jsonrepair@3.15.0: {}
   jsonwebtoken@9.0.3:
     dependencies:
       jws: 4.0.1
@@ -10797,7 +10782,6 @@ snapshots:
   ollama@0.6.3:
     dependencies:
       whatwg-fetch: 3.6.20
-    optional: true
   on-finished@2.4.1:
     dependencies:
       ee-first: 1.1.1
@@ -11550,8 +11534,7 @@ snapshots:
     optional: true
   undici-types@5.26.5: {}
   undici-types@7.24.6: {}
-  undici@6.28.1:
-    optional: true
+  undici@6.28.1: {}
   undici@7.29.1: {}
   unenv@2.0.0-rc.24:
     dependencies:
@@ -11717,8 +11700,7 @@ snapshots:
   web-streams-polyfill@3.3.3: {}
   web-vitals@5.1.0: {}
   webidl-conversions@3.0.1: {}
-  whatwg-fetch@3.6.20:
-    optional: true
+  whatwg-fetch@3.6.20: {}
   whatwg-url@5.0.0:
     dependencies:
       tr46: 0.0.3

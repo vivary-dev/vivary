@@ -467,6 +467,9 @@ function CodeSessionDetails({ runId, projectId, active }: { runId: string; proje
           : <p>No complete transcript entries are available.</p>}
         {details.data.log.truncated && <p className="text-xs">Showing a bounded excerpt. Some entries or text were omitted.</p>}
         <h4 className="font-medium">Provider session log</h4>
+        {details.data.providerLog.reference?.startsWith("codex-thread:") && <p className="text-xs text-muted-foreground">
+          Recent turn summaries show the first user and last assistant message per turn. Messages in between are omitted.
+        </p>}
         {details.data.providerLog.reference && <p className="text-xs font-mono break-all">{details.data.providerLog.reference}</p>}
         {details.data.providerLog.status === "available"
           ? details.data.providerLog.excerpt ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs"

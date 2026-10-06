@@ -739,7 +739,7 @@ export async function workerCleanupTarget(
   return windowsWorkerTarget(pid, forkedFrom, forkedTo, exitedAt);
 }
 
-function windowsWorkerTarget(pid: number, forkedFrom: number, forkedTo: number,
+export function windowsWorkerTarget(pid: number, forkedFrom: number, forkedTo: number,
   exitedAt: number | null): Extract<CleanupTarget, { platform: "win32" }> {
   return { platform: "win32", tracked: [{ pid, createdFrom: forkedFrom - CLOCK_TOLERANCE_MS,
     createdTo: forkedTo + CLOCK_TOLERANCE_MS,
@@ -759,7 +759,7 @@ type CleanupIo = {
   windowsEnd: (processes: readonly LeftoverProcess[]) => Promise<EndAttempt[]>;
 };
 
-const cleanupIo: CleanupIo = {
+export const cleanupIo: CleanupIo = {
   bootId: readBootId, proc: linuxProc, windowsProcesses: scanWindowsProcesses, windowsEnd: endWindowsProcesses,
 };
 

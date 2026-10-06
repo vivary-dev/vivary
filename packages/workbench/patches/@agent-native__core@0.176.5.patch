@@ -12719,16 +12719,240 @@ new file mode 100644
 diff --git a/dist/code-agents/index.js b/dist/code-agents/index.js
 --- a/dist/code-agents/index.js
 +++ b/dist/code-agents/index.js
-@@ -8,3 +8,4 @@
+@@ -8,3 +8,5 @@
  export { executeCodeAgentRun, executeExistingCodeAgentRun, executePendingCodeAgentApproval, } from "../cli/code-agent-executor.js";
  export { codeAgentSchedulesPath, createCodeAgentSchedule, deleteCodeAgentSchedule, getCodeAgentSchedule, isCodeAgentScheduleDue, listCodeAgentSchedules, markCodeAgentScheduleRun, nextCodeAgentScheduleRunAt, updateCodeAgentSchedule, } from "../cli/code-agent-schedules.js";
  export { createCodeAgentThread, listCodeAgentThreadSummaries, messageCodeAgentThread, } from "../cli/code-agent-collaboration.js";
 +export { readClaudeCodeSessionLog } from "../cli/claude-session-log.js";
++export { readCodexCodeSessionLog } from "../cli/codex-session-log.js";
 diff --git a/dist/code-agents/index.d.ts b/dist/code-agents/index.d.ts
 --- a/dist/code-agents/index.d.ts
 +++ b/dist/code-agents/index.d.ts
-@@ -8,3 +8,4 @@
+@@ -8,3 +8,5 @@
  export { executeCodeAgentRun, executeExistingCodeAgentRun, executePendingCodeAgentApproval, type ExecuteCodeAgentRunOptions, } from "../cli/code-agent-executor.js";
  export { codeAgentSchedulesPath, createCodeAgentSchedule, deleteCodeAgentSchedule, getCodeAgentSchedule, isCodeAgentScheduleDue, listCodeAgentSchedules, markCodeAgentScheduleRun, nextCodeAgentScheduleRunAt, updateCodeAgentSchedule, type CodeAgentScheduleRecord, type CodeAgentScheduleRunPatch, type CodeAgentScheduleScope, type CodeAgentScheduleStatus, type CreateCodeAgentScheduleInput, type UpdateCodeAgentScheduleInput, } from "../cli/code-agent-schedules.js";
  export { createCodeAgentThread, listCodeAgentThreadSummaries, messageCodeAgentThread, type CodeAgentThreadSummary, type CreateCodeAgentThreadInput, type CreateCodeAgentThreadResult, type MessageCodeAgentThreadInput, type MessageCodeAgentThreadResult, } from "../cli/code-agent-collaboration.js";
 +export { readClaudeCodeSessionLog, type ClaudeCodeSessionLog } from "../cli/claude-session-log.js";
++export { readCodexCodeSessionLog, type CodexCodeSessionLog, type CodexSessionLogLifecycle } from "../cli/codex-session-log.js";
+diff --git a/dist/cli/codex-session-log.js b/dist/cli/codex-session-log.js
+new file mode 100644
+--- /dev/null
++++ b/dist/cli/codex-session-log.js
+@@ -0,0 +1,198 @@
++import { lstat, realpath } from "node:fs/promises";
++import path from "node:path";
++
++const MAX_WIRE_BYTES = 512 * 1024;
++const MAX_LINE_BYTES = 128 * 1024;
++const MAX_LINES = 256;
++const MAX_DEPTH = 32;
++const MAX_TURNS = 20;
++const MAX_ITEMS = 200;
++const MAX_MESSAGES = 40;
++const TIMEOUT_MS = 10_000;
++let active = false;
++const waiters = [];
++const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
++const identifier = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
++const inside = (root, value) => { const relative = path.relative(root, value); return relative === "" || !relative.startsWith(".." + path.sep) && relative !== ".." && !path.isAbsolute(relative); };
++
++function admit() {
++    if (!active) { active = true; return Promise.resolve(release); }
++    if (waiters.length >= 4) return Promise.resolve(null);
++    return new Promise(resolve => {
++        const entry = { resolve, timer: null };
++        entry.timer = setTimeout(() => { const index = waiters.indexOf(entry); if (index >= 0) waiters.splice(index, 1); resolve(null); }, 15_000);
++        waiters.push(entry);
++    });
++}
++function release() {
++    const next = waiters.shift();
++    if (next) { clearTimeout(next.timer); next.resolve(release); }
++    else active = false;
++}
++
++// Check exact retained paths and their parents, never discover provider files. Missing cwd permits history.
++async function canonical(value) {
++    if (typeof value !== "string" || value.length > 4096 || value.includes("\0") || !path.isAbsolute(value) || path.resolve(value) !== value) throw "malformed";
++    let exists = false;
++    let parents = 0;
++    for (let current = value; ; current = path.dirname(current)) {
++        if (++parents > 64) throw "too-large";
++        try {
++            const stat = await lstat(current);
++            if (stat.isSymbolicLink()) throw "unavailable";
++            if (current === value) exists = true;
++            if (await realpath(current) !== current) throw "unavailable";
++        } catch (error) { if (error?.code !== "ENOENT") throw error; }
++        if (current === path.dirname(current)) break;
++    }
++    return exists;
++}
++
++function parseLine(bytes) {
++    let depth = 0, quoted = false, escaped = false;
++    // Structural depth is bounded on raw bytes before UTF-8 decoding or JSON.parse.
++    for (const byte of bytes) {
++        if (quoted) {
++            if (escaped) escaped = false;
++            else if (byte === 92) escaped = true;
++            else if (byte === 34) quoted = false;
++        } else if (byte === 34) quoted = true;
++        else if (byte === 123 || byte === 91) { if (++depth > MAX_DEPTH) throw "too-large"; }
++        else if (byte === 125 || byte === 93) { if (--depth < 0) throw "malformed"; }
++    }
++    if (depth !== 0 || quoted) throw "malformed";
++    try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
++    catch { throw "malformed"; }
++}
++
++function selectMessages(page) {
++    if (!record(page) || !Array.isArray(page.data)) throw "malformed";
++    if (page.data.length > MAX_TURNS) throw "too-large";
++    if (page.nextCursor != null && (typeof page.nextCursor !== "string" || page.nextCursor.length > 1024)) throw "malformed";
++    let items = 0;
++    const messages = [];
++    for (const turn of [...page.data].reverse()) {
++        if (!record(turn) || !identifier(turn.id) || !Array.isArray(turn.items)
++            || !["completed", "interrupted", "failed", "inProgress"].includes(turn.status)
++            || turn.itemsView && turn.itemsView !== "summary") throw "malformed";
++        items += turn.items.length;
++        if (items > MAX_ITEMS) throw "too-large";
++        for (const item of turn.items) {
++            if (!record(item) || typeof item.type !== "string") throw "malformed";
++            if (item.type === "userMessage") {
++                if (!identifier(item.id) || !Array.isArray(item.content) || item.content.length > MAX_ITEMS) throw "malformed";
++                const texts = [];
++                for (const input of item.content) {
++                    if (!record(input) || typeof input.type !== "string") throw "malformed";
++                    if (input.type === "text") { if (typeof input.text !== "string") throw "malformed"; texts.push(input.text); }
++                }
++                if (texts.length) messages.push({ role: "user", text: texts.join("\n") });
++            } else if (item.type === "agentMessage") {
++                if (!identifier(item.id) || typeof item.text !== "string") throw "malformed";
++                messages.push({ role: "assistant", text: item.text });
++            }
++        }
++    }
++    return { messages: messages.slice(-MAX_MESSAGES), truncated: !!page.nextCursor || messages.length > MAX_MESSAGES };
++}
++
++async function inspect(run, lifecycle, result) {
++    let process;
++    try {
++        const cwdExists = await canonical(run.cwd);
++        process = await lifecycle.open(cwdExists ? run.cwd : undefined);
++        if (!process) return result("unavailable");
++        const child = process.child;
++        let buffer = Buffer.alloc(0), bytes = 0, lines = 0, nextId = 0, pending = null, failed;
++        const fail = status => { failed ??= status; if (pending) { pending.reject(status); pending = null; } };
++        const timer = setTimeout(() => fail("unavailable"), TIMEOUT_MS);
++        const send = message => { if (!failed) child.stdin.write(JSON.stringify(message) + "\n"); };
++        const onData = chunk => {
++            if (failed) return;
++            if (!Buffer.isBuffer(chunk)) { fail("malformed"); return; }
++            bytes += chunk.length;
++            if (bytes > MAX_WIRE_BYTES) { fail("too-large"); return; }
++            buffer = Buffer.concat([buffer, chunk]);
++            let newline;
++            while ((newline = buffer.indexOf(10)) >= 0 && !failed) {
++                if (newline > MAX_LINE_BYTES || ++lines > MAX_LINES) { fail("too-large"); return; }
++                const line = buffer.subarray(0, newline); buffer = buffer.subarray(newline + 1);
++                try {
++                    const message = parseLine(line);
++                    if (!record(message)) throw "malformed";
++                    if (typeof message.method === "string") {
++                        if (message.id !== undefined) {
++                            if (!Number.isSafeInteger(message.id) && !identifier(message.id)) throw "malformed";
++                            // Deny unexpected requests; never execute a tool or grant an approval.
++                            child.stdin.write(JSON.stringify({ id: message.id, error: { code: -32601, message: "Read-only inspection" } }) + "\n");
++                            throw "unavailable";
++                        }
++                        continue;
++                    }
++                    if (!pending || message.id !== pending.id || ("result" in message) === ("error" in message)) throw "malformed";
++                    const waiting = pending;
++                    if ("error" in message) {
++                        const error = message.error;
++                        if (!record(error) || !Number.isInteger(error.code) || typeof error.message !== "string") throw "malformed";
++                        pending = null;
++                        const expectedId = run.metadata.codexSessionId;
++                        const missing = error.code === -32600 && (
++                            waiting.method === "thread/read" && error.message === `thread not loaded: ${expectedId}`
++                            || waiting.method === "thread/turns/list" && (error.message === `thread not loaded: ${expectedId}`
++                                || error.message === `no rollout found for thread id ${expectedId}`));
++                        waiting.reject(error.code === -32601 ? "unsupported" : missing ? "missing" : "unavailable");
++                    } else { pending = null; waiting.resolve(message.result); }
++                } catch (error) { fail(typeof error === "string" ? error : "malformed"); }
++            }
++            if (buffer.length > MAX_LINE_BYTES) fail("too-large");
++        };
++        const onStderr = chunk => { bytes += chunk.length; if (bytes > MAX_WIRE_BYTES) fail("too-large"); };
++        const onError = () => fail("unavailable");
++        const onClose = () => fail(buffer.length ? "malformed" : "unavailable");
++        child.stdout.on("data", onData); child.stderr.on("data", onStderr);
++        child.on("error", onError); child.on("close", onClose); child.stdin.on("error", onError);
++        const call = (method, params) => new Promise((resolve, reject) => {
++            if (failed) { reject(failed); return; }
++            pending = { id: ++nextId, method, resolve, reject }; send({ id: nextId, method, params });
++        });
++        try {
++            const init = await call("initialize", { clientInfo: { name: "vivary-stored-thread-reader", version: "0.0.0" }, capabilities: { experimentalApi: true } });
++            if (!record(init)) throw "malformed";
++            send({ method: "initialized", params: {} });
++            const metadata = await call("thread/read", { threadId: run.metadata.codexSessionId, includeTurns: false });
++            const thread = metadata?.thread;
++            if (!record(thread) || thread.id !== run.metadata.codexSessionId || thread.cwd !== run.cwd || thread.modelProvider !== "openai"
++                || !Array.isArray(thread.turns) || thread.turns.length) throw "malformed";
++            await canonical(thread.cwd);
++            if (thread.path != null) {
++                await canonical(thread.path);
++                if (inside(run.cwd, thread.path)) throw "unavailable";
++            }
++            const page = await call("thread/turns/list", { threadId: thread.id, limit: MAX_TURNS, sortDirection: "desc", itemsView: "summary" });
++            const selected = selectMessages(page);
++            if (failed) throw failed;
++            return { ...result("available"), ...selected };
++        } finally {
++            clearTimeout(timer);
++            child.stdout.off("data", onData); child.stderr.off("data", onStderr);
++            child.off("close", onClose);
++            // Keep error handlers until the lifecycle owner closes the pipes.
++        }
++    } catch (error) { return result(["missing", "unsupported", "malformed", "too-large"].includes(error) ? error : "unavailable"); }
++    finally {
++        if (process && !await process.close().catch(() => false)) throw "cleanup-unverified";
++    }
++}
++
++/** Caller authorizes owner/org/project and supplies the existing host lifecycle, never client launch/path input. */
++export async function readCodexCodeSessionLog(run, lifecycle) {
++    const id = run?.metadata?.codexSessionId;
++    const reference = identifier(id) ? `codex-thread:${id}` : null;
++    const result = status => ({ reference, status, messages: [], truncated: false });
++    if (!reference || run.metadata?.engine !== "codex-cli" || typeof run.cwd !== "string") return result("unsupported");
++    const done = await admit();
++    if (!done) return result("unavailable");
++    try { return await inspect(run, lifecycle, result); }
++    catch { return result("unavailable"); }
++    finally { done(); }
++}
+diff --git a/dist/cli/codex-session-log.d.ts b/dist/cli/codex-session-log.d.ts
+new file mode 100644
+--- /dev/null
++++ b/dist/cli/codex-session-log.d.ts
+@@ -0,0 +1,14 @@
++import type { ChildProcessWithoutNullStreams } from "node:child_process";
++import type { CodeAgentRunRecord } from "./code-agent-runs.js";
++export type CodexCodeSessionLog = {
++    reference: string | null;
++    status: "available" | "missing" | "unavailable" | "unsupported" | "malformed" | "too-large";
++    messages: Array<{ role: "user" | "assistant"; text: string }>;
++    truncated: boolean;
++};
++/** Host owns executable/environment selection and verified process-tree cleanup. Missing cwd uses the host's cwd. */
++export type CodexSessionLogLifecycle = {
++    open(cwd: string | undefined): Promise<{ child: ChildProcessWithoutNullStreams; close(): Promise<boolean> } | null>;
++};
++/** Authorize the retained run before calling; lifecycle is trusted server configuration. */
++export declare function readCodexCodeSessionLog(run: CodeAgentRunRecord, lifecycle: CodexSessionLogLifecycle): Promise<CodexCodeSessionLog>;

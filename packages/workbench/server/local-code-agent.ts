@@ -18,12 +18,14 @@ import {
   listCodeAgentRunRecords,
   listCodeAgentTranscriptEvents,
   readClaudeCodeSessionLog,
+  readCodexCodeSessionLog,
   updateCodeAgentRunRecord,
   type CodeAgentRunRecord,
   type CodeAgentTranscriptEvent,
 } from "@agent-native/core/code-agents";
 
 import { getCodexModels, type CodexModelCatalog } from "./codex-models";
+import { codexSessionLogLifecycle } from "./codex-session-process";
 import { projectReconnectionPending } from "./project-reconnection-admission.mjs";
 
 import {
@@ -1078,8 +1080,9 @@ export async function getVivaryCodeSessionDetails(
       status: "unsupported", excerpt: "", truncated: false },
   };
   await refreshHeldCredentials();
-  if (engineFromRun(run) === "claude-cli" && sessionId) {
-    const provider = await readClaudeCodeSessionLog(run);
+  if (sessionId) {
+    const provider = engineFromRun(run) === "claude-cli"
+      ? await readClaudeCodeSessionLog(run) : await readCodexCodeSessionLog(run, codexSessionLogLifecycle);
     // Redact each whole text before any output truncation, including a secret
     // that crosses the excerpt boundary. Paths and opaque provider data stay private.
     const messages = provider.messages.map(message => ({ role: message.role,
@@ -1090,7 +1093,8 @@ export async function getVivaryCodeSessionDetails(
         .replace(/https?:\/\/(?:\[redacted [A-Za-z0-9_.:-]{1,64}\]|[^\s<>"'])+|(?<![A-Za-z0-9_+.-])file:[^\r\n]+|(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+|(?<![A-Za-z0-9:])\/[^\r\n]+/gi, value => /^https?:\/\//i.test(value) ? value : "[path]") }));
     const excerpt = messages.slice(-40).map(message => `${message.role}: ${message.text.slice(0, 1_500)}`).join("\n\n");
     details.providerLog = { reference: provider.reference, status: provider.status, excerpt: excerpt.slice(-20_000),
-      truncated: messages.length > 40 || messages.some(message => message.text.length > 1_500) || excerpt.length > 20_000 };
+      truncated: ("truncated" in provider && provider.truncated === true) || messages.length > 40
+        || messages.some(message => message.text.length > 1_500) || excerpt.length > 20_000 };
   }
   let file;
   try {

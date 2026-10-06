@@ -15,11 +15,16 @@ isolated copied production server passed. A retained real log preserved its hash
 inspection made zero provider calls. SDK notices are packaged and eight optional
 executors excluded. The worker is not an OS sandbox.
 
-Prior PR #197 Claude Stop/restart/resume acceptance remains unchanged. Issue #10
-stays open: Codex provider-log details are unsupported pending a bounded
-stored-thread view, and current Windows candidate acceptance is unrun. Final
-independent review, reviewed commit, exact-commit CI, Entire verification and
-owner approval remain pending; no new release or publication is accepted here.
+Prior PR #197 Claude Stop/restart/resume acceptance remains unchanged. PR #198
+merged at `df354d0` with successful postmerge CI. Issue #10 stays open: the
+[Codex stored-thread reader](receipts/10-codex-stored-thread-reader.md) passes affected
+regressions, actual retained-thread inspection with unchanged provider-file checksum,
+and built desktop/390px project-isolation/redaction/shutdown checks. Independent
+Spec and Standards source reviews pass. The broader local maintained suite reached
+its wrapper timeout and remains incomplete. Current private packaged Windows
+acceptance is unrun. Commit-bound publisher review, exact-head CI, Entire
+verification and owner approval remain required for this new increment; no
+release or main promotion is accepted here.
 
 ## Runtime sandbox coverage, October 6
 

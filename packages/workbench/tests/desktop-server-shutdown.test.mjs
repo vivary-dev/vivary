@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { fork, spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { writeFileSync } from "node:fs";
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { registerHooks } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -115,6 +115,67 @@ if (role === "preview-service-server") {
   process.on("message", message => {
     if (message.type === "shutdown-server") server.send({ type: "shutdown" });
   });
+} else if (role?.startsWith("reader-observation-")) {
+  // Real reader/stop owners and subprocesses; only external Windows executable output is simulated.
+  const directory = process.argv[3];
+  const receipt = name => path.join(directory, name);
+  const scanner = path.join(directory, "System32", "WindowsPowerShell", "v1.0");
+  const bin = path.join(directory, "bin");
+  await Promise.all([mkdir(scanner, { recursive: true }), mkdir(bin)]);
+  await writeFile(path.join(bin, "codex.exe"), "#!" + process.execPath + "\nsetInterval(() => {}, 1000);\n", { mode: 0o755 });
+  await writeFile(path.join(scanner, "scanner.mjs"), String.raw`
+import { existsSync, writeFileSync, readFileSync } from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
+const first = !existsSync(${JSON.stringify(receipt("first-scan"))});
+if (first) writeFileSync(${JSON.stringify(receipt("first-scan"))}, "");
+process.once("SIGTERM", () => process.exit(0));
+if (first) while (!existsSync(${JSON.stringify(receipt("release-scan"))}) || ${JSON.stringify(role)} === "reader-observation-timeout") await delay(10);
+if (first && ${JSON.stringify(role)} === "reader-observation-unavailable") { process.stdout.write("incomplete scan"); process.exit(0); }
+const { pid, at } = JSON.parse(readFileSync(${JSON.stringify(receipt("reader-identity"))}, "utf8"));
+const stopped = existsSync(${JSON.stringify(receipt("stopped"))});
+const rows = stopped ? [[41002, 41001, at + 2, "orphan.exe"]]
+  : [[pid, 1, at, "reader.exe"], [41001, pid, at + 1, "intermediate.exe"], [41002, 41001, at + 2, "orphan.exe"]];
+for (const [id, parent, created, name] of rows) {
+  process.stdout.write([id, parent, String(BigInt(created) * 10000n + 116444736000000000n), name].join("\t") + "\n");
+}
+process.stdout.write("END\t" + rows.length + "\n");
+`);
+  await writeFile(path.join(scanner, "powershell.exe"),
+    "#!/bin/sh\nexec " + JSON.stringify(process.execPath) + " " + JSON.stringify(path.join(scanner, "scanner.mjs")) + ' "$@"\n', { mode: 0o755 });
+  await writeFile(path.join(directory, "System32", "taskkill.exe"),
+    "#!/bin/sh\nprintf stopped > " + JSON.stringify(receipt("stopped")) + '\nkill -9 "$2"\n', { mode: 0o755 });
+  // guard:allow-env-credential - Selects only disposable Windows scanner/stop executables.
+  process.env.SystemRoot = directory;
+  // guard:allow-env-credential - Selects the inert disposable CLI before host installations.
+  process.env.PATH = bin + path.delimiter + process.env.PATH; // guard:allow-env-mutation - Disposable fork process selects its inert Windows CLI; setting ends with that process.
+  const owner = await import("../server/codex-session-process.ts");
+  const { CLEANUP_TIMEOUT_MS } = await import("../server/code-execution-host.ts");
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  let reader;
+  let closing;
+  try {
+    Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+    reader = await owner.codexSessionLogLifecycle.open(directory);
+    assert.ok(reader, "real reader owner launches the inert app-server");
+    await writeFile(receipt("reader-identity"), JSON.stringify({ pid: reader.child.pid, at: Date.now() }));
+    await until(() => readFile(receipt("first-scan")).then(() => true, () => false), "first scan starts");
+    const started = performance.now();
+    closing = reader.close();
+    await delay(100);
+    assert.equal(await readFile(receipt("stopped")).then(() => true, () => false), false,
+      "reader termination must wait for the bounded in-flight ancestry observation");
+    await writeFile(receipt("release-scan"), "");
+    assert.equal(await closing, false, "escaped ancestry or uncertain observation cannot report clean");
+    assert.ok(performance.now() - started < CLEANUP_TIMEOUT_MS + 1000, "the entire close is bounded");
+    assert.equal(await owner.codexSessionLogLifecycle.open(directory), null,
+      "a later root-only scan cannot clear escaped or unobserved ancestry");
+    await assert.rejects(owner.shutdownCodexSessionReaders(), /could not be stopped completely/);
+  } finally {
+    await writeFile(receipt("release-scan"), "");
+    await closing;
+    if (reader?.child.pid) { try { process.kill(reader.child.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; } }
+    Object.defineProperty(process, "platform", platform);
+  }
 } else if (role) {
   const directory = process.argv[3];
   const receipt = name => path.join(directory, name);
@@ -163,6 +224,7 @@ if (role === "preview-service-server") {
       }
       await writeFile(receipt("settled"), "");
     })(),
+    reader: () => role === "reader-cleanup-failure" ? Promise.reject(new Error("unconfirmed reader cleanup")) : Promise.resolve(),
     code: () => role === "failure" ? Promise.reject(new Error("expected cleanup failure")) : Promise.resolve(),
     previews: () => {
       if (["windows-preview-failure", "windows-standalone-failure"].includes(role)) {
@@ -176,6 +238,8 @@ if (role === "preview-service-server") {
     "@agent-native/core/server": "export const defineNitroPlugin = value => value;",
     "@agent-native/core/jobs": "export const stopRecurringJobs = () => globalThis.__shutdownTestStops.automations();",
     "../local-code-agent.ts": "export const initializeVivaryCodeAgent = async () => {}; export const shutdownVivaryCodeAgent = () => globalThis.__shutdownTestStops.code();",
+    "../codex-session-process.ts": role.startsWith("codex-reader") ? undefined
+      : "export const shutdownCodexSessionReaders = () => globalThis.__shutdownTestStops.reader();",
     "../original-runtime.ts": "export const shutdownOriginalCommands = async () => {};",
     "../project-preview.ts": "export const shutdownProjectPreviews = () => globalThis.__shutdownTestStops.previews();",
   };
@@ -189,6 +253,49 @@ if (role === "preview-service-server") {
     return replacement === undefined ? nextResolve(specifier, context)
       : { url: "data:text/javascript," + encodeURIComponent(replacement), shortCircuit: true };
   } });
+  if (role.startsWith("codex-reader")) {
+    const project = path.join(directory, "project");
+    const provider = path.join(directory, "provider");
+    const bin = path.join(directory, "bin");
+    await Promise.all([mkdir(project), mkdir(provider), mkdir(bin)]);
+    // guard:allow-env-credential - Synthetic CLI/runtime data only; no host credentials are copied.
+    process.env.CODEX_HOME = provider; // guard:allow-env-mutation - Disposable fork process uses its synthetic provider store; setting ends with that process.
+    process.env.AGENT_NATIVE_CODE_AGENTS_HOME = path.join(directory, "native"); // guard:allow-env-mutation - Disposable fork process isolates Native run data; setting ends with that process.
+    // guard:allow-env-credential - Resolve only this disposable external app-server fixture first.
+    process.env.PATH = bin + path.delimiter + process.env.PATH; // guard:allow-env-mutation - Disposable fork process selects only its inert app-server fixture first; setting ends with that process.
+    // guard:allow-env-credential - The disposable reader uses the existing local launcher.
+    process.env.VIVARY_ACCESS_MODE = "local"; // guard:allow-env-mutation - Disposable fork process selects the existing local launcher; setting ends with that process.
+    const threadId = "shutdown-fixture-thread";
+    await writeFile(path.join(bin, "codex"), String.raw`#!/usr/bin/env node
+const { spawn } = require("node:child_process");
+const { appendFileSync, writeFileSync } = require("node:fs");
+const readline = require("node:readline");
+const helper = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+writeFileSync(${JSON.stringify(receipt("reader-pids"))}, JSON.stringify([process.pid, helper.pid]));
+appendFileSync(${JSON.stringify(receipt("reader-spawns"))}, "spawn\n");
+readline.createInterface({ input: process.stdin }).on("line", line => {
+  const request = JSON.parse(line);
+  if (request.method === "initialize") process.stdout.write(JSON.stringify({ id: request.id, result: {} }) + "\n");
+  if (request.method === "thread/read" && ${JSON.stringify(role)} === "codex-reader-turn") {
+    process.stdout.write(JSON.stringify({ id: request.id, result: { thread: {
+      id: ${JSON.stringify(threadId)}, cwd: ${JSON.stringify(project)}, modelProvider: "openai", turns: [],
+      path: ${JSON.stringify(path.join(provider, "stored.jsonl"))} } } }) + "\n");
+  } else if (request.method === "thread/read" || request.method === "thread/turns/list") {
+    writeFileSync(${JSON.stringify(receipt("reader-held"))}, "");
+  }
+});
+`, { mode: 0o755 });
+    const { createCodeAgentRunRecord, readCodexCodeSessionLog } = await import("@agent-native/core/code-agents");
+    const actionReader = await import(new URL("../server/codex-session-process.ts?source-action-reader", import.meta.url));
+    const run = createCodeAgentRunRecord({ goalId: "vivary-local-code", title: "Held reader", cwd: project,
+      status: "paused", metadata: { engine: "codex-cli", codexSessionId: threadId, workspaceRoot: project,
+        app: "vivary-workbench-local-code", ownerEmail: "owner@example.test", orgId: "fixture-org" } });
+    void readCodexCodeSessionLog(run, actionReader.codexSessionLogLifecycle).then(result =>
+      writeFile(receipt("reader-settled"), result.status));
+    await until(() => exists("reader-held"), "real public reader reaches held RPC", 5000);
+    // This public inspection waits behind the held reader; shutdown must deny its later open.
+    void readCodexCodeSessionLog(run, actionReader.codexSessionLogLifecycle);
+  }
   const plugin = (await import(lifecycle)).default;
   globalThis.__shutdownTestBoot = async () => {
     // Load with the real platform first, then select Windows or POSIX only for initialization.
@@ -332,14 +439,37 @@ if (role === "preview-service-server") {
   });
   }
 
+  for (const scenario of ["ancestry", "unavailable", "timeout"]) {
+    test("reader pre-stop Windows observation: " + scenario, { timeout: 25000, skip: process.platform !== "linux" }, async () => {
+      const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-reader-observation-"));
+      const child = fork(fileURLToPath(import.meta.url), ["reader-observation-" + scenario, directory], {
+        execArgv: ["--import", "tsx"], stdio: ["ignore", "ignore", "pipe", "ipc"],
+      });
+      let stderr = "";
+      child.stderr.on("data", chunk => { stderr += chunk; });
+      let result;
+      const exited = new Promise(resolve => child.once("exit", (code, signal) => { result = { code, signal }; resolve(result); }));
+      try {
+        await until(() => result, "reader observation fixture finishes: " + stderr, 20000);
+        assert.deepEqual(await exited, { code: 0, signal: null }, stderr);
+      } finally {
+        if (!result) { child.kill("SIGKILL"); await exited; }
+        const identity = await readFile(path.join(directory, "reader-identity"), "utf8").then(JSON.parse, () => null);
+        if (identity?.pid && await isRunning(identity.pid)) process.kill(identity.pid, "SIGKILL");
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+  }
+
   for (const scenario of [
     "shutdown", "disconnect", "failure", "hosted", "windows-success",
+    "codex-reader-metadata", "codex-reader-turn", "reader-cleanup-failure",
     "windows-pending", "windows-preview-failure", "windows-close-failure",
     "windows-standalone-failure", "windows-root-only-kill",
   ]) {
     test(`desktop lifecycle: ${scenario}`, {
-      timeout: nativeWindows ? 20000 : 10000,
-      skip: scenario === "windows-root-only-kill" && !nativeWindows,
+      timeout: scenario.startsWith("codex-reader") ? 30000 : nativeWindows ? 20000 : 10000,
+      skip: scenario === "windows-root-only-kill" && !nativeWindows || scenario.startsWith("codex-reader") && nativeWindows,
     }, async () => {
       const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-shutdown-"));
       const environment = { ...process.env };
@@ -367,7 +497,7 @@ if (role === "preview-service-server") {
       });
       const exists = name => readFile(path.join(directory, name)).then(() => true, () => false);
       try {
-        await until(() => ready || result, "child becomes ready");
+        await until(() => ready || result, "child becomes ready: " + stderr, scenario.startsWith("codex-reader") ? 15000 : 3000);
         assert.equal(result, undefined, stderr);
         if (scenario === "windows-root-only-kill") {
           const descendantPid = Number(await readFile(path.join(directory, "descendant-pid"), "utf8"));
@@ -422,6 +552,11 @@ if (role === "preview-service-server") {
           return;
         }
         await until(() => exists("started"), "shutdown starts cleanup");
+        if (scenario.startsWith("codex-reader")) {
+          const pids = JSON.parse(await readFile(path.join(directory, "reader-pids"), "utf8"));
+          for (const pid of pids) await until(async () => !await isRunning(pid),
+            "normal host shutdown stops its reader/helper while automation still holds exit", 5000);
+        }
         await delay(100);
         assert.equal(result, undefined, "held automation cleanup must keep the child alive");
         await writeFile(path.join(directory, "release"), "");
@@ -432,7 +567,13 @@ if (role === "preview-service-server") {
           child.send({ type: "owner-finish" });
         }
         await until(() => result, `child must exit after cleanup without a force kill: ${stderr}`);
-        assert.deepEqual(await exited, { code: scenario === "failure" ? 1 : 0, signal: null });
+        assert.deepEqual(await exited, { code: ["failure", "reader-cleanup-failure"].includes(scenario) ? 1 : 0, signal: null });
+        if (scenario.startsWith("codex-reader")) {
+          const pids = JSON.parse(await readFile(path.join(directory, "reader-pids"), "utf8"));
+          for (const pid of pids) await until(async () => !await isRunning(pid), "normal host quit stops owned reader/helper before exit");
+          assert.equal(await readFile(path.join(directory, "reader-spawns"), "utf8"), "spawn\n",
+            "closing admission prevents the queued inspection from spawning another reader");
+        }
       } finally {
         if (!result) {
           child.kill("SIGKILL");
@@ -448,6 +589,13 @@ if (role === "preview-service-server") {
             assert.ok(Number.isSafeInteger(descendantPid) && descendantPid > 0, "fixture descendant PID is valid");
             if (isAlive(descendantPid)) forceWindowsTree(descendantPid);
             await until(() => !isAlive(descendantPid), "fixture descendant cleanup completes");
+          }
+        }
+        if (scenario.startsWith("codex-reader")) {
+          const pids = await readFile(path.join(directory, "reader-pids"), "utf8").then(JSON.parse, () => []);
+          if (pids[0]) {
+            try { process.kill(-pids[0], "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+            for (const pid of pids) await until(async () => !await isRunning(pid), "exact fixture group cleanup");
           }
         }
         await rm(directory, { recursive: true, force: true });
