@@ -7519,6 +7519,19 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+The #188 maintained CI failure exposed collisions in Core's millisecond/random
+usage IDs. The maintained patch now lets database uniqueness arbitrate at most
+sixteen consecutive safe-integer candidates, with connection replay disabled for
+each insert. It preserves existing costs, propagates other failures and enqueues
+alerts only after a confirmed insert. Public usage regressions cover simultaneous
+store instances, exhaustion and refusal; the original collision demonstrated a
+real failing test before correction. The paired performance validator now requires
+both established revisit budgets and rejects raised configuration ceilings.
+Future proven wins lower its policy ceilings and JSON values together, under
+source review. These changes preserve existing data ownership and access boundaries.
+
+The #188 CI site audit found GHSA-68fv-2mgg-jv7q in source-map-js 1.2.1. The site lockfile now selects patched 1.2.2 within every existing consumer range. Upstream advisory/release and registry tarball review establish the fix, publication age over 72 hours, no install scripts and no native build file. This changes site build tooling only; application runtime, data boundaries and architecture remain as described. The high-severity audit and site build remain required checks.
+
 Issue #188, experiment decision. The added Code record/transcript cache and its
 sign-out hook are removed after the identical built-app comparison failed the
 recorded incremental switching threshold. Against corrected E1, large Code

@@ -43,6 +43,18 @@ includes these socket-free regressions. Remove these hunks and the shared helper
 when pinned upstream Core preserves the same formatting, bounded constructor
 reuse, and deferred collapse behavior and passes these tests without the patch.
 
+## Usage record ID collisions
+
+Issue #188's maintained CI exposed two rapid usage writes selecting the same
+millisecond/random-suffix ID. The Core usage store now uses its existing database
+conflict-targeted insert pattern, trying at most sixteen consecutive safe-integer
+IDs. Existing usage rows are never replaced. Other database errors propagate;
+exhaustion rejects. Each insert disables connection replay so an ambiguous
+transport failure cannot turn an already committed charge into another row.
+Alerts enqueue only after an insertion succeeds. The public usage regressions
+cover concurrent store instances, costs/IDs, bounded exhaustion and a refused
+insert. Remove this hunk when upstream preserves those behaviors.
+
 ## Responsiveness baseline overlay
 
 `responsiveness-baseline.patch` is applied only to the fixed pre-E1 checkout by

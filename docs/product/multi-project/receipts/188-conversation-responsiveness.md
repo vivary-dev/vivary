@@ -131,10 +131,25 @@ requires the paired budget to pass and uploads evidence even after failure.
 Thirty-one workflow contract tests pass; the three new contract cases first
 failed when the checker accepted missing/weakened performance checks.
 
-**Still pending:** final paired verification with the cleanup-corrected harness,
-exact-final-head maintained/applicable CI, independent final review/publisher,
-and owner approval. Calibration on this server is not a GitHub runner result.
-No merge or release acceptance is claimed.
+The cleanup-corrected harness also passed paired verification at clean source
+`d78ed263` on both this server and GitHub Actions run `37433604252`, with all six
+repeats complete on each host. Server Code/Native revisit ratios were 0.7041/0.6808;
+GitHub runner ratios were 0.7258/0.7433. Both retained the fixed 0.76/0.75 ceilings.
+These are separate same-host pairs, not pooled cross-host samples. Hosted raw
+artifacts were downloaded and checksummed alongside the original evidence.
+
+That initial CI run separately failed the site high-severity dependency audit
+and exposed a real primary-key collision in rapid usage writes. The site lockfile
+updates source-map-js to patched 1.2.2. The maintained Core patch adds bounded,
+conflict-targeted ID allocation without overwriting charges or replaying ambiguous
+transport failures. A frozen-clock/randomness public-store test reproduced the
+collision before the fix. Automated review also found that candidate budget
+configuration could omit a protected scenario or raise its ceiling. Both cases
+now have demonstrated failing-before-fix public-checker regressions.
+
+Exact-final-head CI, independent publisher review, finding dispositions and owner
+approval remain separate delivery gates; [PR #196](https://github.com/vivary-dev/vivary/pull/196)
+owns their live status. No merge or release acceptance is claimed.
 
 Raw `guard-baseline.json` SHA-256: `691bc9d8826a32dc4a587b5a4bd6e2e21f73a6aaec6471c8beeebdadda16ec07`.
 

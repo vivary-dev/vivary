@@ -18,8 +18,11 @@ server caches retained. Its paired revisit ceilings are 0.76× baseline for Code
 and 0.75× for Native, derived from the measured ratio plus the larger full
 between-repeat range/median, rounded upward to 0.01. The
 [measurement receipt](../../../../docs/product/multi-project/receipts/188-conversation-responsiveness.md)
-records calibration and remaining verification gates. Ratchet ceilings downward
-for proven wins; diagnose a regression rather than raising its budget.
+records calibration and delivery gates. The checker requires both revisit
+scenarios and enforces their established ceilings. For a proven win, lower the
+checker policy ceilings and the JSON budget together. Source review governs policy
+changes; these checks do not make candidate-owned code tamper-proof. Diagnose a
+regression rather than raising its budget.
 
 ```sh
 pnpm build

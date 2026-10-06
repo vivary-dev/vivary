@@ -12482,10 +12482,9 @@ index c9cd99152199d4c5a2cb8d8eb9c1723790e820a0..5d7e9e71da0db59d810a1ac302583c55
   * Record token usage from an LLM call.
   *
 diff --git a/dist/usage/store.js b/dist/usage/store.js
-index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbbaf1a0c20 100644
 --- a/dist/usage/store.js
 +++ b/dist/usage/store.js
-@@ -63,6 +63,11 @@ const PRICING = [
+@@ -63,6 +63,11 @@
          match: /haiku/i,
          pricing: { input: 100, output: 500, cacheRead: 10, cacheWrite: 125 },
      },
@@ -12497,7 +12496,7 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
      // ── OpenAI / Codex ──────────────────────────────────────────────────────────
      // Short-context rates from OpenAI's published table (read 2026-08-25):
      // https://developers.openai.com/api/docs/pricing#text-tokens
-@@ -138,18 +143,40 @@ const PRICING = [
+@@ -138,18 +143,40 @@
          match: /mistral-small|mistral-medium/i,
          pricing: { input: 20, output: 60, cacheRead: 0, cacheWrite: 0 },
      },
@@ -12512,6 +12511,8 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
 -    for (const entry of PRICING) {
 -        if (entry.match.test(model))
 -            return entry.pricing;
+-    }
+-    return PRICING[PRICING.length - 1].pricing;
 +    return PRICING.find((entry) => entry.match.test(model))?.pricing;
 +}
 +/** Whether the price table prices a model, so `calculateCost` is its cost. */
@@ -12542,12 +12543,11 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
 +    }
 +    catch (err) {
 +        console.warn("[usage] Could not mark old estimated costs unknown:", err instanceof Error ? err.message : err);
-     }
--    return PRICING[PRICING.length - 1].pricing;
++    }
  }
  let _initPromise;
  export async function ensureUsageTable() {
-@@ -232,6 +259,7 @@ export async function ensureUsageTable() {
+@@ -232,6 +259,7 @@
                  // the whole release. The SHARE lock is the cost of a build that lands.
                  await ensureIndexExists("idx_token_usage_lower_owner_created", `CREATE INDEX IF NOT EXISTS idx_token_usage_lower_owner_created ON token_usage (LOWER(owner_email), created_at)`);
                  await ensureIndexExists("idx_token_usage_org_app_created", `CREATE INDEX IF NOT EXISTS idx_token_usage_org_app_created ON token_usage (org_id, LOWER(app), created_at)`);
@@ -12555,7 +12555,7 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
                  return;
              }
              // SQLite (local dev): no lock problem — keep the original behaviour.
-@@ -265,6 +293,7 @@ export async function ensureUsageTable() {
+@@ -265,6 +293,7 @@
                      // through the Postgres branch above, which probes before creating.
                  }
              }
@@ -12563,7 +12563,7 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
          })().catch((err) => {
              // Retry init on the next call after a failed startup.
              _initPromise = undefined;
-@@ -292,6 +321,10 @@ export async function ensureUsageTable() {
+@@ -292,6 +321,10 @@
   */
  export function calculateCost(inputTokens, outputTokens, model, cacheReadTokens = 0, cacheWriteTokens = 0) {
      const p = pricingFor(model);
@@ -12574,7 +12574,7 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
      // An engine that still emits the exclusive convention would drive this
      // negative and credit the bill. Clamping keeps the partition non-negative;
      // the fix for a caller that trips it is that engine, not a wider clamp here.
-@@ -334,7 +367,14 @@ export async function recordUsage(recordOrOwner, inputTokens, outputTokens, mode
+@@ -334,39 +367,63 @@
      }
      // Prefer an explicit precomputed cost (e.g. a provider-reported dollar cost);
      // otherwise derive it from tokens via the pricing table.
@@ -12590,3 +12590,80 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
      const costX100 = resolvedCostSource === "unavailable"
          ? 0
          : (costCentsX100 ??
+             calculateCost(inTok, outTok, modelName, cacheReadTokens, cacheWriteTokens));
+-    const id = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+-    await client.execute({
+-        sql: `INSERT INTO token_usage
+-      (id, owner_email, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_cents_x100, cost_source, model, label, app, ref_id, org_id, run_id, thread_id, task_id, integration_scope_id, source_platform, source_id, created_at)
+-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+-        args: [
+-            id,
+-            ownerEmail,
+-            inTok,
+-            outTok,
+-            cacheReadTokens,
+-            cacheWriteTokens,
+-            costX100,
+-            resolvedCostSource,
+-            modelName,
+-            resolvedLabel,
+-            resolvedApp,
+-            resolvedRef,
+-            resolvedOrgId,
+-            runId ?? null,
+-            threadId ?? null,
+-            taskId ?? null,
+-            integrationScopeId ?? null,
+-            sourcePlatform ?? null,
+-            sourceId ?? null,
+-            Date.now(),
+-        ],
+-    });
++    // Millisecond timestamps and random suffixes can collide across calls or
++    // processes. Let the database arbitrate IDs without replacing usage rows.
++    const firstId = Date.now() * 1000 + Math.floor(Math.random() * 1000);
++    let inserted = false;
++    for (let attempt = 0; attempt < 16; attempt++) {
++        const id = firstId + attempt;
++        if (!Number.isSafeInteger(id))
++            throw new Error("Usage ID exceeds the safe integer range");
++        const result = await client.execute({
++            sql: `INSERT INTO token_usage
++          (id, owner_email, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_cents_x100, cost_source, model, label, app, ref_id, org_id, run_id, thread_id, task_id, integration_scope_id, source_platform, source_id, created_at)
++          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
++          ON CONFLICT (id) DO NOTHING`,
++            // An ambiguous transport failure must not replay a committed write.
++            maxAttempts: 1,
++            args: [
++                id,
++                ownerEmail,
++                inTok,
++                outTok,
++                cacheReadTokens,
++                cacheWriteTokens,
++                costX100,
++                resolvedCostSource,
++                modelName,
++                resolvedLabel,
++                resolvedApp,
++                resolvedRef,
++                resolvedOrgId,
++                runId ?? null,
++                threadId ?? null,
++                taskId ?? null,
++                integrationScopeId ?? null,
++                sourcePlatform ?? null,
++                sourceId ?? null,
++                Date.now(),
++            ],
++        });
++        if (result.rowsAffected > 0) {
++            inserted = true;
++            break;
++        }
++    }
++    if (!inserted)
++        throw new Error("Usage ID allocation exhausted after 16 conflicts");
+     // Alert delivery is deliberately detached from the usage write. A provider
+     // or email outage must not make a successful model call fail, and the alert
+     // evaluator serializes its own work so the hot path stays one insert.

@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
+// Lower these policy ceilings and the JSON budget together after a proven win.
+// Candidate configuration cannot remove a protected scenario or undo its gain.
+const revisitCeilings = { codeWarmMs: 0.76, nativeWarmMs: 0.75 };
 const scenarioNames = ['codeColdMs', 'codeWarmMs', 'nativeColdMs', 'nativeWarmMs'];
 const median = values => [...values].sort((a, b) => a - b)[Math.ceil(values.length / 2) - 1];
 
@@ -53,7 +56,11 @@ export function checkResponsivenessBudget(baseline, candidate, budget) {
         `Different measured workload: run ${i + 1} ${name}`);
     }
   }
-  assert.ok(Object.keys(budget.maxRatio).length > 0, 'No latency budgets');
+  for (const [name, ceiling] of Object.entries(revisitCeilings)) {
+    assert.ok(Object.hasOwn(budget.maxRatio, name), `Missing calibrated budget: ${name}`);
+    assert.ok(Number.isFinite(budget.maxRatio[name]) && budget.maxRatio[name] > 0
+      && budget.maxRatio[name] <= ceiling, `Budget exceeds established ceiling: ${name}`);
+  }
   const scenarios = {};
   for (const [name, maxRatio] of Object.entries(budget.maxRatio)) {
     assert.ok(scenarioNames.includes(name));

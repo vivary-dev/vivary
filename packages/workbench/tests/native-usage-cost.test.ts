@@ -258,6 +258,71 @@ test("the Usage tab's metrics count the calls whose cost is unknown", async () =
   });
 });
 
+// CI exposed a real primary-key collision when consecutive calls shared a millisecond.
+// Separate store modules also cover an existing ID left by another store instance.
+test("simultaneous usage calls with the same generated ID both retain their costs", async (t) => {
+  const owner = `owner-${randomUUID()}@example.test`;
+  const otherStore = await import(`${coreUrl("usage/store.js")}?collision=${randomUUID()}`);
+  await store.ensureUsageTable();
+  await otherStore.ensureUsageTable();
+  const now = Date.now();
+  const clock = t.mock.method(Date, "now", () => now);
+  const random = t.mock.method(Math, "random", () => 0);
+  try {
+    const call = { ownerEmail: owner, inputTokens: INPUT_TOKENS, outputTokens: OUTPUT_TOKENS,
+      label: "chat", model: "probe/reported", costSource: "reported" };
+    await Promise.all([
+      store.recordUsage({ ...call, costCentsX100: 60 }),
+      otherStore.recordUsage({ ...call, costCentsX100: 50 }),
+    ]);
+  } finally {
+    clock.mock.restore();
+    random.mock.restore();
+  }
+  const usage = await usageFor(owner);
+  assert.deepEqual(figure(usage.totals), { costCents: 1.1, calls: 2, unknownCostCalls: 0 });
+  assert.equal(usage.recent.length, 2);
+  assert.equal(new Set(usage.recent.map((row: { id: number }) => row.id)).size, 2);
+  assert.deepEqual(usage.recent.map((row: { costCents: number }) => row.costCents).sort((a: number, b: number) => a - b), [0.5, 0.6]);
+});
+
+test("usage ID collision exhaustion is bounded and preserves existing costs", async (t) => {
+  const owner = `owner-${randomUUID()}@example.test`;
+  await store.ensureUsageTable();
+  const now = Date.now() + 2_000;
+  const clock = t.mock.method(Date, "now", () => now);
+  const random = t.mock.method(Math, "random", () => 0);
+  const call = { ownerEmail: owner, inputTokens: 1, outputTokens: 0, label: "chat",
+    model: "probe/reported", costCentsX100: 10, costSource: "reported" };
+  try {
+    for (let i = 0; i < 16; i++) await store.recordUsage(call);
+    await assert.rejects(store.recordUsage(call), /Usage ID allocation exhausted after 16 conflicts/);
+  } finally {
+    clock.mock.restore();
+    random.mock.restore();
+  }
+  const usage = await usageFor(owner);
+  assert.deepEqual(figure(usage.totals), { costCents: 1.6, calls: 16, unknownCostCalls: 0 });
+  const summary = await store.getUsageSummary({ ownerEmail: owner, sinceMs: now - 1_000 });
+  assert.equal(new Set(summary.recent.map((row: { id: number }) => row.id)).size, 16);
+});
+
+test("a refused usage insert still rejects without recording a charge", async () => {
+  const owner = `owner-${randomUUID()}@example.test`;
+  await store.ensureUsageTable();
+  const trigger = `refuse_usage_${randomBytes(4).toString("hex")}`;
+  await getDbExec().execute(`CREATE TRIGGER ${trigger} BEFORE INSERT ON token_usage WHEN NEW.owner_email = '${owner}'
+    BEGIN SELECT RAISE(ABORT, 'usage refused'); END`);
+  try {
+    await assert.rejects(store.recordUsage({ ownerEmail: owner, inputTokens: 1, outputTokens: 0,
+      model: "probe/reported", costCentsX100: 10, costSource: "reported" }), /usage refused/);
+  } finally {
+    await getDbExec().execute(`DROP TRIGGER ${trigger}`);
+  }
+  const usage = await usageFor(owner);
+  assert.deepEqual(figure(usage.totals), { costCents: 0, calls: 0, unknownCostCalls: 0 });
+});
+
 // The tab lists four models. Five priced models cost more than the unpriced one's known cost of 0.
 test("the Usage tab's model list keeps a model whose cost is unknown", async () => {
   const owner = `owner-${randomUUID()}@example.test`;

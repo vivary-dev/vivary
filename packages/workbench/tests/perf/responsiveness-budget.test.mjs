@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { checkResponsivenessBudget } from './responsiveness-budget.mjs';
 
-const budget = { baselineCommit: 'baseline', maxRatio: { codeWarmMs: 0.8, nativeWarmMs: 0.8 } };
+const budget = { baselineCommit: 'baseline', maxRatio: { codeWarmMs: 0.76, nativeWarmMs: 0.75 } };
 function report(commit, ms) {
   return { conditions: { commit, dirty: false, dirtyHash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', mode: 'ordinary-switches', repeats: 3, samples: 15,
     harnessSha256: 'same-harness', chrome: 'same-browser', node: 'same-node', cpu: 'same-cpu',
@@ -57,4 +57,29 @@ test('a dirty baseline overlay requires the exact separately recorded source has
   assert.throws(() => checkResponsivenessBudget(base, candidate, budget));
   assert.equal(checkResponsivenessBudget(base, candidate, { ...budget, baselineDirtyHash: 'a'.repeat(64) }).passed, true);
   assert.throws(() => checkResponsivenessBudget(base, candidate, { ...budget, baselineDirtyHash: 'b'.repeat(64) }));
+});
+
+test('the paired guard refuses a missing calibrated revisit scenario', () => {
+  for (const scenario of ['codeWarmMs', 'nativeWarmMs']) {
+    const weakened = structuredClone(budget);
+    delete weakened.maxRatio[scenario];
+    assert.throws(() => checkResponsivenessBudget(report('baseline', 1000), report('candidate', 600), weakened));
+  }
+});
+
+test('the paired guard refuses ceilings above the established wins', () => {
+  for (const scenario of ['codeWarmMs', 'nativeWarmMs']) {
+    const weakened = structuredClone(budget);
+    weakened.maxRatio[scenario] = 0.99;
+    assert.throws(() => checkResponsivenessBudget(report('baseline', 1000), report('candidate', 600), weakened));
+  }
+});
+
+test('established ceilings and stricter budgets remain valid', () => {
+  const baseline = report('baseline', 1000), candidate = report('candidate', 600);
+  assert.equal(checkResponsivenessBudget(baseline, candidate, budget).passed, true);
+  assert.equal(checkResponsivenessBudget(baseline, candidate,
+    { ...budget, maxRatio: { codeWarmMs: 0.7, nativeWarmMs: 0.7 } }).passed, true);
+  assert.throws(() => checkResponsivenessBudget(baseline, candidate,
+    { ...budget, maxRatio: { ...budget.maxRatio, unknownScenario: 0.5 } }));
 });
