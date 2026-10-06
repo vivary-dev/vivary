@@ -103,3 +103,11 @@ results are retained outside it.
 node tests/perf/responsiveness-budget.mjs baseline.json candidate.json \
   tests/perf/responsiveness-budget.json EXPECTED_CANDIDATE_SHA
 ```
+
+The readiness check now waits for the final message to intersect the clipped
+conversation viewport through IntersectionObserver, without scrolling it from the
+test. Playwright visibility alone accepts off-screen elements. The real-browser
+`conversation-viewport.test.mjs` rejects that case and accepts natural scrolling;
+CI runs it before timing each build. Harness SHA-256 covers the driver followed
+by `conversation-viewport.mjs`. Earlier raw results retain their original identity
+and visibility-only limitation; fixed ratio ceilings are not recalibrated.

@@ -136,6 +136,8 @@ def check_responsiveness_workflow(text: str) -> None:
         "ref: 8b1d1e4eed9331095343366dbba387525d8209e8",
         "git -C baseline apply ../candidate/packages/workbench/patches/responsiveness-baseline.patch",
         "cp candidate/packages/workbench/tests/perf/responsiveness.mjs baseline/packages/workbench/tests/perf/",
+        "cp candidate/packages/workbench/tests/perf/conversation-viewport{,.test}.mjs baseline/packages/workbench/tests/perf/",
+        '(cd "$checkout/packages/workbench" && node --test tests/perf/conversation-viewport.test.mjs) 2>&1 | tee "$evidence/$checkout-viewport.log"',
         "cp candidate/packages/workbench/server/plugins/04-perf.ts baseline/packages/workbench/server/plugins/",
         'test "$(git -C candidate rev-parse HEAD)" = "$EXPECTED_HEAD"',
         'test -z "$(git -C candidate status --porcelain)"',

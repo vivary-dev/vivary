@@ -338,7 +338,11 @@ checks used synthetic saved messages and do not establish real provider executio
 Issue #188, round 3 measurement harness. `packages/workbench/tests/perf/responsiveness.mjs`
 drives the normal built app in system Chrome against a seeded disposable history and times
 what a person waits for: startup to a usable list, conversation switches until messages and the
-current composer or provider state are usable, search until the expected conversation is listed,
+current composer or provider state are usable, and search until the expected conversation is listed.
+Conversation readiness requires the final message to intersect its clipped viewport naturally.
+An actual browser regression rejects an off-screen marker that passes Playwright visibility;
+the same helper and regression run on both CI builds. Harness identity includes that helper.
+Earlier raw samples used visibility alone and remain retained with that limitation. It measures
 idle requests and bytes, server event-loop delay and memory, with crash-safe per-switch memory
 traces. Full mode guides experiments; its shorter paired mode now supplies the
 CI latency guard described above. The opt-in `server/plugins/04-perf.ts` Nitro

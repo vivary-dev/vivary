@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { chromium } from 'playwright-core';
+import { waitForConversationViewport } from './conversation-viewport.mjs';
 import { OWNER, send, startBuiltApp } from '../built-app.mjs';
 
 const { values } = parseArgs({ options: { output: { type: 'string' }, size: { type: 'string', default: 'both' },
@@ -42,7 +43,10 @@ function buildIdentity() {
   return { files: entries.length, hash: sha256(entries.join('\n')), builtAt: statSync(path.join(root, 'server', 'index.mjs')).mtime.toISOString() };
 }
 const report = { schema: 'vivary.responsiveness/v2', conditions: {
-  ...sourceIdentity(), harnessSha256: sha256(readFileSync(fileURLToPath(import.meta.url))), build: buildIdentity(),
+  ...sourceIdentity(), harnessSha256: sha256(Buffer.concat([
+    readFileSync(fileURLToPath(import.meta.url)),
+    readFileSync(new URL('./conversation-viewport.mjs', import.meta.url)),
+  ])), build: buildIdentity(),
   node: process.version, chromePath: executablePath, cpuCount: os.cpus().length, totalMemoryBytes: os.totalmem(),
   cpu: os.cpus()[0]?.model, loadAverage: os.loadavg(), platform: `${os.platform()} ${os.release()}`,
   seed: 188, repeats, samples, viewport: { width: 1440, height: 1000 },
@@ -224,7 +228,7 @@ async function clickConversation(page, item) {
   const start = performance.now();
   await row.click();
   // Target marker is unique across all histories and only the active mounted view may count.
-  await page.getByText(item.last, { exact: true }).filter({ visible: true }).last().waitFor();
+  await waitForConversationViewport(page.getByText(item.last, { exact: true }).filter({ visible: true }).last());
   // Usable means the composer state is current too: Code's composer is enabled; Native's
   // fixture has no provider, so its settled state is the Connect AI card.
   if (item.title.startsWith('Perf Code')) await composerUsable(page);

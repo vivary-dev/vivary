@@ -767,6 +767,7 @@ jobs:
           mkdir -p evidence baseline/packages/workbench/tests/perf baseline/packages/workbench/server/plugins
           git -C baseline apply ../candidate/packages/workbench/patches/responsiveness-baseline.patch
           cp candidate/packages/workbench/tests/perf/responsiveness.mjs baseline/packages/workbench/tests/perf/
+          cp candidate/packages/workbench/tests/perf/conversation-viewport{,.test}.mjs baseline/packages/workbench/tests/perf/
           cp candidate/packages/workbench/server/plugins/04-perf.ts baseline/packages/workbench/server/plugins/
           google-chrome --version
       - name: measure baseline then candidate
@@ -778,6 +779,7 @@ jobs:
           evidence="$GITHUB_WORKSPACE/evidence"
           for checkout in baseline candidate; do
             pnpm --dir "$checkout/packages/workbench" install --frozen-lockfile 2>&1 | tee "$evidence/$checkout-install.log"
+            (cd "$checkout/packages/workbench" && node --test tests/perf/conversation-viewport.test.mjs) 2>&1 | tee "$evidence/$checkout-viewport.log"
             pnpm --dir "$checkout/packages/workbench" build 2>&1 | tee "$evidence/$checkout-build.log"
             (
               cd "$checkout/packages/workbench"

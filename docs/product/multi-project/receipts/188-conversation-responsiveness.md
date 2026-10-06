@@ -154,3 +154,15 @@ owns their live status. No merge or release acceptance is claimed.
 Raw `guard-baseline.json` SHA-256: `691bc9d8826a32dc4a587b5a4bd6e2e21f73a6aaec6471c8beeebdadda16ec07`.
 
 Raw `guard-e1.json` SHA-256: `33db8501d19adecaf7140f72b18ace3708722756c35df48fc72b4c88c04d6457`.
+
+### Final review: viewport readiness
+
+Independent publisher inspection identified that Playwright `visible` accepts a
+message clipped below its scroll pane. The original full measurements and the
+completed d78 pairs remain retained, but their endpoint establishes rendered
+visibility and settled controls, not viewport intersection. No old sample is
+adjusted or discarded. A real-browser off-screen regression failed under that
+readiness rule, then passed with IntersectionObserver waiting for natural viewport
+intersection. The revised paired guard uses identical driver/helper source on both
+builds and retains the existing 0.76/0.75 ceilings. Its final-head result is tracked
+on PR #196; this paragraph does not claim that pending measurement has passed.
