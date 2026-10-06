@@ -142,11 +142,12 @@ test('Yesterday resolves the current translation only when its label is displaye
 
 
 test('default-zone formats follow a system timezone change on the next rendering task', async () => {
-  const previous = process.env.TZ;
+  const previous = process.env.TZ; // guard:allow-env-credential - Save the isolated test's timezone setting.
   const run = runtime();
   try {
     for (const zone of ['Etc/UTC', 'America/New_York', 'Australia/Sydney']) {
-      process.env.TZ = zone; // guard:allow-env-credential - Synthetic system timezone change; not a credential.
+      // guard:allow-env-credential - Synthetic system timezone change; not a credential.
+      process.env.TZ = zone; // guard:allow-env-mutation - Exercise a process-wide timezone change in this isolated test.
       await new Promise(setImmediate);
       const options = { dateStyle: 'full', timeStyle: 'long' };
       assert.equal(run.formatters('en-US').formatDate(now, options),
@@ -157,7 +158,9 @@ test('default-zone formats follow a system timezone change on the next rendering
         new Intl.DateTimeFormat('en-US', explicit).format(now), 'an explicit timezone remains authoritative');
     }
   } finally {
-    if (previous === undefined) delete process.env.TZ;
-    else process.env.TZ = previous; // guard:allow-env-credential - Restore test timezone configuration.
+    // guard:allow-env-credential - Restore test timezone configuration.
+    if (previous === undefined) delete process.env.TZ; // guard:allow-env-mutation - Restore the isolated test's timezone.
+    // guard:allow-env-credential - Restore test timezone configuration.
+    else process.env.TZ = previous; // guard:allow-env-mutation - Restore the isolated test's timezone.
   }
 });

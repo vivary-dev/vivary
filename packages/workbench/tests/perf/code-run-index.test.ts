@@ -346,12 +346,26 @@ test("successful Core sign-out clears retained run, transcript and legacy-link c
     AGENT_NATIVE_DISABLE_RECURRING_JOBS: "1", AGENT_NATIVE_DISABLE_INPROCESS_SWEEPS: "1",
     AGENT_NATIVE_DISABLE_KEEP_WARM: "1", VITE_APP_BASE_PATH: "/fixture",
   };
-  const previous = Object.fromEntries(Object.keys(switches).map(key => [key, process.env[key]]));
+  const previous = {
+    AGENT_NATIVE_DISABLED_PLUGINS: process.env.AGENT_NATIVE_DISABLED_PLUGINS,
+    AGENT_NATIVE_DISABLE_RECURRING_JOBS: process.env.AGENT_NATIVE_DISABLE_RECURRING_JOBS,
+    AGENT_NATIVE_DISABLE_INPROCESS_SWEEPS: process.env.AGENT_NATIVE_DISABLE_INPROCESS_SWEEPS,
+    AGENT_NATIVE_DISABLE_KEEP_WARM: process.env.AGENT_NATIVE_DISABLE_KEEP_WARM,
+    VITE_APP_BASE_PATH: process.env.VITE_APP_BASE_PATH, // guard:allow-env-credential - Save the synthetic mount prefix.
+  };
   Object.assign(process.env, switches); // guard:allow-env-credential - Synthetic mount fixture, no credentials.
-  t.after(() => { for (const [key, value] of Object.entries(previous)) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value; // guard:allow-env-credential - Restore test framework configuration.
-  } });
+  t.after(() => {
+    if (previous.AGENT_NATIVE_DISABLED_PLUGINS === undefined) delete process.env.AGENT_NATIVE_DISABLED_PLUGINS;
+    else process.env.AGENT_NATIVE_DISABLED_PLUGINS = previous.AGENT_NATIVE_DISABLED_PLUGINS;
+    if (previous.AGENT_NATIVE_DISABLE_RECURRING_JOBS === undefined) delete process.env.AGENT_NATIVE_DISABLE_RECURRING_JOBS;
+    else process.env.AGENT_NATIVE_DISABLE_RECURRING_JOBS = previous.AGENT_NATIVE_DISABLE_RECURRING_JOBS;
+    if (previous.AGENT_NATIVE_DISABLE_INPROCESS_SWEEPS === undefined) delete process.env.AGENT_NATIVE_DISABLE_INPROCESS_SWEEPS;
+    else process.env.AGENT_NATIVE_DISABLE_INPROCESS_SWEEPS = previous.AGENT_NATIVE_DISABLE_INPROCESS_SWEEPS;
+    if (previous.AGENT_NATIVE_DISABLE_KEEP_WARM === undefined) delete process.env.AGENT_NATIVE_DISABLE_KEEP_WARM;
+    else process.env.AGENT_NATIVE_DISABLE_KEEP_WARM = previous.AGENT_NATIVE_DISABLE_KEEP_WARM;
+    if (previous.VITE_APP_BASE_PATH === undefined) delete process.env.VITE_APP_BASE_PATH; // guard:allow-env-credential - Restore the synthetic mount prefix.
+    else process.env.VITE_APP_BASE_PATH = previous.VITE_APP_BASE_PATH; // guard:allow-env-credential - Restore the synthetic mount prefix.
+  });
   const nitroApp = { h3: app, hooks };
   await cacheLifecycle(nitroApp);
   await autoMountAuth(getH3App(nitroApp), { getSession: async () => null, rootAuth: false });
