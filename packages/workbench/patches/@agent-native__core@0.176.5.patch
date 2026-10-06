@@ -3472,7 +3472,7 @@ diff --git a/dist/client/chat/message-components.d.ts b/dist/client/chat/message
 index 78f2051e8470f1cbe1789520828320e1cb06e620..231a8b1d862ba609f25cc9e90a191a19dd9e2634 100644
 --- a/dist/client/chat/message-components.d.ts
 +++ b/dist/client/chat/message-components.d.ts
-@@ -10,7 +10,7 @@
+@@ -10,7 +10,7 @@ interface FormattedMessageTimestamp {
      short: string;
      full: string;
  }
@@ -3481,7 +3481,7 @@ index 78f2051e8470f1cbe1789520828320e1cb06e620..231a8b1d862ba609f25cc9e90a191a19
  export declare function MessageTimestamp({ timestamp, className, }: {
      timestamp: FormattedMessageTimestamp;
      className?: string;
-@@ -122,6 +122,7 @@
+@@ -122,6 +122,7 @@ export declare function MessageActionsMenu({ showRevert, onRevert, threadId, }?:
      onRevert?: () => void;
      threadId?: string;
  }): React.JSX.Element;
@@ -3513,7 +3513,7 @@ diff --git a/dist/client/chat/message-components.js b/dist/client/chat/message-c
 index 440c93db05d0b21745e8c74db76af0ec2de27761..c7af25d71d6b2bbe2499c75eb791a3ee7fc172b0 100644
 --- a/dist/client/chat/message-components.js
 +++ b/dist/client/chat/message-components.js
-@@ -10,6 +10,7 @@
+@@ -10,6 +10,7 @@ import { IconX, IconCheck, IconCopy, IconChevronDown, IconChevronLeft, IconChevr
  import React, { useState, useEffect, useCallback, useRef } from "react";
  import { splitAgentChatContextFromMessage } from "../../shared/agent-chat-context.js";
  import { DEFAULT_THINKING_DISPLAY, } from "../../shared/thinking-display.js";
@@ -3521,7 +3521,7 @@ index 440c93db05d0b21745e8c74db76af0ec2de27761..c7af25d71d6b2bbe2499c75eb791a3ee
  import { getActiveRun } from "../active-run-state.js";
  import { agentNativePath } from "../api-path.js";
  import { writeClipboardText } from "../clipboard.js";
-@@ -66,7 +67,7 @@
+@@ -66,7 +67,7 @@ export function formatMessageTimestamp(value, locale, yesterdayLabel = "Yesterda
      const now = new Date();
      const yesterday = new Date(now);
      yesterday.setDate(now.getDate() - 1);
@@ -3530,7 +3530,7 @@ index 440c93db05d0b21745e8c74db76af0ec2de27761..c7af25d71d6b2bbe2499c75eb791a3ee
          hour: "numeric",
          minute: "2-digit",
      }).format(date);
-@@ -75,16 +76,18 @@
+@@ -75,16 +76,18 @@ export function formatMessageTimestamp(value, locale, yesterdayLabel = "Yesterda
          short = time;
      }
      else if (isSameCalendarDay(date, yesterday)) {
@@ -3552,7 +3552,7 @@ index 440c93db05d0b21745e8c74db76af0ec2de27761..c7af25d71d6b2bbe2499c75eb791a3ee
              month: "short",
              day: "numeric",
              year: "numeric",
-@@ -92,7 +95,7 @@
+@@ -92,7 +95,7 @@ export function formatMessageTimestamp(value, locale, yesterdayLabel = "Yesterda
      }
      return {
          short,
@@ -3561,7 +3561,7 @@ index 440c93db05d0b21745e8c74db76af0ec2de27761..c7af25d71d6b2bbe2499c75eb791a3ee
              weekday: "short",
              month: "short",
              day: "numeric",
-@@ -412,7 +415,7 @@
+@@ -412,7 +415,7 @@ export function MessageActionsMenu({ showRevert, onRevert, threadId = "", } = {}
      const [copied, setCopied] = useState(null);
      const messageRuntime = useMessageRuntime();
      const actionsCtx = React.useContext(MessageActionsContext);
@@ -3570,7 +3570,7 @@ index 440c93db05d0b21745e8c74db76af0ec2de27761..c7af25d71d6b2bbe2499c75eb791a3ee
      const handleCopyMessage = useCallback(() => {
          const m = messageRuntime.getState();
          const text = m.content
-@@ -513,15 +516,34 @@
+@@ -513,15 +516,34 @@ function AssistantChatHistoryRevertButton({ onRestore, onRestored, }) {
      return (_jsxs(Popover, { open: open, onOpenChange: handleOpenChange, children: [_jsx(TooltipProvider, { delayDuration: 400, children: _jsxs(Tooltip, { children: [_jsx(TooltipTrigger, { asChild: true, children: _jsx(PopoverTrigger, { asChild: true, children: _jsx("button", { type: "button", "aria-label": t("agentChat.message.revertHere"), className: cn("flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-colors duration-150 hover:bg-accent hover:text-foreground", messageFooterFadeClassName, open && "bg-accent text-foreground"), children: _jsx(IconArrowBackUp, { className: "h-3.5 w-3.5" }) }) }) }), _jsx(TooltipContent, { side: "top", className: "text-xs", children: t("agentChat.message.revertHere") })] }) }), _jsx(PopoverContent, { side: "top", align: "start", sideOffset: 6, className: "w-56 rounded-lg border-border p-3 shadow-xl", children: state === "confirming" ? (_jsxs("div", { className: "grid gap-2", children: [_jsx("p", { className: "text-xs font-medium text-foreground", children: t("agentChat.message.restoreQuestion") }), _jsxs("div", { className: "flex justify-end gap-1.5", children: [_jsx("button", { type: "button", onClick: () => setOpen(false), className: "rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground", children: t("agentChat.common.cancel") }), _jsx("button", { type: "button", onClick: () => void handleRestore(), className: "rounded-md bg-destructive px-2 py-1 text-xs font-medium text-destructive-foreground hover:bg-destructive/90", children: t("agentChat.message.revertHere") })] })] })) : state === "restoring" ? (_jsxs("span", { className: "flex items-center gap-1.5 text-xs text-muted-foreground", children: [_jsx(IconLoader2, { className: "h-3 w-3 animate-spin" }), t("agentChat.message.restoring")] })) : (_jsxs("div", { className: "grid gap-2", children: [_jsx("p", { className: "text-xs text-destructive", children: error ?? t("agentChat.message.restoreRequestFailed") }), _jsx("button", { type: "button", onClick: () => setOpen(false), className: "justify-self-end rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground", children: t("agentChat.common.dismiss") })] })) })] }));
  }
  // ─── UserMessage ──────────────────────────────────────────────────────────────
@@ -3607,7 +3607,7 @@ index 440c93db05d0b21745e8c74db76af0ec2de27761..c7af25d71d6b2bbe2499c75eb791a3ee
      const isEditing = useComposer((state) => state.isEditing);
      const chatRunning = React.useContext(ChatRunningContext);
      const hidden = isHiddenUserMessage(message);
-@@ -533,17 +555,12 @@
+@@ -533,17 +555,12 @@ export function UserMessage() {
              .some((part) => displayableUserMessageText(part.text).length > 0) ??
              false);
      useEffect(() => {
@@ -3629,7 +3629,7 @@ index 440c93db05d0b21745e8c74db76af0ec2de27761..c7af25d71d6b2bbe2499c75eb791a3ee
      if (hidden)
          return null;
      // When in edit mode, show the inline edit composer instead of the message bubble.
-@@ -565,9 +582,9 @@
+@@ -565,9 +582,9 @@ export function UserMessage() {
                          const div = document.createElement("div");
                          div.appendChild(fragment);
                          e.clipboardData.setData("text/plain", div.textContent || "");
@@ -3769,7 +3769,7 @@ index 440c93db05d0b21745e8c74db76af0ec2de27761..c7af25d71d6b2bbe2499c75eb791a3ee
  export function AssistantMessage() {
      const t = useT();
      const locale = useOptionalLocale()?.locale ?? DEFAULT_LOCALE;
-@@ -1001,7 +1122,7 @@
+@@ -1001,7 +1122,7 @@ export function AssistantMessage() {
      const msg = messageRuntime.getState();
      const isMissingCredential = isMissingCredentialAssistantMessage(msg);
      const persistedDurationMs = getAssistantRunDurationMs(msg);
@@ -4132,14 +4132,24 @@ index e043637cb79c273483b22e3d6871107a2ec77360..3fca972cbe5536c442d02f27e7af3733
          tryDelegateBuildRequest: tryDelegateBuildRequestToBuilder,
 diff --git a/dist/client/date-time-format.js b/dist/client/date-time-format.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..4498cd18bb6ea67c4725a4d9601ca6506974f477 100644
+index 0000000000000000000000000000000000000000..802a2944505db73918bc97fbf39ff9eebb4ba75c
 --- /dev/null
 +++ b/dist/client/date-time-format.js
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,46 @@
 +// Share expensive Intl formatters across messages and locale formatDate calls.
 +// FIFO eviction bounds retention without tracking message or translation state.
 +const DATE_TIME_FORMAT_CACHE_LIMIT = 64;
 +const dateTimeFormatters = new Map();
++let batchDefaultTimeZone;
++function defaultTimeZoneForBatch() {
++    if (batchDefaultTimeZone === undefined) {
++        batchDefaultTimeZone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
++        // Resolve again for the next rendering batch, without constructing a
++        // timezone probe for every message in this synchronous batch.
++        queueMicrotask(() => { batchDefaultTimeZone = undefined; });
++    }
++    return batchDefaultTimeZone;
++}
 +export function getDateTimeFormatter(locale, options) {
 +    // Keep Intl's coercion for locale lists and options with inherited values.
 +    if ((locale !== undefined && typeof locale !== "string") ||
@@ -4156,10 +4166,16 @@ index 0000000000000000000000000000000000000000..4498cd18bb6ea67c4725a4d9601ca650
 +            typeof descriptor.value !== "boolean" && !Number.isFinite(descriptor.value)))) {
 +        return new Intl.DateTimeFormat(locale, options);
 +    }
-+    const key = JSON.stringify([locale, entries.map(([name, descriptor]) => [name, descriptor.value])]);
++    const values = entries.map(([name, descriptor]) => [name, descriptor.value]);
++    const defaultZone = values.some(([name, value]) => name === "timeZone" && value !== undefined)
++        ? undefined : defaultTimeZoneForBatch();
++    const key = JSON.stringify([locale, values, defaultZone]);
 +    const cached = dateTimeFormatters.get(key);
 +    if (cached) return cached;
-+    const formatter = new Intl.DateTimeFormat(locale, options);
++    // Pin the zone used by the key. Rebuilding from descriptors preserves
++    // non-enumerable data options; exotic/accessor inputs already bypass caching.
++    const formatter = new Intl.DateTimeFormat(locale, defaultZone === undefined ? options
++        : { ...Object.fromEntries(values), timeZone: defaultZone });
 +    if (dateTimeFormatters.size >= DATE_TIME_FORMAT_CACHE_LIMIT) {
 +        dateTimeFormatters.delete(dateTimeFormatters.keys().next().value);
 +    }
@@ -4170,7 +4186,7 @@ diff --git a/dist/client/i18n.js b/dist/client/i18n.js
 index dade1f26162201e4858aa7b12828351dd7fd1540..21738376d95380d4fb52ac93f013957282a3a380 100644
 --- a/dist/client/i18n.js
 +++ b/dist/client/i18n.js
-@@ -11,6 +11,7 @@
+@@ -11,6 +11,7 @@ import { DEFAULT_LOCALE, LOCALE_HYDRATION_GLOBAL, LOCALE_METADATA, LOCALE_STORAG
  import { injectedAgentNativeConfig } from "./app-config.js";
  import { setClientAppState } from "./application-state.js";
  import { callAction } from "./use-action.js";
@@ -4187,7 +4203,7 @@ index dade1f26162201e4858aa7b12828351dd7fd1540..21738376d95380d4fb52ac93f0139572
      "codeRequired.desktopTitle": "Use Agent-Native Desktop",
      "codeRequired.desktopDescription": "Open the project in the desktop app to enable source edits and CLI access.",
      "codeRequired.builderAgentTitle": "Use Builder.io Agent",
-@@ -586,7 +589,7 @@
+@@ -586,7 +589,7 @@ export function useFormatters() {
      const locale = context?.locale ?? DEFAULT_LOCALE;
      return useMemo(() => ({
          formatDate(value, options) {

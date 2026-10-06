@@ -11,13 +11,6 @@ const source = await readFile(path.join(core, 'dist/client/chat/message-componen
 const start = source.indexOf('export function observeUserMessageExpandability(');
 assert.ok(start >= 0, 'the installed Core includes the maintained observation helper');
 const helper = source.slice(start, source.indexOf('\n}\n', start) + 3).replace('export function ', 'function ');
-const user = source.slice(source.indexOf('export function UserMessage()'), source.indexOf('// ─── AssistantMessage'));
-const effectStart = user.indexOf('    useEffect(() => {');
-const effectEnd = user.indexOf('\n    if (hidden)', effectStart);
-assert.ok(effectStart >= 0 && effectEnd > effectStart);
-const effect = compileFunction(user.slice(effectStart, effectEnd), [
-  'useEffect', 'contentRef', 'hasDisplayableText', 'isEditing', 'setIsExpandable', 'observeUserMessageExpandability',
-]);
 
 function runtime() {
   const observers = [];
@@ -73,38 +66,4 @@ test('disconnect prevents even a queued delivery from updating state', () => {
     { target: run.element, contentRect: { height: 600 } },
   ]);
   assert.deepEqual(decisions, [true, false], 'disconnect also stops the remainder of a delivery');
-});
-
-test('the UserMessage effect resets and reconnects for text and editing changes', () => {
-  const run = runtime(), decisions = [];
-  function mount(hasText, editing, element = run.element) {
-    let cleanup;
-    effect((callback, dependencies) => {
-      assert.deepEqual(dependencies, [hasText, editing]);
-      cleanup = callback();
-    }, { current: element }, hasText, editing, value => decisions.push(value), run.observe);
-    return cleanup;
-  }
-  const firstCleanup = mount(true, false);
-  assert.deepEqual(decisions, [null]);
-  run.observers[0].deliver(600);
-  firstCleanup();
-  assert.equal(mount(false, false), undefined);
-  assert.equal(mount(true, true), undefined);
-  assert.equal(mount(true, false, null), undefined);
-  assert.equal(run.observers.length, 1, 'no observer for absent, hidden or edited text');
-  const nextCleanup = mount(true, false);
-  run.observers[0].deliver(600);
-  assert.equal(decisions.at(-1), null, 'a retired element cannot replace the new unmeasured state');
-  run.observers[1].deliver(80);
-  assert.equal(decisions.at(-1), false, 'the replacement text decides from its own delivery');
-  assert.equal(run.reads(), 0, 'the actual effect never reads layout');
-  nextCleanup();
-});
-
-test('UserMessage observes unclipped text and caps it while unmeasured', () => {
-  assert.match(user, /const \[isExpandable, setIsExpandable\] = useState\(null\)/);
-  assert.match(user, /className: cn\("whitespace-pre-wrap break-words", !expanded && isExpandable !== false && "max-h-\[200px\] overflow-hidden"\), children: _jsx\("div", \{ ref: contentRef, children: _jsx\(MessagePrimitive\.Parts/);
-  assert.match(user, /hasDisplayableText && isExpandable && \(_jsxs\("button"/);
-  assert.doesNotMatch(user, /scrollHeight|clientHeight|offsetHeight|getBoundingClientRect/);
 });

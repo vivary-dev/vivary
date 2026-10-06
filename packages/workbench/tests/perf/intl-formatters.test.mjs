@@ -16,8 +16,6 @@ const [cacheSource, messageSource, i18nSource] = await Promise.all([
 
 // Execute the production functions without mounting the browser-only chat module.
 // Reading the installed helper also makes a missing dependency patch fail CI.
-assert.match(messageSource, /import \{ getDateTimeFormatter \} from "\.\.\/date-time-format\.js";/);
-assert.match(i18nSource, /import \{ getDateTimeFormatter \} from "\.\/date-time-format\.js";/);
 const timestampSource = messageSource.slice(messageSource.indexOf('function coerceMessageDate'), messageSource.indexOf('export function MessageTimestamp('));
 const formattersSource = i18nSource.slice(i18nSource.indexOf('export function useFormatters()'), i18nSource.indexOf('export function LanguagePicker('));
 const now = new Date(2026, 9, 5, 12, 34, 56);
@@ -71,10 +69,11 @@ test('message timestamps and locale formatDate retain the original output', () =
   assert.deepEqual(run.timestamp(days[0]), originalTimestamp(days[0]));
 });
 
-test('2,000 message timestamps and repeat renders construct at most eight formatters', () => {
+test('2,000 timestamps share eight formatters and resolve the default zone once per rendering batch', async () => {
   const run = runtime();
   const expectedTimes = new Map(['en-US', 'fr-FR'].map(locale => [locale, days.map(date => new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(date))]));
   for (let pass = 0; pass < 2; pass++) {
+    await Promise.resolve();
     for (let i = 0; i < 2000; i++) {
       const locale = i % 2 ? 'fr-FR' : 'en-US', day = Math.floor(i / 2) % days.length, date = days[day];
       assert.ok(run.timestamp(date, locale).short);
@@ -82,7 +81,7 @@ test('2,000 message timestamps and repeat renders construct at most eight format
       assert.equal(run.formatters(locale).formatDate(date, { minute: '2-digit', hour: 'numeric' }), expectedTimes.get(locale)[day]);
     }
   }
-  assert.equal(run.constructions(), 8, 'four formats per locale, shared by message and i18n callers');
+  assert.equal(run.constructions(), 10, 'eight shared formatters plus one timezone resolver per batch');
   assert.equal(run.cache.size(), 8);
 });
 
@@ -139,6 +138,26 @@ test('Yesterday resolves the current translation only when its label is displaye
   label = 'Updated catalog label';
   assert.deepEqual(run.timestamp(days[1], 'fr-FR', translate), originalTimestamp(days[1], 'fr-FR', label));
   assert.equal(calls, 2, 'catalog changes are visible without a locale change');
-  const callSites = messageSource.match(/formatMessageTimestamp\([^\n]+locale, \(\) => t\("agentChat\.history\.yesterday"\)\)/g);
-  assert.equal(callSites?.length, 3, 'all three rendered timestamp callers defer translation');
+});
+
+
+test('default-zone formats follow a system timezone change on the next rendering task', async () => {
+  const previous = process.env.TZ;
+  const run = runtime();
+  try {
+    for (const zone of ['Etc/UTC', 'America/New_York', 'Australia/Sydney']) {
+      process.env.TZ = zone; // guard:allow-env-credential - Synthetic system timezone change; not a credential.
+      await new Promise(setImmediate);
+      const options = { dateStyle: 'full', timeStyle: 'long' };
+      assert.equal(run.formatters('en-US').formatDate(now, options),
+        new Intl.DateTimeFormat('en-US', options).format(now));
+      assert.deepEqual(run.timestamp(days[0], 'en-US'), originalTimestamp(days[0], 'en-US'));
+      const explicit = { ...options, timeZone: 'Europe/Paris' };
+      assert.equal(run.formatters('en-US').formatDate(now, explicit),
+        new Intl.DateTimeFormat('en-US', explicit).format(now), 'an explicit timezone remains authoritative');
+    }
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous; // guard:allow-env-credential - Restore test timezone configuration.
+  }
 });

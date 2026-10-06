@@ -40,6 +40,8 @@ import { TiptapComposer } from "@proof/tiptap-composer";
 import { TooltipProvider } from "@proof/tooltip";
 import { UsageSection } from "@proof/usage-section";
 import * as chatHistory from "@proof/chat-history";
+import { createInstance } from "i18next";
+import { I18nextProvider } from "react-i18next";
 
 async function mount(element) {
   const host = document.createElement("div");
@@ -226,11 +228,67 @@ export async function restoreComposerText(ownerTypingElsewhere, how = "initial t
 }
 
 // A thread loaded from its saved messages, with Core's own assistant message.
-function SavedThread({ messages: initialMessages }) {
+function SavedThread({ messages: initialMessages, showUser = false }) {
   const runtime = useLocalRuntime(idleModel, { initialMessages });
   return <AssistantRuntimeProvider runtime={runtime}><TooltipProvider>
-    <ThreadPrimitive.Messages components={{ UserMessage: () => null, AssistantMessage: messages.AssistantMessage }} />
+    <ThreadPrimitive.Messages components={{ UserMessage: showUser ? messages.UserMessage : () => null, AssistantMessage: messages.AssistantMessage }} />
   </TooltipProvider></AssistantRuntimeProvider>;
+}
+
+// Drive the real message and its edit controls. Only browser resize deliveries are simulated;
+// actual wrapping and clipping are checked separately in the built browser application.
+export async function mountUserMessage(text) {
+  const original = globalThis.ResizeObserver;
+  const observers = [];
+  globalThis.ResizeObserver = class {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe(target) { this.target = target; }
+    unobserve() {}
+    disconnect() { this.disconnected = true; }
+  };
+  let view;
+  try {
+    view = await mount(<SavedThread showUser messages={[{ id: "layout-user", role: "user", content: text,
+      createdAt: new Date(2023, 2, 12, 9, 8) }]} />);
+  } catch (error) { globalThis.ResizeObserver = original; throw error; }
+  const button = label => [...view.host.querySelectorAll("button")].find(el =>
+    (el.getAttribute("aria-label") || el.textContent).trim() === label);
+  return {
+    text: () => view.host.textContent,
+    hasButton: label => Boolean(button(label)),
+    click: async label => { await act(async () => { button(label).click(); }); },
+    observer: () => observers.findLast(item => item.target?.textContent === text && !item.disconnected),
+    resize: async (observer, height) => { await act(async () => {
+      observer.callback([{ target: observer.target, contentRect: { height } }]);
+    }); },
+    async unmount() { try { await view.unmount(); } finally { globalThis.ResizeObserver = original; } },
+  };
+}
+
+// Observe the real translation service through its public provider boundary,
+// while rendering Core's user, assistant and message-actions timestamp callers.
+export async function renderTimestampTranslations(createdAt) {
+  const i18n = createInstance();
+  await i18n.init({ lng: "en-US", fallbackLng: "en-US", keySeparator: false,
+    resources: { "en-US": { translation: { "agentChat.history.yesterday": "Translated yesterday" } } } });
+  const translate = i18n.t.bind(i18n);
+  let yesterdayCalls = 0;
+  i18n.t = (key, ...args) => {
+    if (key === "agentChat.history.yesterday") yesterdayCalls++;
+    return translate(key, ...args);
+  };
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = await mount(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}>
+    <SavedThread showUser messages={[
+      { id: "timestamp-user", role: "user", content: "Timestamp question", createdAt },
+      { id: "timestamp-assistant", role: "assistant", content: "Timestamp answer", createdAt,
+        status: { type: "complete", reason: "stop" } },
+    ]} />
+  </QueryClientProvider></I18nextProvider>);
+  try {
+    return { text: view.host.textContent, yesterdayCalls,
+      menus: view.host.querySelectorAll('button[aria-label="Message actions"]').length };
+  } finally { await view.unmount(); client.clear(); }
 }
 
 export async function renderSavedThread(initialMessages) {
@@ -357,7 +415,7 @@ const require = createProofRequire(${JSON.stringify(join(WORKBENCH, "package.jso
           if (args.path === "@proof/usage-section") return { path: join(CLIENT, "settings", "UsageSection.js") };
           if (args.path === "@proof/chat-history") return { path: join(TOOLKIT, "dist", "chat-history", "index.js") };
           // The query cache must be the copy Core's action hooks read.
-          if (args.path === "@tanstack/react-query" && args.resolveDir === HERE) {
+          if (["@tanstack/react-query", "i18next", "react-i18next"].includes(args.path) && args.resolveDir === HERE) {
             return build.resolve(args.path, { kind: args.kind, resolveDir: CLIENT });
           }
           // The workbench does not list the assistant runtime, so the proof takes the Toolkit's copy.
@@ -375,7 +433,7 @@ const require = createProofRequire(${JSON.stringify(join(WORKBENCH, "package.jso
       },
     }],
   });
-  return result.outputFiles[0].text;
+  return result.outputFiles[0].text + "\n//# sourceURL=vivary-native-chat-proof.js\n";
 }
 
 function installDom() {
@@ -496,6 +554,56 @@ test("Native chat controls", async t => {
   const closeChannels = installDom();
   const proof = await import(`data:text/javascript;base64,${Buffer.from(await buildProof()).toString("base64")}`);
   t.after(() => closeChannels());
+
+  await t.test("user messages expand and collapse after layout, and stop offering Expand when text fits", async () => {
+    const text = "A long user message ending in the layout sentinel";
+    const view = await proof.mountUserMessage(text);
+    try {
+      assert.equal(view.hasButton("Expand"), false, "unmeasured text has no invented expansion decision");
+      assert.ok(view.text().includes("Mar 12, 2023, 9:08 AM"), "the real message renders its historical timestamp");
+      const observer = view.observer();
+      assert.ok(observer, "the rendered text receives browser geometry");
+      await view.resize(observer, 600);
+      assert.equal(view.hasButton("Expand"), true);
+      await view.click("Expand");
+      assert.equal(view.hasButton("Collapse"), true);
+      assert.ok(view.text().includes(text), "expansion preserves the entire user message");
+      await view.click("Collapse");
+      assert.equal(view.hasButton("Expand"), true);
+      await view.resize(observer, 200);
+      assert.equal(view.hasButton("Expand"), false, "the threshold is strictly above 200 px");
+      assert.ok(view.text().includes(text));
+    } finally { await view.unmount(); }
+  });
+
+  await t.test("editing retires the old message measurement and Cancel measures the restored message", async () => {
+    const view = await proof.mountUserMessage("Editable layout sentinel");
+    try {
+      const old = view.observer();
+      await view.resize(old, 600);
+      await view.click("Edit message");
+      assert.equal(old.disconnected, true);
+      assert.equal(view.hasButton("Cancel"), true);
+      await view.click("Cancel");
+      const current = view.observer();
+      assert.ok(current && current !== old);
+      await view.resize(current, 80);
+      await view.resize(old, 600);
+      assert.equal(view.hasButton("Expand"), false, "queued geometry from the retired view cannot change restored text");
+      assert.ok(view.text().includes("Editable layout sentinel"));
+    } finally { await view.unmount(); }
+  });
+
+  await t.test("rendered timestamps translate Yesterday only when that label is displayed", async () => {
+    const historical = await proof.renderTimestampTranslations(new Date(2023, 2, 12, 9, 8));
+    assert.equal(historical.yesterdayCalls, 0);
+    assert.ok(historical.menus >= 1, "the message-actions timestamp caller is mounted");
+    assert.ok(historical.text.split("Mar 12, 2023, 9:08 AM").length >= 3, "both message roles show timestamps");
+    const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+    const translated = await proof.renderTimestampTranslations(yesterday);
+    assert.ok(translated.yesterdayCalls >= 2);
+    assert.ok(translated.text.split("Translated yesterday").length >= 3);
+  });
 
   // Issue #101.
   await t.test("a provider stream error shows its message and a Retry, and does not continue on its own", async () => {

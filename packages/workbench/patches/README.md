@@ -21,8 +21,12 @@ while opening 2,000 messages. Cold opens took about 27–30 seconds, compared wi
 measurements remain required before claiming an improvement.
 
 Core shares up to 64 Intl date formatters by locale and sorted primitive options,
-with FIFO eviction. Exotic options retain Intl's original coercion. Timestamp
-output and locale resolution stay the same. The Yesterday translation resolves
+with FIFO eviction. A default timezone is resolved once per synchronous rendering
+batch and included in the cache key and constructor options; a microtask releases
+that batch memo. Subsequent rendering batches observe system timezone changes
+without a timezone constructor for every message. Explicit timezones remain
+unchanged, and exotic options retain Intl's original coercion. Timestamp output
+and locale resolution stay the same. The Yesterday translation resolves
 only when displayed and remains live across catalog changes.
 
 UserMessage observes an unclipped inner text element, using delivered

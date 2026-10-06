@@ -268,6 +268,18 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Issue #188, E1 correctness follow-up. The shared formatter cache now pins its key
+and formatter to the effective timezone. It resolves the system default once per
+synchronous rendering batch, then releases that memo in a microtask so a later
+render observes a system timezone change. Explicit timezone and exotic option
+semantics remain owned by Intl. This changes only Native client formatting;
+message persistence, scope admission and the server owners above remain unchanged.
+The timezone regression first reproduced a stale UTC result after switching to
+New York. The installed maintained patch passes nine formatter/observer checks
+and twenty rendered-component tests, including timezone changes, non-enumerable
+options and eight shared formatters plus one timezone resolver per rendering batch. Built-app measurement of this
+correction remains pending; the original E1 measurements do not establish it.
+
 Issue #188, round 3 experiment 2. The local Code host now reuses parsed run
 records and transcripts only while their on-disk identities match. The shared,
 bounded Workbench cache wraps Core's exported readers; it does not create a
