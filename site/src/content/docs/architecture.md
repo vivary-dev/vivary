@@ -274,7 +274,11 @@ No documentation route reads arbitrary host files.
 
 Issue #188, latency guard preparation. The existing built-app harness now offers
 an ordinary-switch mode using fixed targets in the large history fixture, with
-three fresh servers and at least fifteen first-pass/revisit samples. It shares
+three fresh servers and at least fifteen first-visit/revisit samples. Each fresh
+browser context explicitly opens an untimed Code run because the server's saved
+selection would otherwise pre-open a measured target. Timed targets and untimed
+hops are disjoint; first visit refers to the browser context, not cold server
+caches. This setup still needs real browser calibration. The mode shares
 setup, readiness and cleanup with the full acceptance measurement; it does not
 replace long-thread, search or memory acceptance. The paired evidence checker
 recomputes medians from raw samples, requires matching workloads and host/browser

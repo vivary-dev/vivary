@@ -48,7 +48,9 @@ const report = { schema: 'vivary.responsiveness/v2', conditions: {
   seed: 188, repeats, samples, viewport: { width: 1440, height: 1000 },
   mode: switchesOnly ? 'ordinary-switches' : 'full',
   timings: 'monotonic wall time; click includes actionability; visible means rendered in viewport; no model calls',
-  cold: 'First-pass clicks, not guaranteed first visits: startup selection and untimed hops can visit targets first; another context starts when distinct entries run out',
+  cold: switchesOnly
+    ? 'First visits within each browser context; setup opens untimed Code5 and hops exclude timed targets; server caches persist between contexts'
+    : 'First-pass clicks, not guaranteed first visits: startup selection and untimed hops can visit targets first; another context starts when distinct entries run out',
   ready: 'Code: target last event visible and composer enabled. Native: target last message visible and the provider state settled (enabled composer or the Connect AI card)',
   search: 'Enter until the expected conversation is listed, clicking "Search more history" as a user would, at most 10 times (beyond that the sample is reported not found, not timed); settled when no search is running; every hit must belong to the expected conversation',
 }, runs: [] };
@@ -275,6 +277,9 @@ async function measure(size, repeat) {
     server = await startBuiltApp([], data, { env });
     const cookie = await authenticate(server, data);
     const origin = `http://127.0.0.1:${server.port}`;
+    // Selection persists on the server, so a fresh context alone can reopen a
+    // timed target. The guard explicitly opens its untimed Code hop instead.
+    const startUrl = switchesOnly ? `${origin}/?runtime=code&run=${fixture.code[5].id}` : origin;
     browser = await chromium.launch({ executablePath, headless: true });
     report.conditions.chrome = browser.version();
     run = { size, repeat, status: 'running', loadAverage: os.loadavg(), fixture: fixture.counts,
@@ -290,9 +295,10 @@ async function measure(size, repeat) {
       await current?.context.close();
       current = await openPage(browser, origin, cookie, fixture);
       const start = performance.now();
-      await current.page.goto(origin, { waitUntil: 'domcontentloaded' });
+      await current.page.goto(startUrl, { waitUntil: 'domcontentloaded' });
       await listVisible(current.page);
       run.startup.pageToListMs.push(performance.now() - start);
+      if (switchesOnly) await current.page.getByText(fixture.code[5].last, { exact: true }).filter({ visible: true }).last().waitFor();
       await composerUsable(current.page);
       run.startup.pageToComposerMs.push(performance.now() - start);
     }
@@ -316,7 +322,7 @@ async function measure(size, repeat) {
       // A paired guard must time the same targets even when seeding speed changes
       // the sidebar's interleaving. Fail if these recent fixed targets are absent.
       const pool = switchesOnly
-        ? (runtime === 'code' ? fixture.code.slice(0, 3) : ordinaryNative.slice(-3).reverse())
+        ? (runtime === 'code' ? fixture.code.slice(1, 4) : ordinaryNative.slice(-3).reverse())
         : (runtime === 'code' ? fixture.code : [...fixture.native].reverse())
           .filter(item => visible.has(item.title) && item.title !== leave.title).slice(0, 15);
       if (switchesOnly) {
@@ -328,7 +334,12 @@ async function measure(size, repeat) {
       for (let i = 0; i < samples; i++) {
         if (i && i % pool.length === 0) {
           await current.context.close(); current = await openPage(browser, origin, cookie, fixture);
-          await current.page.goto(origin, { waitUntil: 'domcontentloaded' }); await listVisible(current.page); await expandList(current.page);
+          await current.page.goto(startUrl, { waitUntil: 'domcontentloaded' }); await listVisible(current.page);
+          if (switchesOnly) {
+            await current.page.getByText(fixture.code[5].last, { exact: true }).filter({ visible: true }).last().waitFor();
+            await composerUsable(current.page);
+          }
+          await expandList(current.page);
         }
         const item = pool[i % pool.length];
         let ms = await clickConversation(current.page, item);

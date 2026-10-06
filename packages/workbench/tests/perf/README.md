@@ -10,7 +10,11 @@ measurements, but limits timed Native targets to 200 messages and skips search, 
 and the memory journey. It times three fixed targets per runtime, repeating in
 fresh contexts to collect fifteen samples. Its fixture puts six Code runs ahead
 of Native histories and the other Code runs behind them so the required targets
-fit the fifteen-row expanded sidebar independently of seeding speed. Its paired latency budgets and CI integration are awaiting
+fit the fifteen-row expanded sidebar independently of seeding speed. Each context
+explicitly opens untimed Code 5 before measuring Code 1–3 and Native 196/195/194;
+this avoids reopening a timed target from the server's saved selection. Native 193
+is the other untimed hop. These are first visits within a browser context, with
+server caches retained. Its paired latency budgets and CI integration are awaiting
 calibration; do not treat an uncalibrated threshold as a passing performance gate.
 
 ```sh
