@@ -7319,29 +7319,6 @@ Workbench composes Agent-Native's application, chat, run, action, and storage ow
 
 The selected coding runtime owns execution, tools, model access, and native session continuity. Workbench currently supports Claude Code and Codex through Native Code records and the local Code host. Codex uses its app-server and account-effective model catalog. Workbench relays native approvals, progress, child activity, and Stop. Native provider chat uses Native's chat owner with a project send guard. The [harness adapter contract](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/harness-adapters.md), [Native owner map](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/native-owners.md), and [runtime source map](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/source-map/modules/native-runtime/index.md) describe the distinct owners.
 
-The local Code host reads Native's run files through a Workbench process cache
-in [`code-run-index.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/code-run-index.ts). Each
-listing reads directory membership and checks every file's device, inode/file
-ID, size, nanosecond modification time and change time before reusing Core's
-parsed record. Authorized transcript reads use the same identity check, including
-legacy draft-link lookup. Core still owns parsing, validation and persistence;
-the cache writes no files and uses no TTL. Records retain at most 4,096 entries
-and 16 MiB of charged contents, transcripts at most 64 entries and 64 MiB.
-Legacy draft links retain a separate identity-checked memo of at most one small
-entry per valid stored run, pruned on every listing and cleared on store changes.
-Memo keys and draft IDs are capped at 512 characters; larger values are returned
-normally without retention. This avoids re-parsing all legacy transcripts when
-an unmatched draft lookup exceeds the full transcript cache's working set.
-Charges include eight times file bytes, per-entry overhead and per-event
-overhead; they bound retained contents rather than measuring the JavaScript heap.
-Eviction costs a fresh read. Identity checks on both sides of a cold read prevent
-a concurrent replacement from tagging old contents with the replacement's
-identity. The host still refreshes its listing after awaited discovery, applies
-owner/organization/project admission before transcript access, and returns the
-same twenty-run list and deduplicated latest 400 events. Directory scans, file
-stats, sorting and response assembly still scale with the store; built-app
-measurements determine the user-visible benefit.
-
 ### Original engine
 
 The original engine remains a package family, not another agent loop. `vivary-core` owns pure validation and projection while callers retain execution, persistence, and human approval. Tropo observes, builds typed graph context, and retrieves. Strato evaluates policy. Ozone verifies evidence and proposes gated repairs. Exo projects claims, dependencies, and handoffs. `create-vivary` creates and adopts workspaces. The optional MCP and semantic-memory adapters are outside the default package path. The `vivary` front door routes ten verbs to their package owners. The Workbench bundles this Python runtime and calls its established commands rather than reimplementing their decisions. See [the command reference](https://vivary.vercel.app/commands/) and [package manifests](https://github.com/vivary-dev/vivary/tree/dev/packages).
@@ -7542,6 +7519,26 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Issue #188, experiment decision. The added Code record/transcript cache and its
+sign-out hook are removed after the identical built-app comparison failed the
+recorded incremental switching threshold. Against corrected E1, large Code
+first-pass medians changed from 2,127 to 2,055 ms (72 ms saved), while revisit
+changed from 2,138 to 2,269 ms (131 ms slower). Reduced reads and event-loop delay
+did not establish the required user-visible switching win. All six E2 runs and
+the independent review findings are retained as experiment evidence. Core's
+original record/transcript readers and the pre-experiment legacy draft-ID memo
+are restored; no new content cache ships. Removing that cache also removes its
+confirmed hosted sign-out gap. The proposed Better Auth regression was archived
+without execution; it does not supply a failing or passing test result.
+
+Corrected E1 remains: long Native first-pass medians improved from 77,989 to
+36,602 ms and revisit from 39,945 to 19,248 ms above the recorded noise rule.
+The 12-second long-thread target remains unmet. All six corrected E1 runs
+completed; one baseline memory journey crashed, so stability comparisons have
+that limit. Startup/load qualifications, actual UI acceptance and calibrated CI
+coverage remain separate. These decisions preserve the component and trust
+boundaries above and remove the rejected experiment's additional retention.
+
 Issue #188, latency guard preparation. The existing built-app harness now offers
 an ordinary-switch mode using fixed targets in the large history fixture, with
 three fresh servers and at least fifteen first-visit/revisit samples. Each fresh
@@ -7558,20 +7555,6 @@ mismatched results and incorrect overlays. Calibration and CI integration remain
 pending; no latency threshold is claimed yet. These verification-only changes do
 not change application runtime or the component and trust boundaries above.
 
-Issue #188, E2 correctness follow-up. The process cache caps legacy draft links
-at 4,096 entries with bounded IDs and FIFO eviction. A Workbench Nitro plugin
-releases run records, parsed transcripts and legacy links after successful Core
-BYOA sign-out. It identifies an existing framework cookie or bearer session
-before revocation without invoking the application session resolver; anonymous,
-invalid-token and failed sign-outs leave the cache warm. A session lookup failure
-does not block Core logout; successful logout then clears contents conservatively.
-Core still owns revocation and scope admission. Ten public-reader/API regressions
-pass, including Core's production mount shim, POST/GET, trailing-slash and base-path
-logout aliases, all three retention
-categories, byte/count eviction, edits, deletion and owner/org/project isolation.
-The legacy-bound and sign-out regressions failed before their fixes. Built-app
-E2 measurements and final review remain pending.
-
 Issue #188, E1 correctness follow-up. The shared formatter cache now pins its key
 and formatter to the effective timezone. It resolves the system default once per
 synchronous rendering batch, then releases that memo in a microtask so a later
@@ -7581,28 +7564,9 @@ message persistence, scope admission and the server owners above remain unchange
 The timezone regression first reproduced a stale UTC result after switching to
 New York. The installed maintained patch passes nine formatter/observer checks
 and twenty rendered-component tests, including timezone changes, non-enumerable
-options and eight shared formatters plus one timezone resolver per rendering batch. Built-app measurement of this
-correction remains pending; the original E1 measurements do not establish it.
-
-Issue #188, round 3 experiment 2. The local Code host now reuses parsed run
-records and transcripts only while their on-disk identities match. The shared,
-bounded Workbench cache wraps Core's exported readers; it does not create a
-second persistent store or change clients, polling, response shapes, admission,
-execution or host controls. The legacy draft-ID memo now checks transcript
-identity, retains only a small entry per stored run and prunes deleted records,
-so transcript-only changes and store-root changes cannot leave it stale. Round 2
-review caught full-transcript cache thrashing in unmatched draft lookups; a
-1,000-run legacy fixture verifies zero transcript reads/parses on the second
-lookup and refreshes only the changed transcript, without growing that cache.
-Reviewed Core's record/transcript parsers
-and atomic writer, local Code ownership and discovery ordering, and deterministic
-tests covering a 1,000-run cold/warm poll, in-place edits with preserved size and
-mtime, replacements during reads, directory membership, transcript changes,
-scope isolation, byte-identical response assembly and bounded eviction. Existing
-state snapshot tests retain coverage for runs and runtime readiness changing
-during discovery. Experiment 1 remains intact. Browser latency, renderer memory
-and Windows/macOS filesystem behavior await coordinator validation; zero warm
-content reads alone does not establish conversation-switch independence.
+options and eight shared formatters plus one timezone resolver per rendering batch.
+The corrected built-app measurements are recorded above; actual UI acceptance
+and the final latency guard remain pending.
 
 Issue #188, round 3 experiment 1. The maintained Native Core patch now shares a
 bounded Intl formatter cache between message timestamps and locale `formatDate`,
@@ -7616,9 +7580,9 @@ Reviewed the coordinator's long-thread CPU profile, the original Core formatting
 and collapse paths, and ten socket-free regressions for output equality, constant
 constructor work, bounded eviction, lazy live translation and observer lifecycle.
 The [patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#long-native-conversation-rendering)
-own the implementation contract and removal condition. Candidate browser latency,
-scrolling and visual behavior remain unverified until the coordinator tests the
-built app; deterministic guards alone do not establish a user-felt improvement.
+own the implementation contract and removal condition. Corrected E1 browser
+latency is measured as recorded above. Scrolling and visual acceptance remain
+pending; deterministic guards alone do not establish those product behaviors.
 
 Issue #188, round 3 measurement harness. `packages/workbench/tests/perf/responsiveness.mjs`
 drives the normal built app in system Chrome against a seeded disposable history and times
