@@ -92,10 +92,13 @@ existing Windows 15-second fallback remains unchanged. The host currently
 supports this reader lifecycle on Linux and Windows; other platforms report
 unavailable until descendant cleanup can be verified with an existing primitive.
 
-Workbench shares the Claude reader's full credential/path redaction before any
-per-message or aggregate shortening, retains the newest 20k excerpt and carries
-Native's truncation flag. URLs and next-line text retain the PR #198 behavior;
-filesystem paths consume ambiguous prose through their line end. UI source labels,
+Workbench uses the same complete-text credential/path sanitizer for Native
+transcript excerpts and Claude/Codex Provider summaries before any per-message
+or aggregate shortening, retaining the existing newest 20k excerpts and truncation
+flags. URLs and next-line text retain the PR #198 behavior; filesystem paths
+consume ambiguous prose through their line end. Stored transcripts are unchanged,
+and the existing Native event selection, including Running/Finished status text,
+remains. Source labels stay separate.
 Claude active polling remains every two seconds. Codex automatic active polling
 is suppressed to avoid repeatedly initializing its configured app-server. Opening,
 reopening, manual Refresh and one final settled refresh remain, including the
@@ -243,6 +246,32 @@ Root updated these factual results after the sole captured writer stopped. Final
 commit-bound publisher review, CI, owner approval and the existing Windows controller's
 private packaged acceptance remain pending. Issue #10 stays open; no release or merge
 is implied by source and server checks.
+
+## Native Details path projection
+
+Scoped Windows QA on `7631f7d` observed local file links in Native transcript
+excerpts while Provider summaries already redacted those paths. This was a
+pre-existing Native projection gap, not a Codex-provider leak. Both Details
+sources now reuse the existing credential-first path sanitizer before excerpt
+limits. Native status events remain visible and no stored transcript is rewritten.
+
+The maintained public-action fixture adds Native drive, UNC, file-URI and POSIX
+paths, spaces/apostrophes and paths crossing the 1,500-character message cutoff.
+It preserves ordinary web URLs and Running/Finished status text, redacts URL
+credentials and checks stored transcript bytes remain unchanged. Controller
+preflight passes all nine checks and the complete details suite passes 40 tests with no failures
+or skips, including both new Native subtests. Workbench typecheck exits zero through
+the installed Native CLI's TypeScript --noEmit branch; Native Doctor reports Clean
+with no findings, and line-ending/diff checks pass. The typecheck log also reports
+missing production BETTER_AUTH_SECRET configuration; its zero exit does not establish
+production configuration acceptance. No credentials or deployment settings changed.
+
+Corrected built/packaged privacy acceptance and final-head published review, CI
+and Entire approval remain pending. Controller source inspection found no
+supported defect but does not substitute for that required published review.
+The earlier Windows privacy failure, Provider/refresh/isolation/restart observations,
+separate later cleanup receipts and all unrun platform checks remain preserved;
+no new model turn or fabricated Claude binding is implied.
 
 ## Original-root observation correction
 

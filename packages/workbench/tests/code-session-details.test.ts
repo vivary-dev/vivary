@@ -54,6 +54,68 @@ test("session details reads a bounded Native log only for its conversation owner
   await assert.rejects(() => getVivaryCodeSessionDetails(context.userEmail, run.id,
     { root, label: "Other project", projectId: "other-project", bindingId: "other-binding" }, context.orgId), /not found/i);
   assert.equal(codeStateAction.schema.safeParse({ runId: run.id, details: true, path: "/etc/passwd" }).success, false);
+  await t.test("Native excerpts redact host paths while preserving status text and web links", async () => {
+    const paths = [
+      "/home/O'Brien Smith/PRIVATE_NATIVE_FILENAME_SENTINEL.txt",
+      "C:\\Users\\O'Brien Smith\\PRIVATE_NATIVE_FILENAME_SENTINEL.txt",
+      "C:/Users/Alice Smith/PRIVATE_NATIVE_FILENAME_SENTINEL.txt",
+      "\\\\fixture-host\\Private Share\\PRIVATE_NATIVE_FILENAME_SENTINEL.txt",
+      "file:///home/Alice Smith/PRIVATE_NATIVE_FILENAME_SENTINEL.txt",
+      "file:///C:/Users/Alice Smith/PRIVATE_NATIVE_FILENAME_SENTINEL.txt",
+      "file://fixture-host/Private Share/PRIVATE_NATIVE_FILENAME_SENTINEL.txt",
+    ];
+    const links = ["https://github.com/vivary-dev/vivary/pull/199", "http://example.test/docs?q=read#usage"];
+    const credentialUrl = "https://reader:unknownFixturePassword@example.test/docs?api_key=ghp_0123456789abcdef0123456789abcdef0123";
+    for (const quote of ["", '"', "'"]) {
+      appendCodeAgentTranscriptEvent({ runId: run.id, kind: "artifact", message: [
+        ...paths.map(hostPath => `${quote}${hostPath}${quote} AMBIGUOUS_NATIVE_TRAILING_PROSE`),
+        "PUBLIC_NATIVE_NEXT_LINE_MARKER", "profile:default", ...links, credentialUrl,
+      ].join("\n") });
+    }
+    appendCodeAgentTranscriptEvent({ runId: run.id, kind: "status", message: "Running Read" });
+    appendCodeAgentTranscriptEvent({ runId: run.id, kind: "status", message: "Finished Read" });
+    const stored = await readFile(codeAgentRunTranscriptPath(run.id));
+    const result = await codeStateAction.run(input, context) as VivaryCodeSessionDetails;
+    assert.equal(result.log.status, "available");
+    assert.equal(result.log.reference, `native-transcript:${run.id}`);
+    assert.equal(result.sessionId, sessionId);
+    for (const hostPath of paths) assert.equal(result.log.excerpt.includes(hostPath), false);
+    assert.equal(result.log.excerpt.includes("PRIVATE_NATIVE_FILENAME_SENTINEL"), false);
+    assert.equal(result.log.excerpt.includes("AMBIGUOUS_NATIVE_TRAILING_PROSE"), false);
+    assert.equal(result.log.excerpt.includes("O'Brien Smith"), false);
+    assert.equal(result.log.excerpt.includes("fixture-host"), false);
+    assert.equal(result.log.excerpt.match(/\[path\]/g)?.length, paths.length * 3);
+    for (const link of links) assert.ok(result.log.excerpt.includes(link));
+    assert.match(result.log.excerpt, /PUBLIC_NATIVE_NEXT_LINE_MARKER/);
+    assert.match(result.log.excerpt, /profile:default/);
+    assert.match(result.log.excerpt, /status: Running Read/);
+    assert.match(result.log.excerpt, /status: Finished Read/);
+    assert.equal(result.log.excerpt.includes("unknownFixturePassword"), false);
+    assert.equal(result.log.excerpt.includes("ghp_"), false);
+    assert.match(result.log.excerpt, /https:\/\/reader:\[redacted[^\]]*\]@example\.test\/docs\?api_key=\[redacted/);
+    assert.deepEqual(await readFile(codeAgentRunTranscriptPath(run.id)), stored, "Details preserves the stored transcript");
+  });
+  await t.test("Native paths crossing the message cutoff are redacted before truncation", async () => {
+    const paths = ["/home/Alice Smith/PRIVATE_NATIVE_CUTOFF_SENTINEL.txt",
+      "C:\\Users\\Alice Smith\\PRIVATE_NATIVE_CUTOFF_SENTINEL.txt",
+      "\\\\fixture-host\\Private Share\\PRIVATE_NATIVE_CUTOFF_SENTINEL.txt",
+      "file:///C:/Users/Alice Smith/PRIVATE_NATIVE_CUTOFF_SENTINEL.txt"];
+    for (const hostPath of paths) {
+      appendCodeAgentTranscriptEvent({ runId: run.id, kind: "note", message: "x".repeat(1_490) + " " + hostPath });
+    }
+    const result = await codeStateAction.run(input, context) as VivaryCodeSessionDetails;
+    assert.equal(result.log.status, "available");
+    assert.equal(result.log.truncated, true);
+    assert.ok(result.log.excerpt.length <= 20_000);
+    assert.equal(result.log.excerpt.includes("/home/"), false);
+    assert.equal(result.log.excerpt.includes("C:\\Users"), false);
+    assert.equal(result.log.excerpt.includes("\\\\fixture"), false);
+    assert.equal(result.log.excerpt.includes("file:/"), false);
+    assert.equal(result.log.excerpt.includes("PRIVATE_NATIVE_CUTOFF_SENTINEL"), false);
+    assert.ok(result.log.excerpt.includes("x".repeat(1_490) + " [path]"), "redaction precedes the 1500-character slice");
+    assert.match(result.log.excerpt, /status: Running Read/);
+    assert.match(result.log.excerpt, /status: Finished Read/);
+  });
   await rm(codeAgentRunTranscriptPath(run.id));
   const missing = await codeStateAction.run(input, context) as VivaryCodeSessionDetails;
   assert.equal(missing.log.status, "missing");
