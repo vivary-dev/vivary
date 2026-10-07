@@ -5,6 +5,7 @@ import {
   shutdownVivaryCodeAgent,
 } from "../local-code-agent.ts";
 
+import { shutdownCodexSessionReaders } from "../codex-session-process.ts";
 import { shutdownOriginalCommands } from "../original-runtime.ts";
 import { shutdownProjectPreviews } from "../project-preview.ts";
 
@@ -12,9 +13,10 @@ import { shutdownProjectPreviews } from "../project-preview.ts";
 // settles before the desktop ends the server 15 seconds after asking it to stop.
 // Every stop starts, even when another throws as it is called, and a failed stop
 // is reported only after all of them settle, so the automation stop is always
-// waited for. It is called first, so automations close before the other hosts stop.
+// waited for. Reader admission closes first; all remaining owners begin their stops in the same pass.
 const stopLocalWork = async () => {
   const results = await Promise.allSettled([
+    shutdownCodexSessionReaders,
     () => stopRecurringJobs({ timeoutMs: 10_000 }),
     shutdownVivaryCodeAgent, shutdownOriginalCommands, shutdownProjectPreviews,
   ].map(async stop => stop()));

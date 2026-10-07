@@ -609,7 +609,7 @@ export type EndAttempt = LeftoverProcess & { outcome: EndOutcome };
  * the check and the end act on the same process. Every step also works under Constrained Language Mode. Throws when
  * the call cannot run or prints anything else.
  */
-export async function endWindowsProcesses(processes: readonly LeftoverProcess[]): Promise<EndAttempt[]> {
+export async function endWindowsProcesses(processes: readonly LeftoverProcess[], signal?: AbortSignal): Promise<EndAttempt[]> {
   // The earliest FILETIME in each process's recorded millisecond. Each target is `<pid>:<FILETIME>`.
   const targets = processes.map(({ pid, start }) => `${pid}:${BigInt(start) * 10_000n + FILETIME_UNIX_EPOCH}`).join(";");
   const attempts = parseWindowsEndResults(await runPowerShell([
@@ -624,7 +624,7 @@ export async function endWindowsProcesses(processes: readonly LeftoverProcess[])
       + "catch { if (-not (Get-Process -Id $id -ErrorAction SilentlyContinue)) { $outcome = 'gone' } }; "
       + "@($id, $outcome) -join [char]9; $count++ }",
     "@('END', $count) -join [char]9",
-  ].join("; ")), processes);
+  ].join("; "), signal), processes);
   if (!attempts) throw new Error("The Windows end step printed output Vivary cannot read.");
   return attempts;
 }
@@ -739,7 +739,7 @@ export async function workerCleanupTarget(
   return windowsWorkerTarget(pid, forkedFrom, forkedTo, exitedAt);
 }
 
-function windowsWorkerTarget(pid: number, forkedFrom: number, forkedTo: number,
+export function windowsWorkerTarget(pid: number, forkedFrom: number, forkedTo: number,
   exitedAt: number | null): Extract<CleanupTarget, { platform: "win32" }> {
   return { platform: "win32", tracked: [{ pid, createdFrom: forkedFrom - CLOCK_TOLERANCE_MS,
     createdTo: forkedTo + CLOCK_TOLERANCE_MS,
@@ -759,7 +759,7 @@ type CleanupIo = {
   windowsEnd: (processes: readonly LeftoverProcess[]) => Promise<EndAttempt[]>;
 };
 
-const cleanupIo: CleanupIo = {
+export const cleanupIo: CleanupIo = {
   bootId: readBootId, proc: linuxProc, windowsProcesses: scanWindowsProcesses, windowsEnd: endWindowsProcesses,
 };
 

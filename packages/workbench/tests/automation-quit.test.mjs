@@ -1202,6 +1202,7 @@ const lifecycleStandIns = {
   "@agent-native/core/server": "export const defineNitroPlugin = plugin => plugin;",
   "../local-code-agent.ts": "export const initializeVivaryCodeAgent = async () => {};\n"
     + "export const shutdownVivaryCodeAgent = () => globalThis.__lifecycleStops.code();",
+  "../codex-session-process.ts": "export const shutdownCodexSessionReaders = () => globalThis.__lifecycleStops.reader();",
   "../original-runtime.ts": "export const shutdownOriginalCommands = () => globalThis.__lifecycleStops.commands();",
   "../project-preview.ts": "export const shutdownProjectPreviews = () => globalThis.__lifecycleStops.previews();",
 };
@@ -1228,6 +1229,7 @@ const shutdownStops = () => {
   let finishAutomations;
   const automationsStopping = new Promise(resolve => { finishAutomations = resolve; });
   globalThis.__lifecycleStops = {
+    reader: () => { events.push("reader"); return Promise.resolve(); },
     automations: () => {
       events.push("automations");
       return automationsStopping.then(() => { events.push("automations settled"); });
@@ -1265,12 +1267,12 @@ test("the shutdown owner starts every stop and reports a failed one only after t
   const closing = nitro.close().then(() => { stops.events.push("closed"); },
     error => { stops.events.push(`failed: ${error.message}`); });
   await nextTurn();
-  assert.deepEqual(stops.events, ["automations", "code", "commands", "previews"],
-    "every stop started, the automation stop first, although one threw and one rejected");
+  assert.deepEqual(stops.events, ["reader", "automations", "code", "commands", "previews"],
+    "reader admission closes first and every owner starts, although one throws and one rejects");
   stops.finishAutomations();
   await closing;
-  assert.equal(stops.events[4], "automations settled", "the close hook waited for the automation stop");
-  assert.match(stops.events[5] ?? "", /^failed: The (Code host|command) stop failed\.$/, "the failure still reached the host");
+  assert.equal(stops.events[5], "automations settled", "the close hook waited for the automation stop");
+  assert.match(stops.events[6] ?? "", /^failed: The (Code host|command) stop failed\.$/, "the failure still reached the host");
 });
 
 test("a shutdown signal whose stop throws reports the failure only after the automation stop settled", async t => {
@@ -1288,9 +1290,9 @@ test("a shutdown signal whose stop throws reports the failure only after the aut
   // On the standalone CLI host, the handler exits with code 1 right after it logs the failure.
   assert.doesNotThrow(() => onSignal(), "the signal handler did not throw while the automation stop was running");
   await nextTurn();
-  assert.deepEqual(stops.events, ["automations", "code", "commands", "previews"], "nothing was logged yet");
+  assert.deepEqual(stops.events, ["reader", "automations", "code", "commands", "previews"], "nothing was logged yet");
   stops.finishAutomations();
-  for (let turn = 0; turn < 50 && stops.events.length < 6; turn += 1) await nextTurn();
-  assert.deepEqual(stops.events.slice(4), ["automations settled", "logged: [vivary-local-host] Shutdown did not settle."],
+  for (let turn = 0; turn < 50 && stops.events.length < 7; turn += 1) await nextTurn();
+  assert.deepEqual(stops.events.slice(5), ["automations settled", "logged: [vivary-local-host] Shutdown did not settle."],
     "the failure was logged after the automation stop settled");
 });

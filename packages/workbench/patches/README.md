@@ -90,6 +90,19 @@ or packaged Windows acceptance. Remove the
 executor hunks when a pinned upstream Core version preserves and validates
 Claude session references and passes these regressions without the patch.
 
+## Codex stored-thread details
+
+Issue #10 adds Native's public `readCodexCodeSessionLog`, separate from the
+executing app-server entry. It uses the pinned provider's metadata read and one
+bounded descending summary page, with canonical identity/store guards and raw
+byte/UTF-8/depth/time/queue limits. Workbench retains launch and verified tree
+cleanup through a narrow lifecycle callback and shares the Claude redaction path.
+No dependency or provider turn is added. The [Codex receipt](../../../docs/product/multi-project/receipts/10-codex-stored-thread-reader.md)
+records the API, summary semantics, runtime limits and pending installed/browser/
+private Windows validation. Preserve all previous patch hunks; regenerate the
+Core patch hash through supported pnpm resolution before frozen install. Installed
+regressions must use the resulting patched dependency, not a source-only import.
+
 ## Email BCC delivery
 
 Issue [#112](https://github.com/vivary-dev/vivary/issues/112) fixes an email action
