@@ -5,7 +5,6 @@ import { CLEANUP_EXIT_RESERVE_MS, CLEANUP_TIMEOUT_MS, checkWorkerCleanup, cleanu
   workerCleanupTarget, VivaryCodeWorkerCleanupError, type CleanupTarget } from "./code-execution-host";
 import { resolveVivaryRuntimeCommand } from "./local-runtime-setup";
 
-const PRE_STOP_OBSERVATION_TIMEOUT_MS = 3_000;
 const GRACEFUL_EXIT_MS = 1_000;
 
 type ReaderProcess = NonNullable<Awaited<ReturnType<CodexSessionLogLifecycle["open"]>>> & {
@@ -116,10 +115,10 @@ async function openReader(cwd: string | undefined): Promise<ReaderProcess | null
     let observationConfirmed = !windowsTarget || lastObservationSucceeded;
     if (pendingScan) {
       // Finish the live snapshot before termination can erase an intermediate parent.
-      // Reserve the rest of the same cleanup budget for tree stop, pipe closure and verification.
+      // Keep the existing teardown reserve; the scanner also retains its own bounded timeout.
       observationConfirmed = await new Promise<boolean>(resolve => {
         const timer = setTimeout(() => { scanAbort?.abort(); resolve(false); },
-          Math.min(PRE_STOP_OBSERVATION_TIMEOUT_MS, Math.max(1, deadline - Date.now() - CLEANUP_EXIT_RESERVE_MS)));
+          Math.max(1, deadline - Date.now() - CLEANUP_EXIT_RESERVE_MS));
         void pendingScan.then(result => { clearTimeout(timer); resolve(result); });
       });
     }

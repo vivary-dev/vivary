@@ -79,9 +79,10 @@ including ancestry whose intermediate parent later exits. Before trusting that
 ancestry, a complete live snapshot must establish the original root PID within
 the retained launch creation-time window. A different creation identity for the
 same PID does not count. Once established, later root-absent snapshots can use
-the retained identities. Close lets an in-flight
-observation finish before termination, waiting at most three seconds and reserving
-the rest of the same cleanup budget for tree stop, pipe closure and verification.
+the retained identities. Close lets an already in-flight observation finish before
+termination using the remaining 15-second cleanup budget minus the existing
+three-second reserve for tree stop, pipe closure and verification. The scanner
+retains its own 10-second bound; the overall cleanup deadline is unchanged.
 A pending scan that fails or times out, or a reader whose original root was never observed,
 retains an uncheckable refusal. Later root-only scans cannot reconstruct the lost
 ancestry and do not clear that refusal. A timed-out observation is aborted; its
@@ -293,3 +294,25 @@ The Linux reader/UI behavior is unchanged, so earlier retained-read and browser
 evidence is reused without repeating unaffected journeys. These Windows rows
 are simulated on Linux and do not establish native packaged Windows acceptance
 or OS containment. Renewed exact-head review/CI and Windows acceptance remain pending.
+
+## Delayed valid Windows observation
+
+Before this correction, the controller ran the new public-reader regression
+against unchanged `23304b8`. The real owner returned false after 3,017.286526 ms,
+before the valid first snapshot scheduled for 4,500 ms, and refused the second
+admission. Both reads returned unavailable instead of available (one failed
+test, exit 1). This is recorded red-before-fix evidence without a setup or
+import failure. The original Windows QA scanner output and RPC replies were
+not captured; the reproduction does not prove its precise failure branch.
+
+The extra fixed three-second cutoff is removed. The in-flight observation
+uses the remaining cleanup budget minus the existing teardown reserve,
+preserving the 15-second total, three-second reserve and scanner's 10-second
+bound. Original-root identity, unavailable/timed-out refusal, pipe closure
+and later-admission checks remain unchanged. The regression requires two
+successful public reads, valid live-root snapshots, normal EOF completion,
+no descendants, private metadata omission and the read-only RPC allowlist.
+It uses simulated Windows executables on Linux. Controller green, affected
+checks, independent review and a matching new package/real Windows acceptance
+remain pending. Prior scoped acceptance, provider allowance and failures are
+preserved; no new provider turn is authorized or claimed.

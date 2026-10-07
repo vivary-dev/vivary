@@ -191,10 +191,26 @@ setInterval(() => {}, 1000);
   // Real reader/stop owners and subprocesses; only external Windows executable output is simulated.
   const directory = process.argv[3];
   const receipt = name => path.join(directory, name);
+  const slowValid = role === "reader-observation-slow-valid-repeat";
   const scanner = path.join(directory, "System32", "WindowsPowerShell", "v1.0");
   const bin = path.join(directory, "bin");
   await Promise.all([mkdir(scanner, { recursive: true }), mkdir(bin)]);
-  await writeFile(path.join(bin, "codex.exe"), "#!" + process.execPath + "\nsetInterval(() => {}, 1000);\n", { mode: 0o755 });
+  await writeFile(path.join(bin, "codex.exe"), "#!" + process.execPath + (slowValid ? String.raw`
+const { appendFileSync, readFileSync, writeFileSync } = require("node:fs");
+const responses = JSON.parse(readFileSync(${JSON.stringify(receipt("responses.json"))}, "utf8"));
+require("node:readline").createInterface({ input: process.stdin }).on("line", line => {
+  const request = JSON.parse(line);
+  appendFileSync(${JSON.stringify(receipt("requests.jsonl"))}, JSON.stringify(request) + "\n");
+  if (request.id === undefined) return;
+  const response = Object.hasOwn(responses, request.method) ? { id: request.id, result: responses[request.method] }
+    : { id: request.id, error: { code: -32601, message: "Inert fixture refuses this method" } };
+  process.stdout.write(JSON.stringify(response) + "\n");
+}).on("close", () => {
+  appendFileSync(${JSON.stringify(receipt("eof-completed"))}, process.pid + "\n");
+  writeFileSync(${JSON.stringify(receipt("root-exited"))}, "");
+  process.exit(0);
+});
+` : "\nsetInterval(() => {}, 1000);\n"), { mode: 0o755 });
   await writeFile(path.join(scanner, "scanner.mjs"), String.raw`
 import { existsSync, writeFileSync, readFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
@@ -215,7 +231,8 @@ if (command.includes("Stop-Process") && /reader-observation-(early|first)/.test(
 const { pid, at } = JSON.parse(readFileSync(${JSON.stringify(receipt("reader-identity"))}, "utf8"));
 const stopped = existsSync(${JSON.stringify(receipt("stopped"))}) || existsSync(${JSON.stringify(receipt("root-exited"))});
 const ended = existsSync(${JSON.stringify(receipt("helper-ended"))});
-const rows = ended ? [] : stopped ? [[41002, ${JSON.stringify(role)} === "reader-observation-early-reused" || ${JSON.stringify(role)}.startsWith("reader-observation-first") ? 77 : 41001,
+const rows = ${JSON.stringify(slowValid)} ? stopped ? [] : [[pid, 1, at, "reader.exe"]]
+  : ended ? [] : stopped ? [[41002, ${JSON.stringify(role)} === "reader-observation-early-reused" || ${JSON.stringify(role)}.startsWith("reader-observation-first") ? 77 : 41001,
     at + (${JSON.stringify(role)} === "reader-observation-early-reused" ? 20 : 2), "orphan.exe"]]
   : [[pid, 1, at, "reader.exe"], [41001, pid, at + 1, "intermediate.exe"],
     ...(${JSON.stringify(role)} === "reader-observation-early-untraced" ? [] : [[41002, 41001, at + 2, "orphan.exe"]])];
@@ -246,6 +263,81 @@ if (first) writeFileSync(${JSON.stringify(receipt("first-observed"))}, "");
   let closing;
   try {
     Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+    if (slowValid) {
+      const project = path.join(directory, "project");
+      const provider = path.join(directory, "provider");
+      await Promise.all([mkdir(project), mkdir(provider)]);
+      // guard:allow-env-credential - Disposable fork owns only synthetic Native records.
+      process.env.AGENT_NATIVE_CODE_AGENTS_HOME = path.join(directory, "native"); // guard:allow-env-mutation - Fixture store exists only in this isolated fork process.
+      const { createCodeAgentRunRecord, readCodexCodeSessionLog } = await import("@agent-native/core/code-agents");
+      const threadId = "00000000-0000-4000-8000-000000000031";
+      const run = createCodeAgentRunRecord({ goalId: "vivary-local-code", title: "Slow observation fixture", cwd: project,
+        status: "paused", metadata: { engine: "codex-cli", codexSessionId: threadId, workspaceRoot: project } });
+      await writeFile(receipt("responses.json"), JSON.stringify({ initialize: { userAgent: "inert-reader-fixture" },
+        "thread/read": { thread: { id: threadId, cwd: project, path: path.join(provider, "stored.jsonl"),
+          modelProvider: "openai", turns: [] } },
+        "thread/turns/list": { data: [{ id: "turn-fixture", status: "completed", itemsView: "summary", items: [
+          { id: "user-fixture", type: "userMessage", content: [{ type: "text", text: "SLOW_VALID_USER_MARKER", text_elements: [] }] },
+          { id: "assistant-fixture", type: "agentMessage", text: "SLOW_VALID_ASSISTANT_MARKER", phase: "final_answer" },
+        ] }], nextCursor: null, backwardsCursor: null } }));
+      const results = [], observations = [], children = [];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        for (const name of ["root-exited", "first-scan", "first-observed", "release-scan"]) await rm(receipt(name), { force: true });
+        let observation;
+        const result = await readCodexCodeSessionLog(run, { open: async cwd => {
+          const at = Date.now();
+          const clock = mock.method(Date, "now", () => at);
+          try { reader = await owner.codexSessionLogLifecycle.open(cwd); }
+          finally { clock.mock.restore(); }
+          if (!reader) return null;
+          const opened = reader;
+          children.push(opened.child);
+          await writeFile(receipt("reader-identity"), JSON.stringify({ pid: opened.child.pid, at }));
+          await until(() => readFile(receipt("first-scan")).then(() => true, () => false), "valid first scanner starts");
+          return { child: opened.child, close: async () => {
+            const started = performance.now();
+            observation = { rootAliveAtRelease: null, cleanup: null, elapsedMs: null };
+            // The real close has started waiting on its scan before this delayed release.
+            closing = opened.close();
+            const release = setTimeout(() => {
+              observation.rootAliveAtRelease = isAlive(opened.child.pid);
+              writeFileSync(receipt("release-scan"), "");
+            }, 4_500);
+            try {
+              observation.cleanup = await closing;
+              observation.elapsedMs = performance.now() - started;
+              return observation.cleanup;
+            } finally { clearTimeout(release); }
+          } };
+        } });
+        observations.push(observation ?? { admission: "refused" });
+        results.push(result);
+      }
+      assert.deepEqual(results.map(result => result.status), ["available", "available"], JSON.stringify(observations));
+      for (const result of results) {
+        assert.equal(result.reference, `codex-thread:${threadId}`);
+        assert.deepEqual(result.messages, [{ role: "user", text: "SLOW_VALID_USER_MARKER" },
+          { role: "assistant", text: "SLOW_VALID_ASSISTANT_MARKER" }]);
+        assert.equal(JSON.stringify(result).includes(project), false, "provider path metadata stays private");
+      }
+      for (const observation of observations) {
+        assert.equal(observation.rootAliveAtRelease, true, "the original root lives until the valid snapshot");
+        assert.equal(observation.cleanup, true);
+        assert.ok(observation.elapsedMs >= 4_000 && observation.elapsedMs < CLEANUP_TIMEOUT_MS,
+          "each real close tolerates the delayed scan within its existing overall deadline");
+      }
+      assert.equal((await readFile(receipt("eof-completed"), "utf8")).trim().split("\n").length, 2);
+      for (const child of children) {
+        assert.equal(child.exitCode, 0, "normal EOF completes the inert app-server");
+        assert.equal(child.signalCode, null);
+        assert.equal(await isRunning(child.pid), false);
+      }
+      assert.equal(await readFile(receipt("stopped")).then(() => true, () => false), false, "graceful cleanup needs no tree kill");
+      const methods = (await readFile(receipt("requests.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line).method);
+      assert.deepEqual(methods, ["initialize", "initialized", "thread/read", "thread/turns/list",
+        "initialize", "initialized", "thread/read", "thread/turns/list"]);
+      await owner.shutdownCodexSessionReaders();
+    } else {
     // The simulated root creation time must match the owner's actual launch window,
     // not a later timestamp after open() has also started its PowerShell observer.
     const at = Date.now();
@@ -322,6 +414,7 @@ if (first) writeFileSync(${JSON.stringify(receipt("first-observed"))}, "");
       assert.equal(await owner.codexSessionLogLifecycle.open(directory), null,
         "a later root-only scan cannot clear escaped or unobserved ancestry");
       await assert.rejects(owner.shutdownCodexSessionReaders(), /could not be stopped completely/);
+    }
     }
   } finally {
     await writeFile(receipt("release-scan"), "");
@@ -619,8 +712,10 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
     }
   });
 
-  for (const scenario of ["ancestry", "unavailable", "timeout", "early-exit", "early-reused", "early-untraced", "first-rootless", "first-reused-root"]) {
-    test("reader pre-stop Windows observation: " + scenario, { timeout: 25000, skip: process.platform !== "linux" }, async () => {
+  for (const scenario of ["ancestry", "unavailable", "timeout", "early-exit", "early-reused", "early-untraced", "first-rootless", "first-reused-root", "slow-valid-repeat"]) {
+    test("reader pre-stop Windows observation: " + scenario, {
+      timeout: scenario === "slow-valid-repeat" ? 45000 : 25000, skip: process.platform !== "linux",
+    }, async () => {
       const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-reader-observation-"));
       const child = fork(fileURLToPath(import.meta.url), ["reader-observation-" + scenario, directory], {
         execArgv: ["--import", "tsx"], stdio: ["ignore", "ignore", "pipe", "ipc"],
@@ -630,7 +725,7 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
       let result;
       const exited = new Promise(resolve => child.once("exit", (code, signal) => { result = { code, signal }; resolve(result); }));
       try {
-        await until(() => result, "reader observation fixture finishes: " + stderr, 20000);
+        await until(() => result, "reader observation fixture finishes: " + stderr, scenario === "slow-valid-repeat" ? 40000 : 20000);
         assert.deepEqual(await exited, { code: 0, signal: null }, stderr);
       } finally {
         if (!result) { child.kill("SIGKILL"); await exited; }
