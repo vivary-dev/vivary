@@ -27,7 +27,7 @@ test("approval resumes the same history, thread and logical turn once with the o
   const result = await wait(fixture);
   const pending = await fixture.pending(result.historyId);
   assert.equal(JSON.stringify(pending).includes("fixture-private-connection"), false);
-  assert.equal(JSON.stringify(pending).includes("https://fixture.invalid/original"), false);
+  assert.doesNotMatch(JSON.stringify(pending), /https:\/\/fixture\.invalid\/original/);
   assert.equal(pending.threadId, result.threadId);
   assert.equal(pending.turnId, result.turnId);
   assert.deepEqual(pending.input, toolInput);
