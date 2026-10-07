@@ -6424,7 +6424,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (runIdRef)
              runIdRef.current = runId;
          await recordRunThread(historyId, thread.id, runId);
-@@ -425,170 +569,261 @@
+@@ -425,170 +569,267 @@
          // handoff to the unclaimed-background-run sweep — it gets reaped as
          // "background_worker_never_started" out from under a still-executing
          // job the moment any single tool call runs past the 25s grace window.
@@ -6668,9 +6668,15 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +                            reject(continuationInterruption);
 +                            return;
 +                        }
-+                        if (run.abortReason === SHUTDOWN_ABORT_REASON || run.abortReason === "user" ||
++                        // An initial run explicitly stopped by its owner keeps the
++                        // ordinary aborted error, even when its turn marker is durable.
++                        // Approval continuations retain their unconfirmed classification.
++                        const ownerStoppedInitialRun = !options.continuation &&
++                            run.status === "aborted" && run.abortReason === "user";
++                        if (run.abortReason === SHUTDOWN_ABORT_REASON || (!ownerStoppedInitialRun && (
++                            run.abortReason === "user" ||
 +                            (run.events ?? []).some(({ event }) => event.type === "error" && event.errorCode === INTERRUPTED_RUN_ERROR_CODE) ||
-+                            await isTurnAborted(thread.id, turnId)) {
++                            await isTurnAborted(thread.id, turnId)))) {
 +                            reject(new BackgroundAutomationRunError(INTERRUPTED_RUN_REASON, INTERRUPTED_RUN_ERROR_CODE));
 +                            return;
 +                        }
@@ -6837,7 +6843,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const usage = usageRef.current;
          if (usage &&
              (usage.inputTokens > 0 ||
-@@ -613,6 +848,8 @@
+@@ -613,6 +854,8 @@
                  // Usage attribution must not break an otherwise successful run.
              }
          }
@@ -6846,7 +6852,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (responseText.trim() &&
              automation.meta.deliveryPlatform &&
              automation.meta.deliveryDestination) {
-@@ -627,6 +864,185 @@
+@@ -627,6 +870,185 @@
                  tenantId: automation.meta.deliveryTenantId,
              });
          }

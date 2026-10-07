@@ -356,6 +356,106 @@ test("a crash before the waiting turn save recovers only a terminal Native chunk
   assert.equal(configuredCalls(fixture).length, 1);
 });
 
+for (const [name, reason, durableTurn, expectedStatus, expectedCode] of [
+  ["ordinary-owner-stop", "user", false, "error", "background_automation_aborted"],
+  ["ordinary-durable-stop", "user", true, "error", "background_automation_aborted"],
+  ["ordinary-shutdown", "shutdown", false, "interrupted", history.INTERRUPTED_RUN_ERROR_CODE],
+]) test(`${name} preserves its outcome without an approval continuation`, async () => {
+  const fixture = await makeApprovalCase(name);
+  let started = false;
+  fixture.engine.stream = async function* (options) {
+    started = true;
+    await new Promise(resolve => {
+      if (options.abortSignal.aborted) resolve();
+      else options.abortSignal.addEventListener("abort", resolve, { once: true });
+    });
+    const error = new Error("The fixture model was stopped.");
+    error.name = "AbortError";
+    throw error;
+  };
+  const settled = fixture.start().then(() => assert.fail("the stopped run cannot succeed"), error => error);
+  await until(() => started);
+  const [running] = await history.listAutomationRuns({ owners: [owner], automation: name, appId });
+  assert.equal(runManager.getRun(running.runId).status, "running");
+  const turn = await runStore.getRunTurnRef(running.runId);
+  if (durableTurn) await runManager.abortTurnDurably(running.runId, reason);
+  await runManager.abortRunDurably(running.runId, reason);
+  const error = await settled;
+  assert.equal(error.errorCode, expectedCode);
+  const final = await fixture.terminal(running.id);
+  assert.equal(final.status, expectedStatus);
+  assert.equal(final.errorCode, expectedCode);
+  const { rows } = await database.getDbExec().execute({
+    sql: "SELECT status, abort_reason FROM agent_runs WHERE id = ?", args: [running.runId],
+  });
+  assert.equal(rows[0].status, "aborted");
+  assert.equal(rows[0].abort_reason, reason);
+  if (durableTurn) assert.equal(await runStore.isTurnAborted(turn.threadId, turn.turnId), true);
+  assert.equal(fixture.calls.length, 0);
+  assert.equal(finished.filter(event => event.automationRunId === running.id && event.status === "success").length, 0);
+});
+
+test("owner Stop after an approved tool completes still interrupts its continuation", async () => {
+  const fixture = await makeApprovalCase("stop-after-approved-tool");
+  const originalStream = fixture.engine.stream.bind(fixture.engine);
+  let resumedModelStarted = false;
+  fixture.engine.stream = async function* (options) {
+    if (!JSON.stringify(options.messages).includes("configured-result")) {
+      yield* originalStream(options);
+      return;
+    }
+    resumedModelStarted = true;
+    await new Promise(resolve => {
+      if (options.abortSignal.aborted) resolve();
+      else options.abortSignal.addEventListener("abort", resolve, { once: true });
+    });
+    const error = new Error("The continuation model was stopped.");
+    error.name = "AbortError";
+    throw error;
+  };
+  const result = await wait(fixture);
+  const pending = await fixture.pending(result.historyId);
+  await fixture.decide(result.historyId, pending);
+  await until(() => resumedModelStarted);
+  const claimed = await history.getAutomationRun(result.historyId);
+  await runManager.abortTurnDurably(claimed.runId);
+  await runManager.abortRunDurably(claimed.runId);
+  const final = await fixture.terminal(result.historyId);
+  assert.equal(final.status, "interrupted");
+  assert.equal(final.errorCode, history.INTERRUPTED_RUN_ERROR_CODE);
+  assert.equal((await approvalStore.readAgentToolApproval(pending)).status, "consumed");
+  assert.equal(configuredCalls(fixture).length, 1);
+  const { rows } = await database.getDbExec().execute({
+    sql: "SELECT abort_reason FROM agent_runs WHERE id = ?", args: [claimed.runId],
+  });
+  assert.equal(rows[0].abort_reason, "user");
+  await assert.rejects(fixture.decide(result.historyId, pending), /no longer waiting/);
+  assert.equal(finished.filter(event => event.automationRunId === result.historyId && event.status === "success").length, 0);
+});
+
+test("a persisted stopped turn refuses the approved tool before any side effect", async () => {
+  const fixture = await makeApprovalCase("stopped-waiting-turn");
+  const result = await wait(fixture);
+  const pending = await fixture.pending(result.historyId);
+  await runManager.abortTurnDurably(result.runId);
+  assert.equal(await runStore.isTurnAborted(result.threadId, result.turnId), true);
+  await assert.rejects(fixture.decide(result.historyId, pending), /This automation turn was stopped/);
+  assert.equal((await approvalStore.readAgentToolApproval(pending)).status, "pending");
+  assert.equal(configuredCalls(fixture).length, 0);
+  const retained = await history.getAutomationRun(result.historyId);
+  assert.equal(retained.status, "waiting_approval");
+  assert.equal(retained.finishedAt, null);
+  assert.equal(retained.pendingAskId, pending.askId);
+  assert.equal(retained.runId, result.runId);
+  assert.equal(retained.threadId, result.threadId);
+  assert.deepEqual(await fixture.pending(result.historyId), pending);
+  // Decline ends this retained wait without resuming its stopped turn.
+  await fixture.decide(result.historyId, pending, "decline");
+  assert.equal((await history.getAutomationRun(result.historyId)).status, "declined");
+  assert.equal((await approvalStore.readAgentToolApproval(pending)).status, "declined");
+  assert.equal(configuredCalls(fixture).length, 0);
+});
+
 test("Stop interrupts a consumed continuation without success or a second dispatch", async () => {
   const fixture = await makeApprovalCase("stop-consumed");
   const result = await wait(fixture);
