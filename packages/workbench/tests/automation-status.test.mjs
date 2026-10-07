@@ -334,7 +334,7 @@ test("a running mark no lease covers lists the end of the run time limit the app
     [null, { reason: "stalled-run", resumesAfter: iso(lastRun + 30 * minute) }]);
 });
 
-// Only the run list's data hook, the translation hook, the chat event helper, and the dialog frame are stubbed.
+// The history and approval transport hooks, translation hook, chat event helper and dialog frame are stubbed.
 // They are matched by the file they resolve to. The dialog frame is Radix, which renders into a portal.
 const i18nStub = `
   export function useT() {
@@ -353,6 +353,14 @@ const dialogStub = `
 const stubs = new Map([
   [path.join(CLIENT, "agent-page", "use-jobs.js"), `
     export function useAutomationRuns() { return { data: globalThis.__automationRuns, isLoading: false, error: null }; }
+    export function useAutomationRunInspection(historyId) {
+      globalThis.__inspectedId = historyId;
+      return { data: globalThis.__runInspection, isLoading: false, isError: globalThis.__inspectionFailed ?? false };
+    }
+    export function useAutomationApprovalDecision() {
+      return { mutate: input => globalThis.__decisions.push(input), isPending: false,
+        isError: false, error: null };
+    }
     export const firstLoading = () => false;
     export const loadFailed = () => false;`],
   [path.join(CLIENT, "i18n.js"), i18nStub],
@@ -384,6 +392,35 @@ export async function renderDetails(runs) {
     rows: host.querySelectorAll("li").length,
   };
   await act(async () => { root.unmount(); });
+  host.remove();
+  return snapshot;
+}
+
+export async function inspectDetails(data, failed = false) {
+  globalThis.__automationRuns = [data.run];
+  globalThis.__runInspection = data;
+  globalThis.__inspectionFailed = failed;
+  globalThis.__decisions = [];
+  globalThis.__openRequests = [];
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  await act(async () => root.render(<AutomationDetailsDialog open name="digest" triggerSummary="Every hour"
+    fields={[]} condition={null} instructions="Summarize the project." mcpTools={[]} lastError={null}
+    scope="personal" formatTimestamp={ms => new Date(ms).toISOString()} onClose={() => {}} />));
+  const inspect = [...host.querySelectorAll("button")].find(button => button.textContent === "Inspect run");
+  await act(async () => inspect.click());
+  const control = label => [...host.querySelectorAll("button")].find(button => button.textContent === label);
+  const approve = control("Approve once");
+  const decline = control("Decline");
+  const snapshot = { text: host.textContent, inspectedId: globalThis.__inspectedId,
+    approveDisabled: approve.disabled, declineDisabled: decline.disabled,
+    interactiveInputs: host.querySelectorAll("textarea,input,[contenteditable=true]").length };
+  await act(async () => { if (!approve.disabled) approve.click(); });
+  await act(async () => { if (!decline.disabled) decline.click(); });
+  snapshot.decisions = [...globalThis.__decisions];
+  snapshot.openRequests = [...globalThis.__openRequests];
+  await act(async () => root.unmount());
   host.remove();
   return snapshot;
 }
@@ -449,7 +486,7 @@ function installDom(origin = "http://127.0.0.1:3000") {
   };
 }
 
-test("past runs offer no Open thread control, because Settings cannot open a run thread", async t => {
+test("past runs remain in Settings without an interactive Open thread control", async t => {
   const { code } = await buildProof({ source: proofSource, sourcefile: "automation-details-proof.tsx",
     entry: path.join(CLIENT, "agent-page", "AutomationDetailsDialog.js"), stubs });
   const proof = await importProof(code);
@@ -467,6 +504,36 @@ test("past runs offer no Open thread control, because Settings cannot open a run
   for (const status of ["success", "interrupted", "error"]) assert.match(details.text, new RegExp(status));
   assert.match(details.text, /The run stopped before it recorded a result/, "an interrupted run shows its message");
   assert.deepEqual(details.buttons.filter(label => /open thread/i.test(label)), [], "no run offers Open thread");
+});
+
+test("Settings inspects retained tools and sends only the exact pending approval decision", async t => {
+  const { code } = await buildProof({ source: proofSource, sourcefile: "automation-approval-ui-proof.tsx",
+    entry: path.join(CLIENT, "agent-page", "AutomationDetailsDialog.js"), stubs });
+  const proof = await importProof(code);
+  const restoreDom = installDom();
+  t.after(restoreDom);
+  const data = { run: { id: "history-approval", threadId: "thread-approval", status: "waiting_approval",
+    startedAt: Date.now(), finishedAt: null, approvalReady: true },
+    threadData: JSON.stringify({ messages: [{ message: { role: "assistant", content: [
+      { type: "tool-call", toolName: "resources", argsText: '{"path":"notes/prior.md"}', result: "Retained local result" },
+      { type: "text", text: "Review the next action." },
+    ] } }] }),
+    pending: { askId: "exact-ask", toolName: "mcp__fixture__write", input: { value: "Exact pending content" }, expiresAt: Date.now() + 60_000 } };
+  const view = await proof.inspectDetails(data);
+  assert.equal(view.inspectedId, data.run.id);
+  for (const retained of ["Retained local result", "notes/prior.md", "Exact pending content", "waiting approval"])
+    assert.ok(view.text.includes(retained), retained);
+  assert.equal(view.interactiveInputs, 0);
+  assert.deepEqual(view.openRequests, []);
+  assert.deepEqual(view.decisions, ["approve", "decline"].map(decision => ({ historyId: data.run.id, askId: "exact-ask", decision })));
+  const stale = await proof.inspectDetails(data, true);
+  assert.equal(stale.approveDisabled, true);
+  assert.equal(stale.declineDisabled, true);
+  assert.deepEqual(stale.decisions, []);
+  const expired = await proof.inspectDetails({ ...data, pending: { ...data.pending, expiresAt: Date.now() - 1 } });
+  assert.equal(expired.approveDisabled, true);
+  assert.equal(expired.declineDisabled, false);
+  assert.match(expired.text, /approval expired/i);
 });
 
 // Issue #141. Details must show what the automation list holds now, and the list must refresh while the tab is open.

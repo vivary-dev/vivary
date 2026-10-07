@@ -168,7 +168,9 @@ The published `9884670` prerelease predates the issue #51 automation changes. Th
 describes later builds. The [#51 receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/51-automation-lifecycle.md)
 records their test on an unpublished package. The [#114 and #115 receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/114-automation-quit-and-status.md)
 records a later package's test of quitting during a run and of LAST CHECKED. The [#109 receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/109-automation-file-review.md)
-records a package's test of **Automation files**.
+records a package's test of **Automation files**. Issue #108 adds approval waiting
+and retained run inspection in source. Its tests and built UI journey are still
+pending, so the following approval controls do not describe accepted package behavior.
 
 An automation is a saved instruction that the agent runs on a schedule, when an event
 happens in Vivary, when another program calls its webhook URL, or when you choose
@@ -178,8 +180,9 @@ time zone. **New automation** in Settings > Agent > Automations opens the same k
 with your prompt. If the prompt cannot reach a chat, Vivary shows it with **Copy prompt**.
 
 Each run writes one chat thread, named `Job: <name>` for a scheduled run and
-`Automation: <name>` for **Run now**. Vivary keeps these threads but does not show them
-yet. Chat history does not list them, and **Details** cannot open one. A run can read
+`Automation: <name>` for **Run now**. Vivary keeps these threads outside interactive chat history. With the issue #108
+source change, **Details** > **Past runs** > **Inspect run** shows their retained
+messages, tool inputs and results in Settings. A run can read
 your resources, change your personal resources, memory, chat history, and progress, and
 notify you in the in-app inbox. It cannot write or delete shared files.
 An instruction, skill, or memory change a run writes waits for you:
@@ -199,9 +202,24 @@ not clear the notice.
 Edits by you or a chat keep the proposal waiting. Accept or discard a proposal
 before moving its path. The prompt reports the number of waiting files without
 quoting their proposed text.
-A run cannot send email or messages, reach the web or other agents, use MCP tools, or
-change settings, jobs, or automations. An automation that lists MCP tools fails without
-running.
+The default twelve tools cannot send email or messages, reach the web or other agents,
+or change settings, jobs or automations. A configured MCP tool explicitly listed by
+name adds only that capability. Each call waits for your approval of its exact input.
+An unavailable or hidden configured tool refuses the run before it starts.
+
+A run at a gate shows **waiting_approval** in Past runs. Choose **Inspect run**, read
+the retained thread and pending action, then choose **Approve once** or **Decline**.
+Approve continues the same automation run with its original restricted tools.
+Decline ends the run without that action. There is no always-allow choice.
+While it waits, another run of that automation cannot start, its schedule does not
+advance and no final reply is delivered. An app restart preserves the waiting run.
+If the approval expires or its definition or connector changes, approve is refused.
+You can still decline to end it. A refresh failure disables the decision controls.
+
+If the app stops after approval is consumed, the action may have happened without a
+confirmed result. History shows interrupted and does not automatically retry that
+ask. Check the destination before starting fresh work. A webhook waiting for approval
+stays with its existing queued call and is not redispatched after restart.
 
 Settings > Agent > Automations holds the controls:
 
@@ -232,7 +250,8 @@ Settings > Agent > Automations holds the controls:
 - **Manage** > **Run now** runs it once. The next scheduled run does not change.
 - **Manage** > **Edit** changes the schedule and time zone. Pick a preset, or enter a cron
   expression under **Advanced**.
-- **Manage** > **Delete** removes the automation and its run history. Vivary keeps its
+- **Manage** > **Delete** removes the automation and eligible run history. Waiting approval history
+  stays available so you can decline it. Vivary keeps its
   run threads. A run already in progress finishes and writes its reply.
 
 To change what an automation does, ask the agent in a Personal workspace Native chat.
@@ -341,11 +360,11 @@ lasts longer than its interval delays the next one, and runs of one automation n
 | An automation waits after Vivary was ended during its run | Wait. If Vivary was ended without quitting, for example from Task Manager, the automation that was running waits up to ten minutes, and your other automations run on schedule. When the wait ends, the interrupted run shows that it stopped before it recorded a result, and its schedule resumes. During the wait, **Details** shows when scheduling resumes instead of a next run that would pass with no run, and "Waiting for the next schedule check" once that time has passed. An automation whose next run falls after the wait keeps that time. Builds without the [issue #140](https://github.com/vivary-dev/vivary/issues/140) fix show a next run about a minute away that passes with no run. Builds with the [issue #114](https://github.com/vivary-dev/vivary/issues/114) fix end the run at a normal quit. Builds without the [issue #139](https://github.com/vivary-dev/vivary/issues/139) fix make every automation wait. |
 | LAST CHECKED in **Details** looks old | The scheduler checks about once a minute, and **Details** refreshes every 30 seconds while the window is visible, so the value can be about 90 seconds old. After the window was hidden or minimized, **Details** refreshes when you return to it. When a refresh fails, the tab keeps the last values and shows "Could not refresh automations. The values shown may be out of date." above the list, and **Details** shows "Could not refresh. These values may be out of date." when the list that holds that automation failed. A value far older than 90 seconds with that note shown is the last one Settings received, because the latest refresh failed. Vivary may be down, unreachable, or failing. Builds without the [issue #141](https://github.com/vivary-dev/vivary/issues/141) fix show the values from when the Automations tab loaded. In those builds, open another Settings tab, come back, and open **Details** again. |
 | A failed automation run is not retried | Vivary does not retry runs. Fix the cause, then wait for the next scheduled run or choose **Run now**. |
-| A run fails with "This automation lists MCP tools" | Automation runs cannot call MCP tools. In a Personal workspace Native chat, ask the agent to remove the MCP tools from the automation. |
+| A configured tool is unavailable, or its approval expired or changed | Check the configured tool and automation definition. Decline the old waiting action, then start fresh work when the configuration is correct. Builds before issue #108 refuse all listed MCP tools. |
 | Text shows `[redacted NAME]` or `[redacted credential]` | Vivary replaced a credential before the model, the screen, or storage received it. The original is unchanged where it is kept. If an agent needs a key, keep it in the project's own configuration instead of asking the agent to print it. |
 | A webhook call cannot connect | Vivary must be open, and the caller must run on this computer. Compare the port in the caller's URL with **Manage** > **Details**. After Vivary reports a port change, update the caller. |
 | A webhook call gets 404 | The URL is wrong or the automation was deleted. Copy the URL again from **Manage** > **Details**. |
-| A webhook call runs late after a restart | A call accepted before a quit, or one whose run the quit interrupted, runs the first time Vivary looks for waiting calls at least 90 seconds after the quit. Vivary looks 10 seconds after it starts and then once a minute, so the call runs about 10 seconds after the next start when the quit was more than about 80 seconds earlier, and 70 to 130 seconds after it otherwise. A call whose run was cut off because Vivary was ended without quitting runs again about 15 minutes after that run began. Later calls for that automation wait behind it. |
+| A webhook call runs late after a restart | A call accepted before a quit, or one whose run the quit interrupted, runs the first time Vivary looks for waiting calls at least 90 seconds after the quit. Vivary looks 10 seconds after it starts and then once a minute, so the call runs about 10 seconds after the next start when the quit was more than about 80 seconds earlier, and 70 to 130 seconds after it otherwise. A call whose run was cut off because Vivary was ended without quitting runs again about 15 minutes after that run began. Later calls for that automation wait behind it. An approval wait remains waiting after restart, and a consumed approval is never automatically redispatched. |
 | A webhook call gets 429 | The automation has 20 calls waiting. Wait for them to run, then send the call again. |
 | A webhook or event automation with a condition never runs | Conditions need an Anthropic API key. Open **Manage** > **Details** for the reason, then add an Anthropic key or remove the condition. |
 
@@ -385,8 +404,10 @@ registration, conflict cases, clean-profile onboarding, upgrade/removal acceptan
 Native-provider turns, full adoption, search/memory coverage,
 self-hosted phone access, and integrated debugging remain outside this bounded review.
 Automations were not part of this package's review either. In later builds they run only
-while Vivary is open, runs cannot use MCP tools or wait for an approval, ending Vivary
-without quitting during a run delays scheduling for up to ten minutes, and webhook calls reach Vivary only from the same computer. The
+while Vivary is open. The original #51 candidate could not use MCP tools or wait for
+approval. Issue #108 changes that behavior in source and still needs acceptance.
+Ending Vivary without quitting during a run delays scheduling for up to ten minutes,
+and desktop webhook calls reach Vivary only from the same computer. The
 [#51 receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/51-automation-lifecycle.md) lists each limit and its tracking issue.
 
 See the [acceptance register](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/desktop-acceptance-status.md)

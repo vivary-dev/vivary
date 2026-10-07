@@ -1251,8 +1251,9 @@ offers the same option and passes the same tests.
 ## Local-only automation runs
 
 The owner decided on 2026-09-26 (issue #51) that unattended automation runs are
-local-only. That covers scheduled runs, event and webhook triggers, and Run now.
-Interactive chats do not change.
+local by default. That covers scheduled runs, event and webhook triggers, and Run now.
+Issue #108 adds exact owner approval for explicitly declared configured MCP calls.
+Interactive chats keep their existing registry. Automation threads cannot enter it.
 
 Before this change, every run got the background surface that
 `getBackgroundActionEntries` in `dist/server/agent-chat-plugin.js` builds. It
@@ -1315,17 +1316,14 @@ bridge's declared-name check refuses an unsafe name with its own text.
 `manage-progress` and `get-framework-context` have no limit beyond the run
 surface's argument checks.
 
-An automation that lists `mcpTools` fails before any model call. Its history
-row reads "This automation lists MCP tools (names). Automation runs cannot call
-MCP tools. Nothing ran. No delivery was confirmed." with the error code
-`automation_mcp_tools_refused`. The run is refused rather than sent through
-approval because approval cannot be granted after the fact in an unattended
-run. The runner passes no approval callbacks, the approval stop reaches the
-model as text, the run manager marks the run completed, and history recorded a
-success for a step that never ran. `getJobMcpActionEntries` is gone, and the
-`backgroundMcpTools` plugin option no longer has an effect. The runner's
-`assertRequestedMcpToolsAvailable` is gone too, because the refusal fires
-first for every automation that lists MCP tools.
+An automation may list exact configured `mcpTools`. Each declared tool must be
+available in the current Native MCP registry and visible to this owner and org.
+An unavailable or hidden declaration refuses the run before model work, with
+`automation_mcp_tools_refused`. The plugin adds only those entries to the default
+twelve. Each MCP entry has mandatory approval and `allowPersistentApproval: false`.
+The existing local refusal checks stay in place. There is no interactive registry
+fallback or tool search. The legacy surface without a configured manager still
+refuses every MCP declaration. `backgroundMcpTools` does not grant a capability.
 
 A review of the first version found a bypass. The CLI bridge in
 `server/agent-chat/script-entries.js` turned each argument into a
@@ -1344,23 +1342,18 @@ tool action that reuses a kept name cannot replace Core's checked entry.
 
 A run's system prompt is the framework prompt filtered by
 `filterFrameworkPromptToSurface` to the 12 tools, plus a two-line note that the
-run is local-only. It no longer carries the template action list, so the model
+run has restricted local tools and gates every declared MCP call. It no longer
+carries the template action list, so the model
 is not told about tools it lacks. Its resources block also leaves out the
 workspace apps list, which tells the model to use `call-agent`. Both dependency
 blocks drop
 `getInitialToolNames`, so all 12 tools load up front and no `tool-search` is
 attached.
 
-The user-visible text now says what a run can do. The Run now confirmation,
-the Automations settings summary, and the MCP tools label in automation details
-changed in `localization/default-messages.js` and in the matching
-`defaultValue` strings in the client components. The other locale files do not
-carry these keys. The `manage-automations` description says that Run now uses
-the same local-only tools and that `define` cannot promise email, web, MCP,
-settings, or automation steps. `mcpTools` is no longer listed among the
-`define` options. It stays in the tool schema and in the app, where the label
-warns that runs cannot use it. The `manage-jobs` description says that
-recurring jobs cannot call MCP tools.
+The Run now confirmation, Automations summary, tool labels and the automation
+and recurring-job tool descriptions explain the same restricted surface.
+`mcpTools` accepts exact configured names. Listing a tool does not approve a call.
+Settings automation history owns inspection and the decision described below.
 
 Two outward paths stay, and the owner configures both:
 
@@ -1373,7 +1366,7 @@ Two outward paths stay, and the owner configures both:
 Only an interactive chat or the app can set either field, and a run can no
 longer change automations. An inbox notification still emits
 `notification.sent`, which can fire an event automation the owner defined.
-That run is local-only too.
+That run keeps the same restrictions too.
 
 Run `node --test packages/workbench/tests/automation-local-only.test.mjs`. It
 uses a disposable SQLite database. It checks the exact 12 keys against stand-ins
@@ -2265,6 +2258,89 @@ Upstream can take this change as it is. It adds `jobs/next-run.js`, exports to
 changes no schema. Remove this part of the patch when an upstream release names
 no next run the scheduler cannot meet while a lease or a running mark blocks it,
 and passes the same tests.
+
+## Durable automation approvals
+
+Issue #108 keeps continuation in Native's existing owners. The background runner
+saves `waiting_approval` on the existing `automation_runs` row before yielding.
+It retains the Native thread, logical turn, exact pending ask and restricted
+registry digest. The worker saves the retained turn in Native's completion callback,
+then awaits Native's terminal finalization outside that callback before marking the
+wait ready or returning. A 30-second finalization bound fails closed. Active chunk
+ownership remains held when finalization cannot be confirmed. Waiting does not finish history, deliver a reply, emit
+`automation.run.finished` or advance the schedule. Scheduler, Run now, event
+and webhook paths propagate it and refuse another execution of that definition.
+Waiting publication uses the same resource conditional update as other outcomes,
+with an atomic SQL condition on the exact history ID, current Native chunk,
+ready waiting status and unfinished history. A late original caller cannot overwrite
+a terminal outcome or the wait of a newer chunk, even when it reads the latest
+resource after the owner decision. A separate history read would leave a race. PostgreSQL locks the matched
+history row through that write to serialize against the decision claim. SQLite
+serializes its writers.
+A webhook's existing `integration_pending_tasks` row also becomes
+`waiting_approval`. The retry sweep does not select it, including after restart.
+
+Settings > Agent > Automations > Details > Past runs > Inspect run reads the
+retained Native thread through `inspect-automation-run`. It shows prior tools,
+results and the exact pending input. `decide-automation-approval` accepts only
+history ID, expected ask ID and approve or decline. Both are owner actions,
+not model tools. Production chat POST rejects every automation-owned thread
+before preparation, including a forged internal continuation. Native thread
+scope and its retained history marker preserve that custody after history deletion.
+
+`run-history.js` owns the conditional `waiting_approval` to `resuming` claim.
+Only one concurrent decision wins. Approve rechecks owner, org, app, thread,
+logical turn, exact Native ask, expiry, automation definition revision and the
+restricted registry fingerprint. It invokes the current validated entry through
+`executeAgentToolCall`, including Native schema validation, journal, mutation
+ordering and redaction. The approval store consumes the exact ask ID once.
+The runner rechecks identity and fingerprints before consumption and immediately
+before the current entry runs. A replaced MCP endpoint, changed schema, hidden
+tool or changed definition refuses approval. Fingerprints contain digests,
+never stored MCP headers, tokens or raw connection configuration. Owner-wide
+always-allow policy cannot grant an unattended call. The policy setter binds
+SQLite's enabled INTEGER as 1 or 0 and retains JavaScript booleans for PostgreSQL's
+BOOLEAN. Tests exercise actual enable and disable calls on both backend paths.
+
+Continuation uses the same history ID, thread and logical turn with a fresh
+Native chunk ID. Native's thread fold and `threadDataToEngineMessages` with
+tool calls included retain earlier results. Prior completed tools stay journaled.
+A later gate can return that same history row to waiting. Decline consumes the
+pending ask as declined and ends history clearly without the pending side effect.
+An expired or changed wait can still be declined by its exact owner.
+
+Waiting persists across restart. If a crash interrupted its turn save, the
+next owner decision may recover the fold from Native events only after Native
+proves the chunk terminal, the turn was not stopped and the exact ask is still
+pending. Inspection only reads that readiness. A claimed continuation stays
+blocked while its Native chunk may be live. A terminal chunk with a pending,
+unconsumed ask may return to waiting through a conditional claim. If no chunk
+was inserted, recovery waits for the existing full run liveness ceiling.
+After consumption an unconfirmed crash becomes interrupted and that ask is
+never automatically dispatched again. A persisted decline recovers as declined.
+This gives no exactly-once external-effect promise. Stop and shutdown can leave
+an approved action unconfirmed. The runner retains that explicit interrupted
+classification through Native completion instead of replacing it with generic error. Shutdown preserves an idle approval wait.
+Durable gate storage failure aborts the run and cannot become success.
+
+`tests/automation-approval.test.mjs` uses installed Core, disposable SQLite and
+fake engines and tools. It covers same-run approval, decline, concurrent and
+duplicate decisions, identity and ask mismatch, expiry, definition and connector
+changes, current-entry revalidation, crash refusal, gate storage failure, event
+and webhook waiting, Run now, Stop and fresh-process restart. The existing
+`automation-status.test.mjs` renders the real Settings component with a fake
+owner transport to check retained inspection and exact decision payloads.
+`automation-local-only.test.mjs` keeps the default twelve and their refusals.
+The same suite retains the immediate process-exit restart test and adds a held
+Native terminal-write barrier. Scheduler and trigger regressions cover approve and
+decline in normal order, after a delayed latest-resource read and after a delayed
+conditional update. Each checks terminal history and metadata, no unresolved wait,
+exact configured side-effect counts and admission of fresh gated work. The local
+surface test executes all three plugin dependency expressions with the real Native
+restriction and MCP adapter, checking their local registry, gated declarations and
+confined prompt loading. CI registers the lifecycle test beside those suites. These new regressions are
+source only in this wave. Runtime checks, independent exact-head review and a
+built UI journey remain required before acceptance of issue #108.
 
 ## Automation-written instruction files
 
