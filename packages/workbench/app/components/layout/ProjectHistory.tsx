@@ -76,7 +76,7 @@ function SessionHistory({ identity }: { identity: VivaryChatIdentity }) {
     ...(code?.runs ?? []).map(run => ({ id: `code:${run.id}`, title: run.title || "Untitled conversation",
       subtitle: run.engineLabel, timestamp: isCodeAgentRunActive(run) ? "Working" : undefined,
       updatedAt: Date.parse(run.updatedAt), pinned: false })),
-    ...native.threads.filter(thread => thread.messageCount > 0 && !thread.archivedAt).map(thread => ({
+    ...native.threads.filter(thread => (thread.messageCount > 0 || thread.title.startsWith("Linked: ")) && !thread.archivedAt).map(thread => ({
       id: `native:${thread.id}`, title: thread.title || thread.preview || "Untitled conversation",
       titleText: thread.title || thread.preview || "Untitled conversation",
       subtitle: "Native chat", timestamp: undefined, updatedAt: thread.updatedAt, pinned: Boolean(thread.pinnedAt),

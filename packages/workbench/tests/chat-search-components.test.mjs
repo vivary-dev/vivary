@@ -33,6 +33,7 @@ const stubs = new Map([
     export const writeClientAppState = async (key, value) => { globalThis.searchFixture.writes.push({ key, value }); return value; };
     export const actionErrorMessage = () => null;
     export const callAction = async () => null;
+    export const useActionQuery = () => ({ data: undefined });
     export const tryCallActionKeepalive = () => ({ accepted: false });`],
   ["@agent-native/core/client/api-path", `export const agentNativePath = path => path;`],
   ["@agent-native/core/client/agent-chat", `import { createElement, useEffect } from "react";

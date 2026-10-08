@@ -478,6 +478,7 @@ export function useNativeChatDraft(scope: Scope, ownerKey: string) {
   }), [entry, ensureThread, onChange, beforeSubmit, onAccepted, onRejected, version]);
   return {
     hostComposerDraft,
+    flushForThread: flush,
     rejectKnownSubmission: onRejected,
     statusForThread: (threadId: string) => entry(threadId).error,
     hasConflictForThread: (threadId: string) => entry(threadId).conflict,

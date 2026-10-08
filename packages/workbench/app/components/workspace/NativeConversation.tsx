@@ -2,7 +2,7 @@ import { AgentChatSurface, AssistantChat, clearChatStorage } from "@agent-native
 import { Skeleton } from "@agent-native/toolkit/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { readClientAppState } from "@agent-native/core/client/hooks";
+import { readClientAppState, useActionQuery } from "@agent-native/core/client/hooks";
 import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router";
 import { Button } from "@/components/ui/button";
 import { useVivaryChatIdentity } from "@/components/layout/use-vivary-chat-identity";
@@ -15,6 +15,8 @@ import { useProjects } from "../projects/ProjectContext";
 import { nativeMatchRepository } from "@/lib/native-match-repository";
 import { createHistoryReadAdapter } from "@/lib/history-read-adapter";
 import { ConversationMatch } from "./ConversationMatch";
+import { LinkedConversationChooser, LinkedHistoryNotice } from "./LinkedConversation";
+import type { VivaryCodeState } from "../../../server/local-code-agent";
 import "../../chat-search.css";
 
 export default function NativeConversation() {
@@ -140,6 +142,12 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
     && /^[A-Za-z0-9_-]{1,128}$/.test(savedSelection.threadId)
       ? savedSelection.threadId : null;
   const { call, ready: draftOwnerReady, sessionStatus, retrySession } = useNativeActionCaller();
+  const linkSource = useQuery({ queryKey: ["vivary-link-source", identity.storageKey, selectedThread],
+    enabled: !unassigned && !requestedMessage && !!selectedThread && draftOwnerReady, retry: false,
+    queryFn: () => call<{ available: boolean }>("vivary-linked-history", { operation: "source",
+      projectId: identity.projectId, target: { kind: "native", id: selectedThread } }) });
+  const linkEngines = useActionQuery<VivaryCodeState>("vivary-code-state", { projectId: identity.projectId ?? undefined },
+    { enabled: linkSource.data?.available === true && workspaceAvailable, retry: false });
   const savedThreadCheck = useQuery({
     queryKey: ["vivary-chat-saved-thread", selectionKey, savedThread],
     queryFn: ({ signal }) => savedNativeThreadIsAvailable(identity, savedThread!, call, signal),
@@ -225,6 +233,12 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
     }}>Retry history</Button>
   </div>;
   return <section ref={matchContainer} aria-label="Native chat" className="flex h-full min-h-0 w-full flex-col">
+    {!unassigned && !requestedMessage && selectedThread && <>
+      <LinkedHistoryNotice key={selectedThread} projectId={identity.projectId} target={{ kind: "native", id: selectedThread }} />
+      {linkSource.data?.available && linkEngines.data && <LinkedConversationChooser key={"link:" + selectedThread} projectId={identity.projectId}
+        source={{ kind: "native", id: selectedThread }} sourceEngine="native" engines={linkEngines.data.engines}
+        saveDraft={() => draft.flushForThread(selectedThread)} />}
+    </>}
     <ConversationMatch key={selectedThread} container={matchContainer} messageId={requestedMessage}
       canReturnToLatest={currentMatch !== null && !matchArchived} archived={matchArchived}
       unassigned={unassigned} readFailed={matchReadFailed} />

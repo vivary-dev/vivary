@@ -25,6 +25,7 @@ import "@agent-native/toolkit/chat-history.css";
 import "../../local-agent.css";
 import mascotUrl from "../../assets/vivary-mascot.svg";
 import { ConversationMatch } from "./ConversationMatch";
+import { LinkedConversationChooser, LinkedHistoryNotice } from "./LinkedConversation";
 import { createHistoryReadAdapter } from "@/lib/history-read-adapter";
 import { codeMatchRepository, codeMatchMessageId } from "@/lib/code-match-repository";
 import "../../chat-search.css";
@@ -650,6 +651,12 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     </div>}
     composerSlot={<div className="min-h-0 overflow-auto">
       {props.notices}
+      {!props.viewingMatch && props.run && <>
+        <LinkedHistoryNotice key={props.run.id} projectId={props.projectId} target={{ kind: "code", id: props.run.id }} />
+        <LinkedConversationChooser key={"link:" + props.run.id} projectId={props.projectId}
+          source={{ kind: "code", id: props.run.id }} sourceEngine={props.run.engine} engines={props.state.engines}
+          saveDraft={() => draft.flushForThread(draftThreadId)} />
+      </>}
       {!draftError && draft.draftSaveStatusForThread(draftThreadId) && <div className="local-agent-notice" role="status">
         <span>{draft.draftSaveStatusForThread(draftThreadId) === "saved"
           ? "Draft saved for this conversation." : "Saving draft…"}</span>

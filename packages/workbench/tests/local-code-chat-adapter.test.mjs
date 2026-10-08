@@ -80,3 +80,30 @@ test("an explicit pre-append owner rejection restores the same Code draft", asyn
     assert.equal(actions.length, 1);
   }
 });
+
+test("accepted owner sends refresh linked history while refused sends emit no accepted lifecycle update", async t => {
+  const previousWindow = globalThis.window;
+  const events = [];
+  globalThis.window = { dispatchEvent: event => { events.push(event.type); return true; } };
+  t.after(() => { if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow; });
+  const controller = new AbortController(), runIdRef = { current: null };
+  const adapter = createLocalCodeChatAdapter({
+    context: { engineRef: { current: "codex-cli" }, modelRef: { current: "fixture-model" } },
+    call: async name => {
+      assert.equal(name, "vivary-code-send");
+      return { projectId: "project-one", run: { id: "accepted-target", engine: "codex-cli", status: "completed", events: [] }, error: null };
+    },
+    projectId: "project-one", draftThreadId: "retained-draft", runIdRef,
+    engines: () => [{ engine: "codex-cli", models: ["fixture-model"] }],
+    onKnownRejected: async () => {}, onStarted: () => controller.abort(), onStreaming: () => {}, onSettled: () => {},
+  });
+  for await (const _ of adapter.run({ messages: [{ role: "user", content: [{ type: "text", text: "Explicit send" }] }],
+    abortSignal: controller.signal })) {}
+  assert.deepEqual(events, ["agent-chat:threads-updated"]);
+  assert.equal(runIdRef.current, "accepted-target");
+  const refused = adapterForTest([], [], "codex-cli", Object.assign(new Error("Final owner refusal"), { errorCode: "vivary_code_project_changed" }));
+  await assert.rejects(async () => { for await (const _ of refused.run({
+    messages: [{ role: "user", content: [{ type: "text", text: "Refused send" }] }], abortSignal: new AbortController().signal,
+  })) {} }, /Final owner refusal/);
+  assert.deepEqual(events, ["agent-chat:threads-updated"]);
+});

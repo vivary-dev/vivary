@@ -142,6 +142,48 @@ An active or approval-pending run is not transferred by selecting another model.
 
 Three facts must be visible on demand: recorded history available, context supplied for this turn, and harness-native session continuity. These are not interchangeable. Paginated read tools retrieve exact existing messages and artifact references. Do not copy transcripts into another app-state store, replay raw tool calls as new commands, or share opaque resume state between harnesses. If full context exceeds capacity or an event type cannot be translated, describe what is omitted or summarized and retain access to the original.
 
+### Linked conversation first unit
+
+Saved Code conversations now offer **Linked conversation** beside the composer.
+Choose a different configured Code harness or Native chat. A saved project Native
+conversation offers either configured Code harness. The new target opens inactive
+in the same selected project. The original draft is saved in its original owner.
+Pending approvals stay in the source. Nothing is sent by selection. If saving or
+creation fails, the source remains selected and **Retry link** is available.
+
+The linked-history notice names the original conversation and gives its available
+completed-history count. It distinguishes prepared context from an accepted Code
+send. Preparation can precede a refused request. Code acceptance is bound to the
+actual user event after final project and host checks. Neither stage confirms
+provider ingestion. The notice updates while mounted through the ordinary request
+lifecycle. Expanded inspection shows the exact completed boundary, excerpt size
+and detailed session identity explanation.
+Source-to-target native session continuity is absent. Each target retains its own
+normal harness session. Code session Details continues to report that target's
+recorded continuity. The initial excerpt is at most 100 entries and 12,000
+characters. **Inspect linked history** and **More recorded history** page through
+the same frozen source boundary, rechecking current authority on every read.
+Later source work is excluded. Actual recorded tool results and artifact labels
+and references are quoted as history, never replayed as tool calls. Runtime
+bookkeeping and private reasoning are excluded. An empty saved Native conversation
+has no completed portion and can link onward to Code. A shortened entry or omitted
+page is labeled as truncated, and the original stays readable. New linking refuses sources beyond
+the 8 MiB read limit. An active source with no completed work links with an empty
+completed-history notice. Optimistic unsent Native drafts are not saved sources.
+
+Metadata stays in the existing Workbench Native-backed database. Native keeps
+messages and Code transcripts. The link binds both creation identities, project
+and root binding, owner and organization, and an exact completed-prefix digest.
+A foreign source, revoked membership, replaced binding, changed prefix or foreign
+page cursor is refused. Historical text and tool results are quoted data, with
+no raw tool replay, transferred grant or copied provider resume ID. The target's
+existing project tools, permission policy and host admission still apply.
+
+The maintained `test:linked-conversations` target covers production stores and
+controls. Independent review and a built normal-app journey remain required.
+Prepare handoff, execution leases and concurrency are not implemented by this
+unit and remain part of the full issue #38 scope.
+
 ## Prepare handoff
 
 This action submits a named workflow to the existing agent conversation. It does not happen automatically just because the user picks another harness. The agent reviews the actual project and updates the designated existing handoff/documentation surface. Deterministic actions gather facts, check scope and versions, validate required fields, and write through existing conflict-aware file owners.

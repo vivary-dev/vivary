@@ -134,6 +134,51 @@ prefixes and Windows SystemRoot while retaining credential filtering.
 Offline runtime fixtures cover route selection and error handling. Live provider
 execution and packaged Windows acceptance remain separate checks.
 
+### Linked runtime conversations
+
+The saved Code and Native conversation surfaces can open a linked inactive target
+in the same authorized project. Claude Code and Codex can link to each other or to
+Native chat. Native can link to either configured Code harness. Selection saves
+the source draft through its current owner, then creates a paused Code record or
+an empty Native thread and its cleared draft. It submits no prompt, requests no
+worker, consumes no approval and transfers no provider session. A failed link
+keeps the source selected and offers Retry. The host execution guard is unchanged.
+
+`linked-conversations.ts` uses Native records and the existing Workbench database
+migration owner. Its metadata row binds actor, application, organization, project
+and root binding, source and target creation identities, and the completed source
+boundary with a digest. It contains no transcript copy. Pages and explicit sends
+recheck current membership, project access, both records and the frozen prefix.
+A replaced binding or changed prefix fails closed. Code retains the server-captured
+prefix byte length, never a caller byte cursor, so later appends cannot widen a
+page. Native follows the saved branch and excludes pending approvals, stopped
+turns and live or still-saving execution chunks. No completed prefix means an
+explicit empty-history notice. Source drafts and approval custody stay unchanged.
+
+An explicit send receives at most 12,000 characters from 100 recorded entries as
+quoted historical data. Actual retained tool results and labeled artifact references
+become text, never executable requests or new instruction authority. Runtime
+bookkeeping and private reasoning are excluded. The canonical empty Native
+repository represents no completed history, so an inactive Native target can
+link onward to Code. The target keeps its normal tools and project guard.
+The UI distinguishes available entries, prepared context and accepted Code sends
+from source-to-target session continuity. Preparation records only a small portion
+receipt on the link. Code acceptance binds that portion to the actual user event
+appended after final project and host admission. Refused sends leave the previous
+accepted receipt unchanged. Native preparation preserves separate visible user
+text and records its preparation stage. Neither stage proves provider ingestion.
+The mounted notice refreshes through ordinary Code thread updates and Native
+request lifecycle events. Its collapsed view gives the source title, counts and
+stage. Boundary identifiers and session details remain in expanded inspection.
+Source-bound continuation revalidates access on every page, with explicit truncation and a readable original link.
+Reads are bounded to 8 MiB of source data. An oversized source refuses new linking
+rather than claiming full context. A long individual entry may be shortened with
+an omission notice. The original remains the complete history owner. This is the
+first linked-history slice of issue #38. Prepare handoff and controlled concurrent
+execution remain separate work. Independent review and built UI acceptance of
+this slice remain required.
+
+
 ### Original engine
 
 The original engine remains a package family, not another agent loop. `vivary-core` owns pure validation and projection while callers retain execution, persistence, and human approval. Tropo observes, builds typed graph context, and retrieves. Strato evaluates policy. Ozone verifies evidence and proposes gated repairs. Exo projects claims, dependencies, and handoffs. `create-vivary` creates and adopts workspaces. The optional MCP and semantic-memory adapters are outside the default package path. The `vivary` front door routes ten verbs to their package owners. The Workbench bundles this Python runtime and calls its established commands rather than reimplementing their decisions. See [the command reference](COMMANDS.md) and [package manifests](../packages).
@@ -423,6 +468,16 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-16 Linked conversations on current dev. The October 8 linked-runtime
+slice (`5831173`) never reached `dev`. It is applied to `dev` and rebased onto `3a0576f`,
+with its design text above unchanged. Its Code-admission test now gives the
+fake Claude CLI the version and subscription-route answers that current runtime
+admission requires, as the other send fixtures already do. The 26 linked tests
+and typechecking pass. Linking still submits no prompt, transfers no provider
+session and keeps the host-wide single Code run guard, so the design
+description holds. Built-app and packaged Windows acceptance in each direction
+remain required for issue #38.
 
 2026-10-16 Workbench build gate. The production build runs `agent-native
 doctor`, which refuses environment reads outside its deploy allowlist. The
@@ -1057,6 +1112,27 @@ and recovery stay live. Old-installed controls reproduced refused-queue suppress
 equal-time ambiguity and the absent fresh-follower wake. Revised runtime gates and
 ordinary concurrent-batch natural exit remain controller checks.
 
+Issue #38 linked review correction. Inspected the final independent findings and
+actual Codex completion emitter, artifact projection, Code final admission and
+Native prepareRequest/displayMessage owners. Quoted history now retains actual
+results and artifact references. Preparation is distinct from the accepted Code
+user event and neither claims provider ingestion. The notice refreshes while
+mounted and keeps opaque identities in expanded inspection. Canonical empty
+Native sources can link onward without creating a prompt. New projection,
+request, admission and notice controls cover these boundaries. Source-sandbox
+checks and controller runtime/UI acceptance remain separate gates.
+
+Issue #38 linked conversations. The saved chooser now creates inactive targets
+through Native Code/thread and draft owners. Workbench stores only an immutable
+source boundary and scoped link metadata. Reads and explicit sends revalidate
+membership, project/root binding and retained identities. Runtime tools,
+approvals, provider resume state and the host-wide Code execution guard retain
+their existing owners. The linked-conversation design above describes bounded
+quoted context and the difference between available history, supplied excerpt
+and source session continuity. Focused production storage and component tests
+cover inactive creation, all supported directions, completed-prefix exclusion,
+source-bound paging, revocation, draft custody and failed creation with Retry.
+Source checks do not establish built-app acceptance or completion of issue #38.
 Issue #108 progressive approval answer persistence. The retained real continuation journal included the final model text, but saving its tool result first made the later fold compare that chunk with the longer accumulated waiting turn. Automation persistence now supplies the Native event sequence to the existing fold owner. Its retained per-chunk snapshots replace the current chunk when a later authoritative save arrives, including a shorter correction, while preserving earlier chunks and the waiting sentence. Equivalent or stale saves do not append content again. A consumed ask is removed from recorded snapshots as well as visible content so its unexecuted card cannot return during a rebuild. Chat and team callers retain the existing default fold policy. Pure source checks exercise progressive persistence, idempotence, earlier content, shorter corrections and new-turn isolation. Maintained approval and normal owner HTTP assertions require the final answer in a fresh durable thread read. Historical owner-scope, typecheck, build and UI custody results preceded these bytes. Affected installed suites, configured typecheck, independent review and the built UI final-answer journey remain required. No live profile, tool effect or provider call was changed, and publication remains held.
 
 Issue #108 personal approval ownership correction. The normal app reached a durable personal wait but its Inspect action returned an ownership refusal because Native's action transport backfilled the owner's active organization. The background runner now compares retained thread and continuation organization against the persisted run rather than that ambient selection. A run with an organization still requires the actor's exact organization and current membership. App, owner, history, thread and pending-action identity remain bound. New maintained tests mount the production Native actions through the normal HTTP route and cover personal inspection, decline without an effect, approve once, duplicate refusal, another owner, another app and real organization scope and membership refusals. The former personal wrong-organization assertion moves to an organization-bound transport control. The historical 268 tests, typecheck and app build preceded these bytes. This correction has only source checks until independent review, old-installed red controls, refresh, affected tests and the resumed built UI journey complete. The actual waiting profile and prior evidence remain untouched. Publication remains held.
