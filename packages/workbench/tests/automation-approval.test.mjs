@@ -630,12 +630,15 @@ const child = (role, name, id) => new Promise((resolve, reject) => {
   const timeout = setTimeout(() => { processHandle.kill("SIGKILL"); reject(new Error("Approval child exceeded 30 seconds.")); }, 30_000);
   for (const stream of [processHandle.stdout, processHandle.stderr]) stream.on("data", data => { output += data; });
   processHandle.on("error", reject);
-  processHandle.on("close", code => {
+  processHandle.on("close", (code, signal) => {
     clearTimeout(timeout);
-    if (code !== 0) return reject(new Error(`Approval child exited ${code}: ${output.slice(-8000)}`));
-    const receipt = output.split("\n").find(line => line.startsWith("APPROVAL_RESULT "));
+    const crash = role === "gap-webhook-crash" || role === "gap-retention-crash";
+    if (crash ? code !== null || signal !== "SIGKILL" : code !== 0)
+      return reject(new Error(`Approval child exited ${code}/${signal}: ${output.slice(-8000)}`));
+    const prefix = crash ? "APPROVAL_CRASH " : "APPROVAL_RESULT ";
+    const receipt = output.split("\n").find(line => line.startsWith(prefix));
     if (!receipt) return reject(new Error("Approval child did not report its result."));
-    resolve(JSON.parse(receipt.slice("APPROVAL_RESULT ".length)));
+    resolve(JSON.parse(receipt.slice(prefix.length)));
   });
 });
 
@@ -1058,4 +1061,185 @@ for (const decision of ["approve", "decline"]) for (const dispatchFailure of [fa
       dispatch.setInProcessIntegrationTaskRunner(null);
       await tasks.markTaskFailed(differentId, "Fixture ended without dispatch.");
     }
+  });
+
+
+for (const decision of ["approve", "decline"]) for (const boundary of ["normal", "crash"])
+  test(`webhook history/task ${boundary} wait converges through fresh-process ${decision}`, async () => {
+    const name = `split-wait-${boundary}-${decision}`;
+    const waiting = await child(`gap-webhook-${boundary}`, name);
+    assert.equal(waiting.faultHits, boundary === "crash" ? 1 : 0);
+    assert.equal(waiting.taskStatus, boundary === "crash" ? "processing" : "waiting_approval");
+    if (boundary === "crash") {
+      assert.equal(waiting.configuredEffects, 0); assert.equal(waiting.modelCalls, 2);
+      const state = await history.getAutomationContinuation(waiting.historyId);
+      assert.equal(state.storedStatus, "waiting_approval"); assert.equal(state.run.finishedAt, null);
+      assert.equal(state.run.approvalReady, false, "SIGKILL skipped normal error handling and finalization");
+      assert.equal(state.context.askId, waiting.pending.askId);
+      await runStore.updateRunStatus(waiting.runId, "aborted");
+    }
+    const result = await child(`gap-webhook-recover-${decision}`, name, waiting.historyId);
+    const expected = decision === "approve" ? "success" : "declined";
+    assert.equal(result.result.id, waiting.historyId); assert.equal(result.result.threadId, waiting.threadId);
+    assert.equal(result.turn.turnId, waiting.pending.turnId); assert.equal(result.pending.askId, waiting.pending.askId);
+    assert.equal(result.result.status, expected); assert.equal(result.outcomeReconciled, true);
+    assert.equal(result.configuredEffects, decision === "approve" ? 1 : 0);
+    assert.equal(result.modelCalls, decision === "approve" ? 2 : 1, "only the explicit continuation and one FIFO follower use a model");
+    assert.equal(result.askStatus, decision === "approve" ? "consumed" : "declined");
+    assert.equal(result.taskStatus, decision === "approve" ? "completed" : "failed");
+    assert.equal(result.followerStatus, "completed");
+    assert.deepEqual(result.dispatched, [waiting.followerId]);
+    assert.deepEqual(result.terminalAtDispatch, [expected], "original terminal bookkeeping precedes the immediate follower");
+    assert.equal(result.resourceStatus, "success", "the newer admitted follower owns the final resource");
+  });
+
+for (const reason of ["owner", "shutdown"])
+  test(`Stop during the real approval predicate preserves ${reason} classification`, async () => {
+    const result = await child(`predicate-stop-${reason}`, `predicate-${reason}`);
+    assert.equal(result.barrierHit, 1);
+    assert.equal(result.selectedStorageFaults, 0);
+    assert.equal(result.configuredEffects, 0);
+    assert.equal(result.historyStatus, reason === "shutdown" ? "interrupted" : "error");
+    assert.equal(result.errorCode, reason === "shutdown" ? history.INTERRUPTED_RUN_ERROR_CODE : "background_automation_aborted");
+    assert.equal(result.abortReason, reason === "shutdown" ? "shutdown" : "user");
+    if (reason === "shutdown") {
+      assert.equal(result.workerResult, "retry");
+      assert.equal(result.taskStatus, "pending");
+      assert.equal(result.taskAttempts, 0);
+    }
+  });
+
+test("a thrown task-wait write fails the worker rather than simulating a hard process loss", async () => {
+  const fixture = await makeApprovalCase("split-wait-thrown", { triggerType: "webhook", repeatLocal: false });
+  const tasks = await loadCore("integrations/pending-tasks-store.js"), dispatcher = await loadCore("triggers/dispatcher.js");
+  const webhook = await loadCore("integrations/automation-webhook-task.js");
+  await dispatcher.initTriggerDispatcher(fixture.deps);
+  const resource = fixture.automation.resource, id = "split-wait-thrown-task";
+  await tasks.insertPendingTask({ id, platform: "automation-webhook", externalThreadId: `${owner}:${resource.path}`,
+    ownerEmail: owner, orgId: null, externalEventKey: id, payload: JSON.stringify({ kind: "automation-webhook",
+      automationId: resource.id, owner, path: resource.path, eventId: id, payload: {} }) });
+  const db = database.getDbExec(), execute = db.execute.bind(db); let hits = 0;
+  db.execute = async statement => {
+    const sql = String(statement.sql ?? statement).replace(/\s+/g, " ").trim();
+    if (sql.startsWith("UPDATE integration_pending_tasks SET status = 'waiting_approval'") && statement.args?.includes(id)) {
+      hits++; throw new Error("Selected task wait write error.");
+    }
+    return execute(statement);
+  };
+  let workerResult;
+  try { workerResult = await webhook.runAutomationWebhookTaskInProcess(id, { appId }); }
+  finally { db.execute = execute; }
+  const [run] = await history.listAutomationRuns({ owners: [owner], automation: fixture.automation.name, appId });
+  const diagnostic = {
+    faultHits: hits,
+    workerResult,
+    historyStatus: run?.status ?? null,
+    historyErrorCode: run?.errorCode ?? null,
+    historyFinished: Boolean(run?.finishedAt),
+    taskStatus: (await tasks.getPendingTask(id))?.status ?? null,
+    configuredEffectCount: configuredCalls(fixture).length,
+  };
+  console.log("[approval108 thrown task-wait diagnostic] " + JSON.stringify(diagnostic));
+  assert.equal(hits, 1);
+  assert.equal(workerResult, "failed");
+  assert.ok(run.finishedAt); assert.equal(run.status, "error"); assert.equal(configuredCalls(fixture).length, 0);
+  assert.equal(run.errorCode, "automation_approval_storage_failed");
+  const retained = await history.getAutomationContinuation(run.id);
+  const retryTask = await tasks.getPendingTask(id);
+  assert.equal(retryTask.status, "pending", "ordinary worker failure retains custody for terminal reconciliation");
+  assert.deepEqual(JSON.parse(retryTask.payload), { kind: "automation-webhook", automationId: resource.id,
+    owner, path: resource.path, eventId: id, payload: {} });
+  assert.equal(retained.context.options.webhookTaskId, id);
+  assert.equal(retained.context.historyId, run.id);
+  assert.equal(retained.context.threadId, run.threadId);
+  assert.equal((await approvalStore.readAgentToolApproval(retained.context)).status, "pending");
+  const modelCount = fixture.modelCalls.length;
+  assert.equal(await webhook.runAutomationWebhookTaskInProcess(id, { appId }), "skipped",
+    "a retry delivery restores retained custody instead of starting another Native run");
+  assert.equal(fixture.modelCalls.length, modelCount);
+  assert.equal(configuredCalls(fixture).length, 0);
+  await runner.reconcileAutomationApprovalOutcomes(appId);
+  assert.equal((await tasks.getPendingTask(id)).status, "failed");
+  assert.equal(Boolean((await history.getAutomationContinuation(run.id)).outcomeReconciled), true);
+  assert.equal(frontmatter.parseJobResource((await resources.resourceGetByPath(owner, resource.path)).content).meta.lastStatus, "error");
+  await runner.reconcileAutomationApprovalOutcomes(appId);
+  assert.equal(await webhook.runAutomationWebhookTaskInProcess(id, { appId }), "skipped");
+  await assert.rejects(fixture.decide(run.id, retained.context), /no longer waiting/);
+  assert.equal(fixture.modelCalls.length, modelCount, "reconciliation, duplicate delivery and decision do not redispatch");
+  assert.equal(configuredCalls(fixture).length, 0);
+});
+
+test("a generic event execution error keeps ordinary event handling", async () => {
+  const fixture = await makeApprovalCase("ordinary-event-error", { triggerType: "event", repeatLocal: false });
+  const dispatcher = await loadCore("triggers/dispatcher.js");
+  fixture.engine.stream = async function* (options) {
+    fixture.modelCalls.push(structuredClone(options.messages));
+    throw new Error("Ordinary fixture event failure.");
+  };
+  await dispatcher.initTriggerDispatcher(fixture.deps);
+  await bus.emit("test.event.fired", { id: "ordinary-error-event" }, { owner });
+  const run = await until(async () => {
+    const [row] = await history.listAutomationRuns({ owners: [owner], automation: fixture.automation.name, appId });
+    return row?.finishedAt ? row : null;
+  });
+  assert.equal(run.status, "error");
+  assert.notEqual(run.errorCode, "automation_approval_storage_failed");
+  assert.notEqual(run.errorCode, history.INTERRUPTED_RUN_ERROR_CODE);
+  assert.ok(fixture.modelCalls.length > 0);
+  assert.equal(configuredCalls(fixture).length, 0);
+  assert.equal((await history.getAutomationContinuation(run.id)).context, null);
+});
+
+test("retention preserves the original ask chunk after actual continuation attachment and process loss", async () => {
+  const name = "retained-attachment-crash", waiting = await child("gap-retention-crash", name);
+  assert.equal(waiting.faultHits, 1); assert.equal(waiting.configuredEffects, 0); assert.equal(waiting.modelCalls, 2);
+  assert.notEqual(waiting.resumeRunId, waiting.runId);
+  const state = await history.getAutomationContinuation(waiting.historyId);
+  assert.equal(state.storedStatus, "resuming"); assert.equal(state.run.runId, waiting.resumeRunId);
+  assert.equal(state.context.runId, waiting.runId); assert.equal(state.context.askId, waiting.pending.askId);
+  assert.equal((await approvalStore.readAgentToolApproval(waiting.pending)).status, "pending");
+  const events = await runStore.getRunEventsSince(waiting.runId, -1); assert.ok(events.length);
+  await database.getDbExec().execute({ sql: "UPDATE agent_runs SET completed_at = ? WHERE id = ?",
+    args: [Date.now() - 25 * 60 * 60_000, waiting.runId] });
+  await runStore.cleanupOldRuns(24 * 60 * 60_000);
+  assert.equal(await runStore.getRunStatus(waiting.runId), "completed", "pending original gate evidence survives mandatory attachment");
+  assert.deepEqual(await runStore.getRunEventsSince(waiting.runId, -1), events);
+  const recovered = await child("gap-retention-recover-decline", name, waiting.historyId);
+  assert.equal(recovered.result.id, waiting.historyId); assert.equal(recovered.result.threadId, waiting.threadId);
+  assert.equal(recovered.turn.turnId, waiting.pending.turnId); assert.equal(recovered.pending.askId, waiting.pending.askId);
+  assert.equal(recovered.result.status, "declined"); assert.equal(recovered.resourceStatus, "declined");
+  assert.equal(recovered.outcomeReconciled, true); assert.equal(recovered.askStatus, "declined");
+  assert.equal(recovered.configuredEffects, 0); assert.equal(recovered.modelCalls, 0);
+  await runStore.cleanupOldRuns(24 * 60 * 60_000);
+  assert.equal(await runStore.getRunStatus(waiting.runId), null, "ordinary pruning resumes after settlement");
+  assert.deepEqual(await runStore.getRunEventsSince(waiting.runId, -1), []);
+});
+
+for (const kind of ["personal", "shared", "personal-org", "org-admin"])
+  test(`supported legacy ${kind} deletion retains waiting and resuming approvals`, async () => {
+    const result = await child("gap-delete-" + kind, "legacy-delete-" + kind);
+    assert.equal(result.waitingRefused, true); assert.equal(result.resumingRefused, true);
+    assert.equal(result.deleted, true); assert.equal(result.configuredEffects, 0);
+    assert.equal(result.historyOwner, kind.includes("org") ? resources.organizationResourceOwner("delete-org-legacy-delete-" + kind) : owner);
+  });
+
+test("PostgreSQL pruning SQL adapter/query contract retains the original pending-context selector", async () => {
+  const result = await child("postgres-retention", "postgres-retention");
+  assert.equal(result.pruneQueries.length, 1);
+  assert.match(result.pruneQueries[0], /approval_history\.approval_context::jsonb ->> 'runId'/);
+});
+
+
+test("authorized org-admin deletes an ordinary job after its creator leaves without execution", async () => {
+  const result = await child("gap-delete-org-departed-no-wait", "legacy-delete-departed-no-wait");
+  assert.equal(result.executionRefused, true); assert.equal(result.deleted, true); assert.equal(result.configuredEffects, 0);
+});
+
+for (const kind of ["org-departed-wait", "org-scope-missing", "org-scope-conflict"])
+  test(`legacy deletion refuses ${kind} before definition or token mutation`, async () => {
+    const result = await child("gap-delete-" + kind, "legacy-delete-" + kind);
+    assert.equal(result.waitingRefused, true); assert.equal(result.resumingRefused, true);
+    assert.equal(result.deleted, true); assert.equal(result.configuredEffects, 0);
+    assert.equal(result.membershipRestoredForDecline, kind === "org-departed-wait");
+    assert.equal(result.scopeRefused, kind.startsWith("org-scope-"));
   });

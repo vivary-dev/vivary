@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 const [role, name, historyId] = process.argv.slice(2);
 Object.assign(process.env, { NODE_ENV: "production", APP_NAME: "Vivary" });
 globalThis.fetch = async () => { throw new Error("Approval fixture forbids network calls."); };
-if (role === "postgres-policy") {
+if (role === "postgres-policy" || role === "postgres-retention") {
   const { registerHooks } = await import("node:module");
   const { realpath } = await import("node:fs/promises");
   const { pathToFileURL } = await import("node:url");
@@ -15,6 +15,17 @@ if (role === "postgres-policy") {
     return specifier === "postgres" ? { url: stubUrl, shortCircuit: true } : nextResolve(specifier, context);
   } });
   const core = await realpath(new URL("../../node_modules/@agent-native/core", import.meta.url));
+  if (role === "postgres-retention") {
+    stub.enableRetentionAdapter();
+    const store = await import(pathToFileURL(path.join(core, "dist/agent/run-store.js")).href);
+    await store.cleanupOldRuns(24 * 60 * 60_000);
+    assert.equal(stub.retentionQueries.length, 1, "the actual PostgreSQL prune owner reached its delete");
+    assert.match(stub.retentionQueries[0], /approval_history\.approval_context::jsonb ->> 'runId'/);
+    assert.match(stub.retentionQueries[0], /finished_at IS NULL/);
+    assert.match(stub.retentionQueries[0], /status IN \('waiting_approval', 'resuming'\)/);
+    console.log("APPROVAL_RESULT " + JSON.stringify({ pruneQueries: stub.retentionQueries }));
+    process.exit(0);
+  }
   const store = await import(pathToFileURL(path.join(core, "dist/agent/tool-approval-store.js")).href);
   const binding = { ownerEmail: "policy-owner@example.test", toolName: "mcp__policy__write" };
   const readback = [];
@@ -28,6 +39,16 @@ if (role === "postgres-policy") {
 if (role.startsWith("identity-")) {
   const { runIdentityRecoveryCase } = await import("./automation-approval-identity-recovery.mjs");
   console.log("APPROVAL_RESULT " + JSON.stringify(await runIdentityRecoveryCase(role.slice("identity-".length), name)));
+  process.exit(0);
+}
+if (role.startsWith("predicate-stop-")) {
+  const { runApprovalPredicateStopCase } = await import("./automation-approval-fixture.mjs");
+  console.log("APPROVAL_RESULT " + JSON.stringify(await runApprovalPredicateStopCase(role.slice("predicate-stop-".length), name)));
+  process.exit(0);
+}
+if (role.startsWith("gap-")) {
+  const { runRecoveryGapFixture } = await import("./automation-approval-recovery-gaps.mjs");
+  console.log("APPROVAL_RESULT " + JSON.stringify(await runRecoveryGapFixture(role, name, historyId)));
   process.exit(0);
 }
 const { makeApprovalCase, runner, history, until } = await import("./automation-approval-fixture.mjs");

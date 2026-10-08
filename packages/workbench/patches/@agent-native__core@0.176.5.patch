@@ -891,7 +891,19 @@ diff --git a/dist/agent/run-store.js b/dist/agent/run-store.js
      if (event.type !== "error")
          return null;
      return (event.details || event.error || "").slice(0, 2000) || null;
-@@ -2587,8 +2591,14 @@
+@@ -2573,6 +2577,11 @@
+  * rolls back the claim so the source rows remain available for a retry.
+  */
+ async function pruneAndRollUpPrunedRunOutcomes(client, cutoff, erroredCutoff) {
++    // Continuation attachment replaces the current chunk references, while
++    // the exact pending context still requires the original gate evidence.
++    const pendingApprovalRun = isPostgres()
++        ? "approval_history.approval_context::jsonb ->> 'runId'"
++        : "json_extract(approval_history.approval_context, '$.runId')";
+     const prune = async (tx) => {
+         if (isPostgres()) {
+             const lockResult = await tx.execute({
+@@ -2587,8 +2596,15 @@
              sql: `DELETE FROM agent_runs
              WHERE id IN (
                SELECT id FROM agent_runs
@@ -903,12 +915,13 @@ diff --git a/dist/agent/run-store.js b/dist/agent/run-store.js
 +                  SELECT 1 FROM automation_runs AS approval_history
 +                  WHERE approval_history.finished_at IS NULL
 +                    AND approval_history.status IN ('waiting_approval', 'resuming')
-+                    AND (approval_history.run_id = agent_runs.id OR approval_history.resume_run_id = agent_runs.id)
++                    AND (approval_history.run_id = agent_runs.id OR approval_history.resume_run_id = agent_runs.id
++                      OR ${pendingApprovalRun} = agent_runs.id)
 +                )
                ORDER BY completed_at ASC, id ASC
                LIMIT ${RUN_OUTCOME_PRUNE_BATCH_LIMIT}
              )
-@@ -2691,6 +2701,9 @@
+@@ -2691,6 +2707,9 @@
  let cleanupOldRunsInFlight;
  async function cleanupOldRunsInternal(olderThanMs, erroredOlderThanMs) {
      await ensureRunTables();
@@ -5336,7 +5349,7 @@ new file mode 100644
 +        // for the next launch.
 +        if (isBackgroundAutomationsClosed())
 +            return "skipped";
-+        const task = await claimPendingTask(taskId, { dispatchOutcome: "in-process" });
++        const task = await claimPendingTask(taskId, { dispatchOutcome: "in-process", appId: options.appId });
 +        if (!task)
 +            return "skipped";
 +        return await runClaimedAutomationWebhookTask(task);
@@ -5459,16 +5472,18 @@ index c67091b5fd7c9ce643192317b2606c211dc8fe09..6880de9b61aca81296a49a28f0f76320
 diff --git a/dist/integrations/pending-tasks-retry-job.js b/dist/integrations/pending-tasks-retry-job.js
 --- a/dist/integrations/pending-tasks-retry-job.js
 +++ b/dist/integrations/pending-tasks-retry-job.js
-@@ -1,7 +1,8 @@
+@@ -1,8 +1,9 @@
  import { getDbExec } from "../db/client.js";
 +import { automationRunClaimLeaseMs } from "../jobs/run-history.js";
  import { startIntervalJob, } from "../server/interval-job.js";
  import { hasActiveIntegrationCampaign } from "./integration-campaigns-store.js";
 -import { configuredIntegrationDurableDispatchScopes, dispatchPendingIntegrationTask, isIntegrationDurableDispatchEnabledForTask, } from "./integration-durable-dispatch.js";
+-import { ensurePendingTasksTable, MAX_PENDING_TASK_ATTEMPTS, } from "./pending-tasks-store.js";
 +import { configuredIntegrationDurableDispatchScopes, dispatchPendingIntegrationTask, inProcessIntegrationTaskRunnerFor, isIntegrationDurableDispatchEnabledForTask, } from "./integration-durable-dispatch.js";
- import { ensurePendingTasksTable, MAX_PENDING_TASK_ATTEMPTS, } from "./pending-tasks-store.js";
++import { ensurePendingTasksTable, restoreAutomationApprovalTaskWait, MAX_PENDING_TASK_ATTEMPTS, } from "./pending-tasks-store.js";
  /**
   * Retries stuck integration webhook tasks.
+  *
 @@ -38,8 +39,25 @@
  const DEFAULT_PROCESSING_STUCK_AFTER_MS = 5 * 60 * 1000;
  const SERVERLESS_PROCESSING_STUCK_AFTER_MS = 75_000;
@@ -5574,7 +5589,7 @@ diff --git a/dist/integrations/pending-tasks-retry-job.js b/dist/integrations/pe
              updatedAt: Number(r.updated_at ?? 0),
              dispatchScope: r.dispatch_scope ?? null,
          }));
-@@ -175,6 +215,22 @@
+@@ -175,6 +215,27 @@
          return result;
      for (const row of stuckRows) {
          try {
@@ -5583,6 +5598,11 @@ diff --git a/dist/integrations/pending-tasks-retry-job.js b/dist/integrations/pe
 +                !(await inProcess.acceptsTask(row.id, inProcess.appId))) {
 +                result.skipped += 1;
 +                foreignSkipped += 1;
++                continue;
++            }
++            // History custody precedes expiry, retry reset and redispatch.
++            if (await restoreAutomationApprovalTaskWait(row.id, inProcess?.appId)) {
++                result.skipped += 1;
 +                continue;
 +            }
 +            if (inProcess?.expireTask &&
@@ -5597,7 +5617,7 @@ diff --git a/dist/integrations/pending-tasks-retry-job.js b/dist/integrations/pe
              if (row.status === "processing" &&
                  (await hasActiveIntegrationCampaign(row.id))) {
                  result.skipped += 1;
-@@ -252,6 +308,16 @@
+@@ -252,6 +313,16 @@
              console.error(`[integrations] Failed to retry pending task ${row.id}:`, err);
          }
      }
@@ -5636,7 +5656,15 @@ diff --git a/dist/integrations/pending-tasks-store.d.ts b/dist/integrations/pend
  export interface ResolvedIntegrationSourceContext {
      platform: "slack";
      sourceUrl: string;
-@@ -88,3 +91,7 @@
+@@ -65,6 +68,7 @@
+  */
+ export declare function claimPendingTask(id: string, options?: {
+     dispatchOutcome?: string;
++    appId?: string;
+ }): Promise<PendingTask | null>;
+ export declare function recordPendingTaskDispatchAttempt(id: string, outcome: string): Promise<void>;
+ /** Next queued turn for a provider thread after its current task completes. */
+@@ -88,3 +92,9 @@
  /** Mark a task as failed and stash an error message. */
  export declare function markTaskFailed(id: string, errorMessage: string): Promise<void>;
  export {};
@@ -5644,10 +5672,21 @@ diff --git a/dist/integrations/pending-tasks-store.d.ts b/dist/integrations/pend
 +export declare function markTaskWaitingForApproval(id: string): Promise<void>;
 +
 +export declare function settleAutomationApprovalTask(context: import("../jobs/run-history.js").AutomationApprovalContext, run: import("../jobs/run-history.js").AutomationRun): Promise<void>;
++
++export declare function restoreAutomationApprovalTaskWait(id: string, appId?: string): Promise<boolean>;
 diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pending-tasks-store.js
 --- a/dist/integrations/pending-tasks-store.js
 +++ b/dist/integrations/pending-tasks-store.js
-@@ -278,7 +278,7 @@
+@@ -265,6 +265,8 @@
+ export async function claimPendingTask(id, options) {
+     await ensureTable();
+     const client = getDbExec();
++    if (await restoreAutomationApprovalTaskWait(id, options?.appId))
++        return null;
+     const now = Date.now();
+     // Conditional update: only flip if currently pending. Failed tasks are
+     // terminal unless an explicit retry path resets them to pending first.
+@@ -278,7 +280,7 @@
               SELECT 1 FROM integration_pending_tasks active
               WHERE active.platform = integration_pending_tasks.platform
                 AND active.external_thread_id = integration_pending_tasks.external_thread_id
@@ -5656,7 +5695,7 @@ diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pendin
                 AND active.id <> integration_pending_tasks.id
             )
             AND NOT EXISTS (
-@@ -303,7 +303,7 @@
+@@ -303,7 +305,7 @@
               SELECT 1 FROM integration_pending_tasks active
               WHERE active.platform = integration_pending_tasks.platform
                 AND active.external_thread_id = integration_pending_tasks.external_thread_id
@@ -5665,7 +5704,7 @@ diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pendin
                 AND active.id <> integration_pending_tasks.id
             )
             AND NOT EXISTS (
-@@ -450,6 +450,46 @@
+@@ -450,6 +452,46 @@
          throw new Error("Integration task delivery failure transition lost its race");
      }
  }
@@ -5712,7 +5751,7 @@ diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pendin
  /** Mark a task as failed and stash an error message. */
  export async function markTaskFailed(id, errorMessage) {
      await ensureTable();
-@@ -462,3 +502,40 @@
+@@ -462,3 +504,91 @@
          args: ["failed", now, errorMessage.slice(0, 2000), "{}", id],
      });
  }
@@ -5729,7 +5768,58 @@ diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pendin
 +        throw new Error("The webhook approval wait could not be saved.");
 +}
 +
++/** Recover a split history/task wait without dispatching its automation. */
++export async function restoreAutomationApprovalTaskWait(id, appId) {
++    const task = await getPendingTask(id);
++    if (!task || task.platform !== "automation-webhook")
++        return false;
++    const { getAutomationContinuationForWebhookTask, automationHistoryOwner } = await import("../jobs/run-history.js");
++    const state = await getAutomationContinuationForWebhookTask(id);
++    if (!state)
++        return false;
++    const { run, context } = state;
++    if (!context || context.options.webhookTaskId !== task.id || context.historyId !== run.id ||
++        context.threadId !== run.threadId || run.path !== context.resourcePath ||
++        automationHistoryOwner(context.resourceOwner, { userEmail: context.ownerEmail, orgId: context.orgId }) !== run.owner ||
++        (run.orgId ?? null) !== (context.orgId ?? null) || (appId !== undefined && run.appId !== appId) ||
++        task.ownerEmail !== context.ownerEmail || (task.orgId ?? null) !== (context.orgId ?? null) ||
++        task.externalThreadId !== `${context.resourceOwner}:${context.resourcePath}`)
++        throw new Error("The retained approval task identity changed.");
++    const { getThread } = await import("../chat-threads/store.js");
++    const thread = await getThread(context.threadId);
++    if (!thread || thread.ownerEmail.toLowerCase() !== context.ownerEmail.toLowerCase() ||
++        (thread.orgId ?? null) !== (run.orgId ?? null) ||
++        thread.scope?.type !== "vivary-automation-run" || thread.scope.id !== run.id)
++        throw new Error("The retained approval task thread changed.");
++    if (run.finishedAt && task.status === (run.status === "success" ? "completed" : "failed"))
++        return true;
++    const payload = JSON.parse(task.payload);
++    if (!["pending", "processing", "waiting_approval"].includes(task.status) ||
++        payload.kind !== "automation-webhook" || payload.automationId !== context.resourceId ||
++        payload.owner !== context.resourceOwner || payload.path !== context.resourcePath ||
++        run.pendingAskId !== context.askId)
++        throw new Error("The retained approval task binding changed.");
++    if (task.status === "waiting_approval")
++        return true;
++    const result = await getDbExec().execute({
++        sql: `UPDATE integration_pending_tasks SET status = 'waiting_approval', updated_at = ?
++          WHERE id = ? AND status = ? AND updated_at = ? AND payload = ? AND owner_email = ?
++            AND platform = 'automation-webhook' AND external_thread_id = ? AND COALESCE(org_id, '') = ?
++            AND EXISTS (SELECT 1 FROM automation_runs WHERE id = ? AND owner = ? AND path = ?
++              AND COALESCE(app_id, '') = ? AND COALESCE(org_id, '') = ? AND thread_id = ?
++              AND pending_ask_id = ? AND approval_context = ? AND status = ?
++              AND (finished_at IS NULL OR approval_outcome_reconciled = 0))`,
++        args: [Date.now(), task.id, task.status, task.updatedAt, task.payload, context.ownerEmail,
++            task.externalThreadId, context.orgId ?? "", run.id, run.owner, run.path, run.appId ?? "",
++            run.orgId ?? "", context.threadId, context.askId, JSON.stringify(context), state.storedStatus],
++    });
++    if (result.rowsAffected !== 1)
++        throw new Error("The retained approval task wait must be reconciled again.");
++    return true;
++}
++
 +export async function settleAutomationApprovalTask(context, run) {
++    await restoreAutomationApprovalTaskWait(context.options.webhookTaskId, run.appId ?? undefined);
 +    const task = await getPendingTask(context.options.webhookTaskId);
 +    const status = run.status === "success" ? "completed" : "failed";
 +    if (!task || task.platform !== "automation-webhook" || task.ownerEmail !== context.ownerEmail ||
@@ -6565,7 +6655,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const userApiKey = await getOwnerActiveApiKey(ownerEmail);
          // The run manager invokes its detached callback after the scheduler's
          // setup stack has yielded, so the engine's credentials must be captured
-@@ -382,11 +471,63 @@
+@@ -382,11 +471,71 @@
              engine.defaultModel;
          const model = normalizeModelForEngine(engine, modelCandidate);
          const systemPrompt = await deps.getSystemPrompt(ownerEmail);
@@ -6588,13 +6678,18 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +        let executionSignal;
 +        const approvalHooks = {
 +            onApprovalRequired: async (binding) => {
++                // Refusal before a write is not a durable-storage failure. In
++                // particular, a Stop during needsApproval retains its real cause.
++                if (executionSignal?.aborted || isBackgroundAutomationsClosed() || await isTurnAborted(thread.id, turnId))
++                    throw new Error("The automation is stopping.");
++                await validatedAutomationSurface({ automation, ownerEmail, orgId, definitionRevision, registryFingerprint }, deps);
++                const inputJson = JSON.stringify(binding.input);
++                if (redactText(inputJson) !== inputJson)
++                    throw new Error("Sensitive tool input cannot be retained for automation approval.");
++                // Validation awaits current owners, so Stop may have arrived meanwhile.
++                if (executionSignal?.aborted || isBackgroundAutomationsClosed() || await isTurnAborted(thread.id, turnId))
++                    throw new Error("The automation is stopping.");
 +                try {
-+                    if (executionSignal?.aborted || isBackgroundAutomationsClosed() || await isTurnAborted(thread.id, turnId))
-+                        throw new Error("The automation is stopping.");
-+                    await validatedAutomationSurface({ automation, ownerEmail, orgId, definitionRevision, registryFingerprint }, deps);
-+                    const inputJson = JSON.stringify(binding.input);
-+                    if (redactText(inputJson) !== inputJson)
-+                        throw new Error("Sensitive tool input cannot be retained for automation approval.");
 +                    const expiresAt = Date.now() + 60 * 60_000;
 +                    const askId = await createAgentToolApproval({ ...binding, ownerEmail, orgId, threadId: thread.id, turnId, expiresAt });
 +                    pendingApproval = {
@@ -6613,7 +6708,10 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +                }
 +                catch (error) {
 +                    approvalStorageFailed = true;
-+                    abortRun(runId, "automation_approval_storage_failed");
++                    // Keep a concurrent established Stop reason. The failure flag
++                    // still records that an actual persistence operation failed.
++                    if (getRun(runId)?.status === "running" && !executionSignal?.aborted)
++                        abortRun(runId, "automation_approval_storage_failed");
 +                    throw error;
 +                }
 +            },
@@ -6633,7 +6731,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (runIdRef)
              runIdRef.current = runId;
          await recordRunThread(historyId, thread.id, runId);
-@@ -425,170 +566,267 @@
+@@ -425,170 +574,269 @@
          // handoff to the unclaimed-background-run sweep — it gets reaped as
          // "background_worker_never_started" out from under a still-executing
          // job the moment any single tool call runs past the 25s grace window.
@@ -6877,6 +6975,12 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +                            reject(continuationInterruption);
 +                            return;
 +                        }
++                        // Gate persistence owns this abort. Keep its typed failure instead
++                        // of treating it as a retryable shutdown or generic abort.
++                        if (approvalStorageFailed) {
++                            reject(new BackgroundAutomationRunError("The approval wait was not durably saved", "automation_approval_storage_failed"));
++                            return;
++                        }
 +                        // An initial run explicitly stopped by its owner keeps the
 +                        // ordinary aborted error, even when its turn marker is durable.
 +                        // Approval continuations retain their unconfirmed classification.
@@ -6895,10 +6999,6 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +                        }
 +                        if (run.status !== "completed") {
 +                            reject(new BackgroundAutomationRunError(`Background automation ended with status: ${run.status}`, `background_automation_${run.status}`));
-+                            return;
-+                        }
-+                        if (approvalStorageFailed) {
-+                            reject(new BackgroundAutomationRunError("The approval wait was not durably saved", "automation_approval_storage_failed"));
 +                            return;
 +                        }
 +                        if (pendingApproval) {
@@ -7052,7 +7152,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const usage = usageRef.current;
          if (usage &&
              (usage.inputTokens > 0 ||
-@@ -613,6 +851,8 @@
+@@ -613,6 +861,8 @@
                  // Usage attribution must not break an otherwise successful run.
              }
          }
@@ -7061,7 +7161,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (responseText.trim() &&
              automation.meta.deliveryPlatform &&
              automation.meta.deliveryDestination) {
-@@ -627,6 +867,264 @@
+@@ -627,6 +877,268 @@
                  tenantId: automation.meta.deliveryTenantId,
              });
          }
@@ -7154,6 +7254,10 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +    await persistBackgroundAutomationTurn({ threadId: pending.threadId, threadTitle: pending.options.threadTitle,
 +        prompt: pending.options.prompt, historyId: pending.historyId, continuation: pending.runId !== pending.turnId,
 +        run: { runId: pending.runId, turnId: pending.turnId, startedAt: native.startedAt, events } });
++    if (pending.options.webhookTaskId) {
++        const { restoreAutomationApprovalTaskWait } = await import("../integrations/pending-tasks-store.js");
++        await restoreAutomationApprovalTaskWait(pending.options.webhookTaskId, state.run.appId ?? undefined);
++    }
 +    await markAutomationApprovalReady(pending.historyId, pending.askId);
 +    state.run.approvalReady = true;
 +}
@@ -7597,7 +7701,7 @@ diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
  /**
   * Attach the agent thread once it exists. The thread is created after the run
   * row so the history survives a crash between the two.
-@@ -82,3 +105,39 @@
+@@ -82,3 +105,42 @@
      appId?: string | null;
      limit?: number;
  }): Promise<AutomationRun[]>;
@@ -7628,6 +7732,7 @@ diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
 +    run: AutomationRun; storedStatus: string; decisionAt: number | null;
 +    outcomeReconciled: boolean; resumeRunId: string | null; context: AutomationApprovalContext | null;
 +} | null>;
++export declare function getAutomationContinuationForWebhookTask(taskId: string): Promise<Awaited<ReturnType<typeof getAutomationContinuation>>>;
 +export declare function claimAutomationApprovalDecision(id: string, askId: string, resumeRunId: string): Promise<boolean>;
 +export declare function restoreUnconsumedAutomationApproval(id: string, askId: string, resumeRunId: string): Promise<boolean>;
 +export declare function hasUnresolvedAutomationApproval(owner: string, path: string): Promise<boolean>;
@@ -7637,15 +7742,18 @@ diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
 +export declare function markAutomationApprovalOutcomeReconciled(id: string): Promise<void>;
 +export declare const NEWER_ADMITTED_AUTOMATION_RUN_SQL: string;
 +export declare function hasNewerAutomationRun(run: AutomationRun): Promise<boolean>;
++
++export declare function assertLegacyJobApprovalDeletionAllowed(resource: { id: string; owner: string; path: string }, meta: import("./frontmatter.js").JobFrontmatter, appId?: string): Promise<void>;
 diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 --- a/dist/jobs/run-history.js
 +++ b/dist/jobs/run-history.js
-@@ -5,9 +5,11 @@
+@@ -5,9 +5,12 @@
  import { ensureColumnExists, ensureIndexExists, ensureTableExists, } from "../db/ddl-guard.js";
  import { runMigrations } from "../db/migrations.js";
  import { emit as emitBusEvent, registerEvent } from "../event-bus/index.js";
 +import { redactText } from "../audit/redact.js";
-+import { organizationResourceOwner } from "../resources/store.js";
++import { organizationResourceOwner, organizationIdFromResourceOwner, SHARED_OWNER } from "../resources/store.js";
++import { recoveredFactoryOwnerOrgId } from "./frontmatter.js";
  registerEvent({
      name: "automation.run.finished",
 -    description: "Fires after a scheduled or manual automation run records a terminal status.",
@@ -7653,7 +7761,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
      payloadSchema: z.object({
          automationRunId: z.string(),
          owner: z.string(),
-@@ -16,7 +18,7 @@
+@@ -16,7 +19,7 @@
          orgId: z.string().nullable(),
          runId: z.string().nullable(),
          threadId: z.string().nullable(),
@@ -7662,7 +7770,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          error: z.string().nullable(),
          errorCode: z.string().nullable(),
          /** Wall-clock from `started_at` to now. Null when the row predates the
-@@ -40,16 +42,16 @@
+@@ -40,16 +43,16 @@
  function resolveRunLivenessCeilingMs() {
      return Math.ceil(resolveBackgroundRunHardTimeoutMs() * 1.5);
  }
@@ -7682,7 +7790,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
  /** Rows kept per automation, so a per-minute schedule cannot grow forever. */
  const RUNS_RETAINED_PER_AUTOMATION = 50;
  /** Authoritative release-time schema for durable automation history. */
-@@ -101,6 +103,22 @@
+@@ -101,6 +104,22 @@
          sql: `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS error_code TEXT`,
      },
  ];
@@ -7705,7 +7813,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
  export async function runAutomationRunMigrations(nitroApp) {
      await runMigrations(AUTOMATION_RUN_MIGRATIONS, {
          table: "_automation_run_migrations",
-@@ -128,7 +146,10 @@
+@@ -128,7 +147,10 @@
            error TEXT,
            error_code TEXT,
            claimed_at ${intType()},
@@ -7717,7 +7825,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          )
        `;
              const indexSql = `CREATE INDEX IF NOT EXISTS idx_${TABLE}_owner_automation ON ${TABLE} (owner, automation, started_at)`;
-@@ -137,6 +158,8 @@
+@@ -137,6 +159,8 @@
                  await ensureColumnExists(TABLE, "claimed_at", `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS claimed_at ${intType()}`);
                  await ensureColumnExists(TABLE, "dispatch_pending", `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS dispatch_pending ${intType()} NOT NULL DEFAULT 0`);
                  await ensureColumnExists(TABLE, "error_code", `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS error_code TEXT`);
@@ -7726,7 +7834,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
                  await ensureIndexExists(`idx_${TABLE}_owner_automation`, indexSql);
                  return;
              }
-@@ -144,6 +167,7 @@
+@@ -144,6 +168,7 @@
              const { rows } = await client.execute(`PRAGMA table_info("${TABLE}")`);
              const columns = new Set(rows.map((row) => String(row.name)));
              for (const [name, definition] of [
@@ -7734,7 +7842,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
                  ["claimed_at", `${intType()}`],
                  ["dispatch_pending", `${intType()} NOT NULL DEFAULT 0`],
                  ["app_id", "TEXT"],
-@@ -170,10 +194,14 @@
+@@ -170,10 +195,14 @@
      }
      return _initPromise;
  }
@@ -7750,7 +7858,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          ? "interrupted"
          : stored;
      return {
-@@ -187,7 +215,11 @@
+@@ -187,7 +216,11 @@
          runId: row.run_id == null ? null : stringifyValue(row.run_id),
          threadId: row.thread_id == null ? null : stringifyValue(row.thread_id),
          status,
@@ -7762,7 +7870,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          finishedAt: row.finished_at == null ? null : Number(row.finished_at),
          error: row.error == null && status === "interrupted"
              ? INTERRUPTED_RUN_MESSAGE
-@@ -202,6 +234,18 @@
+@@ -202,6 +235,18 @@
      };
  }
  /**
@@ -7781,7 +7889,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
   * Record an automation execution. Manual runs create the row before dispatch,
   * so `dispatchPending` distinguishes that durable handoff from a run that has
   * already entered the worker.
-@@ -210,8 +254,8 @@
+@@ -210,8 +255,8 @@
      await ensureTable();
      const id = randomUUID();
      await getDbExec().execute({
@@ -7792,7 +7900,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          args: [
              id,
              input.owner,
-@@ -224,6 +268,7 @@
+@@ -224,6 +269,7 @@
              input.threadId ?? null,
              Date.now(),
              input.dispatchPending ? 1 : 0,
@@ -7800,7 +7908,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          ],
      });
      await pruneAutomationRuns(input.owner, input.automation);
-@@ -244,7 +289,7 @@
+@@ -244,7 +290,7 @@
      const now = Date.now();
      const result = await getDbExec().execute({
          sql: `UPDATE ${TABLE} SET claimed_at = ? WHERE id = ? AND dispatch_pending = 1 AND (claimed_at IS NULL OR claimed_at <= ?) AND status = 'running'`,
@@ -7809,7 +7917,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
      });
      return Number(result.rowsAffected ?? 0) > 0;
  }
-@@ -266,7 +311,7 @@
+@@ -266,7 +312,7 @@
              AND started_at <= ?
            ORDER BY started_at ASC LIMIT ${limit}`,
          args: [
@@ -7818,7 +7926,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
              ...(appId ? [appId] : []),
              Date.now() - olderThanMs,
          ],
-@@ -291,7 +336,7 @@
+@@ -291,7 +337,7 @@
  async function pruneAutomationRuns(owner, automation) {
      await getDbExec().execute({
          sql: `DELETE FROM ${TABLE}
@@ -7827,7 +7935,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
              SELECT MIN(started_at) FROM (
                SELECT started_at FROM ${TABLE}
                WHERE owner = ? AND automation = ?
-@@ -302,7 +347,9 @@
+@@ -302,7 +348,9 @@
          args: [owner, automation, owner, automation],
      });
  }
@@ -7838,7 +7946,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
      await ensureTable();
      const existing = await getDbExec().execute({
          sql: `SELECT owner, automation, path, org_id, run_id, thread_id, started_at FROM ${TABLE} WHERE id = ? LIMIT 1`,
-@@ -310,17 +357,20 @@
+@@ -310,17 +358,20 @@
      });
      const row = existing.rows?.[0];
      const finishedAt = Date.now();
@@ -7863,7 +7971,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          return;
      const rawStartedAt = Number(row.started_at);
      const startedAt = Number.isFinite(rawStartedAt) ? rawStartedAt : null;
-@@ -351,10 +401,16 @@
+@@ -351,10 +402,16 @@
   */
  export async function attachAutomationRunThread(id, threadId, runId) {
      await ensureTable();
@@ -7884,7 +7992,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
  }
  /**
   * Forget an automation's executions.
-@@ -371,7 +427,7 @@
+@@ -371,7 +428,7 @@
      // definition's.
      const cutoff = Date.now();
      await getDbExec().execute({
@@ -7893,7 +8001,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          args: [owner, automation, cutoff],
      });
  }
-@@ -393,3 +449,123 @@
+@@ -393,3 +450,174 @@
      const now = Date.now();
      return (result.rows ?? []).map((row) => toRun(row, now));
  }
@@ -7935,6 +8043,22 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +        resumeRunId: row.resume_run_id == null ? null : String(row.resume_run_id),
 +        context: row.approval_context ? JSON.parse(String(row.approval_context)) : null };
 +}
++/** A webhook task can belong to only one unresolved approval history. */
++export async function getAutomationContinuationForWebhookTask(taskId) {
++    await ensureTable();
++    const taskReference = isPostgres()
++        ? "approval_context::jsonb #>> '{options,webhookTaskId}'"
++        : "json_extract(approval_context, '$.options.webhookTaskId')";
++    const result = await getDbExec().execute({
++        sql: `SELECT id FROM automation_runs WHERE approval_context IS NOT NULL
++          AND ${taskReference} = ? AND (finished_at IS NULL AND status IN ('waiting_approval', 'resuming')
++            OR finished_at IS NOT NULL AND approval_outcome_reconciled = 0) LIMIT 2`,
++        args: [taskId],
++    });
++    if (result.rows.length > 1)
++        throw new Error("The webhook task has conflicting approval history owners.");
++    return result.rows.length ? getAutomationContinuation(String(result.rows[0].id)) : null;
++}
 +export async function claimAutomationApprovalDecision(id, askId, resumeRunId) {
 +    const result = await getDbExec().execute({
 +        sql: `UPDATE automation_runs SET status = 'resuming', decision_at = ?, resume_run_id = ?
@@ -7962,6 +8086,41 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +    });
 +    return (result.rows ?? []).length > 0;
 +}
++/** Deletion authority is separate from the stored creator's current eligibility. */
++export async function assertLegacyJobApprovalDeletionAllowed(resource, meta, appId) {
++    const resourceOrg = organizationIdFromResourceOwner(resource.owner);
++    const orgId = recoveredFactoryOwnerOrgId(meta, resource.path, resource.owner) ?? meta.orgId ?? null;
++    const creator = meta.runAs === "shared" ? resource.owner : meta.createdBy ||
++        (!resourceOrg && resource.owner !== SHARED_OWNER ? resource.owner : null);
++    if (!creator || (resourceOrg && resourceOrg !== orgId))
++        throw new Error("Cannot verify the persisted job approval history scope.");
++    const historyOwner = automationHistoryOwner(resource.owner, { userEmail: creator, orgId });
++    await ensureTable();
++    const resourceId = isPostgres() ? "approval_context::jsonb ->> 'resourceId'" : "json_extract(approval_context, '$.resourceId')";
++    const resourceOwner = isPostgres() ? "approval_context::jsonb ->> 'resourceOwner'" : "json_extract(approval_context, '$.resourceOwner')";
++    const resourcePath = isPostgres() ? "approval_context::jsonb ->> 'resourcePath'" : "json_extract(approval_context, '$.resourcePath')";
++    // Include a conflicting row still bound to this exact resource. Looking
++    // only under a newly projected owner could miss retained custody after an edit.
++    const result = await getDbExec().execute({
++        sql: `SELECT * FROM automation_runs WHERE finished_at IS NULL
++          AND status IN ('waiting_approval', 'resuming') AND (
++            owner = ? AND path = ? OR ${resourceId} = ? OR ${resourceOwner} = ? AND ${resourcePath} = ?)`,
++        args: [historyOwner, resource.path, resource.id, resource.owner, resource.path],
++    });
++    for (const row of result.rows) {
++        const context = row.approval_context ? JSON.parse(String(row.approval_context)) : null;
++        if (!context || row.owner !== historyOwner || row.path !== resource.path ||
++            (row.app_id ?? null) !== (appId?.trim() || null) || (row.org_id ?? null) !== orgId ||
++            context.historyId !== row.id || context.resourceId !== resource.id ||
++            context.resourceOwner !== resource.owner || context.resourcePath !== resource.path ||
++            context.ownerEmail?.toLowerCase() !== creator.toLowerCase() ||
++            (context.orgId ?? null) !== orgId || context.threadId !== row.thread_id || context.askId !== row.pending_ask_id)
++            throw new Error("The persisted job approval history scope is missing or conflicting.");
++    }
++    if (result.rows.length)
++        throw new Error("Resolve the waiting approval before deleting this job.");
++}
++
 +/** History retention never changes thread custody, including terminal runs. */
 +export async function isAutomationRunThread(threadId) {
 +    await ensureTable();
@@ -9101,15 +9260,29 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
 diff --git a/dist/jobs/tools.js b/dist/jobs/tools.js
 --- a/dist/jobs/tools.js
 +++ b/dist/jobs/tools.js
-@@ -5,6 +5,7 @@
+@@ -5,6 +5,8 @@
  import { getRequestUserEmail, getRequestOrgId, getIntegrationRequestContext, } from "../server/request-context.js";
  import { isValidCron, nextOccurrence, describeCron, effectiveTimezone, isValidTimezone, } from "./cron.js";
  import { classifyJobResource, jobBelongsToApp } from "./frontmatter.js";
++import { assertLegacyJobApprovalDeletionAllowed } from "./run-history.js";
 +import { unattendedToolRefusal } from "./unattended-surface.js";
  import { parseJobFrontmatter, buildJobContent, normalizeJobMcpTools, } from "./scheduler.js";
  export { jobBelongsToApp } from "./frontmatter.js";
  function getOwner() {
-@@ -359,7 +360,7 @@
+@@ -342,6 +344,12 @@
+     if (denied) {
+         return JSON.stringify({ error: denied });
+     }
++    try {
++        await assertLegacyJobApprovalDeletionAllowed(resource, meta, appId);
++    }
++    catch (error) {
++        return JSON.stringify({ error: error instanceof Error ? error.message : "Cannot verify the persisted job approval history scope." });
++    }
+     await resourceDelete(resource.id);
+     return JSON.stringify({ deleted: true, name });
+ }
+@@ -359,7 +367,7 @@
  
  Cron format is 5 fields: minute hour day-of-month month day-of-week. Common patterns: '0 9 * * *' (daily 9am), '0 9 * * 1-5' (weekdays 9am), '0 * * * *' (every hour), '0 9 * * 1' (Mondays 9am), '*/30 * * * *' (every 30 min).
  
@@ -9118,7 +9291,7 @@ diff --git a/dist/jobs/tools.js b/dist/jobs/tools.js
  
  To run code-agent work on a paired always-on computer, pass executionHostId (from manage-automations action=list-hosts), and optionally executionEngine and executionCwd. The selected host is explicit and never silently replaced.`,
                  parameters: {
-@@ -431,7 +432,13 @@
+@@ -431,7 +439,13 @@
                  allowedValues: { action: ["list"] },
                  description: "Plan mode allows listing recurring jobs.",
              },
@@ -13439,7 +13612,7 @@ diff --git a/dist/triggers/dispatcher.js b/dist/triggers/dispatcher.js
  import { automationMatchesEventOwner, resolveAutomationExecutionIdentity, } from "../automations/service.js";
  import { subscribe, unsubscribe } from "../event-bus/index.js";
 -import { isBackgroundAutomationRunActive, runBackgroundAutomation, } from "../jobs/background-automation-runner.js";
-+import { isBackgroundAutomationRunActive, isBackgroundAutomationsClosed, runBackgroundAutomation, trackBackgroundAutomationWork, } from "../jobs/background-automation-runner.js";
++import { BackgroundAutomationRunError, isBackgroundAutomationRunActive, isBackgroundAutomationsClosed, runBackgroundAutomation, trackBackgroundAutomationWork, } from "../jobs/background-automation-runner.js";
  import { buildJobResourceContent, jobBelongsToApp, parseJobResource, } from "../jobs/frontmatter.js";
  import { resourceGetByPath, resourceListAllOwners, resourcePutIfCurrent, } from "../resources/store.js";
  import { evaluateCondition } from "./condition-evaluator.js";
@@ -13756,7 +13929,7 @@ diff --git a/dist/triggers/dispatcher.js b/dist/triggers/dispatcher.js
          await recordTriggerExecutionOutcome(latest, {
              lastStatus: "success",
              lastError: undefined,
-@@ -450,5 +604,7 @@
+@@ -450,5 +604,12 @@
              lastError,
          });
          console.error(`[triggers] "${triggerName}" failed:`, lastError);
@@ -13764,6 +13937,11 @@ diff --git a/dist/triggers/dispatcher.js b/dist/triggers/dispatcher.js
 -}
 +        if (err?.errorCode === INTERRUPTED_RUN_ERROR_CODE)
 +            return "interrupted";
++        // Only this durable gate failure must reach the webhook worker. Event
++        // errors keep their existing handling and shutdown keeps its retry path.
++        if (startedBy === "webhook" && err instanceof BackgroundAutomationRunError &&
++            err.errorCode === "automation_approval_storage_failed")
++            throw err;
 +    }
 +}
 diff --git a/dist/triggers/routes.js b/dist/triggers/routes.js

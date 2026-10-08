@@ -2359,7 +2359,16 @@ never automatically dispatched again. A persisted decline recovers as declined.
 This gives no exactly-once external-effect promise. Stop and shutdown can leave
 an approved action unconfirmed. The runner retains that explicit interrupted
 classification through Native completion instead of replacing it with generic error. Shutdown preserves an idle approval wait.
-Durable gate storage failure aborts the run and cannot become success.
+Durable gate storage failure aborts the run and cannot become success. Its
+`automation_approval_storage_failed` classification takes precedence over the
+resulting generic abort. Pre-write Stop and validation refusals stay outside the
+persistence catch. Stop is checked again after validation, and a genuine failed
+write retains its failure flag without re-aborting an already stopped chunk.
+Only that typed webhook failure propagates to the
+existing worker. The worker returns failed and retains its payload pending for
+exact-bound terminal reconciliation, which settles task and resource without
+model redispatch or configured effects. Generic event errors and shutdown retry
+semantics are unchanged.
 
 `tests/automation-approval.test.mjs` uses installed Core, disposable SQLite and
 fake engines and tools. It covers same-run approval, decline, concurrent and
@@ -2843,3 +2852,32 @@ held cold initialization, warm reuse, settings or discovery failure and retry,
 plus all three restricted prompt paths with actual planted-file confinement.
 These newly authored controls remain unrun until the controller refreshes the
 maintained package after exact-source review.
+
+### Approval recovery across durable owners
+
+Pending-task custody repair matches the exact approval history, app, projected
+owner, organization, thread, ask and webhook payload before a retry or settlement.
+A processing or pending task can return to waiting after hard loss between the
+two wait writes. No tool or model is redispatched during that repair. Native
+liveness and consumed-ask checks still control the owner decision. Terminal task
+and resource bookkeeping precede the existing claim-safe FIFO wake.
+
+The pruning owner retains approval_context.runId as well as run_id and
+resume_run_id while waiting or resuming. SQLite uses json_extract. PostgreSQL uses
+a jsonb field selector. Both bind the original retained chunk, and ordinary
+pruning resumes after settlement. Legacy manage-jobs deletion projects the
+resolved execution identity through automationHistoryOwner before checking the
+unfinished wait. Existing creator/admin authority and unattended mutation refusal
+remain. Maintained tests distinguish selected SQL faults followed by SIGKILL from
+ordinary thrown errors and cover normal owner recovery, attachment, pruning and
+legacy deletion. Candidate runtime validation remains a controller gate.
+
+The legacy deletion guard projects stored history scope independently of current
+creator membership. Existing mutation authority permits org-admin cleanup of an
+ordinary job after its creator leaves. Exact resource-bound unfinished histories
+remain protected even if their scope conflicts with the current job metadata.
+Unknown scope fails closed, and no execution or owner-decision eligibility changes.
+Maintained controls use normal ORG/BetterAuth initialization and the actual
+manage-jobs action, with real membership removal and explicit restoration only for
+owner-decline cleanup. PostgreSQL pruning coverage is a static driver adapter and
+query-contract control. It does not establish real PostgreSQL database execution.

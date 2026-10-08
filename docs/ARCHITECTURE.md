@@ -239,6 +239,23 @@ receipt](product/multi-project/receipts/runtime-sandbox-coverage-2026-10-06.md)
 owns the versioned source map, harmless Linux observation and UNRUN platform and
 surface checks; it does not establish whole-product containment or acceptance.
 
+An approval's history and webhook task can be saved on opposite sides of a
+process loss. The pending-task owner restores only the exact task named by the
+retained history before claim, retry or terminal settlement. It rechecks app,
+projected execution owner, organization, Native thread, ask, external thread and
+payload binding, then conditionally transfers custody without running a model or
+tool. Native liveness and ask-consumption rules still govern the owner decision.
+Terminal task and resource outcomes precede the existing FIFO wake. Unfinished
+wait retention covers the pending context's original chunk as well as current
+and resume chunks, using explicit SQLite and PostgreSQL JSON selectors. Settlement
+releases that evidence to ordinary pruning. Supported legacy job deletion resolves
+the persisted creator and organization before checking unfinished history, while
+keeping its existing creator and admin authorization. This history projection does
+not require the stored creator's current execution eligibility. An authorized
+admin can delete an ordinary job after that creator leaves, while missing or
+conflicting persisted history scope still refuses deletion before mutation. Retained history-ID Decline
+can work without a definition, but a blocked deletion preserves normal discovery.
+
 Automation terminal ownership follows admitted execution, not request insertion.
 `automation_runs.admitted_at` is recorded at initial Native thread attachment and
 preserved across approval continuations. Durable history attachment is required
@@ -276,6 +293,73 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+Issue #108 approval predicate Stop correction. Review identified a real Stop
+window while Native awaits the configured tool's asynchronous needsApproval
+predicate. The pre-write stopping and surface-validation guards now remain
+outside the approval-persistence catch. A refusal there cannot infer a storage
+failure or change an existing abort reason. A second stopping check follows
+validation. Actual failed persistence still records its typed failure, while an
+already established concurrent Stop cause is retained on the Native chunk.
+The maintained child controls hold the real configured action predicate, invoke
+Native owner Stop or shutdown, release before shutdown drain, and assert zero
+approval-storage faults and configured effects. Ordinary Stop remains an error,
+shutdown remains interrupted and the webhook returns to pending with attempts
+restored. The selected SQL-fault diagnostic and retry-before-reconciliation
+control remain unchanged. New runtime controls are unrun. Syntax and patch
+integrity evidence do not establish runtime or app acceptance.
+
+Issue #108 thrown approval-storage failure correction. The selected task-wait SQL
+fault reached the runner once with zero configured effects, but its abort lost the
+storage error code and the webhook dispatcher reported completion. Native now
+preserves the typed gate-storage failure before generic abort classification and
+propagates only that webhook failure to the existing worker. The worker's ordinary
+failure transition retains the payload as pending. Exact-bound terminal approval
+reconciliation settles that task and resource without another model or tool run.
+Generic event errors and shutdown interruption retain their existing handling.
+The maintained diagnostic asserts the fault before the worker result and adds
+payload binding, typed terminal history, repeat reconciliation and refused replay
+checks. The no-fault wait/approve positive and actual quit retry controls remain.
+Only syntax and patch integrity checks were run for these new bytes. Controller
+runtime validation, independent review and acceptance remain required.
+
+Issue #108 departed-creator deletion correction. Independent review found that
+the legacy wait guard made current execution eligibility a deletion prerequisite,
+blocking an authorized admin from cleaning up an ordinary departed creator's job.
+Deletion now keeps the original mutation authority and independently projects the
+stored resource, recovered Factory scope, creator and organization through the
+existing history owner. Its unresolved-history query also includes exact retained
+resource/context bindings, so changed or missing scope cannot hide custody under
+another owner. It refuses unknown or conflicting scope before definition mutation.
+No membership or execution gate was broadened. Maintained normal-schema controls
+remove the creator's actual membership, prove execution refusal, allow no-wait
+admin cleanup, preserve waiting/resuming custody, then explicitly restore membership
+only for owner-decline cleanup. Missing and conflicting stored history scope and
+foreign app/org/non-admin attempts preserve resource and token snapshots. Existing
+task recovery, FIFO, original-chunk retention, Stop and answer folding are unchanged.
+The PostgreSQL pruning case is a static adapter/query-contract control, not real
+PostgreSQL database execution. Only syntax and patch integrity checks run here.
+Independent review and controller runtime, typecheck, CI and app gates remain
+required. The prior 1200-second implementation receipt remains interrupted.
+
+Issue #108 durable-owner recovery gaps. Source triage confirmed a crash between
+history and task wait writes, pruning of the original pending chunk after fresh
+attachment, and an omitted legacy deletion guard. Exact-bound task custody repair
+now runs through the existing task/history owners before claims, retries and
+settlement. Current app and stored context are conditional write bindings, not
+new execution permissions. Retention protects the pending context's original
+chunk for waiting and resuming histories. The legacy manage-jobs owner projects
+the resolved execution identity with the existing two-argument history helper
+before any delete. Maintained SIGKILL controls distinguish hard process loss from
+thrown storage errors and require actual fault-hit receipts, fresh-process owner
+decisions, zero or one configured effect, retained identity, pruning after
+settlement and FIFO wake after terminal bookkeeping. Personal, shared creator,
+personal-with-organization and org-admin deletion controls use normal Native
+schema initialization. Existing Stop, consumed replay refusal, reliable admission
+and progressive final-answer ownership remain unchanged. This source allocation
+runs syntax and patch integrity checks only. Controller runtime tests, independent
+review, typecheck, CI and built application acceptance remain required. Historical
+review coverage failure and prior evidence are preserved.
 
 Issue #108 admission persistence correction. The independent review found that
 thread attachment still swallowed a database failure before Native insertion and

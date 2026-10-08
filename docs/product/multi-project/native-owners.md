@@ -76,5 +76,27 @@ A webhook waiting for approval retains its existing task and blocks later calls
 on that external thread. After the owner decision durably settles the task and
 resource, Native immediately dispatches its next FIFO task. Dispatch failure is
 recoverable through the existing terminal bookkeeping owner and task retry path.
+Stop during the configured tool's approval predicate retains the Native Stop
+cause. Refusal before approval persistence cannot become a storage failure.
+A thrown approval-wait storage failure retains its typed terminal history error.
+The webhook worker returns failed and keeps its payload pending through the
+existing failure transition. Terminal reconciliation validates that retained
+binding before settling task and resource without redispatching the action.
 A consumed original action is never replayed. New source still requires the
 controller's affected tests, ordinary concurrent transport exit check and review.
+
+A process loss between saving approval history and task custody is recovered by
+matching the exact retained task and execution binding before claim or settlement.
+Recovery does no model or tool work. An unfinished approval retains the original
+pending Native chunk even after fresh continuation attachment. After settlement,
+ordinary pruning applies again. Legacy manage-jobs deletion refuses unfinished
+waiting and resuming history using the job's resolved creator and organization.
+Existing creator and organization-admin permissions still apply. A retained
+history-ID inspection or Decline can survive a missing definition, so preserving
+the definition protects normal discovery rather than creating that API access.
+
+An authorized org admin can delete an ordinary job after its creator leaves the
+organization. Deletion uses the stored execution/history scope rather than current
+execution eligibility. It still refuses waiting or resuming history and unknown
+or conflicting scope before changing the definition. Restoring membership for an
+owner-decline cleanup does not imply that a revoked owner can approve or decline.
