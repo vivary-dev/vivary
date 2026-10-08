@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { pathToFileURL } from "node:url";
 
-// The optional path permits a pure source-overlay check before the controller
-// refreshes Core. Normal CI always uses the actual installed Native owner.
-const source = process.env.VIVARY_TEST_THREAD_DATA_BUILDER
-  ? pathToFileURL(process.env.VIVARY_TEST_THREAD_DATA_BUILDER)
-  : new URL("../../agent/thread-data-builder.js", import.meta.resolve("@agent-native/core/client/agent-chat"));
+const source = new URL("../../agent/thread-data-builder.js", import.meta.resolve("@agent-native/core/client/agent-chat"));
 const { buildAssistantMessage, foldAssistantTurn, threadDataToEngineMessages } = await import(source);
 const turnId = "logical-automation-turn";
 const waiting = "Waiting for your approval of the configured action before this automation can continue.";
