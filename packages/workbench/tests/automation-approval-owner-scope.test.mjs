@@ -120,6 +120,17 @@ for (const decision of ["decline", "approve"]) test(`normal HTTP owner with acti
   assert.equal(final.status, decision === "approve" ? "success" : "declined");
   assert.equal(final.id, result.historyId);
   assert.equal(final.threadId, result.threadId);
+  if (decision === "approve") {
+    const freshInspection = await call("inspect-automation-run", { historyId: result.historyId });
+    assert.equal(freshInspection.status, 200);
+    const repository = JSON.parse(freshInspection.body.threadData);
+    const finalAssistant = repository.messages.map(item => item.message ?? item)
+      .filter(message => message.role === "assistant").at(-1);
+    const visibleText = finalAssistant.content.filter(part => part.type === "text")
+      .map(part => part.text).join("");
+    assert.match(visibleText, /Automation complete\./,
+      "the normal HTTP owner route freshly reads the persisted final answer");
+  }
   const retained = await fixture.pending(result.historyId);
   assert.equal(retained.turnId, pending.turnId);
   const thread = await threads.getThread(result.threadId);

@@ -2298,6 +2298,18 @@ logical turn, exact Native ask, expiry, automation definition revision and the
 restricted registry fingerprint. It invokes the current validated entry through
 `executeAgentToolCall`, including Native schema validation, journal, mutation
 ordering and redaction. The approval store consumes the exact ask ID once.
+The approved result remains durably saved before the follow-up model response.
+Automation saves pass the Native journal sequence to `foldAssistantTurn`.
+Its automation-only mode retains chunk snapshots in the same assistant message's
+custom metadata and replaces the latest chunk at a higher sequence, including
+shorter authoritative text. Earlier chunks and the waiting sentence remain.
+Equivalent or stale snapshots do not append text or cards again. Consumed ask
+cards are removed from both visible parts and retained snapshots. Completed
+prior chunks stay sealed. Legacy accumulated content is retained as a prefix
+until a fresh chunk records its boundary. This adds metadata inside the existing
+thread row, not another transcript or execution owner. Chat and team callers
+keep the default fold mode. Broader merge/replay and installed automation checks
+remain required for the new source.
 The runner rechecks identity and fingerprints before consumption and immediately
 before the current entry runs. A replaced MCP endpoint, changed schema, hidden
 tool or changed definition refuses approval. Fingerprints contain digests,

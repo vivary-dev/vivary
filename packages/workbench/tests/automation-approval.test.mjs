@@ -54,6 +54,10 @@ test("approval resumes the same history, thread and logical turn once with the o
   assert.equal(data.messages.filter(item => (item.message ?? item).role === "user").length, 1);
   assert.equal(data.messages.filter(item => (item.message ?? item).role === "assistant").length, 1, "Native fold retains one logical turn");
   assert.match(JSON.stringify(data), /configured-result/);
+  assert.match(JSON.stringify(data.messages.at(-1).message.content), /Automation complete\./,
+    "the shorter final answer survives the actual interim tool save and a fresh durable thread read");
+  const finalInspection = await runner.inspectAutomationRun(result.historyId, actor, fixture.deps);
+  assert.match(finalInspection.threadData, /Automation complete\./, "normal owner inspection returns the persisted final answer");
   assert.equal(JSON.stringify(data).includes('"askId"'), false, "unexecuted gate card is replaced by the result");
   assert.equal(finished.filter(event => event.automationRunId === result.historyId).length, 1);
   await assert.rejects(fixture.decide(result.historyId, pending), /no longer waiting/);

@@ -919,10 +919,9 @@ diff --git a/dist/agent/run-store.js b/dist/agent/run-store.js
      const cutoff = Date.now() - olderThanMs;
      const erroredCutoff = Date.now() - Math.max(erroredOlderThanMs ?? 0, olderThanMs);
 diff --git a/dist/agent/thread-data-builder.d.ts b/dist/agent/thread-data-builder.d.ts
-index bd348265bcdf57cebf5d611d2741fa9705bf6486..fb04b33d759ba1b01c40c3032b87c3e537efc0dc 100644
 --- a/dist/agent/thread-data-builder.d.ts
 +++ b/dist/agent/thread-data-builder.d.ts
-@@ -6,6 +6,8 @@ import type { EngineMessage } from "./engine/types.js";
+@@ -6,6 +6,8 @@
  import type { AgentChatAttachment, RunEvent } from "./types.js";
  interface ContentPart {
      type: string;
@@ -931,7 +930,7 @@ index bd348265bcdf57cebf5d611d2741fa9705bf6486..fb04b33d759ba1b01c40c3032b87c3e5
      text?: string;
      toolCallId?: string;
      toolName?: string;
-@@ -138,6 +140,7 @@ export declare function buildRepositoryFromCodeAgentTranscript(events: readonly
+@@ -138,6 +140,7 @@
   * accepting client-only messages and metadata.
   */
  export interface MergeThreadDataOptions {
@@ -939,23 +938,43 @@ index bd348265bcdf57cebf5d611d2741fa9705bf6486..fb04b33d759ba1b01c40c3032b87c3e5
      preserveExistingQueuedMessages?: boolean;
      preserveExistingTopLevelKeys?: boolean;
  }
+@@ -184,12 +187,20 @@
+  *   - A run whose content is already represented (already folded, or the client
+  *     saved it) → kept as-is, choosing whichever copy has more content.
+  *   - A new chunk → appended onto the accumulated turn.
++ * Automation callers may supply `chunkEventSeq` for progressive snapshots.
++ * Later event sequences replace the latest chunk, including shorter corrections.
++ * Stale or repeated snapshots keep the saved turn. Other callers retain the
++ * default policy described above.
+  * Falls back to per-run upsert when no `turnId` is available (turn == run).
+  */
+ export declare function foldAssistantTurn(repo: any, assistantMsg: AssistantMessage, options: {
+     turnId?: string;
+     runId?: string;
+     parentId?: string | null;
++    /** Authoritative automation chunk revision from the Native event journal. */
++    chunkEventSeq?: number;
++    /** Exact consumed ask whose unexecuted card must not reappear. */
++    resolvedAskId?: string;
+ }): any;
+ export declare function normalizeThreadTitle(value: unknown): string;
+ /**
 diff --git a/dist/agent/thread-data-builder.js b/dist/agent/thread-data-builder.js
-index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03e54bdcea 100644
 --- a/dist/agent/thread-data-builder.js
 +++ b/dist/agent/thread-data-builder.js
-@@ -10,6 +10,11 @@ function isInternalContinuationError(event) {
+@@ -9,6 +9,11 @@
+     const code = String(event.errorCode ?? "").toLowerCase();
      const msg = event.error.toLowerCase();
      if (code === "builder_gateway_error")
-         return false;
++        return false;
 +    // A provider's in-stream error ends the turn with its message and a Retry.
 +    // Its message can name 502, a closed stream, or an unavailable service,
 +    // which the checks below read as transient.
 +    if (code === "provider_stream_error")
-+        return false;
+         return false;
      // An explicit `recoverable: false` outranks the code and message inference
      // below, matching `isRecoverableContinuationError`. The background
-     // no-progress breaker stops a turn while PRESERVING the underlying transient
-@@ -60,6 +65,7 @@ export function buildAssistantMessage(events, runId, options = {}) {
+@@ -60,6 +65,7 @@
      let toolCallCounter = 0;
      let runError = null;
      let endedAtInternalContinuationBoundary = false;
@@ -963,7 +982,7 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
      const appendText = (text) => {
          const last = content[content.length - 1];
          if (last && last.type === "text") {
-@@ -237,6 +243,13 @@ export function buildAssistantMessage(events, runId, options = {}) {
+@@ -237,6 +243,13 @@
              appendText(`${content.length > 0 ? "\n\n" : ""}${formatChatErrorText(event.error, event.upgradeUrl, event.errorCode)}`);
              continue;
          }
@@ -977,7 +996,7 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
          // done, missing_api_key — terminal signals, not content
      }
      // Only a truly empty turn produces nothing to persist. A turn that ended at
-@@ -244,7 +257,9 @@ export function buildAssistantMessage(events, runId, options = {}) {
+@@ -244,7 +257,9 @@
      // recoverable gateway error, suppressed loop_limit) DID stream real content
      // — persist it as a partial so the continuation run can fold the next chunk
      // onto it (foldAssistantTurn) instead of the earlier text being dropped.
@@ -988,7 +1007,7 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
          return null;
      const continued = endedAtInternalContinuationBoundary;
      if (!continued) {
-@@ -268,6 +283,8 @@ export function buildAssistantMessage(events, runId, options = {}) {
+@@ -268,6 +283,8 @@
      }
      if (continued)
          custom.continued = true;
@@ -997,10 +1016,11 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
      if (runError) {
          custom.runError = {
              ...runError,
-@@ -352,6 +369,15 @@ function getMessageRunId(message) {
+@@ -351,6 +368,15 @@
+     if (typeof errorRun === "string")
          return errorRun;
      return undefined;
- }
++}
 +/**
 + * An assistant message that holds nothing a client save should keep. A reply
 + * the owner stopped before any content holds the stop, so it is kept.
@@ -1009,11 +1029,10 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
 +    return (message?.role === "assistant" &&
 +        messageContentIsEmpty(message.content) &&
 +        message.metadata?.custom?.userStopped !== true);
-+}
+ }
  function messageContentIsEmpty(content) {
      if (typeof content === "string")
-         return content.trim().length === 0;
-@@ -545,7 +571,13 @@ function findRankedIdentityMatch(existingKeys, incomingKeySets, usedIncoming, ex
+@@ -545,7 +571,13 @@
          ? index
          : closest);
  }
@@ -1028,7 +1047,7 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
      const chosen = getStoredMessage(chosenEntry);
      const other = getStoredMessage(otherEntry);
      if (chosen?.role !== "assistant" || other?.role !== "assistant") {
-@@ -554,13 +586,24 @@ function preserveAssistantRunDuration(chosenEntry, otherEntry) {
+@@ -554,13 +586,24 @@
      const chosenCustom = chosen.metadata?.custom && typeof chosen.metadata.custom === "object"
          ? chosen.metadata.custom
          : {};
@@ -1056,7 +1075,7 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
          return chosenEntry;
      const nextMessage = {
          ...chosen,
-@@ -568,7 +611,7 @@ function preserveAssistantRunDuration(chosenEntry, otherEntry) {
+@@ -568,7 +611,7 @@
              ...chosen.metadata,
              custom: {
                  ...chosenCustom,
@@ -1065,7 +1084,7 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
              },
          },
      };
-@@ -599,15 +642,15 @@ function chooseMergedMessageEntry(existingEntry, incomingEntry) {
+@@ -599,15 +642,15 @@
                      !isTerminalAssistantStatus(incoming?.status)
                      ? existingEntry
                      : incomingEntry;
@@ -1077,18 +1096,18 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
          isTerminalAssistantStatus(existing?.status) &&
          !isTerminalAssistantStatus(incoming?.status)) {
 -        return preserveAssistantRunDuration(existingEntry, incomingEntry);
-+        return preserveAssistantRunMetadata(existingEntry, incomingEntry);
-     }
+-    }
 -    return preserveAssistantRunDuration(incomingEntry, existingEntry);
++        return preserveAssistantRunMetadata(existingEntry, incomingEntry);
++    }
 +    return preserveAssistantRunMetadata(incomingEntry, existingEntry);
  }
  function normalizeMessageEntry(entry, parentId) {
      const message = getStoredMessage(entry);
-@@ -775,6 +818,16 @@ function replayedToolPayloadCost(message) {
-     }
+@@ -776,13 +819,23 @@
      return cost;
  }
-+/**
+ /**
 + * Issue #107. Some providers keep only the first nine characters of a tool-call
 + * id. Stored ids such as `${runId}:tc_1` share far more than that, so a replay
 + * gives each call a new id, a one-letter prefix and eight base-36 digits, as
@@ -1098,10 +1117,10 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
 +function replayToolCallId(prefix, n) {
 +    return `${prefix}${n.toString(36).padStart(8, "0")}`;
 +}
- /**
++/**
   * One persisted assistant turn spans many tool rounds. Replay it as the
   * provider protocol wants it — one assistant message carrying every `tool-call`,
-@@ -782,7 +835,7 @@ function replayedToolPayloadCost(message) {
+  * then one user message carrying every matching `tool-result`. The exact
   * round-by-round interleaving is not recoverable from thread_data and does not
   * matter; what matters is that the calls and their outputs survive at all.
   */
@@ -1110,7 +1129,7 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
      const assistant = [];
      const results = [];
      if (text.trim())
-@@ -798,11 +851,12 @@ function assistantReplayContent(message, text) {
+@@ -798,11 +851,12 @@
          const input = part.args && typeof part.args === "object" && !Array.isArray(part.args)
              ? part.args
              : {};
@@ -1125,7 +1144,7 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
              toolName: name,
              toolInput: stringifyToolUseInputForGateway(input),
              content: replayedToolResultContent(result),
-@@ -836,6 +890,9 @@ export function threadDataToEngineMessages(threadData, options = {}) {
+@@ -836,6 +890,9 @@
      if (!Array.isArray(data?.messages))
          return messages;
      const entries = data.messages;
@@ -1135,7 +1154,7 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
      const replaysTools = (m) => options.includeToolCalls === true &&
          m?.role === "assistant" &&
          !hasIntegrationReplayPolicy(m);
-@@ -865,7 +922,7 @@ export function threadDataToEngineMessages(threadData, options = {}) {
+@@ -865,7 +922,7 @@
          const text = threadMessageTextForEngine(m);
          if (replaysTools(m)) {
              if (toolPayloadAllowed.has(index)) {
@@ -1144,7 +1163,7 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
                  if (assistant.length === 0)
                      continue;
                  messages.push({ role: "assistant", content: assistant });
-@@ -1117,6 +1174,21 @@ function pruneClaimedQueuedMessages(repo) {
+@@ -1117,6 +1174,21 @@
          queuedMessages: repo.queuedMessages.filter((message) => typeof message?.id !== "string" || !claimed.has(message.id)),
      };
  }
@@ -1166,7 +1185,7 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
  export function mergeThreadDataForClientSave(existingRepo, incomingRepo, options = {}) {
      const preserveExistingQueuedMessages = options.preserveExistingQueuedMessages ?? true;
      const preserveExistingTopLevelKeys = options.preserveExistingTopLevelKeys ?? true;
-@@ -1162,8 +1234,7 @@ export function mergeThreadDataForClientSave(existingRepo, incomingRepo, options
+@@ -1162,8 +1234,7 @@
      for (let existingIndex = 0; existingIndex < existingMessages.length; existingIndex++) {
          const existingEntry = existingMessages[existingIndex];
          const existingMessage = getStoredMessage(existingEntry);
@@ -1176,7 +1195,7 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
              continue;
          }
          const existingKeys = messageIdentityKeySet(existingMessage);
-@@ -1186,14 +1257,13 @@ export function mergeThreadDataForClientSave(existingRepo, incomingRepo, options
+@@ -1186,14 +1257,13 @@
          if (usedIncoming.has(index))
              continue;
          const incomingMessage = getStoredMessage(incomingMessages[index]);
@@ -1193,7 +1212,7 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
  }
  function escapeAttachmentAttribute(value) {
      return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-@@ -1353,6 +1423,9 @@ function toCoreCodeAgentTranscriptEvent(event) {
+@@ -1353,6 +1423,9 @@
      };
  }
  function contentPartForCodeAgentTranscriptItem(item, options) {
@@ -1203,7 +1222,98 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
      if (item.type === "assistant") {
          return item.text.trim() ? { type: "text", text: item.text } : null;
      }
-@@ -1677,6 +1750,10 @@ export function foldAssistantTurn(repo, assistantMsg, options) {
+@@ -1592,6 +1665,44 @@
+         content: merged,
+     }).content;
+ }
++/** Automation saves are authoritative per-chunk snapshots, ordered by Native
++ * event sequence. Earlier chunks stay sealed while the current chunk can be
++ * corrected, including shortened, without comparing it to the whole turn. */
++function foldAutomationChunk(lastMsg, assistantMsg, options, sameTurn) {
++    const custom = sameTurn ? lastMsg?.metadata?.custom ?? {} : {};
++    const recorded = custom.automationChunkSnapshots;
++    let chunks = Array.isArray(recorded) ? recorded.map((chunk) => ({ ...chunk, content: [...chunk.content] })) : [];
++    let prefix = Array.isArray(custom.automationChunkPrefix) ? custom.automationChunkPrefix : [];
++    if (sameTurn && chunks.length === 0) {
++        const ids = foldedRunIdsOf(lastMsg);
++        const alreadySaved = ids.includes(options.runId) || getMessageRunId(lastMsg) === options.runId;
++        // An old accumulated turn has no recoverable boundary for its current
++        // chunk. Keep it intact. The next fresh chunk records its own boundary.
++        if (alreadySaved && ids.length > 1)
++            return null;
++        if (alreadySaved)
++            chunks = [{ runId: options.runId, eventSeq: -1, content: lastMsg.content ?? [] }];
++        else
++            prefix = lastMsg.content ?? [];
++    }
++    const index = chunks.findIndex((chunk) => chunk.runId === options.runId);
++    if (index >= 0 && (index !== chunks.length - 1 || options.chunkEventSeq <= chunks[index].eventSeq))
++        return null;
++    const snapshot = { runId: options.runId, eventSeq: options.chunkEventSeq, content: assistantMsg.content ?? [] };
++    if (index >= 0)
++        chunks[index] = snapshot;
++    else
++        chunks.push(snapshot);
++    // Native consumed this exact ask. Remove its unexecuted card from both the
++    // visible fold and retained chunk snapshots, so rebuilding cannot revive it.
++    const resolved = (content) => options.resolvedAskId
++        ? content.filter((part) => part.approval?.askId !== options.resolvedAskId)
++        : content;
++    prefix = resolved(prefix);
++    chunks = chunks.map((chunk) => ({ ...chunk, content: resolved(chunk.content) }));
++    const content = chunks.reduce((combined, chunk) => appendFoldedContent(combined, chunk.content), prefix);
++    return { content, custom: { automationChunkPrefix: prefix, automationChunkSnapshots: chunks } };
++}
+ /**
+  * Fold a continuation run's assistant message onto the single durable message
+  * for its logical turn (identified by `turnId`), so a turn that spans several
+@@ -1606,6 +1717,11 @@
+  *   - A run whose content is already represented (already folded, or the client
+  *     saved it) → kept as-is, choosing whichever copy has more content.
+  *   - A new chunk → appended onto the accumulated turn.
++ * Automation callers may supply `chunkEventSeq` for progressive snapshots.
++ * That mode replaces the latest chunk by event sequence, allows authoritative
++ * shorter corrections and ignores stale or repeated snapshots. Earlier chunks
++ * and legacy accumulated content remain retained. The default policy above is
++ * unchanged for other callers.
+  * Falls back to per-run upsert when no `turnId` is available (turn == run).
+  */
+ export function foldAssistantTurn(repo, assistantMsg, options) {
+@@ -1624,7 +1740,16 @@
+             // A message the client wrote for one of this turn's runs before it
+             // carried a turnId stamp.
+             (!!runId && getMessageRunId(lastMsg) === runId));
++    const progressive = !!runId && Number.isSafeInteger(options.chunkEventSeq) && options.chunkEventSeq >= 0;
++    const chunk = progressive ? foldAutomationChunk(lastMsg, assistantMsg, options, sameTurn) : undefined;
++    if (progressive && !chunk)
++        return nextRepo;
+     if (!sameTurn) {
++        if (chunk) {
++            assistantMsg = { ...assistantMsg, content: chunk.content, metadata: {
++                ...assistantMsg.metadata, custom: { ...assistantMsg.metadata?.custom, ...chunk.custom },
++            } };
++        }
+         // First chunk of this turn (or the previous assistant belongs to an
+         // earlier turn) — append as a fresh message; buildAssistantMessage already
+         // stamped turnId + foldedRunIds onto it.
+@@ -1640,7 +1765,7 @@
+     // If this run's chunk is already represented in the turn (the client saved
+     // it, or we already folded it), do not re-append — keep the larger copy so
+     // the turn never shrinks. Otherwise fold this chunk onto the accumulated turn.
+-    const mergedContent = runAlreadyFolded
++    const mergedContent = chunk ? chunk.content : runAlreadyFolded
+         ? assistantContentWeight(incomingContent) >
+             assistantContentWeight(existingContent)
+             ? incomingContent
+@@ -1659,6 +1784,7 @@
+         ...incomingCustom,
+         turnId,
+         foldedRunIds: mergedFolded,
++        ...(chunk?.custom ?? {}),
+     };
+     const existingDurationMs = assistantRunDurationMs(existingCustom);
+     const incomingDurationMs = assistantRunDurationMs(incomingCustom);
+@@ -1677,6 +1803,10 @@
      // Only the freshest chunk decides whether the turn is still continuing.
      if (incomingCustom.continued !== true)
          delete mergedCustom.continued;
@@ -1214,7 +1324,7 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
      const mergedMessage = {
          ...lastMsg,
          content: normalizeAssistantToolCallIds({
-@@ -1701,6 +1778,14 @@ export function normalizeThreadTitle(value) {
+@@ -1701,6 +1831,14 @@
          return "";
      return value.replace(/\s+/g, " ").trim().slice(0, 160);
  }
@@ -1229,7 +1339,7 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
  /**
   * Extract title and preview from a thread runtime export.
   * Isomorphic — works on both server and client.
-@@ -1717,7 +1802,7 @@ export function extractThreadMeta(repo) {
+@@ -1717,7 +1855,7 @@
          const msg = entry?.message ?? entry;
          if (msg.role !== "user")
              continue;
@@ -1238,7 +1348,7 @@ index 25782ed7958f39dd3e5d6c16dbb82ae8c33ec507..f949955cdb3b8ae1c9e3c7ce2b1e1b03
              ? msg.content
                  .filter((p) => p.type === "text")
                  .map((p) => p.text)
-@@ -1725,6 +1810,9 @@ export function extractThreadMeta(repo) {
+@@ -1725,6 +1863,9 @@
              : typeof msg.content === "string"
                  ? msg.content
                  : "";
@@ -6367,7 +6477,16 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const events = [...(input.run.events ?? [])];
          if (input.persistFailure) {
              events.push({
-@@ -331,11 +419,11 @@
+@@ -324,6 +412,8 @@
+             repo = foldAssistantTurn(repo, assistantMsg, {
+                 runId: input.run.runId,
+                 turnId: input.run.turnId,
++                chunkEventSeq: events.reduce((seq, item) => Math.max(seq, item.seq), 0),
++                resolvedAskId: input.resolvedAskId,
+             });
+         }
+         const meta = extractThreadMeta(repo);
+@@ -331,11 +421,11 @@
          await updateThreadData(input.threadId, JSON.stringify(repo), input.threadTitle || row.title, meta.preview || row.preview, Array.isArray(messages) ? messages.length : 0);
      });
  }
@@ -6381,7 +6500,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
      }
      catch (err) {
          console.error(`[automations] Could not record run ${historyId} as ${status}:`, err);
-@@ -349,19 +437,23 @@
+@@ -349,19 +439,23 @@
          orgId,
      }, async () => {
          const baseActions = await deps.getActions(automation);
@@ -6417,7 +6536,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const userApiKey = await getOwnerActiveApiKey(ownerEmail);
          // The run manager invokes its detached callback after the scheduler's
          // setup stack has yielded, so the engine's credentials must be captured
-@@ -382,11 +474,63 @@
+@@ -382,11 +476,63 @@
              engine.defaultModel;
          const model = normalizeModelForEngine(engine, modelCandidate);
          const systemPrompt = await deps.getSystemPrompt(ownerEmail);
@@ -6485,7 +6604,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (runIdRef)
              runIdRef.current = runId;
          await recordRunThread(historyId, thread.id, runId);
-@@ -425,170 +569,267 @@
+@@ -425,170 +571,267 @@
          // handoff to the unclaimed-background-run sweep — it gets reaped as
          // "background_worker_never_started" out from under a still-executing
          // job the moment any single tool call runs past the 25s grace window.
@@ -6904,7 +7023,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const usage = usageRef.current;
          if (usage &&
              (usage.inputTokens > 0 ||
-@@ -613,6 +854,8 @@
+@@ -613,6 +856,8 @@
                  // Usage attribution must not break an otherwise successful run.
              }
          }
@@ -6913,7 +7032,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (responseText.trim() &&
              automation.meta.deliveryPlatform &&
              automation.meta.deliveryDestination) {
-@@ -627,6 +870,225 @@
+@@ -627,6 +872,225 @@
                  tenantId: automation.meta.deliveryTenantId,
              });
          }
