@@ -2283,7 +2283,11 @@ A webhook's existing `integration_pending_tasks` row also becomes
 Settings > Agent > Automations > Details > Past runs > Inspect run reads the
 retained Native thread through `inspect-automation-run`. It shows prior tools,
 results and the exact pending input. `decide-automation-approval` accepts only
-history ID, expected ask ID and approve or decline. Both are owner actions,
+history ID, expected ask ID and approve or decline. Authorization follows the
+persisted run and retained execution binding. The normal HTTP transport's active
+organization does not replace a personal run's null organization. Organization
+runs require the same persisted organization, matching thread and continuation,
+and current owner membership for inspection and decisions. Both are owner actions,
 not model tools. Production chat POST rejects every automation-owned thread
 before preparation, including a forged internal continuation. Native thread
 scope and its retained history marker preserve that custody after history deletion.

@@ -205,6 +205,8 @@ An unavailable or hidden configured tool refuses the run before it starts.
 
 A run at a gate shows **waiting_approval** in Past runs. Choose **Inspect run**, read
 the retained thread and pending action, then choose **Approve once** or **Decline**.
+You can inspect and decide your personal run while an organization is selected.
+An organization run requires its own organization and your current membership.
 Approve continues the same automation run with its original restricted tools.
 Decline ends the run without that action. There is no always-allow choice.
 While it waits, another run of that automation cannot start, its schedule does not

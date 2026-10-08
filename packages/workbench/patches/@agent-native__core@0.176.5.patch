@@ -6913,7 +6913,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (responseText.trim() &&
              automation.meta.deliveryPlatform &&
              automation.meta.deliveryDestination) {
-@@ -627,6 +870,216 @@
+@@ -627,6 +870,225 @@
                  tenantId: automation.meta.deliveryTenantId,
              });
          }
@@ -6953,16 +6953,25 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +}
 +async function authorizedAutomationContinuation(id, actor, deps) {
 +    const state = await getAutomationContinuation(id);
++    const runOrgId = state?.run.orgId ?? null;
++    // HTTP actions backfill the owner's active organization. A personal run
++    // retains its own null organization, independent of that ambient selection.
 +    if (!state || !actor?.userEmail || (state.run.appId ?? null) !== (actor.appId ?? null) ||
-+        (state.run.orgId ?? null) !== (actor.orgId ?? null))
++        (runOrgId !== null && runOrgId !== (actor.orgId ?? null)))
 +        throw approvalDecisionRefusal("Automation run is not available to this owner.");
 +    const thread = state.run.threadId ? await getThread(state.run.threadId) : null;
 +    if (!thread || thread.ownerEmail.toLowerCase() !== actor.userEmail.toLowerCase() ||
-+        (thread.orgId ?? null) !== (actor.orgId ?? null))
++        (thread.orgId ?? null) !== runOrgId)
 +        throw approvalDecisionRefusal("Automation run is not available to this owner.");
 +    if (state.context && (state.context.ownerEmail.toLowerCase() !== actor.userEmail.toLowerCase() ||
-+        state.context.historyId !== id || state.context.threadId !== thread.id))
++        state.context.historyId !== id || state.context.threadId !== thread.id ||
++        (state.context.orgId ?? null) !== runOrgId))
 +        throw approvalDecisionRefusal("The pending approval identity changed.");
++    if (runOrgId !== null) {
++        const validity = await validateAutomationRunIdentity(thread.ownerEmail, runOrgId);
++        if (!validity.ok)
++            throw approvalDecisionRefusal(`Automation run is not available to this owner: ${validity.reason}`);
++    }
 +    return { ...state, thread };
 +}
 +/** Read-only inspection never constructs a chat runtime or a second transcript. */

@@ -111,14 +111,18 @@ test("only one concurrent approve or decline decision wins", async () => {
   assert.equal(configuredCalls(fixture).length, terminal.status === "success" ? 1 : 0);
 });
 
-test("wrong owner, organization, app and fabricated ask cannot authorize or inspect", async () => {
+test("wrong owner, app and fabricated ask cannot authorize or inspect", async () => {
   const fixture = await makeApprovalCase("identity");
   const result = await wait(fixture);
   const pending = await fixture.pending(result.historyId);
-  for (const who of [{ ...actor, userEmail: "another@example.test" }, { ...actor, orgId: "other-org" }, { ...actor, appId: "other-app" }, {}]) {
+  // Organization mismatch remains a refusal for an organization-bound wait.
+  // The normal HTTP owner-scope suite covers it with real membership and scope.
+  for (const who of [{ ...actor, userEmail: "another@example.test" }, { ...actor, appId: "other-app" }, {}]) {
     await assert.rejects(fixture.decide(result.historyId, pending, "approve", who), /not available/);
     await assert.rejects(runner.inspectAutomationRun(result.historyId, who, fixture.deps), /not available/);
   }
+  assert.equal((await runner.inspectAutomationRun(result.historyId, { ...actor, orgId: "other-org" }, fixture.deps)).run.id,
+    result.historyId, "an ambient organization does not change this personal run's owner");
   await assert.rejects(fixture.decide(result.historyId, { ...pending, askId: "model-supplied-key" }), /not the current pending/);
   assert.equal(await approvalStore.consumeAgentToolApproval({ ...pending, askId: "model-supplied-key" }), false);
   assert.equal((await history.getAutomationRun(result.historyId)).status, "waiting_approval");
