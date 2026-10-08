@@ -6354,7 +6354,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
      if (meta.lastStatus !== "running")
          return false;
      if (!meta.lastRun)
-@@ -163,19 +225,29 @@
+@@ -163,35 +225,42 @@
  function uniqueToolNames(names) {
      return [...new Set(names)];
  }
@@ -6387,12 +6387,16 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +}
 +async function recordBackgroundAutomation(options, deps) {
      const { automation } = options;
+-    // Bookkeeping, so it must not gate the work it describes: a history table
+-    // that cannot be written should cost us the record, not the automation.
+-    // Everything downstream tolerates a null id by skipping its own write.
 +    if (!options.continuation && await hasUnresolvedAutomationApproval(automationHistoryOwner(automation.resource.owner, { userEmail: options.ownerEmail, orgId: options.orgId }), automation.resource.path))
 +        throw new BackgroundAutomationRunError("Resolve the pending automation approval first", "automation_approval_unresolved");
-     // Bookkeeping, so it must not gate the work it describes: a history table
-     // that cannot be written should cost us the record, not the automation.
-     // Everything downstream tolerates a null id by skipping its own write.
-@@ -185,13 +257,11 @@
++    // Durable history and thread admission establish execution ownership before
++    // Native can start. Queue receipts alone never grant that authority.
+     let historyId = null;
+     if (options.historyId) {
+         historyId = options.historyId;
      }
      else {
          try {
@@ -6410,15 +6414,21 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
                  automation: automation.name,
                  path: automation.resource.path,
                  scope: options.orgId ? "organization" : "personal",
-@@ -203,6 +273,7 @@
-             console.error(`[automations] Could not open a history record for "${automation.name}"; running anyway:`, err);
+@@ -200,9 +269,10 @@
+             });
          }
-     }
+         catch (err) {
+-            console.error(`[automations] Could not open a history record for "${automation.name}"; running anyway:`, err);
+-        }
+-    }
++            throw new BackgroundAutomationRunError(`Could not persist execution ownership for "${automation.name}": ${err instanceof Error ? err.message : String(err)}`, "automation_execution_admission_failed");
++        }
++    }
 +    const finish = { emitFinished: options.emitFinished !== false };
      let result;
      // Populated as soon as the run id exists, so a failure that never returns a
      // result can still be joined to its LLM trace (`aiTraceId` -> $ai_trace_id).
-@@ -212,15 +283,19 @@
+@@ -212,15 +282,19 @@
      }
      catch (err) {
          const message = err instanceof Error ? err.message : String(err);
@@ -6440,7 +6450,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
              tags: {
                  area: "background-automation",
                  automation: automation.name,
-@@ -233,12 +308,14 @@
+@@ -233,27 +307,25 @@
              },
              ...(runIdRef.current ? { aiTraceId: runIdRef.current } : {}),
          });
@@ -6456,8 +6466,27 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +    await recordRunOutcome(historyId, "success", undefined, undefined, finish);
      return result;
  }
- /**
-@@ -300,7 +377,18 @@
+-/**
+- * Link the run to its agent thread. Bookkeeping again: the automation is
+- * already executing by this point, so a failed write costs the cross-reference
+- * in the history view, not the run.
+- */
++/** Durable admission must succeed before inserting or starting a Native chunk. */
+ async function recordRunThread(historyId, threadId, runId) {
+-    if (!historyId)
+-        return;
+     try {
++        if (!historyId)
++            throw new Error("The automation has no durable history owner.");
+         await attachAutomationRunThread(historyId, threadId, runId);
+     }
+     catch (err) {
+-        console.error(`[automations] Could not attach thread ${threadId} to run ${historyId}:`, err);
++        throw new BackgroundAutomationRunError(`Could not persist automation execution admission: ${err instanceof Error ? err.message : String(err)}`, "automation_execution_admission_failed");
+     }
+ }
+ function backgroundAutomationPersistFailure(input) {
+@@ -300,7 +372,18 @@
          if (!repo || typeof repo !== "object" || Array.isArray(repo)) {
              throw new Error(`Background automation thread ${input.threadId} has unreadable thread data.`);
          }
@@ -6477,7 +6506,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const events = [...(input.run.events ?? [])];
          if (input.persistFailure) {
              events.push({
-@@ -324,6 +412,8 @@
+@@ -324,6 +407,8 @@
              repo = foldAssistantTurn(repo, assistantMsg, {
                  runId: input.run.runId,
                  turnId: input.run.turnId,
@@ -6486,7 +6515,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
              });
          }
          const meta = extractThreadMeta(repo);
-@@ -331,11 +421,11 @@
+@@ -331,11 +416,11 @@
          await updateThreadData(input.threadId, JSON.stringify(repo), input.threadTitle || row.title, meta.preview || row.preview, Array.isArray(messages) ? messages.length : 0);
      });
  }
@@ -6500,7 +6529,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
      }
      catch (err) {
          console.error(`[automations] Could not record run ${historyId} as ${status}:`, err);
-@@ -349,19 +439,23 @@
+@@ -349,19 +434,23 @@
          orgId,
      }, async () => {
          const baseActions = await deps.getActions(automation);
@@ -6536,7 +6565,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const userApiKey = await getOwnerActiveApiKey(ownerEmail);
          // The run manager invokes its detached callback after the scheduler's
          // setup stack has yielded, so the engine's credentials must be captured
-@@ -382,11 +476,63 @@
+@@ -382,11 +471,63 @@
              engine.defaultModel;
          const model = normalizeModelForEngine(engine, modelCandidate);
          const systemPrompt = await deps.getSystemPrompt(ownerEmail);
@@ -6604,7 +6633,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (runIdRef)
              runIdRef.current = runId;
          await recordRunThread(historyId, thread.id, runId);
-@@ -425,170 +571,267 @@
+@@ -425,170 +566,267 @@
          // handoff to the unclaimed-background-run sweep — it gets reaped as
          // "background_worker_never_started" out from under a still-executing
          // job the moment any single tool call runs past the 25s grace window.
@@ -7023,7 +7052,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const usage = usageRef.current;
          if (usage &&
              (usage.inputTokens > 0 ||
-@@ -613,6 +856,8 @@
+@@ -613,6 +851,8 @@
                  // Usage attribution must not break an otherwise successful run.
              }
          }
@@ -7032,7 +7061,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (responseText.trim() &&
              automation.meta.deliveryPlatform &&
              automation.meta.deliveryDestination) {
-@@ -627,6 +872,225 @@
+@@ -627,6 +867,264 @@
                  tenantId: automation.meta.deliveryTenantId,
              });
          }
@@ -7161,7 +7190,46 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +            advanceSchedule: context.options.advanceSchedule ?? false, completedAt: run.finishedAt,
 +        }, undefined, { historyId: run.id, runId: run.runId });
 +    }
++    // Wake only after both durable outcomes. Failure leaves this history recoverable.
++    if (context.options.webhookTaskId)
++        await wakeNextApprovalWebhookTask(context, run);
 +    await markAutomationApprovalOutcomeReconciled(run.id);
++}
++async function wakeNextApprovalWebhookTask(context, run) {
++    const { getPendingTask, getNextPendingTaskForThread } = await import("../integrations/pending-tasks-store.js");
++    const task = await getPendingTask(context.options.webhookTaskId);
++    if (!task || task.platform !== "automation-webhook" || task.ownerEmail !== context.ownerEmail ||
++        (task.orgId ?? null) !== (context.orgId ?? null) || task.externalThreadId !== `${context.resourceOwner}:${context.resourcePath}` ||
++        task.status !== (run.status === "success" ? "completed" : "failed"))
++        throw new Error("The settled approval task identity changed.");
++    const { resourceGetByPath } = await import("../resources/store.js");
++    const resource = await resourceGetByPath(context.resourceOwner, context.resourcePath);
++    if (!resource || resource.id !== context.resourceId)
++        return;
++    const { parseJobResource, jobBelongsToApp } = await import("./frontmatter.js");
++    const { meta } = parseJobResource(resource.content);
++    if (!jobBelongsToApp(meta, run.appId))
++        return;
++    if (isBackgroundAutomationRunActive(meta))
++        throw new Error("The automation resource is not ready for its next webhook.");
++    const next = await getNextPendingTaskForThread(task.platform, task.externalThreadId);
++    if (!next)
++        return;
++    const follower = await getPendingTask(next.id);
++    if (!follower || follower.ownerEmail !== task.ownerEmail || (follower.orgId ?? null) !== (task.orgId ?? null))
++        throw new Error("The next approval webhook owner changed.");
++    const payload = JSON.parse(follower.payload);
++    if (payload.kind !== "automation-webhook" || payload.automationId !== context.resourceId ||
++        payload.owner !== context.resourceOwner || payload.path !== context.resourcePath)
++        throw new Error("The next approval webhook binding changed.");
++    const { dispatchPendingIntegrationTask, inProcessIntegrationTaskRunnerFor } = await import("../integrations/integration-durable-dispatch.js");
++    const registered = inProcessIntegrationTaskRunnerFor(task.platform);
++    if (registered && registered.appId !== run.appId)
++        throw new Error("The next approval webhook app changed.");
++    const outcome = await dispatchPendingIntegrationTask({ taskId: follower.id,
++        task: { platform: task.platform, externalThreadId: task.externalThreadId } });
++    if (outcome === "failed")
++        throw new Error("The next approval webhook dispatch must be retried.");
 +}
 +/** Existing sweeps recover outcome bookkeeping only, never tools or deliveries. */
 +export async function reconcileAutomationApprovalOutcomes(appId) {
@@ -7479,19 +7547,21 @@ diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
  export interface AutomationRun {
      id: string;
      owner: string;
-@@ -17,7 +17,11 @@
+@@ -17,7 +17,13 @@
      runId: string | null;
      threadId: string | null;
      status: AutomationRunStatus;
 +    pendingAskId: string | null;
 +    approvalReady: boolean;
      startedAt: number;
++    /** Initial Native execution admission. Queue claims and refusals remain null. */
++    admittedAt: number | null;
 +    /** When a worker claimed a queued manual run. Null until claimed. */
 +    claimedAt: number | null;
      finishedAt: number | null;
      error: string | null;
      /**
-@@ -40,9 +44,23 @@
+@@ -40,9 +46,23 @@
      dispatchPending?: boolean;
  }
  /** Authoritative release-time schema for durable automation history. */
@@ -7515,7 +7585,7 @@ diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
  /**
   * Record an automation execution. Manual runs create the row before dispatch,
   * so `dispatchPending` distinguishes that durable handoff from a run that has
-@@ -62,7 +80,10 @@
+@@ -62,7 +82,10 @@
      olderThanMs?: number;
      limit?: number;
  }): Promise<AutomationRun[]>;
@@ -7527,7 +7597,7 @@ diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
  /**
   * Attach the agent thread once it exists. The thread is created after the run
   * row so the history survives a crash between the two.
-@@ -82,3 +103,38 @@
+@@ -82,3 +105,39 @@
      appId?: string | null;
      limit?: number;
  }): Promise<AutomationRun[]>;
@@ -7565,6 +7635,7 @@ diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
 +
 +export declare function listUnreconciledAutomationApprovalRuns(appId?: string): Promise<string[]>;
 +export declare function markAutomationApprovalOutcomeReconciled(id: string): Promise<void>;
++export declare const NEWER_ADMITTED_AUTOMATION_RUN_SQL: string;
 +export declare function hasNewerAutomationRun(run: AutomationRun): Promise<boolean>;
 diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 --- a/dist/jobs/run-history.js
@@ -7611,7 +7682,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
  /** Rows kept per automation, so a per-minute schedule cannot grow forever. */
  const RUNS_RETAINED_PER_AUTOMATION = 50;
  /** Authoritative release-time schema for durable automation history. */
-@@ -101,6 +103,18 @@
+@@ -101,6 +103,22 @@
          sql: `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS error_code TEXT`,
      },
  ];
@@ -7627,10 +7698,14 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +    version: 7, name: "automation-approval-outcome-reconciliation",
 +    sql: `ALTER TABLE automation_runs ADD COLUMN IF NOT EXISTS approval_outcome_reconciled INTEGER NOT NULL DEFAULT 0`,
 +});
++AUTOMATION_RUN_MIGRATIONS.push({
++    version: 8, name: "automation-run-execution-admission",
++    sql: `ALTER TABLE automation_runs ADD COLUMN IF NOT EXISTS admitted_at ${intType()}`,
++});
  export async function runAutomationRunMigrations(nitroApp) {
      await runMigrations(AUTOMATION_RUN_MIGRATIONS, {
          table: "_automation_run_migrations",
-@@ -128,7 +142,10 @@
+@@ -128,7 +146,10 @@
            error TEXT,
            error_code TEXT,
            claimed_at ${intType()},
@@ -7638,11 +7713,11 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +          dispatch_pending ${intType()} NOT NULL DEFAULT 0,
 +          pending_ask_id TEXT, approval_context TEXT,
 +          approval_ready ${intType()} NOT NULL DEFAULT 0,
-+          decision_at ${intType()}, resume_run_id TEXT
++          decision_at ${intType()}, resume_run_id TEXT, admitted_at ${intType()}
          )
        `;
              const indexSql = `CREATE INDEX IF NOT EXISTS idx_${TABLE}_owner_automation ON ${TABLE} (owner, automation, started_at)`;
-@@ -137,6 +154,8 @@
+@@ -137,6 +158,8 @@
                  await ensureColumnExists(TABLE, "claimed_at", `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS claimed_at ${intType()}`);
                  await ensureColumnExists(TABLE, "dispatch_pending", `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS dispatch_pending ${intType()} NOT NULL DEFAULT 0`);
                  await ensureColumnExists(TABLE, "error_code", `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS error_code TEXT`);
@@ -7651,7 +7726,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
                  await ensureIndexExists(`idx_${TABLE}_owner_automation`, indexSql);
                  return;
              }
-@@ -144,6 +163,7 @@
+@@ -144,6 +167,7 @@
              const { rows } = await client.execute(`PRAGMA table_info("${TABLE}")`);
              const columns = new Set(rows.map((row) => String(row.name)));
              for (const [name, definition] of [
@@ -7659,12 +7734,12 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
                  ["claimed_at", `${intType()}`],
                  ["dispatch_pending", `${intType()} NOT NULL DEFAULT 0`],
                  ["app_id", "TEXT"],
-@@ -170,10 +190,14 @@
+@@ -170,10 +194,14 @@
      }
      return _initPromise;
  }
 +function approvalColumns() {
-+    return [["approval_outcome_reconciled", `${intType()} NOT NULL DEFAULT 0`], ["pending_ask_id", "TEXT"], ["approval_context", "TEXT"], ["approval_ready", `${intType()} NOT NULL DEFAULT 0`], ["decision_at", intType()], ["resume_run_id", "TEXT"]];
++    return [["admitted_at", intType()], ["approval_outcome_reconciled", `${intType()} NOT NULL DEFAULT 0`], ["pending_ask_id", "TEXT"], ["approval_context", "TEXT"], ["approval_ready", `${intType()} NOT NULL DEFAULT 0`], ["decision_at", intType()], ["resume_run_id", "TEXT"]];
 +}
  function toRun(row, now) {
      const stored = stringifyValue(row.status);
@@ -7675,23 +7750,22 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          ? "interrupted"
          : stored;
      return {
-@@ -187,7 +211,10 @@
+@@ -187,7 +215,11 @@
          runId: row.run_id == null ? null : stringifyValue(row.run_id),
          threadId: row.thread_id == null ? null : stringifyValue(row.thread_id),
          status,
 +        pendingAskId: row.pending_ask_id == null ? null : String(row.pending_ask_id),
 +        approvalReady: Number(row.approval_ready) === 1,
          startedAt,
++        admittedAt: row.admitted_at == null ? null : Number(row.admitted_at),
 +        claimedAt: row.claimed_at == null ? null : Number(row.claimed_at),
          finishedAt: row.finished_at == null ? null : Number(row.finished_at),
          error: row.error == null && status === "interrupted"
              ? INTERRUPTED_RUN_MESSAGE
-@@ -200,6 +227,18 @@
-                 ? null
-                 : stringifyValue(row.error_code),
+@@ -202,6 +234,18 @@
      };
-+}
-+/**
+ }
+ /**
 + * Vivary #110. The owner on every history row of an automation: the
 + * organization owner for an organization identity, the creator for a legacy
 + * `__shared__` resource, and the resource owner otherwise.
@@ -7702,10 +7776,31 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +        : resourceOwner === "__shared__"
 +            ? (identity?.userEmail ?? resourceOwner)
 +            : resourceOwner;
- }
- /**
++}
++/**
   * Record an automation execution. Manual runs create the row before dispatch,
-@@ -244,7 +283,7 @@
+  * so `dispatchPending` distinguishes that durable handoff from a run that has
+  * already entered the worker.
+@@ -210,8 +254,8 @@
+     await ensureTable();
+     const id = randomUUID();
+     await getDbExec().execute({
+-        sql: `INSERT INTO ${TABLE} (id, owner, automation, path, scope, org_id, app_id, run_id, thread_id, status, started_at, dispatch_pending)
+-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?)`,
++        sql: `INSERT INTO ${TABLE} (id, owner, automation, path, scope, org_id, app_id, run_id, thread_id, status, started_at, dispatch_pending, admitted_at)
++          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)`,
+         args: [
+             id,
+             input.owner,
+@@ -224,6 +268,7 @@
+             input.threadId ?? null,
+             Date.now(),
+             input.dispatchPending ? 1 : 0,
++            input.runId && input.threadId ? Date.now() : null,
+         ],
+     });
+     await pruneAutomationRuns(input.owner, input.automation);
+@@ -244,7 +289,7 @@
      const now = Date.now();
      const result = await getDbExec().execute({
          sql: `UPDATE ${TABLE} SET claimed_at = ? WHERE id = ? AND dispatch_pending = 1 AND (claimed_at IS NULL OR claimed_at <= ?) AND status = 'running'`,
@@ -7714,7 +7809,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
      });
      return Number(result.rowsAffected ?? 0) > 0;
  }
-@@ -266,7 +305,7 @@
+@@ -266,7 +311,7 @@
              AND started_at <= ?
            ORDER BY started_at ASC LIMIT ${limit}`,
          args: [
@@ -7723,7 +7818,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
              ...(appId ? [appId] : []),
              Date.now() - olderThanMs,
          ],
-@@ -291,7 +330,7 @@
+@@ -291,7 +336,7 @@
  async function pruneAutomationRuns(owner, automation) {
      await getDbExec().execute({
          sql: `DELETE FROM ${TABLE}
@@ -7732,7 +7827,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
              SELECT MIN(started_at) FROM (
                SELECT started_at FROM ${TABLE}
                WHERE owner = ? AND automation = ?
-@@ -302,7 +341,9 @@
+@@ -302,7 +347,9 @@
          args: [owner, automation, owner, automation],
      });
  }
@@ -7743,7 +7838,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
      await ensureTable();
      const existing = await getDbExec().execute({
          sql: `SELECT owner, automation, path, org_id, run_id, thread_id, started_at FROM ${TABLE} WHERE id = ? LIMIT 1`,
-@@ -310,17 +351,20 @@
+@@ -310,17 +357,20 @@
      });
      const row = existing.rows?.[0];
      const finishedAt = Date.now();
@@ -7768,7 +7863,28 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          return;
      const rawStartedAt = Number(row.started_at);
      const startedAt = Number.isFinite(rawStartedAt) ? rawStartedAt : null;
-@@ -371,7 +415,7 @@
+@@ -351,10 +401,16 @@
+  */
+ export async function attachAutomationRunThread(id, threadId, runId) {
+     await ensureTable();
+-    await getDbExec().execute({
+-        sql: `UPDATE ${TABLE} SET thread_id = ?, run_id = ? WHERE id = ?`,
+-        args: [threadId, runId, id],
+-    });
++    const result = await getDbExec().execute({
++        // Existing attached legacy rows retain their original execution order.
++        // SQL assignment expressions read the pre-update thread/run references.
++        sql: `UPDATE ${TABLE} SET thread_id = ?, run_id = ?,
++          admitted_at = COALESCE(admitted_at, CASE WHEN thread_id IS NOT NULL AND run_id IS NOT NULL THEN started_at ELSE ? END)
++          WHERE id = ? AND status IN ('running', 'resuming') AND finished_at IS NULL`,
++        args: [threadId, runId, Date.now(), id],
++    });
++    if (result.rowsAffected !== 1)
++        throw new Error("The automation execution admission could not be saved.");
+ }
+ /**
+  * Forget an automation's executions.
+@@ -371,7 +427,7 @@
      // definition's.
      const cutoff = Date.now();
      await getDbExec().execute({
@@ -7777,12 +7893,12 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          args: [owner, automation, cutoff],
      });
  }
-@@ -393,3 +437,108 @@
+@@ -393,3 +449,123 @@
      const now = Date.now();
      return (result.rows ?? []).map((row) => toRun(row, now));
  }
 +
-+/** Waiting is authority state, so these writes are required, unlike ordinary history. */
++/** Waiting and execution admission are authority state, so these writes are required. */
 +export async function waitForAutomationApproval(id, context) {
 +    if (!id)
 +        throw new Error("Cannot wait for approval without durable automation history.");
@@ -7790,9 +7906,10 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +    const result = await getDbExec().execute({
 +        sql: `UPDATE automation_runs SET status = 'waiting_approval', pending_ask_id = ?,
 +          approval_context = ?, approval_ready = 0, approval_outcome_reconciled = 0, thread_id = ?, run_id = ?,
++          admitted_at = COALESCE(admitted_at, CASE WHEN thread_id IS NOT NULL AND run_id IS NOT NULL THEN started_at ELSE ? END),
 +          finished_at = NULL, error = NULL, error_code = NULL
 +          WHERE id = ? AND status IN ('running', 'resuming') AND finished_at IS NULL`,
-+        args: [context.askId, JSON.stringify(context), context.threadId, context.runId, id],
++        args: [context.askId, JSON.stringify(context), context.threadId, context.runId, Date.now(), id],
 +    });
 +    if (result.rowsAffected !== 1)
 +        throw new Error("The automation approval wait could not be saved.");
@@ -7878,11 +7995,25 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +          WHERE id = ? AND finished_at IS NOT NULL`, args: [id],
 +    });
 +}
++/** One total order for actual execution owners, shared with the atomic resource CAS.
++ * A queue claim or refusal has no admitted Native thread and cannot supersede a wait.
++ * Legacy attached histories use started_at until their first post-upgrade attachment.
++ * Continuation chunks retain admitted_at. UUID order resolves equal admission times.
++ */
++export const NEWER_ADMITTED_AUTOMATION_RUN_SQL = `
++    newer_history.owner = terminal_history.owner AND newer_history.path = terminal_history.path
++    AND COALESCE(newer_history.app_id, '') = COALESCE(terminal_history.app_id, '')
++    AND COALESCE(newer_history.org_id, '') = COALESCE(terminal_history.org_id, '')
++    AND newer_history.run_id IS NOT NULL AND newer_history.thread_id IS NOT NULL
++    AND (COALESCE(newer_history.admitted_at, newer_history.started_at) > COALESCE(terminal_history.admitted_at, terminal_history.started_at)
++      OR (COALESCE(newer_history.admitted_at, newer_history.started_at) = COALESCE(terminal_history.admitted_at, terminal_history.started_at)
++        AND newer_history.id > terminal_history.id))`;
 +export async function hasNewerAutomationRun(run) {
 +    const result = await getDbExec().execute({
-+        sql: `SELECT 1 FROM automation_runs WHERE owner = ? AND path = ?
-+          AND id != ? AND started_at >= ? LIMIT 1`,
-+        args: [run.owner, run.path, run.id, run.startedAt],
++        sql: `SELECT 1 FROM automation_runs AS terminal_history
++          WHERE terminal_history.id = ? AND terminal_history.owner = ? AND terminal_history.path = ?
++            AND EXISTS (SELECT 1 FROM automation_runs AS newer_history WHERE ${NEWER_ADMITTED_AUTOMATION_RUN_SQL}) LIMIT 1`,
++        args: [run.id, run.owner, run.path],
 +    });
 +    return result.rows.length > 0;
 +}
@@ -9809,14 +9940,14 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
 +          ${isPostgres() ? 'FOR UPDATE' : ''}
 +    )` : "";
 +    const terminal = input.automationTerminal;
++    const newerOwnerSql = terminal ? (await import("../jobs/run-history.js")).NEWER_ADMITTED_AUTOMATION_RUN_SQL : "";
 +    const terminalCondition = terminal ? ` AND EXISTS (
 +        SELECT 1 FROM automation_runs AS terminal_history
 +        WHERE terminal_history.id = ? AND terminal_history.run_id = ?
 +          AND terminal_history.path = resources.path
 +          AND terminal_history.finished_at IS NOT NULL
 +          AND NOT EXISTS (SELECT 1 FROM automation_runs AS newer_history
-+            WHERE newer_history.owner = terminal_history.owner AND newer_history.path = terminal_history.path
-+              AND newer_history.id != terminal_history.id AND newer_history.started_at >= terminal_history.started_at)
++            WHERE ${newerOwnerSql})
 +          ${isPostgres() ? 'FOR UPDATE' : ''}
 +    )` : "";
      const result = await client.execute({

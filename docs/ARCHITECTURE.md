@@ -239,6 +239,20 @@ receipt](product/multi-project/receipts/runtime-sandbox-coverage-2026-10-06.md)
 owns the versioned source map, harmless Linux observation and UNRUN platform and
 surface checks; it does not establish whole-product containment or acceptance.
 
+Automation terminal ownership follows admitted execution, not request insertion.
+`automation_runs.admitted_at` is recorded at initial Native thread attachment and
+preserved across approval continuations. Durable history attachment is required
+before a Native chunk starts, so failed admission cannot execute model or tool
+work without an execution owner. Attached legacy rows retain their original
+start-time ordering when a continuation fills a missing admission marker.
+Queue claims and admission refusals keep
+it null. The history precheck and resource CAS share one admitted-owner predicate,
+scoped by owner, path, app and organization. Existing resource identity, version,
+definition and fresh-running checks still apply. A completed approval task wakes
+its FIFO follower only after the resource is terminal. Recovery revalidates the
+retained task and current resource before claim-safe dispatch, and a failed dispatch
+keeps the same terminal history unreconciled. No original tool or delivery is retried.
+
 ## Delivery and known gaps
 
 The unified workspace, project registration and selection, scoped Code and Native history, bounded files and search, reviewed project preview, bundled original CLI, and selected original operations have implemented and tested slices. The [acceptance register](product/multi-project/desktop-acceptance-status.md) states their candidate-specific evidence. A passing component or source check does not complete the desktop and browser release journey.
@@ -262,6 +276,38 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+Issue #108 admission persistence correction. The independent review found that
+thread attachment still swallowed a database failure before Native insertion and
+start. Initial history creation and its conditional thread attachment now fail
+closed before model or tool work. A failed attachment leaves an explicit failed
+history rather than a new admitted execution owner. Existing history ordering and
+the atomic resource CAS retain their shared predicate, so a genuinely admitted
+later completion remains protected. Continuations fill a legacy null admission
+marker from the already-attached history's original start time rather than the
+new chunk's clock. Maintained scheduler controls select one later-history SQL
+fault and compare a real no-fault completion. Fresh-process controls retain exact
+legacy wait and claim identity, recover only ended unconsumed claims, and refuse
+consumed replay. The FIFO wake and process-scoped transport controls remain
+unchanged. Only source checks run in this sandbox. Proposed-lock mismatch and
+pipe/loopback restrictions leave candidate runtime validation, ordinary batch
+exit, independent review and app acceptance with the controller.
+
+Issue #108 final admission and webhook lifecycle correction. The existing Native
+history owner now records initial execution admission separately from a durable
+Run now request or worker claim. Only admitted owners participate in the shared
+history and atomic resource ordering predicate. An admission timestamp and history
+ID form a total order, including timestamp ties. Continuation chunks retain that
+initial admission. Legacy attached history uses its recorded start timestamp.
+A refused queue cannot strand the original terminal resource at waiting.
+After durable approval task settlement and resource reconciliation, the existing
+claim-safe dispatcher wakes the next validated task on that same external thread.
+Dispatch failure leaves bookkeeping recoverable without replaying the consumed
+action. The normal transport fixture disables unrelated background loops through
+Native's supported process controls before imports, while explicit HTTP decisions
+and recovery stay live. Old-installed controls reproduced refused-queue suppression,
+equal-time ambiguity and the absent fresh-follower wake. Revised runtime gates and
+ordinary concurrent-batch natural exit remain controller checks.
 
 Issue #108 progressive approval answer persistence. The retained real continuation journal included the final model text, but saving its tool result first made the later fold compare that chunk with the longer accumulated waiting turn. Automation persistence now supplies the Native event sequence to the existing fold owner. Its retained per-chunk snapshots replace the current chunk when a later authoritative save arrives, including a shorter correction, while preserving earlier chunks and the waiting sentence. Equivalent or stale saves do not append content again. A consumed ask is removed from recorded snapshots as well as visible content so its unexecuted card cannot return during a rebuild. Chat and team callers retain the existing default fold policy. Pure source checks exercise progressive persistence, idempotence, earlier content, shorter corrections and new-turn isolation. Maintained approval and normal owner HTTP assertions require the final answer in a fresh durable thread read. Historical owner-scope, typecheck, build and UI custody results preceded these bytes. Affected installed suites, configured typecheck, independent review and the built UI final-answer journey remain required. No live profile, tool effect or provider call was changed, and publication remains held.
 

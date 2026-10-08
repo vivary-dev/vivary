@@ -657,6 +657,31 @@ test("a fresh process retains the wait then approves the same run and tools", as
   assert.equal(resumed.calls.filter(call => call.name === "resources").length, 0, "preceding local write remains journaled across processes");
 });
 
+for (const mode of ["waiting", "waiting-decline", "resuming", "consumed"]) test(`legacy-null ${mode} retains admission origin through fresh-process recovery`, async () => {
+  const name = `legacy-null-${mode}`;
+  const waiting = await child(`legacy-null-${mode}`, name);
+  assert.equal(waiting.admittedAt, null);
+  assert.equal(waiting.status, mode === "resuming" || mode === "consumed" ? "resuming" : "waiting_approval");
+  assert.equal(waiting.askStatus, mode === "consumed" ? "consumed" : "pending");
+  const recovered = await child(`legacy-recover-${mode}`, name, waiting.historyId);
+  const expected = mode === "consumed" ? "interrupted" : mode === "waiting-decline" ? "declined" : "success";
+  assert.equal(recovered.result.id, waiting.historyId); assert.equal(recovered.result.status, expected);
+  assert.equal(recovered.result.threadId, waiting.threadId);
+  assert.equal(recovered.pending.threadId, waiting.threadId); assert.equal(recovered.pending.turnId, waiting.turnId);
+  assert.equal(recovered.pending.askId, waiting.askId);
+  assert.equal(recovered.turn.turnId, waiting.turnId);
+  assert.equal(recovered.resourceStatus, expected); assert.equal(recovered.outcomeReconciled, true);
+  assert.equal(recovered.calls.filter(call => call.name === mcpName).length, expected === "success" ? 1 : 0);
+  assert.equal(recovered.calls.filter(call => call.name === "resources").length, 0, "the earlier durable tool result is not replayed");
+  assert.equal(recovered.modelCalls.length, expected === "success" ? 1 : 0);
+  assert.equal(recovered.askStatus, expected === "success" || mode === "consumed" ? "consumed" : "declined");
+  if (expected === "success") {
+    assert.notEqual(recovered.result.runId, waiting.runId);
+    assert.equal(recovered.result.admittedAt, waiting.startedAt, "a resumed legacy row keeps its original admission order");
+  } else assert.equal(recovered.result.admittedAt, null, "terminal recovery preserves the legacy start-time fallback");
+  assert.equal((await history.listAutomationRuns({ owners: [owner], automation: name, appId })).length, 1);
+});
+
 test("shutdown keeps an idle wait and interrupts an active consumed continuation", async () => {
   const waiting = await child("shutdown-wait", "quit-wait");
   assert.equal((await history.getAutomationRun(waiting.historyId)).status, "waiting_approval");
@@ -777,21 +802,153 @@ for (const decision of ["approve", "decline"]) for (const boundary of ["normal",
     assert.equal(configuredCalls(fixture).length, decision === "approve" ? 1 : 0);
   });
 
-test("terminal recovery leaves a newer history's metadata untouched", async () => {
-  const fixture = await makeApprovalCase("reconcile-newer");
-  const ready = await wait(fixture);
-  const pending = await fixture.pending(ready.historyId);
-  await history.finishAutomationRun(ready.historyId, "declined", "The owner declined.", "automation_approval_declined");
-  const current = await resources.resourceGetByPath(owner, fixture.automation.resource.path);
-  const newer = await history.startAutomationRun({ owner, automation: fixture.automation.name, path: current.path, appId });
-  await resources.resourcePut(owner, current.path, frontmatter.patchJobFrontmatterFields(current.content, { lastStatus: "running", lastRun: new Date().toISOString() }));
-  const before = await resources.resourceGetByPath(owner, current.path);
+test("terminal recovery leaves a genuinely newer admitted owner's metadata untouched", async () => {
+  const fixture = await makeApprovalCase("reconcile-newer", { repeatLocal: false });
+  const scheduler = await loadCore("jobs/scheduler.js");
+  await scheduler.runJobNow(owner, fixture.automation.name, fixture.deps);
+  const [first] = await history.listAutomationRuns({ owners: [owner], automation: fixture.automation.name, appId });
+  await fixture.decide(first.id, await fixture.pending(first.id), "decline");
+  assert.equal((await fixture.terminal(first.id)).status, "declined");
+  // A real later run is admitted only after the original wait has settled.
+  await scheduler.runJobNow(owner, fixture.automation.name, fixture.deps);
+  const second = (await history.listAutomationRuns({ owners: [owner], automation: fixture.automation.name, appId })).find(run => run.id !== first.id);
+  assert.equal(second.status, "waiting_approval"); assert.ok(second.threadId); assert.ok(second.runId);
+  const before = await resources.resourceGetByPath(owner, fixture.automation.resource.path);
+  assert.equal(await history.hasNewerAutomationRun(await history.getAutomationRun(first.id)), true);
+  // Reopen only the terminal bookkeeping fault seam, never the consumed action or history state.
+  await database.getDbExec().execute({ sql: "UPDATE automation_runs SET approval_outcome_reconciled = 0 WHERE id = ?", args: [first.id] });
   await runner.reconcileAutomationApprovalOutcomes(appId);
-  assert.deepEqual(await resources.resourceGetByPath(owner, current.path), before);
+  assert.deepEqual(await resources.resourceGetByPath(owner, before.path), before);
+  assert.equal(Boolean((await history.getAutomationContinuation(first.id)).outcomeReconciled), true);
   assert.equal(configuredCalls(fixture).length, 0);
-  await assert.rejects(fixture.decide(ready.historyId, pending), /no longer waiting/);
-  await history.finishAutomationRun(newer, "error", "Fixture ended.");
+  await fixture.decide(second.id, await fixture.pending(second.id), "decline");
 });
+
+for (const failAdmission of [false, true]) test(`later scheduler admission ${failAdmission ? "fails closed on selected attachment fault" : "protects its completed outcome"}`, async () => {
+  const fixture = await makeApprovalCase(`admission-persist-${failAdmission}`, { repeatLocal: false });
+  const scheduler = await loadCore("jobs/scheduler.js");
+  await scheduler.runJobNow(owner, fixture.automation.name, fixture.deps);
+  const [original] = await history.listAutomationRuns({ owners: [owner], automation: fixture.automation.name, appId });
+  await fixture.decide(original.id, await fixture.pending(original.id), "decline");
+  assert.equal((await fixture.terminal(original.id)).status, "declined");
+  // Reopen only already-terminal bookkeeping. The next run is ordinary and is
+  // genuinely admitted after the original wait, without changing its definition.
+  await database.getDbExec().execute({ sql: "UPDATE automation_runs SET approval_outcome_reconciled = 0 WHERE id = ?", args: [original.id] });
+  fixture.engine.stream = async function* (options) {
+    fixture.modelCalls.push(structuredClone(options.messages));
+    assert.deepEqual(options.tools.map(tool => tool.name).sort(), [...surface.UNATTENDED_TOOLS, mcpName].sort());
+    if (!JSON.stringify(options.messages).includes("local-write-result")) {
+      yield { type: "assistant-content", parts: [{ type: "tool-call", name: "resources", id: "later-local",
+        input: { action: "write", path: "notes/later.md", content: "later ordinary execution" } }] };
+      yield { type: "stop", reason: "tool_use" };
+    } else {
+      yield { type: "assistant-content", parts: [{ type: "text", text: "Later ordinary execution completed." }] };
+      yield { type: "stop", reason: "end_turn" };
+    }
+  };
+  const models = fixture.modelCalls.length, calls = fixture.calls.length;
+  const db = database.getDbExec(), execute = db.execute.bind(db);
+  const nativeRows = (await execute({ sql: "SELECT COUNT(*) AS count FROM agent_runs", args: [] })).rows[0].count;
+  let laterId, faults = 0;
+  db.execute = async statement => {
+    const sql = String(typeof statement === "string" ? statement : statement.sql).replace(/\s+/g, " ").trim();
+    if (sql.startsWith("INSERT INTO automation_runs (") && statement.args?.[1] === owner && statement.args[2] === fixture.automation.name)
+      laterId = statement.args[0];
+    if (failAdmission && sql.startsWith("UPDATE automation_runs SET thread_id = ?") && laterId && statement.args?.at(-1) === laterId) {
+      faults++;
+      throw new Error("Selected later-history attachment persistence failure.");
+    }
+    return execute(statement);
+  };
+  try { await scheduler.runJobNow(owner, fixture.automation.name, fixture.deps); }
+  finally { db.execute = execute; }
+  assert.ok(laterId, "the real scheduler created the selected later history");
+  const later = await history.getAutomationRun(laterId);
+  const resource = await resources.resourceGetByPath(owner, fixture.automation.resource.path);
+  assert.equal(faults, failAdmission ? 1 : 0, "only the selected history attachment was faulted");
+  assert.equal(fixture.modelCalls.length - models, failAdmission ? 0 : 2, "admission failure must precede model work");
+  assert.equal(fixture.calls.length - calls, failAdmission ? 0 : 1, "admission failure must precede tool work");
+  assert.equal(frontmatter.parseJobResource(resource.content).meta.lastStatus, failAdmission ? "error" : "success");
+  if (failAdmission) {
+    assert.equal(later.status, "error"); assert.equal(later.errorCode, "automation_execution_admission_failed");
+    assert.match(later.error, /attachment persistence failure/);
+    assert.equal(later.runId, null); assert.equal(later.threadId, null); assert.equal(later.admittedAt, null);
+    assert.equal(fixture.modelCalls.length, models); assert.equal(fixture.calls.length, calls);
+    assert.equal((await execute({ sql: "SELECT COUNT(*) AS count FROM agent_runs", args: [] })).rows[0].count, nativeRows,
+      "failed authority persistence stops before Native insertion or start");
+    assert.equal(await history.hasNewerAutomationRun(await history.getAutomationRun(original.id)), false);
+  } else {
+    assert.equal(later.status, "success"); assert.ok(later.runId); assert.ok(later.threadId); assert.ok(later.admittedAt);
+    assert.equal(fixture.modelCalls.length - models, 2); assert.equal(fixture.calls.length - calls, 1);
+    assert.equal(await history.hasNewerAutomationRun(await history.getAutomationRun(original.id)), true);
+  }
+  await runner.reconcileAutomationApprovalOutcomes(appId);
+  if (!failAdmission) assert.deepEqual(await resources.resourceGetByPath(owner, resource.path), resource,
+    "older terminal reconciliation cannot replace a genuinely admitted completed outcome");
+  // An admission failure is retained as an explicit failed history, not a new
+  // execution owner. Reconciliation may publish the original admitted outcome.
+  assert.equal((await history.getAutomationRun(laterId)).status, failAdmission ? "error" : "success");
+  assert.equal(Boolean((await history.getAutomationContinuation(original.id)).outcomeReconciled), true);
+  assert.equal(await history.hasUnresolvedAutomationApproval(owner, resource.path), false);
+  assert.equal(configuredCalls(fixture).length, 0);
+  assert.equal(fixture.modelCalls.length - models, failAdmission ? 0 : 2);
+  assert.equal(fixture.calls.length - calls, failAdmission ? 0 : 1);
+});
+
+for (const decision of ["approve", "decline"]) test(`admission-refused queue cannot suppress original ${decision} outcome`, async () => {
+  const fixture = await makeApprovalCase(`refused-queue-${decision}`, { repeatLocal: false });
+  const scheduler = await loadCore("jobs/scheduler.js"), runNow = await loadCore("jobs/run-now.js");
+  await scheduler.runJobNow(owner, fixture.automation.name, fixture.deps);
+  const [original] = await history.listAutomationRuns({ owners: [owner], automation: fixture.automation.name, appId });
+  assert.equal(original.status, "waiting_approval");
+  const models = fixture.modelCalls.length, calls = fixture.calls.length;
+  runNow.setInProcessAutomationRunner(id => scheduler.runQueuedAutomation(id, fixture.deps), { appId });
+  try {
+    const queued = await runNow.queueAutomationRunNow({ userEmail: owner, appId, scope: "personal", name: fixture.automation.name });
+    const refused = await until(async () => { const run = await history.getAutomationRun(queued.automationRunId); return run.finishedAt ? run : null; });
+    assert.equal(refused.status, "error"); assert.match(refused.error, /already running|approval/i);
+    assert.ok(refused.claimedAt); assert.equal(refused.threadId, null); assert.equal(refused.runId, null);
+    assert.equal(fixture.modelCalls.length, models); assert.equal(fixture.calls.length, calls);
+    await fixture.decide(original.id, await fixture.pending(original.id), decision);
+    const terminal = await fixture.terminal(original.id);
+    assert.equal(terminal.status, decision === "approve" ? "success" : "declined");
+    const resource = await resources.resourceGetByPath(owner, fixture.automation.resource.path);
+    const meta = frontmatter.parseJobResource(resource.content).meta;
+    assert.equal(meta.lastStatus, terminal.status);
+    assert.equal(runner.isBackgroundAutomationRunActive(meta), false);
+    assert.equal(await history.hasUnresolvedAutomationApproval(owner, resource.path), false);
+    assert.equal(Boolean((await history.getAutomationContinuation(original.id)).outcomeReconciled), true);
+    assert.equal(configuredCalls(fixture).length, decision === "approve" ? 1 : 0);
+    await assert.rejects(fixture.decide(original.id, await fixture.pending(original.id), decision), /no longer waiting/);
+    assert.equal(configuredCalls(fixture).length, decision === "approve" ? 1 : 0);
+  } finally { runNow.setInProcessAutomationRunner(null); }
+});
+
+test("admitted-owner tie has one consistent history and atomic resource CAS winner", async () => {
+  const fixture = await makeApprovalCase("admitted-order");
+  const path = fixture.automation.resource.path, now = Date.now(), clock = Date.now;
+  const ids = [];
+  try {
+    // Only history insertion uses the fixed clock. These completed storage owners do not create overlapping waits.
+    Date.now = () => now;
+    for (const suffix of ["first", "second"]) ids.push(await history.startAutomationRun({ owner, automation: fixture.automation.name,
+      path, appId, threadId: `order-thread-${suffix}`, runId: `order-run-${suffix}` }));
+  } finally { Date.now = clock; }
+  for (const id of ids) await history.finishAutomationRun(id, "success");
+  const runs = await Promise.all(ids.map(id => history.getAutomationRun(id)));
+  assert.equal(runs[0].startedAt, runs[1].startedAt);
+  const newer = await Promise.all(runs.map(run => history.hasNewerAutomationRun(run)));
+  assert.equal(newer.filter(Boolean).length, 1, "equal-time admitted owners must not each supersede the other");
+  const winner = runs.find((_, index) => !newer[index]), loser = runs.find((_, index) => newer[index]);
+  assert.equal(winner.id, [...ids].sort().at(-1));
+  const current = await resources.resourceGetByPath(owner, path);
+  const input = run => ({ owner, path, expectedId: current.id, expectedUpdatedAt: current.updatedAt, expectedContent: current.content,
+    content: frontmatter.patchJobFrontmatterFields(current.content, { lastStatus: "success" }),
+    automationTerminal: { historyId: run.id, runId: run.runId } });
+  assert.equal(await resources.resourcePutIfCurrent(input(loser)), null);
+  assert.ok(await resources.resourcePutIfCurrent(input(winner)), "CAS uses the same admitted-owner order");
+});
+
 
 
 test("deletion also refuses an actively resuming approval", async () => {
@@ -826,4 +983,79 @@ for (const kind of ["legacy-shared", "legacy-personal-org", "scoped-personal", "
     assert.equal(result.resourceStatus, kind === "forged-retained-creator" ? "waiting_approval" : "declined");
     assert.equal(result.additionalEffects, 0);
     assert.equal(result.additionalModelCalls, 0);
+  });
+
+for (const decision of ["approve", "decline"]) for (const dispatchFailure of [false, true])
+  test(`fresh webhook follower wakes after ${decision}${dispatchFailure ? " with dispatch recovery" : ""}`, async () => {
+    const fixture = await makeApprovalCase(`fifo-${decision}-${dispatchFailure}`, { triggerType: "webhook", repeatLocal: false });
+    const dispatcher = await loadCore("triggers/dispatcher.js"), tasks = await loadCore("integrations/pending-tasks-store.js");
+    const webhook = await loadCore("integrations/automation-webhook-task.js"), dispatch = await loadCore("integrations/integration-durable-dispatch.js");
+    await dispatcher.initTriggerDispatcher(fixture.deps);
+    const resource = fixture.automation.resource, externalThreadId = `${owner}:${resource.path}`;
+    const originalId = `fifo-original-${decision}-${dispatchFailure}`, followerId = `fifo-follower-${decision}-${dispatchFailure}`;
+    const differentId = `fifo-different-${decision}-${dispatchFailure}`;
+    const insert = (id, thread = externalThreadId) => tasks.insertPendingTask({ id, platform: "automation-webhook", externalThreadId: thread,
+      ownerEmail: owner, orgId: null, externalEventKey: `${resource.id}:${id}`, payload: JSON.stringify({ kind: "automation-webhook",
+        automationId: resource.id, owner, path: resource.path, eventId: id, payload: { id } }) });
+    await insert(originalId);
+    assert.equal(await webhook.runAutomationWebhookTaskInProcess(originalId, { appId }), "waiting_approval");
+    const [original] = await history.listAutomationRuns({ owners: [owner], automation: fixture.automation.name, appId });
+    await insert(followerId); await insert(differentId, externalThreadId + ":different");
+    assert.equal(await tasks.claimPendingTask(followerId), null, "the real waiting task excludes a fresh follower claim");
+    const beforeModels = fixture.modelCalls.length;
+    assert.equal((await tasks.getPendingTask(followerId)).status, "pending");
+    const dispatched = [], resourceAtDispatch = [];
+    const register = () => dispatch.setInProcessIntegrationTaskRunner(async (id, options) => {
+      dispatched.push(id);
+      const meta = frontmatter.parseJobResource((await resources.resourceGetByPath(owner, resource.path)).content).meta;
+      resourceAtDispatch.push(meta.lastStatus);
+      assert.ok(["success", "declined"].includes(meta.lastStatus), "terminal resource precedes follower dispatch");
+      assert.equal((await tasks.getPendingTask(originalId)).status, decision === "approve" ? "completed" : "failed");
+      const previous = fixture.engine.stream;
+      // The follower completes through the same Native task/runner, with no configured action.
+      fixture.engine.stream = async function* (options) {
+        fixture.modelCalls.push(structuredClone(options.messages));
+        assert.deepEqual(options.tools.map(tool => tool.name).sort(), [...surface.UNATTENDED_TOOLS, mcpName].sort());
+        yield { type: "assistant-content", parts: [{ type: "text", text: "Follower complete." }] };
+        yield { type: "stop", reason: "end_turn" };
+      };
+      try { return await webhook.runAutomationWebhookTaskInProcess(id, options); }
+      finally { fixture.engine.stream = previous; }
+    }, { appId, platforms: ["automation-webhook"] });
+    const pending = await fixture.pending(original.id);
+    try {
+      if (!dispatchFailure) register();
+      if (dispatchFailure) {
+        dispatch.setInProcessIntegrationTaskRunner(null);
+        if (decision === "decline") await assert.rejects(fixture.decide(original.id, pending, decision), /dispatch must be retried/);
+        else {
+          await fixture.decide(original.id, pending, decision);
+          await until(async () => (await tasks.getPendingTask(followerId)).lastDispatchOutcome === "failed");
+        }
+        assert.equal(Boolean((await history.getAutomationContinuation(original.id)).outcomeReconciled), false);
+        assert.equal((await tasks.getPendingTask(followerId)).status, "pending");
+        assert.equal((await tasks.getPendingTask(followerId)).lastDispatchOutcome, "failed");
+        register();
+        await runner.reconcileAutomationApprovalOutcomes(appId);
+      } else await fixture.decide(original.id, pending, decision);
+      if (decision === "decline") assert.deepEqual(dispatched, [followerId], "settled decline immediately schedules its fresh follower");
+      await until(async () => (await tasks.getPendingTask(followerId)).status === "completed");
+      assert.deepEqual(dispatched, [followerId]);
+      assert.deepEqual(resourceAtDispatch, [decision === "approve" ? "success" : "declined"]);
+      assert.equal((await tasks.getPendingTask(followerId)).attempts, 1);
+      assert.ok(Date.now() - (await tasks.getPendingTask(followerId)).createdAt < 90_000, "no aging or generic sweep");
+      assert.equal((await tasks.getPendingTask(differentId)).status, "pending");
+      assert.equal((await tasks.getPendingTask(differentId)).attempts, 0);
+      assert.equal(configuredCalls(fixture).length, decision === "approve" ? 1 : 0);
+      assert.equal(Boolean((await history.getAutomationContinuation(original.id)).outcomeReconciled), true);
+      await runner.reconcileAutomationApprovalOutcomes(appId);
+      await assert.rejects(fixture.decide(original.id, pending, decision), /no longer waiting/);
+      assert.deepEqual(dispatched, [followerId]);
+      assert.equal(configuredCalls(fixture).length, decision === "approve" ? 1 : 0);
+      assert.ok(fixture.modelCalls.length > beforeModels);
+      assert.equal(await tasks.claimPendingTask(followerId), null);
+    } finally {
+      dispatch.setInProcessIntegrationTaskRunner(null);
+      await tasks.markTaskFailed(differentId, "Fixture ended without dispatch.");
+    }
   });

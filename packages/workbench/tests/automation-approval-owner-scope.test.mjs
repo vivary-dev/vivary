@@ -24,6 +24,9 @@ after(async () => {
 });
 const url = `file:${path.join(root, "scope.sqlite")}`;
 Object.assign(process.env, { NODE_ENV: "production", APP_NAME: "Vivary",
+  // Supported Native controls apply to this entire isolated test process.
+  // HTTP and explicit approval/recovery calls remain live. Unrelated lazy pollers do not own this fixture.
+  AGENT_NATIVE_DISABLE_INPROCESS_SWEEPS: "true", AGENT_NATIVE_DISABLE_RECURRING_JOBS: "true",
   DATABASE_URL: url, DATABASE_URL_UNPOOLED: url,
   BETTER_AUTH_SECRET: randomBytes(32).toString("hex") });
 approvalFixture = await import("./fixtures/automation-approval-fixture.mjs");

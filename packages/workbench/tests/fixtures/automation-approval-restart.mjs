@@ -31,8 +31,39 @@ if (role.startsWith("identity-")) {
   process.exit(0);
 }
 const { makeApprovalCase, runner, history, until } = await import("./automation-approval-fixture.mjs");
-const fixture = await makeApprovalCase(name, { existing: ["resume", "reconcile"].includes(role) });
-if (role === "wait") {
+const fixture = await makeApprovalCase(name, { existing: ["resume", "reconcile"].includes(role) || role.startsWith("legacy-recover-"), repeatLocal: !role.startsWith("legacy-") });
+if (role.startsWith("legacy-null-")) {
+  const { database, runStore, approvalStore } = await import("./automation-approval-fixture.mjs");
+  const result = await fixture.start();
+  const before = await history.getAutomationRun(result.historyId);
+  const pending = await fixture.pending(result.historyId);
+  // An attached pre-upgrade history has no admission marker. Its actual Native
+  // wait, identity and exact ask remain intact, not a fabricated overlapping run.
+  await database.getDbExec().execute({ sql: "UPDATE automation_runs SET admitted_at = NULL WHERE id = ?", args: [result.historyId] });
+  if (["legacy-null-resuming", "legacy-null-consumed"].includes(role)) {
+    const chunk = `legacy-claim-${result.historyId}`;
+    assert.equal(await history.claimAutomationApprovalDecision(result.historyId, pending.askId, chunk), true);
+    await runStore.insertRun(chunk, result.threadId, result.turnId, { dispatchMode: "background" });
+    if (role === "legacy-null-consumed") assert.equal(await approvalStore.consumeAgentToolApproval(pending), true);
+    await runStore.updateRunStatus(chunk, "aborted");
+  }
+  const retained = await history.getAutomationRun(result.historyId);
+  console.log("APPROVAL_RESULT " + JSON.stringify({ ...result, startedAt: before.startedAt, admittedAt: retained.admittedAt,
+    status: retained.status, askId: pending.askId, askStatus: (await approvalStore.readAgentToolApproval(pending)).status }));
+} else if (role.startsWith("legacy-recover-")) {
+  const { approvalStore, resources, frontmatter, runStore } = await import("./automation-approval-fixture.mjs");
+  const pending = await fixture.pending(historyId);
+  if (role === "legacy-recover-consumed") await assert.rejects(fixture.decide(historyId, pending), /consumed approval cannot be retried/);
+  else await fixture.decide(historyId, pending, role === "legacy-recover-waiting-decline" ? "decline" : "approve");
+  const result = await fixture.terminal(historyId);
+  const calls = fixture.calls.length, models = fixture.modelCalls.length;
+  await assert.rejects(fixture.decide(historyId, pending), /no longer waiting/);
+  assert.equal(fixture.calls.length, calls); assert.equal(fixture.modelCalls.length, models);
+  console.log("APPROVAL_RESULT " + JSON.stringify({ result, pending, calls: fixture.calls, modelCalls: fixture.modelCalls,
+    turn: await runStore.getRunTurnRef(result.runId), askStatus: (await approvalStore.readAgentToolApproval(pending)).status,
+    outcomeReconciled: Boolean((await history.getAutomationContinuation(historyId)).outcomeReconciled),
+    resourceStatus: frontmatter.parseJobResource((await resources.resourceGetByPath(pending.resourceOwner, pending.resourcePath)).content).meta.lastStatus }));
+} else if (role === "wait") {
   const result = await fixture.start();
   console.log("APPROVAL_RESULT " + JSON.stringify({ ...result, calls: fixture.calls }));
 } else if (role === "resume") {

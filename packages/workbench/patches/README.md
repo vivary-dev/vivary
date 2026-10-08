@@ -2280,6 +2280,28 @@ serializes its writers.
 A webhook's existing `integration_pending_tasks` row also becomes
 `waiting_approval`. The retry sweep does not select it, including after restart.
 
+Run now can create a durable request while an earlier execution awaits approval.
+Its worker still refuses admission. That refused history cannot supersede the
+actual owner of the wait. Native history records `admitted_at` on initial thread
+attachment, preserves it across fresh continuation chunks and leaves queue/refusal
+rows unadmitted. History creation and conditional attachment are mandatory before
+Native insertion or start. Attachment failure records an admission error and
+executes no model or tool. Attached legacy histories use their recorded start
+time even when a later continuation fills a missing admission marker. One
+shared SQL predicate orders admitted owners by admission time and history ID,
+including equal times, within the same owner, path, app and organization. Both the
+history precheck and atomic resource CAS use it. Resource identity, definition
+edits and fresh-running marks retain their existing protections.
+
+After approval settles its retained webhook task and reconciles the resource,
+the runner selects only the next queued task on that validated external thread.
+It rechecks owner, organization, resource and app binding before the existing
+claim-safe dispatch. The resource must have left waiting/running first. Duplicate
+or recovered bookkeeping can redispatch a pending follower, but its existing FIFO
+claim permits one execution. Dispatch failure keeps the original history's terminal
+bookkeeping unreconciled for recovery. It never repeats the original consumed action.
+
+
 Settings > Agent > Automations > Details > Past runs > Inspect run reads the
 retained Native thread through `inspect-automation-run`. It shows prior tools,
 results and the exact pending input. `decide-automation-approval` accepts only

@@ -58,3 +58,23 @@ connections; Vivary discovers and exposes them rather than creating duplicates.
 
 Source basis: `Jeff-Kazzee/littleagent` `docs/product/NATIVE_RUNTIME_PROOF.md`,
 plus the version-matched files under `node_modules/@agent-native/core/docs/content/`.
+
+
+## Waiting approvals and queued work
+
+A Run now receipt means a request was saved, not that execution was admitted.
+If an earlier run is waiting for approval, the worker refuses the new request
+without model or tool work. Approve or Decline still updates the original run and
+its automation status. Terminal metadata belongs to the most recent admitted
+Native execution, using admission time and history identity to resolve ties.
+Its durable history attachment must succeed before Native starts or executes a
+model or tool. A persistence failure records a failed request without admitting
+an execution. A legacy attached history keeps its original start-time ordering
+when the first upgraded continuation fills its missing admission timestamp.
+
+A webhook waiting for approval retains its existing task and blocks later calls
+on that external thread. After the owner decision durably settles the task and
+resource, Native immediately dispatches its next FIFO task. Dispatch failure is
+recoverable through the existing terminal bookkeeping owner and task retry path.
+A consumed original action is never replayed. New source still requires the
+controller's affected tests, ordinary concurrent transport exit check and review.
