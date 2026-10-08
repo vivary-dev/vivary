@@ -656,3 +656,166 @@ test("shutdown keeps an idle wait and interrupts an active consumed continuation
   assert.equal(resumed.result.status, "interrupted");
   assert.equal(resumed.calls.filter(call => call.name === mcpName).length, 1);
 });
+
+
+test("Native pruning retains an aged ready wait and prunes ordinary completion", async () => {
+  const waiting = await makeApprovalCase("retained-aged-wait");
+  const ready = await wait(waiting);
+  const ordinary = await makeApprovalCase("ordinary-prune-control");
+  ordinary.engine.stream = async function* () {
+    yield { type: "assistant-content", parts: [{ type: "text", text: "Complete without a tool." }] };
+    yield { type: "stop", reason: "end_turn" };
+  };
+  const completed = await ordinary.start();
+  assert.equal(completed.status, "success");
+  const old = Date.now() - 25 * 60 * 60_000;
+  await database.getDbExec().execute({ sql: "UPDATE agent_runs SET completed_at = ? WHERE id IN (?, ?)",
+    args: [old, ready.runId, completed.runId] });
+  const events = await runStore.getRunEventsSince(ready.runId, -1);
+  assert.ok(events.length > 0);
+  await runStore.cleanupOldRuns(24 * 60 * 60_000);
+  assert.equal(await runStore.getRunStatus(ready.runId), "completed");
+  assert.deepEqual(await runStore.getRunEventsSince(ready.runId, -1), events);
+  assert.equal(await runStore.getRunStatus(completed.runId), null);
+  await waiting.decide(ready.historyId, await waiting.pending(ready.historyId), "decline");
+  assert.equal((await history.getAutomationRun(ready.historyId)).status, "declined");
+  assert.equal(configuredCalls(waiting).length, 0);
+  await runStore.cleanupOldRuns(24 * 60 * 60_000);
+  assert.equal(await runStore.getRunStatus(ready.runId), null, "settlement releases the terminal chunk for ordinary pruning");
+  assert.deepEqual(await runStore.getRunEventsSince(ready.runId, -1), []);
+});
+
+for (const triggerType of ["schedule", "webhook"]) test(`${triggerType} deletion preserves an unresolved owner's route`, async () => {
+  const service = await loadCore("automations/service.js");
+  const fixture = await makeApprovalCase("delete-wait-" + triggerType, { triggerType });
+  const ready = await wait(fixture);
+  const before = await resources.resourceGetByPath(owner, fixture.automation.resource.path);
+  const tokensBefore = triggerType === "webhook" ? (await database.getDbExec().execute("SELECT * FROM automation_webhook_tokens")).rows : null;
+  await assert.rejects(service.deleteAutomation(actor, "personal", fixture.automation.name), /Resolve the waiting approval/);
+  assert.deepEqual(await resources.resourceGetByPath(owner, before.path), before);
+  assert.equal((await history.getAutomationRun(ready.historyId)).status, "waiting_approval");
+  assert.equal((await runner.inspectAutomationRun(ready.historyId, actor, fixture.deps)).pending.askId,
+    (await fixture.pending(ready.historyId)).askId);
+  if (tokensBefore) assert.deepEqual((await database.getDbExec().execute("SELECT * FROM automation_webhook_tokens")).rows, tokensBefore);
+  await assert.rejects(service.deleteAutomation({ ...actor, userEmail: "different@example.test" }, "personal", fixture.automation.name));
+  await fixture.decide(ready.historyId, await fixture.pending(ready.historyId), "decline");
+  await service.deleteAutomation(actor, "personal", fixture.automation.name);
+  assert.equal(await resources.resourceGetByPath(owner, before.path), null);
+  const nonwaiting = await makeApprovalCase("delete-normal-" + triggerType, { triggerType });
+  await service.deleteAutomation(actor, "personal", nonwaiting.automation.name);
+  assert.equal(await resources.resourceGetByPath(owner, nonwaiting.automation.resource.path), null);
+});
+
+for (const decision of ["approve", "decline"]) for (const boundary of ["normal", "task", "resource"])
+  test(`${decision} terminal bookkeeping converges after ${boundary} boundary in a fresh process`, async () => {
+    const name = `reconcile-${decision}-${boundary}`;
+    const fixture = await makeApprovalCase(name, { triggerType: "webhook" });
+    const dispatcher = await loadCore("triggers/dispatcher.js");
+    const tasks = await loadCore("integrations/pending-tasks-store.js");
+    const webhook = await loadCore("integrations/automation-webhook-task.js");
+    await dispatcher.initTriggerDispatcher(fixture.deps);
+    const resource = fixture.automation.resource;
+    const taskId = "task-" + name;
+    await tasks.insertPendingTask({ id: taskId, platform: "automation-webhook", externalThreadId: `${owner}:${resource.path}`,
+      ownerEmail: owner, orgId: null, externalEventKey: resource.id + ":" + name,
+      payload: JSON.stringify({ kind: "automation-webhook", automationId: resource.id, owner,
+        path: resource.path, eventId: name, payload: { id: name } }) });
+    assert.equal(await webhook.runAutomationWebhookTaskInProcess(taskId, { appId }), "waiting_approval");
+    const [run] = await history.listAutomationRuns({ owners: [owner], automation: name, appId });
+    const pending = await fixture.pending(run.id);
+    const db = database.getDbExec();
+    const execute = db.execute.bind(db);
+    let failures = 0;
+    db.execute = async statement => {
+      const sql = String(typeof statement === "string" ? statement : statement.sql).replace(/\s+/g, " ").trim();
+      const taskWrite = sql.startsWith("UPDATE integration_pending_tasks SET status = ?") && statement.args?.includes(taskId);
+      const resourceWrite = sql.startsWith("UPDATE resources SET content = ?") && statement.args?.includes(resource.path) &&
+        ["success", "declined"].includes(frontmatter.parseJobResource(statement.args[0]).meta.lastStatus);
+      if ((boundary === "task" && taskWrite) || (boundary === "resource" && resourceWrite)) {
+        const committed = await execute({ sql: "SELECT status, finished_at FROM automation_runs WHERE id = ?", args: [run.id] });
+        assert.ok(committed.rows[0].finished_at, "the selected fault follows the terminal history commit");
+        assert.equal(committed.rows[0].status, decision === "approve" ? "success" : "declined");
+        failures++;
+        throw new Error("Retained fixture outcome write failure.");
+      }
+      return execute(statement);
+    };
+    try {
+      if (decision === "decline" && boundary !== "normal")
+        await assert.rejects(fixture.decide(run.id, pending, decision), /outcome write failure/);
+      else await fixture.decide(run.id, pending, decision);
+      const terminal = await fixture.terminal(run.id);
+      assert.equal(terminal.status, decision === "approve" ? "success" : "declined");
+      if (boundary !== "normal") {
+        await until(() => failures > 0);
+        assert.ok(failures > 0, `the selected ${boundary} write fault was actually hit`);
+      } else assert.equal(failures, 0);
+      if (boundary === "task") assert.equal((await tasks.getPendingTask(taskId)).status, "waiting_approval");
+      if (boundary === "resource") assert.equal((await tasks.getPendingTask(taskId)).status, decision === "approve" ? "completed" : "failed");
+      if (boundary !== "normal") assert.equal(frontmatter.parseJobResource((await resources.resourceGetByPath(owner, resource.path)).content).meta.lastStatus, "waiting_approval");
+      assert.equal(configuredCalls(fixture).length, decision === "approve" ? 1 : 0);
+    } finally { db.execute = execute; }
+    const recovered = await child("reconcile", name, run.id);
+    assert.equal(recovered.result.status, decision === "approve" ? "success" : "declined");
+    assert.equal(recovered.taskStatus, decision === "approve" ? "completed" : "failed");
+    assert.equal(recovered.resourceStatus, recovered.result.status);
+    assert.deepEqual(recovered.calls, [], "storage recovery starts no tool");
+    assert.deepEqual(recovered.modelCalls, [], "storage recovery starts no model");
+    assert.equal(recovered.recovery.selected, 0, "the synthetic cursor excludes unrelated task dispatch");
+    assert.equal(recovered.recovery.dispatched, 0);
+    if (recovered.outcomeMarkerAvailable) assert.equal(recovered.outcomeReconciled, 1);
+    else assert.equal(recovered.outcomeReconciled, null, "the old runtime has no reconciliation column");
+    await assert.rejects(fixture.decide(run.id, pending), /no longer waiting/);
+    assert.equal(configuredCalls(fixture).length, decision === "approve" ? 1 : 0);
+  });
+
+test("terminal recovery leaves a newer history's metadata untouched", async () => {
+  const fixture = await makeApprovalCase("reconcile-newer");
+  const ready = await wait(fixture);
+  const pending = await fixture.pending(ready.historyId);
+  await history.finishAutomationRun(ready.historyId, "declined", "The owner declined.", "automation_approval_declined");
+  const current = await resources.resourceGetByPath(owner, fixture.automation.resource.path);
+  const newer = await history.startAutomationRun({ owner, automation: fixture.automation.name, path: current.path, appId });
+  await resources.resourcePut(owner, current.path, frontmatter.patchJobFrontmatterFields(current.content, { lastStatus: "running", lastRun: new Date().toISOString() }));
+  const before = await resources.resourceGetByPath(owner, current.path);
+  await runner.reconcileAutomationApprovalOutcomes(appId);
+  assert.deepEqual(await resources.resourceGetByPath(owner, current.path), before);
+  assert.equal(configuredCalls(fixture).length, 0);
+  await assert.rejects(fixture.decide(ready.historyId, pending), /no longer waiting/);
+  await history.finishAutomationRun(newer, "error", "Fixture ended.");
+});
+
+
+test("deletion also refuses an actively resuming approval", async () => {
+  const service = await loadCore("automations/service.js");
+  const fixture = await makeApprovalCase("delete-resuming");
+  const ready = await wait(fixture);
+  let release;
+  fixture.toolGate = new Promise(resolve => { release = resolve; });
+  await fixture.decide(ready.historyId, await fixture.pending(ready.historyId));
+  await until(() => configuredCalls(fixture).length === 1);
+  try {
+    const active = await history.getAutomationRun(ready.historyId);
+    assert.equal(active.status, "resuming");
+    const before = await resources.resourceGetByPath(owner, fixture.automation.resource.path);
+    await assert.rejects(service.deleteAutomation(actor, "personal", fixture.automation.name), /Resolve the waiting approval/);
+    assert.deepEqual(await resources.resourceGetByPath(owner, before.path), before);
+    await runManager.abortTurnDurably(active.runId);
+    await runManager.abortRunDurably(active.runId);
+    assert.equal((await fixture.terminal(ready.historyId)).status, "interrupted");
+    assert.equal(configuredCalls(fixture).length, 1);
+  } finally { release(); }
+  await service.deleteAutomation(actor, "personal", fixture.automation.name);
+  assert.equal(await resources.resourceGetByPath(owner, fixture.automation.resource.path), null);
+});
+
+
+for (const kind of ["legacy-shared", "legacy-personal-org", "scoped-personal", "scoped-organization", "forged-retained-creator"])
+  test(`${kind} terminal recovery preserves the retained execution identity`, async () => {
+    const result = await child("identity-" + kind, "identity-" + kind);
+    assert.equal(result.status, "declined");
+    assert.equal(result.outcomeReconciled, kind === "forged-retained-creator" ? 0 : 1);
+    assert.equal(result.resourceStatus, kind === "forged-retained-creator" ? "waiting_approval" : "declined");
+    assert.equal(result.additionalEffects, 0);
+    assert.equal(result.additionalModelCalls, 0);
+  });

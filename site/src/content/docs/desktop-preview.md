@@ -414,3 +414,10 @@ See the [acceptance register](https://github.com/vivary-dev/vivary/blob/dev/docs
 and [remaining release work](https://github.com/vivary-dev/vivary/issues/23). For a bug report, include the
 release tag, OS version, reproduction steps, and sanitized screenshots or errors.
 Do not include credentials, profile databases, or private transcripts.
+
+A waiting automation keeps its Details route. Resolve its pending approval before
+deleting the definition. Ordinary Native history pruning retains the chunk needed
+to inspect and decline an unresolved wait. If the app stops after history records a
+terminal decision, existing recovery sweeps finish that task and resource status
+without running its action or delivery again. These source contracts still require
+final built UI acceptance.

@@ -846,7 +846,6 @@ index d633a29f3ebe57ff878a909a583f3a02cde20946..6e3c2a78242c3db96737026d0c21ef36
                  }
                  else if (ev.type === "error") {
 diff --git a/dist/agent/run-store.js b/dist/agent/run-store.js
-index 52ffb623b103f0032033045f3f8132c559e3b80b..11fdfe186e075a1458509af565177231ffc0ce31 100644
 --- a/dist/agent/run-store.js
 +++ b/dist/agent/run-store.js
 @@ -5,11 +5,12 @@
@@ -863,7 +862,7 @@ index 52ffb623b103f0032033045f3f8132c559e3b80b..11fdfe186e075a1458509af565177231
  import { isContinuationTerminalReason } from "./types.js";
  let _initPromise;
  /**
-@@ -613,7 +614,10 @@ const LEDGER_RESULT_MAX_CHARS = 8_000;
+@@ -613,7 +614,10 @@
   * promise continuation after `Promise.race` abandons it. Best-effort — never
   * throws so a ledger write failure doesn't break any caller.
   */
@@ -874,7 +873,7 @@ index 52ffb623b103f0032033045f3f8132c559e3b80b..11fdfe186e075a1458509af565177231
      try {
          await ensureRunTables();
          const client = getDbExec();
-@@ -651,7 +655,7 @@ export async function readLedgerEntry(threadId, toolKey) {
+@@ -651,7 +655,7 @@
              return null;
          const row = rows[0];
          return {
@@ -883,7 +882,7 @@ index 52ffb623b103f0032033045f3f8132c559e3b80b..11fdfe186e075a1458509af565177231
              artifacts: parseLedgerArtifacts(row.artifacts_json, threadId, toolKey),
          };
      }
-@@ -1289,7 +1293,7 @@ function errorCodeForTerminalEvent(event) {
+@@ -1289,7 +1293,7 @@
  }
  function errorDetailForTerminalEvent(event) {
      if (event.type === "missing_api_key")
@@ -892,6 +891,33 @@ index 52ffb623b103f0032033045f3f8132c559e3b80b..11fdfe186e075a1458509af565177231
      if (event.type !== "error")
          return null;
      return (event.details || event.error || "").slice(0, 2000) || null;
+@@ -2587,8 +2591,14 @@
+             sql: `DELETE FROM agent_runs
+             WHERE id IN (
+               SELECT id FROM agent_runs
+-              WHERE (status = 'completed' AND completed_at < ?)
+-                 OR (status IN ${UNSUCCESSFUL_STATUS_SQL_LIST} AND completed_at < ?)
++              WHERE ((status = 'completed' AND completed_at < ?)
++                 OR (status IN ${UNSUCCESSFUL_STATUS_SQL_LIST} AND completed_at < ?))
++                AND NOT EXISTS (
++                  SELECT 1 FROM automation_runs AS approval_history
++                  WHERE approval_history.finished_at IS NULL
++                    AND approval_history.status IN ('waiting_approval', 'resuming')
++                    AND (approval_history.run_id = agent_runs.id OR approval_history.resume_run_id = agent_runs.id)
++                )
+               ORDER BY completed_at ASC, id ASC
+               LIMIT ${RUN_OUTCOME_PRUNE_BATCH_LIMIT}
+             )
+@@ -2691,6 +2701,9 @@
+ let cleanupOldRunsInFlight;
+ async function cleanupOldRunsInternal(olderThanMs, erroredOlderThanMs) {
+     await ensureRunTables();
++    // Terminal approval chunks remain evidence until their existing history settles.
++    const { ensureTable: ensureAutomationHistory } = await import("../jobs/run-history.js");
++    await ensureAutomationHistory();
+     const client = getDbExec();
+     const cutoff = Date.now() - olderThanMs;
+     const erroredCutoff = Date.now() - Math.max(erroredOlderThanMs ?? 0, olderThanMs);
 diff --git a/dist/agent/thread-data-builder.d.ts b/dist/agent/thread-data-builder.d.ts
 index bd348265bcdf57cebf5d611d2741fa9705bf6486..fb04b33d759ba1b01c40c3032b87c3e537efc0dc 100644
 --- a/dist/agent/thread-data-builder.d.ts
@@ -5321,7 +5347,6 @@ index c67091b5fd7c9ce643192317b2606c211dc8fe09..6880de9b61aca81296a49a28f0f76320
      if (input.campaignContinuation &&
          !durable &&
 diff --git a/dist/integrations/pending-tasks-retry-job.js b/dist/integrations/pending-tasks-retry-job.js
-index d9006e9e1f631be07b165c78dc28242c3284211f..6064439d9989ea703bd167d817cdd9ecf427dae4 100644
 --- a/dist/integrations/pending-tasks-retry-job.js
 +++ b/dist/integrations/pending-tasks-retry-job.js
 @@ -1,7 +1,8 @@
@@ -5334,7 +5359,7 @@ index d9006e9e1f631be07b165c78dc28242c3284211f..6064439d9989ea703bd167d817cdd9ec
  import { ensurePendingTasksTable, MAX_PENDING_TASK_ATTEMPTS, } from "./pending-tasks-store.js";
  /**
   * Retries stuck integration webhook tasks.
-@@ -38,8 +39,25 @@ const PENDING_STUCK_AFTER_MS = 90_000;
+@@ -38,8 +39,25 @@
  const DEFAULT_PROCESSING_STUCK_AFTER_MS = 5 * 60 * 1000;
  const SERVERLESS_PROCESSING_STUCK_AFTER_MS = 75_000;
  const DURABLE_BACKGROUND_PROCESSING_STUCK_AFTER_MS = 16 * 60 * 1000;
@@ -5360,7 +5385,7 @@ index d9006e9e1f631be07b165c78dc28242c3284211f..6064439d9989ea703bd167d817cdd9ec
  let job = null;
  let startupTimer = null;
  let activeWebhookBaseUrl;
-@@ -92,6 +110,16 @@ export async function retryStuckPendingTasks(input) {
+@@ -92,6 +110,16 @@
      const scopeSql = options.durableOnly
          ? durableScopeSql()
          : { clause: "", args: [] };
@@ -5377,7 +5402,14 @@ index d9006e9e1f631be07b165c78dc28242c3284211f..6064439d9989ea703bd167d817cdd9ec
      const result = {
          selected: 0,
          dispatched: 0,
-@@ -105,22 +133,25 @@ export async function retryStuckPendingTasks(input) {
+@@ -100,27 +128,32 @@
+         dispatchFailed: 0,
+     };
+     await ensurePendingTasksTable();
++    const { reconcileAutomationApprovalOutcomes } = await import("../jobs/background-automation-runner.js");
++    await reconcileAutomationApprovalOutcomes();
+     const client = getDbExec();
+     const now = Date.now();
      const pendingCutoff = now - PENDING_STUCK_AFTER_MS;
      const processingCutoff = now - getProcessingStuckAfterMs();
      const durableProcessingCutoff = now - DURABLE_BACKGROUND_PROCESSING_STUCK_AFTER_MS;
@@ -5407,7 +5439,7 @@ index d9006e9e1f631be07b165c78dc28242c3284211f..6064439d9989ea703bd167d817cdd9ec
           LIMIT ?
        `,
              // `updated_at` is initialized to `created_at` on insert, so a genuinely
-@@ -131,17 +162,24 @@ export async function retryStuckPendingTasks(input) {
+@@ -131,17 +164,24 @@
                  pendingCutoff,
                  pendingCutoff,
                  durableProcessingCutoff,
@@ -5432,7 +5464,7 @@ index d9006e9e1f631be07b165c78dc28242c3284211f..6064439d9989ea703bd167d817cdd9ec
              updatedAt: Number(r.updated_at ?? 0),
              dispatchScope: r.dispatch_scope ?? null,
          }));
-@@ -175,6 +213,22 @@ export async function retryStuckPendingTasks(input) {
+@@ -175,6 +215,22 @@
          return result;
      for (const row of stuckRows) {
          try {
@@ -5455,7 +5487,7 @@ index d9006e9e1f631be07b165c78dc28242c3284211f..6064439d9989ea703bd167d817cdd9ec
              if (row.status === "processing" &&
                  (await hasActiveIntegrationCampaign(row.id))) {
                  result.skipped += 1;
-@@ -252,6 +306,16 @@ export async function retryStuckPendingTasks(input) {
+@@ -252,6 +308,16 @@
              console.error(`[integrations] Failed to retry pending task ${row.id}:`, err);
          }
      }
@@ -5494,12 +5526,14 @@ diff --git a/dist/integrations/pending-tasks-store.d.ts b/dist/integrations/pend
  export interface ResolvedIntegrationSourceContext {
      platform: "slack";
      sourceUrl: string;
-@@ -88,3 +91,5 @@
+@@ -88,3 +91,7 @@
  /** Mark a task as failed and stash an error message. */
  export declare function markTaskFailed(id: string, errorMessage: string): Promise<void>;
  export {};
 +
 +export declare function markTaskWaitingForApproval(id: string): Promise<void>;
++
++export declare function settleAutomationApprovalTask(context: import("../jobs/run-history.js").AutomationApprovalContext, run: import("../jobs/run-history.js").AutomationRun): Promise<void>;
 diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pending-tasks-store.js
 --- a/dist/integrations/pending-tasks-store.js
 +++ b/dist/integrations/pending-tasks-store.js
@@ -5568,7 +5602,7 @@ diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pendin
  /** Mark a task as failed and stash an error message. */
  export async function markTaskFailed(id, errorMessage) {
      await ensureTable();
-@@ -462,3 +502,15 @@
+@@ -462,3 +502,40 @@
          args: ["failed", now, errorMessage.slice(0, 2000), "{}", id],
      });
  }
@@ -5583,6 +5617,31 @@ diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pendin
 +    });
 +    if (result.rowsAffected !== 1)
 +        throw new Error("The webhook approval wait could not be saved.");
++}
++
++export async function settleAutomationApprovalTask(context, run) {
++    const task = await getPendingTask(context.options.webhookTaskId);
++    const status = run.status === "success" ? "completed" : "failed";
++    if (!task || task.platform !== "automation-webhook" || task.ownerEmail !== context.ownerEmail ||
++        (task.orgId ?? null) !== (context.orgId ?? null) ||
++        task.externalThreadId !== `${context.resourceOwner}:${context.resourcePath}`)
++        throw new Error("The retained approval task identity changed.");
++    if (task.status === status)
++        return;
++    const payload = JSON.parse(task.payload);
++    if (task.status !== "waiting_approval" || payload.kind !== "automation-webhook" ||
++        payload.automationId !== context.resourceId || payload.owner !== context.resourceOwner || payload.path !== context.resourcePath)
++        throw new Error("The retained approval task binding changed.");
++    const result = await getDbExec().execute({
++        sql: `UPDATE integration_pending_tasks SET status = ?, updated_at = ?, completed_at = ?, payload = '{}', error_message = ?
++          WHERE id = ? AND status = 'waiting_approval' AND owner_email = ? AND platform = 'automation-webhook'
++            AND external_thread_id = ? AND payload = ? AND COALESCE(org_id, '') = ?
++            AND EXISTS (SELECT 1 FROM automation_runs WHERE id = ? AND thread_id = ? AND finished_at IS NOT NULL)`,
++        args: [status, Date.now(), run.finishedAt, run.error ?? null, task.id, context.ownerEmail,
++            task.externalThreadId, task.payload, context.orgId ?? "", run.id, context.threadId],
++    });
++    if (result.rowsAffected !== 1)
++        throw new Error("The retained approval task outcome must be reconciled again.");
 +}
 diff --git a/dist/integrations/plugin.js b/dist/integrations/plugin.js
 index 7d0524f2aa91299037bfbb8e657a45e848a3bd86..45f9dfaf14ab19f2ccdf2ef630e5eb65e56d2489 100644
@@ -6043,7 +6102,7 @@ diff --git a/dist/jobs/background-automation-runner.d.ts b/dist/jobs/background-
      responseText: string;
      runId: string;
  }
-@@ -100,4 +114,31 @@
+@@ -100,4 +114,33 @@
          };
      }[];
  }): string | null;
@@ -6075,6 +6134,8 @@ diff --git a/dist/jobs/background-automation-runner.d.ts b/dist/jobs/background-
 +    pending: { askId: string; toolName: string; input: unknown; expiresAt: number } | null;
 +}>;
 +export declare function decideAutomationApproval(input: { historyId: string; askId: string; decision: "approve" | "decline" }, actor: AutomationApprovalActor, deps?: BackgroundAutomationDeps): Promise<{ status: "declined" | "resuming"; historyId: string }>;
++
++export declare function reconcileAutomationApprovalOutcomes(appId?: string): Promise<void>;
 diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-automation-runner.js
 --- a/dist/jobs/background-automation-runner.js
 +++ b/dist/jobs/background-automation-runner.js
@@ -6852,7 +6913,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (responseText.trim() &&
              automation.meta.deliveryPlatform &&
              automation.meta.deliveryDestination) {
-@@ -627,6 +870,185 @@
+@@ -627,6 +870,216 @@
                  tenantId: automation.meta.deliveryTenantId,
              });
          }
@@ -6940,20 +7001,47 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +    state.run.approvalReady = true;
 +}
 +async function recordApprovalExecutionOutcome(context, status, error, runId = context.runId) {
-+    const { recordExecutionOutcome } = await import("./scheduler.js");
-+    if (context.options.webhookTaskId && status !== "waiting_approval") {
-+        const { getPendingTask, markTaskCompleted, markTaskFailed } = await import("../integrations/pending-tasks-store.js");
-+        const task = await getPendingTask(context.options.webhookTaskId);
-+        if (task?.status === "waiting_approval") {
-+            if (status === "success")
-+                await markTaskCompleted(task.id);
-+            else
-+                await markTaskFailed(task.id, error ?? `Automation ended as ${status}. No automatic retry.`);
-+        }
++    if (status !== "waiting_approval") {
++        await reconcileAutomationApprovalOutcome(context.historyId);
++        return;
 +    }
++    const { recordExecutionOutcome } = await import("./scheduler.js");
 +    await recordExecutionOutcome({ owner: context.resourceOwner, path: context.resourcePath, id: context.resourceId }, {
-+        lastStatus: status, lastError: error, advanceSchedule: status === "waiting_approval" ? false : context.options.advanceSchedule ?? false,
-+    }, status === "waiting_approval" ? { historyId: context.historyId, runId } : undefined);
++        lastStatus: status, lastError: error, advanceSchedule: false,
++    }, { historyId: context.historyId, runId });
++}
++async function reconcileAutomationApprovalOutcome(id) {
++    const { hasNewerAutomationRun, markAutomationApprovalOutcomeReconciled } = await import("./run-history.js");
++    const state = await getAutomationContinuation(id);
++    if (!state?.run.finishedAt || !state.context || state.outcomeReconciled)
++        return;
++    const { run, context } = state;
++    if (context.historyId !== run.id || context.threadId !== run.threadId ||
++        automationHistoryOwner(context.resourceOwner, { userEmail: context.ownerEmail, orgId: context.orgId }) !== run.owner || context.resourcePath !== run.path ||
++        (context.orgId ?? null) !== (run.orgId ?? null))
++        throw new Error("The terminal approval history binding changed.");
++    if (context.options.webhookTaskId) {
++        const { settleAutomationApprovalTask } = await import("../integrations/pending-tasks-store.js");
++        await settleAutomationApprovalTask(context, run);
++    }
++    // A newer history owns the resource. The SQL CAS also checks this condition
++    // atomically if a newer run starts after this read.
++    if (!await hasNewerAutomationRun(run)) {
++        const { recordExecutionOutcome } = await import("./scheduler.js");
++        await recordExecutionOutcome({ owner: context.resourceOwner, path: context.resourcePath, id: context.resourceId }, {
++            lastStatus: run.status, lastError: run.error ?? undefined,
++            advanceSchedule: context.options.advanceSchedule ?? false, completedAt: run.finishedAt,
++        }, undefined, { historyId: run.id, runId: run.runId });
++    }
++    await markAutomationApprovalOutcomeReconciled(run.id);
++}
++/** Existing sweeps recover outcome bookkeeping only, never tools or deliveries. */
++export async function reconcileAutomationApprovalOutcomes(appId) {
++    const { listUnreconciledAutomationApprovalRuns } = await import("./run-history.js");
++    for (const id of await listUnreconciledAutomationApprovalRuns(appId)) {
++        try { await reconcileAutomationApprovalOutcome(id); }
++        catch (error) { console.error("[automations] terminal approval reconciliation failed:", id, redactText(error.message)); }
++    }
 +}
 +/** Only an authenticated owner decision enters this continuation path. */
 +export async function decideAutomationApproval(input, actor, deps = _approvalDependencies) {
@@ -6961,6 +7049,10 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +        throw approvalDecisionRefusal("Automation approval execution is not initialized.");
 +    const state = await authorizedAutomationContinuation(input.historyId, actor, deps);
 +    const pending = state.context;
++    if (state.run.finishedAt) {
++        await reconcileAutomationApprovalOutcome(input.historyId);
++        throw approvalDecisionRefusal("The automation is no longer waiting for approval.");
++    }
 +    if (!pending || input.askId !== pending.askId || !["approve", "decline"].includes(input.decision))
 +        throw approvalDecisionRefusal("This is not the current pending automation action.");
 +    if (isBackgroundAutomationsClosed())
@@ -7307,7 +7399,7 @@ diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
  /**
   * Attach the agent thread once it exists. The thread is created after the run
   * row so the history survives a crash between the two.
-@@ -82,3 +103,34 @@
+@@ -82,3 +103,38 @@
      appId?: string | null;
      limit?: number;
  }): Promise<AutomationRun[]>;
@@ -7336,12 +7428,16 @@ diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
 +export declare function markAutomationApprovalReady(id: string, askId: string): Promise<void>;
 +export declare function getAutomationContinuation(id: string): Promise<{
 +    run: AutomationRun; storedStatus: string; decisionAt: number | null;
-+    resumeRunId: string | null; context: AutomationApprovalContext | null;
++    outcomeReconciled: boolean; resumeRunId: string | null; context: AutomationApprovalContext | null;
 +} | null>;
 +export declare function claimAutomationApprovalDecision(id: string, askId: string, resumeRunId: string): Promise<boolean>;
 +export declare function restoreUnconsumedAutomationApproval(id: string, askId: string, resumeRunId: string): Promise<boolean>;
 +export declare function hasUnresolvedAutomationApproval(owner: string, path: string): Promise<boolean>;
 +export declare function isAutomationRunThread(threadId: string): Promise<boolean>;
++
++export declare function listUnreconciledAutomationApprovalRuns(appId?: string): Promise<string[]>;
++export declare function markAutomationApprovalOutcomeReconciled(id: string): Promise<void>;
++export declare function hasNewerAutomationRun(run: AutomationRun): Promise<boolean>;
 diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 --- a/dist/jobs/run-history.js
 +++ b/dist/jobs/run-history.js
@@ -7387,7 +7483,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
  /** Rows kept per automation, so a per-minute schedule cannot grow forever. */
  const RUNS_RETAINED_PER_AUTOMATION = 50;
  /** Authoritative release-time schema for durable automation history. */
-@@ -101,6 +103,14 @@
+@@ -101,6 +103,18 @@
          sql: `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS error_code TEXT`,
      },
  ];
@@ -7399,10 +7495,14 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +      ALTER TABLE automation_runs ADD COLUMN IF NOT EXISTS decision_at INTEGER;
 +      ALTER TABLE automation_runs ADD COLUMN IF NOT EXISTS resume_run_id TEXT`,
 +});
++AUTOMATION_RUN_MIGRATIONS.push({
++    version: 7, name: "automation-approval-outcome-reconciliation",
++    sql: `ALTER TABLE automation_runs ADD COLUMN IF NOT EXISTS approval_outcome_reconciled INTEGER NOT NULL DEFAULT 0`,
++});
  export async function runAutomationRunMigrations(nitroApp) {
      await runMigrations(AUTOMATION_RUN_MIGRATIONS, {
          table: "_automation_run_migrations",
-@@ -128,7 +138,10 @@
+@@ -128,7 +142,10 @@
            error TEXT,
            error_code TEXT,
            claimed_at ${intType()},
@@ -7414,7 +7514,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          )
        `;
              const indexSql = `CREATE INDEX IF NOT EXISTS idx_${TABLE}_owner_automation ON ${TABLE} (owner, automation, started_at)`;
-@@ -137,6 +150,8 @@
+@@ -137,6 +154,8 @@
                  await ensureColumnExists(TABLE, "claimed_at", `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS claimed_at ${intType()}`);
                  await ensureColumnExists(TABLE, "dispatch_pending", `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS dispatch_pending ${intType()} NOT NULL DEFAULT 0`);
                  await ensureColumnExists(TABLE, "error_code", `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS error_code TEXT`);
@@ -7423,7 +7523,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
                  await ensureIndexExists(`idx_${TABLE}_owner_automation`, indexSql);
                  return;
              }
-@@ -144,6 +159,7 @@
+@@ -144,6 +163,7 @@
              const { rows } = await client.execute(`PRAGMA table_info("${TABLE}")`);
              const columns = new Set(rows.map((row) => String(row.name)));
              for (const [name, definition] of [
@@ -7431,12 +7531,12 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
                  ["claimed_at", `${intType()}`],
                  ["dispatch_pending", `${intType()} NOT NULL DEFAULT 0`],
                  ["app_id", "TEXT"],
-@@ -170,10 +186,14 @@
+@@ -170,10 +190,14 @@
      }
      return _initPromise;
  }
 +function approvalColumns() {
-+    return [["pending_ask_id", "TEXT"], ["approval_context", "TEXT"], ["approval_ready", `${intType()} NOT NULL DEFAULT 0`], ["decision_at", intType()], ["resume_run_id", "TEXT"]];
++    return [["approval_outcome_reconciled", `${intType()} NOT NULL DEFAULT 0`], ["pending_ask_id", "TEXT"], ["approval_context", "TEXT"], ["approval_ready", `${intType()} NOT NULL DEFAULT 0`], ["decision_at", intType()], ["resume_run_id", "TEXT"]];
 +}
  function toRun(row, now) {
      const stored = stringifyValue(row.status);
@@ -7447,7 +7547,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          ? "interrupted"
          : stored;
      return {
-@@ -187,7 +207,10 @@
+@@ -187,7 +211,10 @@
          runId: row.run_id == null ? null : stringifyValue(row.run_id),
          threadId: row.thread_id == null ? null : stringifyValue(row.thread_id),
          status,
@@ -7458,7 +7558,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          finishedAt: row.finished_at == null ? null : Number(row.finished_at),
          error: row.error == null && status === "interrupted"
              ? INTERRUPTED_RUN_MESSAGE
-@@ -200,6 +223,18 @@
+@@ -200,6 +227,18 @@
                  ? null
                  : stringifyValue(row.error_code),
      };
@@ -7477,7 +7577,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
  }
  /**
   * Record an automation execution. Manual runs create the row before dispatch,
-@@ -244,7 +279,7 @@
+@@ -244,7 +283,7 @@
      const now = Date.now();
      const result = await getDbExec().execute({
          sql: `UPDATE ${TABLE} SET claimed_at = ? WHERE id = ? AND dispatch_pending = 1 AND (claimed_at IS NULL OR claimed_at <= ?) AND status = 'running'`,
@@ -7486,7 +7586,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
      });
      return Number(result.rowsAffected ?? 0) > 0;
  }
-@@ -266,7 +301,7 @@
+@@ -266,7 +305,7 @@
              AND started_at <= ?
            ORDER BY started_at ASC LIMIT ${limit}`,
          args: [
@@ -7495,16 +7595,16 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
              ...(appId ? [appId] : []),
              Date.now() - olderThanMs,
          ],
-@@ -291,7 +326,7 @@
+@@ -291,7 +330,7 @@
  async function pruneAutomationRuns(owner, automation) {
      await getDbExec().execute({
          sql: `DELETE FROM ${TABLE}
 -          WHERE owner = ? AND automation = ? AND started_at < (
-+          WHERE owner = ? AND automation = ? AND status NOT IN ('waiting_approval', 'resuming') AND started_at < (
++          WHERE owner = ? AND automation = ? AND status NOT IN ('waiting_approval', 'resuming') AND (approval_context IS NULL OR approval_outcome_reconciled = 1) AND started_at < (
              SELECT MIN(started_at) FROM (
                SELECT started_at FROM ${TABLE}
                WHERE owner = ? AND automation = ?
-@@ -302,7 +337,9 @@
+@@ -302,7 +341,9 @@
          args: [owner, automation, owner, automation],
      });
  }
@@ -7515,7 +7615,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
      await ensureTable();
      const existing = await getDbExec().execute({
          sql: `SELECT owner, automation, path, org_id, run_id, thread_id, started_at FROM ${TABLE} WHERE id = ? LIMIT 1`,
-@@ -310,17 +347,20 @@
+@@ -310,17 +351,20 @@
      });
      const row = existing.rows?.[0];
      const finishedAt = Date.now();
@@ -7540,16 +7640,16 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          return;
      const rawStartedAt = Number(row.started_at);
      const startedAt = Number.isFinite(rawStartedAt) ? rawStartedAt : null;
-@@ -371,7 +411,7 @@
+@@ -371,7 +415,7 @@
      // definition's.
      const cutoff = Date.now();
      await getDbExec().execute({
 -        sql: `DELETE FROM ${TABLE} WHERE owner = ? AND automation = ? AND started_at <= ?`,
-+        sql: `DELETE FROM ${TABLE} WHERE owner = ? AND automation = ? AND started_at <= ? AND status NOT IN ('waiting_approval', 'resuming')`,
++        sql: `DELETE FROM ${TABLE} WHERE owner = ? AND automation = ? AND started_at <= ? AND status NOT IN ('waiting_approval', 'resuming') AND (approval_context IS NULL OR approval_outcome_reconciled = 1)`,
          args: [owner, automation, cutoff],
      });
  }
-@@ -393,3 +433,81 @@
+@@ -393,3 +437,108 @@
      const now = Date.now();
      return (result.rows ?? []).map((row) => toRun(row, now));
  }
@@ -7561,7 +7661,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +    await ensureTable();
 +    const result = await getDbExec().execute({
 +        sql: `UPDATE automation_runs SET status = 'waiting_approval', pending_ask_id = ?,
-+          approval_context = ?, approval_ready = 0, thread_id = ?, run_id = ?,
++          approval_context = ?, approval_ready = 0, approval_outcome_reconciled = 0, thread_id = ?, run_id = ?,
 +          finished_at = NULL, error = NULL, error_code = NULL
 +          WHERE id = ? AND status IN ('running', 'resuming') AND finished_at IS NULL`,
 +        args: [context.askId, JSON.stringify(context), context.threadId, context.runId, id],
@@ -7585,6 +7685,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +    if (!row)
 +        return null;
 +    return { run: toRun(row, Date.now()), storedStatus: String(row.status),
++        outcomeReconciled: Number(row.approval_outcome_reconciled) === 1,
 +        decisionAt: row.decision_at == null ? null : Number(row.decision_at),
 +        resumeRunId: row.resume_run_id == null ? null : String(row.resume_run_id),
 +        context: row.approval_context ? JSON.parse(String(row.approval_context)) : null };
@@ -7630,6 +7731,32 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +        return false;
 +    const repo = JSON.parse(row.threadData || "{}");
 +    return row.scope?.type === "vivary-automation-run" || repo._automationRunId != null;
++}
++
++/** Terminal approval bookkeeping is retried without another agent execution. */
++export async function listUnreconciledAutomationApprovalRuns(appId) {
++    await ensureTable();
++    const result = await getDbExec().execute({
++        sql: `SELECT id FROM automation_runs WHERE finished_at IS NOT NULL
++          AND approval_context IS NOT NULL AND approval_outcome_reconciled = 0
++          ${appId ? 'AND app_id = ?' : ''} ORDER BY finished_at LIMIT 100`,
++        args: appId ? [appId] : [],
++    });
++    return result.rows.map(row => String(row.id));
++}
++export async function markAutomationApprovalOutcomeReconciled(id) {
++    await getDbExec().execute({
++        sql: `UPDATE automation_runs SET approval_outcome_reconciled = 1
++          WHERE id = ? AND finished_at IS NOT NULL`, args: [id],
++    });
++}
++export async function hasNewerAutomationRun(run) {
++    const result = await getDbExec().execute({
++        sql: `SELECT 1 FROM automation_runs WHERE owner = ? AND path = ?
++          AND id != ? AND started_at >= ? LIMIT 1`,
++        args: [run.owner, run.path, run.id, run.startedAt],
++    });
++    return result.rows.length > 0;
 +}
 diff --git a/dist/jobs/run-now.d.ts b/dist/jobs/run-now.d.ts
 index d171bf0e5f313133e3f0dc937bafaf9a29e25084..ab3b310f74cfe514977783531512ea91b900798c 100644
@@ -7991,7 +8118,7 @@ diff --git a/dist/jobs/scheduler.d.ts b/dist/jobs/scheduler.d.ts
      error?: string;
  }>;
 +
-+export declare function recordExecutionOutcome(resource: Pick<import("../resources/store.js").Resource, "owner" | "path" | "id">, outcome: import("./frontmatter.js").JobExecutionFrontmatterPatch & { advanceSchedule?: boolean }, automationWait?: import("../resources/store.js").AutomationWaitCondition): Promise<void>;
++export declare function recordExecutionOutcome(resource: Pick<import("../resources/store.js").Resource, "owner" | "path" | "id">, outcome: import("./frontmatter.js").JobExecutionFrontmatterPatch & { advanceSchedule?: boolean; completedAt?: number }, automationWait?: import("../resources/store.js").AutomationWaitCondition, automationTerminal?: import("../resources/store.js").AutomationWaitCondition): Promise<void>;
 diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
 --- a/dist/jobs/scheduler.js
 +++ b/dist/jobs/scheduler.js
@@ -8067,7 +8194,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
      }
      catch (error) {
          primaryFailed = true;
-@@ -107,9 +129,25 @@
+@@ -107,10 +129,29 @@
              }
          }
      }
@@ -8091,9 +8218,13 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
 + * job settles.
 + */
  async function processRecurringJobsWithLease(deps) {
++    const { reconcileAutomationApprovalOutcomes } = await import("./background-automation-runner.js");
++    await reconcileAutomationApprovalOutcomes(deps.appId);
++
      subscribeToJobsResourceEvents();
      // Skip if we recently confirmed there are no job resources to run.
-@@ -128,10 +166,10 @@
+     const nowMs = Date.now();
+@@ -128,10 +169,10 @@
              orgIds: [],
              checkedAt: nowMs,
          });
@@ -8106,7 +8237,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
      const healthOrgIds = new Set();
      let healthError = null;
      let dispatchedAt;
-@@ -140,7 +178,7 @@
+@@ -140,7 +181,7 @@
          _hasJobsCache = jobResources.some((r) => r.path.endsWith(".md") && !r.path.endsWith(".keep"));
          _lastJobsCheck = nowMs;
          if (!_hasJobsCache)
@@ -8115,7 +8246,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
          const now = new Date();
          const dueJobCandidates = [];
          for (const resource of jobResources) {
-@@ -163,10 +201,16 @@
+@@ -163,10 +204,16 @@
                  null);
              // A host-targeted run is reconciled from the durable relay command. It
              // must never fall back to this scheduler after the laptop disconnects.
@@ -8135,7 +8266,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
              // Skip disabled or missing schedule
              if (!meta.enabled || !meta.schedule)
                  continue;
-@@ -174,17 +218,25 @@
+@@ -174,17 +221,25 @@
                  continue;
              // Skip if currently running, unless it has been stuck for more than 10 minutes
              // (server crash mid-job leaves lastStatus=running forever without this guard)
@@ -8171,7 +8302,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
                  continue;
              }
              // Check if due
-@@ -213,7 +265,7 @@
+@@ -213,7 +268,7 @@
                  _preflightingScheduledJobs.has(key)) {
                  continue;
              }
@@ -8180,7 +8311,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
          }
          const preflightCandidates = [];
          for (const candidate of dueJobCandidates) {
-@@ -257,6 +309,10 @@
+@@ -257,6 +312,10 @@
                  _preflightingScheduledJobs.delete(candidate.key);
              }
          }
@@ -8191,7 +8322,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
          if (dueJobs.length > 0)
              dispatchedAt = Date.now();
          await recordSchedulerHealthForScopes({
-@@ -265,17 +321,9 @@
+@@ -265,17 +324,9 @@
              checkedAt: Date.now(),
              dispatchedAt,
          });
@@ -8212,7 +8343,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
      }
      catch (err) {
          // Transient WS / connection drops (Neon serverless): silently retry next
-@@ -286,7 +334,7 @@
+@@ -286,7 +337,7 @@
              healthError = "The scheduler could not reach the database.";
              _hasJobsCache = undefined; // force re-check on next successful tick
              _lastJobsCheck = 0;
@@ -8221,7 +8352,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
          }
          // Unwrap ErrorEvent (Neon WS driver emits these on network failure) so logs show the real cause
          const detail = err instanceof Error
-@@ -299,7 +347,7 @@
+@@ -299,7 +350,7 @@
          // A scan can fail after reserving a job but before dispatching it. Do not
          // leave that reservation blocking the job on every subsequent tick.
          for (const key of reservedJobKeys) {
@@ -8230,7 +8361,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
                  _activeScheduledJobs.delete(key);
          }
          await recordSchedulerHealthForScopes({
-@@ -310,6 +358,68 @@
+@@ -310,6 +361,68 @@
              error: healthError,
          });
      }
@@ -8299,7 +8430,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
  }
  async function recoverStaleAutomationHistory(owner, path) {
      const automation = path.replace(/^jobs\//, "").replace(/\.md$/, "");
-@@ -324,7 +434,7 @@
+@@ -324,7 +437,7 @@
              (run.status !== "running" && run.status !== "interrupted")) {
              return;
          }
@@ -8308,7 +8439,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
      }
      catch (error) {
          console.warn(`[recurring-jobs] Could not record stale history for "${automation}":`, error instanceof Error ? error.message : error);
-@@ -430,135 +540,182 @@
+@@ -430,135 +543,182 @@
      // Manual runs use the same resource row as scheduled runs for concurrency
      // protection. The check is paired with the conditional write below: two
      // requests that read the same idle snapshot cannot both claim it.
@@ -8600,7 +8731,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
      }
  }
  /** Execute one stored automation without changing its scheduled next run. */
-@@ -577,7 +734,10 @@
+@@ -577,7 +737,10 @@
      });
  }
  /** Process a durable run-now history row exactly once in the background worker. */
@@ -8612,7 +8743,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
      const queued = await getAutomationRun(historyId);
      if (!queued)
          throw new Error(`Automation run "${historyId}" not found.`);
-@@ -586,6 +746,9 @@
+@@ -586,6 +749,9 @@
      if (queuedAppId && queuedAppId !== workerAppId) {
          return { skipped: true };
      }
@@ -8622,7 +8753,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
      if (!(await claimAutomationRun(historyId))) {
          return { skipped: true };
      }
-@@ -599,7 +762,38 @@
+@@ -599,7 +765,38 @@
          ...(result.error ? { error: result.error } : {}),
      };
  }
@@ -8658,35 +8789,53 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
 +    });
 +    return _stopPromise;
 +}
-+async function updateResource(resource, meta, _body, automationWait) {
++async function updateResource(resource, meta, _body, automationWait, automationTerminal) {
      const content = patchJobFrontmatterFields(resource.content, {
          lastRun: meta.lastRun,
          lastCheck: meta.lastCheck,
-@@ -619,6 +813,7 @@
+@@ -619,6 +816,7 @@
          expectedId: resource.id,
          expectedUpdatedAt: resource.updatedAt,
          expectedContent: resource.content,
-+        automationWait,
++        automationWait, automationTerminal,
      });
      return written !== null;
  }
-@@ -631,7 +826,9 @@
+@@ -631,7 +829,9 @@
   * ours to write, and `nextRun` is recomputed from whatever schedule is stored
   * now, so an edit mid-run takes effect on the next tick.
   */
 -async function recordExecutionOutcome(resource, outcome) {
-+export async function recordExecutionOutcome(resource, outcome, automationWait) {
++export async function recordExecutionOutcome(resource, outcome, automationWait, automationTerminal) {
 +    if (outcome.lastStatus === "waiting_approval" && !automationWait)
 +        throw new Error("A waiting outcome requires its automation history and Native chunk.");
      const latest = await resourceGetByPath(resource.owner, resource.path);
      if (!latest) {
          // Deleted while it was running. Writing the pre-run snapshot back would
-@@ -654,7 +851,7 @@
-         // Measured from completion so a long run cannot immediately re-fire.
-         meta.nextRun = nextOccurrence(meta.schedule, new Date(), meta.timezone).toISOString();
+@@ -646,15 +846,22 @@
+         return;
      }
+     const current = parseJobResource(latest.content);
+-    const { advanceSchedule, ...execution } = outcome;
++    const { advanceSchedule, completedAt, ...execution } = outcome;
++    // A fresh running mark may precede insertion of its history row. Its CAS
++    // version and timestamp also keep late terminal recovery from owning it.
++    if (automationTerminal && current.meta.lastStatus === "running" &&
++        Date.parse(current.meta.lastRun ?? "") >= completedAt)
++        return;
+     const meta = { ...current.meta, ...execution };
+     if (advanceSchedule !== false &&
+         meta.schedule &&
+         isValidCron(meta.schedule)) {
+         // Measured from completion so a long run cannot immediately re-fire.
+-        meta.nextRun = nextOccurrence(meta.schedule, new Date(), meta.timezone).toISOString();
+-    }
 -    if (!(await updateResource(latest, meta, current.body))) {
-+    if (!(await updateResource(latest, meta, current.body, automationWait))) {
++        meta.nextRun = nextOccurrence(meta.schedule, new Date(completedAt ?? Date.now()), meta.timezone).toISOString();
++    }
++    if (!(await updateResource(latest, meta, current.body, automationWait, automationTerminal))) {
++        if (automationTerminal)
++            throw new Error("The terminal automation outcome must be reconciled again.");
          console.log(`[recurring-jobs] "${resource.path}" changed while its outcome was being recorded; dropping the outcome.`);
      }
  }
@@ -9140,15 +9289,16 @@ diff --git a/dist/resources/store.d.ts b/dist/resources/store.d.ts
  export interface ResourceConditionalWrite {
      owner: string;
      path: string;
-@@ -75,6 +80,7 @@
+@@ -75,6 +80,8 @@
      /** Also guards the rare case where two writes share the same millisecond. */
      expectedContent: string;
      mimeType?: string;
 +    automationWait?: AutomationWaitCondition;
++    automationTerminal?: AutomationWaitCondition;
  }
  export interface ResourceListOptions {
      includeAgentScratch?: boolean;
-@@ -127,6 +133,14 @@
+@@ -127,6 +134,14 @@
   */
  export declare function resourcePutIfCurrent(input: ResourceConditionalWrite): Promise<Resource | null>;
  export declare function resourceDeleteIfCurrent(resource: Resource): Promise<boolean>;
@@ -9163,7 +9313,7 @@ diff --git a/dist/resources/store.d.ts b/dist/resources/store.d.ts
  export declare function resourceDelete(id: string): Promise<boolean>;
  export declare function resourceDeleteByPath(owner: string, path: string): Promise<boolean>;
  export declare function resourceList(owner: string, pathPrefix?: string, options?: ResourceListOptions): Promise<ResourceMeta[]>;
-@@ -144,3 +158,12 @@
+@@ -144,3 +159,12 @@
   */
  export declare function resourceListAllOwners(pathPrefix: string): Promise<Resource[]>;
  export declare function resourceMove(id: string, newPath: string): Promise<boolean>;
@@ -9513,7 +9663,7 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
      await ensureTable();
      if (input.owner === WORKSPACE_OWNER &&
          (await shouldHandleWorkspaceResourceAsLocal(input.path))) {
-@@ -1302,8 +1447,21 @@
+@@ -1302,8 +1447,32 @@
      const now = Math.max(Date.now(), input.expectedUpdatedAt + 1);
      const size = Buffer.byteLength(input.content, "utf8");
      const mime = input.mimeType || "text/markdown";
@@ -9530,21 +9680,33 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
 +          AND approval_run.approval_ready = 1 AND approval_run.finished_at IS NULL
 +          ${isPostgres() ? 'FOR UPDATE' : ''}
 +    )` : "";
++    const terminal = input.automationTerminal;
++    const terminalCondition = terminal ? ` AND EXISTS (
++        SELECT 1 FROM automation_runs AS terminal_history
++        WHERE terminal_history.id = ? AND terminal_history.run_id = ?
++          AND terminal_history.path = resources.path
++          AND terminal_history.finished_at IS NOT NULL
++          AND NOT EXISTS (SELECT 1 FROM automation_runs AS newer_history
++            WHERE newer_history.owner = terminal_history.owner AND newer_history.path = terminal_history.path
++              AND newer_history.id != terminal_history.id AND newer_history.started_at >= terminal_history.started_at)
++          ${isPostgres() ? 'FOR UPDATE' : ''}
++    )` : "";
      const result = await client.execute({
 -        sql: `UPDATE resources SET content = ?, mime_type = ?, size = ?, updated_at = ? WHERE owner = ? AND path = ? AND id = ? AND updated_at = ? AND content = ?`,
-+        sql: `UPDATE resources SET content = ?, mime_type = ?, size = ?, updated_at = ? WHERE owner = ? AND path = ? AND id = ? AND updated_at = ? AND content = ?${waitCondition}`,
++        sql: `UPDATE resources SET content = ?, mime_type = ?, size = ?, updated_at = ? WHERE owner = ? AND path = ? AND id = ? AND updated_at = ? AND content = ?${waitCondition}${terminalCondition}`,
          args: [
              input.content,
              mime,
-@@ -1314,6 +1472,7 @@
+@@ -1314,6 +1483,8 @@
              input.expectedId,
              input.expectedUpdatedAt,
              input.expectedContent,
 +            ...(wait ? [wait.historyId, wait.runId] : []),
++            ...(terminal ? [terminal.historyId, terminal.runId] : []),
          ],
      });
      const rowsAffected = result
-@@ -1331,6 +1490,7 @@
+@@ -1331,6 +1502,7 @@
      return resource;
  }
  export async function resourceDeleteIfCurrent(resource) {
@@ -9552,7 +9714,7 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
      await ensureTable();
      if (isLocalWorkspaceResourceId(resource.id))
          return false;
-@@ -1367,12 +1527,89 @@
+@@ -1367,12 +1539,89 @@
      }
      return deleted;
  }
@@ -9642,7 +9804,7 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
          const deleted = await deleteLocalWorkspaceResource({ path: resourcePath });
          if (deleted) {
              emitResourceDelete(id, resourcePath, WORKSPACE_OWNER);
-@@ -1387,9 +1624,10 @@
+@@ -1387,9 +1636,10 @@
      });
      if (rows.length === 0)
          return false;
@@ -9655,7 +9817,7 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
      });
      const deleted = result.rowsAffected > 0;
      if (deleted) {
-@@ -1398,6 +1636,7 @@
+@@ -1398,6 +1648,7 @@
      return deleted;
  }
  export async function resourceDeleteByPath(owner, path) {
@@ -9663,7 +9825,7 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
      await ensureTable();
      if (owner === WORKSPACE_OWNER &&
          (await shouldHandleWorkspaceResourceAsLocal(path))) {
-@@ -1623,18 +1862,24 @@
+@@ -1623,18 +1874,24 @@
      const now = Date.now();
      // Get current resource info
      const { rows } = await client.execute({
@@ -11980,7 +12142,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
              const browserTools = createBuilderBrowserTool({
                  getOrigin: () => getRequestRunContext()?.requestOrigin ?? "http://localhost:3000",
                  getOwner: () => getRequestRunContext()?.owner ?? getRequestUserEmail(),
-@@ -956,32 +965,24 @@
+@@ -956,31 +965,27 @@
                  coreAttachmentTools = createCoreAttachmentActionEntries();
              }
              catch { }
@@ -11988,7 +12150,14 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
 -            // background surface. Interactive-only tools stay out of it, while
 -            // shared capabilities such as call-agent and core-send-email cannot
 -            // drift independently between the two background entry points.
--            const getBackgroundActionEntries = async (automation) => {
++            // Scheduled, event, webhook, and Run now runs share one background
++            // surface. The allowlist in
++            // jobs/unattended-surface.js keeps 12 tools, refuses outward and
++            // configuration changes. Only declared configured MCP tools are added,
++            // each behind the exact-call durable approval gate.
++            // Only Core's own tool groups feed it, so a template or tool action
++            // that reuses a kept name cannot replace Core's checked entry.
+             const getBackgroundActionEntries = async (automation) => {
 -                const mcpActions = await getJobMcpActionEntries(automation);
 -                return {
 -                    ...templateScripts,
@@ -12009,15 +12178,9 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
 -                    ...coreAttachmentTools,
 -                    ...mcpActions,
 -                };
--            };
-+            // Scheduled, event, webhook, and Run now runs share one background
-+            // surface. The allowlist in
-+            // jobs/unattended-surface.js keeps 12 tools, refuses outward and
-+            // configuration changes. Only declared configured MCP tools are added,
-+            // each behind the exact-call durable approval gate.
-+            // Only Core's own tool groups feed it, so a template or tool action
-+            // that reuses a kept name cannot replace Core's checked entry.
-+            const getBackgroundActionEntries = async (automation) => restrictActionsForUnattendedRun({
++                if (automation?.meta?.mcpTools?.length)
++                    await ensureMcpInitialized();
++                return restrictActionsForUnattendedRun({
 +                ...resourceScripts,
 +                ...docsScripts,
 +                ...(lazyContext ? frameworkContextTool : {}),
@@ -12028,10 +12191,10 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
 +                ...progressTools,
 +                ...mcpToolsToActionEntries(mcpManager, { ...mcpActionEntryOptions, toolNames: automation?.meta?.mcpTools ?? [] }),
 +            }, automation, { mcpManager });
+             };
              // -----------------------------------------------------------------------
              // Production code-execution mode resolution.
-             //
-@@ -1906,6 +1907,14 @@
+@@ -1906,6 +1911,14 @@
              const getFrameworkPromptActions = () => Object.fromEntries(Object.entries(prodActions).filter(([name]) => !templateScripts[name] && !mcpActionEntries[name]));
              const resolveRequestBasePrompt = () => (options?.systemPrompt ??
                  filterFrameworkPromptToSurface(lazyContext ? PROD_FRAMEWORK_PROMPT_COMPACT : PROD_FRAMEWORK_PROMPT, getFrameworkPromptActions(), getRequestRunContext()?.allowedActionNames)) + resolveRequestActionsPrompt("tool");
@@ -12046,7 +12209,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
              const resolveRequestLeanPrompt = () => (options?.systemPrompt ?? "") + resolveRequestLeanActionsPrompt();
              const resolveRequestDevPrompt = () => {
                  if (devNative)
-@@ -2838,6 +2847,10 @@
+@@ -2838,6 +2851,10 @@
  
  Non-code requests are still fine on this surface: read data, navigate the UI, summarize, search, create/update extensions (sandboxed Alpine.js mini-apps stored in SQL), and call template actions. The restriction is specifically about direct edits to the host app's own source files.
  </app-rendered-chat-no-direct-code-edits>`;
@@ -12057,7 +12220,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
              // System-prompt note appended when production code execution is enabled.
              const prodCodeExecPromptNote = !canToggle && effectiveProdCodeExec !== "off"
                  ? effectiveProdCodeExec === "trusted"
-@@ -2854,7 +2867,9 @@
+@@ -2854,7 +2871,9 @@
                      const requestLeanPrompt = resolveRequestLeanPrompt();
                      const runtimeContext = runtimeContextForEvent(event);
                      const codeEditingSurfaceRestriction = shouldBlockInProductCodeEditing(event)
@@ -12068,7 +12231,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                          : "";
                      const hostedHarnessRuntime = getRequestRunContext()?.hostedHarnessRuntime;
                      const hostedHarnessPromptNote = hostedHarnessRuntime
-@@ -3816,15 +3831,21 @@
+@@ -3816,15 +3835,21 @@
                              return pathOrder;
                          return a.path.localeCompare(b.path);
                      });
@@ -12093,7 +12256,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                              if (full) {
                                  const fm = parseSkillFrontmatter(full.content);
                                  if (!isRuntimeVisibleScope(fm.scope))
-@@ -4649,6 +4670,19 @@
+@@ -4649,6 +4674,19 @@
                                  setResponseStatus(event, 404);
                                  return { error: "Thread not found" };
                              }
@@ -12113,7 +12276,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                              let newThreadData = body.threadData || thread.threadData;
                              let newMessageCount = body.messageCount ?? thread.messageCount;
                              let nextTitle = typeof body.title === "string" ? body.title : thread.title;
-@@ -4666,34 +4700,20 @@
+@@ -4666,34 +4704,20 @@
                                          nextTitle = meta.title;
                                  }
                              };
@@ -12162,7 +12325,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                              // Scope updates piggyback on the PUT — the client uses this
                              // path for detach and for claiming a legacy unscoped thread.
                              // A scoped thread cannot be retagged across resources here.
-@@ -4701,7 +4721,7 @@
+@@ -4701,7 +4725,7 @@
                                  const incomingScope = parseScopeFromBody(body.scope);
                                  await setThreadScope(threadId, incomingScope);
                              }
@@ -12171,7 +12334,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                          });
                      }
                      // POST /threads/:id/queued — debounced writes from the client
-@@ -5113,32 +5133,13 @@
+@@ -5113,32 +5137,13 @@
                      ? preparedMarker.automationRunId
                      : undefined;
                  if (typeof automationRunId === "string" && automationRunId) {
@@ -12205,7 +12368,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                          }
                          catch {
                              setResponseStatus(event, 500);
-@@ -5146,7 +5147,7 @@
+@@ -5146,7 +5151,7 @@
                          }
                      }
                      const waitUntil = event.req?.waitUntil;
@@ -12214,7 +12377,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                      if (typeof waitUntil === "function") {
                          void waitUntil(runPromise);
                      }
-@@ -5321,34 +5322,19 @@
+@@ -5321,34 +5326,19 @@
              // Poll every 60 seconds for due recurring jobs and execute them.
              // Long-lived runtimes use setInterval; serverless runtimes rely on a
              // platform-owned sweep because an invocation cannot own a durable loop.
@@ -12253,7 +12416,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                      apiKey: options?.apiKey,
                      model: resolveConfiguredAgentModel(options),
                      appId: options?.appId,
-@@ -5439,15 +5425,24 @@
+@@ -5439,15 +5429,24 @@
                      }
                  }
                  else {
@@ -12280,7 +12443,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                      }, 10_000);
                  }
              }
-@@ -5759,27 +5754,48 @@
+@@ -5759,27 +5758,48 @@
              // Event and webhook automations remain live when the recurring scheduler
              // is disabled; only the cron driver is gated above.
              const { initTriggerDispatcher } = await import("../triggers/dispatcher.js");
@@ -12339,7 +12502,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
          })().catch((err) => {
              // If the init fails, the routes never get registered and requests
              // to /_agent-native/agent-chat silently 404. Register a fallback
-@@ -5803,6 +5819,7 @@
+@@ -5803,6 +5823,7 @@
                  "/mcp",
                  "/.well-known/agent-card.json",
                  "/_agent-native/a2a",
@@ -14456,3 +14619,24 @@ diff --git a/dist/server/action-discovery.js b/dist/server/action-discovery.js
              "list-automation-runs",
              () => import("../jobs/actions/list-automation-runs.js"),
          ],
+diff --git a/dist/automations/service.js b/dist/automations/service.js
+--- a/dist/automations/service.js
++++ b/dist/automations/service.js
+@@ -1,7 +1,7 @@
+ import { getDbExec } from "../db/client.js";
+ import { isValidCron, isValidTimezone, nextOccurrence } from "../jobs/cron.js";
+ import { buildJobResourceContent, isRecoveredFactoryJob, jobBelongsToApp, normalizeJobMcpTools, parseJobResource, } from "../jobs/frontmatter.js";
+-import { deleteAutomationRuns } from "../jobs/run-history.js";
++import { deleteAutomationRuns, hasUnresolvedAutomationApproval } from "../jobs/run-history.js";
+ import { resolveUserSchedulingTimezone } from "../localization/user-timezone.js";
+ import { organizationIdFromResourceOwner, organizationResourceOwner, resourceDelete, resourceGetByPath, resourceList, resourcePut, SHARED_OWNER, } from "../resources/store.js";
+ import { deleteAutomationWebhookToken, readAutomationWebhookPath, saveAutomationWebhookToken, } from "../triggers/webhook-store.js";
+@@ -393,6 +393,8 @@
+     if (!definition.canUpdate) {
+         throw httpError("Only the automation's creator or an organization admin can delete it.", 403);
+     }
++    if (await hasUnresolvedAutomationApproval(definition.resource.owner, definition.resource.path))
++        throw httpError("Resolve the waiting approval before deleting this automation.", 409);
+     if (definition.meta.triggerType === "webhook") {
+         await deleteAutomationWebhookToken(definition.resource, definition.meta);
+     }

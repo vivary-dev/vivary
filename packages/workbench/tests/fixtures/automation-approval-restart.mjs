@@ -25,8 +25,13 @@ if (role === "postgres-policy") {
   console.log("APPROVAL_RESULT " + JSON.stringify({ enabledBindings: stub.enabledBindings, readback }));
   process.exit(0);
 }
+if (role.startsWith("identity-")) {
+  const { runIdentityRecoveryCase } = await import("./automation-approval-identity-recovery.mjs");
+  console.log("APPROVAL_RESULT " + JSON.stringify(await runIdentityRecoveryCase(role.slice("identity-".length), name)));
+  process.exit(0);
+}
 const { makeApprovalCase, runner, history, until } = await import("./automation-approval-fixture.mjs");
-const fixture = await makeApprovalCase(name, { existing: role === "resume" });
+const fixture = await makeApprovalCase(name, { existing: ["resume", "reconcile"].includes(role) });
 if (role === "wait") {
   const result = await fixture.start();
   console.log("APPROVAL_RESULT " + JSON.stringify({ ...result, calls: fixture.calls }));
@@ -37,6 +42,26 @@ if (role === "wait") {
   await fixture.decide(historyId, pending);
   const result = await fixture.terminal(historyId);
   console.log("APPROVAL_RESULT " + JSON.stringify({ result, pending, calls: fixture.calls, modelCalls: fixture.modelCalls }));
+} else if (role === "reconcile") {
+  const { loadCore, resources, frontmatter } = await import("./automation-approval-fixture.mjs");
+  const { database } = await import("./automation-approval-fixture.mjs");
+  const tasks = await loadCore("integrations/pending-tasks-store.js");
+  const retry = await loadCore("integrations/pending-tasks-retry-job.js");
+  const durable = await loadCore("integrations/integration-durable-dispatch.js");
+  durable.setInProcessIntegrationTaskRunner(() => assert.fail("Recovery fixture must never dispatch a task"), {
+    platforms: ["automation-webhook"], appId: fixture.deps.appId, acceptsTask: async () => false,
+  });
+  const recovery = await retry.retryStuckPendingTasks({ after: { updatedAt: Number.MAX_SAFE_INTEGER, id: "fixture-end" }, limit: 1, pagesLeft: 1 });
+  assert.equal(recovery.selected, 0);
+  assert.equal(recovery.dispatched, 0);
+  const { rows } = await database.getDbExec().execute({ sql: "SELECT * FROM automation_runs WHERE id = ?", args: [historyId] });
+  const outcomeMarkerAvailable = Object.hasOwn(rows[0], "approval_outcome_reconciled");
+  const pending = await fixture.pending(historyId);
+  console.log("APPROVAL_RESULT " + JSON.stringify({ result: await history.getAutomationRun(historyId),
+    taskStatus: pending.options.webhookTaskId ? (await tasks.getPendingTask(pending.options.webhookTaskId)).status : null,
+    resourceStatus: frontmatter.parseJobResource((await resources.resourceGetByPath(pending.resourceOwner, pending.resourcePath)).content).meta.lastStatus,
+    calls: fixture.calls, modelCalls: fixture.modelCalls, recovery, outcomeMarkerAvailable,
+    outcomeReconciled: outcomeMarkerAvailable ? Number(rows[0].approval_outcome_reconciled) : null }));
 } else if (role === "shutdown-wait") {
   const result = await fixture.start();
   await runner.interruptBackgroundAutomations(Promise.resolve());

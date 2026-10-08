@@ -1,3 +1,4 @@
+import { backgroundActionsExpression, evaluatePluginExpression, pluginObjectAfter } from "./fixtures/automation-plugin-expressions.mjs";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import os from "node:os";
@@ -248,28 +249,8 @@ test("scheduler, trigger and approval dependencies execute the confined registry
   // Execute the actual small dependency expressions from the installed plugin.
   // Booting Nitro would launch unrelated owners. Their real tool restriction
   // and MCP adapter remain loaded, while only prompt IO and native groups are fake.
-  const evaluate = (expression, scope) => new Function("scope",
-    "const { " + Object.keys(scope).join(", ") + " } = scope; return (" + expression + ");")(scope);
-  const objectAfter = marker => {
-    const offset = plugin.indexOf(marker);
-    assert.notEqual(offset, -1, marker);
-    const start = plugin.indexOf("{", offset);
-    let depth = 0;
-    let quoted = null;
-    for (let index = start; index < plugin.length; index++) {
-      const char = plugin[index];
-      if (quoted) {
-        if (char === "\\") index++;
-        else if (char === quoted) quoted = null;
-      } else if (["'", '"', "`"].includes(char)) quoted = char;
-      else if (char === "{") depth++;
-      else if (char === "}" && --depth === 0) return plugin.slice(start, index + 1);
-    }
-    throw new Error("The dependency object is incomplete: " + marker);
-  };
-  const factoryStart = plugin.indexOf("const getBackgroundActionEntries = ") + "const getBackgroundActionEntries = ".length;
-  const factoryEnd = plugin.indexOf("}, automation, { mcpManager });", factoryStart) + "}, automation, { mcpManager })".length;
-  assert.ok(factoryStart > 0 && factoryEnd > factoryStart);
+  const evaluate = evaluatePluginExpression;
+  const objectAfter = marker => pluginObjectAfter(plugin, marker);
   const { mcpToolsToActionEntries } = await load("mcp-client/index.js");
   const name = "mcp__confinement__write";
   const raw = { name: "write", inputSchema: { type: "object", properties: { value: { type: "string" } } } };
@@ -282,11 +263,11 @@ test("scheduler, trigger and approval dependencies execute the confined registry
     getConfig: () => ({ servers: { confinement: { type: "http", url: "https://invalid.example/confinement" } } }),
     callTool: async () => { invoked++; throw new Error("No configured tool call is authorized by this fixture."); } };
   for (const lazyContext of [true, false]) {
-    const getBackgroundActionEntries = evaluate(plugin.slice(factoryStart, factoryEnd), {
+    const getBackgroundActionEntries = evaluate(backgroundActionsExpression(plugin), {
       restrictActionsForUnattendedRun: surface.restrictActionsForUnattendedRun,
       resourceScripts: Object.fromEntries([...surface.UNATTENDED_TOOLS, "web-request", "core-send-email", "call-agent", "future-tool"].map(key => [key, entry])),
       docsScripts: {}, frameworkContextTool: {}, chatScripts: {}, jobTools: {}, automationTools: {}, notificationTools: {}, progressTools: {},
-      lazyContext, mcpToolsToActionEntries, mcpManager: manager, mcpActionEntryOptions: {},
+      lazyContext, mcpToolsToActionEntries, mcpManager: manager, mcpActionEntryOptions: {}, ensureMcpInitialized: async () => {},
     });
     for (const marker of ["const schedulerDeps = {", "const approvalDeps = {", "await initTriggerDispatcher({"]) {
       let loaded = false;
@@ -317,4 +298,58 @@ test("scheduler, trigger and approval dependencies execute the confined registry
     }
   }
   assert.equal(invoked, 0);
+});
+
+test("declared configured tools await cold initialization, warm reuse and retry after settings failure", async () => {
+  const plugin = await readFile(path.join(coreRoot, "dist", "server", "agent-chat-plugin.js"), "utf8");
+  const start = plugin.indexOf("const ensureMcpInitialized = ") + "const ensureMcpInitialized = ".length;
+  const end = plugin.indexOf("\n            setGlobalMcpManager", start);
+  assert.ok(start > 0 && end > start);
+  const initializer = plugin.slice(start, end).trim().replace(/;$/, "");
+  const { mcpToolsToActionEntries } = await load("mcp-client/index.js");
+  const name = "mcp__cold__write";
+  const raw = { name: "write", inputSchema: { type: "object", properties: {} } };
+  const configured = { name, originalName: "write", source: "cold", raw, inputSchema: raw.inputSchema };
+  for (const failFirst of [false, "settings", "discovery"]) {
+    let initializeCalls = 0;
+    let tools = [];
+    let snapshots = 0;
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    const ensure = new Function("initializeMcpManager", "let mcpInitializationPromise; return (" + initializer + ");")(async () => {
+      initializeCalls++;
+      if (failFirst && initializeCalls === 1) throw new Error(`Fixture ${failFirst} unavailable.`);
+      await held;
+      tools = [configured];
+    });
+    const manager = { getTools: () => { snapshots++; return tools; }, getTool: key => tools.find(tool => tool.name === key),
+      getConfig: () => ({ servers: { cold: { type: "http", url: "https://invalid.example/cold" } } }),
+      callTool: () => assert.fail("Cold registry construction dispatches no configured action") };
+    const factory = evaluatePluginExpression(backgroundActionsExpression(plugin), {
+      ensureMcpInitialized: ensure, restrictActionsForUnattendedRun: surface.restrictActionsForUnattendedRun,
+      resourceScripts: {}, docsScripts: {}, frameworkContextTool: {}, chatScripts: {}, jobTools: {}, automationTools: {},
+      notificationTools: {}, progressTools: {}, lazyContext: true, mcpToolsToActionEntries, mcpManager: manager, mcpActionEntryOptions: {},
+    });
+    await factory({ meta: {} });
+    assert.equal(initializeCalls, 0, "local-only work skips MCP settings and discovery");
+    if (failFirst) await assert.rejects(factory({ meta: { mcpTools: [name] } }), /settings unavailable|discovery unavailable/);
+    const before = snapshots;
+    let settled = false;
+    const cold = factory({ meta: { mcpTools: [name] } });
+    // Handle an old-runtime refusal so the red control reports missing
+    // initialization behavior rather than an unrelated unhandled rejection.
+    void cold.then(() => { settled = true; }, () => { settled = true; });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(initializeCalls, failFirst ? 2 : 1, "the actual factory entered the existing cold initializer");
+    assert.equal(settled, false);
+    assert.equal(snapshots, before, "configured entries are not snapshotted before initialization finishes");
+    release();
+    const entries = await cold;
+    assert.equal(entries[name].needsApproval, true);
+    assert.equal(entries[name].allowPersistentApproval, false);
+    await factory({ meta: { mcpTools: [name] } });
+    assert.equal(initializeCalls, failFirst ? 2 : 1, "the existing initializer caches only a successful attempt");
+    tools = [];
+    await assert.rejects(factory({ meta: { mcpTools: [name] } }), /unavailable|refused|configured/i);
+  }
 });

@@ -2772,3 +2772,36 @@ would change how Core saves messages.
 `appendAgentChatContextToMessage` and checks the title and preview. It is part
 of `test:native-chat`. On a loopback build the saved thread list showed a clean
 preview; on `dev` the same send saved a preview holding the context block.
+
+## Approval lifecycle retention and convergence
+
+The Native run-store pruner exempts terminal chunks referenced by unfinished
+waiting or resuming automation history. Ordinary terminal pruning and outcome
+rollups remain active. A ready wait therefore keeps the SQL terminal evidence and
+events required by the existing decision guard.
+
+Migration 7 adds an approval outcome reconciliation marker to the existing history
+owner. Terminal approval context retains its original task, resource and identity
+binding. Unreconciled terminal rows survive history retention. The scheduler and
+pending-task recovery sweeps finish recorded bookkeeping only. Task settlement
+checks its retained platform, owner, organization, external thread and payload
+binding. Resource writes combine their CAS with exact terminal history and chunk
+identity and exclude newer history. Schedule calculation uses recorded completion
+time, so retrying bookkeeping does not create another completion or delivery.
+Repeated decisions may reconcile a terminal row but still refuse another decision.
+
+The supported delete service refuses unfinished waiting or resuming history before
+any resource, token or history mutation. Declared configured MCP tools await the
+existing lazy initializer before entry construction. Local-only runs skip it.
+Initializer failure remains a refusal and its existing rejected-promise reset
+allows the next attempt to retry. Exact-call approval and current-entry validation
+remain mandatory.
+
+Installed-Core controls cover aged waits after real cleanup with ordinary pruning
+as a positive control, deletion refusal and settled deletion, history-to-task and
+task-to-resource storage failures, fresh-process terminal recovery, duplicate
+decisions and exact configured-effect counts. Plugin expression controls exercise
+held cold initialization, warm reuse, settings or discovery failure and retry,
+plus all three restricted prompt paths with actual planted-file confinement.
+These newly authored controls remain unrun until the controller refreshes the
+maintained package after exact-source review.
