@@ -1361,7 +1361,7 @@ test("a return of the network refetches the automation data that went stale", as
   const tab = await proof.mountJobsTab(everyList());
   const watched = [["list-automations", { scope: "personal" }], ["list-recurring-jobs", { scope: "personal" }],
     ["list-automations", { scope: "organization" }], ["list-recurring-jobs", { scope: "organization" }],
-    ["list-automation-runs", { scope: "personal", name: "digest" }]];
+    ["list-automation-runs", { scope: "personal", name: "digest", includePendingApprovals: true }]];
   try {
     await tab.openDetails("Details", 2);
     await tab.online(false);
@@ -1388,7 +1388,7 @@ test("a return to a hidden window refetches the automation data that went stale"
   const tab = await proof.mountJobsTab({ personal: [beforeTick], organization: [] });
   const watched = [["list-automations", { scope: "personal" }], ["list-recurring-jobs", { scope: "personal" }],
     ["list-automations", { scope: "organization" }], ["list-recurring-jobs", { scope: "organization" }],
-    ["list-automation-runs", { scope: "personal", name: "digest" }]];
+    ["list-automation-runs", { scope: "personal", name: "digest", includePendingApprovals: true }]];
   try {
     await tab.openDetails();
     await tab.focus(false);

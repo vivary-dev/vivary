@@ -34,11 +34,11 @@ const { makeApprovalCase, actor, owner, appId, mcpName, runner, history, threads
   approvalStore, resources, frontmatter, service, database, runStore, loadCore } = approvalFixture;
 const { H3, toNodeHandler } = await import("h3");
 const { mountActionRoutes } = await loadCore("server/action-routes.js");
+const { default: listAction } = await loadCore("jobs/actions/list-automation-runs.js");
 const { default: inspectAction } = await loadCore("jobs/actions/inspect-automation-run.js");
 const { default: decideAction } = await loadCore("jobs/actions/decide-automation-approval.js");
 const { setActiveOrgId } = await loadCore("org/active-org.js");
 const { resolveOrgIdForEmail } = await loadCore("org/context.js");
-const db = database.getDbExec();
 const orgId = "approval-owned-organization";
 const unrelatedOrg = "approval-unrelated-active-organization";
 const otherOwner = "another-approval-owner@example.test";
@@ -50,6 +50,7 @@ const { ORG_MIGRATIONS } = await loadCore("org/migrations.js");
 // plugins. Await their complete schema before rows or action routes exist.
 await runBetterAuthMigrations(nitroApp);
 await runMigrations(ORG_MIGRATIONS, { table: "_org_migrations" })(nitroApp);
+const db = database.getDbExec();
 const seededAt = Date.now();
 for (const email of [owner, otherOwner]) await db.execute({
   sql: 'INSERT INTO "user" (id, email, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
@@ -62,7 +63,7 @@ for (const id of [orgId, unrelatedOrg]) {
 }
 await setActiveOrgId(owner, unrelatedOrg, "approval transport fixture setup");
 
-const actions = { "inspect-automation-run": inspectAction, "decide-automation-approval": decideAction };
+const actions = { "list-automation-runs": listAction, "inspect-automation-run": inspectAction, "decide-automation-approval": decideAction };
 const resolveOwner = async event => {
   const email = event.headers.get("x-fixture-owner") ?? owner;
   assert.ok([owner, otherOwner].includes(email), "fixture identity resolver recognizes only stored users");
@@ -84,7 +85,7 @@ globalThis.fetch = (input, options) => {
   return nativeFetch(input, options);
 };
 async function call(name, input, { email = owner, prefix = "" } = {}) {
-  const inspect = name === "inspect-automation-run";
+  const inspect = name === "inspect-automation-run" || name === "list-automation-runs";
   const response = await fetch(`${origin}${prefix}/_agent-native/actions/${name}${inspect ? "?" + new URLSearchParams(input) : ""}`, {
     method: inspect ? "GET" : "POST", headers: { "content-type": "application/json", "x-fixture-owner": email },
     ...(inspect ? {} : { body: JSON.stringify(input) }), signal: AbortSignal.timeout(10_000) });
@@ -201,4 +202,109 @@ test("normal HTTP organization approvals require the persisted organization and 
   assert.equal((await fixture.terminal(result.historyId)).status, "declined");
   assert.equal(effects(fixture), 0);
   await setActiveOrgId(owner, unrelatedOrg, "restore fixture active organization");
+});
+
+for (const recovery of [false, true]) test(`normal HTTP history discovers an older ${recovery ? "recoverable claim" : "ready wait"} after actual refused Run now rows`, async () => {
+  await setActiveOrgId(owner, unrelatedOrg, "retained personal history control");
+  const { fixture, result, pending, decision } = await ready(`http-old-wait-${recovery}`);
+  if (recovery) {
+    const chunk = `recoverable-${result.historyId}`;
+    assert.equal(await history.claimAutomationApprovalDecision(result.historyId, pending.askId, chunk), true);
+    await runStore.insertRun(chunk, result.threadId, result.turnId, { dispatchMode: "background" });
+    await runStore.updateRunStatus(chunk, "aborted");
+  }
+  const scheduler = await loadCore("jobs/scheduler.js"), runNow = await loadCore("jobs/run-now.js");
+  const models = fixture.modelCalls.length, calls = fixture.calls.length;
+  runNow.setInProcessAutomationRunner(id => scheduler.runQueuedAutomation(id, fixture.deps), { appId });
+  try {
+    for (let i = 0; i < 22; i++) {
+      const queued = await runNow.queueAutomationRunNow({ userEmail: owner, appId, scope: "personal", name: fixture.automation.name });
+      const refused = await fixture.terminal(queued.automationRunId);
+      assert.equal(refused.status, "error");
+      assert.equal(refused.threadId, null); assert.equal(refused.runId, null);
+    }
+  } finally { runNow.setInProcessAutomationRunner(null); }
+  assert.equal(fixture.modelCalls.length, models); assert.equal(fixture.calls.length, calls);
+  const ordinary = await history.listAutomationRuns({ owners: [owner], automation: fixture.automation.name, appId });
+  assert.equal(ordinary.length, 20); assert.equal(ordinary.some(run => run.id === result.historyId), false);
+  assert.equal((await history.listAutomationRuns({ owners: [owner], automation: fixture.automation.name, appId, limit: 1 })).length, 1);
+  const listed = await call("list-automation-runs", { name: fixture.automation.name, scope: "personal", includePendingApprovals: "true" });
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.filter(run => run.id === result.historyId).length, 1);
+  assert.equal(listed.body.length, 21, "recent history stays bounded and includes retained custody once");
+  for (const options of [{ email: otherOwner }, { prefix: "/wrong-app" }]) {
+    const foreign = await call("list-automation-runs", { name: fixture.automation.name, scope: "personal", includePendingApprovals: "true" }, options);
+    assert.equal(foreign.status, 200); assert.deepEqual(foreign.body, []);
+  }
+  const foreignOrg = await call("list-automation-runs", { name: fixture.automation.name, scope: "organization", includePendingApprovals: "true" });
+  assert.equal(foreignOrg.status, 200); assert.deepEqual(foreignOrg.body, []);
+  assert.equal((await call("inspect-automation-run", { historyId: result.historyId })).status, 200);
+  assert.equal((await call("decide-automation-approval", { ...decision, decision: "decline" })).status, 200);
+  const terminal = await history.getAutomationRun(result.historyId);
+  assert.equal(terminal.status, "declined"); assert.equal(terminal.threadId, result.threadId);
+  assert.equal((await runStore.getRunTurnRef(pending.runId)).turnId, result.turnId);
+  assert.equal((await approvalStore.readAgentToolApproval(pending)).status, "declined");
+  assert.equal(effects(fixture), 0); assert.equal(fixture.modelCalls.length, models);
+});
+
+test("normal HTTP history includes current organization custody without duplicating recent rows", async () => {
+  const { fixture, result, decision } = await ready("http-org-list", true);
+  await setActiveOrgId(owner, orgId, "organization history control");
+  const listed = await call("list-automation-runs", { name: fixture.automation.name, scope: "organization", includePendingApprovals: "true" });
+  assert.equal(listed.status, 200); assert.deepEqual(listed.body.map(run => run.id), [result.historyId]);
+  const personal = await call("list-automation-runs", { name: fixture.automation.name, scope: "personal", includePendingApprovals: "true" });
+  assert.equal(personal.status, 200); assert.deepEqual(personal.body, []);
+  assert.equal((await call("decide-automation-approval", { ...decision, decision: "decline" })).status, 200);
+});
+
+
+test("normal HTTP organization history fails closed while personal NULL-org custody survives unavailable membership", async () => {
+  const { fixture, result, decision } = await ready("http-membership-list");
+  await setActiveOrgId(owner, orgId, "membership history control");
+  const input = { name: fixture.automation.name, scope: "organization", includePendingApprovals: "true" };
+  const { rows: memberships } = await db.execute({
+    sql: "SELECT id, org_id, email, role, joined_at FROM org_members WHERE org_id = ? AND email = ?",
+    args: [orgId, owner] });
+  assert.equal(memberships.length, 1, "the real fixture membership exists before revocation");
+  const membership = memberships[0];
+  const restoreMembership = () => db.execute({
+    sql: "INSERT INTO org_members (id, org_id, email, role, joined_at) VALUES (?, ?, ?, ?, ?)",
+    args: [membership.id, membership.org_id, membership.email, membership.role, membership.joined_at] });
+  await db.execute({ sql: "DELETE FROM org_members WHERE org_id = ? AND email = ?", args: [orgId, owner] });
+  const originalExecute = db.execute;
+  const execute = originalExecute.bind(db);
+  let membershipRestored = false;
+  let membershipQueries = 0;
+  try {
+    const revoked = await call("list-automation-runs", input, { prefix: "/retained-org" });
+    assert.notEqual(revoked.status, 200);
+    await restoreMembership();
+    membershipRestored = true;
+    const { rows: restored } = await db.execute({
+      sql: "SELECT id, org_id, email, role, joined_at FROM org_members WHERE org_id = ? AND email = ?",
+      args: [orgId, owner] });
+    assert.deepEqual(restored, [membership], "healthy membership is restored before the selected lookup fault");
+    assert.equal(db, database.getDbExec(), "the hook owns the current initialized singleton executor");
+    db.execute = async statement => {
+      const sql = typeof statement === "string" ? statement : statement.sql;
+      if (sql?.includes("SELECT email FROM org_members WHERE org_id = ? AND LOWER(email) = ? LIMIT 1")) {
+        assert.deepEqual(statement.args, [orgId, owner.toLowerCase()]);
+        membershipQueries += 1;
+        throw new Error("selected membership lookup unavailable");
+      }
+      return execute(statement);
+    };
+    const unavailable = await call("list-automation-runs", input, { prefix: "/retained-org" });
+    assert.notEqual(unavailable.status, 200);
+    const personal = await call("list-automation-runs", { ...input, scope: "personal" }, { prefix: "/retained-org" });
+    assert.equal(personal.status, 200);
+    assert.deepEqual(personal.body.map(run => run.id), [result.historyId]);
+    assert.equal(membershipQueries, 2, "actual action queries exact current membership on both routes");
+    assert.equal((await history.getAutomationRun(result.historyId)).status, "waiting_approval");
+    assert.equal(effects(fixture), 0);
+  } finally {
+    db.execute = originalExecute;
+    if (!membershipRestored) await restoreMembership();
+    assert.equal((await call("decide-automation-approval", { ...decision, decision: "decline" })).status, 200);
+  }
 });

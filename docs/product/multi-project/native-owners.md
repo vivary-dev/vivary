@@ -100,3 +100,22 @@ organization. Deletion uses the stored execution/history scope rather than curre
 execution eligibility. It still refuses waiting or resuming history and unknown
 or conflicting scope before changing the definition. Restoring membership for an
 owner-decline cleanup does not imply that a revoked owner can approve or decline.
+
+Settings history includes authorized retained approvals alongside its recent
+bounded rows. This keeps an older waiting or recoverable run discoverable after
+later refused Run now requests. Ordinary history and scheduler limits stay bounded.
+A webhook encountering another execution's wait before it starts returns retry
+and restores its task attempts. It does not become that wait's task owner.
+
+Approval ask creation and durable waiting use one resource custody transaction.
+Deletion uses the same exact resource owner, ID and path and checks persisted
+history before token, secret or definition removal. Deletion cannot take a waiting
+or resuming definition. If deletion wins first, the running automation cannot bind
+an ask to a missing or same-name replacement. The original admitted history is
+retained to record its refusal. Existing admin cleanup after a creator departs
+remains allowed when no unresolved custody exists. Runtime and UI gates for these
+new bytes remain pending.
+
+Local SQLite transaction ownership queues ordinary execute calls and subsequent transactions behind the current transaction. Its callback must use the supplied tx.execute. Ownership is released after commit or rollback, including thrown callbacks. Organization history discovery queries exact org_id and caller email and treats missing membership as unavailable. Personal NULL-org history does not require membership in an unrelated active organization. The new SQLite controls are maintained runtime targets and have not run in this source allocation.
+
+Webhook deletion initializes the existing webhook-token and app-secret schema owners before taking resource custody. It does not pre-delete token or secret data. Actual deletion stays on the transaction executor, together with history custody and resource mutation. Fresh-process controls seed the webhook in one process and delete or refuse it in another. Public closeDbExec uses the queued SQLite close owner before clearing the singleton. Close is memoized to avoid a second handle close. An old closed executor rejects later operations, while a new singleton can initialize normally. These new runtime controls remain unrun in the source sandbox.

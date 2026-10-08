@@ -171,7 +171,11 @@ async function deletionCase(kind, name) {
     const invoke = (action, who = identity, selectedTool = tool, selectedName = name) => context.runWithRequestContext(who,
       async () => JSON.parse(await selectedTool.run({ action, name: selectedName, scope,
         ...(action === "create" ? { instructions: "Perform the fixture steps.", schedule: "0 * * * *", timezone: "UTC", mcpTools: [mcpName] } : {}) }, { caller: "human" })));
-    assert.equal((await invoke("create")).created, true);
+    const modernRace = kind.startsWith("race-modern-");
+    if (modernRace) await f.service.defineAutomation({ ...identity, appId }, { scope: "personal", name,
+      body: "Perform the fixture steps.", triggerType: kind.includes("webhook") ? "webhook" : "schedule",
+      schedule: "0 * * * *", timezone: "UTC", mcpTools: [mcpName] });
+    else assert.equal((await invoke("create")).created, true);
     const deletingActor = kind.startsWith("org-") ? { userEmail: admin, orgId } : identity;
     const readTokens = async () => {
       const exists = (await db.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'automation_webhook_tokens'")).rows.length;
@@ -204,6 +208,9 @@ async function deletionCase(kind, name) {
       return { kind, executionRefused: true, deleted: true, configuredEffects: 0 };
     }
     const fixture = await f.makeApprovalCase(name, { existing: true, resourceOwner, repeatLocal: false });
+    if (kind.startsWith("race-")) return deletionRaceCase(kind, fixture, f,
+      modernRace ? async () => { await f.service.deleteAutomation({ ...identity, appId }, "personal", name); return { deleted: true }; } : () => invoke("delete"),
+      readTokens);
     assert.equal(await context.runWithRequestContext(identity, () => scheduler.runJobNow(resourceOwner, name, fixture.deps)).then(x => x.status), "waiting_approval");
     const resolved = await runner.resolveBackgroundAutomationIdentity(fixture.automation);
     assert.equal(resolved.ok, true);
@@ -268,4 +275,102 @@ async function deletionCase(kind, name) {
     return { kind, historyOwner, waitingRefused: true, resumingRefused: true, deleted: true, configuredEffects: 0,
       membershipRestoredForDecline: kind === "org-departed-wait", scopeRefused: kind.startsWith("org-scope-") };
   } finally { await rm(directory, { recursive: true, force: true }); }
+}
+
+// Same resource and owner APIs on old and repaired packages. The selected
+// resource read is inside the repaired transaction and outside it on old Core.
+async function deletionRaceCase(kind, fixture, f, remove, readTokens) {
+  const { history, runner, database, resources, frontmatter, approvalStore, runStore, owner, appId, mcpName, until } = f;
+  const resource = fixture.automation.resource, db = database.getDbExec();
+  let releasePredicate, releaseDelete;
+  const predicateGate = new Promise(resolve => { releasePredicate = resolve; });
+  const deleteGate = new Promise(resolve => { releaseDelete = resolve; });
+  let predicateHit = 0, deleteBarrierHit = 0, heldTransaction = false;
+  const actions = fixture.deps.getActions;
+  fixture.deps.getActions = async current => {
+    const entries = await actions(current);
+    return { ...entries, [mcpName]: { ...entries[mcpName], needsApproval: async () => {
+      predicateHit++; await predicateGate; return true;
+    } } };
+  };
+  const execute = db.execute.bind(db), transaction = db.transaction?.bind(db);
+  const work = fixture.start().then(result => ({ result }), error => ({ error }));
+  let deletion, ready, replacement;
+  try {
+    await until(() => predicateHit === 1);
+    const [original] = await history.listAutomationRuns({ owners: [owner], automation: fixture.automation.name, appId });
+    assert.ok(original.threadId); assert.ok(original.runId);
+    const turn = await runStore.getRunTurnRef(original.runId);
+    const tokens = await readTokens();
+    if (kind.endsWith("delete")) {
+      assert.equal((await remove()).deleted, true);
+      assert.equal(await resources.resourceGetByPath(owner, resource.path), null);
+      // Same name, new definition and ID. The old run cannot bind its ask to it.
+      replacement = await resources.resourcePut(owner, resource.path, resource.content);
+      assert.notEqual(replacement.id, resource.id);
+      releasePredicate();
+      const settled = await work;
+      assert.equal(settled.result, undefined);
+      assert.equal(settled.error?.errorCode, "automation_approval_changed");
+      const terminal = await fixture.terminal(original.id);
+      assert.equal(terminal.status, "error"); assert.equal(terminal.errorCode, "automation_approval_changed");
+      assert.equal(terminal.threadId, original.threadId);
+      assert.equal((await history.getAutomationContinuation(original.id)).context, null);
+      assert.equal(terminal.pendingAskId, null);
+      assert.deepEqual(await resources.resourceGetByPath(owner, resource.path), replacement);
+      assert.equal(fixture.calls.filter(call => call.name === mcpName).length, 0);
+      return { kind, winner: "delete", predicateHit, deleteBarrierHit, configuredEffects: 0, originalHistoryId: original.id,
+        threadId: original.threadId, turnId: turn.turnId, terminalCode: terminal.errorCode, replacementId: replacement.id };
+    }
+    const intercept = (executeStatement, inTransaction) => async statement => {
+      const sql = normalized(statement), result = await executeStatement(statement);
+      if (!deleteBarrierHit && sql.startsWith("SELECT") && sql.includes("FROM resources WHERE id = ?") && statement.args?.[0] === resource.id) {
+        deleteBarrierHit++; heldTransaction = inTransaction; await deleteGate;
+      }
+      return result;
+    };
+    db.execute = intercept(execute, false);
+    if (transaction) db.transaction = callback => transaction(tx => callback({ ...tx, execute: intercept(tx.execute.bind(tx), true) }));
+    deletion = remove().then(result => ({ result }), error => ({ error }));
+    await until(() => deleteBarrierHit === 1);
+    releasePredicate();
+    // Old Core must reach the actual bad ordering. The repair may serialize
+    // either winner, so release the transaction before awaiting Native readiness.
+    if (!heldTransaction) {
+      ready = (await work).result;
+      assert.equal(ready.status, "waiting_approval");
+    }
+    releaseDelete();
+    const [settled, deleted] = await Promise.all([work, deletion]);
+    assert.equal(predicateHit, 1); assert.equal(deleteBarrierHit, 1);
+    assert.equal(fixture.calls.filter(call => call.name === mcpName).length, 0);
+    if (settled.result?.status === "waiting_approval") {
+      ready = settled.result;
+      assert.ok(deleted.error || deleted.result?.error, "Delete must refuse after the real run established waiting custody");
+      assert.deepEqual(await resources.resourceGetByPath(owner, resource.path), resource);
+      assert.deepEqual(await readTokens(), tokens, "refusal precedes token deletion");
+      const pending = await fixture.pending(original.id);
+      assert.equal(pending.historyId, original.id); assert.equal(pending.threadId, original.threadId);
+      assert.equal(pending.turnId, turn.turnId); assert.equal(pending.resourceId, resource.id);
+      assert.equal((await approvalStore.readAgentToolApproval(pending)).status, "pending");
+      assert.equal((await runner.inspectAutomationRun(original.id, f.actor, fixture.deps)).pending.askId, pending.askId);
+      await fixture.decide(original.id, pending, "decline");
+      await assert.rejects(fixture.decide(original.id, pending), /no longer waiting/);
+      return { kind, winner: "wait", predicateHit, deleteBarrierHit, heldTransaction, configuredEffects: 0,
+        historyId: original.id, threadId: original.threadId, turnId: turn.turnId, askId: pending.askId };
+    }
+    assert.equal(deleted.result?.deleted, true, "a deletion winner commits before waiting can be established");
+    assert.equal(await resources.resourceGetByPath(owner, resource.path), null);
+    const terminal = await fixture.terminal(original.id);
+    assert.equal(terminal.status, "error");
+    assert.equal(terminal.errorCode, "automation_approval_changed", "healthy deletion contention is a changed resource, not a storage failure");
+    assert.equal((await history.getAutomationContinuation(original.id)).context, null);
+    assert.equal(terminal.pendingAskId, null);
+    return { kind, winner: "delete", predicateHit, deleteBarrierHit, heldTransaction, configuredEffects: 0, terminalCode: terminal.errorCode };
+  } finally {
+    releasePredicate(); releaseDelete();
+    if (deletion) await deletion;
+    await work;
+    db.execute = execute; if (transaction) db.transaction = transaction;
+  }
 }

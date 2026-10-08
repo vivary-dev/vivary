@@ -2259,6 +2259,19 @@ changes no schema. Remove this part of the patch when an upstream release names
 no next run the scheduler cannot meet while a lease or a running mark blocks it,
 and passes the same tests.
 
+The current approval custody correction keeps Settings discovery separate from
+ordinary bounded history reads. Settings opts into scoped retained approvals and
+the history store deduplicates recent and retained rows. Pre-execution webhook
+contention is retry, with payload and attempts preserved, rather than custody of
+another execution's wait. Ask creation and wait persistence lock the exact live
+resource in the existing database transaction. Modern and legacy deletion recheck
+persisted custody in that transaction before token, secret and definition mutation.
+PostgreSQL uses FOR UPDATE and local SQLite uses BEGIN IMMEDIATE. Resource deletion
+events follow commit. A missing or replaced definition cannot receive an ask.
+Unfinished admitted history survives deletion cleanup to record its terminal refusal.
+The maintained PostgreSQL adapter controls are static query contracts, not database
+execution proof. New source still requires controller runtime, review and UI checks.
+
 ## Durable automation approvals
 
 Issue #108 keeps continuation in Native's existing owners. The background runner
@@ -2881,3 +2894,7 @@ Maintained controls use normal ORG/BetterAuth initialization and the actual
 manage-jobs action, with real membership removal and explicit restoration only for
 owner-decline cleanup. PostgreSQL pruning coverage is a static driver adapter and
 query-contract control. It does not establish real PostgreSQL database execution.
+
+Local SQLite transaction ownership queues ordinary execute calls and subsequent transactions behind the current transaction. Its callback must use the supplied tx.execute. Ownership is released after commit or rollback, including thrown callbacks. Organization history discovery queries exact org_id and caller email and treats missing membership as unavailable. Personal NULL-org history does not require membership in an unrelated active organization. The new SQLite controls are maintained runtime targets and have not run in this source allocation.
+
+Webhook deletion initializes the existing webhook-token and app-secret schema owners before taking resource custody. It does not pre-delete token or secret data. Actual deletion stays on the transaction executor, together with history custody and resource mutation. Fresh-process controls seed the webhook in one process and delete or refuse it in another. Public closeDbExec uses the queued SQLite close owner before clearing the singleton. Close is memoized to avoid a second handle close. An old closed executor rejects later operations, while a new singleton can initialize normally. These new runtime controls remain unrun in the source sandbox.

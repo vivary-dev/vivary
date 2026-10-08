@@ -21,6 +21,131 @@ const finished = [];
 const subscription = bus.subscribe("automation.run.finished", payload => finished.push(payload));
 after(() => bus.unsubscribe(subscription));
 
+// The event-loop barrier drains completed admission microtasks without a timed sleep.
+// A correctly owned connection keeps the outside write queued until custody ends.
+async function sqliteCustodyAdmission(outcome) {
+  const fixture = await makeApprovalCase(`sqlite-custody-${outcome}`);
+  const resource = fixture.automation.resource;
+  await history.listAutomationRuns({ owners: [owner], automation: fixture.automation.name, appId });
+  const db = database.getDbExec();
+  const execute = db.execute.bind(db);
+  let releaseCustody;
+  const gate = new Promise(resolve => { releaseCustody = resolve; });
+  let entered;
+  const inside = new Promise(resolve => { entered = resolve; });
+  let attempted;
+  const admissionAttempt = new Promise(resolve => { attempted = resolve; });
+  let admissionCompleted = false;
+  let completedBeforeRelease = false;
+  let released = false;
+  let selectedInserts = 0;
+  db.execute = async statement => {
+    const sql = typeof statement === "string" ? statement : statement.sql;
+    if (/INSERT INTO automation_runs/.test(sql) && statement.args?.[2] === fixture.automation.name) {
+      selectedInserts += 1;
+      attempted();
+    }
+    return execute(statement);
+  };
+  let custody;
+  let admission;
+  try {
+    if (outcome !== "outside") {
+      custody = db.transaction(async tx => {
+        await tx.execute({ sql: "UPDATE resources SET content = ? WHERE id = ?", args: ["SQLite custody control", resource.id] });
+        entered();
+        await gate;
+        if (outcome === "rollback") throw new Error("selected custody rollback");
+      }).then(() => "committed", error => {
+        if (error.message !== "selected custody rollback") throw error;
+        return "rolled_back";
+      });
+      await inside;
+    }
+    admission = history.startAutomationRun({ owner, automation: fixture.automation.name, path: resource.path,
+      appId, scope: "personal", orgId: null }).then(id => {
+      admissionCompleted = true;
+      completedBeforeRelease = !released;
+      return id;
+    });
+    await admissionAttempt;
+    if (outcome !== "outside") {
+      await new Promise(resolve => setImmediate(resolve));
+      released = true;
+      releaseCustody();
+    }
+    const custodyResult = custody ? await custody : "none";
+    const id = await admission;
+    const retained = await history.getAutomationRun(id);
+    const persistedResource = await resources.resourceGetByPath(owner, resource.path);
+    console.log("SQLITE_CUSTODY_OBSERVATION " + JSON.stringify({ outcome, custodyResult, selectedInserts,
+      admissionCompleted, completedBeforeRelease, historyPresent: Boolean(retained), resourcePresent: Boolean(persistedResource),
+      modelCalls: fixture.modelCalls.length, toolCalls: fixture.calls.length }));
+    assert.equal(selectedInserts, 1);
+    assert.equal(admissionCompleted, true);
+    assert.ok(retained, "outside admission must survive the custody transaction");
+    assert.equal(retained.status, "running");
+    assert.equal(retained.path, resource.path);
+    assert.equal(persistedResource.id, resource.id);
+    assert.equal(fixture.modelCalls.length, 0);
+    assert.equal(fixture.calls.length, 0);
+    if (outcome !== "outside") {
+      assert.equal(completedBeforeRelease, false, "ordinary admission must queue behind custody");
+      assert.equal(custodyResult, outcome === "rollback" ? "rolled_back" : "committed");
+      assert.equal(persistedResource.content, outcome === "rollback" ? resource.content : "SQLite custody control");
+    }
+    await history.finishAutomationRun(id, "error", "SQLite ownership control finished", "sqlite_control_complete");
+  } finally {
+    released = true;
+    releaseCustody();
+    await Promise.allSettled([custody, admission].filter(Boolean));
+    db.execute = execute;
+  }
+}
+
+for (const [label, outcome] of [
+  ["custody rollback cannot erase unrelated automation admission", "rollback"],
+  ["custody commit preserves and queues unrelated automation admission", "commit"],
+  ["outside automation admission survives without custody", "outside"],
+]) test(`SQLite ${label}`, () => sqliteCustodyAdmission(outcome));
+
+test("SQLite custody transactions serialize healthy resource contention", async () => {
+  const fixture = await makeApprovalCase("sqlite-two-custodies");
+  const resource = fixture.automation.resource;
+  const db = database.getDbExec();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let entered;
+  const firstEntered = new Promise(resolve => { entered = resolve; });
+  const order = [];
+  const first = db.transaction(async tx => {
+    await tx.execute({ sql: "UPDATE resources SET content = ? WHERE id = ?", args: ["first custody", resource.id] });
+    order.push("first"); entered(); await gate; order.push("first released");
+  });
+  let second;
+  try {
+    await firstEntered;
+    second = db.transaction(async tx => {
+      order.push("second");
+      const { rows } = await tx.execute({ sql: "SELECT content FROM resources WHERE id = ?", args: [resource.id] });
+      assert.equal(rows[0].content, "first custody");
+      await tx.execute({ sql: "UPDATE resources SET content = ? WHERE id = ?", args: ["second custody", resource.id] });
+    });
+    // Observe a rejected old nested BEGIN immediately to avoid an unhandled rejection.
+    const result = second.then(() => ({ ok: true }), error => ({ ok: false, error }));
+    await new Promise(resolve => setImmediate(resolve));
+    release();
+    await first;
+    const settled = await result;
+    console.log("SQLITE_TWO_CUSTODIES " + JSON.stringify({ ok: settled.ok, order, modelCalls: fixture.modelCalls.length, toolCalls: fixture.calls.length }));
+    assert.equal(settled.ok, true, settled.error?.message);
+    assert.deepEqual(order, ["first", "first released", "second"]);
+    assert.equal((await resources.resourceGetByPath(owner, resource.path)).content, "second custody");
+    assert.equal(fixture.modelCalls.length, 0);
+    assert.equal(fixture.calls.length, 0);
+  } finally { release(); await Promise.allSettled([first, second].filter(Boolean)); }
+});
+
 test("approval resumes the same history, thread and logical turn once with the original tools", async () => {
   const fixture = await makeApprovalCase("approve");
   fixture.manager.config.servers.approval_fixture.headers = { Authorization: "Bearer fixture-private-connection" };
@@ -280,14 +405,25 @@ test("a gate storage failure aborts and cannot become a successful run", async (
   const fixture = await makeApprovalCase("storage-failure");
   const db = database.getDbExec();
   const execute = db.execute.bind(db);
-  db.execute = async statement => {
-    if (String(statement.sql).includes("SET status = 'waiting_approval'")) throw new Error("Fixture storage unavailable.");
-    return execute(statement);
+  const transaction = db.transaction?.bind(db);
+  let faultHits = 0;
+  const failWrite = run => async statement => {
+    if (String(statement.sql).includes("SET status = 'waiting_approval'")) {
+      faultHits++; throw new Error("Fixture storage unavailable.");
+    }
+    return run(statement);
   };
+  db.execute = failWrite(execute);
+  if (transaction) db.transaction = fn => transaction(tx => fn({ ...tx, execute: failWrite(tx.execute.bind(tx)) }));
   try { await assert.rejects(fixture.start()); }
-  finally { db.execute = execute; }
+  finally { db.execute = execute; if (transaction) db.transaction = transaction; }
+  assert.equal(faultHits, 1);
   const [run] = await history.listAutomationRuns({ owners: [owner], automation: fixture.automation.name, appId });
   assert.equal(run.status, "error");
+  assert.equal(run.errorCode, "automation_approval_storage_failed");
+  assert.equal((await history.getAutomationContinuation(run.id)).context, null);
+  assert.equal((await execute({ sql: "SELECT COUNT(*) AS count FROM agent_tool_approvals WHERE thread_id = ?", args: [run.threadId] })).rows[0].count, 0,
+    "the failed history write rolls back its ask in the same transaction");
   assert.equal(configuredCalls(fixture).length, 0);
 });
 
@@ -624,7 +760,7 @@ for (const caller of ["scheduler", "trigger"]) for (const decision of ["approve"
   });
 
 const child = (role, name, id) => new Promise((resolve, reject) => {
-  const script = fileURLToPath(new URL("./fixtures/automation-approval-restart.mjs", import.meta.url));
+  const script = fileURLToPath(new URL(role.startsWith("cold-") ? "./fixtures/automation-approval-cold-delete.mjs" : "./fixtures/automation-approval-restart.mjs", import.meta.url));
   const processHandle = spawn(process.execPath, [script, role, name, ...(id ? [id] : [])], { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   const timeout = setTimeout(() => { processHandle.kill("SIGKILL"); reject(new Error("Approval child exceeded 30 seconds.")); }, 30_000);
@@ -1243,3 +1379,108 @@ for (const kind of ["org-departed-wait", "org-scope-missing", "org-scope-conflic
     assert.equal(result.membershipRestoredForDecline, kind === "org-departed-wait");
     assert.equal(result.scopeRefused, kind.startsWith("org-scope-"));
   });
+
+test("a webhook encountering another ready wait after its initial check returns retry with exact FIFO custody", async () => {
+  const fixture = await makeApprovalCase("webhook-late-contention", { triggerType: "webhook", repeatLocal: false });
+  const tasks = await loadCore("integrations/pending-tasks-store.js"), dispatcher = await loadCore("triggers/dispatcher.js");
+  const webhook = await loadCore("integrations/automation-webhook-task.js");
+  await dispatcher.initTriggerDispatcher(fixture.deps);
+  const resource = fixture.automation.resource, id = "late-contention-0-task", follower = "late-contention-1-follower";
+  const insert = taskId => tasks.insertPendingTask({ id: taskId, platform: "automation-webhook", externalThreadId: `${owner}:${resource.path}`,
+    ownerEmail: owner, orgId: null, externalEventKey: taskId, payload: JSON.stringify({ kind: "automation-webhook",
+      automationId: resource.id, owner, path: resource.path, eventId: taskId, payload: {} }) });
+  await insert(id);
+  const db = database.getDbExec(), execute = db.execute.bind(db);
+  let initialClear = false, barrierHit = 0, release;
+  const gate = new Promise(resolve => { release = resolve; });
+  db.execute = async statement => {
+    const sql = String(statement.sql ?? statement).replace(/\s+/g, " ").trim();
+    const result = await execute(statement);
+    if (sql.startsWith("SELECT 1 FROM automation_runs WHERE owner = ? AND path = ?") &&
+        statement.args?.includes(resource.path) && !initialClear) {
+      assert.equal(result.rows.length, 0); initialClear = true;
+    } else if (initialClear && !barrierHit && sql.startsWith("SELECT") && sql.includes("FROM resources") &&
+        statement.args?.includes(owner) && statement.args?.includes(resource.path)) {
+      barrierHit++; await gate;
+    }
+    return result;
+  };
+  const work = webhook.runAutomationWebhookTaskInProcess(id, { appId });
+  let unrelated;
+  try {
+    await until(() => barrierHit === 1);
+    await insert(follower);
+    unrelated = await wait(fixture);
+    const pending = await fixture.pending(unrelated.historyId);
+    assert.equal(pending.options.webhookTaskId, undefined, "this wait belongs to another real execution");
+    const models = fixture.modelCalls.length, calls = fixture.calls.length;
+    release();
+    assert.equal(await work, "retry");
+    assert.equal(barrierHit, 1);
+    const task = await tasks.getPendingTask(id);
+    assert.equal(task.status, "pending"); assert.equal(task.attempts, 0);
+    assert.equal(task.ownerEmail, owner); assert.equal(task.externalThreadId, `${owner}:${resource.path}`);
+    assert.equal(JSON.parse(task.payload).eventId, id);
+    assert.equal((await tasks.getPendingTask(follower)).status, "pending");
+    assert.equal(await tasks.claimPendingTask(follower), null);
+    assert.equal(fixture.modelCalls.length, models); assert.equal(fixture.calls.length, calls);
+    assert.equal(configuredCalls(fixture).length, 0);
+    await fixture.decide(unrelated.historyId, pending, "decline");
+    assert.equal(await webhook.runAutomationWebhookTaskInProcess(id, { appId }), "waiting_approval");
+    const current = (await history.listAutomationRuns({ owners: [owner], automation: fixture.automation.name, appId })).find(run => run.id !== unrelated.historyId);
+    const currentPending = await fixture.pending(current.id);
+    assert.equal(currentPending.options.webhookTaskId, id);
+    assert.equal((await tasks.getPendingTask(id)).status, "waiting_approval");
+    const waitingModels = fixture.modelCalls.length;
+    assert.equal(await webhook.runAutomationWebhookTaskInProcess(id, { appId }), "skipped");
+    assert.equal(fixture.modelCalls.length, waitingModels); assert.equal(configuredCalls(fixture).length, 0);
+    await tasks.markTaskFailed(follower, "Fixture cleanup after FIFO custody assertions.");
+    await fixture.decide(current.id, currentPending, "decline");
+    assert.equal((await tasks.getPendingTask(id)).status, "failed");
+  } finally { release(); db.execute = execute; await work; }
+});
+
+for (const surface of ["modern-schedule", "modern-webhook", "legacy"]) for (const order of ["lock", "delete"])
+  test(`${surface} deletion and real wait serialize ${order} custody without replacing a definition`, async () => {
+    const result = await child(`gap-delete-race-${surface}-${order}`, `delete-race-${surface}-${order}`);
+    assert.equal(result.predicateHit, 1); assert.equal(result.configuredEffects, 0);
+    assert.ok(["wait", "delete"].includes(result.winner));
+    assert.equal(result.deleteBarrierHit, order === "lock" ? 1 : 0);
+    if (order === "delete") { assert.equal(result.winner, "delete"); assert.equal(result.terminalCode, "automation_approval_changed"); }
+  });
+
+
+test("fresh-process webhook deletion initializes both cold stores before custody and exits naturally", async () => {
+  const name = "cold-webhook-delete";
+  const seeded = await child("cold-webhook-seed-no-wait", name);
+  assert.equal(seeded.modelCalls, 0); assert.equal(seeded.toolCalls, 0);
+  const deleted = await child("cold-webhook-delete-no-wait", name);
+  assert.equal(deleted.resourceId, seeded.resourceId);
+  assert.equal(deleted.deleted, true);
+  assert.equal(deleted.tokenInitializations, 1); assert.equal(deleted.secretInitializations, 1);
+  assert.deepEqual(deleted.initializationInsideCustody, []);
+  assert.equal(deleted.modelCalls, 0); assert.equal(deleted.toolCalls, 0);
+});
+
+test("fresh-process webhook deletion refuses an existing wait without changing custody", async () => {
+  const name = "cold-webhook-wait";
+  const seeded = await child("cold-webhook-seed-wait", name);
+  const preserved = await child("cold-webhook-delete-wait", name, seeded.result.historyId);
+  assert.equal(preserved.preserved, true);
+  assert.equal(preserved.resourceId, seeded.resourceId);
+  assert.equal(preserved.historyId, seeded.result.historyId);
+  assert.equal(preserved.threadId, seeded.result.threadId);
+  assert.equal(preserved.turnId, seeded.result.turnId);
+  assert.equal(preserved.askId, seeded.askId);
+  assert.equal(preserved.tokenDigest, seeded.tokenDigest);
+  assert.equal(preserved.secretDigest, seeded.secretDigest);
+  assert.equal(preserved.modelCalls, 0); assert.equal(preserved.toolCalls, 0);
+  assert.equal(preserved.deleted, true, "supported owner decline permits subsequent deletion");
+});
+
+test("public SQLite close queues behind custody and permits a fresh singleton", async () => {
+  const receipt = await child("cold-close", "queued-public-close");
+  assert.equal(receipt.closedAfterRelease, true);
+  assert.equal(receipt.reopened, true); assert.equal(receipt.oldExecutorRejected, true);
+  assert.equal(receipt.modelCalls, 0); assert.equal(receipt.toolCalls, 0);
+});

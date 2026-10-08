@@ -3757,7 +3757,11 @@ diff --git a/dist/client/agent-page/use-jobs.js b/dist/client/agent-page/use-job
          onSuccess: (_result, variables) => {
              const scope = variables.scope === "organization" ? "organization" : "personal";
              const name = variables.name ??
-@@ -118,6 +155,27 @@
+@@ -115,9 +152,31 @@
+     const params = {
+         scope: scope === "org" ? "organization" : "personal",
+         name: name || "",
++        includePendingApprovals: true,
      };
      return useActionQuery("list-automation-runs", params, {
          staleTime: 5_000,
@@ -6353,8 +6357,8 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +import { abortRun, getRun, resolveBackgroundAutomationSoftTimeoutMs, resolveBackgroundRunHardTimeoutMs, startRun, } from "../agent/run-manager.js";
 +import { claimBackgroundRun, getRunById, getRunEventsSince, getRunStatus, getRunTurnRef, insertRun, isTurnAborted } from "../agent/run-store.js";
 +import { buildAssistantMessage, buildUserMessage, extractThreadMeta, foldAssistantTurn, threadDataToEngineMessages, upsertUserMessage, } from "../agent/thread-data-builder.js";
-+import { consumeAgentToolApproval, createAgentToolApproval, declineAgentToolApproval, readAgentToolApproval } from "../agent/tool-approval-store.js";
-+import { resourceGetByPath } from "../resources/store.js";
++import { ensureAgentToolApprovalTable, consumeAgentToolApproval, createAgentToolApproval, declineAgentToolApproval, readAgentToolApproval } from "../agent/tool-approval-store.js";
++import { AutomationResourceChangedError, withAutomationResourceCustody, resourceGetByPath } from "../resources/store.js";
 +import { redactText, redactTextInValue } from "../audit/redact.js";
  import { resolveAutomationExecutionIdentity, } from "../automations/service.js";
  import { createThread, getThread, updateThreadData, withThreadDataLock, } from "../chat-threads/store.js";
@@ -6655,7 +6659,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const userApiKey = await getOwnerActiveApiKey(ownerEmail);
          // The run manager invokes its detached callback after the scheduler's
          // setup stack has yielded, so the engine's credentials must be captured
-@@ -382,11 +471,71 @@
+@@ -382,11 +471,90 @@
              engine.defaultModel;
          const model = normalizeModelForEngine(engine, modelCandidate);
          const systemPrompt = await deps.getSystemPrompt(ownerEmail);
@@ -6673,6 +6677,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +        const turnId = options.continuation?.turnId ?? runId;
 +        let pendingApproval = null;
 +        let approvalStorageFailed = false;
++        let approvalRefusal = null;
 +        let consumedApproval = false;
 +        let continuationInterruption = null;
 +        let executionSignal;
@@ -6682,7 +6687,15 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +                // particular, a Stop during needsApproval retains its real cause.
 +                if (executionSignal?.aborted || isBackgroundAutomationsClosed() || await isTurnAborted(thread.id, turnId))
 +                    throw new Error("The automation is stopping.");
-+                await validatedAutomationSurface({ automation, ownerEmail, orgId, definitionRevision, registryFingerprint }, deps);
++                try {
++                    await validatedAutomationSurface({ automation, ownerEmail, orgId, definitionRevision, registryFingerprint }, deps);
++                } catch (error) {
++                    if (error instanceof BackgroundAutomationRunError) {
++                        approvalRefusal = error;
++                        if (getRun(runId)?.status === "running" && !executionSignal?.aborted) abortRun(runId, error.errorCode);
++                    }
++                    throw error;
++                }
 +                const inputJson = JSON.stringify(binding.input);
 +                if (redactText(inputJson) !== inputJson)
 +                    throw new Error("Sensitive tool input cannot be retained for automation approval.");
@@ -6690,23 +6703,33 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +                if (executionSignal?.aborted || isBackgroundAutomationsClosed() || await isTurnAborted(thread.id, turnId))
 +                    throw new Error("The automation is stopping.");
 +                try {
-+                    const expiresAt = Date.now() + 60 * 60_000;
-+                    const askId = await createAgentToolApproval({ ...binding, ownerEmail, orgId, threadId: thread.id, turnId, expiresAt });
-+                    pendingApproval = {
-+                        ...binding, askId, expiresAt, historyId, ownerEmail, orgId: orgId ?? null,
-+                        threadId: thread.id, turnId, runId, definitionRevision, registryFingerprint,
-+                        resourceOwner: automation.resource.owner, resourceId: automation.resource.id, resourcePath: automation.resource.path,
-+                        // Only run inputs. No resource snapshot, connection settings or credentials.
-+                        options: retainedAutomationOptions(options),
-+                    };
-+                    await waitForAutomationApproval(historyId, pendingApproval);
++                    await ensureAgentToolApprovalTable();
++                    pendingApproval = await withAutomationResourceCustody(automation.resource, async (tx, current) => {
++                        if (automationDefinitionRevision({ ...automation, resource: current, ...parseJobResource(current.content) }) !== definitionRevision)
++                            throw new AutomationResourceChangedError();
++                        const expiresAt = Date.now() + 60 * 60_000;
++                        const askId = await createAgentToolApproval({ ...binding, ownerEmail, orgId, threadId: thread.id, turnId, expiresAt }, tx);
++                        const pending = {
++                            ...binding, askId, expiresAt, historyId, ownerEmail, orgId: orgId ?? null,
++                            threadId: thread.id, turnId, runId, definitionRevision, registryFingerprint,
++                            resourceOwner: automation.resource.owner, resourceId: automation.resource.id, resourcePath: automation.resource.path,
++                            options: retainedAutomationOptions(options),
++                        };
++                        await waitForAutomationApproval(historyId, pending, tx);
++                        return pending;
++                    });
 +                    if (options.webhookTaskId) {
 +                        const { markTaskWaitingForApproval } = await import("../integrations/pending-tasks-store.js");
 +                        await markTaskWaitingForApproval(options.webhookTaskId);
 +                    }
-+                    return askId;
++                    return pendingApproval.askId;
 +                }
 +                catch (error) {
++                    if (error instanceof AutomationResourceChangedError) {
++                        approvalRefusal = new BackgroundAutomationRunError(error.message, "automation_approval_changed");
++                        if (getRun(runId)?.status === "running" && !executionSignal?.aborted) abortRun(runId, approvalRefusal.errorCode);
++                        throw approvalRefusal;
++                    }
 +                    approvalStorageFailed = true;
 +                    // Keep a concurrent established Stop reason. The failure flag
 +                    // still records that an actual persistence operation failed.
@@ -6731,7 +6754,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (runIdRef)
              runIdRef.current = runId;
          await recordRunThread(historyId, thread.id, runId);
-@@ -425,170 +574,269 @@
+@@ -425,170 +593,273 @@
          // handoff to the unclaimed-background-run sweep — it gets reaped as
          // "background_worker_never_started" out from under a still-executing
          // job the moment any single tool call runs past the 25s grace window.
@@ -6975,6 +6998,10 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +                            reject(continuationInterruption);
 +                            return;
 +                        }
++                        if (approvalRefusal) {
++                            reject(approvalRefusal);
++                            return;
++                        }
 +                        // Gate persistence owns this abort. Keep its typed failure instead
 +                        // of treating it as a retryable shutdown or generic abort.
 +                        if (approvalStorageFailed) {
@@ -7152,7 +7179,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const usage = usageRef.current;
          if (usage &&
              (usage.inputTokens > 0 ||
-@@ -613,6 +861,8 @@
+@@ -613,6 +884,8 @@
                  // Usage attribution must not break an otherwise successful run.
              }
          }
@@ -7161,7 +7188,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (responseText.trim() &&
              automation.meta.deliveryPlatform &&
              automation.meta.deliveryDestination) {
-@@ -627,6 +877,268 @@
+@@ -627,6 +900,268 @@
                  tenantId: automation.meta.deliveryTenantId,
              });
          }
@@ -7701,9 +7728,12 @@ diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
  /**
   * Attach the agent thread once it exists. The thread is created after the run
   * row so the history survives a crash between the two.
-@@ -82,3 +105,42 @@
+@@ -81,4 +104,45 @@
+     automation: string;
      appId?: string | null;
      limit?: number;
++    includePendingApprovals?: boolean;
++    orgIds?: Array<string | null>;
  }): Promise<AutomationRun[]>;
 +
 +export interface AutomationApprovalContext {
@@ -7726,7 +7756,7 @@ diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
 +    resourcePath: string;
 +    options: Omit<import("./background-automation-runner.js").BackgroundAutomationRunOptions, "automation">;
 +}
-+export declare function waitForAutomationApproval(id: string | null, context: AutomationApprovalContext): Promise<void>;
++export declare function waitForAutomationApproval(id: string | null, context: AutomationApprovalContext, exec?: import("../db/client.js").DbExec): Promise<void>;
 +export declare function markAutomationApprovalReady(id: string, askId: string): Promise<void>;
 +export declare function getAutomationContinuation(id: string): Promise<{
 +    run: AutomationRun; storedStatus: string; decisionAt: number | null;
@@ -7743,7 +7773,7 @@ diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
 +export declare const NEWER_ADMITTED_AUTOMATION_RUN_SQL: string;
 +export declare function hasNewerAutomationRun(run: AutomationRun): Promise<boolean>;
 +
-+export declare function assertLegacyJobApprovalDeletionAllowed(resource: { id: string; owner: string; path: string }, meta: import("./frontmatter.js").JobFrontmatter, appId?: string): Promise<void>;
++export declare function assertLegacyJobApprovalDeletionAllowed(resource: { id: string; owner: string; path: string }, meta: import("./frontmatter.js").JobFrontmatter, appId?: string, exec?: import("../db/client.js").DbExec): Promise<void>;
 diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 --- a/dist/jobs/run-history.js
 +++ b/dist/jobs/run-history.js
@@ -7997,27 +8027,57 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
      const cutoff = Date.now();
      await getDbExec().execute({
 -        sql: `DELETE FROM ${TABLE} WHERE owner = ? AND automation = ? AND started_at <= ?`,
-+        sql: `DELETE FROM ${TABLE} WHERE owner = ? AND automation = ? AND started_at <= ? AND status NOT IN ('waiting_approval', 'resuming') AND (approval_context IS NULL OR approval_outcome_reconciled = 1)`,
++        sql: `DELETE FROM ${TABLE} WHERE owner = ? AND automation = ? AND started_at <= ? AND finished_at IS NOT NULL AND status NOT IN ('waiting_approval', 'resuming') AND (approval_context IS NULL OR approval_outcome_reconciled = 1)`,
          args: [owner, automation, cutoff],
      });
  }
-@@ -393,3 +450,174 @@
+@@ -384,12 +441,196 @@
+     const appId = options.appId?.trim() || null;
+     const placeholders = owners.map(() => "?").join(", ");
+     const appFilter = appId ? " AND (app_id = ? OR app_id IS NULL)" : "";
+-    const result = await getDbExec().execute({
+-        sql: `SELECT * FROM ${TABLE} WHERE owner IN (${placeholders}) AND automation = ?
+-          ${appFilter}
+-          ORDER BY started_at DESC LIMIT ${limit}`,
+-        args: [...owners, options.automation, ...(appId ? [appId] : [])],
+-    });
++    const orgFilter = options.orgIds ? ` AND COALESCE(org_id, '') IN (${options.orgIds.map(() => "?").join(", ")})` : "";
++    if (options.orgIds && !options.orgIds.length)
++        return [];
++    const args = [...owners, options.automation, ...(appId ? [appId] : []), ...(options.orgIds?.map(id => id ?? "") ?? [])];
++    const where = `owner IN (${placeholders}) AND automation = ? ${appFilter}${orgFilter}`;
++    const result = await getDbExec().execute({
++        sql: `SELECT * FROM ${TABLE} WHERE ${where} ORDER BY started_at DESC, id DESC LIMIT ${limit}`,
++        args,
++    });
++    const retained = options.includePendingApprovals ? await getDbExec().execute({
++        sql: `SELECT * FROM ${TABLE} WHERE ${where} AND (
++          finished_at IS NULL AND status IN ('waiting_approval', 'resuming')
++          OR approval_context IS NOT NULL AND approval_outcome_reconciled = 0)
++          ORDER BY started_at DESC, id DESC`,
++        args,
++    }) : { rows: [] };
++    const rows = [...new Map([...result.rows, ...retained.rows].map(row => [String(row.id), row])).values()];
++    rows.sort((a, b) => Number(b.started_at) - Number(a.started_at) || String(b.id).localeCompare(String(a.id)));
      const now = Date.now();
-     return (result.rows ?? []).map((row) => toRun(row, now));
- }
+-    return (result.rows ?? []).map((row) => toRun(row, now));
+-}
++    return rows.map((row) => toRun(row, now));
++}
 +
 +/** Waiting and execution admission are authority state, so these writes are required. */
-+export async function waitForAutomationApproval(id, context) {
++export async function waitForAutomationApproval(id, context, exec = getDbExec()) {
 +    if (!id)
 +        throw new Error("Cannot wait for approval without durable automation history.");
 +    await ensureTable();
-+    const result = await getDbExec().execute({
++    const result = await exec.execute({
 +        sql: `UPDATE automation_runs SET status = 'waiting_approval', pending_ask_id = ?,
 +          approval_context = ?, approval_ready = 0, approval_outcome_reconciled = 0, thread_id = ?, run_id = ?,
 +          admitted_at = COALESCE(admitted_at, CASE WHEN thread_id IS NOT NULL AND run_id IS NOT NULL THEN started_at ELSE ? END),
 +          finished_at = NULL, error = NULL, error_code = NULL
-+          WHERE id = ? AND status IN ('running', 'resuming') AND finished_at IS NULL`,
-+        args: [context.askId, JSON.stringify(context), context.threadId, context.runId, Date.now(), id],
++          WHERE id = ? AND status IN ('running', 'resuming') AND finished_at IS NULL
++            AND EXISTS (SELECT 1 FROM resources WHERE id = ? AND owner = ? AND path = ?)`,
++        args: [context.askId, JSON.stringify(context), context.threadId, context.runId, Date.now(), id, context.resourceId, context.resourceOwner, context.resourcePath],
 +    });
 +    if (result.rowsAffected !== 1)
 +        throw new Error("The automation approval wait could not be saved.");
@@ -8087,7 +8147,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +    return (result.rows ?? []).length > 0;
 +}
 +/** Deletion authority is separate from the stored creator's current eligibility. */
-+export async function assertLegacyJobApprovalDeletionAllowed(resource, meta, appId) {
++export async function assertLegacyJobApprovalDeletionAllowed(resource, meta, appId, exec = getDbExec()) {
 +    const resourceOrg = organizationIdFromResourceOwner(resource.owner);
 +    const orgId = recoveredFactoryOwnerOrgId(meta, resource.path, resource.owner) ?? meta.orgId ?? null;
 +    const creator = meta.runAs === "shared" ? resource.owner : meta.createdBy ||
@@ -8101,7 +8161,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +    const resourcePath = isPostgres() ? "approval_context::jsonb ->> 'resourcePath'" : "json_extract(approval_context, '$.resourcePath')";
 +    // Include a conflicting row still bound to this exact resource. Looking
 +    // only under a newly projected owner could miss retained custody after an edit.
-+    const result = await getDbExec().execute({
++    const result = await exec.execute({
 +        sql: `SELECT * FROM automation_runs WHERE finished_at IS NULL
 +          AND status IN ('waiting_approval', 'resuming') AND (
 +            owner = ? AND path = ? OR ${resourceId} = ? OR ${resourceOwner} = ? AND ${resourcePath} = ?)`,
@@ -9260,7 +9320,12 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
 diff --git a/dist/jobs/tools.js b/dist/jobs/tools.js
 --- a/dist/jobs/tools.js
 +++ b/dist/jobs/tools.js
-@@ -5,6 +5,8 @@
+@@ -1,10 +1,12 @@
+ import { DEFAULT_AUTOMATION_SCHEDULE } from "../automations/service.js";
+ import { getDbExec } from "../db/client.js";
+ import { resolveUserSchedulingTimezone } from "../localization/user-timezone.js";
+-import { resourcePut, resourceGetByPath, resourceList, resourceDelete, organizationIdFromResourceOwner, sharedResourceOwner, SHARED_OWNER, } from "../resources/store.js";
++import { resourcePut, resourceGetByPath, resourceList, deleteAutomationResource, resourceDelete, organizationIdFromResourceOwner, sharedResourceOwner, SHARED_OWNER, } from "../resources/store.js";
  import { getRequestUserEmail, getRequestOrgId, getIntegrationRequestContext, } from "../server/request-context.js";
  import { isValidCron, nextOccurrence, describeCron, effectiveTimezone, isValidTimezone, } from "./cron.js";
  import { classifyJobResource, jobBelongsToApp } from "./frontmatter.js";
@@ -9269,19 +9334,21 @@ diff --git a/dist/jobs/tools.js b/dist/jobs/tools.js
  import { parseJobFrontmatter, buildJobContent, normalizeJobMcpTools, } from "./scheduler.js";
  export { jobBelongsToApp } from "./frontmatter.js";
  function getOwner() {
-@@ -342,6 +344,12 @@
+@@ -342,7 +344,13 @@
      if (denied) {
          return JSON.stringify({ error: denied });
      }
+-    await resourceDelete(resource.id);
 +    try {
 +        await assertLegacyJobApprovalDeletionAllowed(resource, meta, appId);
++        await deleteAutomationResource(resource, tx => assertLegacyJobApprovalDeletionAllowed(resource, meta, appId, tx));
 +    }
 +    catch (error) {
 +        return JSON.stringify({ error: error instanceof Error ? error.message : "Cannot verify the persisted job approval history scope." });
 +    }
-     await resourceDelete(resource.id);
      return JSON.stringify({ deleted: true, name });
  }
+ export function createJobTools(appId) {
 @@ -359,7 +367,7 @@
  
  Cron format is 5 fields: minute hour day-of-month month day-of-week. Common patterns: '0 9 * * *' (daily 9am), '0 9 * * 1-5' (weekdays 9am), '0 * * * *' (every hour), '0 9 * * 1' (Mondays 9am), '*/30 * * * *' (every 30 min).
@@ -9745,7 +9812,7 @@ diff --git a/dist/resources/store.d.ts b/dist/resources/store.d.ts
  export declare function resourceDelete(id: string): Promise<boolean>;
  export declare function resourceDeleteByPath(owner: string, path: string): Promise<boolean>;
  export declare function resourceList(owner: string, pathPrefix?: string, options?: ResourceListOptions): Promise<ResourceMeta[]>;
-@@ -144,3 +159,12 @@
+@@ -144,3 +159,16 @@
   */
  export declare function resourceListAllOwners(pathPrefix: string): Promise<Resource[]>;
  export declare function resourceMove(id: string, newPath: string): Promise<boolean>;
@@ -9758,6 +9825,10 @@ diff --git a/dist/resources/store.d.ts b/dist/resources/store.d.ts
 +    owner: string;
 +    updatedAt: number;
 +}): Promise<boolean>;
++
++export declare class AutomationResourceChangedError extends Error { constructor(); }
++export declare function withAutomationResourceCustody<T>(resource: Pick<Resource, "id" | "owner" | "path">, operation: (tx: import("../db/client.js").DbExec, current: Pick<Resource, "id" | "owner" | "path" | "content">) => Promise<T>): Promise<T>;
++export declare function deleteAutomationResource(resource: Pick<Resource, "id" | "owner" | "path" | "content">, guard: (tx: import("../db/client.js").DbExec) => Promise<void>, beforeDelete?: (tx: import("../db/client.js").DbExec) => Promise<void>): Promise<boolean>;
 diff --git a/dist/resources/store.js b/dist/resources/store.js
 --- a/dist/resources/store.js
 +++ b/dist/resources/store.js
@@ -10146,7 +10217,7 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
      await ensureTable();
      if (isLocalWorkspaceResourceId(resource.id))
          return false;
-@@ -1367,12 +1539,89 @@
+@@ -1367,12 +1539,129 @@
      }
      return deleted;
  }
@@ -10226,6 +10297,46 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
 +    emitResourceChange(current.id, current.path, current.owner);
 +    return true;
 +}
++/** A disappeared or replaced definition cannot receive approval custody. */
++export class AutomationResourceChangedError extends Error {
++    constructor() { super("The automation definition changed before approval custody could be established."); this.name = "AutomationResourceChangedError"; }
++}
++/** PostgreSQL locks the exact resource row. SQLite's existing transaction starts
++ * BEGIN IMMEDIATE. Neither operation yields custody to a separate resource read. */
++export async function withAutomationResourceCustody(resource, operation) {
++    await ensureTable();
++    const client = getDbExec();
++    if (!client.transaction)
++        throw new Error("Automation custody requires a database transaction.");
++    return client.transaction(async tx => {
++        const { rows } = await tx.execute({
++            sql: `SELECT id, owner, path, content FROM resources WHERE id = ? AND owner = ? AND path = ?${isPostgres() ? " FOR UPDATE" : ""}`,
++            args: [resource.id, resource.owner, resource.path],
++        });
++        if (rows.length !== 1)
++            throw new AutomationResourceChangedError();
++        return operation(tx, rows[0]);
++    });
++}
++/** Guard and token cleanup precede deletion in the same custody transaction.
++ * Resource events are emitted only after the deletion commits. */
++export async function deleteAutomationResource(resource, guard, beforeDelete) {
++    refuseRunInstructionMutation(resource.owner, resource.path, "delete");
++    const deleted = await withAutomationResourceCustody(resource, async (tx, current) => {
++        if (current.content !== resource.content)
++            throw new AutomationResourceChangedError();
++        await guard(tx);
++        if (beforeDelete) await beforeDelete(tx);
++        const result = await tx.execute({ sql: "DELETE FROM resources WHERE id = ? AND owner = ? AND path = ?",
++            args: [resource.id, resource.owner, resource.path] });
++        if (result.rowsAffected !== 1)
++            throw new AutomationResourceChangedError();
++        return true;
++    });
++    if (deleted) emitResourceDelete(resource.id, resource.path, resource.owner);
++    return deleted;
++}
++
  export async function resourceDelete(id) {
      await ensureTable();
      if (isLocalWorkspaceResourceId(id)) {
@@ -10236,7 +10347,7 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
          const deleted = await deleteLocalWorkspaceResource({ path: resourcePath });
          if (deleted) {
              emitResourceDelete(id, resourcePath, WORKSPACE_OWNER);
-@@ -1387,9 +1636,10 @@
+@@ -1387,9 +1676,10 @@
      });
      if (rows.length === 0)
          return false;
@@ -10249,7 +10360,7 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
      });
      const deleted = result.rowsAffected > 0;
      if (deleted) {
-@@ -1398,6 +1648,7 @@
+@@ -1398,6 +1688,7 @@
      return deleted;
  }
  export async function resourceDeleteByPath(owner, path) {
@@ -10257,7 +10368,7 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
      await ensureTable();
      if (owner === WORKSPACE_OWNER &&
          (await shouldHandleWorkspaceResourceAsLocal(path))) {
-@@ -1623,18 +1874,24 @@
+@@ -1623,18 +1914,24 @@
      const now = Date.now();
      // Get current resource info
      const { rows } = await client.execute({
@@ -11677,10 +11788,9 @@ index 5417799efb2d2e719676d8a85ef43f529948a95b..ff9faeb0c91c84539b7afc76916ea3a4
  // AES-256-GCM helpers for column-level encryption of per-row secret values
  // (e.g. a per-record share password) that don't fit the keyed app_secrets /
 diff --git a/dist/secrets/storage.d.ts b/dist/secrets/storage.d.ts
-index 989d96f155eb5f16593d91c5f94ba194186cc394..68f92006316aa0f59b3634e94b517517758d50de 100644
 --- a/dist/secrets/storage.d.ts
 +++ b/dist/secrets/storage.d.ts
-@@ -35,6 +35,8 @@ export interface WriteSecretArgs extends SecretRef {
+@@ -35,6 +35,8 @@
   * stored — the caller's plaintext is never persisted. Returns the new
   * record's id.
   */
@@ -11689,11 +11799,16 @@ index 989d96f155eb5f16593d91c5f94ba194186cc394..68f92006316aa0f59b3634e94b517517
  export declare function writeAppSecret(args: WriteSecretArgs): Promise<string>;
  export interface ReadSecretResult {
      value: string;
+@@ -83,4 +85,4 @@
+  * user-created keys.
+  */
+ export declare function listAppSecretsForScope(scope: SecretScope, scopeId: string): Promise<SecretMeta[]>;
+-export declare function deleteAppSecret(ref: SecretRef): Promise<boolean>;
++export declare function deleteAppSecret(ref: SecretRef, exec?: import("../db/client.js").DbExec): Promise<boolean>;
 diff --git a/dist/secrets/storage.js b/dist/secrets/storage.js
-index 4a3abfe4918097e29c0feeee835196e4faf46fa5..9831435b99b7a5067cbbd1b37511d7e820241f87 100644
 --- a/dist/secrets/storage.js
 +++ b/dist/secrets/storage.js
-@@ -101,7 +101,29 @@ export function last4(value) {
+@@ -101,7 +101,29 @@
   * stored — the caller's plaintext is never persisted. Returns the new
   * record's id.
   */
@@ -11723,18 +11838,25 @@ index 4a3abfe4918097e29c0feeee835196e4faf46fa5..9831435b99b7a5067cbbd1b37511d7e8
      await ensureTable();
      const { key, value, scope, scopeId, description, urlAllowlist } = args;
      if (!key || !value || !scope || !scopeId) {
-@@ -525,6 +547,11 @@ function parseAllowlist(raw) {
+@@ -524,11 +546,16 @@
+         return null;
      }
  }
- export async function deleteAppSecret(ref) {
-+    const deleted = await deleteAppSecretRow(ref);
+-export async function deleteAppSecret(ref) {
++export async function deleteAppSecret(ref, exec) {
++    const deleted = await deleteAppSecretRow(ref, exec);
 +    notifyAppSecretsChanged();
 +    return deleted;
 +}
-+async function deleteAppSecretRow(ref) {
++async function deleteAppSecretRow(ref, exec) {
      await ensureTable();
      invalidateRequestSecret(ref);
      const { key, scope, scopeId } = ref;
+-    const client = getDbExec();
++    const client = exec ?? getDbExec();
+     const { rowsAffected } = await client.execute({
+         sql: `DELETE FROM app_secrets WHERE scope = ? AND scope_id = ? AND key = ?`,
+         args: [scope, scopeId, key],
 diff --git a/dist/server/agent-chat/browser-team-tools.js b/dist/server/agent-chat/browser-team-tools.js
 index d17541a8886db23eca66fdaf3b7a34bc08068a85..858f28b48dbd5d6944031e8b6cd444d8304890c3 100644
 --- a/dist/server/agent-chat/browser-team-tools.js
@@ -13878,7 +14000,7 @@ diff --git a/dist/triggers/dispatcher.js b/dist/triggers/dispatcher.js
 -}
 -async function dispatchAgentic(resource, payload, eventMeta, identity) {
 +    // Vivary #114: a quit interrupted the run, so the call goes back to the queue.
-+    return outcome === "waiting_approval" ? "waiting_approval" : outcome === "interrupted" ? "interrupted" : "completed";
++    return outcome === "retry" ? "retry" : outcome === "waiting_approval" ? "waiting_approval" : outcome === "interrupted" ? "interrupted" : "completed";
 +}
 +/**
 + * Vivary #114: tracked, so a quit waits until the trigger records the run's
@@ -13902,7 +14024,7 @@ diff --git a/dist/triggers/dispatcher.js b/dist/triggers/dispatcher.js
          return;
      }
 +    if (await hasUnresolvedAutomationApproval(automationHistoryOwner(resource.owner, identity), resource.path))
-+        return "waiting_approval";
++        return startedBy === "webhook" ? "retry" : "waiting_approval";
      const latestTrigger = parseTriggerFrontmatter(latest.content);
      if (!jobBelongsToApp(latestTrigger.meta, _deps.appId)) {
          console.log(`[triggers] "${resource.path}" belongs to a different app; dropping the event.`);
@@ -14918,6 +15040,15 @@ diff --git a/dist/agent/tool-approval-store.d.ts b/dist/agent/tool-approval-stor
  }
  export declare function hashAgentToolApprovalKey(approvalKey: string): string;
  export interface AgentToolApprovalPolicyBinding {
+@@ -42,7 +44,7 @@
+  * re-rendered" apart from "this is a NEW ask for the same tool call". See
+  * `ApprovalAffordance` in client/chat/tool-call-display.tsx.
+  */
+-export declare function createAgentToolApproval(binding: AgentToolApprovalBinding): Promise<string>;
++export declare function createAgentToolApproval(binding: AgentToolApprovalBinding, exec?: import("../db/client.js").DbExec): Promise<string>;
+ /**
+  * Atomically consume the server-created approval for one logical tool call.
+  * The model's call id is transport metadata and can change when Dispatch
 @@ -51,3 +53,6 @@
   * cannot manufacture a grant.
   */
@@ -14937,6 +15068,30 @@ diff --git a/dist/agent/tool-approval-store.js b/dist/agent/tool-approval-store.
              now,
              now,
          ],
+@@ -164,12 +164,12 @@
+  * re-rendered" apart from "this is a NEW ask for the same tool call". See
+  * `ApprovalAffordance` in client/chat/tool-call-display.tsx.
+  */
+-export async function createAgentToolApproval(binding) {
++export async function createAgentToolApproval(binding, exec = getDbExec()) {
+     await ensureAgentToolApprovalTable();
+     const now = Date.now();
+     const expiresAt = binding.expiresAt ?? now + APPROVAL_TTL_MS;
+     const id = `agent-tool-approval-${randomUUID()}`;
+-    await getDbExec().execute({
++    await exec.execute({
+         sql: `INSERT INTO agent_tool_approvals
+       (id, owner_email, org_id, thread_id, turn_id, tool_name, call_id,
+        approval_key_hash, status, expires_at, consumed_at, created_at, updated_at)
+@@ -192,7 +192,7 @@
+     // an atomic status and expiry predicate, so cleanup failures must not affect
+     // the approval that was just recorded.
+     try {
+-        await getDbExec().execute({
++        await exec.execute({
+             sql: `DELETE FROM agent_tool_approvals
+         WHERE expires_at < ? AND status <> 'pending'`,
+             args: [now - APPROVAL_CLEANUP_AGE_MS],
 @@ -219,6 +219,7 @@
        WHERE id = (
          SELECT id FROM agent_tool_approvals
@@ -15059,21 +15214,260 @@ diff --git a/dist/server/action-discovery.js b/dist/server/action-discovery.js
 diff --git a/dist/automations/service.js b/dist/automations/service.js
 --- a/dist/automations/service.js
 +++ b/dist/automations/service.js
-@@ -1,7 +1,7 @@
+@@ -1,10 +1,11 @@
  import { getDbExec } from "../db/client.js";
++import { ensureTable as ensureAppSecretTable } from "../secrets/storage.js";
  import { isValidCron, isValidTimezone, nextOccurrence } from "../jobs/cron.js";
  import { buildJobResourceContent, isRecoveredFactoryJob, jobBelongsToApp, normalizeJobMcpTools, parseJobResource, } from "../jobs/frontmatter.js";
 -import { deleteAutomationRuns } from "../jobs/run-history.js";
-+import { deleteAutomationRuns, hasUnresolvedAutomationApproval } from "../jobs/run-history.js";
++import { assertLegacyJobApprovalDeletionAllowed, deleteAutomationRuns, hasUnresolvedAutomationApproval } from "../jobs/run-history.js";
  import { resolveUserSchedulingTimezone } from "../localization/user-timezone.js";
- import { organizationIdFromResourceOwner, organizationResourceOwner, resourceDelete, resourceGetByPath, resourceList, resourcePut, SHARED_OWNER, } from "../resources/store.js";
- import { deleteAutomationWebhookToken, readAutomationWebhookPath, saveAutomationWebhookToken, } from "../triggers/webhook-store.js";
-@@ -393,6 +393,8 @@
+-import { organizationIdFromResourceOwner, organizationResourceOwner, resourceDelete, resourceGetByPath, resourceList, resourcePut, SHARED_OWNER, } from "../resources/store.js";
+-import { deleteAutomationWebhookToken, readAutomationWebhookPath, saveAutomationWebhookToken, } from "../triggers/webhook-store.js";
++import { organizationIdFromResourceOwner, organizationResourceOwner, deleteAutomationResource, resourceDelete, resourceGetByPath, resourceList, resourcePut, SHARED_OWNER, } from "../resources/store.js";
++import { deleteAutomationWebhookToken, ensureTable as ensureWebhookTokenTable, readAutomationWebhookPath, saveAutomationWebhookToken, } from "../triggers/webhook-store.js";
+ import { createAutomationWebhookToken, automationWebhookPath, } from "../triggers/webhook.js";
+ /** Conservative default for new scheduled automations when no cadence is given. */
+ export const DEFAULT_AUTOMATION_SCHEDULE = "0 * * * *";
+@@ -393,10 +394,21 @@
      if (!definition.canUpdate) {
          throw httpError("Only the automation's creator or an organization admin can delete it.", 403);
      }
+-    if (definition.meta.triggerType === "webhook") {
+-        await deleteAutomationWebhookToken(definition.resource, definition.meta);
+-    }
+-    await resourceDelete(definition.resource.id);
 +    if (await hasUnresolvedAutomationApproval(definition.resource.owner, definition.resource.path))
 +        throw httpError("Resolve the waiting approval before deleting this automation.", 409);
-     if (definition.meta.triggerType === "webhook") {
-         await deleteAutomationWebhookToken(definition.resource, definition.meta);
++    try {
++        if (definition.meta.triggerType === "webhook") {
++            // Both lazy owners use global schema initialization. Complete it before
++            // custody, then keep token and secret deletion on the supplied executor.
++            await ensureWebhookTokenTable();
++            await ensureAppSecretTable();
++        }
++        await deleteAutomationResource(definition.resource,
++            tx => assertLegacyJobApprovalDeletionAllowed(definition.resource, definition.meta, normalizeActor(actorInput).appId, tx),
++            definition.meta.triggerType === "webhook" ? tx => deleteAutomationWebhookToken(definition.resource, definition.meta, tx) : undefined);
++    } catch (error) {
++        throw httpError(error instanceof Error ? error.message : "Cannot verify automation approval custody.", 409);
++    }
+     // Names are reusable, so leaving history behind would attach these runs to
+     // whatever automation is created under the same name next.
+     await deleteAutomationRuns(definition.resource.owner, name);
+diff --git a/dist/jobs/actions/list-automation-runs.js b/dist/jobs/actions/list-automation-runs.js
+--- a/dist/jobs/actions/list-automation-runs.js
++++ b/dist/jobs/actions/list-automation-runs.js
+@@ -1,6 +1,7 @@
+ import { z } from "zod";
+ import { defineAction } from "../../action.js";
+ import { organizationResourceOwner } from "../../resources/store.js";
++import { queryOrgMembers } from "../../org/context.js";
+ import { listAutomationRuns } from "../run-history.js";
+ const scopeSchema = z.enum(["personal", "organization"]);
+ export default defineAction({
+@@ -11,16 +12,33 @@
+         scope: scopeSchema.default("personal"),
+         appId: z.string().trim().min(1).optional(),
+         limit: z.number().int().min(1).max(100).optional(),
++        includePendingApprovals: z.boolean().default(false),
+     }),
+     http: { method: "GET" },
+     readOnly: true,
+     parallelSafe: true,
+-    run: async ({ name, scope, appId: requestedAppId, limit }, ctx) => {
++    run: async ({ name, scope, appId: requestedAppId, limit, includePendingApprovals }, ctx) => {
+         const userEmail = ctx?.userEmail;
+         if (!userEmail)
+             throw new Error("Not authenticated.");
+         if (scope === "organization" && !ctx?.orgId)
+             return [];
++        let isMember = false;
++        if (ctx?.orgId) {
++            try {
++                const members = await queryOrgMembers({
++                    sql: "SELECT email FROM org_members WHERE org_id = ? AND LOWER(email) = ? LIMIT 1",
++                    args: [ctx.orgId, userEmail.toLowerCase()],
++                });
++                isMember = Boolean(members?.length);
++            }
++            catch (error) {
++                // Personal NULL-org history does not depend on an ambient organization.
++                if (scope === "organization") throw error;
++            }
++        }
++        if (scope === "organization" && !isMember)
++            throw new Error("You are no longer a member of this organization.");
+         const owner = scope === "organization"
+             ? organizationResourceOwner(ctx.orgId)
+             : userEmail;
+@@ -30,6 +48,8 @@
+             automation: name,
+             appId,
+             limit,
++            includePendingApprovals,
++            orgIds: scope === "organization" ? [ctx.orgId] : [null, ...(isMember ? [ctx.orgId] : [])],
+         });
+     },
+ });
+diff --git a/dist/triggers/webhook-store.js b/dist/triggers/webhook-store.js
+--- a/dist/triggers/webhook-store.js
++++ b/dist/triggers/webhook-store.js
+@@ -84,14 +84,14 @@
+         throw error;
      }
+ }
+-export async function deleteAutomationWebhookToken(resource, meta) {
++export async function deleteAutomationWebhookToken(resource, meta, exec = getDbExec()) {
+     await ensureTable();
+     const ref = secretRef(resource, meta);
+-    await getDbExec().execute({
++    await exec.execute({
+         sql: "DELETE FROM automation_webhook_tokens WHERE automation_id = ?",
+         args: [resource.id],
+     });
+-    await deleteAppSecret(ref);
++    await deleteAppSecret(ref, exec);
+ }
+ export async function readAutomationWebhookPath(resource, meta) {
+     const stored = await readAppSecret(secretRef(resource, meta));
+diff --git a/dist/triggers/webhook-store.d.ts b/dist/triggers/webhook-store.d.ts
+--- a/dist/triggers/webhook-store.d.ts
++++ b/dist/triggers/webhook-store.d.ts
+@@ -2,7 +2,7 @@
+ import type { Resource } from "../resources/store.js";
+ export declare function ensureTable(): Promise<void>;
+ export declare function saveAutomationWebhookToken(resource: Pick<Resource, "id" | "owner" | "path">, meta: Pick<JobFrontmatter, "createdBy" | "orgId">, token: string): Promise<void>;
+-export declare function deleteAutomationWebhookToken(resource: Pick<Resource, "id" | "owner">, meta: Pick<JobFrontmatter, "createdBy" | "orgId">): Promise<void>;
++export declare function deleteAutomationWebhookToken(resource: Pick<Resource, "id" | "owner">, meta: Pick<JobFrontmatter, "createdBy" | "orgId">, exec?: import("../db/client.js").DbExec): Promise<void>;
+ export declare function readAutomationWebhookPath(resource: Pick<Resource, "id" | "owner">, meta: Pick<JobFrontmatter, "createdBy" | "orgId">): Promise<string | undefined>;
+ export interface AutomationWebhookTarget {
+     automationId: string;
+diff --git a/dist/db/client.js b/dist/db/client.js
+--- a/dist/db/client.js
++++ b/dist/db/client.js
+@@ -1716,7 +1716,7 @@
+         }
+         if (trackSingletonResources)
+             _sqlite = sqlite;
+-        const execute = async (sql) => {
++        const executeStatement = async (sql) => {
+             const { rawSql, args } = sqlAndArgs(sql);
+             const stmt = sqlite.prepare(rawSql);
+             if (stmt.reader) {
+@@ -1731,12 +1731,20 @@
+                 rowsAffected: result.changes ?? 0,
+             };
+         };
++        // One connection owns every transaction. Public operations queue behind it,
++        // while the callback's supplied executor runs within that ownership.
++        let connectionTail = Promise.resolve();
++        const withConnection = (operation) => {
++            const result = connectionTail.then(operation);
++            connectionTail = result.then(() => undefined, () => undefined);
++            return result;
++        };
++        const transact = explicitTransaction(executeStatement, "BEGIN IMMEDIATE");
++        let closePromise;
+         return {
+-            execute,
+-            transaction: explicitTransaction(execute, "BEGIN IMMEDIATE"),
+-            async close() {
+-                sqlite.close();
+-            },
++            execute: (sql) => withConnection(() => executeStatement(sql)),
++            transaction: (fn) => withConnection(() => transact(fn)),
++            close: () => closePromise ??= withConnection(() => sqlite.close()),
+         };
+     }
+     const { createClient } = await import("@libsql/client/web");
+@@ -1858,7 +1866,13 @@
+         }
+         return sql;
+     }
++    let sqliteConnection;
++    function assertSqliteConnectionOpen() {
++        if (sqliteConnection && sqliteConnection !== _sqlite)
++            throw new Error("SQLite database connection is closed.");
++    }
+     async function execAnnotated(s) {
++        assertSqliteConnectionOpen();
+         assertSchemaMutationAllowed(s);
+         try {
+             return await _exec.execute(sanitize(s));
+@@ -1885,6 +1899,7 @@
+                 throw err;
+             }
+             // After init, swap to a sanitizing wrapper around the real client
++            sqliteConnection ??= _sqlite;
+             const wrapper = {
+                 execute: (s) => execAnnotated(s),
+                 atomicBatch: _exec.atomicBatch
+@@ -1896,13 +1911,16 @@
+                     }
+                     : undefined,
+                 transaction: _exec.transaction
+-                    ? (fn) => _exec.transaction((tx) => fn({
+-                        execute: (s) => {
+-                            assertSchemaMutationAllowed(s);
+-                            return tx.execute(sanitize(s));
+-                        },
+-                        transaction: tx.transaction?.bind(tx),
+-                    }))
++                    ? (fn) => {
++                        assertSqliteConnectionOpen();
++                        return _exec.transaction((tx) => fn({
++                            execute: (s) => {
++                                assertSchemaMutationAllowed(s);
++                                return tx.execute(sanitize(s));
++                            },
++                            transaction: tx.transaction?.bind(tx),
++                        }));
++                    }
+                     : undefined,
+             };
+             Object.assign(proxy, wrapper);
+@@ -1919,6 +1937,7 @@
+                 _exec = undefined;
+                 throw err;
+             }
++            sqliteConnection ??= _sqlite;
+             const wrapper = {
+                 execute: (s) => execAnnotated(s),
+                 atomicBatch: _exec.atomicBatch
+@@ -1930,13 +1949,16 @@
+                     }
+                     : undefined,
+                 transaction: _exec.transaction
+-                    ? (innerFn) => _exec.transaction((tx) => innerFn({
+-                        execute: (s) => {
+-                            assertSchemaMutationAllowed(s);
+-                            return tx.execute(sanitize(s));
+-                        },
+-                        transaction: tx.transaction?.bind(tx),
+-                    }))
++                    ? (innerFn) => {
++                        assertSqliteConnectionOpen();
++                        return _exec.transaction((tx) => innerFn({
++                            execute: (s) => {
++                                assertSchemaMutationAllowed(s);
++                                return tx.execute(sanitize(s));
++                            },
++                            transaction: tx.transaction?.bind(tx),
++                        }));
++                    }
+                     : undefined,
+             };
+             Object.assign(proxy, wrapper);
+@@ -1989,7 +2011,10 @@
+     // Drizzle / Better Auth consumers bound to them.
+     await closeSharedDbPools();
+     if (_sqlite) {
+-        _sqlite.close();
++        // Finish connection-owned work before clearing the singleton. The local
++        // executor queues and memoizes close, so concurrent cleanup cannot close twice.
++        if (_initPromise) await _initPromise;
++        await _exec.close();
+         _sqlite = undefined;
+     }
+     await closePgliteClients();
