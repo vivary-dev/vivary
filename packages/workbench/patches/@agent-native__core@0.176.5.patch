@@ -6754,7 +6754,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (runIdRef)
              runIdRef.current = runId;
          await recordRunThread(historyId, thread.id, runId);
-@@ -425,170 +593,273 @@
+@@ -425,170 +593,275 @@
          // handoff to the unclaimed-background-run sweep — it gets reaped as
          // "background_worker_never_started" out from under a still-executing
          // job the moment any single tool call runs past the 25s grace window.
@@ -6945,36 +6945,16 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +                        }
 +                        usageRef.current = await execute();
 +                    }, async (run) => {
-+                        if (hardAbortTimer) {
-+                            clearTimeout(hardAbortTimer);
-+                            hardAbortTimer = null;
-+                        }
-+                        const persistFailure = backgroundAutomationPersistFailure({
-+                            run,
-+                            hardTimedOut,
-+                            hardTimeoutMs,
-                         });
--                        return;
--                    }
--                }
--                catch (error) {
--                    // Match A2A and interactive chat: a setup failure falls through
--                    // to an uninstrumented run, but a failure from INSIDE the
--                    // instrumented loop is the real run failure and must rethrow.
--                    if (instrumented)
--                        throw error;
--                }
--                usageRef.current = await execute();
--            }, async (run) => {
--                if (hardAbortTimer) {
--                    clearTimeout(hardAbortTimer);
--                    hardAbortTimer = null;
--                }
--                const persistFailure = backgroundAutomationPersistFailure({
--                    run,
--                    hardTimedOut,
--                    hardTimeoutMs,
 +                        try {
++                            if (hardAbortTimer) {
++                                clearTimeout(hardAbortTimer);
++                                hardAbortTimer = null;
++                            }
++                            const persistFailure = backgroundAutomationPersistFailure({
++                                run,
++                                hardTimedOut,
++                                hardTimeoutMs,
++                            });
 +                            await persistBackgroundAutomationTurn({
 +                                threadId: thread.id,
 +                                threadTitle,
@@ -6983,57 +6963,59 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +                                persistFailure, historyId, continuation: Boolean(options.continuation),
 +                                resolvedAskId: options.continuation?.askId,
 +                            });
++                            // Hard timeout owns the runner reject so a serverless return
++                            // waits for this persist via `activeRun.finalized`.
++                            if (hardTimedOut)
++                                return;
++                            // The reason alone: a run that reached a soft-timeout boundary
++                            // reads completed after the quit's abort.
++                            if (continuationInterruption) {
++                                reject(continuationInterruption);
++                                return;
++                            }
++                            if (approvalRefusal) {
++                                reject(approvalRefusal);
++                                return;
++                            }
++                            // Gate persistence owns this abort. Keep its typed failure instead
++                            // of treating it as a retryable shutdown or generic abort.
++                            if (approvalStorageFailed) {
++                                reject(new BackgroundAutomationRunError("The approval wait was not durably saved", "automation_approval_storage_failed"));
++                                return;
++                            }
++                            // An initial run explicitly stopped by its owner keeps the
++                            // ordinary aborted error, even when its turn marker is durable.
++                            // Approval continuations retain their unconfirmed classification.
++                            const ownerStoppedInitialRun = !options.continuation &&
++                                run.status === "aborted" && run.abortReason === "user";
++                            if (run.abortReason === SHUTDOWN_ABORT_REASON || (!ownerStoppedInitialRun && (
++                                run.abortReason === "user" ||
++                                (run.events ?? []).some(({ event }) => event.type === "error" && event.errorCode === INTERRUPTED_RUN_ERROR_CODE) ||
++                                await isTurnAborted(thread.id, turnId)))) {
++                                reject(new BackgroundAutomationRunError(INTERRUPTED_RUN_REASON, INTERRUPTED_RUN_ERROR_CODE));
++                                return;
++                            }
++                            if (persistFailure) {
++                                reject(new BackgroundAutomationRunError(persistFailure.message, persistFailure.errorCode));
++                                return;
++                            }
++                            if (run.status !== "completed") {
++                                reject(new BackgroundAutomationRunError(`Background automation ended with status: ${run.status}`, `background_automation_${run.status}`));
++                                return;
++                            }
++                            if (pendingApproval) {
++                                resolve();
++                                return;
++                            }
++                            responseText = collectFinalResponseTextFromAgentEvents((run.events ?? []).map((entry) => entry.event));
++                            resolve();
 +                        }
 +                        catch (err) {
++                            // Settle the runner's promise for every callback failure,
++                            // then preserve the original error for Native terminal storage.
 +                            reject(continuationInterruption ?? (err instanceof Error ? err : new Error(String(err))));
 +                            throw err;
 +                        }
-+                        // Hard timeout owns the runner reject so a serverless return
-+                        // waits for this persist via `activeRun.finalized`.
-+                        if (hardTimedOut)
-+                            return;
-+                        // The reason alone: a run that reached a soft-timeout boundary
-+                        // reads completed after the quit's abort.
-+                        if (continuationInterruption) {
-+                            reject(continuationInterruption);
-+                            return;
-+                        }
-+                        if (approvalRefusal) {
-+                            reject(approvalRefusal);
-+                            return;
-+                        }
-+                        // Gate persistence owns this abort. Keep its typed failure instead
-+                        // of treating it as a retryable shutdown or generic abort.
-+                        if (approvalStorageFailed) {
-+                            reject(new BackgroundAutomationRunError("The approval wait was not durably saved", "automation_approval_storage_failed"));
-+                            return;
-+                        }
-+                        // An initial run explicitly stopped by its owner keeps the
-+                        // ordinary aborted error, even when its turn marker is durable.
-+                        // Approval continuations retain their unconfirmed classification.
-+                        const ownerStoppedInitialRun = !options.continuation &&
-+                            run.status === "aborted" && run.abortReason === "user";
-+                        if (run.abortReason === SHUTDOWN_ABORT_REASON || (!ownerStoppedInitialRun && (
-+                            run.abortReason === "user" ||
-+                            (run.events ?? []).some(({ event }) => event.type === "error" && event.errorCode === INTERRUPTED_RUN_ERROR_CODE) ||
-+                            await isTurnAborted(thread.id, turnId)))) {
-+                            reject(new BackgroundAutomationRunError(INTERRUPTED_RUN_REASON, INTERRUPTED_RUN_ERROR_CODE));
-+                            return;
-+                        }
-+                        if (persistFailure) {
-+                            reject(new BackgroundAutomationRunError(persistFailure.message, persistFailure.errorCode));
-+                            return;
-+                        }
-+                        if (run.status !== "completed") {
-+                            reject(new BackgroundAutomationRunError(`Background automation ended with status: ${run.status}`, `background_automation_${run.status}`));
-+                            return;
-+                        }
-+                        if (pendingApproval) {
-+                            resolve();
-+                            return;
-+                        }
-+                        responseText = collectFinalResponseTextFromAgentEvents((run.events ?? []).map((entry) => entry.event));
-+                        resolve();
 +                    }, {
 +                        softTimeoutMs,
 +                        turnId,
@@ -7070,7 +7052,27 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +                            .catch(() => { })
 +                            .then(() => {
 +                            reject(timeoutError);
-+                        });
+                         });
+-                        return;
+-                    }
+-                }
+-                catch (error) {
+-                    // Match A2A and interactive chat: a setup failure falls through
+-                    // to an uninstrumented run, but a failure from INSIDE the
+-                    // instrumented loop is the real run failure and must rethrow.
+-                    if (instrumented)
+-                        throw error;
+-                }
+-                usageRef.current = await execute();
+-            }, async (run) => {
+-                if (hardAbortTimer) {
+-                    clearTimeout(hardAbortTimer);
+-                    hardAbortTimer = null;
+-                }
+-                const persistFailure = backgroundAutomationPersistFailure({
+-                    run,
+-                    hardTimedOut,
+-                    hardTimeoutMs,
 +                    }, hardTimeoutMs);
                  });
 -                try {
@@ -7179,7 +7181,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const usage = usageRef.current;
          if (usage &&
              (usage.inputTokens > 0 ||
-@@ -613,6 +884,8 @@
+@@ -613,6 +886,8 @@
                  // Usage attribution must not break an otherwise successful run.
              }
          }
@@ -7188,7 +7190,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (responseText.trim() &&
              automation.meta.deliveryPlatform &&
              automation.meta.deliveryDestination) {
-@@ -627,6 +900,268 @@
+@@ -627,6 +902,268 @@
                  tenantId: automation.meta.deliveryTenantId,
              });
          }

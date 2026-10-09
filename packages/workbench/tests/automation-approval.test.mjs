@@ -760,7 +760,9 @@ for (const caller of ["scheduler", "trigger"]) for (const decision of ["approve"
   });
 
 const child = (role, name, id) => new Promise((resolve, reject) => {
-  const script = fileURLToPath(new URL(role.startsWith("cold-") ? "./fixtures/automation-approval-cold-delete.mjs" : "./fixtures/automation-approval-restart.mjs", import.meta.url));
+  const fixturePath = role.startsWith("completion-error-") ? "./fixtures/automation-approval-completion-error.mjs"
+    : role.startsWith("cold-") ? "./fixtures/automation-approval-cold-delete.mjs" : "./fixtures/automation-approval-restart.mjs";
+  const script = fileURLToPath(new URL(fixturePath, import.meta.url));
   const processHandle = spawn(process.execPath, [script, role, name, ...(id ? [id] : [])], { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   const timeout = setTimeout(() => { processHandle.kill("SIGKILL"); reject(new Error("Approval child exceeded 30 seconds.")); }, 30_000);
@@ -1484,3 +1486,22 @@ test("public SQLite close queues behind custody and permits a fresh singleton", 
   assert.equal(receipt.reopened, true); assert.equal(receipt.oldExecutorRejected, true);
   assert.equal(receipt.modelCalls, 0); assert.equal(receipt.toolCalls, 0);
 });
+
+
+for (const kind of ["text", "wait"]) for (const outcome of ["fault", "ok"]) {
+  test(`completion callback settles ${kind} path after ${outcome === "fault" ? "selected marker-read failure" : "healthy marker read"}`, async () => {
+    const receipt = await child(`completion-error-${kind}-${outcome}`, `completion-${kind}-${outcome}`);
+    assert.equal(receipt.faultHits, outcome === "fault" ? 1 : 0);
+    assert.equal(receipt.successfulThreadSaves, 1);
+    assert.equal(receipt.configuredEffects, 0);
+    assert.equal(receipt.modelCalls, 1);
+    assert.equal(receipt.drained, true);
+    if (outcome === "fault") {
+      assert.equal(receipt.nativeStatus, "errored");
+      assert.equal(receipt.nativeErrorCode, "completion_error");
+      assert.equal(receipt.historyStatus, "error");
+      assert.equal(receipt.historyErrorCode, "background_automation_failed");
+      assert.equal(receipt.askStatus, kind === "wait" ? "pending" : null);
+    } else assert.equal(receipt.historyStatus, kind === "wait" ? "waiting_approval" : "success");
+  });
+}
