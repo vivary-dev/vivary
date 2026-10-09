@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test, { after } from "node:test";
+import { fileURLToPath } from "node:url";
 
 // Exercise the real Native action definitions and HTTP transport. Only the
 // authenticated owner resolver and deterministic engine/MCP dependencies are
@@ -683,28 +685,20 @@ for (const kind of ["path", "id"]) test(`delegated ${kind} job deletion serializ
 });
 
 test("resource ID and path helpers retain actual local-workspace deletion behavior", async () => {
-  const cwd = process.cwd(), allow = process.env.AGENT_NATIVE_ALLOW_LOCAL_FILES_IN_PRODUCTION;
   const directory = await mkdtemp(path.join(root, "local-workspace-"));
   await writeFile(path.join(directory, "agent-native.json"), JSON.stringify({ version: 1, mode: "local-files" }));
-  // Native's supported single-tenant bridge flag, scoped to this disposable
-  // process and restored below. No source-overlay or production bypass exists.
-  process.env.AGENT_NATIVE_ALLOW_LOCAL_FILES_IN_PRODUCTION = "true";
-  process.chdir(directory);
-  try {
-    const local = await loadCore("local-artifacts/index.js");
-    assert.equal(await local.isLocalWorkspaceResourcesEnabled(), true);
-    for (const kind of ["id", "path"]) {
-      const resourcePath = `skills/helper-${kind}/SKILL.md`;
-      const saved = await resources.resourcePut(resources.WORKSPACE_OWNER, resourcePath, "Local workspace control.");
-      assert.equal(saved.id, local.localWorkspaceResourceId(resourcePath));
-      assert.equal(await (kind === "id" ? resources.resourceDelete(saved.id) : resources.resourceDeleteByPath(resources.WORKSPACE_OWNER, resourcePath)), true);
-      assert.equal(await local.readLocalWorkspaceResource({ path: resourcePath }), null);
-    }
-  } finally {
-    process.chdir(cwd);
-    if (allow === undefined) delete process.env.AGENT_NATIVE_ALLOW_LOCAL_FILES_IN_PRODUCTION;
-    else process.env.AGENT_NATIVE_ALLOW_LOCAL_FILES_IN_PRODUCTION = allow;
-  }
+  // Native's supported single-tenant bridge flag and the local workspace apply
+  // only to this disposable child, never to this test process or production.
+  const script = fileURLToPath(new URL("./fixtures/automation-approval-local-workspace.mjs", import.meta.url));
+  const output = execFileSync(process.execPath, [script], { cwd: directory, encoding: "utf8", timeout: 30_000,
+    env: { ...process.env, AGENT_NATIVE_ALLOW_LOCAL_FILES_IN_PRODUCTION: "true" } });
+  const receipt = output.split("\n").find(line => line.startsWith("APPROVAL_RESULT "));
+  assert.ok(receipt, "local-workspace child reported its result");
+  const result = JSON.parse(receipt.slice("APPROVAL_RESULT ".length));
+  assert.equal(result.cwd, await realpath(directory), "the child used the disposable local workspace");
+  assert.equal(result.enabled, true);
+  assert.deepEqual(result.cases, ["id", "path"].map(kind => ({ kind, resourcePath: `skills/helper-${kind}/SKILL.md`,
+    localId: true, storedBeforeDelete: true, deleted: true, readAfterDelete: null })));
 });
 
 
