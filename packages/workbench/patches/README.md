@@ -2850,8 +2850,17 @@ identity and exclude newer history. Schedule calculation uses recorded completio
 time, so retrying bookkeeping does not create another completion or delivery.
 Repeated decisions may reconcile a terminal row but still refuse another decision.
 
-The supported delete service refuses unfinished waiting or resuming history before
-any resource, token or history mutation. Declared configured MCP tools await the
+The supported delete service refuses unfinished waiting or resuming history and
+finished approval history whose outcome remains unreconciled before any resource,
+token or history mutation. The existing resource custody transaction checks exact
+persisted history scope, including conflicting bindings. This deletion-specific
+guard does not broaden execution activity checks. After settlement, supported
+deletion removes eligible finished history before a reusable name is recreated.
+A maintained installed-owner completion control reaches a real terminal approval
+error, records safe deletion observations before assertions, verifies refusal with
+resource and token custody intact, then reconciles, deletes and starts a same-name
+replacement with a different resource ID. Later recovery cannot change that
+replacement's history or metadata. Runtime validation of this correction is pending. Declared configured MCP tools await the
 existing lazy initializer before entry construction. Local-only runs skip it.
 Initializer failure remains a refusal and its existing rejected-promise reset
 allows the next attempt to retry. Exact-call approval and current-entry validation

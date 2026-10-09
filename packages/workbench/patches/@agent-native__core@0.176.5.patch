@@ -8086,7 +8086,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          args: [owner, automation, cutoff],
      });
  }
-@@ -384,12 +441,196 @@
+@@ -384,12 +441,201 @@
      const appId = options.appId?.trim() || null;
      const placeholders = owners.map(() => "?").join(", ");
      const appFilter = appId ? " AND (app_id = ? OR app_id IS NULL)" : "";
@@ -8214,11 +8214,14 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +    const resourceId = isPostgres() ? "approval_context::jsonb ->> 'resourceId'" : "json_extract(approval_context, '$.resourceId')";
 +    const resourceOwner = isPostgres() ? "approval_context::jsonb ->> 'resourceOwner'" : "json_extract(approval_context, '$.resourceOwner')";
 +    const resourcePath = isPostgres() ? "approval_context::jsonb ->> 'resourcePath'" : "json_extract(approval_context, '$.resourcePath')";
-+    // Include a conflicting row still bound to this exact resource. Looking
-+    // only under a newly projected owner could miss retained custody after an edit.
++    // Include conflicting bindings and terminal approval custody until settlement.
++    // Deleting earlier would retain history that a same-name replacement inherits.
++    // Looking only under a newly projected owner could miss custody after an edit.
 +    const result = await exec.execute({
-+        sql: `SELECT * FROM automation_runs WHERE finished_at IS NULL
-+          AND status IN ('waiting_approval', 'resuming') AND (
++        sql: `SELECT * FROM automation_runs WHERE (
++            finished_at IS NULL AND status IN ('waiting_approval', 'resuming')
++            OR finished_at IS NOT NULL AND approval_context IS NOT NULL AND approval_outcome_reconciled = 0
++          ) AND (
 +            owner = ? AND path = ? OR ${resourceId} = ? OR ${resourceOwner} = ? AND ${resourcePath} = ?)`,
 +        args: [historyOwner, resource.path, resource.id, resource.owner, resource.path],
 +    });
@@ -8232,6 +8235,8 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +            (context.orgId ?? null) !== orgId || context.threadId !== row.thread_id || context.askId !== row.pending_ask_id)
 +            throw new Error("The persisted job approval history scope is missing or conflicting.");
 +    }
++    if (result.rows.some(row => row.finished_at != null))
++        throw new Error("Wait for the approval outcome to reconcile before deleting this job.");
 +    if (result.rows.length)
 +        throw new Error("Resolve the waiting approval before deleting this job.");
 +}

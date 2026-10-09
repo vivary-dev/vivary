@@ -250,10 +250,11 @@ Settings > Agent > Automations holds the controls:
 - **Manage** > **Run now** runs it once. The next scheduled run does not change.
 - **Manage** > **Edit** changes the schedule and time zone. Pick a preset, or enter a cron
   expression under **Advanced**.
-- **Manage** > **Delete** refuses while an approval is waiting or resuming. Inspect
-  the pending run and approve or decline it first. Deletion removes the definition
-  and eligible finished history after settlement. Vivary keeps retained Native run
-  threads. If deletion wins before a running automation establishes approval custody,
+- **Manage** > **Delete** refuses while an approval is waiting or resuming, or while
+  a finished approval's outcome is still being recorded. Inspect a pending run and
+  approve or decline it first. For a finished run, retry Delete after settlement.
+  Deletion removes the definition and eligible finished history after settlement.
+  Vivary keeps retained Native run threads. If deletion wins before a running automation establishes approval custody,
   that run stops without executing the pending configured action.
 
 To change what an automation does, ask the agent in a Personal workspace Native chat.

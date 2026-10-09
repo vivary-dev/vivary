@@ -1533,3 +1533,11 @@ for (const [interleaving, kind] of [["lookup-race", "wait"], ["write-settled", "
     assert.equal(receipt.configuredEffects, 0); assert.equal(receipt.modelCalls, 1); assert.equal(receipt.drained, true);
   });
 }
+
+test("terminal approval custody blocks deletion until reconciliation and isolates a same-name replacement", async () => {
+  const receipt = await child("completion-error-webhook-delete-wait-fault", "terminal-approval-delete");
+  assert.equal(receipt.deletionGuarded, true); assert.equal(receipt.faultHits, 1);
+  assert.equal(receipt.workerResult, "failed"); assert.equal(receipt.historyStatus, "error");
+  assert.equal(receipt.initialTaskStatus, "waiting_approval"); assert.equal(receipt.finalTaskStatus, "failed");
+  assert.equal(receipt.configuredEffects, 0); assert.equal(receipt.modelCalls, 1); assert.equal(receipt.drained, true);
+});

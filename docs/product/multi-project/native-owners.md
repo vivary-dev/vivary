@@ -110,7 +110,11 @@ and restores its task attempts. It does not become that wait's task owner.
 Approval ask creation and durable waiting use one resource custody transaction.
 Deletion uses the same exact resource owner, ID and path and checks persisted
 history before token, secret or definition removal. Deletion cannot take a waiting
-or resuming definition. If deletion wins first, the running automation cannot bind
+or resuming definition, or one with terminal approval history awaiting outcome
+reconciliation. The same transactional guard validates exact persisted scope before
+mutation. Settlement completes before supported deletion removes eligible history,
+so a later same-name definition does not inherit the deleted generation's rows.
+If deletion wins first, the running automation cannot bind
 an ask to a missing or same-name replacement. The original admitted history is
 retained to record its refusal. Existing admin cleanup after a creator departs
 remains allowed when no unresolved custody exists. Runtime and UI gates for these

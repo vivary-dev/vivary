@@ -8,6 +8,7 @@ const f = await import("./automation-approval-fixture.mjs");
 const waiting = role.includes("-wait-");
 const inject = role.endsWith("-fault");
 const webhookMode = role.includes("-webhook-");
+const deleteCase = role.includes("-delete-");
 const lookupRace = role.includes("-lookup-race-");
 const writeRace = role.includes("-write-settled-") ? "settled" : role.includes("-write-reclaimed-") ? "reclaimed" : null;
 const taskId = `completion-webhook-${name}`;
@@ -133,10 +134,33 @@ if (webhookMode) {
     const task = await tasks.getPendingTask(taskId);
     const native = saved ? (await execute({ sql: "SELECT status, error_code, error_detail FROM agent_runs WHERE id = ? AND thread_id = ?",
       args: [saved.run_id, saved.thread_id] })).rows[0] : null;
+    let deletionError, beforeDeletion, afterDeletion, tokenBefore, tokensAfter, secretBefore, secretAfter;
+    if (deleteCase) {
+      beforeDeletion = await f.resources.resourceGetByPath(f.owner, resource.path);
+      tokenBefore = (await execute({ sql: "SELECT * FROM automation_webhook_tokens WHERE automation_id = ?", args: [resource.id] })).rows;
+      const token = tokenBefore[0];
+      const secretStatement = { sql: "SELECT id, scope, scope_id, key, created_at FROM app_secrets WHERE scope = ? AND scope_id = ? AND key = ?",
+        args: [token.secret_scope, token.secret_scope_id, token.secret_key] };
+      secretBefore = (await execute(secretStatement)).rows;
+      try { await f.service.deleteAutomation(f.actor, "personal", name); }
+      catch (error) { deletionError = error; }
+      afterDeletion = await f.resources.resourceGetByPath(f.owner, resource.path);
+      tokensAfter = (await execute({ sql: "SELECT * FROM automation_webhook_tokens WHERE automation_id = ?", args: [resource.id] })).rows;
+      secretAfter = (await execute(secretStatement)).rows;
+      const retainedAfter = await f.history.getAutomationContinuation(run.id);
+      const listed = await f.history.listAutomationRuns({ owners: [f.owner], automation: name, appId: f.appId });
+      // Safe evidence precedes the guard assertions on either matching runtime.
+      console.log("TERMINAL_APPROVAL_DELETE_DIAGNOSTIC " + JSON.stringify({ faultHits, workerResult,
+        deletionAllowed: !deletionError, resourcePresent: Boolean(afterDeletion), tokenPresent: tokensAfter.length === 1,
+        secretPresent: secretAfter.length === 1, historyStatus: retainedAfter?.run.status ?? null,
+        retainedContext: Boolean(retainedAfter?.context), outcomeReconciled: retainedAfter?.outcomeReconciled ?? null,
+        listedRetainedHistory: listed.some(item => item.id === run.id), modelCalls: fixture.modelCalls.length,
+        configuredEffects: fixture.calls.length }));
+    }
     // The old matched runtime reaches actual reconciliation and exposes its
     // stranded marker before the same behavioral assertions fail below.
     let baselineReconciliationAttempted = false;
-    if (waiting && inject && !lookupRace && workerResult === "completed") {
+    if (waiting && inject && !lookupRace && !deleteCase && workerResult === "completed") {
       baselineReconciliationAttempted = true;
       await f.runner.reconcileAutomationApprovalOutcomes(f.appId);
     }
@@ -158,7 +182,55 @@ if (webhookMode) {
     }
     assert.equal((await f.threads.getThread(saved.thread_id)).scope.id, run.id);
     const modelCount = fixture.modelCalls.length;
-    if (lookupRace) {
+    if (deleteCase) {
+      assert.equal(workerResult, "failed"); assert.ok(waitPublicationChecks >= 1);
+      assert.equal(run.status, "error"); assert.ok(run.finishedAt); assert.equal(retained.outcomeReconciled, false);
+      assert.ok(retained.context); assert.equal(retained.context.historyId, run.id);
+      assert.equal(retained.context.resourceId, resource.id); assert.equal(retained.context.threadId, saved.thread_id);
+      assert.equal(retained.context.turnId, saved.run_id); assert.equal(retained.context.askId, run.pendingAskId);
+      assert.ok(deletionError, "terminal approval custody refuses service deletion before mutation");
+      assert.match(deletionError.message, /approval outcome.*reconcile/);
+      assert.deepEqual(afterDeletion, beforeDeletion); assert.deepEqual(tokensAfter, tokenBefore);
+      assert.equal(tokenBefore.length, 1); assert.equal(secretBefore.length, 1); assert.deepEqual(secretAfter, secretBefore);
+      assert.deepEqual(await f.history.getAutomationContinuation(run.id), retained);
+      assert.equal((await tasks.getPendingTask(taskId)).status, "waiting_approval");
+      assert.deepEqual(JSON.parse((await tasks.getPendingTask(taskId)).payload), payload);
+      assert.equal((await f.approvalStore.readAgentToolApproval(retained.context)).status, "pending");
+      await f.runner.reconcileAutomationApprovalOutcomes(f.appId);
+      assert.equal((await f.history.getAutomationContinuation(run.id)).outcomeReconciled, true);
+      assert.equal((await tasks.getPendingTask(taskId)).status, "failed");
+      await assert.rejects(fixture.decide(run.id, retained.context), /no longer waiting/);
+      assert.equal(fixture.modelCalls.length, modelCount); assert.equal(fixture.calls.length, 0);
+      await f.service.deleteAutomation(f.actor, "personal", name);
+      assert.equal(await f.resources.resourceGetByPath(f.owner, resource.path), null);
+      assert.equal(await f.history.getAutomationRun(run.id), null);
+      assert.deepEqual((await execute({ sql: "SELECT automation_id FROM automation_webhook_tokens WHERE automation_id = ?", args: [resource.id] })).rows, []);
+      const oldToken = tokenBefore[0];
+      assert.deepEqual((await execute({ sql: "SELECT id FROM app_secrets WHERE scope = ? AND scope_id = ? AND key = ?",
+        args: [oldToken.secret_scope, oldToken.secret_scope_id, oldToken.secret_key] })).rows, []);
+      const replacement = await f.makeApprovalCase(name, { repeatLocal: false, triggerType: "webhook" });
+      assert.notEqual(replacement.automation.resource.id, resource.id);
+      assert.deepEqual(await f.history.listAutomationRuns({ owners: [f.owner], automation: name, appId: f.appId }), []);
+      replacement.engine.stream = async function* (options) {
+        replacement.modelCalls.push(structuredClone(options.messages));
+        yield { type: "assistant-content", parts: [{ type: "text", text: "Replacement generation complete." }] };
+        yield { type: "stop", reason: "end_turn" };
+      };
+      const scheduler = await f.loadCore("jobs/scheduler.js");
+      await scheduler.runJobNow(f.owner, name, replacement.deps);
+      const replacementHistory = await f.history.listAutomationRuns({ owners: [f.owner], automation: name, appId: f.appId });
+      assert.equal(replacementHistory.length, 1); assert.notEqual(replacementHistory[0].id, run.id);
+      assert.equal(replacementHistory[0].status, "success"); assert.ok(replacementHistory[0].threadId);
+      const replacementResource = await f.resources.resourceGetByPath(f.owner, resource.path);
+      assert.equal(replacementResource.id, replacement.automation.resource.id);
+      assert.equal(f.frontmatter.parseJobResource(replacementResource.content).meta.lastStatus, "success");
+      await f.runner.reconcileAutomationApprovalOutcomes(f.appId);
+      assert.equal(await worker.runAutomationWebhookTaskInProcess(taskId, { appId: f.appId }), "skipped");
+      assert.deepEqual(await f.resources.resourceGetByPath(f.owner, resource.path), replacementResource);
+      assert.deepEqual(await f.history.listAutomationRuns({ owners: [f.owner], automation: name, appId: f.appId }), replacementHistory);
+      assert.equal(replacement.modelCalls.length, 1); assert.equal(replacement.calls.length, 0);
+      assert.equal((await f.approvalStore.readAgentToolApproval(retained.context)).status, "pending");
+    } else if (lookupRace) {
       assert.equal(lookupRaceHits, 1); assert.ok(waitPublicationChecks >= 1);
       assert.equal(workerResult, "failed"); assert.equal(task.status, "failed"); assert.equal(task.payload, "{}");
       assert.equal(run.status, "error"); assert.ok(run.finishedAt);
@@ -227,7 +299,7 @@ if (webhookMode) {
     }
     assert.equal(fixture.modelCalls.length, modelCount, "settlement, delivery and decisions cannot redispatch");
     assert.equal(fixture.calls.length, 0);
-    receipt = { waiting, inject, faultHits, workerResult, lookupRaceHits, completionWriteHits, successfulThreadSaves,
+    receipt = { waiting, inject, deletionGuarded: deleteCase, faultHits, workerResult, lookupRaceHits, completionWriteHits, successfulThreadSaves,
       historyId: run.id, threadId: saved.thread_id, turnId: saved.run_id, historyStatus: run.status,
       initialTaskStatus: task.status, finalTaskStatus: (await tasks.getPendingTask(taskId)).status,
       configuredEffects: 0, modelCalls: modelCount };
