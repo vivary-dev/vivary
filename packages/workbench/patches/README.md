@@ -2259,6 +2259,16 @@ changes no schema. Remove this part of the patch when an upstream release names
 no next run the scheduler cannot meet while a lease or a running mark blocks it,
 and passes the same tests.
 
+Listed run inspection is an advisory server capability derived from the existing
+read-only inspection binding checks. It requires the actual app, retained thread
+owner, organization and current membership. Shared organization members retain
+history visibility without another execution owner's transcript access. Details
+requires canInspect to be true before showing Inspect and preserves NULL-app
+older-run wording. Missing capability fails closed. Inspection and decisions
+always revalidate rather than treating the flag as a grant. Listing performs no
+continuation, action discovery or outcome reconciliation. New maintained HTTP
+and rendered capability controls remain pending controller runtime validation.
+
 The current approval custody correction keeps Settings discovery separate from
 ordinary bounded history reads. Settings opts into scoped retained approvals and
 the history store deduplicates recent and retained rows. Pre-execution webhook
@@ -2268,7 +2278,14 @@ resource in the existing database transaction. Modern and legacy deletion rechec
 persisted custody in that transaction before token, secret and definition mutation.
 PostgreSQL uses FOR UPDATE and local SQLite uses BEGIN IMMEDIATE. Resource deletion
 events follow commit. The authenticated resources plugin's DELETE route now
-uses this custody guard inside resourceDeleteIfCurrent for jobs/*.md. It warms
+uses this custody guard inside resourceDeleteIfCurrent for jobs/*.md. Public
+database resourceDelete and resourceDeleteByPath delegate job snapshots to that
+owner, protecting the actual personal resources script and legacy Settings ID
+delete. Legacy Settings checks the deletion result before cleaning history.
+The local workspace branches and ordinary resource deletion stay unchanged.
+Webhook token-setup compensation uses the same guard and retains the original
+setup error. Custody internals keep direct SQL without recursive helper calls
+or nested transactions. These tool and helper runtime controls remain unrun. It warms
 the history schema before custody, then validates the locked definition's exact
 persisted history scope with the supplied transaction executor. Its full mutable
 row snapshot comparison remains unchanged. Waiting, resuming and terminal

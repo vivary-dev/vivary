@@ -515,9 +515,53 @@ test("Settings labels listed legacy NULL-app threads as unavailable instead of o
   const legacy = await proof.renderDetails([row]);
   assert.equal(legacy.rows, 1); assert.match(legacy.text, /Inspection unavailable for this older run/);
   assert.equal(legacy.buttons.includes("Inspect run"), false);
-  const current = await proof.renderDetails([{ ...row, appId: "status-test" }]);
+  const current = await proof.renderDetails([{ ...row, appId: "status-test", canInspect: true }]);
   assert.equal(current.buttons.filter(label => label === "Inspect run").length, 1);
   assert.doesNotMatch(current.text, /Inspection unavailable/);
+});
+
+test("Settings renders actual server inspection capabilities for organization owner and member history", async t => {
+  const { runBetterAuthMigrations } = await load("server/better-auth-migrations.js");
+  const { runMigrations } = await load("db/migrations.js");
+  const { ORG_MIGRATIONS } = await load("org/migrations.js");
+  await runBetterAuthMigrations({});
+  await runMigrations(ORG_MIGRATIONS, { table: "_org_migrations" })({});
+  const db = getDbExec(), member = "inspection-member@example.test", orgId = "render-inspection-organization", now = Date.now();
+  for (const email of [owner, member]) await db.execute({
+    sql: 'INSERT INTO "user" (id, email, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+    args: [email, email, "Inspection fixture", now, now] });
+  await db.execute({ sql: "INSERT INTO organizations (id, name, created_by, created_at) VALUES (?, ?, ?, ?)",
+    args: [orgId, orgId, owner, now] });
+  for (const email of [owner, member]) await db.execute({
+    sql: "INSERT INTO org_members (id, org_id, email, role, joined_at) VALUES (?, ?, ?, ?, ?)",
+    args: ["render-inspection-" + email, orgId, email, email === owner ? "owner" : "member", now] });
+  const { createThread } = await load("chat-threads/store.js");
+  const { organizationResourceOwner } = await load("resources/store.js");
+  const { startAutomationRun, finishAutomationRun } = await load("jobs/run-history.js");
+  const { default: listRuns } = await load("jobs/actions/list-automation-runs.js");
+  const { inspectAutomationRun } = await load("jobs/background-automation-runner.js");
+  const thread = await createThread(owner, { orgId, title: "Retained inspection control" });
+  const id = await startAutomationRun({ owner: organizationResourceOwner(orgId), automation: "render-inspection",
+    path: "jobs/render-inspection.md", scope: "organization", orgId, appId, threadId: thread.id });
+  await finishAutomationRun(id, "success");
+  const input = { name: "render-inspection", scope: "organization" };
+  const [owned] = await listRuns.run(input, { ...actor, orgId });
+  const [shared] = await listRuns.run(input, { userEmail: member, appId, orgId });
+  assert.equal(owned.id, id); assert.equal(shared.id, id);
+  assert.equal(owned.canInspect, true); assert.equal(shared.canInspect, false);
+  assert.equal((await inspectAutomationRun(id, { ...actor, orgId })).run.id, id);
+  await assert.rejects(inspectAutomationRun(id, { userEmail: member, appId, orgId }), /not available/);
+  const { code } = await buildProof({ source: proofSource, sourcefile: "automation-member-inspection-proof.tsx",
+    entry: path.join(CLIENT, "agent-page", "AutomationDetailsDialog.js"), stubs });
+  const proof = await importProof(code), restoreDom = installDom(); t.after(restoreDom);
+  const ownerView = await proof.renderDetails([owned]);
+  assert.equal(ownerView.rows, 1); assert.equal(ownerView.buttons.filter(label => label === "Inspect run").length, 1);
+  assert.doesNotMatch(ownerView.text, /Inspection unavailable/);
+  const memberView = await proof.renderDetails([shared]);
+  assert.equal(memberView.rows, 1); assert.match(memberView.text, /Inspection unavailable\./);
+  assert.equal(memberView.buttons.includes("Inspect run"), false);
+  const absent = await proof.renderDetails([{ ...shared, canInspect: undefined }]);
+  assert.equal(absent.buttons.includes("Inspect run"), false, "missing capability fails closed");
 });
 
 test("Settings inspects retained tools and sends only the exact pending approval decision", async t => {
@@ -526,7 +570,7 @@ test("Settings inspects retained tools and sends only the exact pending approval
   const proof = await importProof(code);
   const restoreDom = installDom();
   t.after(restoreDom);
-  const data = { run: { id: "history-approval", appId: "status-test", threadId: "thread-approval", status: "waiting_approval",
+  const data = { run: { id: "history-approval", appId: "status-test", canInspect: true, threadId: "thread-approval", status: "waiting_approval",
     startedAt: Date.now(), finishedAt: null, approvalReady: true },
     threadData: JSON.stringify({ messages: [{ message: { role: "assistant", content: [
       { type: "tool-call", toolName: "resources", argsText: '{"path":"notes/prior.md"}', result: "Retained local result" },

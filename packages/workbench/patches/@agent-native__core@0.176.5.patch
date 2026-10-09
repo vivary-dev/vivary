@@ -3575,7 +3575,7 @@ diff --git a/dist/client/agent-page/AutomationDetailsDialog.js b/dist/client/age
 -                                                    });
 -                                                    onClose();
 -                                                }, children: [_jsx(IconExternalLink, { className: "size-3" }), "Open thread"] })) : null] }, run.id))) }))] })] })] }) }));
-+                                    }) })) : (_jsx("ul", { className: "mt-2 divide-y divide-border/60 border-y border-border/60", children: runs.map((run) => (_jsxs("li", { className: "flex items-center gap-2 py-1.5 text-xs", children: [_jsx(RunStatusDot, { status: run.status }), _jsx("span", { className: "shrink-0 text-muted-foreground", children: formatTimestamp(run.startedAt) }), _jsx("span", { className: "shrink-0 font-medium", children: run.status }), run.error ? (_jsx("span", { className: "min-w-0 flex-1 truncate text-muted-foreground", title: run.error, children: run.error })) : (_jsx("span", { className: "min-w-0 flex-1" })), run.threadId ? (run.appId == null ? _jsx("span", { className: "shrink-0 text-muted-foreground", children: t("jobs.legacyInspectionUnavailable", { defaultValue: "Inspection unavailable for this older run." }) }) : _jsx("button", { type: "button", className: "shrink-0 rounded border px-2 py-1", onClick: () => setInspectionId(run.id), children: t("jobs.inspectRun", { defaultValue: "Inspect run" }) })) : null, run.finishedAt ? (_jsxs("span", { className: "shrink-0 tabular-nums text-muted-foreground", children: [Math.round((run.finishedAt - run.startedAt) / 1000), "s"] })) : null] }, run.id))) })), inspectionId ? _jsx(AutomationRunInspection, { historyId: inspectionId, onClose: () => setInspectionId(null) }) : null] })] })] }) }));
++                                    }) })) : (_jsx("ul", { className: "mt-2 divide-y divide-border/60 border-y border-border/60", children: runs.map((run) => (_jsxs("li", { className: "flex items-center gap-2 py-1.5 text-xs", children: [_jsx(RunStatusDot, { status: run.status }), _jsx("span", { className: "shrink-0 text-muted-foreground", children: formatTimestamp(run.startedAt) }), _jsx("span", { className: "shrink-0 font-medium", children: run.status }), run.error ? (_jsx("span", { className: "min-w-0 flex-1 truncate text-muted-foreground", title: run.error, children: run.error })) : (_jsx("span", { className: "min-w-0 flex-1" })), run.threadId ? (run.appId == null ? _jsx("span", { className: "shrink-0 text-muted-foreground", children: t("jobs.legacyInspectionUnavailable", { defaultValue: "Inspection unavailable for this older run." }) }) : run.canInspect !== true ? _jsx("span", { className: "shrink-0 text-muted-foreground", children: t("jobs.runInspectionUnavailable", { defaultValue: "Inspection unavailable." }) }) : _jsx("button", { type: "button", className: "shrink-0 rounded border px-2 py-1", onClick: () => setInspectionId(run.id), children: t("jobs.inspectRun", { defaultValue: "Inspect run" }) })) : null, run.finishedAt ? (_jsxs("span", { className: "shrink-0 tabular-nums text-muted-foreground", children: [Math.round((run.finishedAt - run.startedAt) / 1000), "s"] })) : null] }, run.id))) })), inspectionId ? _jsx(AutomationRunInspection, { historyId: inspectionId, onClose: () => setInspectionId(null) }) : null] })] })] }) }));
  }
 +
 +/** Retained Native data only. No chat runtime, composer, send or resume control. */
@@ -3651,7 +3651,15 @@ diff --git a/dist/client/agent-page/use-jobs.d.ts b/dist/client/agent-page/use-j
      createdBy: string | null;
      model: string | null;
      mcpTools: string[];
-@@ -78,12 +82,16 @@
+@@ -73,17 +77,24 @@
+     automationRunId: string;
+ }
+ export interface AutomationRun {
++    /** Server-derived advisory capability, rechecked by inspection. */
++    canInspect: boolean;
++    appId: string | null;
+     id: string;
+     automation: string;
      scope: string | null;
      runId: string | null;
      threadId: string | null;
@@ -3669,7 +3677,7 @@ diff --git a/dist/client/agent-page/use-jobs.d.ts b/dist/client/agent-page/use-j
  /**
   * Deploy-scoped and fixed for the life of the process, so it is cached far
   * longer than the automation lists.
-@@ -103,3 +111,8 @@
+@@ -103,3 +114,8 @@
  }, Error, ManageAutomationInput, unknown>;
  export declare function useRunAutomationNow(): import("@tanstack/react-query").UseMutationResult<RunAutomationNowResult, Error, RunAutomationNowInput, unknown>;
  export declare function useAutomationRuns(scope: JobsScope, name: string | null, active: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<AutomationRun[]>, Error>;
@@ -6361,7 +6369,7 @@ diff --git a/dist/jobs/background-automation-runner.d.ts b/dist/jobs/background-
      responseText: string;
      runId: string;
  }
-@@ -100,4 +115,40 @@
+@@ -100,4 +115,42 @@
          };
      }[];
  }): string | null;
@@ -6388,6 +6396,8 @@ diff --git a/dist/jobs/background-automation-runner.d.ts b/dist/jobs/background-
 +export declare function setAutomationApprovalDependencies(deps: BackgroundAutomationDeps | null): void;
 +export declare function automationDefinitionRevision(automation: BackgroundAutomationContext): string;
 +export interface AutomationApprovalActor { userEmail?: string; orgId?: string | null; appId?: string | null }
++/** Advisory only. Inspection and decisions revalidate the current binding. */
++export declare function canInspectAutomationRun(id: string, actor: AutomationApprovalActor): Promise<boolean>;
 +export declare function inspectAutomationRun(id: string, actor: AutomationApprovalActor, deps?: BackgroundAutomationDeps): Promise<{
 +    run: import("./run-history.js").AutomationRun; threadData: string;
 +    pending: { askId: string; toolName: string; input: unknown; expiresAt: number } | null;
@@ -7290,7 +7300,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (responseText.trim() &&
              automation.meta.deliveryPlatform &&
              automation.meta.deliveryDestination) {
-@@ -627,6 +929,309 @@
+@@ -627,6 +929,320 @@
                  tenantId: automation.meta.deliveryTenantId,
              });
          }
@@ -7350,6 +7360,17 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +            throw approvalDecisionRefusal(`Automation run is not available to this owner: ${validity.reason}`);
 +    }
 +    return { ...state, thread };
++}
++/** Advisory list capability uses the same read-only binding checks as inspection. */
++export async function canInspectAutomationRun(id, actor) {
++    try {
++        await authorizedAutomationContinuation(id, actor);
++        return true;
++    }
++    catch {
++        // Unavailable bindings or membership never advertise transcript access.
++        return false;
++    }
 +}
 +/** Read-only inspection never constructs a chat runtime or a second transcript. */
 +export async function inspectAutomationRun(id, actor, deps = _approvalDependencies) {
@@ -10613,11 +10634,21 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
          const deleted = await deleteLocalWorkspaceResource({ path: resourcePath });
          if (deleted) {
              emitResourceDelete(id, resourcePath, WORKSPACE_OWNER);
-@@ -1387,9 +1701,10 @@
+@@ -1382,14 +1696,19 @@
+     const client = getDbExec();
+     // Get resource info for emitter before deleting
+     const { rows } = await client.execute({
+-        sql: `SELECT path, owner FROM resources WHERE id = ?`,
++        sql: `SELECT * FROM resources WHERE id = ?`,
+         args: [id],
      });
      if (rows.length === 0)
          return false;
 +    refuseRunInstructionMutation(rows[0].owner, rows[0].path, "delete");
++    // Database job deletion has one custody owner. Do not add a transaction here:
++    // the snapshot owner locks and validates the exact retained history itself.
++    if (rows[0].path.startsWith("jobs/") && rows[0].path.endsWith(".md"))
++        return resourceDeleteIfCurrent(rowToResource(rows[0]));
      const result = await client.execute({
 -        sql: `DELETE FROM resources WHERE id = ?`,
 -        args: [id],
@@ -10626,7 +10657,7 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
      });
      const deleted = result.rowsAffected > 0;
      if (deleted) {
-@@ -1398,6 +1713,7 @@
+@@ -1398,6 +1717,7 @@
      return deleted;
  }
  export async function resourceDeleteByPath(owner, path) {
@@ -10634,7 +10665,22 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
      await ensureTable();
      if (owner === WORKSPACE_OWNER &&
          (await shouldHandleWorkspaceResourceAsLocal(path))) {
-@@ -1623,18 +1939,24 @@
+@@ -1414,11 +1734,13 @@
+     const client = getDbExec();
+     // Get resource info for emitter before deleting
+     const { rows } = await client.execute({
+-        sql: `SELECT id FROM resources WHERE owner = ? AND path = ?`,
++        sql: `SELECT * FROM resources WHERE owner = ? AND path = ?`,
+         args: [owner, path],
+     });
+     if (rows.length === 0)
+         return false;
++    if (path.startsWith("jobs/") && path.endsWith(".md"))
++        return resourceDeleteIfCurrent(rowToResource(rows[0]));
+     const result = await client.execute({
+         sql: `DELETE FROM resources WHERE owner = ? AND path = ?`,
+         args: [owner, path],
+@@ -1623,18 +1945,24 @@
      const now = Date.now();
      // Get current resource info
      const { rows } = await client.execute({
@@ -15544,15 +15590,17 @@ diff --git a/dist/automations/service.js b/dist/automations/service.js
 diff --git a/dist/jobs/actions/list-automation-runs.js b/dist/jobs/actions/list-automation-runs.js
 --- a/dist/jobs/actions/list-automation-runs.js
 +++ b/dist/jobs/actions/list-automation-runs.js
-@@ -1,6 +1,7 @@
+@@ -1,7 +1,9 @@
  import { z } from "zod";
  import { defineAction } from "../../action.js";
  import { organizationResourceOwner } from "../../resources/store.js";
 +import { queryOrgMembers } from "../../org/context.js";
  import { listAutomationRuns } from "../run-history.js";
++import { canInspectAutomationRun } from "../background-automation-runner.js";
  const scopeSchema = z.enum(["personal", "organization"]);
  export default defineAction({
-@@ -11,16 +12,33 @@
+     description: "List past execution records for one automation or recurring job in the selected scope.",
+@@ -11,25 +13,47 @@
          scope: scopeSchema.default("personal"),
          appId: z.string().trim().min(1).optional(),
          limit: z.number().int().min(1).max(100).optional(),
@@ -15587,13 +15635,19 @@ diff --git a/dist/jobs/actions/list-automation-runs.js b/dist/jobs/actions/list-
          const owner = scope === "organization"
              ? organizationResourceOwner(ctx.orgId)
              : userEmail;
-@@ -30,6 +48,8 @@
+         const appId = ctx?.appId === "dispatch" ? requestedAppId : ctx?.appId;
+-        return listAutomationRuns({
++        const runs = await listAutomationRuns({
+             owners: [owner],
              automation: name,
              appId,
              limit,
 +            includePendingApprovals,
 +            orgIds: scope === "organization" ? [ctx.orgId] : [null, ...(isMember ? [ctx.orgId] : [])],
          });
++        return Promise.all(runs.map(async run => ({
++            ...run, canInspect: await canInspectAutomationRun(run.id, ctx),
++        })));
      },
  });
 diff --git a/dist/triggers/webhook-store.js b/dist/triggers/webhook-store.js
@@ -15757,3 +15811,27 @@ diff --git a/dist/db/client.js b/dist/db/client.js
          _sqlite = undefined;
      }
      await closePgliteClients();
+diff --git a/dist/jobs/actions/manage-recurring-job.js b/dist/jobs/actions/manage-recurring-job.js
+--- a/dist/jobs/actions/manage-recurring-job.js
++++ b/dist/jobs/actions/manage-recurring-job.js
+@@ -45,7 +45,8 @@
+         if (denied)
+             throw Object.assign(new Error(denied), { statusCode: 403 });
+         if (operation === "delete") {
+-            await resourceDelete(resource.id);
++            if (!await resourceDelete(resource.id))
++                throw Object.assign(new Error("The job changed before it could be deleted."), { statusCode: 409 });
+             // Names are reusable; history left behind would surface as the run
+             // history of whatever job is next created under this name.
+             await deleteAutomationRuns(resource.owner, name);
+diff --git a/dist/jobs/actions/list-automation-runs.d.ts b/dist/jobs/actions/list-automation-runs.d.ts
+--- a/dist/jobs/actions/list-automation-runs.d.ts
++++ b/dist/jobs/actions/list-automation-runs.d.ts
+@@ -4,5 +4,6 @@
+     scope?: "organization" | "personal";
+     appId?: string;
+     limit?: number;
+-}, AutomationRun[]>;
++    includePendingApprovals?: boolean;
++}, (AutomationRun & { canInspect: boolean })[]>;
+ export default _default;

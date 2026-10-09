@@ -1562,6 +1562,7 @@ test("listed NULL-app legacy history stays unavailable to inspection and approva
     const rows = await list.run({ scope: "personal", name: fixture.automation.name }, actor);
     const legacy = rows.find(row => row.id === result.historyId);
     assert.ok(legacy); assert.equal(legacy.appId, null); assert.equal(legacy.threadId, result.threadId);
+    assert.equal(legacy.canInspect, false);
     assert.deepEqual(await list.run({ scope: "personal", name: fixture.automation.name }, { ...actor, userEmail: "foreign@example.test" }), []);
     for (const who of [actor, { ...actor, userEmail: "foreign@example.test" }, { ...actor, appId: "other-app" }]) {
       await assert.rejects(runner.inspectAutomationRun(result.historyId, who, fixture.deps), /not available/);
@@ -1584,5 +1585,6 @@ test("listed NULL-app legacy history stays unavailable to inspection and approva
   await db.execute({ sql: "UPDATE automation_runs SET app_id = NULL, approval_context = NULL WHERE id = ?", args: [result.historyId] });
   const [legacyTerminal] = await list.run({ scope: "personal", name: fixture.automation.name }, actor);
   assert.equal(legacyTerminal.id, terminal.id); assert.equal(legacyTerminal.appId, null); assert.ok(legacyTerminal.threadId);
+  assert.equal(legacyTerminal.canInspect, false);
   await assert.rejects(runner.inspectAutomationRun(terminal.id, actor, fixture.deps), /not available/);
 });

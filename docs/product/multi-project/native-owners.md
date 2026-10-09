@@ -107,13 +107,29 @@ later refused Run now requests. Ordinary history and scheduler limits stay bound
 A webhook encountering another execution's wait before it starts returns retry
 and restores its task attempts. It does not become that wait's task owner.
 
+Organization history visibility does not grant transcript inspection. The history list
+returns advisory canInspect through the same read-only retained app, thread-owner,
+organization and current-membership binding checks used by inspection. Details
+offers Inspect only when that capability is true and otherwise shows a short
+unavailable state. NULL-app older history keeps its existing unavailable wording.
+Direct inspection and owner decisions revalidate current authorization. Listing
+never resolves execution actions or performs continuation or reconciliation work.
+The new HTTP and rendered capability controls remain unrun in this source allocation.
+
 Approval ask creation and durable waiting use one resource custody transaction.
 Deletion uses the same exact resource owner, ID and path and checks persisted
 history before token, secret or definition removal. Deletion cannot take a waiting
 or resuming definition, or one with terminal approval history awaiting outcome
 reconciliation. The same transactional guard validates exact persisted scope before
 mutation. The mounted authenticated resource DELETE route also applies it
-inside the job snapshot deletion transaction. The full mutable-row snapshot CAS
+inside the job snapshot deletion transaction. Public database job ID and path
+helpers delegate one way to this same owner, including the personal Native
+resources tool and legacy Settings deletion. Settings requires a successful
+snapshot deletion before history cleanup. Custody internals use direct SQL and
+do not call the public helpers or nest transactions. Local workspace branches
+and ordinary non-job deletion remain unchanged. Webhook token-setup compensation
+uses this guard without bypassing valid custody and preserves its original error.
+The new tool, helper and Settings runtime controls remain unrun. The full mutable-row snapshot CAS
 still refuses stale deletes. History initialization finishes before transaction
 ownership, and resource deletion events follow commit. This route retains history
 and preserves ordinary non-job deletion and existing owner and organization
