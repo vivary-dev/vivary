@@ -5193,7 +5193,7 @@ diff --git a/dist/integrations/automation-webhook-task.js b/dist/integrations/au
 new file mode 100644
 --- /dev/null
 +++ b/dist/integrations/automation-webhook-task.js
-@@ -0,0 +1,169 @@
+@@ -0,0 +1,174 @@
 +import { isBackgroundAutomationsClosed, trackBackgroundAutomationWork, } from "../jobs/background-automation-runner.js";
 +import { jobBelongsToApp, parseJobResource } from "../jobs/frontmatter.js";
 +import { INTERRUPTED_RUN_MESSAGE } from "../jobs/run-history.js";
@@ -5227,7 +5227,8 @@ new file mode 100644
 + *   run (Vivary #114). The row returns to pending with its payload and its
 + *   attempts reset, and the retry sweep delivers it again. The calls queued
 + *   behind it wait for it.
-+ * - `failed`: the run threw. The row returns to pending until its attempts
++ * - `failed`: the completion claim was lost, leaving its current owner untouched,
++ *   or the run threw. The row returns to pending until its attempts
 + *   run out, then fails with an errored history row. A refusal, such as a
 + *   condition without a usable key, fails the row at once. The dispatcher
 + *   has recorded it. The error is logged here.
@@ -5261,7 +5262,11 @@ new file mode 100644
 +        }
 +        if (result === "waiting_approval")
 +            return "waiting_approval";
-+        await markTaskCompleted(task.id);
++        if (!await markTaskCompleted(task.id, task)) {
++            // Custody was settled or moved while this invocation was returning.
++            // Leave the current owner untouched and do not dispatch its follower.
++            return "failed";
++        }
 +    }
 +    catch (error) {
 +        const message = error instanceof Error ? error.message : String(error);
@@ -5668,7 +5673,16 @@ diff --git a/dist/integrations/pending-tasks-store.d.ts b/dist/integrations/pend
  }): Promise<PendingTask | null>;
  export declare function recordPendingTaskDispatchAttempt(id: string, outcome: string): Promise<void>;
  /** Next queued turn for a provider thread after its current task completes. */
-@@ -88,3 +92,9 @@
+@@ -74,6 +78,8 @@
+ } | null>;
+ /** Mark a task as completed. */
+ export declare function markTaskCompleted(id: string): Promise<void>;
++/** Complete only the exact still-processing webhook claim and report whether it won. */
++export declare function markTaskCompleted(id: string, expectedClaim: PendingTask): Promise<boolean>;
+ /**
+  * Return a transiently failed task to the retryable queue without erasing its
+  * payload. The payload may contain the only copy of the inbound message and is
+@@ -88,3 +94,9 @@
  /** Mark a task as failed and stash an error message. */
  export declare function markTaskFailed(id: string, errorMessage: string): Promise<void>;
  export {};
@@ -5708,7 +5722,46 @@ diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pendin
                 AND active.id <> integration_pending_tasks.id
             )
             AND NOT EXISTS (
-@@ -450,6 +452,46 @@
+@@ -371,19 +373,33 @@
+         : null;
+ }
+ /** Mark a task as completed. */
+-export async function markTaskCompleted(id) {
++export async function markTaskCompleted(id, expectedClaim) {
+     await ensureTable();
+     const client = getDbExec();
+     const now = Date.now();
+-    await client.execute({
++    if (expectedClaim && (expectedClaim.id !== id || expectedClaim.status !== "processing" ||
++        expectedClaim.platform !== "automation-webhook"))
++        return false;
++    const ownedClaim = expectedClaim
++        ? ` AND status = 'processing' AND platform = ? AND external_thread_id = ?
++            AND owner_email = ? AND (org_id = ? OR (org_id IS NULL AND CAST(? AS TEXT) IS NULL)) AND payload = ?
++            AND updated_at = ? AND attempts = ? AND created_at = ?`
++        : "";
++    const result = await client.execute({
+         sql: `UPDATE integration_pending_tasks
+           SET status = ?, updated_at = ?, completed_at = ?, payload = ?
+-          WHERE id = ?`,
++          WHERE id = ?${ownedClaim}`,
+         // The payload can contain short-lived provider credentials such as a
+         // Discord interaction token. Once terminal, no retry needs the inbound
+         // body, so erase it instead of retaining secrets or user text indefinitely.
+-        args: ["completed", now, now, "{}", id],
+-    });
++        args: ["completed", now, now, "{}", id, ...(expectedClaim ? [expectedClaim.platform,
++            expectedClaim.externalThreadId, expectedClaim.ownerEmail, expectedClaim.orgId, expectedClaim.orgId,
++            expectedClaim.payload, expectedClaim.updatedAt, expectedClaim.attempts, expectedClaim.createdAt] : [])],
++    });
++    // Webhook completion belongs to this exact still-processing claim. A later
++    // approval settlement, retry claim or payload update keeps its own state.
++    if (expectedClaim)
++        return Number(result.rowsAffected ?? result.rowCount ?? 0) === 1;
+ }
+ /**
+  * Return a transiently failed task to the retryable queue without erasing its
+@@ -450,6 +466,46 @@
          throw new Error("Integration task delivery failure transition lost its race");
      }
  }
@@ -5755,7 +5808,7 @@ diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pendin
  /** Mark a task as failed and stash an error message. */
  export async function markTaskFailed(id, errorMessage) {
      await ensureTable();
-@@ -462,3 +504,91 @@
+@@ -462,3 +518,91 @@
          args: ["failed", now, errorMessage.slice(0, 2000), "{}", id],
      });
  }
@@ -13732,7 +13785,7 @@ diff --git a/dist/triggers/dispatcher.js b/dist/triggers/dispatcher.js
   */
 -import { getOwnerActiveApiKey } from "../agent/production-agent.js";
 +import { getOwnerApiKeyForEngine } from "../agent/production-agent.js";
-+import { automationHistoryOwner, hasUnresolvedAutomationApproval, finishAutomationRun, INTERRUPTED_RUN_ERROR_CODE, startAutomationRun, } from "../jobs/run-history.js";
++import { automationHistoryOwner, getAutomationContinuationForWebhookTask, hasUnresolvedAutomationApproval, finishAutomationRun, INTERRUPTED_RUN_ERROR_CODE, startAutomationRun, } from "../jobs/run-history.js";
  import { automationMatchesEventOwner, resolveAutomationExecutionIdentity, } from "../automations/service.js";
  import { subscribe, unsubscribe } from "../event-bus/index.js";
 -import { isBackgroundAutomationRunActive, runBackgroundAutomation, } from "../jobs/background-automation-runner.js";
@@ -14053,7 +14106,7 @@ diff --git a/dist/triggers/dispatcher.js b/dist/triggers/dispatcher.js
          await recordTriggerExecutionOutcome(latest, {
              lastStatus: "success",
              lastError: undefined,
-@@ -450,5 +604,12 @@
+@@ -450,5 +604,32 @@
              lastError,
          });
          console.error(`[triggers] "${triggerName}" failed:`, lastError);
@@ -14061,11 +14114,31 @@ diff --git a/dist/triggers/dispatcher.js b/dist/triggers/dispatcher.js
 -}
 +        if (err?.errorCode === INTERRUPTED_RUN_ERROR_CODE)
 +            return "interrupted";
-+        // Only this durable gate failure must reach the webhook worker. Event
++        // A durable gate failure must reach the webhook worker. Event
 +        // errors keep their existing handling and shutdown keeps its retry path.
 +        if (startedBy === "webhook" && err instanceof BackgroundAutomationRunError &&
 +            err.errorCode === "automation_approval_storage_failed")
 +            throw err;
++        // A persisted terminal approval error still owns this webhook payload.
++        // Preserve the original exception. Ordinary errors without custody keep
++        // their existing handling, and interruption already returned above.
++        if (startedBy === "webhook" && webhookTaskId) {
++            const state = await getAutomationContinuationForWebhookTask(webhookTaskId);
++            if (state?.storedStatus === "error" && state.run.finishedAt && state.context) {
++                const { run, context } = state;
++                if (context.resourceId !== latest.id || context.resourceOwner !== latest.owner ||
++                    context.resourcePath !== latest.path || context.historyId !== run.id ||
++                    context.threadId !== run.threadId || context.ownerEmail !== jobUserEmail ||
++                    (context.orgId ?? null) !== (jobOrgId ?? null) ||
++                    (run.appId ?? null) !== (_deps.appId ?? null) ||
++                    automationHistoryOwner(latest.owner, identity) !== run.owner)
++                    throw new BackgroundAutomationRunError("The retained approval failure identity changed", "automation_approval_identity_changed");
++                const { restoreAutomationApprovalTaskWait } = await import("../integrations/pending-tasks-store.js");
++                if (!await restoreAutomationApprovalTaskWait(webhookTaskId, _deps.appId))
++                    throw new BackgroundAutomationRunError("The retained approval task is unavailable", "automation_approval_identity_changed");
++                throw err;
++            }
++        }
 +    }
 +}
 diff --git a/dist/triggers/routes.js b/dist/triggers/routes.js

@@ -1505,3 +1505,31 @@ for (const kind of ["text", "wait"]) for (const outcome of ["fault", "ok"]) {
     } else assert.equal(receipt.historyStatus, kind === "wait" ? "waiting_approval" : "success");
   });
 }
+
+
+for (const [kind, outcome, description] of [
+  ["wait", "fault", "preserves terminal approval custody after a selected marker-read failure"],
+  ["wait", "ok", "retains the identical healthy approval wait"],
+  ["text", "fault", "keeps ordinary no-context error handling"],
+]) {
+  test(`completion webhook ${description}`, async () => {
+    const receipt = await child(`completion-error-webhook-${kind}-${outcome}`, `webhook-completion-${kind}-${outcome}`);
+    assert.equal(receipt.faultHits, outcome === "fault" ? 1 : 0);
+    assert.equal(receipt.successfulThreadSaves, 1);
+    assert.equal(receipt.configuredEffects, 0); assert.equal(receipt.modelCalls, 1); assert.equal(receipt.drained, true);
+    assert.equal(receipt.workerResult, kind === "text" ? "completed" : outcome === "fault" ? "failed" : "waiting_approval");
+    assert.equal(receipt.initialTaskStatus, kind === "text" ? "completed" : "waiting_approval");
+    assert.equal(receipt.finalTaskStatus, kind === "text" ? "completed" : "failed");
+  });
+}
+
+for (const [interleaving, kind] of [["lookup-race", "wait"], ["write-settled", "text"], ["write-reclaimed", "text"]]) {
+  test(`completion webhook preserves custody during ${interleaving}`, async () => {
+    const receipt = await child(`completion-error-webhook-${interleaving}-${kind}-fault`, `webhook-completion-${interleaving}`);
+    assert.equal(receipt.faultHits, 1); assert.equal(receipt.workerResult, "failed");
+    assert.equal(receipt.lookupRaceHits, interleaving === "lookup-race" ? 1 : 0);
+    assert.equal(receipt.completionWriteHits, interleaving === "lookup-race" ? 0 : 1);
+    assert.equal(receipt.historyStatus, "error"); assert.equal(receipt.finalTaskStatus, "failed");
+    assert.equal(receipt.configuredEffects, 0); assert.equal(receipt.modelCalls, 1); assert.equal(receipt.drained, true);
+  });
+}

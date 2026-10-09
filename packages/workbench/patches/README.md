@@ -2377,11 +2377,13 @@ Durable gate storage failure aborts the run and cannot become success. Its
 resulting generic abort. Pre-write Stop and validation refusals stay outside the
 persistence catch. Stop is checked again after validation, and a genuine failed
 write retains its failure flag without re-aborting an already stopped chunk.
-Only that typed webhook failure propagates to the
-existing worker. The worker returns failed and retains its payload pending for
-exact-bound terminal reconciliation, which settles task and resource without
-model redispatch or configured effects. Generic event errors and shutdown retry
-semantics are unchanged.
+That typed gate-storage failure propagates to the existing webhook worker.
+A persisted terminal error with retained approval context also propagates its
+original exception after exact resource, history, execution owner, organization,
+app, thread and task custody validation. The worker returns failed and preserves
+the pending or waiting payload for the existing bound terminal reconciliation,
+which settles task and resource without model redispatch or configured effects.
+Generic event and no-context webhook errors and shutdown retry semantics are unchanged.
 
 `tests/automation-approval.test.mjs` uses installed Core, disposable SQLite and
 fake engines and tools. It covers same-run approval, decline, concurrent and
@@ -2898,3 +2900,5 @@ Local SQLite transaction ownership queues ordinary execute calls and subsequent 
 Webhook deletion initializes the existing webhook-token and app-secret schema owners before taking resource custody. It does not pre-delete token or secret data. Actual deletion stays on the transaction executor, together with history custody and resource mutation. Fresh-process controls seed the webhook in one process and delete or refuse it in another. Public closeDbExec uses the queued SQLite close owner before clearing the singleton. Close is memoized to avoid a second handle close. An old closed executor rejects later operations, while a new singleton can initialize normally. These new runtime controls remain unrun in the source sandbox.
 
 Every thrown automation completion callback error rejects the background runner promise and is rethrown to Native's completion handler. The callback-wide boundary covers persistence, durable stop-marker reads and response collection while preserving existing primary and typed errors. Native finalization remains outside the callback. On 2026-10-08, the focused controller gate passed 7/7 and the ordinary 26-file batch passed 417/417 with those focused cases included. Configured workbench typecheck passed. Faulted approval completion is an inspectable terminal error with an unconsumed ask that cannot resume or dispatch, not a recovered waiting result. The results cover the uncommitted Native 0.176.5 candidate. A new-head build and built UI journey, required published exact-head review, live PostgreSQL execution and packaged Windows acceptance remain pending.
+
+The webhook completion custody successor adds installed-owner child controls for a selected stop-marker read fault after assistant persistence and durable history/task waiting, the identical healthy wait and an ordinary no-context webhook error. The fault control observes actual worker, Native, history, task and payload fields before assertions. It then checks a delivery before any decision or explicit reconciliation, failed task/resource convergence, duplicate reconciliation and delivery, and an unconsumed non-executable ask with no model or tool replay. Additional real-worker barriers let reconciliation finish before the dispatcher lookup and let a task settle or acquire a newer claim before the actual completion write. Webhook completion uses the pending-task owner to atomically compare the processing status, platform, external thread, owner, organization, payload, creation time, claim timestamp and attempt. Only one affected row permits a completed result or follower dispatch. A lost comparison leaves current custody untouched and reports failure. Existing one-argument completion callers retain their contracts. These new controls have only source syntax checks in this allocation. Passing b80cfa4 CI/build/UI evidence predates this dispatcher correction and does not establish its acceptance.

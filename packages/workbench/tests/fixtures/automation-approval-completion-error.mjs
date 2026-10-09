@@ -7,7 +7,11 @@ globalThis.fetch = async () => { throw new Error("Completion fixture forbids out
 const f = await import("./automation-approval-fixture.mjs");
 const waiting = role.includes("-wait-");
 const inject = role.endsWith("-fault");
-const fixture = await f.makeApprovalCase(name, { repeatLocal: false });
+const webhookMode = role.includes("-webhook-");
+const lookupRace = role.includes("-lookup-race-");
+const writeRace = role.includes("-write-settled-") ? "settled" : role.includes("-write-reclaimed-") ? "reclaimed" : null;
+const taskId = `completion-webhook-${name}`;
+const fixture = await f.makeApprovalCase(name, { repeatLocal: false, triggerType: webhookMode ? "webhook" : "schedule" });
 fixture.engine.stream = async function* (options) {
   fixture.modelCalls.push(structuredClone(options.messages));
   assert.deepEqual(options.tools.map(tool => tool.name).sort(), [...f.surface.UNATTENDED_TOOLS, f.mcpName].sort());
@@ -24,7 +28,11 @@ assert.equal(db, f.database.getDbExec());
 const originalExecute = db.execute;
 const execute = originalExecute.bind(db);
 const normalize = statement => String(typeof statement === "string" ? statement : statement.sql).replace(/\s+/g, " ").trim();
-let saved = null, successfulThreadSaves = 0, markerReads = 0, faultHits = 0;
+let saved = null, successfulThreadSaves = 0, markerReads = 0, faultHits = 0, waitPublicationChecks = 0;
+let lookupRaceHits = 0, completionWriteHits = 0;
+let notifyRace, releaseRace;
+const raceReached = new Promise(resolve => { notifyRace = resolve; });
+const raceReleased = new Promise(resolve => { releaseRace = resolve; });
 const selectedError = new Error("selected completion turn-abort lookup failed");
 const bounded = async (promise, label) => {
   let timer;
@@ -36,9 +44,33 @@ const bounded = async (promise, label) => {
 };
 db.execute = async statement => {
   const sql = normalize(statement);
+  if (lookupRace && saved && lookupRaceHits === 0 &&
+    sql.startsWith("SELECT id FROM automation_runs WHERE approval_context IS NOT NULL") && statement.args?.[0] === taskId) {
+    const { rows } = await execute({ sql: "SELECT status, finished_at FROM automation_runs WHERE id = ?", args: [saved.id] });
+    assert.equal(rows[0]?.status, "error"); assert.ok(rows[0].finished_at);
+    lookupRaceHits++;
+    notifyRace();
+    await raceReleased;
+  }
+  if (writeRace && saved && completionWriteHits === 0 &&
+    sql.startsWith("UPDATE integration_pending_tasks SET status = ?, updated_at = ?, completed_at = ?, payload = ?") &&
+    statement.args?.[0] === "completed" && statement.args?.[4] === taskId) {
+    completionWriteHits++;
+    notifyRace();
+    await raceReleased;
+  }
   if (saved && sql === "SELECT id FROM agent_runs WHERE id = ? AND thread_id = ? AND status = 'aborted' LIMIT 1" &&
     statement.args?.[0] === `turn-abort-${saved.run_id}` && statement.args?.[1] === saved.thread_id) {
     markerReads++;
+    if (webhookMode && waiting) {
+      const { rows: runs } = await execute({ sql: "SELECT status, pending_ask_id, approval_context FROM automation_runs WHERE id = ?", args: [saved.id] });
+      const { rows: tasks } = await execute({ sql: "SELECT status FROM integration_pending_tasks WHERE id = ?", args: [taskId] });
+      assert.equal(runs[0]?.status, "waiting_approval", "the selected fault follows durable history wait publication");
+      assert.ok(runs[0].pending_ask_id);
+      assert.equal(JSON.parse(runs[0].approval_context).options.webhookTaskId, taskId);
+      assert.equal(tasks[0]?.status, "waiting_approval", "the actual task transferred to approval custody before completion");
+      waitPublicationChecks++;
+    }
     if (inject && faultHits === 0) {
       faultHits++;
       console.log("COMPLETION_MARKER_FAULT " + JSON.stringify({ faultHits, successfulThreadSaves, markerReads,
@@ -63,6 +95,151 @@ db.execute = async statement => {
   }
   return result;
 };
+if (webhookMode) {
+  const tasks = await f.loadCore("integrations/pending-tasks-store.js");
+  const dispatcher = await f.loadCore("triggers/dispatcher.js");
+  const worker = await f.loadCore("integrations/automation-webhook-task.js");
+  const resource = fixture.automation.resource;
+  const payload = { kind: "automation-webhook", automationId: resource.id, owner: f.owner,
+    path: resource.path, eventId: taskId, payload: { source: "completion-control" } };
+  let receipt, competingClaim;
+  try {
+    await dispatcher.initTriggerDispatcher(fixture.deps);
+    await tasks.insertPendingTask({ id: taskId, platform: "automation-webhook", externalThreadId: `${f.owner}:${resource.path}`,
+      ownerEmail: f.owner, orgId: null, externalEventKey: taskId, payload: JSON.stringify(payload) });
+    const work = worker.runAutomationWebhookTaskInProcess(taskId, { appId: f.appId });
+    if (lookupRace || writeRace) {
+      try {
+        await bounded(raceReached, "selected worker interleaving");
+        if (lookupRace) {
+          await f.runner.reconcileAutomationApprovalOutcomes(f.appId);
+          assert.equal((await tasks.getPendingTask(taskId)).status, "failed");
+          assert.equal((await f.history.getAutomationContinuation(saved.id)).outcomeReconciled, true);
+          assert.equal(f.frontmatter.parseJobResource((await f.resources.resourceGetByPath(f.owner, resource.path)).content).meta.lastStatus, "error");
+        } else if (writeRace === "settled") {
+          await tasks.markTaskFailed(taskId, "Selected overlapping settlement");
+          competingClaim = await tasks.getPendingTask(taskId);
+        } else {
+          await tasks.markTaskRetryable(taskId, "Selected concurrent retry");
+          competingClaim = await tasks.claimPendingTask(taskId, { appId: f.appId, dispatchOutcome: "in-process" });
+          assert.equal(competingClaim.status, "processing"); assert.equal(competingClaim.attempts, 2);
+        }
+      } finally { releaseRace(); }
+    }
+    const workerResult = await bounded(work, "webhook completion");
+    db.execute = originalExecute;
+    const run = saved ? await f.history.getAutomationRun(saved.id) : null;
+    const retained = run ? await f.history.getAutomationContinuation(run.id) : null;
+    const task = await tasks.getPendingTask(taskId);
+    const native = saved ? (await execute({ sql: "SELECT status, error_code, error_detail FROM agent_runs WHERE id = ? AND thread_id = ?",
+      args: [saved.run_id, saved.thread_id] })).rows[0] : null;
+    // The old matched runtime reaches actual reconciliation and exposes its
+    // stranded marker before the same behavioral assertions fail below.
+    let baselineReconciliationAttempted = false;
+    if (waiting && inject && !lookupRace && workerResult === "completed") {
+      baselineReconciliationAttempted = true;
+      await f.runner.reconcileAutomationApprovalOutcomes(f.appId);
+    }
+    console.log("WEBHOOK_COMPLETION_DIAGNOSTIC " + JSON.stringify({ waiting, inject, faultHits,
+      workerResult, lookupRaceHits, completionWriteHits, successfulThreadSaves, waitPublicationChecks, nativeStatus: native?.status ?? null,
+      nativeErrorCode: native?.error_code ?? null, historyStatus: run?.status ?? null,
+      historyErrorCode: run?.errorCode ?? null, historyFinished: Boolean(run?.finishedAt),
+      taskStatus: task?.status ?? null, payloadEmpty: task?.payload === "{}", retainedContext: Boolean(retained?.context),
+      baselineReconciliationAttempted, outcomeReconciled: run ? Boolean((await f.history.getAutomationContinuation(run.id)).outcomeReconciled) : null,
+      configuredEffects: fixture.calls.length, modelCalls: fixture.modelCalls.length }));
+    assert.ok(saved); assert.equal(successfulThreadSaves, 1);
+    assert.equal(faultHits, inject ? 1 : 0); assert.ok(markerReads >= 1);
+    assert.equal(fixture.modelCalls.length, 1); assert.equal(fixture.calls.length, 0);
+    assert.notEqual(native.status, "running", "the worker settles only after Native terminal storage");
+    if (inject) {
+      assert.equal(native.status, "errored"); assert.equal(native.error_code, "completion_error");
+      assert.equal(run.status, "error"); assert.equal(run.errorCode, "background_automation_failed");
+      assert.match(run.error, /selected completion turn-abort lookup failed/);
+    }
+    assert.equal((await f.threads.getThread(saved.thread_id)).scope.id, run.id);
+    const modelCount = fixture.modelCalls.length;
+    if (lookupRace) {
+      assert.equal(lookupRaceHits, 1); assert.ok(waitPublicationChecks >= 1);
+      assert.equal(workerResult, "failed"); assert.equal(task.status, "failed"); assert.equal(task.payload, "{}");
+      assert.equal(run.status, "error"); assert.ok(run.finishedAt);
+      assert.equal(retained.outcomeReconciled, true);
+      assert.equal((await f.approvalStore.readAgentToolApproval(retained.context)).status, "pending");
+      assert.equal((await f.runner.inspectAutomationRun(run.id, f.actor, fixture.deps)).pending, null);
+      await assert.rejects(fixture.decide(run.id, retained.context), /no longer waiting/);
+      await f.runner.reconcileAutomationApprovalOutcomes(f.appId);
+      assert.equal(await worker.runAutomationWebhookTaskInProcess(taskId, { appId: f.appId }), "skipped");
+      assert.equal((await tasks.getPendingTask(taskId)).status, "failed");
+      assert.equal(f.frontmatter.parseJobResource((await f.resources.resourceGetByPath(f.owner, resource.path)).content).meta.lastStatus, "error");
+    } else if (writeRace) {
+      assert.equal(completionWriteHits, 1); assert.equal(workerResult, "failed");
+      assert.equal(run.status, "error"); assert.ok(run.finishedAt); assert.equal(retained.context, null);
+      assert.deepEqual(task, competingClaim, "the completion write cannot replace a settled row or a later processing claim");
+      assert.equal(task.status, writeRace === "settled" ? "failed" : "processing");
+      if (writeRace === "reclaimed") await tasks.markTaskFailed(taskId, "Selected claim control cleanup");
+      assert.equal(await worker.runAutomationWebhookTaskInProcess(taskId, { appId: f.appId }), "skipped");
+    } else if (waiting && inject) {
+      assert.ok(waitPublicationChecks >= 1);
+      assert.equal(workerResult, "failed");
+      assert.equal(native.status, "errored"); assert.equal(native.error_code, "completion_error");
+      assert.equal(native.error_detail, "Agent response could not be saved.");
+      assert.equal(run.status, "error"); assert.equal(run.errorCode, "background_automation_failed");
+      assert.ok(run.finishedAt); assert.match(run.error, /selected completion turn-abort lookup failed/);
+      assert.equal(task.status, "waiting_approval", "worker failure preserves the retained task custody");
+      assert.deepEqual(JSON.parse(task.payload), payload);
+      assert.equal(retained.context.historyId, run.id); assert.equal(retained.context.threadId, saved.thread_id);
+      assert.equal(retained.context.turnId, saved.run_id); assert.equal(retained.context.options.webhookTaskId, taskId);
+      assert.equal(retained.context.askId, run.pendingAskId);
+      assert.equal((await f.approvalStore.readAgentToolApproval(retained.context)).status, "pending");
+      assert.equal(retained.outcomeReconciled, false);
+      assert.equal((await f.runner.inspectAutomationRun(run.id, f.actor, fixture.deps)).pending, null);
+      assert.equal((await f.history.getAutomationContinuation(run.id)).outcomeReconciled, false,
+        "the delivery precedes any decision or reconciliation");
+      assert.equal(await worker.runAutomationWebhookTaskInProcess(taskId, { appId: f.appId }), "skipped",
+        "a delivery before explicit reconciliation cannot redispatch the terminal history");
+      assert.equal((await f.history.getAutomationContinuation(run.id)).outcomeReconciled, false);
+      assert.equal(fixture.modelCalls.length, modelCount); assert.equal(fixture.calls.length, 0);
+      await f.runner.reconcileAutomationApprovalOutcomes(f.appId);
+      assert.equal((await tasks.getPendingTask(taskId)).status, "failed");
+      assert.equal((await tasks.getPendingTask(taskId)).payload, "{}");
+      assert.equal((await f.history.getAutomationContinuation(run.id)).outcomeReconciled, true);
+      assert.equal(f.frontmatter.parseJobResource((await f.resources.resourceGetByPath(f.owner, resource.path)).content).meta.lastStatus, "error");
+      await f.runner.reconcileAutomationApprovalOutcomes(f.appId);
+      assert.equal(await worker.runAutomationWebhookTaskInProcess(taskId, { appId: f.appId }), "skipped");
+      await assert.rejects(fixture.decide(run.id, retained.context), /no longer waiting/);
+      assert.equal((await f.approvalStore.readAgentToolApproval(retained.context)).status, "pending");
+    } else if (waiting) {
+      assert.equal(workerResult, "waiting_approval"); assert.equal(run.status, "waiting_approval");
+      assert.equal(task.status, "waiting_approval"); assert.deepEqual(JSON.parse(task.payload), payload);
+      assert.equal(run.finishedAt, null); assert.equal(run.approvalReady, true);
+      assert.equal(native.status, "completed");
+      assert.equal(await worker.runAutomationWebhookTaskInProcess(taskId, { appId: f.appId }), "skipped");
+      await fixture.decide(run.id, retained.context, "decline");
+      assert.equal((await f.history.getAutomationRun(run.id)).status, "declined");
+      assert.equal((await tasks.getPendingTask(taskId)).status, "failed");
+      assert.equal((await f.history.getAutomationContinuation(run.id)).outcomeReconciled, true);
+    } else {
+      assert.equal(workerResult, "completed", "ordinary no-context webhook errors retain their existing handling");
+      assert.equal(task.status, "completed"); assert.equal(task.payload, "{}");
+      assert.equal(run.status, "error"); assert.equal(run.errorCode, "background_automation_failed");
+      assert.ok(run.finishedAt); assert.equal(retained.context, null);
+      assert.equal(native.status, "errored"); assert.equal(native.error_code, "completion_error");
+      assert.equal(await worker.runAutomationWebhookTaskInProcess(taskId, { appId: f.appId }), "skipped");
+    }
+    assert.equal(fixture.modelCalls.length, modelCount, "settlement, delivery and decisions cannot redispatch");
+    assert.equal(fixture.calls.length, 0);
+    receipt = { waiting, inject, faultHits, workerResult, lookupRaceHits, completionWriteHits, successfulThreadSaves,
+      historyId: run.id, threadId: saved.thread_id, turnId: saved.run_id, historyStatus: run.status,
+      initialTaskStatus: task.status, finalTaskStatus: (await tasks.getPendingTask(taskId)).status,
+      configuredEffects: 0, modelCalls: modelCount };
+  } finally {
+    releaseRace();
+    db.execute = originalExecute;
+    const drain = await bounded(f.runner.interruptBackgroundAutomations(new Promise(() => {})), "webhook completion drain");
+    assert.ok(Array.isArray(drain));
+    f.restoreTimers();
+  }
+  console.log("APPROVAL_RESULT " + JSON.stringify({ ...receipt, drained: true }));
+} else {
 let work;
 try {
   work = fixture.start().then(result => ({ result }), error => ({ error }));
@@ -141,5 +318,6 @@ try {
 } finally {
   db.execute = originalExecute;
   f.restoreTimers();
+}
 }
 // Natural exit. The maintained parent owns the child timeout and reaping.
