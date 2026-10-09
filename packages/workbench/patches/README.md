@@ -2267,7 +2267,18 @@ another execution's wait. Ask creation and wait persistence lock the exact live
 resource in the existing database transaction. Modern and legacy deletion recheck
 persisted custody in that transaction before token, secret and definition mutation.
 PostgreSQL uses FOR UPDATE and local SQLite uses BEGIN IMMEDIATE. Resource deletion
-events follow commit. A missing or replaced definition cannot receive an ask.
+events follow commit. The authenticated resources plugin's DELETE route now
+uses this custody guard inside resourceDeleteIfCurrent for jobs/*.md. It warms
+the history schema before custody, then validates the locked definition's exact
+persisted history scope with the supplied transaction executor. Its full mutable
+row snapshot comparison remains unchanged. Waiting, resuming and terminal
+unreconciled approval custody refuse deletion with HTTP 409. Missing or replaced
+resources and stale snapshots cannot delete a newer row. This path retains
+history, preserves non-job deletion and does not change handler authorization or
+admin cleanup without custody. Maintained controls use the actual auth and
+resource plugins, assert session hits and a route positive, and exercise the
+snapshot DELETE versus approval-publication boundary. Successor runtime controls
+remain pending coordinator execution. A missing or replaced definition cannot receive an ask.
 Unfinished admitted history survives deletion cleanup to record its terminal refusal.
 The maintained PostgreSQL adapter controls are static query contracts, not database
 execution proof. New source still requires controller runtime, review and UI checks.

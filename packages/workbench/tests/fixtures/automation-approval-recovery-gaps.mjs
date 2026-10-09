@@ -279,7 +279,7 @@ async function deletionCase(kind, name) {
 
 // Same resource and owner APIs on old and repaired packages. The selected
 // resource read is inside the repaired transaction and outside it on old Core.
-async function deletionRaceCase(kind, fixture, f, remove, readTokens) {
+export async function deletionRaceCase(kind, fixture, f, remove, readTokens, boundary = "resource-read") {
   const { history, runner, database, resources, frontmatter, approvalStore, runStore, owner, appId, mcpName, until } = f;
   const resource = fixture.automation.resource, db = database.getDbExec();
   let releasePredicate, releaseDelete;
@@ -323,8 +323,12 @@ async function deletionRaceCase(kind, fixture, f, remove, readTokens) {
         threadId: original.threadId, turnId: turn.turnId, terminalCode: terminal.errorCode, replacementId: replacement.id };
     }
     const intercept = (executeStatement, inTransaction) => async statement => {
-      const sql = normalized(statement), result = await executeStatement(statement);
-      if (!deleteBarrierHit && sql.startsWith("SELECT") && sql.includes("FROM resources WHERE id = ?") && statement.args?.[0] === resource.id) {
+      const sql = normalized(statement);
+      if (boundary === "snapshot-delete" && !deleteBarrierHit && sql.startsWith("DELETE FROM resources WHERE owner = ? AND path = ? AND id = ?") && statement.args?.[2] === resource.id) {
+        deleteBarrierHit++; heldTransaction = inTransaction; await deleteGate;
+      }
+      const result = await executeStatement(statement);
+      if (boundary === "resource-read" && !deleteBarrierHit && sql.startsWith("SELECT") && sql.includes("FROM resources WHERE id = ?") && statement.args?.[0] === resource.id) {
         deleteBarrierHit++; heldTransaction = inTransaction; await deleteGate;
       }
       return result;

@@ -10393,7 +10393,7 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
          ],
      });
      const rowsAffected = result
-@@ -1331,6 +1502,7 @@
+@@ -1331,48 +1502,191 @@
      return resource;
  }
  export async function resourceDeleteIfCurrent(resource) {
@@ -10401,7 +10401,89 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
      await ensureTable();
      if (isLocalWorkspaceResourceId(resource.id))
          return false;
-@@ -1367,12 +1539,129 @@
+-    const client = getDbExec();
+-    // `updated_at` is a wall-clock millisecond, not a logical version. Compare
+-    // the full mutable row snapshot so same-ms or clock-skewed writes cannot be
+-    // deleted by a stale caller.
+-    const result = await client.execute({
+-        sql: `DELETE FROM resources WHERE owner = ? AND path = ? AND id = ? AND updated_at = ? AND content = ? AND mime_type = ? AND size = ? AND created_at = ? AND created_by = ? AND visibility = ? AND (thread_id = ? OR (thread_id IS NULL AND ? IS NULL)) AND (run_id = ? OR (run_id IS NULL AND ? IS NULL)) AND (expires_at = ? OR (expires_at IS NULL AND ? IS NULL)) AND (metadata = ? OR (metadata IS NULL AND ? IS NULL))`,
+-        args: [
+-            resource.owner,
+-            resource.path,
+-            resource.id,
+-            resource.updatedAt,
+-            resource.content,
+-            resource.mimeType,
+-            resource.size,
+-            resource.createdAt,
+-            resource.createdBy,
+-            resource.visibility,
+-            resource.threadId,
+-            resource.threadId,
+-            resource.runId,
+-            resource.runId,
+-            resource.expiresAt,
+-            resource.expiresAt,
+-            resource.metadata,
+-            resource.metadata,
+-        ],
+-    });
+-    const deleted = result.rowsAffected === 1;
++    const deleteSnapshot = async client => {
++        // `updated_at` is a wall-clock millisecond, not a logical version. Compare
++        // the full mutable row snapshot so same-ms or clock-skewed writes cannot be
++        // deleted by a stale caller.
++        const result = await client.execute({
++            sql: `DELETE FROM resources WHERE owner = ? AND path = ? AND id = ? AND updated_at = ? AND content = ? AND mime_type = ? AND size = ? AND created_at = ? AND created_by = ? AND visibility = ? AND (thread_id = ? OR (thread_id IS NULL AND ? IS NULL)) AND (run_id = ? OR (run_id IS NULL AND ? IS NULL)) AND (expires_at = ? OR (expires_at IS NULL AND ? IS NULL)) AND (metadata = ? OR (metadata IS NULL AND ? IS NULL))`,
++            args: [
++                resource.owner,
++                resource.path,
++                resource.id,
++                resource.updatedAt,
++                resource.content,
++                resource.mimeType,
++                resource.size,
++                resource.createdAt,
++                resource.createdBy,
++                resource.visibility,
++                resource.threadId,
++                resource.threadId,
++                resource.runId,
++                resource.runId,
++                resource.expiresAt,
++                resource.expiresAt,
++                resource.metadata,
++                resource.metadata,
++            ],
++        });
++        return result.rowsAffected === 1;
++    };
++    let deleted;
++    if (resource.path.startsWith("jobs/") && resource.path.endsWith(".md")) {
++        const { ensureTable: ensureHistoryTable, assertLegacyJobApprovalDeletionAllowed } = await import("../jobs/run-history.js");
++        const { parseJobResource } = await import("../jobs/frontmatter.js");
++        // Lazy schema writes use the global executor. Warm before owning custody.
++        await ensureHistoryTable();
++        try {
++            deleted = await withAutomationResourceCustody(resource, async (tx, current) => {
++                const { meta } = parseJobResource(current.content);
++                try {
++                    await assertLegacyJobApprovalDeletionAllowed(current, meta, meta.appId, tx);
++                } catch (error) {
++                    // The mounted resource handler preserves this HTTP refusal.
++                    throw Object.assign(new Error("Resolve retained automation approval custody before deleting this resource.", { cause: error }), {
++                        statusCode: 409, statusMessage: "Resolve retained automation approval custody before deleting this resource.",
++                    });
++                }
++                return deleteSnapshot(tx);
++            });
++        } catch (error) {
++            if (!(error instanceof AutomationResourceChangedError)) throw error;
++            return false;
++        }
++    } else deleted = await deleteSnapshot(getDbExec());
+     if (deleted) {
+         emitResourceDelete(resource.id, resource.path, resource.owner);
      }
      return deleted;
  }
@@ -10531,7 +10613,7 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
          const deleted = await deleteLocalWorkspaceResource({ path: resourcePath });
          if (deleted) {
              emitResourceDelete(id, resourcePath, WORKSPACE_OWNER);
-@@ -1387,9 +1676,10 @@
+@@ -1387,9 +1701,10 @@
      });
      if (rows.length === 0)
          return false;
@@ -10544,7 +10626,7 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
      });
      const deleted = result.rowsAffected > 0;
      if (deleted) {
-@@ -1398,6 +1688,7 @@
+@@ -1398,6 +1713,7 @@
      return deleted;
  }
  export async function resourceDeleteByPath(owner, path) {
@@ -10552,7 +10634,7 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
      await ensureTable();
      if (owner === WORKSPACE_OWNER &&
          (await shouldHandleWorkspaceResourceAsLocal(path))) {
-@@ -1623,18 +1914,24 @@
+@@ -1623,18 +1939,24 @@
      const now = Date.now();
      // Get current resource info
      const { rows } = await client.execute({

@@ -31,7 +31,7 @@ Object.assign(process.env, { NODE_ENV: "production", APP_NAME: "Vivary",
   BETTER_AUTH_SECRET: randomBytes(32).toString("hex") });
 approvalFixture = await import("./fixtures/automation-approval-fixture.mjs");
 const { makeApprovalCase, actor, owner, appId, mcpName, runner, history, threads,
-  approvalStore, resources, frontmatter, service, database, runStore, loadCore } = approvalFixture;
+  approvalStore, resources, frontmatter, service, database, runStore, loadCore, until } = approvalFixture;
 const { H3, toNodeHandler } = await import("h3");
 const { mountActionRoutes } = await loadCore("server/action-routes.js");
 const { default: listAction } = await loadCore("jobs/actions/list-automation-runs.js");
@@ -62,6 +62,21 @@ for (const id of [orgId, unrelatedOrg]) {
     args: ["membership-" + id, id, owner, "owner", seededAt] });
 }
 await setActiveOrgId(owner, unrelatedOrg, "approval transport fixture setup");
+
+// Resources use Native getSession, not the action-only owner resolver below.
+// BYOA is Native's supported authentication seam for the stored fixture users.
+let resourceSessionHits = 0;
+const { createAuthPlugin } = await loadCore("server/auth-plugin.js");
+const { markDefaultPluginProvided } = await loadCore("server/framework-request-handler.js");
+markDefaultPluginProvided(nitroApp, "resources");
+createAuthPlugin({ getSession: async event => {
+  const email = event.headers.get("x-fixture-owner");
+  if (![owner, otherOwner].includes(email)) return null;
+  resourceSessionHits++;
+  return { email, emailVerified: true };
+} })(nitroApp);
+const { createResourcesPlugin } = await loadCore("server/resources-plugin.js");
+await createResourcesPlugin()(nitroApp);
 
 const actions = { "list-automation-runs": listAction, "inspect-automation-run": inspectAction, "decide-automation-approval": decideAction };
 const resolveOwner = async event => {
@@ -307,4 +322,150 @@ test("normal HTTP organization history fails closed while personal NULL-org cust
     if (!membershipRestored) await restoreMembership();
     assert.equal((await call("decide-automation-approval", { ...decision, decision: "decline" })).status, 200);
   }
+});
+
+
+async function resourceRequest(id, { method = "DELETE", email = owner } = {}) {
+  const before = resourceSessionHits;
+  const response = await fetch(`${origin}/_agent-native/resources/${id}`, { method,
+    headers: { "x-fixture-owner": email }, signal: AbortSignal.timeout(10_000) });
+  const body = await response.json();
+  assert.equal(resourceSessionHits - before, 1, "the actual resource handler authenticates this request through getSession");
+  return { status: response.status, body };
+}
+async function webhookRows(resource) {
+  return (await db.execute({ sql: "SELECT * FROM automation_webhook_tokens WHERE automation_id = ?", args: [resource.id] })).rows;
+}
+async function custodySnapshot(resource, historyId, pending, taskId) {
+  return { resource: await resources.resourceGetByPath(resource.owner, resource.path),
+    history: await history.getAutomationContinuation(historyId), thread: await threads.getThread(pending.threadId),
+    ask: await approvalStore.readAgentToolApproval(pending),
+    ...(taskId ? { task: await (await loadCore("integrations/pending-tasks-store.js")).getPendingTask(taskId),
+      tokens: await webhookRows(resource), secrets: (await db.execute({ sql: "SELECT * FROM app_secrets ORDER BY id" })).rows } : {}) };
+}
+for (const triggerType of ["schedule", "webhook"]) test(`authenticated resource DELETE preserves ${triggerType} waiting and resuming custody`, async () => {
+  const fixture = await makeApprovalCase(`http-resource-${triggerType}`, { triggerType, repeatLocal: false });
+  runner.setAutomationApprovalDependencies(fixture.deps);
+  let result, taskId;
+  if (triggerType === "webhook") {
+    const tasks = await loadCore("integrations/pending-tasks-store.js"), dispatcher = await loadCore("triggers/dispatcher.js");
+    const worker = await loadCore("integrations/automation-webhook-task.js"), resource = fixture.automation.resource;
+    await dispatcher.initTriggerDispatcher(fixture.deps);
+    taskId = "http-delete-task-" + resource.id;
+    await tasks.insertPendingTask({ id: taskId, platform: "automation-webhook", externalThreadId: `${owner}:${resource.path}`,
+      ownerEmail: owner, orgId: null, externalEventKey: taskId, payload: JSON.stringify({ kind: "automation-webhook",
+        automationId: resource.id, owner, path: resource.path, eventId: taskId, payload: {} }) });
+    assert.equal(await worker.runAutomationWebhookTaskInProcess(taskId, { appId }), "waiting_approval");
+    const [run] = await history.listAutomationRuns({ owners: [owner], automation: fixture.automation.name, appId });
+    result = { historyId: run.id };
+  } else result = await fixture.start();
+  const pending = await fixture.pending(result.historyId), resource = fixture.automation.resource;
+  const counts = [fixture.calls.length, fixture.modelCalls.length];
+  try {
+    const session = await fetch(`${origin}/_agent-native/auth/session`, { headers: { "x-fixture-owner": owner } });
+    assert.equal(session.status, 200); assert.equal((await session.json()).email, owner);
+    assert.equal((await resourceRequest(resource.id, { method: "GET" })).status, 200, "the actual authenticated resource route is reachable");
+    for (const status of ["waiting_approval", "resuming"]) {
+      if (status === "resuming") assert.equal(await history.claimAutomationApprovalDecision(result.historyId, pending.askId, "http-delete-unstarted-" + resource.id), true);
+      const before = await custodySnapshot(resource, result.historyId, pending, taskId);
+      const response = await resourceRequest(resource.id);
+      const after = await custodySnapshot(resource, result.historyId, pending, taskId);
+      console.log("RESOURCE_HTTP_DELETE_CUSTODY " + JSON.stringify({ triggerType, status, httpStatus: response.status,
+        resourceRetained: Boolean(after.resource), historyId: after.history.run.id, askId: pending.askId,
+        taskStatus: after.task?.status ?? null, configuredEffects: effects(fixture) }));
+      assert.equal(response.status, 409); assert.match(response.body.error ?? response.body.message ?? response.body.statusMessage, /approval/i);
+      assert.deepEqual(after, before, "refusal precedes definition, token, history, thread, ask and task mutation");
+      assert.deepEqual([fixture.calls.length, fixture.modelCalls.length], counts); assert.equal(effects(fixture), 0);
+      if (status === "resuming") assert.equal(await history.restoreUnconsumedAutomationApproval(result.historyId, pending.askId, "http-delete-unstarted-" + resource.id), true);
+    }
+  } finally {
+    const state = await history.getAutomationContinuation(result.historyId);
+    if (state.storedStatus === "resuming") await history.restoreUnconsumedAutomationApproval(result.historyId, pending.askId, "http-delete-unstarted-" + resource.id);
+    await fixture.decide(result.historyId, pending, "decline");
+  }
+  const settled = await history.getAutomationContinuation(result.historyId);
+  assert.equal(settled.outcomeReconciled, true); assert.equal(settled.run.status, "declined");
+  assert.equal((await resourceRequest(resource.id)).status, 200);
+  assert.equal(await resources.resourceGetByPath(owner, resource.path), null);
+  assert.equal((await history.getAutomationRun(result.historyId)).id, result.historyId, "snapshot deletion retains the original history");
+  assert.equal(effects(fixture), 0);
+});
+
+test("authenticated resource DELETE refuses terminal unreconciled approval before mutation", async () => {
+  const fixture = await makeApprovalCase("http-resource-terminal-error", { repeatLocal: false });
+  runner.setAutomationApprovalDependencies(fixture.deps);
+  const originalExecute = db.execute, execute = originalExecute.bind(db);
+  let saved, faultHits = 0, successfulThreadSaves = 0;
+  db.execute = async statement => {
+    const sql = String(statement.sql ?? statement).replace(/\s+/g, " ").trim();
+    if (saved && faultHits === 0 && sql === "SELECT id FROM agent_runs WHERE id = ? AND thread_id = ? AND status = 'aborted' LIMIT 1" &&
+        statement.args?.[0] === `turn-abort-${saved.run_id}` && statement.args?.[1] === saved.thread_id) {
+      const state = await history.getAutomationContinuation(saved.id);
+      assert.equal(state.storedStatus, "waiting_approval"); assert.ok(state.context.askId);
+      faultHits++; throw new Error("Selected resource-delete completion read failed.");
+    }
+    const result = await execute(statement);
+    if (sql.startsWith("UPDATE chat_threads SET thread_data = ?") && result.rowsAffected === 1) {
+      const repo = JSON.parse(statement.args[0]);
+      if (repo._automationRunId && repo.messages?.some(item => (item.message ?? item).role === "assistant")) {
+        const { rows } = await execute({ sql: "SELECT id, run_id, thread_id FROM automation_runs WHERE id = ? AND owner = ? AND automation = ? AND app_id = ?",
+          args: [repo._automationRunId, owner, fixture.automation.name, appId] });
+        if (rows.length === 1 && rows[0].thread_id === statement.args[5]) { saved = rows[0]; successfulThreadSaves++; }
+      }
+    }
+    return result;
+  };
+  try { await assert.rejects(fixture.start(), /Selected resource-delete completion read failed/); }
+  finally { db.execute = originalExecute; }
+  const state = await history.getAutomationContinuation(saved.id), pending = state.context, resource = fixture.automation.resource;
+  const before = await custodySnapshot(resource, saved.id, pending);
+  const counts = [fixture.calls.length, fixture.modelCalls.length];
+  const response = await resourceRequest(resource.id);
+  const after = await custodySnapshot(resource, saved.id, pending);
+  console.log("RESOURCE_HTTP_DELETE_TERMINAL " + JSON.stringify({ faultHits, successfulThreadSaves, httpStatus: response.status,
+    historyStatus: state.run.status, outcomeReconciled: state.outcomeReconciled, resourceRetained: Boolean(after.resource), configuredEffects: effects(fixture) }));
+  assert.equal(faultHits, 1); assert.equal(successfulThreadSaves, 1);
+  assert.equal(state.run.status, "error"); assert.ok(state.run.finishedAt); assert.equal(state.outcomeReconciled, false);
+  assert.equal(response.status, 409); assert.deepEqual(after, before);
+  assert.deepEqual([fixture.calls.length, fixture.modelCalls.length], counts); assert.equal(effects(fixture), 0);
+  await runner.reconcileAutomationApprovalOutcomes(appId);
+  assert.equal((await history.getAutomationContinuation(saved.id)).outcomeReconciled, true);
+  assert.equal((await resourceRequest(resource.id)).status, 200);
+  assert.equal((await history.getAutomationRun(saved.id)).status, "error");
+  assert.deepEqual([fixture.calls.length, fixture.modelCalls.length], counts);
+});
+
+test("authenticated resource DELETE preserves ordinary deletion, wrong-owner refusal and full snapshot CAS", async () => {
+  const fixture = await makeApprovalCase("http-resource-no-wait");
+  const job = fixture.automation.resource;
+  const before = await resources.resourceGetByPath(owner, job.path);
+  assert.equal((await resourceRequest(job.id, { email: otherOwner })).status, 404);
+  assert.deepEqual(await resources.resourceGetByPath(owner, job.path), before);
+  assert.equal((await resourceRequest(job.id)).status, 200);
+  assert.equal(fixture.calls.length, 0); assert.equal(fixture.modelCalls.length, 0);
+  const original = await resources.resourcePut(owner, "notes/http-delete.md", "original");
+  const current = await resources.resourcePut(owner, original.path, "updated");
+  assert.equal(await resources.resourceDeleteIfCurrent(original), false, "a stale full snapshot cannot delete a changed resource");
+  assert.deepEqual(await resources.resourceGetByPath(owner, original.path), current);
+  assert.equal((await resourceRequest(current.id)).status, 200);
+  assert.equal(await resources.resourceGetByPath(owner, original.path), null);
+  const staleJob = await makeApprovalCase("http-resource-stale-job");
+  const stale = staleJob.automation.resource;
+  const changed = await resources.resourcePut(owner, stale.path, stale.content + "\nchanged");
+  assert.equal(await resources.resourceDeleteIfCurrent(stale), false);
+  assert.deepEqual(await resources.resourceGetByPath(owner, stale.path), changed);
+  assert.equal((await resourceRequest(changed.id)).status, 200);
+});
+
+for (const order of ["lock", "delete"]) test(`authenticated snapshot DELETE serializes actual wait publication with ${order} ordering`, async () => {
+  const fixture = await makeApprovalCase("http-snapshot-race-" + order, { repeatLocal: false });
+  const { deletionRaceCase } = await import("./fixtures/automation-approval-recovery-gaps.mjs");
+  const result = await deletionRaceCase("http-snapshot-" + order, fixture, approvalFixture, async () => {
+    const response = await resourceRequest(fixture.automation.resource.id);
+    return response.status === 200 ? { deleted: true } : { error: response.body.error ?? response.body.message };
+  }, async () => [], "snapshot-delete");
+  assert.equal(result.predicateHit, 1); assert.equal(result.configuredEffects, 0);
+  assert.equal(result.deleteBarrierHit, order === "lock" ? 1 : 0);
+  assert.ok(["wait", "delete"].includes(result.winner));
+  if (result.winner === "delete") assert.equal(result.terminalCode, "automation_approval_changed");
 });
