@@ -183,3 +183,133 @@ export async function runApprovalPredicateStopCase(reason, name) {
     db.execute = execute;
   }
 }
+
+// A real continuation finishes Native before the selected terminal history write.
+// Child isolation lets the normal tracked-work drain await bookkeeping without
+// shutting down the parent suite's execution owner.
+export async function runTerminalHistoryWriteCase(name, failWrite, errorOutcome) {
+  const fixture = await makeApprovalCase(name, { triggerType: "webhook", repeatLocal: false });
+  if (errorOutcome) {
+    const meta = { ...fixture.automation.meta, deliveryPlatform: "terminal-history-no-adapter", deliveryDestination: "no-send" };
+    await resources.resourcePut(owner, fixture.automation.resource.path, frontmatter.buildJobResourceContent(meta, fixture.automation.body));
+  }
+  let release, followupHit = 0;
+  const gate = new Promise(resolve => { release = resolve; });
+  fixture.engine.stream = async function* (options) {
+    fixture.modelCalls.push(structuredClone(options.messages));
+    if (!JSON.stringify(options.messages).includes("configured-result")) {
+      yield { type: "assistant-content", parts: [{ type: "tool-call", name: mcpName, id: "terminal-history-gate", input: toolInput }] };
+      yield { type: "stop", reason: "tool_use" };
+    } else {
+      followupHit++;
+      await gate;
+      yield { type: "assistant-content", parts: [{ type: "text", text: "Known continuation answer." }] };
+      yield { type: "stop", reason: "end_turn" };
+    }
+  };
+  const dispatcher = await loadCore("triggers/dispatcher.js"), tasks = await loadCore("integrations/pending-tasks-store.js");
+  const worker = await loadCore("integrations/automation-webhook-task.js");
+  await dispatcher.initTriggerDispatcher(fixture.deps);
+  const resource = fixture.automation.resource, taskId = "terminal-history-" + name;
+  await tasks.insertPendingTask({ id: taskId, platform: "automation-webhook", externalThreadId: `${owner}:${resource.path}`,
+    ownerEmail: owner, orgId: null, externalEventKey: taskId, payload: JSON.stringify({ kind: "automation-webhook",
+      automationId: resource.id, owner, path: resource.path, eventId: taskId, payload: {} }) });
+  assert.equal(await worker.runAutomationWebhookTaskInProcess(taskId, { appId }), "waiting_approval");
+  const [initial] = await history.listAutomationRuns({ owners: [owner], automation: name, appId });
+  const pending = await fixture.pending(initial.id), db = database.getDbExec(), original = db.execute;
+  assert.equal(db, database.getDbExec());
+  const execute = original.bind(db);
+  let faultHits = 0, knownOutcome, rejectWrites = true;
+  const faultLimit = failWrite === "exhaust" ? Infinity : failWrite === "twice" ? 2 : failWrite === "fault" || failWrite === true ? 1 : 0;
+  const reports = [], originalConsoleError = console.error;
+  console.error = (...args) => {
+    if (String(args[0]).includes("Approval continuation bookkeeping remains unsettled:")) reports.push(String(args[1]));
+    originalConsoleError(...args);
+  };
+  const finishedEvents = [];
+  const subscription = bus.subscribe("automation.run.finished", event => { if (event.automationRunId === initial.id) finishedEvents.push(event); });
+  db.execute = async statement => {
+    const sql = String(typeof statement === "string" ? statement : statement.sql).replace(/\s+/g, " ").trim();
+    if (sql.startsWith("UPDATE automation_runs SET status = ?, finished_at = ?, error = ?, error_code = ?") && statement.args?.[4] === initial.id) {
+      knownOutcome = { status: statement.args[0], error: statement.args[2], errorCode: statement.args[3] };
+      if (rejectWrites && faultHits < faultLimit) {
+        const state = await history.getAutomationContinuation(initial.id);
+        assert.equal(state.storedStatus, "resuming"); assert.equal(state.run.finishedAt, null);
+        assert.equal(await runStore.getRunStatus(state.run.runId), "completed", "the exact Native chunk is terminal, not inferred from age");
+        faultHits++;
+        console.log("TERMINAL_HISTORY_WRITE_FAULT " + JSON.stringify({ faultHits, historyId: initial.id,
+          knownStatus: knownOutcome.status, knownErrorCode: knownOutcome.errorCode, nativeRunId: state.run.runId }));
+        throw new Error("Selected continuation terminal history write failed before commit.");
+      }
+    }
+    return execute(statement);
+  };
+  try {
+    await fixture.decide(initial.id, pending);
+    await until(() => followupHit === 1);
+    const live = await history.getAutomationContinuation(initial.id);
+    assert.equal(live.storedStatus, "resuming"); assert.equal(live.run.finishedAt, null);
+    assert.equal(await runStore.getRunStatus(live.resumeRunId), "running");
+    assert.equal((await tasks.getPendingTask(taskId)).status, "waiting_approval");
+    await runner.reconcileAutomationApprovalOutcomes(appId);
+    assert.equal((await history.getAutomationContinuation(initial.id)).storedStatus, "resuming", "recovery cannot finish a live chunk");
+    assert.equal(faultHits, 0);
+    release();
+    await until(async () => await runStore.getRunStatus(live.resumeRunId) === "completed");
+    // Native is already complete, so this drain waits only for known outcome
+    // bookkeeping and its continuation callback, without aborting execution.
+    await runner.interruptBackgroundAutomations(new Promise(() => {}));
+    let state = await history.getAutomationContinuation(initial.id), task = await tasks.getPendingTask(taskId);
+    let resourceStatus = frontmatter.parseJobResource((await resources.resourceGetByPath(owner, resource.path)).content).meta.lastStatus;
+    console.log("TERMINAL_HISTORY_WRITE_DIAGNOSTIC " + JSON.stringify({ faultHits, knownStatus: knownOutcome?.status,
+      knownErrorCode: knownOutcome?.errorCode, storedStatus: state.storedStatus, finished: Boolean(state.run.finishedAt),
+      taskStatus: task.status, resourceStatus, outcomeReconciled: state.outcomeReconciled,
+      configuredEffects: fixture.calls.length, modelCalls: fixture.modelCalls.length, finishedEvents: finishedEvents.length }));
+    const expectedFaults = failWrite === "exhaust" ? 3 : faultLimit;
+    assert.equal(faultHits, expectedFaults, "the exact terminal write faults must precede outcome assertions");
+    if (failWrite === "exhaust") {
+      assert.equal(state.storedStatus, "resuming"); assert.equal(state.run.finishedAt, null);
+      assert.equal(state.outcomeReconciled, false); assert.equal(task.status, "waiting_approval");
+      assert.equal(finishedEvents.length, 0);
+      assert.equal(state.context.terminalOutcome.status, errorOutcome ? "error" : "success");
+      assert.equal(state.context.terminalOutcome.error, knownOutcome.error);
+      assert.equal(state.context.terminalOutcome.errorCode, knownOutcome.errorCode);
+      assert.equal(state.context.terminalOutcome.runId, live.resumeRunId);
+      assert.equal(state.context.terminalOutcome.historyId, initial.id);
+      assert.equal(state.context.terminalOutcome.askId, pending.askId);
+      assert.equal(state.context.terminalOutcome.turnId, pending.turnId);
+      assert.equal(state.context.terminalOutcome.threadId, initial.threadId);
+      const inspection = await runner.inspectAutomationRun(initial.id, { userEmail: owner, orgId: null, appId });
+      assert.equal(inspection.bookkeepingPending, true); assert.equal(inspection.pending, null);
+      assert.equal(inspection.knownOutcome.status, errorOutcome ? "error" : "success");
+      assert.equal(reports.length, 1, "exhausted persistence must report its known outcome");
+      assert.equal(JSON.parse(reports[0]).knownOutcome.runId, live.resumeRunId);
+      assert.equal(fixture.calls.length, 1); assert.equal(fixture.modelCalls.length, 2);
+      // Restoring storage and running the existing sweep needs no owner decision,
+      // Native dispatch, consumed tool retry or delivery retry.
+      rejectWrites = false;
+      await runner.reconcileAutomationApprovalOutcomes(appId);
+      state = await history.getAutomationContinuation(initial.id); task = await tasks.getPendingTask(taskId);
+      resourceStatus = frontmatter.parseJobResource((await resources.resourceGetByPath(owner, resource.path)).content).meta.lastStatus;
+      assert.equal(faultHits, expectedFaults);
+    } else assert.equal(reports.length, 0);
+    assert.equal(state.storedStatus, errorOutcome ? "error" : "success"); assert.ok(state.run.finishedAt);
+    assert.equal(state.run.errorCode, knownOutcome.errorCode);
+    assert.equal(state.run.error, knownOutcome.error);
+    if (errorOutcome) { assert.equal(state.run.errorCode, "background_automation_failed"); assert.match(state.run.error, /delivery is not supported/); }
+    assert.equal(state.run.threadId, initial.threadId); assert.equal(state.context.askId, pending.askId);
+    assert.equal(state.context.turnId, pending.turnId); assert.equal(state.resumeRunId, live.resumeRunId);
+    assert.notEqual(state.run.runId, initial.runId);
+    assert.equal((await runStore.getRunTurnRef(state.run.runId)).turnId, pending.turnId);
+    assert.equal((await approvalStore.readAgentToolApproval(pending)).status, "consumed");
+    assert.equal(task.status, errorOutcome ? "failed" : "completed"); assert.equal(resourceStatus, state.storedStatus);
+    assert.equal(state.outcomeReconciled, true); assert.equal(fixture.calls.length, 1); assert.equal(fixture.modelCalls.length, 2);
+    assert.equal(finishedEvents.length, 1);
+    const counts = [fixture.calls.length, fixture.modelCalls.length, finishedEvents.length];
+    await runner.reconcileAutomationApprovalOutcomes(appId);
+    assert.equal(await worker.runAutomationWebhookTaskInProcess(taskId, { appId }), "skipped");
+    assert.deepEqual([fixture.calls.length, fixture.modelCalls.length, finishedEvents.length], counts);
+    return { faultHits, status: state.storedStatus, errorCode: state.run.errorCode,
+      taskStatus: task.status, resourceStatus, outcomeReconciled: true, configuredEffects: 1, modelCalls: 2, finishedEvents: 1, bookkeepingReported: reports.length };
+  } finally { release(); db.execute = original; console.error = originalConsoleError; bus.unsubscribe(subscription); restoreTimers(); }
+}

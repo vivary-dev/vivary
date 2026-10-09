@@ -3539,7 +3539,7 @@ diff --git a/dist/client/agent-page/AutomationDetailsDialog.js b/dist/client/age
  function RunStatusDot({ status }) {
      const tone = status === "success"
          ? "bg-emerald-500"
-@@ -17,23 +16,75 @@
+@@ -17,23 +16,76 @@
                      : "bg-amber-500";
      return _jsx("span", { className: `size-1.5 shrink-0 rounded-full ${tone}` });
  }
@@ -3575,7 +3575,7 @@ diff --git a/dist/client/agent-page/AutomationDetailsDialog.js b/dist/client/age
 -                                                    });
 -                                                    onClose();
 -                                                }, children: [_jsx(IconExternalLink, { className: "size-3" }), "Open thread"] })) : null] }, run.id))) }))] })] })] }) }));
-+                                    }) })) : (_jsx("ul", { className: "mt-2 divide-y divide-border/60 border-y border-border/60", children: runs.map((run) => (_jsxs("li", { className: "flex items-center gap-2 py-1.5 text-xs", children: [_jsx(RunStatusDot, { status: run.status }), _jsx("span", { className: "shrink-0 text-muted-foreground", children: formatTimestamp(run.startedAt) }), _jsx("span", { className: "shrink-0 font-medium", children: run.status }), run.error ? (_jsx("span", { className: "min-w-0 flex-1 truncate text-muted-foreground", title: run.error, children: run.error })) : (_jsx("span", { className: "min-w-0 flex-1" })), run.threadId ? _jsx("button", { type: "button", className: "shrink-0 rounded border px-2 py-1", onClick: () => setInspectionId(run.id), children: t("jobs.inspectRun", { defaultValue: "Inspect run" }) }) : null, run.finishedAt ? (_jsxs("span", { className: "shrink-0 tabular-nums text-muted-foreground", children: [Math.round((run.finishedAt - run.startedAt) / 1000), "s"] })) : null] }, run.id))) })), inspectionId ? _jsx(AutomationRunInspection, { historyId: inspectionId, onClose: () => setInspectionId(null) }) : null] })] })] }) }));
++                                    }) })) : (_jsx("ul", { className: "mt-2 divide-y divide-border/60 border-y border-border/60", children: runs.map((run) => (_jsxs("li", { className: "flex items-center gap-2 py-1.5 text-xs", children: [_jsx(RunStatusDot, { status: run.status }), _jsx("span", { className: "shrink-0 text-muted-foreground", children: formatTimestamp(run.startedAt) }), _jsx("span", { className: "shrink-0 font-medium", children: run.status }), run.error ? (_jsx("span", { className: "min-w-0 flex-1 truncate text-muted-foreground", title: run.error, children: run.error })) : (_jsx("span", { className: "min-w-0 flex-1" })), run.threadId ? (run.appId == null ? _jsx("span", { className: "shrink-0 text-muted-foreground", children: t("jobs.legacyInspectionUnavailable", { defaultValue: "Inspection unavailable for this older run." }) }) : _jsx("button", { type: "button", className: "shrink-0 rounded border px-2 py-1", onClick: () => setInspectionId(run.id), children: t("jobs.inspectRun", { defaultValue: "Inspect run" }) })) : null, run.finishedAt ? (_jsxs("span", { className: "shrink-0 tabular-nums text-muted-foreground", children: [Math.round((run.finishedAt - run.startedAt) / 1000), "s"] })) : null] }, run.id))) })), inspectionId ? _jsx(AutomationRunInspection, { historyId: inspectionId, onClose: () => setInspectionId(null) }) : null] })] })] }) }));
  }
 +
 +/** Retained Native data only. No chat runtime, composer, send or resume control. */
@@ -3598,6 +3598,7 @@ diff --git a/dist/client/agent-page/AutomationDetailsDialog.js b/dist/client/age
 +        query.isLoading ? _jsx("p", { children: t("jobs.loadingRun", { defaultValue: "Loading run…" }) }) : null,
 +        query.isError ? _jsx("p", { role: "alert", children: t("jobs.inspectionUnavailable", { defaultValue: "Could not refresh this run. Refresh before deciding." }) }) : null,
 +        data ? _jsx("p", { role: "status", children: data.run.status.replace(/_/g, " ") }) : null,
++        data?.bookkeepingPending ? _jsx("p", { role: "status", children: t("jobs.bookkeepingPending", { defaultValue: "This run finished. Its result is still being saved." }) }) : null,
 +        _jsx("div", { className: "max-h-80 space-y-3 overflow-auto", children: messages.map((item, index) => {
 +            const message = item.message ?? item;
 +            return _jsxs("div", { children: [
@@ -6348,10 +6349,11 @@ diff --git a/dist/jobs/background-automation-runner.d.ts b/dist/jobs/background-
       * Per-run overrides for the run-manager no-progress backstop. `startRun` has
       * always accepted these; the automation path had no way to reach them, and
       * the one indirect route (zeroing `agent.runSoftTimeoutMs`) is global and
-@@ -62,6 +72,10 @@
+@@ -62,6 +72,11 @@
      backgroundNoProgressTimeoutMs?: number;
  }
  export interface BackgroundAutomationRunResult {
++    terminalOutcome?: import("./run-history.js").AutomationTerminalOutcome;
 +    status: "success" | "waiting_approval";
 +    historyId: string | null;
 +    threadId: string;
@@ -6359,7 +6361,7 @@ diff --git a/dist/jobs/background-automation-runner.d.ts b/dist/jobs/background-
      responseText: string;
      runId: string;
  }
-@@ -100,4 +114,33 @@
+@@ -100,4 +115,40 @@
          };
      }[];
  }): string | null;
@@ -6389,10 +6391,17 @@ diff --git a/dist/jobs/background-automation-runner.d.ts b/dist/jobs/background-
 +export declare function inspectAutomationRun(id: string, actor: AutomationApprovalActor, deps?: BackgroundAutomationDeps): Promise<{
 +    run: import("./run-history.js").AutomationRun; threadData: string;
 +    pending: { askId: string; toolName: string; input: unknown; expiresAt: number } | null;
++    bookkeepingPending: boolean; knownOutcome: { status: string; errorCode: string | null } | null;
 +}>;
 +export declare function decideAutomationApproval(input: { historyId: string; askId: string; decision: "approve" | "decline" }, actor: AutomationApprovalActor, deps?: BackgroundAutomationDeps): Promise<{ status: "declined" | "resuming"; historyId: string }>;
 +
 +export declare function reconcileAutomationApprovalOutcomes(appId?: string): Promise<void>;
++
++export declare class AutomationApprovalOutcomePendingError extends Error {
++    readonly outcome: import("./run-history.js").AutomationTerminalOutcome;
++    executionError?: unknown;
++    constructor(outcome: import("./run-history.js").AutomationTerminalOutcome, cause: unknown);
++}
 diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-automation-runner.js
 --- a/dist/jobs/background-automation-runner.js
 +++ b/dist/jobs/background-automation-runner.js
@@ -6423,7 +6432,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 -import { recoveredFactoryOwnerOrgId, } from "./frontmatter.js";
 -import { attachAutomationRunThread, finishAutomationRun, startAutomationRun, } from "./run-history.js";
 +import { JOB_EXECUTION_FRONTMATTER_FIELDS, parseJobResource, patchJobFrontmatterFields, recoveredFactoryOwnerOrgId, } from "./frontmatter.js";
-+import { attachAutomationRunThread, automationHistoryOwner, automationRunClaimLeaseMs, claimAutomationApprovalDecision, finishAutomationRun, getAutomationContinuation, hasUnresolvedAutomationApproval, markAutomationApprovalReady, restoreUnconsumedAutomationApproval, waitForAutomationApproval, INTERRUPTED_RUN_ERROR_CODE, INTERRUPTED_RUN_MESSAGE, startAutomationRun, } from "./run-history.js";
++import { attachAutomationRunThread, automationHistoryOwner, automationRunClaimLeaseMs, claimAutomationApprovalDecision, finishAutomationRun, getAutomationContinuation, hasUnresolvedAutomationApproval, markAutomationApprovalReady, restoreUnconsumedAutomationApproval, retainAutomationApprovalOutcome, waitForAutomationApproval, INTERRUPTED_RUN_ERROR_CODE, INTERRUPTED_RUN_MESSAGE, startAutomationRun, } from "./run-history.js";
 +import { automationApprovalFingerprint, unattendedRegistryFingerprint, UnattendedRunRefusedError } from "./unattended-surface.js";
  /**
   * Default hard abort for one in-process automation run. Read through
@@ -6597,27 +6606,35 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
              tags: {
                  area: "background-automation",
                  automation: automation.name,
-@@ -233,27 +307,25 @@
+@@ -233,27 +307,31 @@
              },
              ...(runIdRef.current ? { aiTraceId: runIdRef.current } : {}),
          });
 -        await recordRunOutcome(historyId, "error", `${message}. No delivery was confirmed.`, errorCode);
-+        await recordRunOutcome(historyId, interrupted ? "interrupted" : "error", `${message}. No delivery was confirmed.`, errorCode, finish);
++        try {
++            await recordRunOutcome(historyId, interrupted ? "interrupted" : "error", `${message}. No delivery was confirmed.`, errorCode, finish, options.continuation);
++        } catch (bookkeepingError) {
++            if (bookkeepingError instanceof AutomationApprovalOutcomePendingError)
++                bookkeepingError.executionError = err;
++            throw bookkeepingError;
++        }
          throw err;
      }
      // Outside the try: history is bookkeeping about the run, so a failure to
      // write it must not turn a completed automation into a reported failure.
 -    await recordRunOutcome(historyId, "success");
-+    if (result.status === "waiting_approval")
-+        return result;
-+    await recordRunOutcome(historyId, "success", undefined, undefined, finish);
-     return result;
- }
+-    return result;
+-}
 -/**
 - * Link the run to its agent thread. Bookkeeping again: the automation is
 - * already executing by this point, so a failed write costs the cross-reference
 - * in the history view, not the run.
 - */
++    if (result.status === "waiting_approval")
++        return result;
++    const terminalOutcome = await recordRunOutcome(historyId, "success", undefined, undefined, finish, options.continuation, result.responseText);
++    return terminalOutcome ? { ...result, terminalOutcome } : result;
++}
 +/** Durable admission must succeed before inserting or starting a Native chunk. */
  async function recordRunThread(historyId, threadId, runId) {
 -    if (!historyId)
@@ -6633,7 +6650,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
      }
  }
  function backgroundAutomationPersistFailure(input) {
-@@ -300,7 +372,18 @@
+@@ -300,7 +378,18 @@
          if (!repo || typeof repo !== "object" || Array.isArray(repo)) {
              throw new Error(`Background automation thread ${input.threadId} has unreadable thread data.`);
          }
@@ -6653,7 +6670,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const events = [...(input.run.events ?? [])];
          if (input.persistFailure) {
              events.push({
-@@ -324,6 +407,8 @@
+@@ -324,6 +413,8 @@
              repo = foldAssistantTurn(repo, assistantMsg, {
                  runId: input.run.runId,
                  turnId: input.run.turnId,
@@ -6662,21 +6679,51 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
              });
          }
          const meta = extractThreadMeta(repo);
-@@ -331,11 +416,11 @@
+@@ -331,15 +422,36 @@
          await updateThreadData(input.threadId, JSON.stringify(repo), input.threadTitle || row.title, meta.preview || row.preview, Array.isArray(messages) ? messages.length : 0);
      });
  }
 -async function recordRunOutcome(historyId, status, error, errorCode) {
-+async function recordRunOutcome(historyId, status, error, errorCode, finish) {
++/** Bookkeeping failure is distinct from the known execution outcome. */
++export class AutomationApprovalOutcomePendingError extends Error {
++    constructor(outcome, cause) {
++        super("The automation finished, but its known outcome is still awaiting storage.", { cause });
++        this.outcome = outcome;
++    }
++}
++async function recordRunOutcome(historyId, status, error, errorCode, finish, continuation, responseText) {
      if (!historyId)
          return;
-     try {
+-    try {
 -        await finishAutomationRun(historyId, status, error, errorCode);
-+        await finishAutomationRun(historyId, status, error, errorCode, finish);
-     }
-     catch (err) {
-         console.error(`[automations] Could not record run ${historyId} as ${status}:`, err);
-@@ -349,19 +434,23 @@
+-    }
+-    catch (err) {
+-        console.error(`[automations] Could not record run ${historyId} as ${status}:`, err);
+-    }
++    const outcome = continuation ? { historyId, askId: continuation.askId, threadId: continuation.threadId,
++        turnId: continuation.turnId, runId: continuation.resumeRunId, status, error: error ?? null,
++        errorCode: errorCode ?? null, emitFinished: finish.emitFinished,
++        ...(responseText === undefined ? {} : { responseText: redactText(responseText) }) } : null;
++    let storageError;
++    if (outcome) {
++        try { await retainAutomationApprovalOutcome(continuation, outcome); }
++        catch (err) { storageError = err; }
++    }
++    for (let attempt = 0; attempt < (outcome ? 2 : 1); attempt++) {
++        try {
++            await finishAutomationRun(historyId, status, error, errorCode, finish);
++            return outcome;
++        } catch (err) {
++            storageError = err;
++            console.error(`[automations] Could not record run ${historyId} as ${status}:`, err);
++        }
++    }
++    if (outcome)
++        throw new AutomationApprovalOutcomePendingError(outcome, storageError);
+ }
+ async function executeBackgroundAutomation(options, deps, historyId, runIdRef) {
+     const { automation, ownerEmail, orgId, prompt, threadTitle, usageLabel } = options;
+@@ -349,19 +461,23 @@
          orgId,
      }, async () => {
          const baseActions = await deps.getActions(automation);
@@ -6712,7 +6759,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const userApiKey = await getOwnerActiveApiKey(ownerEmail);
          // The run manager invokes its detached callback after the scheduler's
          // setup stack has yielded, so the engine's credentials must be captured
-@@ -382,11 +471,90 @@
+@@ -382,11 +498,90 @@
              engine.defaultModel;
          const model = normalizeModelForEngine(engine, modelCandidate);
          const systemPrompt = await deps.getSystemPrompt(ownerEmail);
@@ -6807,7 +6854,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (runIdRef)
              runIdRef.current = runId;
          await recordRunThread(historyId, thread.id, runId);
-@@ -425,170 +593,275 @@
+@@ -425,170 +620,275 @@
          // handoff to the unclaimed-background-run sweep — it gets reaped as
          // "background_worker_never_started" out from under a still-executing
          // job the moment any single tool call runs past the 25s grace window.
@@ -7234,7 +7281,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const usage = usageRef.current;
          if (usage &&
              (usage.inputTokens > 0 ||
-@@ -613,6 +886,8 @@
+@@ -613,6 +913,8 @@
                  // Usage attribution must not break an otherwise successful run.
              }
          }
@@ -7243,7 +7290,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (responseText.trim() &&
              automation.meta.deliveryPlatform &&
              automation.meta.deliveryDestination) {
-@@ -627,6 +902,268 @@
+@@ -627,6 +929,309 @@
                  tenantId: automation.meta.deliveryTenantId,
              });
          }
@@ -7313,7 +7360,9 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +    const recoverableWait = pending && state.storedStatus === "waiting_approval" && !state.run.approvalReady &&
 +        await canRecoverWaitingTurn(pending);
 +    return { run: { ...state.run, approvalReady: state.run.approvalReady || Boolean(recoverableWait) }, threadData: JSON.stringify(redactTextInValue(JSON.parse(state.thread.threadData || "{}"))),
-+        pending: pending && ["waiting_approval", "resuming"].includes(state.storedStatus) ? {
++        bookkeepingPending: Boolean(pending?.terminalOutcome && !state.run.finishedAt),
++        knownOutcome: pending?.terminalOutcome ? { status: pending.terminalOutcome.status, errorCode: pending.terminalOutcome.errorCode } : null,
++        pending: pending && !pending.terminalOutcome && ["waiting_approval", "resuming"].includes(state.storedStatus) ? {
 +            askId: pending.askId, toolName: pending.toolName, input: JSON.parse(redactText(JSON.stringify(pending.input))),
 +            expiresAt: pending.expiresAt,
 +        } : null };
@@ -7343,7 +7392,16 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +    await markAutomationApprovalReady(pending.historyId, pending.askId);
 +    state.run.approvalReady = true;
 +}
-+async function recordApprovalExecutionOutcome(context, status, error, runId = context.runId) {
++async function recordApprovalExecutionOutcome(context, status, error, runId = context.runId, knownOutcome) {
++    if (knownOutcome) {
++        try {
++            await retainAutomationApprovalOutcome(context, knownOutcome);
++            await finishAutomationRun(context.historyId, knownOutcome.status, knownOutcome.error, knownOutcome.errorCode,
++                { emitFinished: knownOutcome.emitFinished });
++        } catch (storageError) {
++            throw new AutomationApprovalOutcomePendingError(knownOutcome, storageError);
++        }
++    }
 +    if (status !== "waiting_approval") {
 +        await reconcileAutomationApprovalOutcome(context.historyId);
 +        return;
@@ -7355,8 +7413,29 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +}
 +async function reconcileAutomationApprovalOutcome(id) {
 +    const { hasNewerAutomationRun, markAutomationApprovalOutcomeReconciled } = await import("./run-history.js");
-+    const state = await getAutomationContinuation(id);
-+    if (!state?.run.finishedAt || !state.context || state.outcomeReconciled)
++    let state = await getAutomationContinuation(id);
++    if (!state?.context || state.outcomeReconciled)
++        return;
++    if (state.context.historyId !== state.run.id || state.context.threadId !== state.run.threadId ||
++        automationHistoryOwner(state.context.resourceOwner, { userEmail: state.context.ownerEmail, orgId: state.context.orgId }) !== state.run.owner ||
++        state.context.resourcePath !== state.run.path || (state.context.orgId ?? null) !== (state.run.orgId ?? null))
++        throw new Error("The terminal approval history binding changed.");
++    if (!state.run.finishedAt && state.context.terminalOutcome) {
++        const outcome = state.context.terminalOutcome;
++        const reference = await getRunTurnRef(outcome.runId), native = await getRunById(outcome.runId);
++        if (outcome.historyId !== id || outcome.askId !== state.context.askId ||
++            outcome.threadId !== state.run.threadId || outcome.turnId !== state.context.turnId ||
++            outcome.runId !== state.run.runId || outcome.runId !== state.resumeRunId ||
++            !native || native.status === "running" || _activeBackgroundRunIds.has(outcome.runId) ||
++            reference?.threadId !== outcome.threadId || reference.turnId !== outcome.turnId ||
++            !["success", "error", "interrupted"].includes(outcome.status) ||
++            (outcome.status === "success" && native.status !== "completed"))
++            throw new Error("The known approval outcome has no confirmed terminal Native identity.");
++        await retainAutomationApprovalOutcome(state.context, outcome);
++        await finishAutomationRun(id, outcome.status, outcome.error, outcome.errorCode, { emitFinished: outcome.emitFinished });
++        state = await getAutomationContinuation(id);
++    }
++    if (!state?.run.finishedAt)
 +        return;
 +    const { run, context } = state;
 +    if (context.historyId !== run.id || context.threadId !== run.threadId ||
@@ -7435,6 +7514,10 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +        await reconcileAutomationApprovalOutcome(input.historyId);
 +        throw approvalDecisionRefusal("The automation is no longer waiting for approval.");
 +    }
++    if (pending?.terminalOutcome) {
++        await reconcileAutomationApprovalOutcome(input.historyId);
++        throw approvalDecisionRefusal("This execution already finished. Its known outcome must settle without another action.");
++    }
 +    if (!pending || input.askId !== pending.askId || !["approve", "decline"].includes(input.decision))
 +        throw approvalDecisionRefusal("This is not the current pending automation action.");
 +    if (isBackgroundAutomationsClosed())
@@ -7503,10 +7586,15 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +        historyId: input.historyId, continuation: { ...pending, resumeRunId } }, deps);
 +    // Match Run now: return a receipt while this existing runner owns execution.
 +    trackBackgroundAutomationWork(work.then(async (result) => {
-+        await recordApprovalExecutionOutcome(pending, result.status, undefined, result.runId);
++        await recordApprovalExecutionOutcome(pending, result.status, undefined, result.runId, result.terminalOutcome);
 +    }, async (error) => {
++        if (error instanceof AutomationApprovalOutcomePendingError) {
++            await recordApprovalExecutionOutcome(pending, error.outcome.status, error.outcome.error, error.outcome.runId, error.outcome);
++            return;
++        }
 +        await recordApprovalExecutionOutcome(pending, error?.errorCode === INTERRUPTED_RUN_ERROR_CODE ? "interrupted" : "error", redactText(error.message));
-+    })).catch((error) => console.error("[automations] Approval continuation outcome could not be recorded:", redactText(String(error))));
++    })).catch((error) => console.error("[automations] Approval continuation bookkeeping remains unsettled:",
++        redactText(JSON.stringify({ message: String(error), knownOutcome: error instanceof AutomationApprovalOutcomePendingError ? error.outcome : null }))));
 +    return { status: "resuming", historyId: input.historyId };
 +}
 +
@@ -7783,7 +7871,7 @@ diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
  /**
   * Attach the agent thread once it exists. The thread is created after the run
   * row so the history survives a crash between the two.
-@@ -81,4 +104,45 @@
+@@ -81,4 +104,53 @@
      automation: string;
      appId?: string | null;
      limit?: number;
@@ -7792,6 +7880,7 @@ diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
  }): Promise<AutomationRun[]>;
 +
 +export interface AutomationApprovalContext {
++    terminalOutcome?: AutomationTerminalOutcome;
 +    askId: string;
 +    historyId: string;
 +    ownerEmail: string;
@@ -7829,6 +7918,13 @@ diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
 +export declare function hasNewerAutomationRun(run: AutomationRun): Promise<boolean>;
 +
 +export declare function assertLegacyJobApprovalDeletionAllowed(resource: { id: string; owner: string; path: string }, meta: import("./frontmatter.js").JobFrontmatter, appId?: string, exec?: import("../db/client.js").DbExec): Promise<void>;
++
++export interface AutomationTerminalOutcome {
++    historyId: string; askId: string; threadId: string; turnId: string; runId: string;
++    status: "success" | "error" | "interrupted"; error: string | null; errorCode: string | null;
++    emitFinished: boolean; responseText?: string;
++}
++export declare function retainAutomationApprovalOutcome(context: AutomationApprovalContext, outcome: AutomationTerminalOutcome): Promise<void>;
 diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 --- a/dist/jobs/run-history.js
 +++ b/dist/jobs/run-history.js
@@ -8086,7 +8182,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          args: [owner, automation, cutoff],
      });
  }
-@@ -384,12 +441,201 @@
+@@ -384,12 +441,229 @@
      const appId = options.appId?.trim() || null;
      const placeholders = owners.map(() => "?").join(", ");
      const appFilter = appId ? " AND (app_id = ? OR app_id IS NULL)" : "";
@@ -8136,6 +8232,33 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +    });
 +    if (result.rowsAffected !== 1)
 +        throw new Error("The automation approval wait could not be saved.");
++}
++/** Retain completion evidence in the existing exact approval history context. */
++export async function retainAutomationApprovalOutcome(context, outcome) {
++    await ensureTable();
++    const db = getDbExec();
++    const { rows } = await db.execute({ sql: "SELECT * FROM automation_runs WHERE id = ?", args: [context.historyId] });
++    const row = rows[0], stored = row?.approval_context ? JSON.parse(String(row.approval_context)) : null;
++    if (!row || !stored || stored.askId !== context.askId || stored.historyId !== context.historyId ||
++        stored.threadId !== context.threadId || stored.turnId !== context.turnId ||
++        stored.resourceId !== context.resourceId || stored.resourceOwner !== context.resourceOwner ||
++        stored.resourcePath !== context.resourcePath || stored.ownerEmail !== context.ownerEmail ||
++        (stored.orgId ?? null) !== (context.orgId ?? null) || row.thread_id !== outcome.threadId ||
++        row.run_id !== outcome.runId || row.resume_run_id !== outcome.runId ||
++        outcome.historyId !== row.id || outcome.askId !== row.pending_ask_id || outcome.turnId !== stored.turnId ||
++        !["success", "error", "interrupted"].includes(outcome.status))
++        throw new Error("The known approval outcome binding changed.");
++    if (stored.terminalOutcome && JSON.stringify(stored.terminalOutcome) !== JSON.stringify(outcome))
++        throw new Error("The known approval outcome conflicts with retained evidence.");
++    if (row.finished_at != null || stored.terminalOutcome)
++        return;
++    const result = await db.execute({ sql: `UPDATE automation_runs SET approval_context = ?
++        WHERE id = ? AND approval_context = ? AND pending_ask_id = ? AND run_id = ?
++          AND resume_run_id = ? AND thread_id = ? AND status = 'resuming' AND finished_at IS NULL`,
++        args: [JSON.stringify({ ...stored, terminalOutcome: outcome }), row.id, row.approval_context,
++            outcome.askId, outcome.runId, outcome.runId, outcome.threadId] });
++    if (Number(result.rowsAffected ?? result.rowCount ?? 0) !== 1)
++        throw new Error("The known approval outcome could not be retained.");
 +}
 +export async function markAutomationApprovalReady(id, askId) {
 +    const result = await getDbExec().execute({
@@ -8261,8 +8384,9 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +export async function listUnreconciledAutomationApprovalRuns(appId) {
 +    await ensureTable();
 +    const result = await getDbExec().execute({
-+        sql: `SELECT id FROM automation_runs WHERE finished_at IS NOT NULL
-+          AND approval_context IS NOT NULL AND approval_outcome_reconciled = 0
++        sql: `SELECT id FROM automation_runs WHERE approval_context IS NOT NULL
++          AND approval_outcome_reconciled = 0 AND (finished_at IS NOT NULL OR
++            ${isPostgres() ? "approval_context::jsonb -> 'terminalOutcome' IS NOT NULL" : "json_extract(approval_context, '$.terminalOutcome') IS NOT NULL"})
 +          ${appId ? 'AND app_id = ?' : ''} ORDER BY finished_at LIMIT 100`,
 +        args: appId ? [appId] : [],
 +    });

@@ -506,13 +506,27 @@ test("past runs remain in Settings without an interactive Open thread control", 
   assert.deepEqual(details.buttons.filter(label => /open thread/i.test(label)), [], "no run offers Open thread");
 });
 
+test("Settings labels listed legacy NULL-app threads as unavailable instead of offering Inspect", async t => {
+  const { code } = await buildProof({ source: proofSource, sourcefile: "automation-legacy-inspection-proof.tsx",
+    entry: path.join(CLIENT, "agent-page", "AutomationDetailsDialog.js"), stubs });
+  const proof = await importProof(code), restoreDom = installDom(); t.after(restoreDom);
+  const row = { id: "legacy-threaded", appId: null, threadId: "retained-thread", status: "success",
+    startedAt: Date.now() - 1000, finishedAt: Date.now(), error: null };
+  const legacy = await proof.renderDetails([row]);
+  assert.equal(legacy.rows, 1); assert.match(legacy.text, /Inspection unavailable for this older run/);
+  assert.equal(legacy.buttons.includes("Inspect run"), false);
+  const current = await proof.renderDetails([{ ...row, appId: "status-test" }]);
+  assert.equal(current.buttons.filter(label => label === "Inspect run").length, 1);
+  assert.doesNotMatch(current.text, /Inspection unavailable/);
+});
+
 test("Settings inspects retained tools and sends only the exact pending approval decision", async t => {
   const { code } = await buildProof({ source: proofSource, sourcefile: "automation-approval-ui-proof.tsx",
     entry: path.join(CLIENT, "agent-page", "AutomationDetailsDialog.js"), stubs });
   const proof = await importProof(code);
   const restoreDom = installDom();
   t.after(restoreDom);
-  const data = { run: { id: "history-approval", threadId: "thread-approval", status: "waiting_approval",
+  const data = { run: { id: "history-approval", appId: "status-test", threadId: "thread-approval", status: "waiting_approval",
     startedAt: Date.now(), finishedAt: null, approvalReady: true },
     threadData: JSON.stringify({ messages: [{ message: { role: "assistant", content: [
       { type: "tool-call", toolName: "resources", argsText: '{"path":"notes/prior.md"}', result: "Retained local result" },

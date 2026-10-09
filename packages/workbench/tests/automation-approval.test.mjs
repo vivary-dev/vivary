@@ -1541,3 +1541,48 @@ test("terminal approval custody blocks deletion until reconciliation and isolate
   assert.equal(receipt.initialTaskStatus, "waiting_approval"); assert.equal(receipt.finalTaskStatus, "failed");
   assert.equal(receipt.configuredEffects, 0); assert.equal(receipt.modelCalls, 1); assert.equal(receipt.drained, true);
 });
+
+for (const outcome of ["success", "error"]) for (const write of ["healthy", "fault", "twice", "exhaust"])
+  test(`${outcome} approval completion preserves its known outcome after ${write} terminal history write`, async () => {
+    const result = await child(`terminal-history-${outcome}-${write}`, `terminal-history-${outcome}-${write}`);
+    assert.equal(result.faultHits, write === "exhaust" ? 3 : write === "twice" ? 2 : write === "fault" ? 1 : 0); assert.equal(result.status, outcome);
+    assert.equal(result.bookkeepingReported, write === "exhaust" ? 1 : 0);
+    assert.equal(result.taskStatus, outcome === "success" ? "completed" : "failed");
+    assert.equal(result.resourceStatus, outcome); assert.equal(result.outcomeReconciled, true);
+    assert.equal(result.configuredEffects, 1); assert.equal(result.modelCalls, 2); assert.equal(result.finishedEvents, 1);
+  });
+
+test("listed NULL-app legacy history stays unavailable to inspection and approval", async () => {
+  const fixture = await makeApprovalCase("legacy-inspection-binding");
+  const result = await wait(fixture), pending = await fixture.pending(result.historyId);
+  const db = database.getDbExec();
+  const list = (await loadCore("jobs/actions/list-automation-runs.js")).default;
+  try {
+    await db.execute({ sql: "UPDATE automation_runs SET app_id = NULL WHERE id = ?", args: [result.historyId] });
+    const rows = await list.run({ scope: "personal", name: fixture.automation.name }, actor);
+    const legacy = rows.find(row => row.id === result.historyId);
+    assert.ok(legacy); assert.equal(legacy.appId, null); assert.equal(legacy.threadId, result.threadId);
+    assert.deepEqual(await list.run({ scope: "personal", name: fixture.automation.name }, { ...actor, userEmail: "foreign@example.test" }), []);
+    for (const who of [actor, { ...actor, userEmail: "foreign@example.test" }, { ...actor, appId: "other-app" }]) {
+      await assert.rejects(runner.inspectAutomationRun(result.historyId, who, fixture.deps), /not available/);
+      await assert.rejects(fixture.decide(result.historyId, pending, "approve", who), /not available/);
+    }
+    assert.equal(configuredCalls(fixture).length, 0);
+    await db.execute({ sql: "UPDATE automation_runs SET app_id = ?, org_id = ? WHERE id = ?", args: [appId, "foreign-org", result.historyId] });
+    assert.equal((await list.run({ scope: "personal", name: fixture.automation.name }, actor)).some(row => row.id === result.historyId), false);
+    await assert.rejects(runner.inspectAutomationRun(result.historyId, actor, fixture.deps), /not available/);
+    await assert.rejects(fixture.decide(result.historyId, pending), /not available/);
+    await db.execute({ sql: "UPDATE automation_runs SET app_id = ?, org_id = NULL WHERE id = ?", args: ["other-app", result.historyId] });
+    assert.equal((await list.run({ scope: "personal", name: fixture.automation.name }, actor)).some(row => row.id === result.historyId), false);
+    await assert.rejects(runner.inspectAutomationRun(result.historyId, actor, fixture.deps), /not available/);
+    await assert.rejects(fixture.decide(result.historyId, pending), /not available/);
+  } finally {
+    await db.execute({ sql: "UPDATE automation_runs SET app_id = ?, org_id = NULL WHERE id = ?", args: [appId, result.historyId] });
+    await fixture.decide(result.historyId, pending, "decline");
+  }
+  const terminal = await history.getAutomationRun(result.historyId);
+  await db.execute({ sql: "UPDATE automation_runs SET app_id = NULL, approval_context = NULL WHERE id = ?", args: [result.historyId] });
+  const [legacyTerminal] = await list.run({ scope: "personal", name: fixture.automation.name }, actor);
+  assert.equal(legacyTerminal.id, terminal.id); assert.equal(legacyTerminal.appId, null); assert.ok(legacyTerminal.threadId);
+  await assert.rejects(runner.inspectAutomationRun(terminal.id, actor, fixture.deps), /not available/);
+});

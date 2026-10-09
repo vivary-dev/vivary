@@ -246,6 +246,9 @@ Settings > Agent > Automations holds the controls:
 - **Manage** > **Run now** runs it once. The next scheduled run does not change.
 - **Manage** > **Edit** changes the schedule and time zone. Pick a preset, or enter a cron
   expression under **Advanced**.
+- **Past runs** may include older runs whose inspection is unavailable. Their
+  recorded status stays visible. A retained result may show that it is still being
+  saved. Automatic recovery depends on successfully retaining that result.
 - **Manage** > **Delete** refuses while an approval is waiting or resuming, or while
   a finished approval's outcome is still being recorded. Inspect a pending run and
   approve or decline it first. For a finished run, retry Delete after settlement.

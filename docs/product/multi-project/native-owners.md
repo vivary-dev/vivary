@@ -127,3 +127,21 @@ Webhook deletion initializes the existing webhook-token and app-secret schema ow
 Every thrown automation completion callback error rejects the background runner promise and is rethrown to Native's completion handler. The callback-wide boundary covers persistence, durable stop-marker reads and response collection while preserving existing primary and typed errors. Native finalization remains outside the callback. On 2026-10-08, focused controller controls passed 7/7 and were included in the ordinary 26-file batch, which passed 417/417. Configured workbench typecheck passed. Faulted approval completion is an inspectable terminal error with an unconsumed ask that cannot resume or dispatch, not a recovered waiting result. These results cover the uncommitted Native 0.176.5 candidate. The retained 4a01d31 CI/build predates it. A new-head build and built UI journey, required published exact-head review, live PostgreSQL execution and packaged Windows acceptance remain pending.
 
 A webhook completion failure with exact persisted terminal approval context retains its existing task custody. The dispatcher validates the retained resource, execution owner, organization, app, history and thread and uses the existing task owner before propagating the original exception. Worker failure preserves the waiting payload for terminal reconciliation. Its completion write is conditional on the exact still-processing webhook claim, including its scope, payload, timestamp and attempt. A lost transition returns failure without overwriting terminal custody or a later claim and without dispatching the next task. A subsequent delivery cannot start another model run or tool action. Ordinary no-context webhook and event error handling and shutdown retry are unchanged. The maintained child controls observe actual persisted outcomes and zero configured effects. Runtime validation of this successor remains pending, separately from the passing b80cfa4 baseline.
+
+Approval continuation completion retains its exact known result in the existing
+approval history context before terminal bookkeeping. Execution status, error,
+code, response and finished-event policy remain separate from storage success.
+Two rejected history writes propagate a typed bookkeeping error carrying that
+result to completion, which retries only persistence. When outcome evidence was
+stored successfully, exhaustion is inspectable as a result still needing storage,
+with no executable decision. The existing recovery sweep can settle that retained
+evidence only after confirming the exact terminal Native chunk, logical turn and
+history binding. If every evidence write fails, completion reports the known
+outcome as unsettled without a durable automatic-recovery guarantee.
+It never infers success from age or liveness, changes known success into execution
+failure, or repeats a model turn, consumed tool or delivery. Ordinary non-approval
+history bookkeeping remains best effort.
+Legacy NULL-app history remains listed but Settings marks inspection unavailable.
+NULL app is never a wildcard in shared inspection or approval authorization.
+Maintained success/error one-write, two-write, exhaustion and healthy controls, a live continuation
+negative and listing/component controls are pending controller runtime validation.

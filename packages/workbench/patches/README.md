@@ -2911,3 +2911,28 @@ Webhook deletion initializes the existing webhook-token and app-secret schema ow
 Every thrown automation completion callback error rejects the background runner promise and is rethrown to Native's completion handler. The callback-wide boundary covers persistence, durable stop-marker reads and response collection while preserving existing primary and typed errors. Native finalization remains outside the callback. On 2026-10-08, the focused controller gate passed 7/7 and the ordinary 26-file batch passed 417/417 with those focused cases included. Configured workbench typecheck passed. Faulted approval completion is an inspectable terminal error with an unconsumed ask that cannot resume or dispatch, not a recovered waiting result. The results cover the uncommitted Native 0.176.5 candidate. A new-head build and built UI journey, required published exact-head review, live PostgreSQL execution and packaged Windows acceptance remain pending.
 
 The webhook completion custody successor adds installed-owner child controls for a selected stop-marker read fault after assistant persistence and durable history/task waiting, the identical healthy wait and an ordinary no-context webhook error. The fault control observes actual worker, Native, history, task and payload fields before assertions. It then checks a delivery before any decision or explicit reconciliation, failed task/resource convergence, duplicate reconciliation and delivery, and an unconsumed non-executable ask with no model or tool replay. Additional real-worker barriers let reconciliation finish before the dispatcher lookup and let a task settle or acquire a newer claim before the actual completion write. Webhook completion uses the pending-task owner to atomically compare the processing status, platform, external thread, owner, organization, payload, creation time, claim timestamp and attempt. Only one affected row permits a completed result or follower dispatch. A lost comparison leaves current custody untouched and reports failure. Existing one-argument completion callers retain their contracts. These new controls have only source syntax checks in this allocation. Passing b80cfa4 CI/build/UI evidence predates this dispatcher correction and does not establish its acceptance.
+
+### Known continuation outcomes and legacy inspection
+
+Approval continuation completion records its exact known outcome in the existing
+approval context independently of terminal-history persistence. Two rejected
+writes return a typed bookkeeping error carrying the same result to completion.
+Completion retries only history persistence before reconciliation. Exhaustion is
+reported separately from the execution outcome. Inspectable automatic recovery
+depends on successfully stored outcome evidence in the existing approval history
+context. The existing sweep can settle that evidence only after confirming the
+exact terminal Native chunk, history, thread and turn. If every evidence write
+fails, completion reports the known outcome as unsettled without a durable
+automatic-recovery guarantee. It does not infer outcomes from age or liveness. Models, consumed tools and delivery are never repeated. Ordinary
+non-approval bookkeeping remains best effort. Maintained real webhook controls
+cover healthy outcomes, one and two selected pre-commit rejections, exhausted
+writes with durable known success/error, storage restoration and the live chunk
+negative. Controller runtime validation remains pending.
+
+NULL-app legacy history stays in the normal scoped list. Settings labels its
+inspection unavailable instead of offering Inspect. The shared inspection and
+approval authorizer still requires exact app, owner and organization binding.
+Listing and component controls cover unavailable legacy rows and current Inspect
+positives. These successor controls are source-checked and await controller
+runtime validation. Existing eb9bce9 evidence remains historical acceptance of the
+preceding bytes.

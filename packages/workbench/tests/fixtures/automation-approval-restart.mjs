@@ -36,6 +36,11 @@ if (role === "postgres-policy" || role === "postgres-retention") {
   console.log("APPROVAL_RESULT " + JSON.stringify({ enabledBindings: stub.enabledBindings, readback }));
   process.exit(0);
 }
+if (role.startsWith("terminal-history-")) {
+  const { runTerminalHistoryWriteCase } = await import("./automation-approval-fixture.mjs");
+  console.log("APPROVAL_RESULT " + JSON.stringify(await runTerminalHistoryWriteCase(name, role.split("-").at(-1), role.includes("-error-"))));
+  process.exit(0);
+}
 if (role.startsWith("identity-")) {
   const { runIdentityRecoveryCase } = await import("./automation-approval-identity-recovery.mjs");
   console.log("APPROVAL_RESULT " + JSON.stringify(await runIdentityRecoveryCase(role.slice("identity-".length), name)));
