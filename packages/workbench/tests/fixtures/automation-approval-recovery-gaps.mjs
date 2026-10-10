@@ -12,6 +12,7 @@ function loseProcess(receipt) {
 }
 
 export async function runRecoveryGapFixture(role, name, historyId) {
+  if (role === "gap-modern-delete-departed-wait") return modernDepartedDeleteCase(name);
   if (role.startsWith("gap-delete-")) return deletionCase(role.slice("gap-delete-".length), name);
   const f = await import("./automation-approval-fixture.mjs");
   const { makeApprovalCase, history, runner, database, runStore, resources, frontmatter, approvalStore,
@@ -136,6 +137,58 @@ async function terminalReceipt(fixture, pending, f) {
     outcomeReconciled: Boolean((await f.history.getAutomationContinuation(result.id)).outcomeReconciled),
     configuredEffects: fixture.calls.filter(call => call.name === f.mcpName).length,
     modelCalls: fixture.modelCalls.length };
+}
+
+// Settings Delete of a modern organization automation whose creator left. The admin's
+// delete declines the creator's wait, which records the outcome on the definition.
+async function modernDepartedDeleteCase(name) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-modern-delete-"));
+  const url = `file:${path.join(directory, "fixture.sqlite")}`;
+  Object.assign(process.env, { DATABASE_URL: url, DATABASE_URL_UNPOOLED: url });
+  try {
+    const f = await import("./automation-approval-fixture.mjs");
+    const { database, loadCore, owner, appId, mcpName, context, history, runner, resources, approvalStore } = f;
+    const { H3 } = await import("h3");
+    const { runBetterAuthMigrations } = await loadCore("server/better-auth-migrations.js");
+    const { runMigrations } = await loadCore("db/migrations.js");
+    const { ORG_MIGRATIONS } = await loadCore("org/migrations.js");
+    const app = { h3: new H3() };
+    await runBetterAuthMigrations(app);
+    await runMigrations(ORG_MIGRATIONS, { table: "_org_migrations" })(app);
+    const db = database.getDbExec(), orgId = `modern-delete-org-${name}`, admin = "delete-admin@example.test";
+    for (const email of [owner, admin]) await db.execute({
+      sql: 'INSERT INTO "user" (id, email, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+      args: [email, email, "Fixture owner", Date.now(), Date.now()] });
+    await db.execute({ sql: "INSERT INTO organizations (id, name, created_by, created_at) VALUES (?, ?, ?, ?)", args: [orgId, orgId, owner, Date.now()] });
+    for (const [email, role] of [[owner, "owner"], [admin, "admin"]]) await db.execute({
+      sql: "INSERT INTO org_members (id, org_id, email, role, joined_at) VALUES (?, ?, ?, ?, ?)",
+      args: [email + orgId, orgId, email, role, Date.now()] });
+    await context.runWithRequestContext({ userEmail: owner, orgId }, () => f.service.defineAutomation({ userEmail: owner, orgId, appId },
+      { scope: "organization", name, body: "Perform the local step, then the configured step.", triggerType: "schedule",
+        schedule: "0 * * * *", timezone: "UTC", mcpTools: [mcpName] }));
+    const resourceOwner = resources.organizationResourceOwner(orgId);
+    const fixture = await f.makeApprovalCase(name, { existing: true, resourceOwner, repeatLocal: false });
+    const resolved = await runner.resolveBackgroundAutomationIdentity(fixture.automation);
+    assert.equal(resolved.ok, true); assert.equal(resolved.identity.userEmail, owner); assert.equal(resolved.identity.orgId, orgId);
+    const scheduler = await loadCore("jobs/scheduler.js");
+    assert.equal((await context.runWithRequestContext({ userEmail: owner, orgId },
+      () => scheduler.runJobNow(resourceOwner, name, fixture.deps))).status, "waiting_approval");
+    const [run] = await history.listAutomationRuns({ owners: [resourceOwner], automation: name, appId });
+    assert.equal(run.status, "waiting_approval");
+    const pending = await fixture.pending(run.id);
+    // The creator leaves, so only deletion authority can decline the wait.
+    await db.execute({ sql: "DELETE FROM org_members WHERE org_id = ? AND email = ?", args: [orgId, owner] });
+    runner.setAutomationApprovalDependencies(fixture.deps);
+    let outcome;
+    try {
+      outcome = await context.runWithRequestContext({ userEmail: admin, orgId },
+        () => f.service.deleteAutomation({ userEmail: admin, orgId, appId }, "organization", name)).then(() => "deleted", error => error.message);
+    } finally { runner.setAutomationApprovalDependencies(null); }
+    return { outcome, declinedAsk: (await approvalStore.readAgentToolApproval(pending)).status,
+      definitionRemoved: (await resources.resourceGetByPath(resourceOwner, run.path)) === null,
+      historyRemoved: (await history.getAutomationRun(run.id)) === null,
+      configuredEffects: fixture.calls.filter(call => call.name === mcpName).length };
+  } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
 async function deletionCase(kind, name) {

@@ -7568,12 +7568,13 @@ creator or organization scope cannot be resolved refuses deletion only when
 unfinished or unreconciled history is bound to that exact resource. When an
 organization run's owner can no longer act, a principal with deletion authority
 over the same automation may decline its wait, never approve it. An expired request is declined by the
-next settlement pass, so no wait blocks its job forever. A wait saved before its turn was marked
+next settlement pass, so no wait blocks its job forever. If a write fails after a pass
+claims an expired wait, a later pass settles that claim once its lease has passed. A wait saved before its turn was marked
 ready is first recovered, once its run has ended, as an owner's decision recovers it. A personal
 job that runs under an organization keeps its history there, keyed by path, so it is refused
 connected tools at start, and the approval gate refuses to create a wait on any history row
 whose owner or organization differs from the run's binding. Settings Delete by such a principal
-declines that wait first, then deletes the job. A job that runs as the shared
+declines that wait first, reads the job again, then deletes it. A job that runs as the shared
 or organization identity and declares connected tools is refused at start,
 because no person can approve for that identity. Retained history-ID Decline can work without a definition, but a blocked
 deletion preserves normal discovery.
@@ -7654,7 +7655,20 @@ head found that a personal job that runs under an organization shares its histor
 organization owner and the path, with other members' jobs of the same name, so its wait
 blocked their runs and deletes and stayed hidden from its owner's list. The owner chose the
 narrow correction: such a job is refused connected tools at start, as a shared-identity job
-is, so it never holds a wait. Keying waits by resource is issue #209. A shared job that declares connected tools is refused at start, since no
+is, so it never holds a wait. Keying waits by resource is issue #209. The review of the
+next head found two more gaps, each reproduced by a failing test. When a webhook run saved a
+wait and then failed on the call's last allowed attempt, the worker overwrote the task custody
+that the dispatcher had restored and added a second history row. The worker's failure write
+now changes only a pending or processing task, and it records the exhausted-attempts history
+only when that write changed the row. Settings Delete of a modern organization automation
+whose creator left declined the wait, which records its outcome on the definition, then
+refused against its earlier read of the definition. Delete now reads the definition again
+after the decline step and refuses one that was replaced. The Codex review found that an
+expiry pass whose write failed after its claim left the job blocked, and that Inspect run threw
+on a message whose content is a string. A later pass now settles the expiry pass's own stale
+claim, and the inspection renders string content as text. The task, history and deletion
+boundaries described above are unchanged. An owner's approval that crashes mid-resume still
+waits for the owner to revisit it, which issue #205 tracks. A shared job that declares connected tools is refused at start, since no
 person can approve for its pseudo-identity. Legacy job
 deletion with an unresolvable creator or organization scope refuses only when
 history is bound to that exact resource. History cleanup removes an ordinary

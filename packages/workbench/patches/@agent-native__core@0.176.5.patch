@@ -3539,7 +3539,7 @@ diff --git a/dist/client/agent-page/AutomationDetailsDialog.js b/dist/client/age
  function RunStatusDot({ status }) {
      const tone = status === "success"
          ? "bg-emerald-500"
-@@ -17,23 +16,76 @@
+@@ -17,23 +16,82 @@
                      : "bg-amber-500";
      return _jsx("span", { className: `size-1.5 shrink-0 rounded-full ${tone}` });
  }
@@ -3576,9 +3576,15 @@ diff --git a/dist/client/agent-page/AutomationDetailsDialog.js b/dist/client/age
 -                                                    onClose();
 -                                                }, children: [_jsx(IconExternalLink, { className: "size-3" }), "Open thread"] })) : null] }, run.id))) }))] })] })] }) }));
 +                                    }) })) : (_jsx("ul", { className: "mt-2 divide-y divide-border/60 border-y border-border/60", children: runs.map((run) => (_jsxs("li", { className: "flex items-center gap-2 py-1.5 text-xs", children: [_jsx(RunStatusDot, { status: run.status }), _jsx("span", { className: "shrink-0 text-muted-foreground", children: formatTimestamp(run.startedAt) }), _jsx("span", { className: "shrink-0 font-medium", children: run.status }), run.error ? (_jsx("span", { className: "min-w-0 flex-1 truncate text-muted-foreground", title: run.error, children: run.error })) : (_jsx("span", { className: "min-w-0 flex-1" })), run.threadId ? (run.appId == null ? _jsx("span", { className: "shrink-0 text-muted-foreground", children: t("jobs.legacyInspectionUnavailable", { defaultValue: "Inspection unavailable for this older run." }) }) : run.canInspect !== true ? _jsx("span", { className: "shrink-0 text-muted-foreground", children: t("jobs.runInspectionUnavailable", { defaultValue: "Inspection unavailable." }) }) : _jsx("button", { type: "button", className: "shrink-0 rounded border px-2 py-1", onClick: () => setInspectionId(run.id), children: t("jobs.inspectRun", { defaultValue: "Inspect run" }) })) : null, run.finishedAt ? (_jsxs("span", { className: "shrink-0 tabular-nums text-muted-foreground", children: [Math.round((run.finishedAt - run.startedAt) / 1000), "s"] })) : null] }, run.id))) })), inspectionId ? _jsx(AutomationRunInspection, { historyId: inspectionId, onClose: () => setInspectionId(null) }) : null] })] })] }) }));
- }
++}
 +
 +/** Retained Native data only. No chat runtime, composer, send or resume control. */
++/** Core thread data may store a message's content as a string. */
++function messageParts(message) {
++    if (typeof message.content === "string")
++        return [{ type: "text", text: message.content }];
++    return Array.isArray(message.content) ? message.content : [];
++}
 +export function AutomationRunInspection({ historyId, onClose }) {
 +    const t = useT();
 +    const query = useAutomationRunInspection(historyId);
@@ -3603,7 +3609,7 @@ diff --git a/dist/client/agent-page/AutomationDetailsDialog.js b/dist/client/age
 +            const message = item.message ?? item;
 +            return _jsxs("div", { children: [
 +                _jsx("p", { className: "text-xs font-medium", children: message.role }),
-+                ...(message.content ?? []).map((part, partIndex) => part.type === "tool-call" ? _jsxs("div", { children: [
++                ...messageParts(message).map((part, partIndex) => part.type === "tool-call" ? _jsxs("div", { children: [
 +                    _jsx("p", { className: "break-all text-xs", children: part.toolName }),
 +                    _jsx("pre", { className: "whitespace-pre-wrap break-all text-xs", children: part.argsText ?? JSON.stringify(part.args, null, 2) }),
 +                    _jsx("pre", { className: "whitespace-pre-wrap break-all text-xs", children: part.result ?? "" }),
@@ -3624,7 +3630,7 @@ diff --git a/dist/client/agent-page/AutomationDetailsDialog.js b/dist/client/age
 +        ] }) : null,
 +        decision.isError ? _jsx("p", { role: "alert", children: decision.error?.message ?? t("jobs.decisionFailed", { defaultValue: "The decision was not confirmed. Refresh this run before trying again." }) }) : null,
 +    ] });
-+}
+ }
 diff --git a/dist/client/agent-page/use-jobs.d.ts b/dist/client/agent-page/use-jobs.d.ts
 --- a/dist/client/agent-page/use-jobs.d.ts
 +++ b/dist/client/agent-page/use-jobs.d.ts
@@ -5202,7 +5208,7 @@ diff --git a/dist/integrations/automation-webhook-task.js b/dist/integrations/au
 new file mode 100644
 --- /dev/null
 +++ b/dist/integrations/automation-webhook-task.js
-@@ -0,0 +1,174 @@
+@@ -0,0 +1,178 @@
 +import { isBackgroundAutomationsClosed, trackBackgroundAutomationWork, } from "../jobs/background-automation-runner.js";
 +import { jobBelongsToApp, parseJobResource } from "../jobs/frontmatter.js";
 +import { INTERRUPTED_RUN_MESSAGE } from "../jobs/run-history.js";
@@ -5240,7 +5246,9 @@ new file mode 100644
 + *   or the run threw. The row returns to pending until its attempts
 + *   run out, then fails with an errored history row. A refusal, such as a
 + *   condition without a usable key, fails the row at once. The dispatcher
-+ *   has recorded it. The error is logged here.
++ *   has recorded it. A row that a terminal approval error returned to
++ *   `waiting_approval` keeps that custody, and reconciliation settles it
++ *   from its history. The error is logged here.
 + * - `invalid`: the row does not hold a webhook task. The row fails.
 + */
 +export async function runClaimedAutomationWebhookTask(task, options = {}) {
@@ -5281,12 +5289,14 @@ new file mode 100644
 +        const message = error instanceof Error ? error.message : String(error);
 +        const refused = error instanceof AutomationWebhookRefusedError;
 +        try {
++            // A failure write never replaces approval custody that the
++            // dispatcher restored before rethrowing a terminal approval error.
 +            if (refused) {
-+                await markTaskFailed(task.id, message);
++                await markTaskFailed(task.id, message, { onlyPendingOrProcessing: true });
 +            }
 +            else if (task.attempts >= MAX_PENDING_TASK_ATTEMPTS) {
-+                await markTaskFailed(task.id, message);
-+                await recordAutomationFailure(taskPayload, `The webhook call failed ${task.attempts} times and will not be retried. Last error: ${message.replace(/\.$/, "")}. No delivery was confirmed.`, "automation_webhook_failed", { userEmail: task.ownerEmail, orgId: task.orgId });
++                if (await markTaskFailed(task.id, message, { onlyPendingOrProcessing: true }))
++                    await recordAutomationFailure(taskPayload, `The webhook call failed ${task.attempts} times and will not be retried. Last error: ${message.replace(/\.$/, "")}. No delivery was confirmed.`, "automation_webhook_failed", { userEmail: task.ownerEmail, orgId: task.orgId });
 +            }
 +            else {
 +                await markTaskRetryable(task.id, message);
@@ -5691,9 +5701,14 @@ diff --git a/dist/integrations/pending-tasks-store.d.ts b/dist/integrations/pend
  /**
   * Return a transiently failed task to the retryable queue without erasing its
   * payload. The payload may contain the only copy of the inbound message and is
-@@ -88,3 +94,9 @@
+@@ -86,5 +92,13 @@
+ export declare function markTaskDeliveryRetryable(id: string, payload: string, errorMessage: string): Promise<void>;
+ export declare function failTaskDeliveryTransition(id: string, errorMessage: string): Promise<void>;
  /** Mark a task as failed and stash an error message. */
- export declare function markTaskFailed(id: string, errorMessage: string): Promise<void>;
+-export declare function markTaskFailed(id: string, errorMessage: string): Promise<void>;
++export declare function markTaskFailed(id: string, errorMessage: string, options?: {
++    onlyPendingOrProcessing?: boolean;
++}): Promise<boolean>;
  export {};
 +
 +export declare function markTaskWaitingForApproval(id: string): Promise<void>;
@@ -5773,10 +5788,12 @@ diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pendin
  }
  /**
   * Return a transiently failed task to the retryable queue without erasing its
-@@ -450,6 +470,46 @@
+@@ -450,15 +470,149 @@
          throw new Error("Integration task delivery failure transition lost its race");
      }
  }
+-/** Mark a task as failed and stash an error message. */
+-export async function markTaskFailed(id, errorMessage) {
 +/**
 + * Fail a task that is still pending or processing, and return whether this
 + * call failed it. With `expectedUpdatedAt`, only a row unchanged since it was
@@ -5817,13 +5834,26 @@ diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pendin
 +    });
 +    return rows.length > 0;
 +}
- /** Mark a task as failed and stash an error message. */
- export async function markTaskFailed(id, errorMessage) {
++/**
++ * Mark a task as failed and stash an error message. With
++ * `onlyPendingOrProcessing`, a task that an approval wait or a settlement
++ * now holds is left unchanged. Returns whether the row changed.
++ */
++export async function markTaskFailed(id, errorMessage, options) {
      await ensureTable();
-@@ -462,3 +522,91 @@
+     const client = getDbExec();
+     const now = Date.now();
+-    await client.execute({
++    const open = options?.onlyPendingOrProcessing ? " AND status IN ('pending', 'processing')" : "";
++    const result = await client.execute({
+         sql: `UPDATE integration_pending_tasks
+           SET status = ?, updated_at = ?, error_message = ?, payload = ?, external_event_key = NULL
+-          WHERE id = ?`,
++          WHERE id = ?${open}`,
          args: ["failed", now, errorMessage.slice(0, 2000), "{}", id],
      });
- }
++    return result.rowsAffected === 1;
++}
 +
 +/** Transfer a webhook task to its existing automation history continuation. */
 +export async function markTaskWaitingForApproval(id) {
@@ -5911,7 +5941,7 @@ diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pendin
 +    });
 +    if (result.rowsAffected !== 1)
 +        throw new Error("The retained approval task outcome must be reconciled again.");
-+}
+ }
 diff --git a/dist/integrations/plugin.js b/dist/integrations/plugin.js
 index 7d0524f2aa91299037bfbb8e657a45e848a3bd86..45f9dfaf14ab19f2ccdf2ef630e5eb65e56d2489 100644
 --- a/dist/integrations/plugin.js
@@ -7334,7 +7364,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (responseText.trim() &&
              automation.meta.deliveryPlatform &&
              automation.meta.deliveryDestination) {
-@@ -627,6 +948,452 @@
+@@ -627,6 +948,458 @@
                  tenantId: automation.meta.deliveryTenantId,
              });
          }
@@ -7582,22 +7612,28 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +        try {
 +            const state = await getAutomationContinuation(id);
 +            const pending = state?.context;
-+            if (!pending || state.storedStatus !== "waiting_approval" || state.run.finishedAt)
++            // This sweep's own claim, left when a write after it failed. It never
++            // starts a turn, so once its lease passes a later pass settles it.
++            const staleClaim = state?.storedStatus === "resuming" && Boolean(state.resumeRunId?.startsWith("automation-expire-")) &&
++                Date.now() - state.decisionAt > automationRunClaimLeaseMs();
++            if (!pending || (state.storedStatus !== "waiting_approval" && !staleClaim) || state.run.finishedAt)
 +                continue;
 +            const ask = await readAgentToolApproval(pending);
-+            if (!ask || ask.status !== "pending" || ask.expiresAt > Date.now() ||
++            if (!ask || !(ask.status === "pending" || (staleClaim && ask.status === "declined")) || ask.expiresAt > Date.now() ||
 +                _activeBackgroundRunIds.has(pending.runId) || await getRunStatus(pending.runId) === "running")
 +                continue;
-+            // A wait saved before its turn was marked ready is recovered as an
-+            // owner's decision recovers it. A run that can still save it is left.
-+            if (!state.run.approvalReady) {
-+                if (!await canRecoverWaitingTurn(pending))
++            if (!staleClaim) {
++                // A wait saved before its turn was marked ready is recovered as an
++                // owner's decision recovers it. A run that can still save it is left.
++                if (!state.run.approvalReady) {
++                    if (!await canRecoverWaitingTurn(pending))
++                        continue;
++                    await recoverWaitingTurn(state);
++                }
++                if (!await claimAutomationApprovalDecision(id, pending.askId, createRunId("automation-expire")))
 +                    continue;
-+                await recoverWaitingTurn(state);
 +            }
-+            if (!await claimAutomationApprovalDecision(id, pending.askId, createRunId("automation-expire")))
-+                continue;
-+            if (!await declineAgentToolApproval(pending))
++            if (ask.status === "pending" && !await declineAgentToolApproval(pending))
 +                throw new Error("The expired approval could not be declined.");
 +            await finishAutomationRun(id, "declined", "The approval request expired. The pending action did not execute.",
 +                "automation_approval_expired", { emitFinished: pending.options.emitFinished });
@@ -8386,7 +8422,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          args: [owner, automation, cutoff],
      });
  }
-@@ -384,12 +458,264 @@
+@@ -384,12 +458,269 @@
      const appId = options.appId?.trim() || null;
      const placeholders = owners.map(() => "?").join(", ");
      const appFilter = appId ? " AND (app_id = ? OR app_id IS NULL)" : "";
@@ -8568,13 +8604,18 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +        throw new Error("Resolve the waiting approval before deleting this job.");
 +}
 +
-+/** Waits whose ask passed its expiry. No person can approve them any more. */
++/**
++ * Waits whose ask passed its expiry, and the expiry sweep's own claims on them
++ * (resume ids that start with "automation-expire-") that a failed write left
++ * unsettled. No person can approve them any more.
++ */
 +export async function listExpiredApprovalWaits(appId, now = Date.now()) {
 +    await ensureTable();
 +    const expiresAt = isPostgres() ? "(approval_context::jsonb ->> 'expiresAt')::bigint"
 +        : "CAST(json_extract(approval_context, '$.expiresAt') AS INTEGER)";
 +    const result = await getDbExec().execute({
-+        sql: `SELECT id FROM ${TABLE} WHERE finished_at IS NULL AND status = 'waiting_approval'
++        sql: `SELECT id FROM ${TABLE} WHERE finished_at IS NULL
++          AND (status = 'waiting_approval' OR (status = 'resuming' AND resume_run_id LIKE 'automation-expire-%'))
 +          AND approval_context IS NOT NULL AND ${expiresAt} <= ? ${appId ? 'AND app_id = ?' : ''} ORDER BY started_at LIMIT 100`,
 +        args: appId ? [now, appId] : [now],
 +    });
@@ -15807,7 +15848,12 @@ diff --git a/dist/automations/service.js b/dist/automations/service.js
  import { createAutomationWebhookToken, automationWebhookPath, } from "../triggers/webhook.js";
  /** Conservative default for new scheduled automations when no cadence is given. */
  export const DEFAULT_AUTOMATION_SCHEDULE = "0 * * * *";
-@@ -393,10 +394,24 @@
+@@ -389,14 +390,34 @@
+     return { ...definition, meta, body };
+ }
+ export async function deleteAutomation(actorInput, scope, name) {
+-    const definition = await readDefinition(actorInput, scope, name);
++    let definition = await readDefinition(actorInput, scope, name);
      if (!definition.canUpdate) {
          throw httpError("Only the automation's creator or an organization admin can delete it.", 403);
      }
@@ -15816,6 +15862,12 @@ diff --git a/dist/automations/service.js b/dist/automations/service.js
 +    // Settings Delete first declines a wait its departed organization owner can no longer decide.
 +    const { declineDepartedOwnerWaits } = await import("../jobs/background-automation-runner.js");
 +    await declineDepartedOwnerWaits(definition.resource, normalizeActor(actorInput));
++    // Settling a declined wait records its outcome on the definition, so the delete
++    // compares against the definition as it is now. A replaced definition is refused.
++    const current = await readDefinition(actorInput, scope, name);
++    if (current.resource.id !== definition.resource.id || !current.canUpdate)
++        throw httpError("The automation definition changed before approval custody could be established.", 409);
++    definition = current;
 +    if (await hasUnresolvedAutomationApproval(definition.resource.owner, definition.resource.path))
 +        throw httpError("Resolve the waiting approval before deleting this automation.", 409);
 +    try {

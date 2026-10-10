@@ -1398,6 +1398,16 @@ for (const kind of ["org-departed-wait", "org-scope-missing", "org-scope-conflic
     assert.equal(result.scopeRefused, kind.startsWith("org-scope-"));
   });
 
+// Settings deletes a modern automation through deleteAutomation. Declining the departed
+// creator's wait records its outcome on the definition, and the delete still succeeds.
+test("Settings Delete of a modern organization automation declines its departed creator's wait and deletes", async () => {
+  const result = await child("gap-modern-delete-departed-wait", "modern-delete-departed-wait");
+  assert.equal(result.declinedAsk, "declined");
+  assert.equal(result.outcome, "deleted", "Settings Delete succeeds on the first request");
+  assert.equal(result.definitionRemoved, true); assert.equal(result.historyRemoved, true);
+  assert.equal(result.configuredEffects, 0);
+});
+
 test("a webhook encountering another ready wait after its initial check returns retry with exact FIFO custody", async () => {
   const fixture = await makeApprovalCase("webhook-late-contention", { triggerType: "webhook", repeatLocal: false });
   const tasks = await loadCore("integrations/pending-tasks-store.js"), dispatcher = await loadCore("triggers/dispatcher.js");
@@ -1550,6 +1560,15 @@ for (const [interleaving, kind] of [["lookup-race", "wait"], ["write-settled", "
   });
 }
 
+test("completion webhook keeps terminal approval custody when the failure spends the last attempt", async () => {
+  const receipt = await child("completion-error-webhook-exhausted-wait-fault", "webhook-completion-exhausted");
+  assert.equal(receipt.exhausted, true); assert.equal(receipt.attempts, 3); assert.equal(receipt.faultHits, 1);
+  assert.equal(receipt.workerResult, "failed"); assert.equal(receipt.historyStatus, "error");
+  assert.equal(receipt.initialTaskStatus, "waiting_approval"); assert.equal(receipt.finalTaskStatus, "failed");
+  assert.equal(receipt.historyRows, 1);
+  assert.equal(receipt.configuredEffects, 0); assert.equal(receipt.modelCalls, 1); assert.equal(receipt.drained, true);
+});
+
 test("terminal approval custody blocks deletion until reconciliation and isolates a same-name replacement", async () => {
   const receipt = await child("completion-error-webhook-delete-wait-fault", "terminal-approval-delete");
   assert.equal(receipt.deletionGuarded, true); assert.equal(receipt.faultHits, 1);
@@ -1626,6 +1645,49 @@ test("an expired approval request is declined by reconciliation and releases its
   assert.equal(frontmatter.parseJobResource((await resources.resourceGetByPath(owner, path)).content).meta.lastStatus, "declined");
   assert.equal(configuredCalls(fixture).length, 0);
   await assert.rejects(fixture.decide(result.historyId, pending), /no longer waiting/);
+});
+
+// A write that fails after the sweep claims an expired wait leaves the sweep's own claim. A later pass settles it.
+test("an expiry claim left resuming by a failed write is settled by a later pass", async () => {
+  const fixture = await makeApprovalCase("expired-claim-retry", { repeatLocal: false });
+  const result = await wait(fixture);
+  await until(async () => (await history.getAutomationRun(result.historyId)).approvalReady);
+  const pending = await fixture.pending(result.historyId), db = database.getDbExec(), past = Date.now() - 1000;
+  await db.execute({ sql: "UPDATE agent_tool_approvals SET expires_at = ? WHERE id = ?", args: [past, pending.askId] });
+  const stored = (await db.execute({ sql: "SELECT approval_context FROM automation_runs WHERE id = ?", args: [result.historyId] })).rows[0];
+  await db.execute({ sql: "UPDATE automation_runs SET approval_context = ? WHERE id = ?",
+    args: [JSON.stringify({ ...JSON.parse(String(stored.approval_context)), expiresAt: past }), result.historyId] });
+  const path = fixture.automation.resource.path, execute = db.execute;
+  const row = async () => (await execute.call(db, { sql: "SELECT status, resume_run_id, finished_at FROM automation_runs WHERE id = ?",
+    args: [result.historyId] })).rows[0];
+  let faults = 0;
+  db.execute = async statement => {
+    if (faults === 0 && String(statement?.sql ?? statement).startsWith("UPDATE automation_runs SET status = ?, finished_at = ?") &&
+      statement.args?.[4] === result.historyId) {
+      faults++;
+      throw new Error("selected transient history write failure");
+    }
+    return execute.call(db, statement);
+  };
+  try { await runner.reconcileAutomationApprovalOutcomes(appId); } finally { db.execute = execute; }
+  assert.equal(faults, 1);
+  let claimed = await row();
+  assert.equal(claimed.status, "resuming"); assert.match(String(claimed.resume_run_id), /^automation-expire-/);
+  assert.equal(claimed.finished_at, null);
+  assert.equal((await approvalStore.readAgentToolApproval(pending)).status, "declined");
+  assert.equal(await history.hasUnresolvedAutomationApproval(owner, path), true);
+  // A claim inside its lease may belong to a pass that is still running, so it is left.
+  await runner.reconcileAutomationApprovalOutcomes(appId);
+  claimed = await row();
+  assert.equal(claimed.status, "resuming"); assert.equal(claimed.finished_at, null);
+  await db.execute({ sql: "UPDATE automation_runs SET decision_at = ? WHERE id = ?",
+    args: [Date.now() - history.automationRunClaimLeaseMs() - 1000, result.historyId] });
+  await runner.reconcileAutomationApprovalOutcomes(appId);
+  assert.equal((await row()).status, "declined", "the sweep settles its own stale claim");
+  assert.equal((await history.getAutomationRun(result.historyId)).errorCode, "automation_approval_expired");
+  assert.equal(await history.hasUnresolvedAutomationApproval(owner, path), false, "the job is no longer blocked");
+  assert.equal(frontmatter.parseJobResource((await resources.resourceGetByPath(owner, path)).content).meta.lastStatus, "declined");
+  assert.equal(configuredCalls(fixture).length, 0);
 });
 
 // A crash can leave a wait saved before its turn was marked ready. It expires too, once its run has ended.

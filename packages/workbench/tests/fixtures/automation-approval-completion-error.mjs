@@ -11,6 +11,7 @@ const webhookMode = role.includes("-webhook-");
 const deleteCase = role.includes("-delete-");
 const lookupRace = role.includes("-lookup-race-");
 const writeRace = role.includes("-write-settled-") ? "settled" : role.includes("-write-reclaimed-") ? "reclaimed" : null;
+const exhausted = role.includes("-exhausted-");
 const taskId = `completion-webhook-${name}`;
 const fixture = await f.makeApprovalCase(name, { repeatLocal: false, triggerType: webhookMode ? "webhook" : "schedule" });
 fixture.engine.stream = async function* (options) {
@@ -103,11 +104,16 @@ if (webhookMode) {
   const resource = fixture.automation.resource;
   const payload = { kind: "automation-webhook", automationId: resource.id, owner: f.owner,
     path: resource.path, eventId: taskId, payload: { source: "completion-control" } };
+  const historyRows = async () => Number((await execute({ sql: "SELECT COUNT(*) AS n FROM automation_runs WHERE owner = ? AND path = ?",
+    args: [f.owner, resource.path] })).rows[0].n);
   let receipt, competingClaim;
   try {
     await dispatcher.initTriggerDispatcher(fixture.deps);
     await tasks.insertPendingTask({ id: taskId, platform: "automation-webhook", externalThreadId: `${f.owner}:${resource.path}`,
       ownerEmail: f.owner, orgId: null, externalEventKey: taskId, payload: JSON.stringify(payload) });
+    // The selected failure spends the last allowed attempt.
+    if (exhausted) assert.equal((await execute({ sql: "UPDATE integration_pending_tasks SET attempts = ? WHERE id = ? AND status = 'pending'",
+      args: [tasks.MAX_PENDING_TASK_ATTEMPTS - 1, taskId] })).rowsAffected, 1);
     const work = worker.runAutomationWebhookTaskInProcess(taskId, { appId: f.appId });
     if (lookupRace || writeRace) {
       try {
@@ -169,6 +175,7 @@ if (webhookMode) {
       nativeErrorCode: native?.error_code ?? null, historyStatus: run?.status ?? null,
       historyErrorCode: run?.errorCode ?? null, historyFinished: Boolean(run?.finishedAt),
       taskStatus: task?.status ?? null, payloadEmpty: task?.payload === "{}", retainedContext: Boolean(retained?.context),
+      exhausted, attempts: task?.attempts ?? null, historyRows: await historyRows(),
       baselineReconciliationAttempted, outcomeReconciled: run ? Boolean((await f.history.getAutomationContinuation(run.id)).outcomeReconciled) : null,
       configuredEffects: fixture.calls.length, modelCalls: fixture.modelCalls.length }));
     assert.ok(saved); assert.equal(successfulThreadSaves, 1);
@@ -251,6 +258,7 @@ if (webhookMode) {
       assert.equal(await worker.runAutomationWebhookTaskInProcess(taskId, { appId: f.appId }), "skipped");
     } else if (waiting && inject) {
       assert.ok(waitPublicationChecks >= 1);
+      if (exhausted) assert.equal(task.attempts, tasks.MAX_PENDING_TASK_ATTEMPTS, "the selected failure spent the last allowed attempt");
       assert.equal(workerResult, "failed");
       assert.equal(native.status, "errored"); assert.equal(native.error_code, "completion_error");
       assert.equal(native.error_detail, "Agent response could not be saved.");
@@ -258,6 +266,9 @@ if (webhookMode) {
       assert.ok(run.finishedAt); assert.match(run.error, /selected completion turn-abort lookup failed/);
       assert.equal(task.status, "waiting_approval", "worker failure preserves the retained task custody");
       assert.deepEqual(JSON.parse(task.payload), payload);
+      assert.equal(await historyRows(), 1, "the worker adds no exhausted-attempts history row");
+      assert.doesNotMatch(f.frontmatter.parseJobResource((await f.resources.resourceGetByPath(f.owner, resource.path)).content).meta.lastError ?? "",
+        /failed \d+ times/);
       assert.equal(retained.context.historyId, run.id); assert.equal(retained.context.threadId, saved.thread_id);
       assert.equal(retained.context.turnId, saved.run_id); assert.equal(retained.context.options.webhookTaskId, taskId);
       assert.equal(retained.context.askId, run.pendingAskId);
@@ -299,7 +310,8 @@ if (webhookMode) {
     }
     assert.equal(fixture.modelCalls.length, modelCount, "settlement, delivery and decisions cannot redispatch");
     assert.equal(fixture.calls.length, 0);
-    receipt = { waiting, inject, deletionGuarded: deleteCase, faultHits, workerResult, lookupRaceHits, completionWriteHits, successfulThreadSaves,
+    receipt = { waiting, inject, exhausted, attempts: task.attempts, historyRows: await historyRows(),
+      deletionGuarded: deleteCase, faultHits, workerResult, lookupRaceHits, completionWriteHits, successfulThreadSaves,
       historyId: run.id, threadId: saved.thread_id, turnId: saved.run_id, historyStatus: run.status,
       initialTaskStatus: task.status, finalTaskStatus: (await tasks.getPendingTask(taskId)).status,
       configuredEffects: 0, modelCalls: modelCount };

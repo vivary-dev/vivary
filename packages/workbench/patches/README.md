@@ -2969,6 +2969,14 @@ runs in the same context as its first half. `resourceMove` of a `jobs/*.md` file
 The legacy identity resolver also refuses a personal job whose identity carries an organization
 and that declares connected tools, because its history shares the organization owner and path
 key with other members' jobs.
+`markTaskFailed` takes `onlyPendingOrProcessing` and returns whether it changed the row. The
+webhook worker uses it, so a failure after the dispatcher returned a terminal approval error's
+task to `waiting_approval` keeps that custody and adds no exhausted-attempts history row. The
+approval expiry sweep also settles its own claim (a resume ID that starts with
+`automation-expire-`) when a write after the claim failed and the claim lease has passed. The
+run inspection renders a message whose content is a string as text. `deleteAutomation` reads the
+definition again after it declines a departed owner's wait, because settling that wait rewrites
+the definition, and it refuses a definition that was replaced.
 History cleanup after deletion also removes ordinary unfinished rows without
 approval context, so a run that finishes after its definition is deleted leaves
 no history for a reused name. Approval custody is never removed. A removed member

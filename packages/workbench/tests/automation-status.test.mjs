@@ -594,6 +594,23 @@ test("Settings inspects retained tools and sends only the exact pending approval
   assert.match(expired.text, /approval expired/i);
 });
 
+// Core thread data may store a message's content as a string, so the inspection renders it as text.
+test("Settings inspection shows a retained message whose content is a string", async t => {
+  const { code } = await buildProof({ source: proofSource, sourcefile: "automation-approval-ui-proof.tsx",
+    entry: path.join(CLIENT, "agent-page", "AutomationDetailsDialog.js"), stubs });
+  const proof = await importProof(code);
+  const restoreDom = installDom();
+  t.after(restoreDom);
+  const data = { run: { id: "history-string", appId: "status-test", canInspect: true, threadId: "thread-string", status: "waiting_approval",
+    startedAt: Date.now(), finishedAt: null, approvalReady: true },
+    threadData: JSON.stringify({ messages: [{ role: "user", content: "Summarize the retained notes." },
+      { message: { role: "assistant", content: [{ type: "text", text: "Retained summary." }] } }] }),
+    pending: { askId: "string-ask", toolName: "mcp__fixture__write", input: { value: "String pending content" }, expiresAt: Date.now() + 60_000 } };
+  const view = await proof.inspectDetails(data);
+  for (const retained of ["Summarize the retained notes.", "Retained summary.", "String pending content"])
+    assert.ok(view.text.includes(retained), retained);
+});
+
 // Issue #141. Details must show what the automation list holds now, and the list must refresh while the tab is open.
 // use-action.js is replaced so the real use-jobs.js hooks run on real React Query, answered by a fake transport.
 const jobsTabStubs = new Map([
