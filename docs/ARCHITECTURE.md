@@ -260,6 +260,22 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Issue #23 PDF.js advisory. officeparser 7.8.0, Core's optional document
+parser, pins pdfjs-dist 6.1.200 exactly, and that release carries the high
+GHSA-hq66-cqwq-w95j. A Workbench override scoped to
+`officeparser@7.8.0>pdfjs-dist` now resolves 6.2.108, the first fixed release,
+without an officeparser major upgrade. The lock records the same override and
+changes the PDF.js package key, its integrity, its snapshot key and
+officeparser's reference. 6.2.108 keeps the `@napi-rs/canvas` optional
+dependency and the Node engine range. Its SHA-512 integrity matches the
+retained registry receipt and archive inspection, which also record
+publication more than 72 hours earlier and no install scripts or binding.gyp.
+Core reaches officeparser
+only through `parseOfficeDocument` in its public ingestion export, Workbench
+source does not call it, and the built server output contains neither
+package. Runtime flows, dependency owners and trust boundaries are therefore
+unchanged. The advisory floor test now covers pdfjs-dist.
+
 Issue #23 proxy-addr and brace-expansion advisories. A Workbench test reads the
 Workbench `pnpm-lock.yaml` and the desktop packager's `package-lock.json`, and
 fails when any locked version of an advised package is below its first fixed

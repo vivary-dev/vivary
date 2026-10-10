@@ -19,3 +19,7 @@ ignoredOptionalDependencies:
   - '@anthropic-ai/claude-agent-sdk-darwin-arm64'
   - '@anthropic-ai/claude-agent-sdk-win32-x64'
   - '@anthropic-ai/claude-agent-sdk-win32-arm64'
+# officeparser 7.8.0 pins pdfjs-dist 6.1.200 exactly. 6.2.108 fixes GHSA-hq66-cqwq-w95j.
+# Drop this override when an officeparser release accepts a fixed PDF.js.
+overrides:
+  officeparser@7.8.0>pdfjs-dist: 6.2.108
