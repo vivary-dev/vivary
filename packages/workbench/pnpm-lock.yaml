@@ -2,6 +2,8 @@ lockfileVersion: '9.0'
 settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
+overrides:
+  officeparser@7.8.0>pdfjs-dist: 6.2.108
 patchedDependencies:
   '@agent-native/core@0.176.5':
     hash: 6fa8d6d354cf9fddb479753845abd53ea7359d501af1f19e6b7f8449bef89b46
@@ -5439,9 +5441,9 @@ packages:
   pathe@2.0.3:
     resolution:
       integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==
-  pdfjs-dist@6.1.200:
+  pdfjs-dist@6.2.108:
     resolution:
-      integrity: sha512-o8MolyzirkkLrcdsae/HEOiIcXWI7DS5zGpvqW8xTC2YUsW30rltFw2bDGvw/fskUdEMrQm2br68jzDS5BH2vw==
+      integrity: sha512-YxFb+SQcodN2rnX9Tn3dHYlqfb7NjlzzfONPpJd+AKoKtUjEdevTfbC07d5TcczzOK6261auRkP/M8OBHs9vFQ==
     engines:
       node: '>=22.13.0 || >=24'
   picocolors@1.1.1:
@@ -10772,7 +10774,7 @@ snapshots:
       '@xmldom/xmldom': 0.9.12
       fflate: 0.8.3
       file-type: 22.0.2
-      pdfjs-dist: 6.1.200
+      pdfjs-dist: 6.2.108
       tesseract.js: 7.0.0
     transitivePeerDependencies:
     - encoding
@@ -10831,7 +10833,7 @@ snapshots:
   path-key@3.1.1: {}
   path-to-regexp@8.4.2: {}
   pathe@2.0.3: {}
-  pdfjs-dist@6.1.200:
+  pdfjs-dist@6.2.108:
     optionalDependencies:
       '@napi-rs/canvas': 1.0.8
     optional: true
