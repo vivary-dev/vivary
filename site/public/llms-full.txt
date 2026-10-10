@@ -7534,6 +7534,26 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Issue #23 SheetJS advisories. Core's spreadsheet parser, which pre-upload
+attachments call for XLS and XLSX files, loaded xlsx 0.18.5, which carries the
+high GHSA-4r6h-8v6p-xvw6 and GHSA-5pgg-2g8v-p4x9. SheetJS publishes the fixed
+releases only on its CDN. Workbench now depends on the reviewed xlsx 0.20.3
+archive at `cdn.sheetjs.com` by URL, and an override scoped to
+`@agent-native/core@0.176.5>xlsx` routes Core's optional `^0.18.5` to the same
+archive, so Core and Workbench resolve one package. The lock records that
+tarball URL with its SHA-512 integrity and drops the seven helper packages only
+0.18.5 needed. 0.20.3's exports map selects an ES module that starts without
+codepage tables, which 0.18.5's CommonJS build carried, so Excel 95 and older
+workbooks would lose their 8-bit text. The new
+`server/plugins/00-xlsx-codepages.mjs` loads SheetJS's `cpexcel.full.mjs` into
+the shared module when the server starts. The built server bundles one xlsx
+0.20.3 module, which Core's parser and the plugin both import. Tests cover a
+synthesized Windows-1251 BIFF5 workbook, a Unicode XLSX workbook, one shared
+package, the advisory floors and the archive source. The Apache-2.0 license
+text is byte-identical to 0.18.5's. The parser still runs in the server
+process on the same uploads within Core's size and sheet limits, so runtime
+flows and trust boundaries are unchanged.
+
 Issue #23 PDF.js advisory. officeparser 7.8.0, Core's optional document
 parser, pins pdfjs-dist 6.1.200 exactly, and that release carries the high
 GHSA-hq66-cqwq-w95j. A Workbench override scoped to

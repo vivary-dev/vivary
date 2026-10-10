@@ -21,5 +21,8 @@ ignoredOptionalDependencies:
   - '@anthropic-ai/claude-agent-sdk-win32-arm64'
 # officeparser 7.8.0 pins pdfjs-dist 6.1.200 exactly. 6.2.108 fixes GHSA-hq66-cqwq-w95j.
 # Drop this override when an officeparser release accepts a fixed PDF.js.
+# Core's optional xlsx ^0.18.5 cannot reach the fixed 0.20.3, which SheetJS publishes only on
+# its CDN. Route it to the same archive Workbench depends on, so both share one module.
 overrides:
   officeparser@7.8.0>pdfjs-dist: 6.2.108
+  '@agent-native/core@0.176.5>xlsx': https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
