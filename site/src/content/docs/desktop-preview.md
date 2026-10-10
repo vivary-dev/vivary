@@ -255,7 +255,9 @@ Settings > Agent > Automations holds the controls:
   saved. Automatic recovery depends on successfully retaining that result.
 - **Manage** > **Delete** refuses while an approval is waiting or resuming, or while
   a finished approval's outcome is still being recorded. Inspect a pending run and
-  approve or decline it first. For a finished run, retry Delete after settlement.
+  approve or decline it first. When an organization run's owner can no longer act,
+  Delete by someone allowed to delete the job declines that wait first, then deletes.
+  For a finished run, retry Delete after settlement.
   Deletion removes the definition and eligible finished history after settlement.
   Vivary keeps retained Native run threads. If deletion wins before a running automation establishes approval custody,
   that run stops without executing the pending configured action.

@@ -2966,6 +2966,9 @@ another worker's `processing` claim. `retainedAutomationOptions` keeps `actionCa
 integration request context's identifiers, with empty inbound text, so an approved continuation
 runs in the same context as its first half. `resourceMove` of a `jobs/*.md` file runs
 `assertLegacyJobApprovalDeletionAllowed` inside `withAutomationResourceCustody`, as deletion does.
+The legacy identity resolver also refuses a personal job whose identity carries an organization
+and that declares connected tools, because its history shares the organization owner and path
+key with other members' jobs.
 History cleanup after deletion also removes ordinary unfinished rows without
 approval context, so a run that finishes after its definition is deleted leaves
 no history for a reused name. Approval custody is never removed. A removed member

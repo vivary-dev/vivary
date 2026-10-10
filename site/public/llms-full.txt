@@ -6695,7 +6695,9 @@ Settings > Agent > Automations holds the controls:
   saved. Automatic recovery depends on successfully retaining that result.
 - **Manage** > **Delete** refuses while an approval is waiting or resuming, or while
   a finished approval's outcome is still being recorded. Inspect a pending run and
-  approve or decline it first. For a finished run, retry Delete after settlement.
+  approve or decline it first. When an organization run's owner can no longer act,
+  Delete by someone allowed to delete the job declines that wait first, then deletes.
+  For a finished run, retry Delete after settlement.
   Deletion removes the definition and eligible finished history after settlement.
   Vivary keeps retained Native run threads. If deletion wins before a running automation establishes approval custody,
   that run stops without executing the pending configured action.
@@ -7567,10 +7569,10 @@ unfinished or unreconciled history is bound to that exact resource. When an
 organization run's owner can no longer act, a principal with deletion authority
 over the same automation may decline its wait, never approve it. An expired request is declined by the
 next settlement pass, so no wait blocks its job forever. A wait saved before its turn was marked
-ready is first recovered, once its run has ended, as an owner's decision recovers it. A queued
-Run now row keeps the resource owner. When the job keeps its history under another owner or
-organization, Run now refuses a job that declares connected tools before the run starts, and
-the approval gate refuses to create a wait on such a row. Settings Delete by such a principal
+ready is first recovered, once its run has ended, as an owner's decision recovers it. A personal
+job that runs under an organization keeps its history there, keyed by path, so it is refused
+connected tools at start, and the approval gate refuses to create a wait on any history row
+whose owner or organization differs from the run's binding. Settings Delete by such a principal
 declines that wait first, then deletes the job. A job that runs as the shared
 or organization identity and declares connected tools is refused at start,
 because no person can approve for that identity. Retained history-ID Decline can work without a definition, but a blocked
@@ -7647,7 +7649,12 @@ complete it, so the call ran again. The worker now completes its own call over a
 with the same payload, and still never replaces a settled row or another worker's claim. An
 approved continuation now keeps the run's integration request context and its automation
 caller, so the resumed half of a turn runs in the same context as the first. Moving a job
-file now takes the same approval custody check as deleting it. A shared job that declares connected tools is refused at start, since no
+file now takes the same approval custody check as deleting it. The review of the following
+head found that a personal job that runs under an organization shares its history key, the
+organization owner and the path, with other members' jobs of the same name, so its wait
+blocked their runs and deletes and stayed hidden from its owner's list. The owner chose the
+narrow correction: such a job is refused connected tools at start, as a shared-identity job
+is, so it never holds a wait. Keying waits by resource is issue #209. A shared job that declares connected tools is refused at start, since no
 person can approve for its pseudo-identity. Legacy job
 deletion with an unresolvable creator or organization scope refuses only when
 history is bound to that exact resource. History cleanup removes an ordinary

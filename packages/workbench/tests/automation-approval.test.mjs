@@ -1128,7 +1128,9 @@ test("deletion also refuses an actively resuming approval", async () => {
 });
 
 
-for (const kind of ["legacy-shared", "legacy-personal-org", "scoped-personal", "scoped-organization", "forged-retained-creator"])
+// A legacy personal job that runs under an organization is refused connected tools at
+// start (owner-scope test), so it has no wait to recover.
+for (const kind of ["legacy-shared", "scoped-personal", "scoped-organization", "forged-retained-creator"])
   test(`${kind} terminal recovery preserves the retained execution identity`, async () => {
     const result = await child("identity-" + kind, "identity-" + kind);
     assert.equal(result.status, "declined");
@@ -1365,7 +1367,8 @@ test("retention preserves the original ask chunk after actual continuation attac
   assert.deepEqual(await runStore.getRunEventsSince(waiting.runId, -1), []);
 });
 
-for (const kind of ["personal", "shared", "personal-org", "org-admin"])
+// A legacy personal job that runs under an organization never holds a wait, so it is not listed.
+for (const kind of ["personal", "shared", "org-admin"])
   test(`supported legacy ${kind} deletion retains waiting and resuming approvals`, async () => {
     const result = await child("gap-delete-" + kind, "legacy-delete-" + kind);
     assert.equal(result.waitingRefused, true); assert.equal(result.resumingRefused, true);

@@ -3287,7 +3287,7 @@ diff --git a/dist/client/agent-page/AgentJobsTab.js b/dist/client/agent-page/Age
  function describeTrigger(entry, t) {
      if (entry.kind === "automation" && entry.triggerType === "event") {
          return t("jobs.automationEventDetails", {
-@@ -49,17 +56,26 @@
+@@ -49,11 +56,13 @@
   * promises to run it, so it must never be presented with more confidence than
   * the scheduler check earned. Three answers, three phrasings: a known-dead
   * scheduler replaces the date, an unverified one qualifies it, and a confirmed
@@ -3303,25 +3303,24 @@ diff --git a/dist/client/agent-page/AgentJobsTab.js b/dist/client/agent-page/Age
          return formatted ?? unset;
      }
      if (scheduleFiring === "never") {
-         return t("jobs.nextRunNeverScheduler", {
+@@ -61,6 +70,13 @@
              defaultValue: "Never — no scheduler in this deploy",
          });
-+    }
+     }
 +    // A row from a server without the field reads as no wait.
 +    if (entry.resource.schedulerWait) {
 +        return schedulerWaitValue(entry.resource.schedulerWait, t, formatDateTime);
 +    }
 +    if (scheduleFiring === "fires") {
 +        return formatted ?? unset;
-     }
++    }
      return formatted
          ? t("jobs.nextRunSchedulerUnknown", {
-@@ -68,6 +84,28 @@
-         })
-         : t("jobs.nextRunSchedulerUnknownNoDate", {
+             defaultValue: "{{date}} — unconfirmed, the scheduler check failed",
+@@ -70,6 +86,28 @@
              defaultValue: "Unknown — the scheduler check failed",
-+        });
-+}
+         });
+ }
 +function schedulerWaitValue(wait, t, formatDateTime) {
 +    if (wait.reason === "run") {
 +        return t("jobs.nextRunAfterRun", {
@@ -3342,9 +3341,11 @@ diff --git a/dist/client/agent-page/AgentJobsTab.js b/dist/client/agent-page/Age
 +        : t("jobs.nextRunAfterSchedulerLease", {
 +            defaultValue: "Scheduling resumes after {{date}}, when an interrupted schedule check times out",
 +            date,
-         });
- }
++        });
++}
  function detailsFields(entry, t, formatDateTime, scheduleFiring) {
+     const resource = entry.resource;
+     const unset = t("jobs.notSet", { defaultValue: "—" });
 @@ -100,11 +138,30 @@
          });
      }
@@ -3494,7 +3495,7 @@ diff --git a/dist/client/agent-page/AgentJobsTab.js b/dist/client/agent-page/Age
                          setRunTarget(null);
                  }, children: _jsxs(DialogContent, { children: [_jsxs(DialogHeader, { children: [_jsx(DialogTitle, { children: t("jobs.runNowTitle", { defaultValue: "Run automation now?" }) }), _jsx(DialogDescription, { children: t("jobs.runNowDescription", {
 -                                        defaultValue: "This runs the automation's real actions immediately. It may send messages or change data, and it will not change the next scheduled run.",
-+                                        defaultValue: "This runs the automation now, on this server. It can read and change your resources, memory, chat history, and progress. It cannot send email, reach the web, or change settings or automations. Every call to an explicitly configured tool waits for your approval in Details > Past runs. The next scheduled run does not change.",
++                                        defaultValue: "This runs the automation now, on this server. It can read and change your resources, memory, chat history, and progress. Its built-in tools cannot send email, reach the web, or change settings or automations. A configured tool can reach other services, so each call waits for your approval in Details > Past runs, and a job that cannot pause for approval does not start. If the automation has a reply destination, its result is sent there. The next scheduled run does not change.",
                                      }) })] }), runAutomationMutation.error ? (_jsx("p", { className: "text-sm text-destructive", children: runAutomationMutation.error.message })) : null, _jsxs(DialogFooter, { children: [_jsx(Button, { type: "button", variant: "outline", className: "cursor-pointer", disabled: runAutomationMutation.isPending, onClick: () => setRunTarget(null), children: t("jobs.cancel", { defaultValue: "Cancel" }) }), _jsxs(Button, { type: "button", className: "cursor-pointer", disabled: runAutomationMutation.isPending, onClick: () => {
                                          if (!runTarget)
                                              return;
@@ -3503,9 +3504,8 @@ diff --git a/dist/client/agent-page/AgentJobsTab.js b/dist/client/agent-page/Age
                      : null, instructions: detailsTarget.kind === "automation"
                      ? detailsTarget.resource.body
 -                    : detailsTarget.resource.instructions, mcpTools: detailsTarget.resource.mcpTools ?? [], lastError: detailsTarget.resource.lastError, formatTimestamp: (value) => formatDateTime(new Date(value).toISOString()) ?? String(value), onClose: () => setDetailsTarget(null) })) : null, scheduleTarget ? (_jsx(AutomationScheduleDialog, { open: true, name: scheduleTarget.resource.name, schedule: scheduleTarget.resource.schedule ?? "", timezone: scheduleTarget.resource.timezone ?? null, saving: mutationPending, error: mutationError ? mutationError.message : null, scheduledTriggerState: scheduledTriggerState, onCancel: () => setScheduleTarget(null), onSave: (next) => mutateEntry(scheduleTarget, "update", next, () => setScheduleTarget(null)) })) : null] }));
--}
 +                    : detailsTarget.resource.instructions, mcpTools: detailsTarget.resource.mcpTools ?? [], lastError: detailsTarget.resource.lastError, refreshFailed: listQueryFor(detailsTarget).isRefetchError, formatTimestamp: (value) => formatDateTime(new Date(value).toISOString()) ?? String(value), onClose: () => setDetailsKey(null) })) : null, scheduleTarget ? (_jsx(AutomationScheduleDialog, { open: true, name: scheduleTarget.resource.name, schedule: scheduleTarget.resource.schedule ?? "", timezone: scheduleTarget.resource.timezone ?? null, saving: mutationPending, error: mutationError ? mutationError.message : null, scheduledTriggerState: scheduledTriggerState, onCancel: () => setScheduleTarget(null), onSave: (next) => mutateEntry(scheduleTarget, "update", next, () => setScheduleTarget(null)) })) : null] }));
-+}
+ }
 diff --git a/dist/client/agent-page/AutomationDetailsDialog.d.ts b/dist/client/agent-page/AutomationDetailsDialog.d.ts
 --- a/dist/client/agent-page/AutomationDetailsDialog.d.ts
 +++ b/dist/client/agent-page/AutomationDetailsDialog.d.ts
@@ -6524,7 +6524,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
  /**
   * A persisted background run must not outlive its execution identity.
   * Organization runs fail closed when membership state cannot be read. A
-@@ -117,6 +177,11 @@
+@@ -117,6 +177,17 @@
      const orgId = recoveredFactoryOwnerOrgId(automation.meta, automation.resource.path, automation.resource.owner) ??
          automation.meta.orgId ??
          undefined;
@@ -6533,10 +6533,16 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +    if ((userEmail === "__shared__" || organizationIdFromResourceOwner(userEmail)) &&
 +        Array.isArray(automation.meta.mcpTools) && automation.meta.mcpTools.length)
 +        return { ok: false, reason: "A shared job cannot pause for approval, so it cannot use connected tools. Run it as its creator." };
++    // A personal job that runs under an organization keeps its history there, keyed
++    // by path. Its wait would block other members' jobs of the same name and stay
++    // hidden from its owner's own list, so it cannot hold one either.
++    if (orgId && automation.resource.owner !== "__shared__" && !organizationIdFromResourceOwner(automation.resource.owner) &&
++        Array.isArray(automation.meta.mcpTools) && automation.meta.mcpTools.length)
++        return { ok: false, reason: "This personal job runs under an organization, so it cannot pause for approval and cannot use connected tools. Create it as an organization job to use them." };
      const validity = await validateAutomationRunIdentity(userEmail, orgId);
      return validity.ok
          ? {
-@@ -130,6 +195,8 @@
+@@ -130,6 +201,8 @@
          : validity;
  }
  export function isBackgroundAutomationRunActive(meta, now = new Date()) {
@@ -6545,7 +6551,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
      if (meta.lastStatus !== "running")
          return false;
      if (!meta.lastRun)
-@@ -163,35 +230,42 @@
+@@ -163,35 +236,42 @@
  function uniqueToolNames(names) {
      return [...new Set(names)];
  }
@@ -6605,7 +6611,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
                  automation: automation.name,
                  path: automation.resource.path,
                  scope: options.orgId ? "organization" : "personal",
-@@ -200,9 +274,10 @@
+@@ -200,9 +280,10 @@
              });
          }
          catch (err) {
@@ -6617,7 +6623,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
      let result;
      // Populated as soon as the run id exists, so a failure that never returns a
      // result can still be joined to its LLM trace (`aiTraceId` -> $ai_trace_id).
-@@ -212,15 +287,19 @@
+@@ -212,15 +293,19 @@
      }
      catch (err) {
          const message = err instanceof Error ? err.message : String(err);
@@ -6639,7 +6645,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
              tags: {
                  area: "background-automation",
                  automation: automation.name,
-@@ -233,27 +312,31 @@
+@@ -233,27 +318,31 @@
              },
              ...(runIdRef.current ? { aiTraceId: runIdRef.current } : {}),
          });
@@ -6682,7 +6688,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
      }
  }
  function backgroundAutomationPersistFailure(input) {
-@@ -300,7 +383,18 @@
+@@ -300,7 +389,18 @@
          if (!repo || typeof repo !== "object" || Array.isArray(repo)) {
              throw new Error(`Background automation thread ${input.threadId} has unreadable thread data.`);
          }
@@ -6702,7 +6708,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const events = [...(input.run.events ?? [])];
          if (input.persistFailure) {
              events.push({
-@@ -324,6 +418,8 @@
+@@ -324,6 +424,8 @@
              repo = foldAssistantTurn(repo, assistantMsg, {
                  runId: input.run.runId,
                  turnId: input.run.turnId,
@@ -6711,7 +6717,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
              });
          }
          const meta = extractThreadMeta(repo);
-@@ -331,15 +427,36 @@
+@@ -331,15 +433,36 @@
          await updateThreadData(input.threadId, JSON.stringify(repo), input.threadTitle || row.title, meta.preview || row.preview, Array.isArray(messages) ? messages.length : 0);
      });
  }
@@ -6753,7 +6759,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
  }
  async function executeBackgroundAutomation(options, deps, historyId, runIdRef) {
      const { automation, ownerEmail, orgId, prompt, threadTitle, usageLabel } = options;
-@@ -349,19 +466,23 @@
+@@ -349,19 +472,23 @@
          orgId,
      }, async () => {
          const baseActions = await deps.getActions(automation);
@@ -6789,7 +6795,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const userApiKey = await getOwnerActiveApiKey(ownerEmail);
          // The run manager invokes its detached callback after the scheduler's
          // setup stack has yielded, so the engine's credentials must be captured
-@@ -382,11 +503,98 @@
+@@ -382,11 +509,98 @@
              engine.defaultModel;
          const model = normalizeModelForEngine(engine, modelCandidate);
          const systemPrompt = await deps.getSystemPrompt(ownerEmail);
@@ -6892,7 +6898,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (runIdRef)
              runIdRef.current = runId;
          await recordRunThread(historyId, thread.id, runId);
-@@ -425,170 +633,275 @@
+@@ -425,170 +639,275 @@
          // handoff to the unclaimed-background-run sweep — it gets reaped as
          // "background_worker_never_started" out from under a still-executing
          // job the moment any single tool call runs past the 25s grace window.
@@ -7319,7 +7325,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const usage = usageRef.current;
          if (usage &&
              (usage.inputTokens > 0 ||
-@@ -613,6 +926,8 @@
+@@ -613,6 +932,8 @@
                  // Usage attribution must not break an otherwise successful run.
              }
          }
@@ -7328,7 +7334,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (responseText.trim() &&
              automation.meta.deliveryPlatform &&
              automation.meta.deliveryDestination) {
-@@ -627,6 +942,452 @@
+@@ -627,6 +948,452 @@
                  tenantId: automation.meta.deliveryTenantId,
              });
          }
@@ -10150,7 +10156,7 @@ diff --git a/dist/localization/default-messages.js b/dist/localization/default-m
          runNow: "Run now",
          runNowTitle: "Run automation now?",
 -        runNowDescription: "This runs the automation's real actions immediately. It may send messages or change data, and it will not change the next scheduled run.",
-+        runNowDescription: "This runs the automation now, on this server. It can read and change your resources, memory, chat history, and progress. It cannot send email, reach the web, or change settings or automations. Every call to an explicitly configured tool waits for your approval in Details > Past runs. The next scheduled run does not change.",
++        runNowDescription: "This runs the automation now, on this server. It can read and change your resources, memory, chat history, and progress. Its built-in tools cannot send email, reach the web, or change settings or automations. A configured tool can reach other services, so each call waits for your approval in Details > Past runs, and a job that cannot pause for approval does not start. If the automation has a reply destination, its result is sent there. The next scheduled run does not change.",
          automationDetails: "Automation details",
          automationEventDetails: "Runs when {{event}}.",
          condition: "Condition",
