@@ -267,8 +267,9 @@ releases only on its CDN. Workbench now depends on the reviewed xlsx 0.20.3
 archive at `cdn.sheetjs.com` by URL, and an override scoped to
 `@agent-native/core@0.176.5>xlsx` routes Core's optional `^0.18.5` to the same
 archive, so Core and Workbench resolve one package. The lock records that
-tarball URL with its SHA-512 integrity and drops the seven helper packages only
-0.18.5 needed. 0.20.3's exports map selects an ES module that starts without
+tarball URL with its SHA-512 integrity and drops the eight helper packages only
+0.18.5 needed: its seven direct helpers adler-32, cfb, codepage, crc-32, ssf,
+wmf and word, plus frac, which ssf brings in. 0.20.3's exports map selects an ES module that starts without
 codepage tables, which 0.18.5's CommonJS build carried, so Excel 95 and older
 workbooks would lose their 8-bit text. The new
 `server/plugins/00-xlsx-codepages.mjs` loads SheetJS's `cpexcel.full.mjs` into
