@@ -274,7 +274,11 @@ Core reaches officeparser
 only through `parseOfficeDocument` in its public ingestion export, Workbench
 source does not call it, and the built server output contains neither
 package. Runtime flows, dependency owners and trust boundaries are therefore
-unchanged. The advisory floor test now covers pdfjs-dist.
+unchanged. The advisory floor test now covers pdfjs-dist. A PDF ingestion
+test in the workbench CI job calls `parseOfficeDocument` with a generated
+two-page PDF and a corrupt one. It passed unchanged on 6.1.200 and 6.2.108,
+so text order, the single text part and the "Invalid PDF structure" rejection
+are preserved.
 
 Issue #23 proxy-addr and brace-expansion advisories. A Workbench test reads the
 Workbench `pnpm-lock.yaml` and the desktop packager's `package-lock.json`, and
