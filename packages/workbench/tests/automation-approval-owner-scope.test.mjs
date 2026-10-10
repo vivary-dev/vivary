@@ -361,7 +361,8 @@ test("normal HTTP organization history fails closed while personal NULL-org cust
   let membershipQueries = 0;
   try {
     const revoked = await call("list-automation-runs", input, { prefix: "/retained-org" });
-    assert.notEqual(revoked.status, 200);
+    assert.equal(revoked.status, 403);
+    assert.match(revoked.body.error, /no longer a member/);
     await restoreMembership();
     membershipRestored = true;
     const { rows: restored } = await db.execute({
@@ -701,6 +702,20 @@ test("resource ID and path helpers retain actual local-workspace deletion behavi
     localId: true, storedBeforeDelete: true, deleted: true, readAfterDelete: null })));
 });
 
+
+// A jobs file whose creator scope cannot be resolved and that has no approval history
+// stays deletable. Exact-bound unresolved history still refuses (see the org-scope cases).
+test("job deletion helpers delete an unresolvable-scope job that has no approval history", async () => {
+  const cases = [["shared", resources.SHARED_OWNER, {}], ["org", resources.organizationResourceOwner(orgId), { orgId: "a-different-org" }]];
+  for (const [kind, resourceOwner, scope] of cases) for (const remove of ["id", "path"]) {
+    const resourcePath = `jobs/unscoped-${kind}-${remove}.md`;
+    const saved = await resources.resourcePut(resourceOwner, resourcePath, frontmatter.buildJobResourceContent(
+      { schedule: "0 * * * *", timezone: "UTC", enabled: true, ...scope }, "Legacy job with no recorded creator."));
+    assert.equal(frontmatter.parseJobResource(saved.content).meta.createdBy, undefined);
+    assert.equal(await (remove === "id" ? resources.resourceDelete(saved.id) : resources.resourceDeleteByPath(resourceOwner, resourcePath)), true);
+    assert.equal(await resources.resourceGetByPath(resourceOwner, resourcePath), null);
+  }
+});
 
 test("job ID custody delegation preserves webhook token-setup compensation", async () => {
   const name = "helper-webhook-compensation", resourcePath = `jobs/${name}.md`;

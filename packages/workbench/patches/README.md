@@ -2926,11 +2926,34 @@ The legacy deletion guard projects stored history scope independently of current
 creator membership. Existing mutation authority permits org-admin cleanup of an
 ordinary job after its creator leaves. Exact resource-bound unfinished histories
 remain protected even if their scope conflicts with the current job metadata.
-Unknown scope fails closed, and no execution or owner-decision eligibility changes.
-Maintained controls use normal ORG/BetterAuth initialization and the actual
-manage-jobs action, with real membership removal and explicit restoration only for
-owner-decline cleanup. PostgreSQL pruning coverage is a static driver adapter and
-query-contract control. It does not establish real PostgreSQL database execution.
+An unknown creator or organization scope refuses deletion only when unfinished
+or unreconciled history is bound to that exact resource by ID or by owner and
+path. Without such history the snapshot delete proceeds. No execution
+eligibility changes. Maintained controls use normal ORG/BetterAuth
+initialization and the actual manage-jobs action with real membership removal.
+PostgreSQL pruning coverage is a static driver adapter and query-contract
+control. It does not establish real PostgreSQL database execution.
+
+Required-review corrections for `012fd0a6`. The runner stores the resolved
+`advanceSchedule` value in the approval context, so a scheduled run that waits
+moves `nextRun` forward when its outcome settles. The scheduler sweep omits the
+option, which means advance, and Run now stores false. Reconciliation reads older
+contexts with the same default. A decline-only path opens when an organization
+run's retained owner fails current identity validation: the decider must hold
+deletion authority over the same automation resource through
+`canUpdateAutomationResource`. That path never approves and executes nothing.
+History cleanup after deletion also removes ordinary unfinished rows without
+approval context, so a run that finishes after its definition is deleted leaves
+no history for a reused name. Approval custody is never removed. A removed member
+listing organization history gets a 403 refusal instead of a 500. The threads PUT
+route refuses a `threadData` rewrite of an automation run thread with the chat
+route's `automation_thread_interactive_refused` code, because an approved
+continuation reloads that transcript. Title-only saves are unchanged. Maintained
+controls cover the real scheduler sweep for approve and decline, departed-owner
+decline by an organization admin with approve and member refusals, deletion of
+unresolvable-scope jobs without history, in-flight history cleanup and the exact
+403 refusal. The predicate-stop control now also guards writes on the custody
+transaction executor.
 
 Local SQLite transaction ownership queues ordinary execute calls and subsequent transactions behind the current transaction. Its callback must use the supplied tx.execute. Ownership is released after commit or rollback, including thrown callbacks. Organization history discovery queries exact org_id and caller email and treats missing membership as unavailable. Personal NULL-org history does not require membership in an unrelated active organization. The new SQLite controls are maintained runtime targets and have not run in this source allocation.
 

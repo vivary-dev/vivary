@@ -759,11 +759,12 @@ for (const caller of ["scheduler", "trigger"]) for (const decision of ["approve"
     }
   });
 
-const child = (role, name, id) => new Promise((resolve, reject) => {
+const child = (role, name, id, env = {}) => new Promise((resolve, reject) => {
   const fixturePath = role.startsWith("completion-error-") ? "./fixtures/automation-approval-completion-error.mjs"
-    : role.startsWith("cold-") ? "./fixtures/automation-approval-cold-delete.mjs" : "./fixtures/automation-approval-restart.mjs";
+    : role.startsWith("cold-") ? "./fixtures/automation-approval-cold-delete.mjs"
+    : role.startsWith("schedule-") ? "./fixtures/automation-approval-schedule.mjs" : "./fixtures/automation-approval-restart.mjs";
   const script = fileURLToPath(new URL(fixturePath, import.meta.url));
-  const processHandle = spawn(process.execPath, [script, role, name, ...(id ? [id] : [])], { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+  const processHandle = spawn(process.execPath, [script, role, name, ...(id ? [id] : [])], { env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   const timeout = setTimeout(() => { processHandle.kill("SIGKILL"); reject(new Error("Approval child exceeded 30 seconds.")); }, 30_000);
   for (const stream of [processHandle.stdout, processHandle.stderr]) stream.on("data", data => { output += data; });
@@ -1378,7 +1379,8 @@ for (const kind of ["org-departed-wait", "org-scope-missing", "org-scope-conflic
     const result = await child("gap-delete-" + kind, "legacy-delete-" + kind);
     assert.equal(result.waitingRefused, true); assert.equal(result.resumingRefused, true);
     assert.equal(result.deleted, true); assert.equal(result.configuredEffects, 0);
-    assert.equal(result.membershipRestoredForDecline, kind === "org-departed-wait");
+    assert.equal(result.membershipRestoredForDecline, false);
+    assert.equal(result.declinedByDeletionAuthority, kind === "org-departed-wait");
     assert.equal(result.scopeRefused, kind.startsWith("org-scope-"));
   });
 
@@ -1587,4 +1589,32 @@ test("listed NULL-app legacy history stays unavailable to inspection and approva
   assert.equal(legacyTerminal.id, terminal.id); assert.equal(legacyTerminal.appId, null); assert.ok(legacyTerminal.threadId);
   assert.equal(legacyTerminal.canInspect, false);
   await assert.rejects(runner.inspectAutomationRun(terminal.id, actor, fixture.deps), /not available/);
+});
+
+test("deleting a definition also removes ordinary history that finishes after the deletion", async () => {
+  const name = "inflight-history-cleanup", path = `jobs/${name}.md`;
+  const running = await history.startAutomationRun({ owner, automation: name, path, appId });
+  const waitingSibling = await makeApprovalCase(name + "-custody", { repeatLocal: false });
+  const waiting = await wait(waitingSibling);
+  await history.deleteAutomationRuns(owner, name);
+  await history.deleteAutomationRuns(owner, waitingSibling.automation.name);
+  await history.finishAutomationRun(running, "success");
+  assert.deepEqual(await history.listAutomationRuns({ owners: [owner], automation: name, appId }), []);
+  // Approval custody is never removed by history cleanup.
+  assert.equal((await history.getAutomationRun(waiting.historyId)).status, "waiting_approval");
+  await waitingSibling.decide(waiting.historyId, await waitingSibling.pending(waiting.historyId), "decline");
+});
+
+// The scheduler sweep passes no execution options and never moves nextRun at dispatch.
+// The settled outcome of a scheduled run that waited must advance it, or the next tick reruns the job.
+// A separate database holds only this job, so the real sweep reaches it at any time of day.
+for (const decision of ["approve", "decline"]) test(`a scheduled run that waited for approval advances its schedule after ${decision}`, async () => {
+  const database = `file:${path.join(root, `schedule-${decision}.sqlite`)}`;
+  const result = await child(`schedule-${decision}`, `scheduled-advance-${decision}`, undefined,
+    { DATABASE_URL: database, DATABASE_URL_UNPOOLED: database });
+  assert.equal(result.waitingStatus, "waiting_approval");
+  assert.equal(result.lastStatus, decision === "approve" ? "success" : "declined");
+  assert.equal(result.nextRunAdvanced, true, "the settled outcome moved nextRun to the next occurrence");
+  assert.deepEqual(result.runsAfterNextTick, [result.historyId], "the next tick does not run the job again");
+  assert.equal(result.configuredEffects, decision === "approve" ? 1 : 0);
 });

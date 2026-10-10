@@ -120,8 +120,9 @@ export async function runApprovalPredicateStopCase(reason, name) {
       return true;
     } } };
   };
-  const db = database.getDbExec(), execute = db.execute.bind(db);
-  db.execute = async statement => {
+  const db = database.getDbExec(), execute = db.execute.bind(db), transaction = db.transaction.bind(db);
+  // Approval persistence runs on the custody transaction executor, so guard both paths.
+  const guarded = run => async statement => {
     const sql = String(statement.sql ?? statement).replace(/\s+/g, " ").trim();
     if (sql.startsWith("INSERT INTO agent_tool_approvals") ||
         sql.startsWith("UPDATE automation_runs SET status = 'waiting_approval'") ||
@@ -129,8 +130,10 @@ export async function runApprovalPredicateStopCase(reason, name) {
       selectedStorageFaults++;
       throw new Error("Stop control must not reach approval persistence.");
     }
-    return execute(statement);
+    return run(statement);
   };
+  db.execute = guarded(execute);
+  db.transaction = callback => transaction(tx => callback({ ...tx, execute: guarded(tx.execute.bind(tx)) }));
   let tasks, work, taskId;
   try {
     if (shutdown) {
@@ -181,6 +184,7 @@ export async function runApprovalPredicateStopCase(reason, name) {
     release();
     if (work) await work;
     db.execute = execute;
+    db.transaction = transaction;
   }
 }
 

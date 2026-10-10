@@ -6426,13 +6426,14 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 -import { claimBackgroundRun, insertRun } from "../agent/run-store.js";
 -import { buildAssistantMessage, buildUserMessage, extractThreadMeta, foldAssistantTurn, upsertUserMessage, } from "../agent/thread-data-builder.js";
 -import { attachToolSearch } from "../agent/tool-search.js";
+-import { resolveAutomationExecutionIdentity, } from "../automations/service.js";
 +import { abortRun, getRun, resolveBackgroundAutomationSoftTimeoutMs, resolveBackgroundRunHardTimeoutMs, startRun, } from "../agent/run-manager.js";
 +import { claimBackgroundRun, getRunById, getRunEventsSince, getRunStatus, getRunTurnRef, insertRun, isTurnAborted } from "../agent/run-store.js";
 +import { buildAssistantMessage, buildUserMessage, extractThreadMeta, foldAssistantTurn, threadDataToEngineMessages, upsertUserMessage, } from "../agent/thread-data-builder.js";
 +import { ensureAgentToolApprovalTable, consumeAgentToolApproval, createAgentToolApproval, declineAgentToolApproval, readAgentToolApproval } from "../agent/tool-approval-store.js";
 +import { AutomationResourceChangedError, withAutomationResourceCustody, resourceGetByPath } from "../resources/store.js";
 +import { redactText, redactTextInValue } from "../audit/redact.js";
- import { resolveAutomationExecutionIdentity, } from "../automations/service.js";
++import { canUpdateAutomationResource, resolveAutomationExecutionIdentity, } from "../automations/service.js";
  import { createThread, getThread, updateThreadData, withThreadDataLock, } from "../chat-threads/store.js";
  import { queryOrgMembers } from "../org/context.js";
 -import { organizationIdFromResourceOwner, organizationResourceOwner, } from "../resources/store.js";
@@ -6447,10 +6448,11 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
  /**
   * Default hard abort for one in-process automation run. Read through
   * `resolveBackgroundRunHardTimeoutMs()` at the use site — this is the host's
-@@ -37,6 +40,63 @@
+@@ -36,6 +39,63 @@
+         this.errorCode = errorCode;
      }
  }
- /**
++/**
 + * Vivary #114: a normal quit aborts every in-process run with this reason, and
 + * the run then records itself interrupted through its own settle path. Both
 + * this runner's catch and the scheduler's append " No delivery was
@@ -6507,10 +6509,9 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +export function isBackgroundAutomationsClosed() {
 +    return _backgroundAutomationsClosed;
 +}
-+/**
+ /**
   * A persisted background run must not outlive its execution identity.
   * Organization runs fail closed when membership state cannot be read. A
-  * brand-new personal install without auth tables remains a distinct
 @@ -130,6 +190,8 @@
          : validity;
  }
@@ -6585,11 +6586,9 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          }
          catch (err) {
 -            console.error(`[automations] Could not open a history record for "${automation.name}"; running anyway:`, err);
--        }
--    }
 +            throw new BackgroundAutomationRunError(`Could not persist execution ownership for "${automation.name}": ${err instanceof Error ? err.message : String(err)}`, "automation_execution_admission_failed");
-+        }
-+    }
+         }
+     }
 +    const finish = { emitFinished: options.emitFinished !== false };
      let result;
      // Populated as soon as the run id exists, so a failure that never returns a
@@ -6634,17 +6633,16 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
      // write it must not turn a completed automation into a reported failure.
 -    await recordRunOutcome(historyId, "success");
 -    return result;
--}
++    if (result.status === "waiting_approval")
++        return result;
++    const terminalOutcome = await recordRunOutcome(historyId, "success", undefined, undefined, finish, options.continuation, result.responseText);
++    return terminalOutcome ? { ...result, terminalOutcome } : result;
+ }
 -/**
 - * Link the run to its agent thread. Bookkeeping again: the automation is
 - * already executing by this point, so a failed write costs the cross-reference
 - * in the history view, not the run.
 - */
-+    if (result.status === "waiting_approval")
-+        return result;
-+    const terminalOutcome = await recordRunOutcome(historyId, "success", undefined, undefined, finish, options.continuation, result.responseText);
-+    return terminalOutcome ? { ...result, terminalOutcome } : result;
-+}
 +/** Durable admission must succeed before inserting or starting a Native chunk. */
  async function recordRunThread(historyId, threadId, runId) {
 -    if (!historyId)
@@ -6706,10 +6704,6 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          return;
 -    try {
 -        await finishAutomationRun(historyId, status, error, errorCode);
--    }
--    catch (err) {
--        console.error(`[automations] Could not record run ${historyId} as ${status}:`, err);
--    }
 +    const outcome = continuation ? { historyId, askId: continuation.askId, threadId: continuation.threadId,
 +        turnId: continuation.turnId, runId: continuation.resumeRunId, status, error: error ?? null,
 +        errorCode: errorCode ?? null, emitFinished: finish.emitFinished,
@@ -6718,7 +6712,9 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +    if (outcome) {
 +        try { await retainAutomationApprovalOutcome(continuation, outcome); }
 +        catch (err) { storageError = err; }
-+    }
+     }
+-    catch (err) {
+-        console.error(`[automations] Could not record run ${historyId} as ${status}:`, err);
 +    for (let attempt = 0; attempt < (outcome ? 2 : 1); attempt++) {
 +        try {
 +            await finishAutomationRun(historyId, status, error, errorCode, finish);
@@ -6727,7 +6723,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +            storageError = err;
 +            console.error(`[automations] Could not record run ${historyId} as ${status}:`, err);
 +        }
-+    }
+     }
 +    if (outcome)
 +        throw new AutomationApprovalOutcomePendingError(outcome, storageError);
  }
@@ -6925,6 +6921,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 -                        usageRef.current = await instrumentAgentLoop({
 -                            runAgentLoop: (o) => execute(o),
 -                            loopOpts,
+-                            runId,
 +        let activeRun;
 +        let callbackError = null;
 +        let finalizationConfirmed = false;
@@ -6973,14 +6970,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +                            actions,
 +                            send,
 +                            signal,
-+                            threadId: thread.id,
-+                            ownerEmail,
-+                            orgId,
-+                            appId: deps.appId,
-+                            actionCaller: options.actionCaller,
-+                            automation: options.actionAutomation,
-                             runId,
--                            threadId: thread.id,
+                             threadId: thread.id,
 -                            // A scheduled run is NOT anonymous. Passing the owner is what
 -                            // makes it visible to per-user observability reads.
 -                            userId: ownerEmail,
@@ -6998,6 +6988,41 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 -                                label: usageLabel,
 -                                scope: orgId ? "organization" : "personal",
 -                            },
+-                        });
+-                        return;
+-                    }
+-                }
+-                catch (error) {
+-                    // Match A2A and interactive chat: a setup failure falls through
+-                    // to an uninstrumented run, but a failure from INSIDE the
+-                    // instrumented loop is the real run failure and must rethrow.
+-                    if (instrumented)
+-                        throw error;
+-                }
+-                usageRef.current = await execute();
+-            }, async (run) => {
+-                if (hardAbortTimer) {
+-                    clearTimeout(hardAbortTimer);
+-                    hardAbortTimer = null;
+-                }
+-                const persistFailure = backgroundAutomationPersistFailure({
+-                    run,
+-                    hardTimedOut,
+-                    hardTimeoutMs,
+-                });
+-                try {
+-                    await persistBackgroundAutomationTurn({
+-                        threadId: thread.id,
+-                        threadTitle,
+-                        prompt,
+-                        run,
+-                        persistFailure,
++                            ownerEmail,
++                            orgId,
++                            appId: deps.appId,
++                            actionCaller: options.actionCaller,
++                            automation: options.actionAutomation,
++                            runId,
 +                            maxIterations: automation.meta.maxIterations,
 +                            maxRunInputTokens: automation.meta.maxRunInputTokens,
 +                            // Same model-aware ceiling the interactive paths pass (see
@@ -7143,56 +7168,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +                        model,
 +                        engineName: engine.name,
 +                        userId: ownerEmail,
-+                    });
-+                    _activeBackgroundRunIds.add(runId);
-+                    if (_backgroundAutomationsClosed)
-+                        abortRun(runId, SHUTDOWN_ABORT_REASON);
-+                    hardAbortTimer = setTimeout(() => {
-+                        hardAbortTimer = null;
-+                        if (activeRun.status !== "running")
-+                            return;
-+                        hardTimedOut = true;
-+                        // `abortRun`, not `activeRun.abort.abort`: the controller alone
-+                        // carries no reason the run manager can see, so finalization fell
-+                        // through to `aborted:user` and a hard timeout was recorded as a
-+                        // person pressing Stop.
-+                        abortRun(runId, "background_automation_hard_timeout");
-+                        const timeoutError = new BackgroundAutomationRunError(`Background automation timed out after ${Math.round(hardTimeoutMs / 60_000)} minutes`, "background_automation_hard_timeout");
-+                        void activeRun.finalized
-+                            .catch(() => { })
-+                            .then(() => {
-+                            reject(timeoutError);
-                         });
--                        return;
--                    }
--                }
--                catch (error) {
--                    // Match A2A and interactive chat: a setup failure falls through
--                    // to an uninstrumented run, but a failure from INSIDE the
--                    // instrumented loop is the real run failure and must rethrow.
--                    if (instrumented)
--                        throw error;
--                }
--                usageRef.current = await execute();
--            }, async (run) => {
--                if (hardAbortTimer) {
--                    clearTimeout(hardAbortTimer);
--                    hardAbortTimer = null;
--                }
--                const persistFailure = backgroundAutomationPersistFailure({
--                    run,
--                    hardTimedOut,
--                    hardTimeoutMs,
-+                    }, hardTimeoutMs);
-                 });
--                try {
--                    await persistBackgroundAutomationTurn({
--                        threadId: thread.id,
--                        threadTitle,
--                        prompt,
--                        run,
--                        persistFailure,
--                    });
+                     });
 -                }
 -                catch (err) {
 -                    reject(err instanceof Error ? err : new Error(String(err)));
@@ -7244,7 +7220,27 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 -                    .catch(() => { })
 -                    .then(() => {
 -                    reject(timeoutError);
--                });
++                    _activeBackgroundRunIds.add(runId);
++                    if (_backgroundAutomationsClosed)
++                        abortRun(runId, SHUTDOWN_ABORT_REASON);
++                    hardAbortTimer = setTimeout(() => {
++                        hardAbortTimer = null;
++                        if (activeRun.status !== "running")
++                            return;
++                        hardTimedOut = true;
++                        // `abortRun`, not `activeRun.abort.abort`: the controller alone
++                        // carries no reason the run manager can see, so finalization fell
++                        // through to `aborted:user` and a hard timeout was recorded as a
++                        // person pressing Stop.
++                        abortRun(runId, "background_automation_hard_timeout");
++                        const timeoutError = new BackgroundAutomationRunError(`Background automation timed out after ${Math.round(hardTimeoutMs / 60_000)} minutes`, "background_automation_hard_timeout");
++                        void activeRun.finalized
++                            .catch(() => { })
++                            .then(() => {
++                            reject(timeoutError);
++                        });
++                    }, hardTimeoutMs);
+                 });
 -            }, hardTimeoutMs);
 -        }).finally(() => {
 +            }
@@ -7300,7 +7296,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (responseText.trim() &&
              automation.meta.deliveryPlatform &&
              automation.meta.deliveryDestination) {
-@@ -627,6 +929,320 @@
+@@ -627,6 +929,372 @@
                  tenantId: automation.meta.deliveryTenantId,
              });
          }
@@ -7315,7 +7311,11 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +}
 +function retainedAutomationOptions(options) {
 +    const keys = ["ownerEmail", "orgId", "prompt", "threadTitle", "runIdPrefix", "usageLabel", "usageRefId", "emitFinished", "advanceSchedule", "actionAutomation", "webhookTaskId"];
-+    return Object.fromEntries(keys.filter((key) => options[key] !== undefined).map((key) => [key, key === "prompt" ? redactText(options[key]) : options[key]]));
++    const retained = Object.fromEntries(keys.filter((key) => options[key] !== undefined).map((key) => [key, key === "prompt" ? redactText(options[key]) : options[key]]));
++    // The scheduler sweep omits advanceSchedule, which means advance. Store the
++    // resolved value so the settled outcome of a waited run moves nextRun forward.
++    retained.advanceSchedule = options.advanceSchedule !== false;
++    return retained;
 +}
 +export function automationDefinitionRevision(automation) {
 +    const fields = Object.fromEntries(JOB_EXECUTION_FRONTMATTER_FIELDS.map((key) => [key, undefined]));
@@ -7473,7 +7473,8 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +        const { recordExecutionOutcome } = await import("./scheduler.js");
 +        await recordExecutionOutcome({ owner: context.resourceOwner, path: context.resourcePath, id: context.resourceId }, {
 +            lastStatus: run.status, lastError: run.error ?? undefined,
-+            advanceSchedule: context.options.advanceSchedule ?? false, completedAt: run.finishedAt,
++            // Contexts stored before the resolved value keep the same default. Run now stores false.
++            advanceSchedule: context.options.advanceSchedule !== false, completedAt: run.finishedAt,
 +        }, undefined, { historyId: run.id, runId: run.runId });
 +    }
 +    // Wake only after both durable outcomes. Failure leaves this history recoverable.
@@ -7526,10 +7527,54 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +    }
 +}
 +/** Only an authenticated owner decision enters this continuation path. */
++/**
++ * A wait's owner decides it. When an organization run's owner can no longer act
++ * (removed from the organization or deleted), a principal with deletion
++ * authority over the same automation may decline the wait, never approve it, so
++ * the job can be cleaned up. Declining executes nothing.
++ */
++async function authorizedDecisionState(input, actor, deps) {
++    try {
++        return { state: await authorizedAutomationContinuation(input.historyId, actor, deps), departedOwner: false };
++    }
++    catch (refusal) {
++        const state = input.decision === "decline" ? await departedOwnerDeclineState(input.historyId, actor) : null;
++        if (!state)
++            throw refusal;
++        return { state, departedOwner: true };
++    }
++}
++async function departedOwnerDeclineState(id, actor) {
++    const state = await getAutomationContinuation(id);
++    const context = state?.context, runOrgId = state?.run.orgId ?? null;
++    if (!context || runOrgId === null || !actor?.userEmail || context.historyId !== id ||
++        (state.run.appId ?? null) !== (actor.appId ?? null) || runOrgId !== (actor.orgId ?? null) ||
++        (context.orgId ?? null) !== runOrgId)
++        return null;
++    // Only an owner who can no longer act opens this path.
++    if ((await validateAutomationRunIdentity(context.ownerEmail, runOrgId)).ok)
++        return null;
++    const thread = state.run.threadId ? await getThread(state.run.threadId) : null;
++    if (!thread || thread.id !== context.threadId || (thread.orgId ?? null) !== runOrgId ||
++        thread.ownerEmail.toLowerCase() !== context.ownerEmail.toLowerCase())
++        return null;
++    const resource = await resourceGetByPath(context.resourceOwner, state.run.path);
++    if (!resource || resource.id !== context.resourceId)
++        return null;
++    try {
++        // The same authority deleteAutomation and manage-jobs deletion require.
++        if (!await canUpdateAutomationResource({ userEmail: actor.userEmail, orgId: actor.orgId, appId: actor.appId }, resource))
++            return null;
++    }
++    catch {
++        return null;
++    }
++    return { ...state, thread };
++}
 +export async function decideAutomationApproval(input, actor, deps = _approvalDependencies) {
 +    if (!deps)
 +        throw approvalDecisionRefusal("Automation approval execution is not initialized.");
-+    const state = await authorizedAutomationContinuation(input.historyId, actor, deps);
++    const { state, departedOwner } = await authorizedDecisionState(input, actor, deps);
 +    const pending = state.context;
 +    if (state.run.finishedAt) {
 +        await reconcileAutomationApprovalOutcome(input.historyId);
@@ -7577,14 +7622,17 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +    if (!ask || ask.status !== "pending")
 +        throw approvalDecisionRefusal("The exact pending approval is unavailable.");
 +    const validity = await validateAutomationRunIdentity(pending.ownerEmail, pending.orgId ?? undefined);
-+    if (!validity.ok)
++    if (!validity.ok && !departedOwner)
 +        throw approvalDecisionRefusal("The approval owner identity is no longer valid.");
 +    if (input.decision === "decline") {
 +        if (!await claimAutomationApprovalDecision(input.historyId, pending.askId, createRunId("automation-decline")))
 +            throw approvalDecisionRefusal("Another decision already claimed this approval.");
 +        if (!await declineAgentToolApproval(pending))
 +            throw approvalDecisionRefusal("The exact approval could not be declined.");
-+        await finishAutomationRun(input.historyId, "declined", "The owner declined the pending action. It did not execute.", "automation_approval_declined", { emitFinished: pending.options.emitFinished });
++        const declined = departedOwner
++            ? "Someone with authority to delete this automation declined the pending action after its owner lost access. It did not execute."
++            : "The owner declined the pending action. It did not execute.";
++        await finishAutomationRun(input.historyId, "declined", declined, "automation_approval_declined", { emitFinished: pending.options.emitFinished });
 +        await recordApprovalExecutionOutcome(pending, "declined");
 +        return { status: "declined", historyId: input.historyId };
 +    }
@@ -8072,10 +8120,11 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          finishedAt: row.finished_at == null ? null : Number(row.finished_at),
          error: row.error == null && status === "interrupted"
              ? INTERRUPTED_RUN_MESSAGE
-@@ -202,6 +235,18 @@
+@@ -201,6 +234,18 @@
+                 : stringifyValue(row.error_code),
      };
  }
- /**
++/**
 + * Vivary #110. The owner on every history row of an automation: the
 + * organization owner for an organization identity, the creator for a legacy
 + * `__shared__` resource, and the resource owner otherwise.
@@ -8087,10 +8136,9 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +            ? (identity?.userEmail ?? resourceOwner)
 +            : resourceOwner;
 +}
-+/**
+ /**
   * Record an automation execution. Manual runs create the row before dispatch,
   * so `dispatchPending` distinguishes that durable handoff from a run that has
-  * already entered the worker.
 @@ -210,8 +255,8 @@
      await ensureTable();
      const id = randomUUID();
@@ -8180,7 +8228,6 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 -    await getDbExec().execute({
 -        sql: `UPDATE ${TABLE} SET thread_id = ?, run_id = ? WHERE id = ?`,
 -        args: [threadId, runId, id],
--    });
 +    const result = await getDbExec().execute({
 +        // Existing attached legacy rows retain their original execution order.
 +        // SQL assignment expressions read the pre-update thread/run references.
@@ -8188,40 +8235,44 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +          admitted_at = COALESCE(admitted_at, CASE WHEN thread_id IS NOT NULL AND run_id IS NOT NULL THEN started_at ELSE ? END)
 +          WHERE id = ? AND status IN ('running', 'resuming') AND finished_at IS NULL`,
 +        args: [threadId, runId, Date.now(), id],
-+    });
+     });
 +    if (result.rowsAffected !== 1)
 +        throw new Error("The automation execution admission could not be saved.");
  }
  /**
   * Forget an automation's executions.
-@@ -371,7 +428,7 @@
+@@ -370,8 +427,13 @@
+     // the cutoff keeps that run's history from being swept up with the old
      // definition's.
      const cutoff = Date.now();
++    // Approval custody stays until it settles. An ordinary run still in flight goes
++    // too: it finishes against a deleted definition, and a reused name must not
++    // inherit its row. It can no longer publish custody once the definition is gone.
      await getDbExec().execute({
 -        sql: `DELETE FROM ${TABLE} WHERE owner = ? AND automation = ? AND started_at <= ?`,
-+        sql: `DELETE FROM ${TABLE} WHERE owner = ? AND automation = ? AND started_at <= ? AND finished_at IS NOT NULL AND status NOT IN ('waiting_approval', 'resuming') AND (approval_context IS NULL OR approval_outcome_reconciled = 1)`,
++        sql: `DELETE FROM ${TABLE} WHERE owner = ? AND automation = ? AND started_at <= ? AND status NOT IN ('waiting_approval', 'resuming') AND (
++            finished_at IS NOT NULL AND (approval_context IS NULL OR approval_outcome_reconciled = 1)
++            OR finished_at IS NULL AND approval_context IS NULL)`,
          args: [owner, automation, cutoff],
      });
  }
-@@ -384,12 +441,229 @@
+@@ -384,12 +446,232 @@
      const appId = options.appId?.trim() || null;
      const placeholders = owners.map(() => "?").join(", ");
      const appFilter = appId ? " AND (app_id = ? OR app_id IS NULL)" : "";
--    const result = await getDbExec().execute({
--        sql: `SELECT * FROM ${TABLE} WHERE owner IN (${placeholders}) AND automation = ?
--          ${appFilter}
--          ORDER BY started_at DESC LIMIT ${limit}`,
--        args: [...owners, options.automation, ...(appId ? [appId] : [])],
--    });
 +    const orgFilter = options.orgIds ? ` AND COALESCE(org_id, '') IN (${options.orgIds.map(() => "?").join(", ")})` : "";
 +    if (options.orgIds && !options.orgIds.length)
 +        return [];
 +    const args = [...owners, options.automation, ...(appId ? [appId] : []), ...(options.orgIds?.map(id => id ?? "") ?? [])];
 +    const where = `owner IN (${placeholders}) AND automation = ? ${appFilter}${orgFilter}`;
-+    const result = await getDbExec().execute({
+     const result = await getDbExec().execute({
+-        sql: `SELECT * FROM ${TABLE} WHERE owner IN (${placeholders}) AND automation = ?
+-          ${appFilter}
+-          ORDER BY started_at DESC LIMIT ${limit}`,
+-        args: [...owners, options.automation, ...(appId ? [appId] : [])],
 +        sql: `SELECT * FROM ${TABLE} WHERE ${where} ORDER BY started_at DESC, id DESC LIMIT ${limit}`,
 +        args,
-+    });
+     });
 +    const retained = options.includePendingApprovals ? await getDbExec().execute({
 +        sql: `SELECT * FROM ${TABLE} WHERE ${where} AND (
 +          finished_at IS NULL AND status IN ('waiting_approval', 'resuming')
@@ -8233,7 +8284,6 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +    rows.sort((a, b) => Number(b.started_at) - Number(a.started_at) || String(b.id).localeCompare(String(a.id)));
      const now = Date.now();
 -    return (result.rows ?? []).map((row) => toRun(row, now));
--}
 +    return rows.map((row) => toRun(row, now));
 +}
 +
@@ -8351,9 +8401,10 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +    const orgId = recoveredFactoryOwnerOrgId(meta, resource.path, resource.owner) ?? meta.orgId ?? null;
 +    const creator = meta.runAs === "shared" ? resource.owner : meta.createdBy ||
 +        (!resourceOrg && resource.owner !== SHARED_OWNER ? resource.owner : null);
-+    if (!creator || (resourceOrg && resourceOrg !== orgId))
-+        throw new Error("Cannot verify the persisted job approval history scope.");
-+    const historyOwner = automationHistoryOwner(resource.owner, { userEmail: creator, orgId });
++    // An unresolvable creator or organization scope cannot project the history owner.
++    // Exact resource bindings still find any custody, so refuse only when one exists.
++    const scopeKnown = Boolean(creator) && !(resourceOrg && resourceOrg !== orgId);
++    const historyOwner = scopeKnown ? automationHistoryOwner(resource.owner, { userEmail: creator, orgId }) : null;
 +    await ensureTable();
 +    const resourceId = isPostgres() ? "approval_context::jsonb ->> 'resourceId'" : "json_extract(approval_context, '$.resourceId')";
 +    const resourceOwner = isPostgres() ? "approval_context::jsonb ->> 'resourceOwner'" : "json_extract(approval_context, '$.resourceOwner')";
@@ -8369,6 +8420,8 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +            owner = ? AND path = ? OR ${resourceId} = ? OR ${resourceOwner} = ? AND ${resourcePath} = ?)`,
 +        args: [historyOwner, resource.path, resource.id, resource.owner, resource.path],
 +    });
++    if (!scopeKnown && result.rows.length)
++        throw new Error("Cannot verify the persisted job approval history scope.");
 +    for (const row of result.rows) {
 +        const context = row.approval_context ? JSON.parse(String(row.approval_context)) : null;
 +        if (!context || row.owner !== historyOwner || row.path !== resource.path ||
@@ -8440,7 +8493,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +        args: [run.id, run.owner, run.path],
 +    });
 +    return result.rows.length > 0;
-+}
+ }
 diff --git a/dist/jobs/run-now.d.ts b/dist/jobs/run-now.d.ts
 index d171bf0e5f313133e3f0dc937bafaf9a29e25084..ab3b310f74cfe514977783531512ea91b900798c 100644
 --- a/dist/jobs/run-now.d.ts
@@ -13122,11 +13175,16 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                              if (full) {
                                  const fm = parseSkillFrontmatter(full.content);
                                  if (!isRuntimeVisibleScope(fm.scope))
-@@ -4649,6 +4674,19 @@
+@@ -4649,6 +4674,24 @@
                                  setResponseStatus(event, 404);
                                  return { error: "Thread not found" };
                              }
 +                            if (body.threadData) {
++                                const { isAutomationRunThread } = await import("../jobs/run-history.js");
++                                if (await isAutomationRunThread(threadId)) {
++                                    setResponseStatus(event, 409);
++                                    return { error: "Inspect and decide automation runs in Settings.", errorCode: "automation_thread_interactive_refused", retryable: false };
++                                }
 +                                try {
 +                                    const snapshot = JSON.parse(body.threadData);
 +                                    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)
@@ -13142,7 +13200,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                              let newThreadData = body.threadData || thread.threadData;
                              let newMessageCount = body.messageCount ?? thread.messageCount;
                              let nextTitle = typeof body.title === "string" ? body.title : thread.title;
-@@ -4666,34 +4704,20 @@
+@@ -4666,34 +4709,20 @@
                                          nextTitle = meta.title;
                                  }
                              };
@@ -13164,7 +13222,11 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
 -                                catch {
 -                                    // Invalid JSON in either side — fall back to raw body blob.
 -                                }
--                            }
++                            // Keep the original snapshot until the store's CAS attempt. A
++                            // preliminary merge would hide which head the browser requested.
++                            try {
++                                preserveTitleOverride(JSON.parse(thread.threadData));
+                             }
 -                            else {
 -                                try {
 -                                    preserveTitleOverride(JSON.parse(newThreadData));
@@ -13172,13 +13234,6 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
 -                                catch {
 -                                    // Invalid JSON — keep the title supplied by the client.
 -                                }
--                            }
--                            await updateThreadData(threadId, newThreadData, nextTitle, nextPreview, newMessageCount, { ignoreConflicts: true });
-+                            // Keep the original snapshot until the store's CAS attempt. A
-+                            // preliminary merge would hide which head the browser requested.
-+                            try {
-+                                preserveTitleOverride(JSON.parse(thread.threadData));
-+                            }
 +                            catch { }
 +                            const saved = await updateThreadData(threadId, newThreadData, nextTitle, nextPreview, newMessageCount, {
 +                                expectedHeadRevision: Number.isSafeInteger(body.expectedHeadRevision)
@@ -13187,11 +13242,12 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
 +                            if (!saved) {
 +                                setResponseStatus(event, 404);
 +                                return { error: "Thread not found" };
-+                            }
+                             }
+-                            await updateThreadData(threadId, newThreadData, nextTitle, nextPreview, newMessageCount, { ignoreConflicts: true });
                              // Scope updates piggyback on the PUT — the client uses this
                              // path for detach and for claiming a legacy unscoped thread.
                              // A scoped thread cannot be retagged across resources here.
-@@ -4701,7 +4725,7 @@
+@@ -4701,7 +4730,7 @@
                                  const incomingScope = parseScopeFromBody(body.scope);
                                  await setThreadScope(threadId, incomingScope);
                              }
@@ -13200,7 +13256,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                          });
                      }
                      // POST /threads/:id/queued — debounced writes from the client
-@@ -5113,32 +5137,13 @@
+@@ -5113,32 +5142,13 @@
                      ? preparedMarker.automationRunId
                      : undefined;
                  if (typeof automationRunId === "string" && automationRunId) {
@@ -13234,7 +13290,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                          }
                          catch {
                              setResponseStatus(event, 500);
-@@ -5146,7 +5151,7 @@
+@@ -5146,7 +5156,7 @@
                          }
                      }
                      const waitUntil = event.req?.waitUntil;
@@ -13243,7 +13299,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                      if (typeof waitUntil === "function") {
                          void waitUntil(runPromise);
                      }
-@@ -5321,34 +5326,19 @@
+@@ -5321,34 +5331,19 @@
              // Poll every 60 seconds for due recurring jobs and execute them.
              // Long-lived runtimes use setInterval; serverless runtimes rely on a
              // platform-owned sweep because an invocation cannot own a durable loop.
@@ -13282,7 +13338,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                      apiKey: options?.apiKey,
                      model: resolveConfiguredAgentModel(options),
                      appId: options?.appId,
-@@ -5439,15 +5429,24 @@
+@@ -5439,15 +5434,24 @@
                      }
                  }
                  else {
@@ -13309,7 +13365,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                      }, 10_000);
                  }
              }
-@@ -5759,27 +5758,48 @@
+@@ -5759,27 +5763,48 @@
              // Event and webhook automations remain live when the recurring scheduler
              // is disabled; only the cron driver is gated above.
              const { initTriggerDispatcher } = await import("../triggers/dispatcher.js");
@@ -13368,7 +13424,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
          })().catch((err) => {
              // If the init fails, the routes never get registered and requests
              // to /_agent-native/agent-chat silently 404. Register a fallback
-@@ -5803,6 +5823,7 @@
+@@ -5803,6 +5828,7 @@
                  "/mcp",
                  "/.well-known/agent-card.json",
                  "/_agent-native/a2a",
@@ -15631,7 +15687,7 @@ diff --git a/dist/jobs/actions/list-automation-runs.js b/dist/jobs/actions/list-
 +            }
 +        }
 +        if (scope === "organization" && !isMember)
-+            throw new Error("You are no longer a member of this organization.");
++            throw Object.assign(new Error("You are no longer a member of this organization."), { statusCode: 403 });
          const owner = scope === "organization"
              ? organizationResourceOwner(ctx.orgId)
              : userEmail;

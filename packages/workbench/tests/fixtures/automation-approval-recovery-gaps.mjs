@@ -210,7 +210,7 @@ async function deletionCase(kind, name) {
     const fixture = await f.makeApprovalCase(name, { existing: true, resourceOwner, repeatLocal: false });
     if (kind.startsWith("race-")) return deletionRaceCase(kind, fixture, f,
       modernRace ? async () => { await f.service.deleteAutomation({ ...identity, appId }, "personal", name); return { deleted: true }; } : () => invoke("delete"),
-      readTokens);
+      readTokens, "resource-read", modernRace);
     assert.equal(await context.runWithRequestContext(identity, () => scheduler.runJobNow(resourceOwner, name, fixture.deps)).then(x => x.status), "waiting_approval");
     const resolved = await runner.resolveBackgroundAutomationIdentity(fixture.automation);
     assert.equal(resolved.ok, true);
@@ -263,8 +263,13 @@ async function deletionCase(kind, name) {
     assert.deepEqual(await fixture.pending(run.id), pending);
     assert.deepEqual(await resources.resourceGetByPath(resourceOwner, run.path), before);
     await runStore.updateRunStatus(chunk, "aborted");
-    if (kind === "org-departed-wait") await restore();
-    await fixture.decide(run.id, pending, "decline", { ...identity, appId });
+    if (kind === "org-departed-wait") {
+      // Membership stays removed. Deletion authority may decline the wait, never approve it.
+      await assert.rejects(fixture.decide(run.id, pending, "approve", { ...deletingActor, appId }), /not available to this owner/);
+      await assert.rejects(fixture.decide(run.id, pending, "decline", { userEmail: foreign, orgId, appId }), /not available to this owner/);
+      await assert.rejects(fixture.decide(run.id, pending, "decline", { ...identity, appId }), /not available to this owner/);
+      await fixture.decide(run.id, pending, "decline", { ...deletingActor, appId });
+    } else await fixture.decide(run.id, pending, "decline", { ...identity, appId });
     assert.equal((await invoke("delete", deletingActor)).deleted, true);
     assert.equal(await resources.resourceGetByPath(resourceOwner, run.path), null);
     assert.equal((await history.getAutomationRun(run.id)).status, "declined");
@@ -273,13 +278,16 @@ async function deletionCase(kind, name) {
     assert.equal((await invoke("create", identity, tool, name + "-ordinary")).created, true);
     assert.equal((await invoke("delete", deletingActor, tool, name + "-ordinary")).deleted, true);
     return { kind, historyOwner, waitingRefused: true, resumingRefused: true, deleted: true, configuredEffects: 0,
-      membershipRestoredForDecline: kind === "org-departed-wait", scopeRefused: kind.startsWith("org-scope-") };
+      membershipRestoredForDecline: false, declinedByDeletionAuthority: kind === "org-departed-wait",
+      scopeRefused: kind.startsWith("org-scope-") };
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
 // Same resource and owner APIs on old and repaired packages. The selected
 // resource read is inside the repaired transaction and outside it on old Core.
-export async function deletionRaceCase(kind, fixture, f, remove, readTokens, boundary = "resource-read") {
+// cleansHistory: the remover also runs history cleanup, as the automation service does.
+// The refused run's history then goes with its definition, so a reused name starts clean.
+export async function deletionRaceCase(kind, fixture, f, remove, readTokens, boundary = "resource-read", cleansHistory = false) {
   const { history, runner, database, resources, frontmatter, approvalStore, runStore, owner, appId, mcpName, until } = f;
   const resource = fixture.automation.resource, db = database.getDbExec();
   let releasePredicate, releaseDelete;
@@ -294,6 +302,11 @@ export async function deletionRaceCase(kind, fixture, f, remove, readTokens, bou
     } } };
   };
   const execute = db.execute.bind(db), transaction = db.transaction?.bind(db);
+  const assertHistoryRemoved = async original => {
+    // The run settled after its history went with the definition, and it wrote no row back.
+    await until(async () => (await history.getAutomationRun(original.id)) === null);
+    assert.deepEqual(await history.listAutomationRuns({ owners: [owner], automation: fixture.automation.name, appId }), []);
+  };
   const work = fixture.start().then(result => ({ result }), error => ({ error }));
   let deletion, ready, replacement;
   try {
@@ -312,15 +325,18 @@ export async function deletionRaceCase(kind, fixture, f, remove, readTokens, bou
       const settled = await work;
       assert.equal(settled.result, undefined);
       assert.equal(settled.error?.errorCode, "automation_approval_changed");
-      const terminal = await fixture.terminal(original.id);
-      assert.equal(terminal.status, "error"); assert.equal(terminal.errorCode, "automation_approval_changed");
-      assert.equal(terminal.threadId, original.threadId);
-      assert.equal((await history.getAutomationContinuation(original.id)).context, null);
-      assert.equal(terminal.pendingAskId, null);
+      if (cleansHistory) await assertHistoryRemoved(original);
+      else {
+        const terminal = await fixture.terminal(original.id);
+        assert.equal(terminal.status, "error"); assert.equal(terminal.errorCode, "automation_approval_changed");
+        assert.equal(terminal.threadId, original.threadId);
+        assert.equal((await history.getAutomationContinuation(original.id)).context, null);
+        assert.equal(terminal.pendingAskId, null);
+      }
       assert.deepEqual(await resources.resourceGetByPath(owner, resource.path), replacement);
       assert.equal(fixture.calls.filter(call => call.name === mcpName).length, 0);
       return { kind, winner: "delete", predicateHit, deleteBarrierHit, configuredEffects: 0, originalHistoryId: original.id,
-        threadId: original.threadId, turnId: turn.turnId, terminalCode: terminal.errorCode, replacementId: replacement.id };
+        threadId: original.threadId, turnId: turn.turnId, terminalCode: settled.error.errorCode, replacementId: replacement.id };
     }
     const intercept = (executeStatement, inTransaction) => async statement => {
       const sql = normalized(statement);
@@ -365,12 +381,16 @@ export async function deletionRaceCase(kind, fixture, f, remove, readTokens, bou
     }
     assert.equal(deleted.result?.deleted, true, "a deletion winner commits before waiting can be established");
     assert.equal(await resources.resourceGetByPath(owner, resource.path), null);
-    const terminal = await fixture.terminal(original.id);
-    assert.equal(terminal.status, "error");
-    assert.equal(terminal.errorCode, "automation_approval_changed", "healthy deletion contention is a changed resource, not a storage failure");
-    assert.equal((await history.getAutomationContinuation(original.id)).context, null);
-    assert.equal(terminal.pendingAskId, null);
-    return { kind, winner: "delete", predicateHit, deleteBarrierHit, heldTransaction, configuredEffects: 0, terminalCode: terminal.errorCode };
+    assert.equal(settled.error?.errorCode, "automation_approval_changed", "healthy deletion contention is a changed resource, not a storage failure");
+    if (cleansHistory) await assertHistoryRemoved(original);
+    else {
+      const terminal = await fixture.terminal(original.id);
+      assert.equal(terminal.status, "error");
+      assert.equal(terminal.errorCode, "automation_approval_changed");
+      assert.equal((await history.getAutomationContinuation(original.id)).context, null);
+      assert.equal(terminal.pendingAskId, null);
+    }
+    return { kind, winner: "delete", predicateHit, deleteBarrierHit, heldTransaction, configuredEffects: 0, terminalCode: settled.error.errorCode };
   } finally {
     releasePredicate(); releaseDelete();
     if (deletion) await deletion;

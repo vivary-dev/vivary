@@ -213,6 +213,32 @@ flowchart LR
 
 Factory and heartbeat use existing Native scheduling/task owners. Preserve one task identity, bounded retries and no-progress stops. A periodic trigger is not new authority. These later features remain unavailable until their integration and activation gates pass.
 
+### Automation approval waits
+
+An automation run that reaches a tool needing approval keeps one history, conversation and turn while it waits. The wait survives an app restart, and Settings shows it for inspection and a decision. Update this diagram in the same change as any change to these states, the decision authority, deletion or settlement (issue #108).
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  state "Waiting for approval" as Waiting
+  state "Resuming" as Resuming
+  [*] --> Running: schedule, Run now, event or webhook
+  Running --> Waiting: tool needs approval
+  Running --> Completed: observed success
+  Running --> Failed: observed error
+  Running --> Interrupted: Stop, quit or lost run
+  Waiting --> Resuming: owner approves exact unexpired request
+  Waiting --> Declined: owner declines
+  Waiting --> Declined: deletion authority declines after owner lost access
+  Resuming --> Waiting: approved step never started
+  Resuming --> Declined: request was already declined
+  Resuming --> Interrupted: approved step outcome unconfirmed
+  Resuming --> Completed: continuation succeeds
+  Resuming --> Failed: continuation fails
+```
+
+Only the run's owner can approve, and only before the request expires. Declining executes nothing. If an organization run's owner leaves or loses access, the automation's creator or an organization admin (whoever may delete it) can decline the wait, never approve it, and then delete the job. After a waited run ends, settlement records its outcome on the automation, moves a scheduled job to its next run (Run now does not move the schedule), and releases the next queued webhook delivery. Deleting a job is refused while a wait, a resume or an unsettled outcome is bound to it. History cleanup removes ordinary runs, including one still in flight, and never removes a wait.
+
 ## J11: Host, preview and platform acceptance
 
 The live preview is isolated from privileged app state. Supported agent browser tools inspect its errors through the same project conversation. Remote access explicitly connects an authenticated browser to the chosen host and can be revoked. Reconnection restores authorized references rather than starting another run.
