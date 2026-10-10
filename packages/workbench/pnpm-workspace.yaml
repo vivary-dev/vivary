@@ -26,3 +26,24 @@ ignoredOptionalDependencies:
 overrides:
   officeparser@7.8.0>pdfjs-dist: 6.2.108
   '@agent-native/core@0.176.5>xlsx': https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
+  # Toolkit 0.19.3 pins its TipTap packages at 3.30.1, whose core carries GHSA-j95f-988m-3j2f.
+  # The packages pin each other exactly, so all of Toolkit's direct TipTap pins move to 3.30.5
+  # together. @tiptap/y-tiptap keeps its own 3.0.x line.
+  '@agent-native/toolkit@0.19.3>@tiptap/core': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/extension-bubble-menu': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/extension-code-block-lowlight': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/extension-collaboration': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/extension-collaboration-caret': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/extension-floating-menu': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/extension-image': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/extension-link': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/extension-placeholder': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/extension-table': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/extension-table-cell': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/extension-table-header': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/extension-table-row': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/extension-task-item': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/extension-task-list': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/pm': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/react': 3.30.5
+  '@agent-native/toolkit@0.19.3>@tiptap/starter-kit': 3.30.5
