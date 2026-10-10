@@ -11,6 +11,8 @@ const advisoryFloors = [
   { name: "pdfjs-dist", fixed: "6.2.108", advisories: ["GHSA-hq66-cqwq-w95j"] },
   { name: "xlsx", fixed: "0.19.3", advisories: ["GHSA-4r6h-8v6p-xvw6"] },
   { name: "xlsx", fixed: "0.20.2", advisories: ["GHSA-5pgg-2g8v-p4x9"] },
+  { name: "@tiptap/core", fixed: "3.30.4", advisories: ["GHSA-cp6q-959q-f8rh"] },
+  { name: "@tiptap/core", fixed: "3.30.5", advisories: ["GHSA-j95f-988m-3j2f"] },
 ];
 
 // SheetJS publishes fixed xlsx releases only on its CDN. This is the reviewed 0.20.3 archive.
@@ -74,6 +76,14 @@ for (const { name, fixed, advisories } of advisoryFloors) {
     assert.deepEqual(locked.filter(({ version }) => !isAtLeast(version, fixed)), [], `${name} is locked below ${fixed}`);
   });
 }
+
+// TipTap packages pin each other exactly, so a partial update breaks peer alignment.
+// @tiptap/y-tiptap has its own release line.
+test("the TipTap packages stay on one release", () => {
+  const releases = workbenchEntries.filter(({ name }) => name.startsWith("@tiptap/") && name !== "@tiptap/y-tiptap");
+  assert.ok(releases.length > 0, "no TipTap packages are locked");
+  assert.equal(new Set(releases.map(({ version }) => version)).size, 1, "TipTap packages are locked at different releases");
+});
 
 test("xlsx resolves only from the reviewed SheetJS archive and its integrity", () => {
   const entries = workbenchEntries.filter(({ name }) => name === "xlsx");
