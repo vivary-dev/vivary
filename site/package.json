@@ -23,7 +23,7 @@
   },
   "overrides": {
     "esbuild": "0.28.1",
-    "astro@7.3.3": {
+    "astro@7.3.5": {
       "http-cache-semantics": "$http-cache-semantics"
     }
   }
