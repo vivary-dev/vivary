@@ -8,6 +8,7 @@ import test from "node:test";
 const advisoryFloors = [
   { name: "proxy-addr", fixed: "2.0.8", advisories: ["GHSA-jqcg-44mw-7w3h"] },
   { name: "brace-expansion", fixed: "5.0.12", advisories: ["GHSA-qhr7-859c-m2p7", "GHSA-6j4f-fj2g-mc7p", "GHSA-q2hr-2g5m-vwhr"] },
+  { name: "pdfjs-dist", fixed: "6.2.108", advisories: ["GHSA-hq66-cqwq-w95j"] },
 ];
 
 const workbenchLock = readFileSync(new URL("../pnpm-lock.yaml", import.meta.url), "utf8");
