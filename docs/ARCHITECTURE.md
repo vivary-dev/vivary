@@ -260,22 +260,25 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
-Issue #23 proxy-addr and brace-expansion advisories. A Workbench test reads
-`pnpm-lock.yaml` and fails when any locked version of an advised package is
-below its first fixed release. The floors are proxy-addr 2.0.8 for
-GHSA-jqcg-44mw-7w3h and brace-expansion 5.0.12 for GHSA-qhr7-859c-m2p7,
-GHSA-6j4f-fj2g-mc7p and the moderate GHSA-q2hr-2g5m-vwhr. The workbench CI job
-runs it beside the Native package tests. The Workbench lock now resolves
-proxy-addr 2.0.8 under Express 5.2.1, which MCP SDK 1.30.0 brings in, and
-brace-expansion 5.0.12 under minimatch 10.2.6. Both versions fit their parents'
-existing ranges and keep the same dependencies and engines. Eight lock lines
-change: two package keys, their integrity values, two snapshot keys and the two
-parent references. Manifests, workspace settings, Core and Toolkit pins and
-patch hashes are unchanged. The retained dependency review and a 5.0.12 receipt
-record SHA-512 integrity matching the lock, publication more than 72 hours
-earlier, and no install scripts or binding.gyp.
-These are transitive request and glob helpers, so runtime flows, dependency
-owners and trust boundaries are unchanged.
+Issue #23 proxy-addr and brace-expansion advisories. A Workbench test reads the
+Workbench `pnpm-lock.yaml` and the desktop packager's `package-lock.json`, and
+fails when any locked version of an advised package is below its first fixed
+release in SemVer order, so a prerelease of the fixed release also fails. The
+floors are proxy-addr 2.0.8 for GHSA-jqcg-44mw-7w3h and brace-expansion 5.0.12
+for GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p and the moderate
+GHSA-q2hr-2g5m-vwhr. The workbench CI job runs it beside the Native package
+tests. The Workbench lock now resolves proxy-addr 2.0.8 under Express 5.2.1,
+which MCP SDK 1.30.0 brings in, and brace-expansion 5.0.12 under minimatch
+10.2.6. Both versions fit their parents' existing ranges and keep the same
+dependencies and engines. Eight Workbench lock lines change: two package keys,
+their integrity values, two snapshot keys and the two parent references. The
+desktop packager's development lock moves brace-expansion from 5.0.9 to 5.0.12
+under its own minimatch 10.2.6, changing only version, resolved and integrity.
+Manifests, workspace settings, Core and Toolkit pins and patch hashes are
+unchanged. The retained dependency review and a 5.0.12 receipt record SHA-512
+integrity matching both locks, publication more than 72 hours earlier, and no
+install scripts or binding.gyp. These are transitive request and glob helpers,
+so runtime flows, dependency owners and trust boundaries are unchanged.
 
 Issue #10 / PR #199 delayed Windows observation. The controller reproduced the fixed three-second pre-stop cutoff on unchanged `23304b8`: the real reader owner returned false after 3,017 ms before a valid 4,500 ms snapshot, then refused the second read. The public reader returned unavailable twice instead of available twice. Close now gives the in-flight scanner the remaining cleanup budget minus the teardown reserve. The 15-second overall deadline, three-second reserve, scanner's 10-second bound, original-root identity and fail-closed refusal/pipe-closure checks remain unchanged. The retained two-read regression simulates Windows executables on Linux; it is not packaged Windows acceptance. Controller green, affected checks, independent review and a matching new package/Windows acceptance remain pending. The original Windows scanner output was not captured, so this reproduction does not prove that incident's precise internal branch. Earlier scoped acceptance and failures remain preserved.
 
