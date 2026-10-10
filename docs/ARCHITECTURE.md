@@ -307,6 +307,26 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Issue #23 proxy-addr and brace-expansion advisories. A Workbench test reads the
+Workbench `pnpm-lock.yaml` and the desktop packager's `package-lock.json`, and
+fails when any locked version of an advised package is below its first fixed
+release in SemVer order, so a prerelease of the fixed release also fails. The
+floors are proxy-addr 2.0.8 for GHSA-jqcg-44mw-7w3h and brace-expansion 5.0.12
+for GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p and the moderate
+GHSA-q2hr-2g5m-vwhr. The `maintained workbench checks` CI job runs it beside the Native package
+tests. The Workbench lock now resolves proxy-addr 2.0.8 under Express 5.2.1,
+which MCP SDK 1.30.0 brings in, and brace-expansion 5.0.12 under minimatch
+10.2.6. Both versions fit their parents' existing ranges and keep the same
+dependencies and engines. Eight Workbench lock lines change: two package keys,
+their integrity values, two snapshot keys and the two parent references. The
+desktop packager's development lock moves brace-expansion from 5.0.9 to 5.0.12
+under its own minimatch 10.2.6, changing only version, resolved and integrity.
+Manifests, workspace settings, Core and Toolkit pins and patch hashes are
+unchanged. The retained dependency review and a 5.0.12 receipt record SHA-512
+integrity matching both locks, publication more than 72 hours earlier, and no
+install scripts or binding.gyp. These are transitive request and glob helpers,
+so runtime flows, dependency owners and trust boundaries are unchanged.
+
 Documentation site Astro 7.3.5, replacing Dependabot PR #185. Dependabot moved
 the site to Astro 7.3.5 and Starlight 0.42.4 but left the Astro-scoped
 cache-policy override keyed to 7.3.3, so `npm ci` failed with ERESOLVE. The
