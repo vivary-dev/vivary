@@ -272,6 +272,11 @@ async function deletionCase(kind, name) {
       // decide, then deletes. No inspection and no approval happen on this path.
       runner.setAutomationApprovalDependencies(fixture.deps);
       try {
+        // Settings shows Delete only for a listed job the viewer can change.
+        const settingsList = (await loadCore("jobs/actions/list-recurring-jobs.js")).default;
+        const listed = await context.runWithRequestContext({ userEmail: admin, orgId },
+          () => settingsList.run({ scope: "organization" }, { userEmail: admin, orgId, appId }));
+        assert.equal(listed.find(job => job.name === name)?.canUpdate, true, "Settings offers Delete to the admin");
         const settingsDelete = (await loadCore("jobs/actions/manage-recurring-job.js")).default;
         assert.deepEqual(await context.runWithRequestContext({ userEmail: admin, orgId },
           () => settingsDelete.run({ operation: "delete", scope: "organization", name }, { userEmail: admin, orgId, appId })),

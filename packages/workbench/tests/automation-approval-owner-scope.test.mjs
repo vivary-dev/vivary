@@ -331,6 +331,52 @@ for (const recovery of [false, true]) test(`normal HTTP history discovers an old
   assert.equal(effects(fixture), 0); assert.equal(fixture.modelCalls.length, models);
 });
 
+// A personal job made while an organization was active runs under it and keeps
+// its run history there. A queued Run now row keeps the personal owner, so a wait
+// on it could be decided by nobody. Run now refuses before the run starts, and
+// the job's own scheduled run still waits under the organization.
+test("Run now refuses connected tools when the job keeps its history under an organization", async () => {
+  // The manage-jobs tool stamps the active organization on a personal legacy job.
+  const name = "run-now-org-history";
+  const { createJobTools } = await loadCore("jobs/tools.js");
+  const created = await requestContext.runWithRequestContext({ userEmail: owner, orgId }, async () =>
+    JSON.parse(await createJobTools(appId)["manage-jobs"].run({ action: "create", name, scope: "personal",
+      instructions: "Perform the local step, then the configured step.", schedule: "0 * * * *", timezone: "UTC",
+      mcpTools: [mcpName] }, { caller: "human" })));
+  assert.equal(created.created, true);
+  const fixture = await makeApprovalCase(name, { existing: true });
+  const { resource } = fixture.automation;
+  // The finding's precondition: a personal job whose run identity is the organization's.
+  assert.equal(resource.owner, owner); assert.equal(fixture.automation.meta.orgId, orgId);
+  const identity = await runner.resolveBackgroundAutomationIdentity(fixture.automation);
+  assert.equal(identity.ok, true); assert.equal(identity.identity.orgId, orgId);
+  runner.setAutomationApprovalDependencies(fixture.deps);
+  const scheduler = await loadCore("jobs/scheduler.js"), runNow = await loadCore("jobs/run-now.js");
+  const orgOwner = resources.organizationResourceOwner(orgId);
+  runNow.setInProcessAutomationRunner(id => scheduler.runQueuedAutomation(id, fixture.deps), { appId });
+  let refused;
+  try {
+    const queued = await runNow.queueAutomationRunNow({ userEmail: owner, appId, scope: "personal", name: fixture.automation.name });
+    await until(async () => (await history.getAutomationRun(queued.automationRunId)).status !== "running");
+    refused = await history.getAutomationRun(queued.automationRunId);
+  } finally { runNow.setInProcessAutomationRunner(null); }
+  assert.equal(refused.status, "error"); assert.equal(refused.errorCode, "automation_run_binding_mismatch");
+  assert.equal(fixture.modelCalls.length, 0); assert.equal(effects(fixture), 0);
+  for (const key of [owner, orgOwner]) assert.equal(await history.hasUnresolvedAutomationApproval(key, resource.path), false);
+  const current = frontmatter.parseJobResource((await resources.resourceGetByPath(owner, resource.path)).content).meta;
+  assert.equal(runner.isBackgroundAutomationRunActive(current), false);
+  // The job's own runs record under the organization, so their wait can be decided.
+  assert.equal((await scheduler.runJobNow(owner, fixture.automation.name, fixture.deps)).status, "waiting_approval");
+  const [waiting] = await history.listAutomationRuns({ owners: [orgOwner], automation: fixture.automation.name, appId });
+  assert.equal(waiting.status, "waiting_approval"); assert.equal(waiting.orgId, orgId);
+  assert.equal(await history.hasUnresolvedAutomationApproval(orgOwner, resource.path), true);
+  await setActiveOrgId(owner, orgId, "decide the organization-history wait");
+  const pending = await fixture.pending(waiting.id);
+  const declined = await call("decide-automation-approval", { historyId: waiting.id, askId: pending.askId, decision: "decline" });
+  assert.equal(declined.status, 200);
+  assert.equal((await history.getAutomationRun(waiting.id)).status, "declined"); assert.equal(effects(fixture), 0);
+});
+
 test("normal HTTP history includes current organization custody without duplicating recent rows", async () => {
   const { fixture, result, decision } = await ready("http-org-list", true);
   await setActiveOrgId(owner, orgId, "organization history control");

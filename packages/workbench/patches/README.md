@@ -2948,7 +2948,17 @@ as the shared or organization pseudo-owner and declares connected tools, because
 approve for that identity. `reconcileAutomationApprovalOutcomes`, which the scheduler tick and
 pending-task sweep already run, first declines ready waits whose ask passed its expiry
 (`listExpiredApprovalWaits`, error code `automation_approval_expired`) through the same claim,
-decline, finish and settle steps as an owner's Decline.
+decline, finish and settle steps as an owner's Decline. A wait not yet marked ready is first
+recovered through `canRecoverWaitingTurn` and `recoverWaitingTurn`, as an owner's decision
+recovers it, and is skipped while its run can still save it. `automationRunBindingMatches`
+compares a history row's owner and organization with the run's custody binding. `executeJob`
+refuses a queued Run now of a job that declares connected tools when they differ, and the
+approval gate refuses to create a wait on such a row, with error code
+`automation_run_binding_mismatch`. `list-recurring-jobs` passes the request app ID to
+`authorizeJobMutation`, as `manage-recurring-job` does, so Settings offers Delete, Edit, Run now
+and the switch for an organization job that records an app ID. `isAutomationRunThread` treats a
+malformed legacy snapshot as an ordinary thread unless its scope marks an automation run, so
+the custody check on each chat send does not fail that chat.
 History cleanup after deletion also removes ordinary unfinished rows without
 approval context, so a run that finishes after its definition is deleted leaves
 no history for a reused name. Approval custody is never removed. A removed member

@@ -6237,7 +6237,7 @@ index 894c08a6583e5efca02509f382392b67f95d6c9a..5e3326679c61a9f6bd33af269630c8de
      executionHostId: string | null;
      executionEngine: string | null;
 diff --git a/dist/jobs/actions/list-recurring-jobs.js b/dist/jobs/actions/list-recurring-jobs.js
-index e806ca826db827ed70671a9409b718df85644d58..34bd90e383707f151b235e6725fd24a6740d14dc 100644
+index e806ca8..7520daf 100644
 --- a/dist/jobs/actions/list-recurring-jobs.js
 +++ b/dist/jobs/actions/list-recurring-jobs.js
 @@ -1,32 +1,52 @@
@@ -6317,6 +6317,15 @@ index e806ca826db827ed70671a9409b718df85644d58..34bd90e383707f151b235e6725fd24a6
          const jobs = [];
          for (const resource of resources) {
              if (!resource.path.endsWith(".md") || resource.path.endsWith(".keep")) {
+@@ -60,7 +82,7 @@ export default defineAction({
+             if (!jobBelongsToApp(meta, ctx?.appId))
+                 continue;
+             const canUpdate = scope === "personal" ||
+-                (await authorizeJobMutation(owner, meta)) === null;
++                (await authorizeJobMutation(owner, meta, ctx?.appId)) === null;
+             jobs.push({
+                 id: full.id,
+                 name: jobName(full.path),
 @@ -74,10 +96,10 @@ export default defineAction({
                  instructions: body,
                  enabled: meta.enabled,
@@ -6443,7 +6452,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 -import { recoveredFactoryOwnerOrgId, } from "./frontmatter.js";
 -import { attachAutomationRunThread, finishAutomationRun, startAutomationRun, } from "./run-history.js";
 +import { JOB_EXECUTION_FRONTMATTER_FIELDS, parseJobResource, patchJobFrontmatterFields, recoveredFactoryOwnerOrgId, } from "./frontmatter.js";
-+import { attachAutomationRunThread, automationHistoryOwner, automationRunClaimLeaseMs, claimAutomationApprovalDecision, finishAutomationRun, getAutomationContinuation, hasUnresolvedAutomationApproval, markAutomationApprovalReady, restoreUnconsumedAutomationApproval, retainAutomationApprovalOutcome, waitForAutomationApproval, INTERRUPTED_RUN_ERROR_CODE, INTERRUPTED_RUN_MESSAGE, startAutomationRun, } from "./run-history.js";
++import { attachAutomationRunThread, automationHistoryOwner, automationRunBindingMatches, AUTOMATION_RUN_BINDING_REFUSAL, automationRunClaimLeaseMs, claimAutomationApprovalDecision, finishAutomationRun, getAutomationContinuation, hasUnresolvedAutomationApproval, markAutomationApprovalReady, restoreUnconsumedAutomationApproval, retainAutomationApprovalOutcome, waitForAutomationApproval, INTERRUPTED_RUN_ERROR_CODE, INTERRUPTED_RUN_MESSAGE, startAutomationRun, } from "./run-history.js";
 +import { automationApprovalFingerprint, unattendedRegistryFingerprint, UnattendedRunRefusedError } from "./unattended-surface.js";
  /**
   * Default hard abort for one in-process automation run. Read through
@@ -6777,7 +6786,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const userApiKey = await getOwnerActiveApiKey(ownerEmail);
          // The run manager invokes its detached callback after the scheduler's
          // setup stack has yielded, so the engine's credentials must be captured
-@@ -382,11 +503,90 @@
+@@ -382,11 +503,98 @@
              engine.defaultModel;
          const model = normalizeModelForEngine(engine, modelCandidate);
          const systemPrompt = await deps.getSystemPrompt(ownerEmail);
@@ -6817,6 +6826,14 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +                const inputJson = JSON.stringify(binding.input);
 +                if (redactText(inputJson) !== inputJson)
 +                    throw new Error("Sensitive tool input cannot be retained for automation approval.");
++                // A wait is decided, blocks its job and settles under its history
++                // row's owner and organization. Nobody could decide one on a row
++                // with another binding, so refuse before any wait exists.
++                if (historyId && !await automationRunBindingMatches(historyId, automation.resource.owner, { userEmail: ownerEmail, orgId })) {
++                    approvalRefusal = new BackgroundAutomationRunError(AUTOMATION_RUN_BINDING_REFUSAL, "automation_run_binding_mismatch");
++                    if (getRun(runId)?.status === "running" && !executionSignal?.aborted) abortRun(runId, approvalRefusal.errorCode);
++                    throw approvalRefusal;
++                }
 +                // Validation awaits current owners, so Stop may have arrived meanwhile.
 +                if (executionSignal?.aborted || isBackgroundAutomationsClosed() || await isTurnAborted(thread.id, turnId))
 +                    throw new Error("The automation is stopping.");
@@ -6872,7 +6889,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (runIdRef)
              runIdRef.current = runId;
          await recordRunThread(historyId, thread.id, runId);
-@@ -425,170 +625,275 @@
+@@ -425,170 +633,275 @@
          // handoff to the unclaimed-background-run sweep — it gets reaped as
          // "background_worker_never_started" out from under a still-executing
          // job the moment any single tool call runs past the 25s grace window.
@@ -7299,7 +7316,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const usage = usageRef.current;
          if (usage &&
              (usage.inputTokens > 0 ||
-@@ -613,6 +918,8 @@
+@@ -613,6 +926,8 @@
                  // Usage attribution must not break an otherwise successful run.
              }
          }
@@ -7308,7 +7325,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (responseText.trim() &&
              automation.meta.deliveryPlatform &&
              automation.meta.deliveryDestination) {
-@@ -627,6 +934,431 @@
+@@ -627,6 +942,438 @@
                  tenantId: automation.meta.deliveryTenantId,
              });
          }
@@ -7542,12 +7559,19 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +        try {
 +            const state = await getAutomationContinuation(id);
 +            const pending = state?.context;
-+            if (!pending || state.storedStatus !== "waiting_approval" || !state.run.approvalReady || state.run.finishedAt)
++            if (!pending || state.storedStatus !== "waiting_approval" || state.run.finishedAt)
 +                continue;
 +            const ask = await readAgentToolApproval(pending);
 +            if (!ask || ask.status !== "pending" || ask.expiresAt > Date.now() ||
 +                _activeBackgroundRunIds.has(pending.runId) || await getRunStatus(pending.runId) === "running")
 +                continue;
++            // A wait saved before its turn was marked ready is recovered as an
++            // owner's decision recovers it. A run that can still save it is left.
++            if (!state.run.approvalReady) {
++                if (!await canRecoverWaitingTurn(pending))
++                    continue;
++                await recoverWaitingTurn(state);
++            }
 +            if (!await claimAutomationApprovalDecision(id, pending.askId, createRunId("automation-expire")))
 +                continue;
 +            if (!await declineAgentToolApproval(pending))
@@ -8191,7 +8215,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          finishedAt: row.finished_at == null ? null : Number(row.finished_at),
          error: row.error == null && status === "interrupted"
              ? INTERRUPTED_RUN_MESSAGE
-@@ -201,6 +234,18 @@
+@@ -201,6 +234,30 @@
                  : stringifyValue(row.error_code),
      };
  }
@@ -8207,10 +8231,22 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +            ? (identity?.userEmail ?? resourceOwner)
 +            : resourceOwner;
 +}
++export const AUTOMATION_RUN_BINDING_REFUSAL = "Run now cannot pause this job for approval, because the job keeps its run history under a different owner or organization. Its scheduled and triggered runs can still pause for approval.";
++/**
++ * Vivary #108. Whether a history row holds the owner and organization that the
++ * run binds its approval custody to. A queued Run now row keeps the resource
++ * owner, because the queued run looks its resource up by that owner, so the two
++ * differ for a job that keeps its history under an organization.
++ */
++export async function automationRunBindingMatches(id, resourceOwner, identity) {
++    const run = await getAutomationRun(id);
++    return Boolean(run) && run.owner === automationHistoryOwner(resourceOwner, identity) &&
++        (run.orgId ?? null) === (identity?.orgId ?? null);
++}
  /**
   * Record an automation execution. Manual runs create the row before dispatch,
   * so `dispatchPending` distinguishes that durable handoff from a run that has
-@@ -210,8 +255,8 @@
+@@ -210,8 +267,8 @@
      await ensureTable();
      const id = randomUUID();
      await getDbExec().execute({
@@ -8221,7 +8257,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          args: [
              id,
              input.owner,
-@@ -224,6 +269,7 @@
+@@ -224,6 +281,7 @@
              input.threadId ?? null,
              Date.now(),
              input.dispatchPending ? 1 : 0,
@@ -8229,7 +8265,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          ],
      });
      await pruneAutomationRuns(input.owner, input.automation);
-@@ -244,7 +290,7 @@
+@@ -244,7 +302,7 @@
      const now = Date.now();
      const result = await getDbExec().execute({
          sql: `UPDATE ${TABLE} SET claimed_at = ? WHERE id = ? AND dispatch_pending = 1 AND (claimed_at IS NULL OR claimed_at <= ?) AND status = 'running'`,
@@ -8238,7 +8274,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
      });
      return Number(result.rowsAffected ?? 0) > 0;
  }
-@@ -266,7 +312,7 @@
+@@ -266,7 +324,7 @@
              AND started_at <= ?
            ORDER BY started_at ASC LIMIT ${limit}`,
          args: [
@@ -8247,7 +8283,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
              ...(appId ? [appId] : []),
              Date.now() - olderThanMs,
          ],
-@@ -291,7 +337,7 @@
+@@ -291,7 +349,7 @@
  async function pruneAutomationRuns(owner, automation) {
      await getDbExec().execute({
          sql: `DELETE FROM ${TABLE}
@@ -8256,7 +8292,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
              SELECT MIN(started_at) FROM (
                SELECT started_at FROM ${TABLE}
                WHERE owner = ? AND automation = ?
-@@ -302,7 +348,9 @@
+@@ -302,7 +360,9 @@
          args: [owner, automation, owner, automation],
      });
  }
@@ -8267,7 +8303,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
      await ensureTable();
      const existing = await getDbExec().execute({
          sql: `SELECT owner, automation, path, org_id, run_id, thread_id, started_at FROM ${TABLE} WHERE id = ? LIMIT 1`,
-@@ -310,17 +358,20 @@
+@@ -310,17 +370,20 @@
      });
      const row = existing.rows?.[0];
      const finishedAt = Date.now();
@@ -8292,7 +8328,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          return;
      const rawStartedAt = Number(row.started_at);
      const startedAt = Number.isFinite(rawStartedAt) ? rawStartedAt : null;
-@@ -351,10 +402,16 @@
+@@ -351,10 +414,16 @@
   */
  export async function attachAutomationRunThread(id, threadId, runId) {
      await ensureTable();
@@ -8312,7 +8348,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
  }
  /**
   * Forget an automation's executions.
-@@ -370,8 +427,13 @@
+@@ -370,8 +439,13 @@
      // the cutoff keeps that run's history from being swept up with the old
      // definition's.
      const cutoff = Date.now();
@@ -8327,7 +8363,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          args: [owner, automation, cutoff],
      });
  }
-@@ -384,12 +446,257 @@
+@@ -384,12 +458,264 @@
      const appId = options.appId?.trim() || null;
      const placeholders = owners.map(() => "?").join(", ");
      const appFilter = appId ? " AND (app_id = ? OR app_id IS NULL)" : "";
@@ -8509,13 +8545,13 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +        throw new Error("Resolve the waiting approval before deleting this job.");
 +}
 +
-+/** Ready waits whose ask passed its expiry. No person can approve them any more. */
++/** Waits whose ask passed its expiry. No person can approve them any more. */
 +export async function listExpiredApprovalWaits(appId, now = Date.now()) {
 +    await ensureTable();
 +    const expiresAt = isPostgres() ? "(approval_context::jsonb ->> 'expiresAt')::bigint"
 +        : "CAST(json_extract(approval_context, '$.expiresAt') AS INTEGER)";
 +    const result = await getDbExec().execute({
-+        sql: `SELECT id FROM ${TABLE} WHERE finished_at IS NULL AND status = 'waiting_approval' AND approval_ready = 1
++        sql: `SELECT id FROM ${TABLE} WHERE finished_at IS NULL AND status = 'waiting_approval'
 +          AND approval_context IS NOT NULL AND ${expiresAt} <= ? ${appId ? 'AND app_id = ?' : ''} ORDER BY started_at LIMIT 100`,
 +        args: appId ? [now, appId] : [now],
 +    });
@@ -8546,8 +8582,15 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +    const row = await getThread(threadId);
 +    if (!row)
 +        return false;
-+    const repo = JSON.parse(row.threadData || "{}");
-+    return row.scope?.type === "vivary-automation-run" || repo._automationRunId != null;
++    if (row.scope?.type === "vivary-automation-run")
++        return true;
++    // A malformed legacy snapshot carries no run marker, so it stays an ordinary thread.
++    try {
++        return JSON.parse(row.threadData || "{}")?._automationRunId != null;
++    }
++    catch {
++        return false;
++    }
 +}
 +
 +/** Terminal approval bookkeeping is retried without another agent execution. */
@@ -8964,7 +9007,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
  import { dispatchRemoteAutomation, finishRemoteAutomationHistory, getRemoteAutomationStatus, } from "./remote-execution.js";
 -import { claimAutomationRun, finishAutomationRun, getAutomationRun, listAutomationRuns, } from "./run-history.js";
 -import { acquireAutomationSchedulerLease, recordAutomationSchedulerHealth, releaseAutomationSchedulerLease, renewAutomationSchedulerLease, AUTOMATION_SCHEDULER_LEASE_RENEWAL_MS, } from "./scheduler-health.js";
-+import { automationHistoryOwner, hasUnresolvedAutomationApproval, claimAutomationRun, finishAutomationRun, getAutomationRun, INTERRUPTED_RUN_ERROR_CODE, INTERRUPTED_RUN_MESSAGE, listAutomationRuns, } from "./run-history.js";
++import { automationHistoryOwner, automationRunBindingMatches, AUTOMATION_RUN_BINDING_REFUSAL, hasUnresolvedAutomationApproval, claimAutomationRun, finishAutomationRun, getAutomationRun, INTERRUPTED_RUN_ERROR_CODE, INTERRUPTED_RUN_MESSAGE, listAutomationRuns, } from "./run-history.js";
 +import { acquireAutomationRunLease, acquireAutomationSchedulerLease, automationRunLeaseKey, recordAutomationSchedulerHealth, releaseAutomationRunLease, releaseAutomationSchedulerLease, renewAutomationRunLease, renewAutomationSchedulerLease, AUTOMATION_SCHEDULER_LEASE_RENEWAL_MS, } from "./scheduler-health.js";
  // ─── Frontmatter parsing ────────────────────────────────────────────────────
  export { classifyJobFrontmatter, classifyJobResource, normalizeJobMcpTools, parseJobResource, } from "./frontmatter.js";
@@ -9085,14 +9128,12 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
 +            // Vivary #139: its dispatch holds the run lease until the run is queued.
              if (meta.lastStatus === "running" && meta.executionHostId) {
 -                await reconcileRemoteJob(resource, meta, now);
--                continue;
--            }
 +                await actOnRunningMark(resource, async (latest, fresh) => {
 +                    if (fresh.executionHostId)
 +                        await reconcileRemoteJob(latest, fresh, now);
 +                });
-+                continue;
-+            }
+                 continue;
+             }
 +            if (await hasUnresolvedAutomationApproval(automationHistoryOwner(resource.owner, { userEmail: meta.createdBy, orgId: meta.orgId }), resource.path))
 +                continue;
              // Skip disabled or missing schedule
@@ -9271,7 +9312,18 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
      }
      catch (error) {
          console.warn(`[recurring-jobs] Could not record stale history for "${automation}":`, error instanceof Error ? error.message : error);
-@@ -430,135 +543,182 @@
+@@ -427,138 +540,193 @@
+     }
+     const jobUserEmail = identity.identity.userEmail;
+     const jobOrgId = identity.identity.orgId;
++    // Vivary #108: a queued Run now row keeps the resource owner. When the job
++    // keeps its history under another owner or organization, a connected-tool
++    // approval on that row could never be decided, so the run does not start.
++    if (options.historyId && Array.isArray(meta.mcpTools) && meta.mcpTools.length &&
++        !await automationRunBindingMatches(options.historyId, resource.owner, identity.identity)) {
++        await finishAutomationRun(options.historyId, "error", AUTOMATION_RUN_BINDING_REFUSAL, "automation_run_binding_mismatch");
++        return { status: "error", error: AUTOMATION_RUN_BINDING_REFUSAL };
++    }
      // Manual runs use the same resource row as scheduled runs for concurrency
      // protection. The check is paired with the conditional write below: two
      // requests that read the same idle snapshot cannot both claim it.
@@ -9286,9 +9338,11 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
 +    if (isBackgroundAutomationsClosed()) {
          if (options.historyId) {
 -            await finishAutomationRun(options.historyId, "error", `${error} No delivery was confirmed.`);
--        }
++            await finishAutomationRun(options.historyId, "interrupted", INTERRUPTED_RUN_MESSAGE, INTERRUPTED_RUN_ERROR_CODE);
+         }
 -        return { status: "skipped", error };
--    }
++        return { status: "skipped", error: "The app is quitting, so the run did not start." };
+     }
 -    // Mark as running
 -    meta.lastRun = now.toISOString();
 -    meta.lastStatus = "running";
@@ -9301,10 +9355,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
 -        return {
 -            status: "error",
 -            error: "The automation changed before the run could start.",
-+            await finishAutomationRun(options.historyId, "interrupted", INTERRUPTED_RUN_MESSAGE, INTERRUPTED_RUN_ERROR_CODE);
-+        }
-+        return { status: "skipped", error: "The app is quitting, so the run did not start." };
-+    }
+-        };
 +    // Vivary #139: the run lease covers this run in every process until its
 +    // outcome is written, or until a paired-host run is queued, so no scan
 +    // reads it as stuck, and a lease another run holds means that run is live.
@@ -9316,7 +9367,11 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
 +        if (!options.manual)
 +            console.log(`[recurring-jobs] Job "${jobName}" was skipped because another run holds its run lease.`);
 +        return refuseAlreadyRunning(options.historyId);
-+    }
+     }
+-    const prompt = options.manual
+-        ? `[Manual Automation Run: ${jobName}]\nThis run was explicitly started by the automation owner. Execute the following instructions now:\n\n${body}`
+-        : `[Recurring Job: ${jobName}]\nSchedule: ${describeCron(meta.schedule, effectiveTimezone(meta.timezone))}\n\nExecute the following job instructions:\n\n${body}`;
+-    if (meta.executionHostId) {
 +    try {
 +        // Vivary #114: the fields the mark replaces, written back when a quit
 +        // begins before a remote dispatch.
@@ -9324,12 +9379,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
 +            lastRun: meta.lastRun,
 +            lastStatus: meta.lastStatus,
 +            lastError: meta.lastError,
-         };
--    }
--    const prompt = options.manual
--        ? `[Manual Automation Run: ${jobName}]\nThis run was explicitly started by the automation owner. Execute the following instructions now:\n\n${body}`
--        : `[Recurring Job: ${jobName}]\nSchedule: ${describeCron(meta.schedule, effectiveTimezone(meta.timezone))}\n\nExecute the following job instructions:\n\n${body}`;
--    if (meta.executionHostId) {
++        };
 +        // Mark as running
 +        meta.lastRun = now.toISOString();
 +        meta.lastStatus = "running";
@@ -9441,8 +9491,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
 +                runIdPrefix: `${options.manual ? "manual" : "job"}-${jobName}`,
 +                usageLabel: `${options.manual ? "manual-automation" : "recurring-job"}:${jobName}`,
 +                requestContext,
-                 advanceSchedule: options.advanceSchedule,
--                now,
++                advanceSchedule: options.advanceSchedule,
 +                ...(options.historyId ? { historyId: options.historyId } : {}),
 +                actionCaller: "automation",
 +                actionAutomation: {
@@ -9461,7 +9510,8 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
 +                lastRun: meta.lastRun,
 +                lastStatus: "success",
 +                lastError: undefined,
-+                advanceSchedule: options.advanceSchedule,
+                 advanceSchedule: options.advanceSchedule,
+-                now,
              });
 -            console.log(`[recurring-jobs] Job "${jobName}" queued on remote host as ${dispatch.command.id}.`);
 -            return { status: "success", runId: dispatch.command.id };
@@ -9563,7 +9613,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
      }
  }
  /** Execute one stored automation without changing its scheduled next run. */
-@@ -577,7 +737,10 @@
+@@ -577,7 +745,10 @@
      });
  }
  /** Process a durable run-now history row exactly once in the background worker. */
@@ -9575,7 +9625,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
      const queued = await getAutomationRun(historyId);
      if (!queued)
          throw new Error(`Automation run "${historyId}" not found.`);
-@@ -586,6 +749,9 @@
+@@ -586,6 +757,9 @@
      if (queuedAppId && queuedAppId !== workerAppId) {
          return { skipped: true };
      }
@@ -9585,7 +9635,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
      if (!(await claimAutomationRun(historyId))) {
          return { skipped: true };
      }
-@@ -599,7 +765,38 @@
+@@ -599,7 +773,38 @@
          ...(result.error ? { error: result.error } : {}),
      };
  }
@@ -9625,7 +9675,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
      const content = patchJobFrontmatterFields(resource.content, {
          lastRun: meta.lastRun,
          lastCheck: meta.lastCheck,
-@@ -619,6 +816,7 @@
+@@ -619,6 +824,7 @@
          expectedId: resource.id,
          expectedUpdatedAt: resource.updatedAt,
          expectedContent: resource.content,
@@ -9633,7 +9683,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
      });
      return written !== null;
  }
-@@ -631,7 +829,9 @@
+@@ -631,7 +837,9 @@
   * ours to write, and `nextRun` is recomputed from whatever schedule is stored
   * now, so an edit mid-run takes effect on the next tick.
   */
@@ -9644,7 +9694,7 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
      const latest = await resourceGetByPath(resource.owner, resource.path);
      if (!latest) {
          // Deleted while it was running. Writing the pre-run snapshot back would
-@@ -646,15 +846,22 @@
+@@ -646,15 +854,22 @@
          return;
      }
      const current = parseJobResource(latest.content);
@@ -9661,10 +9711,9 @@ diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
          isValidCron(meta.schedule)) {
          // Measured from completion so a long run cannot immediately re-fire.
 -        meta.nextRun = nextOccurrence(meta.schedule, new Date(), meta.timezone).toISOString();
--    }
--    if (!(await updateResource(latest, meta, current.body))) {
 +        meta.nextRun = nextOccurrence(meta.schedule, new Date(completedAt ?? Date.now()), meta.timezone).toISOString();
-+    }
+     }
+-    if (!(await updateResource(latest, meta, current.body))) {
 +    if (!(await updateResource(latest, meta, current.body, automationWait, automationTerminal))) {
 +        if (automationTerminal)
 +            throw new Error("The terminal automation outcome must be reconciled again.");

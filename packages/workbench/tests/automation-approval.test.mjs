@@ -401,6 +401,17 @@ test("interactive POST and resume history cannot continue an automation-owned th
   assert.equal(await history.isAutomationRunThread(result.threadId), true, "thread custody survives history pruning");
 });
 
+// Every chat send checks run custody. A malformed legacy snapshot must not fail that send.
+test("a malformed legacy thread snapshot reads as an ordinary thread unless its scope marks a run", async () => {
+  const { createThread } = await loadCore("chat-threads/store.js");
+  const ordinary = await createThread(owner, { title: "Legacy ordinary" });
+  const marked = await createThread(owner, { title: "Legacy run", scope: { type: "vivary-automation-run", id: "legacy" } });
+  for (const thread of [ordinary, marked]) await database.getDbExec().execute({
+    sql: "UPDATE chat_threads SET thread_data = ? WHERE id = ?", args: ["{not json", thread.id] });
+  assert.equal(await history.isAutomationRunThread(ordinary.id), false);
+  assert.equal(await history.isAutomationRunThread(marked.id), true);
+});
+
 test("a gate storage failure aborts and cannot become a successful run", async () => {
   const fixture = await makeApprovalCase("storage-failure");
   const db = database.getDbExec();
@@ -1612,6 +1623,33 @@ test("an expired approval request is declined by reconciliation and releases its
   assert.equal(frontmatter.parseJobResource((await resources.resourceGetByPath(owner, path)).content).meta.lastStatus, "declined");
   assert.equal(configuredCalls(fixture).length, 0);
   await assert.rejects(fixture.decide(result.historyId, pending), /no longer waiting/);
+});
+
+// A crash can leave a wait saved before its turn was marked ready. It expires too, once its run has ended.
+test("an expired wait that was never marked ready is recovered, then declined", async () => {
+  const fixture = await makeApprovalCase("expired-unready-wait", { repeatLocal: false });
+  const result = await wait(fixture);
+  await until(async () => (await history.getAutomationRun(result.historyId)).approvalReady);
+  const pending = await fixture.pending(result.historyId), db = database.getDbExec(), past = Date.now() - 1000;
+  await db.execute({ sql: "UPDATE agent_tool_approvals SET expires_at = ? WHERE id = ?", args: [past, pending.askId] });
+  const stored = (await db.execute({ sql: "SELECT approval_context FROM automation_runs WHERE id = ?", args: [result.historyId] })).rows[0];
+  await db.execute({ sql: "UPDATE automation_runs SET approval_context = ?, approval_ready = 0 WHERE id = ?",
+    args: [JSON.stringify({ ...JSON.parse(String(stored.approval_context)), expiresAt: past }), result.historyId] });
+  const path = fixture.automation.resource.path;
+  // A run that can still save its wait is left alone.
+  await runStore.updateRunStatus(result.runId, "running");
+  await runner.reconcileAutomationApprovalOutcomes(appId);
+  let run = await history.getAutomationRun(result.historyId);
+  assert.equal(run.status, "waiting_approval"); assert.equal(run.approvalReady, false);
+  // After the crash its run has ended, so the wait is recovered and declined.
+  await runStore.updateRunStatus(result.runId, "aborted");
+  await runner.reconcileAutomationApprovalOutcomes(appId);
+  run = await history.getAutomationRun(result.historyId);
+  assert.equal(run.status, "declined"); assert.equal(run.errorCode, "automation_approval_expired");
+  assert.equal(run.approvalReady, true, "the waiting turn was recovered before the decline");
+  assert.equal((await approvalStore.readAgentToolApproval(pending)).status, "declined");
+  assert.equal(await history.hasUnresolvedAutomationApproval(owner, path), false, "the job is no longer blocked");
+  assert.equal(configuredCalls(fixture).length, 0);
 });
 
 // A shared job runs as a pseudo-owner no person can approve for. It must not create a wait.
