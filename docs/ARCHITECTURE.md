@@ -263,16 +263,17 @@ No documentation route reads arbitrary host files.
 Issue #23 proxy-addr and brace-expansion advisories. A Workbench test reads
 `pnpm-lock.yaml` and fails when any locked version of an advised package is
 below its first fixed release. The floors are proxy-addr 2.0.8 for
-GHSA-jqcg-44mw-7w3h and brace-expansion 5.0.11 for GHSA-qhr7-859c-m2p7 and
-GHSA-6j4f-fj2g-mc7p. The workbench CI job runs it beside the Native package
-tests. The Workbench lock now resolves proxy-addr 2.0.8 under Express 5.2.1,
-which MCP SDK 1.30.0 brings in, and brace-expansion 5.0.11 under minimatch
-10.2.6. Both versions fit their parents' existing ranges and keep the same
-dependencies and engines. Eight lock lines change: two package keys, their
-integrity values, two snapshot keys and the two parent references. Manifests,
-workspace settings, Core and Toolkit pins and patch hashes are unchanged. The
-retained dependency review records SHA-512 integrity matching the lock,
-publication more than 72 hours earlier, and no install scripts or binding.gyp.
+GHSA-jqcg-44mw-7w3h and brace-expansion 5.0.12 for GHSA-qhr7-859c-m2p7,
+GHSA-6j4f-fj2g-mc7p and the moderate GHSA-q2hr-2g5m-vwhr. The workbench CI job
+runs it beside the Native package tests. The Workbench lock now resolves
+proxy-addr 2.0.8 under Express 5.2.1, which MCP SDK 1.30.0 brings in, and
+brace-expansion 5.0.12 under minimatch 10.2.6. Both versions fit their parents'
+existing ranges and keep the same dependencies and engines. Eight lock lines
+change: two package keys, their integrity values, two snapshot keys and the two
+parent references. Manifests, workspace settings, Core and Toolkit pins and
+patch hashes are unchanged. The retained dependency review and a 5.0.12 receipt
+record SHA-512 integrity matching the lock, publication more than 72 hours
+earlier, and no install scripts or binding.gyp.
 These are transitive request and glob helpers, so runtime flows, dependency
 owners and trust boundaries are unchanged.
 
