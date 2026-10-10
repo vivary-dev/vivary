@@ -7,7 +7,7 @@ import test from "node:test";
 // needs its own review before it can enter the lockfile.
 const advisoryFloors = [
   { name: "proxy-addr", fixed: "2.0.8", advisories: ["GHSA-jqcg-44mw-7w3h"] },
-  { name: "brace-expansion", fixed: "5.0.11", advisories: ["GHSA-qhr7-859c-m2p7", "GHSA-6j4f-fj2g-mc7p"] },
+  { name: "brace-expansion", fixed: "5.0.12", advisories: ["GHSA-qhr7-859c-m2p7", "GHSA-6j4f-fj2g-mc7p", "GHSA-q2hr-2g5m-vwhr"] },
 ];
 
 const lockfile = readFileSync(new URL("../pnpm-lock.yaml", import.meta.url), "utf8");
