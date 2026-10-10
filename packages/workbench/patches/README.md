@@ -2941,7 +2941,14 @@ option, which means advance, and Run now stores false. Reconciliation reads olde
 contexts with the same default. A decline-only path opens when an organization
 run's retained owner fails current identity validation: the decider must hold
 deletion authority over the same automation resource through
-`canUpdateAutomationResource`. That path never approves and executes nothing.
+`canUpdateAutomationResource`. That path never approves and executes nothing. Settings Delete (the automation service and the
+manage-recurring-job action) calls it first through `declineDepartedOwnerWaits`, so an admin can
+clean up without inspecting the transcript. The legacy identity resolver refuses a job that runs
+as the shared or organization pseudo-owner and declares connected tools, because nobody can
+approve for that identity. `reconcileAutomationApprovalOutcomes`, which the scheduler tick and
+pending-task sweep already run, first declines ready waits whose ask passed its expiry
+(`listExpiredApprovalWaits`, error code `automation_approval_expired`) through the same claim,
+decline, finish and settle steps as an owner's Decline.
 History cleanup after deletion also removes ordinary unfinished rows without
 approval context, so a run that finishes after its definition is deleted leaves
 no history for a reused name. Approval custody is never removed. A removed member

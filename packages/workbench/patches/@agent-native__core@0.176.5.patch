@@ -6512,7 +6512,19 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
  /**
   * A persisted background run must not outlive its execution identity.
   * Organization runs fail closed when membership state cannot be read. A
-@@ -130,6 +190,8 @@
+@@ -117,6 +177,11 @@
+     const orgId = recoveredFactoryOwnerOrgId(automation.meta, automation.resource.path, automation.resource.owner) ??
+         automation.meta.orgId ??
+         undefined;
++    // A run as the shared or organization identity has no person who can approve
++    // for it. Connected tools always need approval, so refuse before any wait exists.
++    if ((userEmail === "__shared__" || organizationIdFromResourceOwner(userEmail)) &&
++        Array.isArray(automation.meta.mcpTools) && automation.meta.mcpTools.length)
++        return { ok: false, reason: "A shared job cannot pause for approval, so it cannot use connected tools. Run it as its creator." };
+     const validity = await validateAutomationRunIdentity(userEmail, orgId);
+     return validity.ok
+         ? {
+@@ -130,6 +195,8 @@
          : validity;
  }
  export function isBackgroundAutomationRunActive(meta, now = new Date()) {
@@ -6521,7 +6533,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
      if (meta.lastStatus !== "running")
          return false;
      if (!meta.lastRun)
-@@ -163,35 +225,42 @@
+@@ -163,35 +230,42 @@
  function uniqueToolNames(names) {
      return [...new Set(names)];
  }
@@ -6581,7 +6593,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
                  automation: automation.name,
                  path: automation.resource.path,
                  scope: options.orgId ? "organization" : "personal",
-@@ -200,9 +269,10 @@
+@@ -200,9 +274,10 @@
              });
          }
          catch (err) {
@@ -6593,7 +6605,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
      let result;
      // Populated as soon as the run id exists, so a failure that never returns a
      // result can still be joined to its LLM trace (`aiTraceId` -> $ai_trace_id).
-@@ -212,15 +282,19 @@
+@@ -212,15 +287,19 @@
      }
      catch (err) {
          const message = err instanceof Error ? err.message : String(err);
@@ -6615,7 +6627,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
              tags: {
                  area: "background-automation",
                  automation: automation.name,
-@@ -233,27 +307,31 @@
+@@ -233,27 +312,31 @@
              },
              ...(runIdRef.current ? { aiTraceId: runIdRef.current } : {}),
          });
@@ -6658,7 +6670,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
      }
  }
  function backgroundAutomationPersistFailure(input) {
-@@ -300,7 +378,18 @@
+@@ -300,7 +383,18 @@
          if (!repo || typeof repo !== "object" || Array.isArray(repo)) {
              throw new Error(`Background automation thread ${input.threadId} has unreadable thread data.`);
          }
@@ -6678,7 +6690,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const events = [...(input.run.events ?? [])];
          if (input.persistFailure) {
              events.push({
-@@ -324,6 +413,8 @@
+@@ -324,6 +418,8 @@
              repo = foldAssistantTurn(repo, assistantMsg, {
                  runId: input.run.runId,
                  turnId: input.run.turnId,
@@ -6687,7 +6699,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
              });
          }
          const meta = extractThreadMeta(repo);
-@@ -331,15 +422,36 @@
+@@ -331,15 +427,36 @@
          await updateThreadData(input.threadId, JSON.stringify(repo), input.threadTitle || row.title, meta.preview || row.preview, Array.isArray(messages) ? messages.length : 0);
      });
  }
@@ -6729,7 +6741,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
  }
  async function executeBackgroundAutomation(options, deps, historyId, runIdRef) {
      const { automation, ownerEmail, orgId, prompt, threadTitle, usageLabel } = options;
-@@ -349,19 +461,23 @@
+@@ -349,19 +466,23 @@
          orgId,
      }, async () => {
          const baseActions = await deps.getActions(automation);
@@ -6765,7 +6777,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const userApiKey = await getOwnerActiveApiKey(ownerEmail);
          // The run manager invokes its detached callback after the scheduler's
          // setup stack has yielded, so the engine's credentials must be captured
-@@ -382,11 +498,90 @@
+@@ -382,11 +503,90 @@
              engine.defaultModel;
          const model = normalizeModelForEngine(engine, modelCandidate);
          const systemPrompt = await deps.getSystemPrompt(ownerEmail);
@@ -6860,7 +6872,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (runIdRef)
              runIdRef.current = runId;
          await recordRunThread(historyId, thread.id, runId);
-@@ -425,170 +620,275 @@
+@@ -425,170 +625,275 @@
          // handoff to the unclaimed-background-run sweep — it gets reaped as
          // "background_worker_never_started" out from under a still-executing
          // job the moment any single tool call runs past the 25s grace window.
@@ -7287,7 +7299,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          const usage = usageRef.current;
          if (usage &&
              (usage.inputTokens > 0 ||
-@@ -613,6 +913,8 @@
+@@ -613,6 +918,8 @@
                  // Usage attribution must not break an otherwise successful run.
              }
          }
@@ -7296,7 +7308,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (responseText.trim() &&
              automation.meta.deliveryPlatform &&
              automation.meta.deliveryDestination) {
-@@ -627,6 +929,372 @@
+@@ -627,6 +934,431 @@
                  tenantId: automation.meta.deliveryTenantId,
              });
          }
@@ -7519,7 +7531,44 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +        throw new Error("The next approval webhook dispatch must be retried.");
 +}
 +/** Existing sweeps recover outcome bookkeeping only, never tools or deliveries. */
++/**
++ * An expired ask can never be approved, so a wait whose owner never decides would
++ * otherwise block its job forever. Decline it as the owner's Decline would: claim,
++ * decline the exact ask, finish and settle. Nothing executes.
++ */
++async function expireAutomationApprovalWaits(appId) {
++    const { listExpiredApprovalWaits } = await import("./run-history.js");
++    for (const id of await listExpiredApprovalWaits(appId)) {
++        try {
++            const state = await getAutomationContinuation(id);
++            const pending = state?.context;
++            if (!pending || state.storedStatus !== "waiting_approval" || !state.run.approvalReady || state.run.finishedAt)
++                continue;
++            const ask = await readAgentToolApproval(pending);
++            if (!ask || ask.status !== "pending" || ask.expiresAt > Date.now() ||
++                _activeBackgroundRunIds.has(pending.runId) || await getRunStatus(pending.runId) === "running")
++                continue;
++            if (!await claimAutomationApprovalDecision(id, pending.askId, createRunId("automation-expire")))
++                continue;
++            if (!await declineAgentToolApproval(pending))
++                throw new Error("The expired approval could not be declined.");
++            await finishAutomationRun(id, "declined", "The approval request expired. The pending action did not execute.",
++                "automation_approval_expired", { emitFinished: pending.options.emitFinished });
++            await recordApprovalExecutionOutcome(pending, "declined");
++        }
++        catch (error) {
++            console.error("[automations] approval expiry failed:", id, redactText(error instanceof Error ? error.message : String(error)));
++        }
++    }
++}
 +export async function reconcileAutomationApprovalOutcomes(appId) {
++    // Expiry first, so a wait that ends here settles in this same pass.
++    try {
++        await expireAutomationApprovalWaits(appId);
++    }
++    catch (error) {
++        console.error("[automations] approval expiry scan failed:", redactText(error instanceof Error ? error.message : String(error)));
++    }
 +    const { listUnreconciledAutomationApprovalRuns } = await import("./run-history.js");
 +    for (const id of await listUnreconciledAutomationApprovalRuns(appId)) {
 +        try { await reconcileAutomationApprovalOutcome(id); }
@@ -7570,6 +7619,28 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +        return null;
 +    }
 +    return { ...state, thread };
++}
++/**
++ * Settings Delete calls this first. A wait bound to the resource whose organization
++ * owner can no longer act is declined when the deleting actor holds deletion
++ * authority. It never approves. A wait with a live owner, or a refused decline,
++ * stays, and the deletion guard then refuses as before.
++ */
++export async function declineDepartedOwnerWaits(resource, actor) {
++    if (!_approvalDependencies)
++        return;
++    const { listBoundApprovalWaits } = await import("./run-history.js");
++    for (const id of await listBoundApprovalWaits(resource)) {
++        const state = await departedOwnerDeclineState(id, actor);
++        if (!state?.context)
++            continue;
++        try {
++            await decideAutomationApproval({ historyId: id, askId: state.context.askId, decision: "decline" }, actor);
++        }
++        catch (error) {
++            console.warn("[automations] A departed owner's wait was not declined before deletion:", redactText(error instanceof Error ? error.message : String(error)));
++        }
++    }
 +}
 +export async function decideAutomationApproval(input, actor, deps = _approvalDependencies) {
 +    if (!deps)
@@ -8256,7 +8327,7 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
          args: [owner, automation, cutoff],
      });
  }
-@@ -384,12 +446,232 @@
+@@ -384,12 +446,257 @@
      const appId = options.appId?.trim() || null;
      const placeholders = owners.map(() => "?").join(", ");
      const appFilter = appId ? " AND (app_id = ? OR app_id IS NULL)" : "";
@@ -8438,6 +8509,31 @@ diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
 +        throw new Error("Resolve the waiting approval before deleting this job.");
 +}
 +
++/** Ready waits whose ask passed its expiry. No person can approve them any more. */
++export async function listExpiredApprovalWaits(appId, now = Date.now()) {
++    await ensureTable();
++    const expiresAt = isPostgres() ? "(approval_context::jsonb ->> 'expiresAt')::bigint"
++        : "CAST(json_extract(approval_context, '$.expiresAt') AS INTEGER)";
++    const result = await getDbExec().execute({
++        sql: `SELECT id FROM ${TABLE} WHERE finished_at IS NULL AND status = 'waiting_approval' AND approval_ready = 1
++          AND approval_context IS NOT NULL AND ${expiresAt} <= ? ${appId ? 'AND app_id = ?' : ''} ORDER BY started_at LIMIT 100`,
++        args: appId ? [now, appId] : [now],
++    });
++    return (result.rows ?? []).map(row => String(row.id));
++}
++/** Unfinished approval history bound to this exact resource. */
++export async function listBoundApprovalWaits(resource) {
++    await ensureTable();
++    const resourceId = isPostgres() ? "approval_context::jsonb ->> 'resourceId'" : "json_extract(approval_context, '$.resourceId')";
++    const resourceOwner = isPostgres() ? "approval_context::jsonb ->> 'resourceOwner'" : "json_extract(approval_context, '$.resourceOwner')";
++    const resourcePath = isPostgres() ? "approval_context::jsonb ->> 'resourcePath'" : "json_extract(approval_context, '$.resourcePath')";
++    const result = await getDbExec().execute({
++        sql: `SELECT id FROM ${TABLE} WHERE finished_at IS NULL AND status IN ('waiting_approval', 'resuming')
++          AND (${resourceId} = ? OR ${resourceOwner} = ? AND ${resourcePath} = ?)`,
++        args: [resource.id, resource.owner, resource.path],
++    });
++    return (result.rows ?? []).map(row => String(row.id));
++}
 +/** History retention never changes thread custody, including terminal runs. */
 +export async function isAutomationRunThread(threadId) {
 +    await ensureTable();
@@ -15617,14 +15713,15 @@ diff --git a/dist/automations/service.js b/dist/automations/service.js
  import { createAutomationWebhookToken, automationWebhookPath, } from "../triggers/webhook.js";
  /** Conservative default for new scheduled automations when no cadence is given. */
  export const DEFAULT_AUTOMATION_SCHEDULE = "0 * * * *";
-@@ -393,10 +394,21 @@
+@@ -393,10 +394,24 @@
      if (!definition.canUpdate) {
          throw httpError("Only the automation's creator or an organization admin can delete it.", 403);
      }
 -    if (definition.meta.triggerType === "webhook") {
 -        await deleteAutomationWebhookToken(definition.resource, definition.meta);
--    }
--    await resourceDelete(definition.resource.id);
++    // Settings Delete first declines a wait its departed organization owner can no longer decide.
++    const { declineDepartedOwnerWaits } = await import("../jobs/background-automation-runner.js");
++    await declineDepartedOwnerWaits(definition.resource, normalizeActor(actorInput));
 +    if (await hasUnresolvedAutomationApproval(definition.resource.owner, definition.resource.path))
 +        throw httpError("Resolve the waiting approval before deleting this automation.", 409);
 +    try {
@@ -15639,7 +15736,8 @@ diff --git a/dist/automations/service.js b/dist/automations/service.js
 +            definition.meta.triggerType === "webhook" ? tx => deleteAutomationWebhookToken(definition.resource, definition.meta, tx) : undefined);
 +    } catch (error) {
 +        throw httpError(error instanceof Error ? error.message : "Cannot verify automation approval custody.", 409);
-+    }
+     }
+-    await resourceDelete(definition.resource.id);
      // Names are reusable, so leaving history behind would attach these runs to
      // whatever automation is created under the same name next.
      await deleteAutomationRuns(definition.resource.owner, name);
@@ -15870,11 +15968,14 @@ diff --git a/dist/db/client.js b/dist/db/client.js
 diff --git a/dist/jobs/actions/manage-recurring-job.js b/dist/jobs/actions/manage-recurring-job.js
 --- a/dist/jobs/actions/manage-recurring-job.js
 +++ b/dist/jobs/actions/manage-recurring-job.js
-@@ -45,7 +45,8 @@
+@@ -45,7 +45,11 @@
          if (denied)
              throw Object.assign(new Error(denied), { statusCode: 403 });
          if (operation === "delete") {
 -            await resourceDelete(resource.id);
++            // Settings Delete first declines a wait its departed organization owner can no longer decide.
++            const { declineDepartedOwnerWaits } = await import("../background-automation-runner.js");
++            await declineDepartedOwnerWaits(resource, { userEmail, orgId: ctx.orgId, appId: ctx.appId });
 +            if (!await resourceDelete(resource.id))
 +                throw Object.assign(new Error("The job changed before it could be deleted."), { statusCode: 409 });
              // Names are reusable; history left behind would surface as the run

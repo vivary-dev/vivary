@@ -7565,8 +7565,11 @@ persisted history scope still refuses deletion before mutation. A job whose
 creator or organization scope cannot be resolved refuses deletion only when
 unfinished or unreconciled history is bound to that exact resource. When an
 organization run's owner can no longer act, a principal with deletion authority
-over the same automation may decline its wait, never approve it, and then delete
-the job. Retained history-ID Decline can work without a definition, but a blocked
+over the same automation may decline its wait, never approve it. An expired request is declined by the
+next settlement pass, so no wait blocks its job forever. Settings Delete by such a principal
+declines that wait first, then deletes the job. A job that runs as the shared
+or organization identity and declares connected tools is refused at start,
+because no person can approve for that identity. Retained history-ID Decline can work without a definition, but a blocked
 deletion preserves normal discovery.
 
 Automation terminal ownership follows admitted execution, not request insertion.
@@ -7614,7 +7617,12 @@ decision settles. The runner stores the resolved schedule-advance value, so the
 scheduler sweep's omitted option keeps its meaning, and Run now still stores
 false. When an organization run's owner can no longer act, a principal with
 deletion authority over the same automation may decline the wait, never approve
-it. Declining executes nothing, and the job can then be deleted. Legacy job
+it, and Settings Delete declines such a wait before deleting. Declining executes
+nothing. A lifecycle trace found the shared cause behind these findings: a wait
+had no clock, so any request its owner never decided blocked the job forever. The
+settlement pass now declines a ready wait whose request expired, with error code
+`automation_approval_expired`. A shared job that declares connected tools is refused at start, since no
+person can approve for its pseudo-identity. Legacy job
 deletion with an unresolvable creator or organization scope refuses only when
 history is bound to that exact resource. History cleanup removes an ordinary
 run still in flight, so a reused name cannot inherit it. Approval custody stays.
@@ -7635,7 +7643,7 @@ boundaries above describe the corrected behavior.
 
 2026-10-08 webhook completion custody correction. A terminal completion callback failure after durable approval waiting must reach the webhook worker with its original error. The dispatcher now recognizes an exact persisted terminal error history with retained approval context, checks the resource, execution owner, organization, app and thread binding, and uses the existing task custody owner before rethrowing. The worker preserves the waiting payload, and its existing claim and reconciliation paths settle the failed task and resource without model redispatch or tool effects. Webhook completion atomically checks the exact still-processing claim, including owner, organization, platform, external thread, payload and claim version. A late worker cannot overwrite a settled approval or a newer claim and reports failure without changing that current owner or dispatching its follower. Generic event and no-context webhook error handling, typed gate-storage failure and interruption retry remain unchanged. Maintained child-isolated controls cover the selected post-save stop-marker read failure, the identical healthy webhook wait and a no-context error. Deterministic barriers also cover reconciliation before the dispatcher history lookup and task settlement or replacement at the actual completion write. The pre-reconciliation delivery check runs before any owner decision. This successor has syntax and patch-integrity checks only. The passing b80cfa4 CI/build/UI observations preceded these bytes and do not establish candidate acceptance. Controller runtime checks, independent review and affected acceptance remain pending.
 
-2026-10-08 CI grouping for issue #108. The complete 26-file Node regression command now has its own step in the existing `workbench-maintained` job, separate from the `workbench` sequence that runs state-transport tests, Python coverage and typecheck. The command, file order and natural exit are unchanged. Both jobs retain their IDs, status names, ten-minute limits, dependency setup, conditions and other commands. The design flow above remains accurate because this changes CI grouping only. The hosted run that motivated the move passed the earlier regression groups, including the 417 assertions and seven Python tests, but exceeded the existing workbench job budget during remaining configuration/typecheck work. The regrouped hosted jobs later passed, for example in run 37984385775.
+2026-10-08 CI grouping for issue #108. The complete 26-file Node regression command now has its own step in the existing `workbench-maintained` job, separate from the `workbench` sequence that runs state-transport tests, Python coverage and typecheck. The batch also gained three issue #108 files: `native-thread-fold.test.mjs`, `automation-approval.test.mjs` and `automation-approval-owner-scope.test.mjs`. Natural exit is unchanged. Both jobs retain their IDs, status names, ten-minute limits, dependency setup, conditions and other commands. The design flow above remains accurate because this changes CI grouping only. The hosted run that motivated the move passed the earlier regression groups, including the 417 assertions and seven Python tests, but exceeded the existing workbench job budget during remaining configuration/typecheck work. The regrouped hosted jobs later passed, for example in run 37984385775.
 
 2026-10-08 issue #108 validation checkpoint. The Native completion callback now rejects its runner promise for any thrown callback error, including a failed durable turn-abort read after thread persistence, while rethrowing the original error to Native's completion handler. Stop, shutdown, typed approval-storage failure and response classification retain distinct outcomes. The focused controller gate passed 7/7, including text and approval-wait completion with selected marker-read faults, healthy reads, terminal persistence and existing wait/storage/event controls. These cases are included in, not added to, the ordinary 26-file batch, which passed 417/417 naturally. Configured workbench typecheck also passed. A failed waiting completion is an inspectable terminal error with an unconsumed ask that cannot resume or dispatch, not a recovered wait. The local slice-review set includes an independent Native execution review of all 29 assigned sections, which found one Major completion-settlement defect that is now repaired. This scoped review set is not the required published exact-head review. These results validate the uncommitted 0.176.5 candidate, not the retained 4a01d31 CI/build artifact. A new-head build and built UI journey, required published review, live PostgreSQL execution and packaged Windows acceptance remain pending. Earlier source-only and unrun statements below record their original checkpoints.
 

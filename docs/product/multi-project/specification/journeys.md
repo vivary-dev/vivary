@@ -229,7 +229,8 @@ stateDiagram-v2
   Running --> Interrupted: Stop, quit or lost run
   Waiting --> Resuming: owner approves exact unexpired request
   Waiting --> Declined: owner declines
-  Waiting --> Declined: deletion authority declines after owner lost access
+  Waiting --> Declined: Settings Delete declines after owner lost access
+  Waiting --> Declined: request expired
   Resuming --> Waiting: approved step never started
   Resuming --> Declined: request was already declined
   Resuming --> Interrupted: approved step outcome unconfirmed
@@ -237,7 +238,7 @@ stateDiagram-v2
   Resuming --> Failed: continuation fails
 ```
 
-Only the run's owner can approve, and only before the request expires. Declining executes nothing. If an organization run's owner leaves or loses access, the automation's creator or an organization admin (whoever may delete it) can decline the wait, never approve it, and then delete the job. After a waited run ends, settlement records its outcome on the automation, moves a scheduled job to its next run (Run now does not move the schedule), and releases the next queued webhook delivery. Deleting a job is refused while a wait, a resume or an unsettled outcome is bound to it. History cleanup removes ordinary runs, including one still in flight, and never removes a wait.
+Only the run's owner can approve, and only before the request expires. Declining executes nothing. A request expires after an hour. An expired request can only be declined, so the next settlement pass declines it, which releases the job even when nobody acts. If an organization run's owner leaves or loses access, the automation's creator or an organization admin (whoever may delete it) can decline the wait, never approve it. Deleting the job in Settings declines that wait first, then deletes the job. A job that runs as the shared or organization identity cannot use connected tools, because no person can approve for it, so it is refused at start. After a waited run ends, settlement records its outcome on the automation, moves a scheduled job to its next run (Run now does not move the schedule), and releases the next queued webhook delivery. Deleting a job is refused while a wait, a resume or an unsettled outcome is bound to it. History cleanup removes ordinary runs, including one still in flight, and never removes a wait.
 
 ## J11: Host, preview and platform acceptance
 

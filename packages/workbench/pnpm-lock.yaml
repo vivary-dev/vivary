@@ -4,7 +4,7 @@ settings:
   excludeLinksFromLockfile: false
 patchedDependencies:
   '@agent-native/core@0.176.5':
-    hash: 20c233002897da4fc68ebb8b71034503e38aaeeb16ae4419d6d5f548adb1a689
+    hash: 699efc1dd8d38ce1c6d139447c711833d7bdebb6642baf43c3c4506f7ce7f71d
     path: patches/@agent-native__core@0.176.5.patch
   '@agent-native/toolkit@0.19.3':
     hash: 0f67553a6b26e76bcb0a07b5228c628ff6cf24eb5d865e0f4ac41d5238d22801
@@ -14,7 +14,7 @@ importers:
     dependencies:
       '@agent-native/core':
         specifier: 0.176.5
-        version: 0.176.5(patch_hash=20c233002897da4fc68ebb8b71034503e38aaeeb16ae4419d6d5f548adb1a689)(1d7db17d621489a62dbf2df23ea81eba)
+        version: 0.176.5(patch_hash=699efc1dd8d38ce1c6d139447c711833d7bdebb6642baf43c3c4506f7ce7f71d)(1d7db17d621489a62dbf2df23ea81eba)
       '@agent-native/toolkit':
         specifier: 0.19.3
         version: 0.19.3(patch_hash=0f67553a6b26e76bcb0a07b5228c628ff6cf24eb5d865e0f4ac41d5238d22801)(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@tiptap/extension-list@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@tiptap/extensions@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))
@@ -6830,7 +6830,7 @@ packages:
       zod:
         optional: true
 snapshots:
-  ? '@agent-native/core@0.176.5(patch_hash=20c233002897da4fc68ebb8b71034503e38aaeeb16ae4419d6d5f548adb1a689)(1d7db17d621489a62dbf2df23ea81eba)'
+  ? '@agent-native/core@0.176.5(patch_hash=699efc1dd8d38ce1c6d139447c711833d7bdebb6642baf43c3c4506f7ce7f71d)(1d7db17d621489a62dbf2df23ea81eba)'
   : dependencies:
       '@agent-native/recap-cli': 0.5.25
       '@agent-native/toolkit': 0.19.3(patch_hash=0f67553a6b26e76bcb0a07b5228c628ff6cf24eb5d865e0f4ac41d5238d22801)(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@tiptap/extension-list@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@tiptap/extensions@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))

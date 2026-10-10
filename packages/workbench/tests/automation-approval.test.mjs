@@ -1591,6 +1591,51 @@ test("listed NULL-app legacy history stays unavailable to inspection and approva
   await assert.rejects(runner.inspectAutomationRun(terminal.id, actor, fixture.deps), /not available/);
 });
 
+// No owner decision is guaranteed. An expired request ends, and its job is released.
+test("an expired approval request is declined by reconciliation and releases its job", async () => {
+  const fixture = await makeApprovalCase("expired-wait", { repeatLocal: false });
+  const result = await wait(fixture);
+  await until(async () => (await history.getAutomationRun(result.historyId)).approvalReady);
+  const pending = await fixture.pending(result.historyId), db = database.getDbExec(), past = Date.now() - 1000;
+  // Move the exact ask and its retained binding past expiry together, as time would.
+  await db.execute({ sql: "UPDATE agent_tool_approvals SET expires_at = ? WHERE id = ?", args: [past, pending.askId] });
+  const stored = (await db.execute({ sql: "SELECT approval_context FROM automation_runs WHERE id = ?", args: [result.historyId] })).rows[0];
+  await db.execute({ sql: "UPDATE automation_runs SET approval_context = ? WHERE id = ?",
+    args: [JSON.stringify({ ...JSON.parse(String(stored.approval_context)), expiresAt: past }), result.historyId] });
+  const path = fixture.automation.resource.path;
+  assert.equal(await history.hasUnresolvedAutomationApproval(owner, path), true);
+  await runner.reconcileAutomationApprovalOutcomes(appId);
+  const run = await history.getAutomationRun(result.historyId);
+  assert.equal(run.status, "declined"); assert.equal(run.errorCode, "automation_approval_expired");
+  assert.equal((await approvalStore.readAgentToolApproval(pending)).status, "declined");
+  assert.equal(await history.hasUnresolvedAutomationApproval(owner, path), false, "the job is no longer blocked");
+  assert.equal(frontmatter.parseJobResource((await resources.resourceGetByPath(owner, path)).content).meta.lastStatus, "declined");
+  assert.equal(configuredCalls(fixture).length, 0);
+  await assert.rejects(fixture.decide(result.historyId, pending), /no longer waiting/);
+});
+
+// A shared job runs as a pseudo-owner no person can approve for. It must not create a wait.
+test("a shared job with connected tools is refused at start instead of waiting for approval", async () => {
+  const name = "shared-pseudo-owner-tools", path = `jobs/${name}.md`;
+  const deps = (await makeApprovalCase(name + "-deps", { repeatLocal: false })).deps;
+  const { createJobTools } = await loadCore("jobs/tools.js"), scheduler = await loadCore("jobs/scheduler.js");
+  const created = await context.runWithRequestContext({ userEmail: owner }, () => createJobTools(appId)["manage-jobs"].run({
+    action: "create", name, scope: "shared", runAs: "shared", instructions: "Use the connected tool.",
+    schedule: "0 * * * *", timezone: "UTC", mcpTools: [mcpName] }, { caller: "tool" }));
+  assert.equal(JSON.parse(created).created, true);
+  await approvalStore.ensureAgentToolApprovalTable(); // the count must not depend on earlier tests
+  const approvalsBefore = (await database.getDbExec().execute("SELECT COUNT(*) AS n FROM agent_tool_approvals")).rows[0].n;
+  const result = await scheduler.runJobNow(resources.SHARED_OWNER, name, deps);
+  assert.notEqual(result.status, "waiting_approval");
+  const runs = await history.listAutomationRuns({ owners: [resources.SHARED_OWNER], automation: name, appId });
+  assert.deepEqual(runs.filter(run => run.status === "waiting_approval" || run.pendingAskId), []);
+  assert.equal((await database.getDbExec().execute("SELECT COUNT(*) AS n FROM agent_tool_approvals")).rows[0].n, approvalsBefore);
+  assert.equal(await history.hasUnresolvedAutomationApproval(resources.SHARED_OWNER, path), false);
+  const meta = frontmatter.parseJobResource((await resources.resourceGetByPath(resources.SHARED_OWNER, path)).content).meta;
+  assert.match(String(meta.lastError), /cannot pause for approval/);
+  assert.equal(await resources.resourceDeleteByPath(resources.SHARED_OWNER, path), true);
+});
+
 test("deleting a definition also removes ordinary history that finishes after the deletion", async () => {
   const name = "inflight-history-cleanup", path = `jobs/${name}.md`;
   const running = await history.startAutomationRun({ owner, automation: name, path, appId });

@@ -268,11 +268,23 @@ async function deletionCase(kind, name) {
       await assert.rejects(fixture.decide(run.id, pending, "approve", { ...deletingActor, appId }), /not available to this owner/);
       await assert.rejects(fixture.decide(run.id, pending, "decline", { userEmail: foreign, orgId, appId }), /not available to this owner/);
       await assert.rejects(fixture.decide(run.id, pending, "decline", { ...identity, appId }), /not available to this owner/);
-      await fixture.decide(run.id, pending, "decline", { ...deletingActor, appId });
-    } else await fixture.decide(run.id, pending, "decline", { ...identity, appId });
-    assert.equal((await invoke("delete", deletingActor)).deleted, true);
+      // Settings Delete by the admin declines the wait its departed owner can no longer
+      // decide, then deletes. No inspection and no approval happen on this path.
+      runner.setAutomationApprovalDependencies(fixture.deps);
+      try {
+        const settingsDelete = (await loadCore("jobs/actions/manage-recurring-job.js")).default;
+        assert.deepEqual(await context.runWithRequestContext({ userEmail: admin, orgId },
+          () => settingsDelete.run({ operation: "delete", scope: "organization", name }, { userEmail: admin, orgId, appId })),
+          { deleted: true, name });
+      } finally { runner.setAutomationApprovalDependencies(null); }
+    } else {
+      await fixture.decide(run.id, pending, "decline", { ...identity, appId });
+      assert.equal((await invoke("delete", deletingActor)).deleted, true);
+    }
     assert.equal(await resources.resourceGetByPath(resourceOwner, run.path), null);
-    assert.equal((await history.getAutomationRun(run.id)).status, "declined");
+    // Settings Delete also removes the declined, reconciled history with the definition.
+    if (kind === "org-departed-wait") assert.equal(await history.getAutomationRun(run.id), null);
+    else assert.equal((await history.getAutomationRun(run.id)).status, "declined");
     assert.equal((await approvalStore.readAgentToolApproval(pending)).status, "declined");
     assert.equal(fixture.calls.filter(call => call.name === mcpName).length, 0);
     assert.equal((await invoke("create", identity, tool, name + "-ordinary")).created, true);

@@ -101,7 +101,7 @@ execution eligibility. It still refuses waiting or resuming history and unknown
 or conflicting scope before changing the definition. Unresolvable scope refuses only
 when history is bound to that exact resource. When an organization run's owner can
 no longer act, a principal with this deletion authority may decline the wait, never
-approve it, and then delete the job. The revoked owner still cannot approve or decline.
+approve it. Settings Delete declines that wait first, then deletes the job. The revoked owner still cannot approve or decline.
 
 Settings history includes authorized retained approvals alongside its recent
 bounded rows. This keeps an older waiting or recoverable run discoverable after
@@ -138,8 +138,8 @@ and preserves ordinary non-job deletion and existing owner and organization
 authorization. New real HTTP and snapshot-contention controls remain unrun. Settlement completes before supported deletion removes eligible history,
 so a later same-name definition does not inherit the deleted generation's rows.
 If deletion wins first, the running automation cannot bind
-an ask to a missing or same-name replacement. The original admitted history is
-retained to record its refusal. Existing admin cleanup after a creator departs
+an ask to a missing or same-name replacement. Ordinary in-flight history is
+removed with the definition. Only waiting, resuming or unreconciled approval history stays. Existing admin cleanup after a creator departs
 remains allowed when no unresolved custody exists. Runtime and UI gates for these
 new bytes remain pending.
 
