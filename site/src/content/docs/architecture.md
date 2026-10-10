@@ -264,6 +264,14 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Issue #23 advisory floor for proxy-addr and brace-expansion. A Workbench test
+reads `pnpm-lock.yaml` and fails when any locked version of an advised package is
+below its first fixed release. The floors are proxy-addr 2.0.8 for
+GHSA-jqcg-44mw-7w3h and brace-expansion 5.0.11 for GHSA-qhr7-859c-m2p7 and
+GHSA-6j4f-fj2g-mc7p. The workbench CI job runs it beside the Native package tests. The check reads the
+lockfile only, so runtime flows, dependency owners and trust boundaries are
+unchanged.
+
 Issue #10 / PR #199 delayed Windows observation. The controller reproduced the fixed three-second pre-stop cutoff on unchanged `23304b8`: the real reader owner returned false after 3,017 ms before a valid 4,500 ms snapshot, then refused the second read. The public reader returned unavailable twice instead of available twice. Close now gives the in-flight scanner the remaining cleanup budget minus the teardown reserve. The 15-second overall deadline, three-second reserve, scanner's 10-second bound, original-root identity and fail-closed refusal/pipe-closure checks remain unchanged. The retained two-read regression simulates Windows executables on Linux; it is not packaged Windows acceptance. Controller green, affected checks, independent review and a matching new package/Windows acceptance remain pending. The original Windows scanner output was not captured, so this reproduction does not prove that incident's precise internal branch. Earlier scoped acceptance and failures remain preserved.
 
 Issue #10 / PR #199 Native Details privacy. Windows QA at `7631f7d` found local file links in the Native excerpt while Provider summaries were already path-redacted. Workbench now reuses the existing complete-text credential/path sanitizer for both source projections before truncation. Stored transcripts, source labels, event selection and read/output bounds remain unchanged; Native Running/Finished status text stays visible. Public-action regressions cover drive, UNC, file-URI and POSIX paths with spaces/apostrophes, paths crossing the 1,500-character cutoff, web links, URL credentials and unchanged transcript bytes. Controller preflight passes all nine checks; the complete details suite passes 40 tests with no failures or skips, including both new Native cases. Workbench typecheck exits zero through Native's TypeScript --noEmit branch, and Native Doctor, line endings and diff checks pass. Typecheck also emits missing production BETTER_AUTH_SECRET diagnostics, so it does not establish production configuration acceptance. Corrected built/packaged privacy acceptance and final-head published review, CI and Entire approval remain pending; prior Windows privacy failure, scoped observations and separate cleanup receipts are preserved.
