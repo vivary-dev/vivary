@@ -109,11 +109,13 @@ globalThis.fetch = (input, options) => {
   headers.set("Connection", "close");
   return nativeFetch(input, { ...options, headers });
 };
+// Each request is bounded at 30 s. An approve request runs the whole continuation before
+// it answers, and on a loaded host that took longer than 10 s (issue #217).
 async function call(name, input, { email = owner, prefix = "" } = {}) {
   const inspect = name === "inspect-automation-run" || name === "list-automation-runs";
   const response = await fetch(`${origin}${prefix}/_agent-native/actions/${name}${inspect ? "?" + new URLSearchParams(input) : ""}`, {
     method: inspect ? "GET" : "POST", headers: { "content-type": "application/json", "x-fixture-owner": email },
-    ...(inspect ? {} : { body: JSON.stringify(input) }), signal: AbortSignal.timeout(10_000) });
+    ...(inspect ? {} : { body: JSON.stringify(input) }), signal: AbortSignal.timeout(30_000) });
   return { status: response.status, body: await response.json() };
 }
 const effects = fixture => fixture.calls.filter(call => call.name === mcpName).length;
@@ -440,7 +442,7 @@ test("normal HTTP organization history fails closed while personal NULL-org cust
 async function resourceRequest(id, { method = "DELETE", email = owner } = {}) {
   const before = resourceSessionHits;
   const response = await fetch(`${origin}/_agent-native/resources/${id}`, { method,
-    headers: { "x-fixture-owner": email }, signal: AbortSignal.timeout(10_000) });
+    headers: { "x-fixture-owner": email }, signal: AbortSignal.timeout(30_000) });
   const body = await response.json();
   assert.equal(resourceSessionHits - before, 1, "the actual resource handler authenticates this request through getSession");
   return { status: response.status, body };
