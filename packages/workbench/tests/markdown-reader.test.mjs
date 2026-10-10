@@ -12,6 +12,7 @@ import * as esbuild from "esbuild";
 // Files and Architecture routes pass, and checks the document, HTML, and Markdown read back.
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WORKBENCH = resolve(HERE, "..");
+const CORE = dirname(realpathSync(join(WORKBENCH, "node_modules", "@agent-native", "core", "package.json")));
 const TOOLKIT = dirname(realpathSync(join(WORKBENCH, "node_modules", "@agent-native", "toolkit", "package.json")));
 const EDITOR = join(TOOLKIT, "dist", "editor");
 
@@ -76,7 +77,8 @@ async function buildProof() {
 }
 
 function installDom() {
-  const linkedom = createRequire(join(TOOLKIT, "package.json"))("linkedom");
+  // Core declares linkedom. Toolkit does not, so resolving it there relies on pnpm's hoisting.
+  const linkedom = createRequire(join(CORE, "package.json"))("linkedom");
   const view = linkedom.parseHTML("<!doctype html><html><head></head><body></body></html>");
   // TipTap parses rendered Markdown as `<body>…</body>`, which linkedom drops unless the markup is a
   // whole document. linkedom's window ignores assignments, so a proxy supplies the parser.
