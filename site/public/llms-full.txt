@@ -7534,6 +7534,23 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Issue #23 TipTap advisories. Toolkit 0.19.3 pins its TipTap packages at
+3.30.1, and @tiptap/core 3.30.1 carries the high GHSA-j95f-988m-3j2f and the
+moderate GHSA-cp6q-959q-f8rh. TipTap packages pin each other exactly, so
+overrides scoped to `@agent-native/toolkit@0.19.3>@tiptap/<name>` move
+Toolkit's 18 direct TipTap pins to 3.30.5, and the aligned set of 39 TipTap
+packages resolves at 3.30.5. @tiptap/y-tiptap keeps its own 3.0.7. The lock
+was written from pnpm's resolution in a throwaway copy, kept in the existing
+layout. Toolkit's and Core's peer suffixes change with the TipTap versions.
+Core's patch hash and the Toolkit patch are unchanged. The retained alignment
+receipt records the 39 packages' integrity, provenance and publication more
+than 72 hours earlier, with no failed metadata gate. Toolkit's composer, rich
+Markdown editor and Workbench's Files and Architecture readers keep their
+roles. The advisory test now checks the TipTap floors and one shared release,
+and a Markdown reader test pins the document, HTML and Markdown that Toolkit's
+shared editor extensions produce. Runtime flows and trust boundaries are
+unchanged.
+
 Issue #23 SheetJS advisories. Core's spreadsheet parser, which pre-upload
 attachments call for XLS and XLSX files, loaded xlsx 0.18.5, which carries the
 high GHSA-4r6h-8v6p-xvw6 and GHSA-5pgg-2g8v-p4x9. SheetJS publishes the fixed
