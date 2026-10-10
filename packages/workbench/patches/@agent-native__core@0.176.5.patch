@@ -5731,7 +5731,7 @@ diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pendin
                 AND active.id <> integration_pending_tasks.id
             )
             AND NOT EXISTS (
-@@ -371,19 +373,33 @@
+@@ -371,19 +373,37 @@
          : null;
  }
  /** Mark a task as completed. */
@@ -5744,10 +5744,14 @@ diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pendin
 +    if (expectedClaim && (expectedClaim.id !== id || expectedClaim.status !== "processing" ||
 +        expectedClaim.platform !== "automation-webhook"))
 +        return false;
++    // The worker that ran the call completes its own claim. A retry sweep or a
++    // refused redelivery may have put the same call back to pending meanwhile, and
++    // completing that row keeps the call from running twice. A settled row or
++    // another worker's processing claim is never replaced.
 +    const ownedClaim = expectedClaim
-+        ? ` AND status = 'processing' AND platform = ? AND external_thread_id = ?
++        ? ` AND platform = ? AND external_thread_id = ?
 +            AND owner_email = ? AND (org_id = ? OR (org_id IS NULL AND CAST(? AS TEXT) IS NULL)) AND payload = ?
-+            AND updated_at = ? AND attempts = ? AND created_at = ?`
++            AND created_at = ? AND (status = 'pending' OR (status = 'processing' AND updated_at = ? AND attempts = ?))`
 +        : "";
 +    const result = await client.execute({
          sql: `UPDATE integration_pending_tasks
@@ -5758,11 +5762,10 @@ diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pendin
          // Discord interaction token. Once terminal, no retry needs the inbound
          // body, so erase it instead of retaining secrets or user text indefinitely.
 -        args: ["completed", now, now, "{}", id],
--    });
 +        args: ["completed", now, now, "{}", id, ...(expectedClaim ? [expectedClaim.platform,
 +            expectedClaim.externalThreadId, expectedClaim.ownerEmail, expectedClaim.orgId, expectedClaim.orgId,
-+            expectedClaim.payload, expectedClaim.updatedAt, expectedClaim.attempts, expectedClaim.createdAt] : [])],
-+    });
++            expectedClaim.payload, expectedClaim.createdAt, expectedClaim.updatedAt, expectedClaim.attempts] : [])],
+     });
 +    // Webhook completion belongs to this exact still-processing claim. A later
 +    // approval settlement, retry claim or payload update keeps its own state.
 +    if (expectedClaim)
@@ -5770,7 +5773,7 @@ diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pendin
  }
  /**
   * Return a transiently failed task to the retryable queue without erasing its
-@@ -450,6 +466,46 @@
+@@ -450,6 +470,46 @@
          throw new Error("Integration task delivery failure transition lost its race");
      }
  }
@@ -5817,7 +5820,7 @@ diff --git a/dist/integrations/pending-tasks-store.js b/dist/integrations/pendin
  /** Mark a task as failed and stash an error message. */
  export async function markTaskFailed(id, errorMessage) {
      await ensureTable();
-@@ -462,3 +518,91 @@
+@@ -462,3 +522,91 @@
          args: ["failed", now, errorMessage.slice(0, 2000), "{}", id],
      });
  }
@@ -7325,7 +7328,7 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
          if (responseText.trim() &&
              automation.meta.deliveryPlatform &&
              automation.meta.deliveryDestination) {
-@@ -627,6 +942,438 @@
+@@ -627,6 +942,452 @@
                  tenantId: automation.meta.deliveryTenantId,
              });
          }
@@ -7339,11 +7342,25 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
 +    _approvalDependencies = deps;
 +}
 +function retainedAutomationOptions(options) {
-+    const keys = ["ownerEmail", "orgId", "prompt", "threadTitle", "runIdPrefix", "usageLabel", "usageRefId", "emitFinished", "advanceSchedule", "actionAutomation", "webhookTaskId"];
++    const keys = ["ownerEmail", "orgId", "prompt", "threadTitle", "runIdPrefix", "usageLabel", "usageRefId", "emitFinished", "advanceSchedule", "actionAutomation", "actionCaller", "webhookTaskId"];
 +    const retained = Object.fromEntries(keys.filter((key) => options[key] !== undefined).map((key) => [key, key === "prompt" ? redactText(options[key]) : options[key]]));
 +    // The scheduler sweep omits advanceSchedule, which means advance. Store the
 +    // resolved value so the settled outcome of a waited run moves nextRun forward.
 +    retained.advanceSchedule = options.advanceSchedule !== false;
++    // The resumed half of a turn runs in the same request context as the first.
++    // Keep only the identifiers the scheduler and dispatcher derive from the job's
++    // delivery metadata. Inbound text and provider payloads are never retained.
++    const integration = options.requestContext?.isIntegrationCaller ? options.requestContext.integration : undefined;
++    if (integration) {
++        const incoming = integration.incoming ?? {};
++        const place = incoming.platformContext ?? {};
++        retained.requestContext = redactTextInValue({ isIntegrationCaller: true, integration: {
++            taskId: integration.taskId, scopeId: integration.scopeId, principalType: integration.principalType,
++            incoming: { platform: incoming.platform, externalThreadId: incoming.externalThreadId, text: "",
++                tenantId: incoming.tenantId, integrationScopeId: incoming.integrationScopeId,
++                platformContext: { channelId: place.channelId, threadTs: place.threadTs, teamId: place.teamId },
++                threadRef: incoming.threadRef, timestamp: incoming.timestamp } } });
++    }
 +    return retained;
 +}
 +export function automationDefinitionRevision(automation) {
@@ -10247,11 +10264,10 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
  import { getSetting, putSetting, } from "../settings/store.js";
  import { emitResourceChange, emitResourceDelete } from "./emitter.js";
  export const SHARED_OWNER = "__shared__";
-@@ -366,6 +367,78 @@
-     if (value === null)
+@@ -367,6 +368,78 @@
          return null;
      return typeof value === "string" ? value : JSON.stringify(value);
-+}
+ }
 +// Vivary #109: an instruction or memory file an automation run writes waits
 +// for the owner's review. These are the paths Core loads into prompts.
 +const RUN_REVIEWED_FILES = new Set(["agents.md", "learnings.md"]);
@@ -10323,9 +10339,10 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
 +        throw new Error("Automation runs cannot " + verb + " " + path +
 +            ", because instruction and memory files require the owner's review.");
 +    }
- }
++}
  function scratchFilterSql(options) {
      return options?.includeAgentScratch === true
+         ? ""
 @@ -1119,8 +1192,40 @@
          ? resource
          : null;
@@ -10620,34 +10637,6 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
      await ensureTable();
      if (isLocalWorkspaceResourceId(resource.id))
          return false;
--    const client = getDbExec();
--    // `updated_at` is a wall-clock millisecond, not a logical version. Compare
--    // the full mutable row snapshot so same-ms or clock-skewed writes cannot be
--    // deleted by a stale caller.
--    const result = await client.execute({
--        sql: `DELETE FROM resources WHERE owner = ? AND path = ? AND id = ? AND updated_at = ? AND content = ? AND mime_type = ? AND size = ? AND created_at = ? AND created_by = ? AND visibility = ? AND (thread_id = ? OR (thread_id IS NULL AND ? IS NULL)) AND (run_id = ? OR (run_id IS NULL AND ? IS NULL)) AND (expires_at = ? OR (expires_at IS NULL AND ? IS NULL)) AND (metadata = ? OR (metadata IS NULL AND ? IS NULL))`,
--        args: [
--            resource.owner,
--            resource.path,
--            resource.id,
--            resource.updatedAt,
--            resource.content,
--            resource.mimeType,
--            resource.size,
--            resource.createdAt,
--            resource.createdBy,
--            resource.visibility,
--            resource.threadId,
--            resource.threadId,
--            resource.runId,
--            resource.runId,
--            resource.expiresAt,
--            resource.expiresAt,
--            resource.metadata,
--            resource.metadata,
--        ],
--    });
--    const deleted = result.rowsAffected === 1;
 +    const deleteSnapshot = async client => {
 +        // `updated_at` is a wall-clock millisecond, not a logical version. Compare
 +        // the full mutable row snapshot so same-ms or clock-skewed writes cannot be
@@ -10701,11 +10690,11 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
 +            return false;
 +        }
 +    } else deleted = await deleteSnapshot(getDbExec());
-     if (deleted) {
-         emitResourceDelete(resource.id, resource.path, resource.owner);
-     }
-     return deleted;
- }
++    if (deleted) {
++        emitResourceDelete(resource.id, resource.path, resource.owner);
++    }
++    return deleted;
++}
 +/**
 + * Vivary #109. Record the owner's accept of a file an automation run wrote,
 + * only while it still waits and has the update time the owner reviewed. The
@@ -10714,7 +10703,10 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
 + */
 +export async function resourceAcceptRunReviewIfCurrent(input) {
 +    await ensureTable();
-+    const client = getDbExec();
+     const client = getDbExec();
+-    // `updated_at` is a wall-clock millisecond, not a logical version. Compare
+-    // the full mutable row snapshot so same-ms or clock-skewed writes cannot be
+-    // deleted by a stale caller.
 +    const { rows } = await client.execute({
 +        sql: `SELECT * FROM resources WHERE id = ?`,
 +        args: [input.id],
@@ -10730,9 +10722,28 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
 +    refuseRunInstructionMutation(current.owner, current.path, "accept");
 +    const { previous: _previous, ...review } = metadataObject(current.metadata).runReview;
 +    const updatedAt = Math.max(Date.now(), current.updatedAt + 1);
-+    const result = await client.execute({
+     const result = await client.execute({
+-        sql: `DELETE FROM resources WHERE owner = ? AND path = ? AND id = ? AND updated_at = ? AND content = ? AND mime_type = ? AND size = ? AND created_at = ? AND created_by = ? AND visibility = ? AND (thread_id = ? OR (thread_id IS NULL AND ? IS NULL)) AND (run_id = ? OR (run_id IS NULL AND ? IS NULL)) AND (expires_at = ? OR (expires_at IS NULL AND ? IS NULL)) AND (metadata = ? OR (metadata IS NULL AND ? IS NULL))`,
 +        sql: `UPDATE resources SET metadata = ?, updated_at = ? WHERE id = ? AND updated_at = ? AND metadata = ?`,
-+        args: [
+         args: [
+-            resource.owner,
+-            resource.path,
+-            resource.id,
+-            resource.updatedAt,
+-            resource.content,
+-            resource.mimeType,
+-            resource.size,
+-            resource.createdAt,
+-            resource.createdBy,
+-            resource.visibility,
+-            resource.threadId,
+-            resource.threadId,
+-            resource.runId,
+-            resource.runId,
+-            resource.expiresAt,
+-            resource.expiresAt,
+-            resource.metadata,
+-            resource.metadata,
 +            withRunReview(current.metadata, {
 +                ...review,
 +                state: "accepted",
@@ -10743,8 +10754,12 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
 +            current.id,
 +            current.updatedAt,
 +            current.metadata,
-+        ],
-+    });
+         ],
+     });
+-    const deleted = result.rowsAffected === 1;
+-    if (deleted) {
+-        emitResourceDelete(resource.id, resource.path, resource.owner);
+-    }
 +    if (result.rowsAffected !== 1)
 +        return false;
 +    emitResourceChange(current.id, current.path, current.owner);
@@ -10819,8 +10834,8 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
 +        return true;
 +    });
 +    if (deleted) emitResourceDelete(resource.id, resource.path, resource.owner);
-+    return deleted;
-+}
+     return deleted;
+ }
 +
  export async function resourceDelete(id) {
      await ensureTable();
@@ -10878,32 +10893,56 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
      const result = await client.execute({
          sql: `DELETE FROM resources WHERE owner = ? AND path = ?`,
          args: [owner, path],
-@@ -1623,18 +1945,24 @@
+@@ -1623,18 +1945,46 @@
      const now = Date.now();
      // Get current resource info
      const { rows } = await client.execute({
 -        sql: `SELECT path, owner FROM resources WHERE id = ?`,
-+        sql: `SELECT path, owner, metadata, updated_at FROM resources WHERE id = ?`,
++        sql: `SELECT * FROM resources WHERE id = ?`,
          args: [id],
      });
      if (rows.length === 0)
          return false;
+-    const result = await client.execute({
+-        sql: `UPDATE resources SET path = ?, updated_at = ? WHERE id = ?`,
+-        args: [newPath, now, id],
+-    });
+-    const moved = result.rowsAffected > 0;
+-    if (moved) {
+-        emitResourceChange(id, newPath, rows[0].owner);
 +    refuseRunInstructionMutation(rows[0].owner, rows[0].path, "move");
 +    refuseRunInstructionMutation(rows[0].owner, newPath, "move");
 +    if (isPendingRunReview(rows[0])) {
 +        throw new Error("Accept or discard this file's proposed change before moving it.");
-+    }
-     const result = await client.execute({
--        sql: `UPDATE resources SET path = ?, updated_at = ? WHERE id = ?`,
--        args: [newPath, now, id],
+     }
++    const move = async exec => (await exec.execute({
 +        sql: `UPDATE resources SET path = ?, updated_at = ? WHERE id = ? AND owner = ? AND path = ? AND updated_at = ? AND (metadata = ? OR (metadata IS NULL AND ? IS NULL))`,
 +        args: [newPath, Math.max(now, Number(rows[0].updated_at) + 1), id, rows[0].owner, rows[0].path,
 +            rows[0].updated_at, rows[0].metadata, rows[0].metadata],
-     });
-     const moved = result.rowsAffected > 0;
--    if (moved) {
--        emitResourceChange(id, newPath, rows[0].owner);
--    }
++    })).rowsAffected > 0;
++    let moved = false;
++    // Moving a job file removes its definition from the job path, so it takes the
++    // same approval custody check as deletion, in the same transaction.
++    if (rows[0].path.startsWith("jobs/") && rows[0].path.endsWith(".md")) {
++        const { ensureTable: ensureHistoryTable, assertLegacyJobApprovalDeletionAllowed } = await import("../jobs/run-history.js");
++        const { parseJobResource } = await import("../jobs/frontmatter.js");
++        await ensureHistoryTable();
++        try {
++            moved = await withAutomationResourceCustody(rowToResource(rows[0]), async (tx, current) => {
++                const { meta } = parseJobResource(current.content);
++                try {
++                    await assertLegacyJobApprovalDeletionAllowed(current, meta, meta.appId, tx);
++                } catch (error) {
++                    throw Object.assign(new Error("Resolve retained automation approval custody before moving this resource.", { cause: error }), {
++                        statusCode: 409, statusMessage: "Resolve retained automation approval custody before moving this resource.",
++                    });
++                }
++                return move(tx);
++            });
++        } catch (error) {
++            if (!(error instanceof AutomationResourceChangedError)) throw error;
++        }
++    } else moved = await move(client);
 +    if (!moved)
 +        throw new Error("This file changed. Reload before moving it.");
 +    emitResourceChange(id, newPath, rows[0].owner);

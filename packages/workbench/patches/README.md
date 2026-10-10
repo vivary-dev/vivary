@@ -2296,7 +2296,8 @@ admin cleanup without custody. Maintained controls use the actual auth and
 resource plugins, assert session hits and a route positive, and exercise the
 snapshot DELETE versus approval-publication boundary. Successor runtime controls
 remain pending coordinator execution. A missing or replaced definition cannot receive an ask.
-Unfinished admitted history survives deletion cleanup to record its terminal refusal.
+Deletion cleanup removes ordinary unfinished history with the definition. Unfinished approval
+history stays until it settles.
 The maintained PostgreSQL adapter controls are static query contracts, not database
 execution proof. New source still requires controller runtime, review and UI checks.
 
@@ -2958,7 +2959,13 @@ approval gate refuses to create a wait on such a row, with error code
 `authorizeJobMutation`, as `manage-recurring-job` does, so Settings offers Delete, Edit, Run now
 and the switch for an organization job that records an app ID. `isAutomationRunThread` treats a
 malformed legacy snapshot as an ordinary thread unless its scope marks an automation run, so
-the custody check on each chat send does not fail that chat.
+the custody check on each chat send does not fail that chat. `markTaskCompleted` lets the worker
+that ran a webhook call complete it over a `pending` row with the same identifiers and payload,
+which a retry sweep or a refused redelivery leaves, and still never replaces a settled row or
+another worker's `processing` claim. `retainedAutomationOptions` keeps `actionCaller` and the
+integration request context's identifiers, with empty inbound text, so an approved continuation
+runs in the same context as its first half. `resourceMove` of a `jobs/*.md` file runs
+`assertLegacyJobApprovalDeletionAllowed` inside `withAutomationResourceCustody`, as deletion does.
 History cleanup after deletion also removes ordinary unfinished rows without
 approval context, so a run that finishes after its definition is deleted leaves
 no history for a reused name. Approval custody is never removed. A removed member

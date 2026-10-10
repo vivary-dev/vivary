@@ -332,7 +332,14 @@ every organization job that records an app ID, because `list-recurring-jobs` che
 rights without the app ID while the Settings action that deletes passes it. The list now
 passes it too, so Settings offers Delete to the admin on the departed-owner path. A thread
 whose stored snapshot is malformed now reads as an ordinary thread unless its scope marks an
-automation run, so the run-custody check on each chat send no longer fails that chat. A shared job that declares connected tools is refused at start, since no
+automation run, so the run-custody check on each chat send no longer fails that chat. The
+review of the next head found three more gaps, each reproduced by a failing test. A webhook
+worker whose call a retry sweep put back to pending while the run continued could not
+complete it, so the call ran again. The worker now completes its own call over a pending row
+with the same payload, and still never replaces a settled row or another worker's claim. An
+approved continuation now keeps the run's integration request context and its automation
+caller, so the resumed half of a turn runs in the same context as the first. Moving a job
+file now takes the same approval custody check as deleting it. A shared job that declares connected tools is refused at start, since no
 person can approve for its pseudo-identity. Legacy job
 deletion with an unresolvable creator or organization scope refuses only when
 history is bound to that exact resource. History cleanup removes an ordinary

@@ -1652,6 +1652,58 @@ test("an expired wait that was never marked ready is recovered, then declined", 
   assert.equal(configuredCalls(fixture).length, 0);
 });
 
+// A retry sweep can put a long call back to pending while its worker still runs it.
+test("the worker that ran a webhook call completes it after a retry put it back to pending", async () => {
+  const tasks = await loadCore("integrations/pending-tasks-store.js");
+  const id = "webhook-completion-after-retry", path = "jobs/completion-after-retry.md";
+  await tasks.insertPendingTask({ id, platform: "automation-webhook", externalThreadId: `${owner}:${path}`, ownerEmail: owner,
+    orgId: null, payload: JSON.stringify({ kind: "automation-webhook", owner, path, eventId: id, payload: { id } }) });
+  const claim = await tasks.claimPendingTask(id);
+  assert.equal(claim.status, "processing");
+  // The sweep's reset and a refused redelivery both leave the same call pending at a new time.
+  await database.getDbExec().execute({ sql: "UPDATE integration_pending_tasks SET status = 'pending', updated_at = ?, attempts = 0 WHERE id = ?",
+    args: [Date.now() + 5, id] });
+  assert.equal(await tasks.markTaskCompleted(id, claim), true);
+  assert.equal((await tasks.getPendingTask(id)).status, "completed");
+  assert.equal(await tasks.claimPendingTask(id), null, "the completed call does not run again");
+});
+
+// The resumed half of a turn runs in the same request context as the first half.
+test("an approved continuation keeps the run's integration context and caller", async () => {
+  const fixture = await makeApprovalCase("continuation-context", { repeatLocal: false });
+  const integration = { taskId: "job:continuation-context:1", scopeId: "scope-continuation", principalType: "service",
+    incoming: { platform: "slack", externalThreadId: "T1:C1:root", text: "", tenantId: "T1", integrationScopeId: "scope-continuation",
+      platformContext: { channelId: "C1", teamId: "T1" }, timestamp: 1 } };
+  Object.assign(fixture.options, { requestContext: { isIntegrationCaller: true, integration }, actionCaller: "automation" });
+  const seen = [], callTool = fixture.manager.callTool.bind(fixture.manager);
+  fixture.manager.callTool = async (name, input) => {
+    const current = context.getRequestContext();
+    seen.push({ integrationCaller: current?.isIntegrationCaller, scopeId: current?.integration?.scopeId });
+    return callTool(name, input);
+  };
+  const result = await wait(fixture);
+  const pending = await fixture.pending(result.historyId);
+  assert.equal(pending.options.actionCaller, "automation");
+  assert.equal(pending.options.requestContext.integration.scopeId, "scope-continuation");
+  assert.equal(pending.options.requestContext.integration.incoming.text, "");
+  await fixture.decide(result.historyId, pending);
+  assert.equal((await fixture.terminal(result.historyId)).status, "success");
+  assert.deepEqual(seen, [{ integrationCaller: true, scopeId: "scope-continuation" }]);
+});
+
+// Moving a job removes its definition from the job path, so it follows the delete custody rule.
+test("a job bound to an unsettled approval cannot be moved until the wait settles", async () => {
+  const fixture = await makeApprovalCase("move-custody", { repeatLocal: false });
+  const result = await wait(fixture);
+  const { resource } = fixture.automation;
+  const before = await resources.resourceGetByPath(owner, resource.path);
+  await assert.rejects(resources.resourceMove(resource.id, "notes/move-custody.md"), /Resolve retained automation approval custody/);
+  assert.deepEqual(await resources.resourceGetByPath(owner, resource.path), before);
+  await fixture.decide(result.historyId, await fixture.pending(result.historyId), "decline");
+  assert.equal(await resources.resourceMove(resource.id, "notes/move-custody.md"), true);
+  assert.equal(await resources.resourceGetByPath(owner, resource.path), null);
+});
+
 // A shared job runs as a pseudo-owner no person can approve for. It must not create a wait.
 test("a shared job with connected tools is refused at start instead of waiting for approval", async () => {
   const name = "shared-pseudo-owner-tools", path = `jobs/${name}.md`;
