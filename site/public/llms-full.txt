@@ -7617,6 +7617,17 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-11 Windows temporary-file custody. Creator temporary files now
+share read and write access only. Their own handle retains delete access
+for the commit and failure cleanup. Denying delete sharing keeps the
+same-parent rename condition enforced for the lifetime of that handle,
+while the existing parent locks and identity checks remain. The ordinary
+native Windows create, replacement, collision and cleanup regression and
+exact-plan create/adopt checks validate this lifecycle. Microsoft's
+[sharing contract](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)
+explains that delete sharing permits later handles to request rename or
+delete access. No adversarial filesystem probe was run for this correction.
+
 2026-10-11 Windows creator atomic commits. The creator renames its open
 temporary file within the same locked destination parent. It now supplies
 a null `RootDirectory`, as the Windows same-directory rename contract

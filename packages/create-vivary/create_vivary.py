@@ -3925,7 +3925,9 @@ def _windows_create_temporary_file(
         handle = _WINDOWS_CREATE_FILE(
             str(temporary),
             _WINDOWS_GENERIC_WRITE | _WINDOWS_DELETE,
-            _WINDOWS_FILE_SHARE_READ_WRITE | _WINDOWS_FILE_SHARE_DELETE,
+            # Keep the temporary file in its locked parent until our own
+            # handle commits or deletes it. Other handles cannot rename it.
+            _WINDOWS_FILE_SHARE_READ_WRITE,
             None,
             _WINDOWS_CREATE_NEW,
             _WINDOWS_FILE_ATTRIBUTE_TEMPORARY,
