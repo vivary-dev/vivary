@@ -3324,6 +3324,32 @@ class CreateVivaryTests(unittest.TestCase):
 
 
 class TestAgentFlags(unittest.TestCase):
+    def test_interactive_wizard_json_reports_backend_install_failure(self):
+        with temp_workspace() as td:
+            target = Path(td) / "interactive-wizard-install-failure"
+            target.mkdir()
+            sentinel = target / "owned.txt"
+            sentinel.write_bytes(b"preserve existing bytes\n")
+            output = io.StringIO()
+            prompts = io.StringIO()
+            answers = io.StringIO("2\n2\n")
+            with mock.patch.object(sys, "stdin", answers), \
+                    mock.patch.object(answers, "isatty", return_value=True), \
+                    mock.patch.object(create_vivary, "_ensure_backend_installed",
+                        side_effect=create_vivary.ScaffoldError("optional backend installation failed")) as install, \
+                    redirect_stdout(output), redirect_stderr(prompts):
+                rc = create_vivary.main([
+                    "wizard", str(target), "--json", "--repo-root", str(ROOT),
+                ])
+            self.assertEqual(rc, 1)
+            self.assertEqual(json.loads(output.getvalue()), {
+                "ok": False, "error": "optional backend installation failed",
+            })
+            install.assert_called_once()
+            self.assertIn("How large", prompts.getvalue())
+            self.assertEqual(sentinel.read_bytes(), b"preserve existing bytes\n")
+            self.assertEqual(list(target.iterdir()), [sentinel])
+
     def test_wizard_json_reports_backend_install_failure(self):
         with temp_workspace() as td:
             target = Path(td) / "wizard-install-failure"
