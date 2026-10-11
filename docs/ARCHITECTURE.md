@@ -307,6 +307,25 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-11 outgoing MCP OAuth issuer binding. Workbench pins MCP SDK 1.31.0,
+and Native resolves the same SDK plus aligned client, core and server 2.2.0
+dependencies. The unrelated WebMCP types dependency retains server and core
+2.0.0, whose server-only use is excluded from the advisory. Native still owns
+outgoing configured connections, discovery, PKCE and encrypted credentials.
+Managed HubSpot and Google clients carry their catalog's trusted issuer.
+Native's custom provider preserves issuers on saved credentials and refuses
+reads for a different issuer. Its direct refresh binding check remains intact.
+Revocation requires the same nonempty issuer across discovery, client information
+and tokens before sending credentials. An unbound or mismatched grant skips
+remote revocation and can still be unlinked through the existing local revision
+comparison. A concurrent replacement survives. Unexpired legacy bearers retain
+their canonical resource binding without an authorization-server request.
+The [maintained patch contract](../packages/workbench/patches/README.md#mcp-oauth-issuer-binding)
+owns the dependency and credential details. Installed-owner synthetic tests
+cover these controls, legitimate static-client PKCE and refresh rotation.
+Incoming MCP and OAuth routes remain disabled. Built outgoing OAuth, packaged
+acceptance and real account connections remain distinct validation gates.
+
 2026-10-11 Windows bundled Node shutdown. The Windows packager pins Node
 24.20.0 and its official executable checksum, retaining ABI 137 and the existing
 SQLite 12.11.1 asset. The exact-version Workbench build marker remains required.

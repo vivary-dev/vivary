@@ -6,6 +6,8 @@ import test from "node:test";
 // every locked version of the package, so an older major line also fails here and
 // needs its own review before it can enter a lockfile.
 const advisoryFloors = [
+  { name: "@modelcontextprotocol/sdk", fixed: "1.31.0", advisories: ["GHSA-6qxp-vccf-f47h"] },
+  { name: "@modelcontextprotocol/client", fixed: "2.2.0", advisories: ["GHSA-6qxp-vccf-f47h"] },
   { name: "proxy-addr", fixed: "2.0.8", advisories: ["GHSA-jqcg-44mw-7w3h"] },
   { name: "brace-expansion", fixed: "5.0.12", advisories: ["GHSA-qhr7-859c-m2p7", "GHSA-6j4f-fj2g-mc7p", "GHSA-q2hr-2g5m-vwhr"] },
   { name: "pdfjs-dist", fixed: "6.2.108", advisories: ["GHSA-hq66-cqwq-w95j"] },

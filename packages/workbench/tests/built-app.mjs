@@ -32,10 +32,11 @@ export function send(port, method, route, headers, body) {
 
 export async function startBuiltApp(args, data, { env = {}, headers = port => ({ host: `127.0.0.1:${port}` }) } = {}) {
   const port = await freePort();
+  const childEnv = typeof env === 'function' ? env(port) : env;
   const child = spawn(process.execPath, ['bin/start.mjs', '--port', String(port), '--data-dir', data, ...args], {
     cwd: root,
     detached: true,
-    env: { PATH: '/usr/bin:/bin', HOME: data, ...env },
+    env: { PATH: '/usr/bin:/bin', HOME: data, ...childEnv },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
