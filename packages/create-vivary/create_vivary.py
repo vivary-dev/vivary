@@ -12087,12 +12087,12 @@ def _main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
             return 1
         decisions = _run_wizard(args)
         _yes = getattr(args, "yes", False) or getattr(args, "auto", False)
-        installed = decisions.get("installed") or (
-            []
-            if getattr(args, "dry_run", False) or decisions["storage"] != "embedded"
-            else _ensure_backend_installed(decisions["provider"], _yes)
-        )
         try:
+            installed = decisions.get("installed") or (
+                []
+                if getattr(args, "dry_run", False) or decisions["storage"] != "embedded"
+                else _ensure_backend_installed(decisions["provider"], _yes)
+            )
             vivary_paths = _write_vivary_dir(
                 target,
                 decisions["storage"],

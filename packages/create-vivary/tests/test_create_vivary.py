@@ -3324,6 +3324,26 @@ class CreateVivaryTests(unittest.TestCase):
 
 
 class TestAgentFlags(unittest.TestCase):
+    def test_wizard_json_reports_backend_install_failure(self):
+        with temp_workspace() as td:
+            target = Path(td) / "wizard-install-failure"
+            target.mkdir()
+            output = io.StringIO()
+            with mock.patch.object(
+                create_vivary, "_ensure_backend_installed",
+                side_effect=create_vivary.ScaffoldError("optional backend installation failed"),
+            ) as install, redirect_stdout(output):
+                rc = create_vivary.main([
+                    "wizard", str(target), "--auto", "--storage", "embedded",
+                    "--provider", "lancedb", "--json", "--repo-root", str(ROOT),
+                ])
+            self.assertEqual(rc, 1)
+            self.assertEqual(json.loads(output.getvalue()), {
+                "ok": False, "error": "optional backend installation failed",
+            })
+            install.assert_called_once_with("lancedb", True)
+            self.assertEqual(list(target.iterdir()), [])
+
     """Tests for --json, --auto, --dry-run, --storage and the wizard subcommand."""
 
     def test_init_json_flag_returns_valid_json(self):
@@ -3531,7 +3551,8 @@ class TestAgentFlags(unittest.TestCase):
             self.assertEqual(out["installed"], [])
             self.assertTrue((target / ".vivary" / "storage.toml").exists())
 
-    def test_wizard_subcommand_writes_storage_toml(self):
+    @mock.patch.object(create_vivary, "_ensure_backend_installed", return_value=[])
+    def test_wizard_subcommand_writes_storage_toml(self, _install):
         with temp_workspace() as td:
             target = Path(td) / "wizard-demo"
             # First scaffold a bare workspace
@@ -3613,7 +3634,8 @@ class TestAgentFlags(unittest.TestCase):
             self.assertFalse((target / ".vivary" / "storage.toml").exists())
 
     @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
-    def test_wizard_json_reports_storage_safety_error(self):
+    @mock.patch.object(create_vivary, "_ensure_backend_installed", return_value=[])
+    def test_wizard_json_reports_storage_safety_error(self, _install):
         with temp_workspace() as td:
             target = Path(td) / "wizard-symlink"
             create_vivary.scaffold_workspace(

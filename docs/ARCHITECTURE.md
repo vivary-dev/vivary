@@ -307,6 +307,16 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-11 original creator wizard failure handling. Optional embedded
+backend installation now shares the wizard's existing configuration-error
+boundary. A failed install returns exit1 and the requested JSON error
+without writing configuration, instead of escaping as a traceback.
+The installer and storage choices retain their existing owners. A normal
+failure regression injects an installation failure without downloading
+anything. Configuration-only tests stub that boundary rather than install
+an optional backend. This preserves the original-engine flow and does not
+establish an installed embedded-provider capability.
+
 2026-10-11 Windows temporary-file custody. Creator temporary files now
 share read and write access only. Their own handle retains delete access
 for the commit and failure cleanup. Denying delete sharing keeps the
