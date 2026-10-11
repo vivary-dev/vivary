@@ -7617,6 +7617,18 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-11 Windows creator atomic commits. The creator renames its open
+temporary file within the same locked destination parent. It now supplies
+a null `RootDirectory`, as the Windows same-directory rename contract
+requires, rather than passing the parent handle. The parent locks, inode
+checks, reparse-point refusals and open-file cleanup stay in their existing
+owners. A native Windows regression checks create, replace and collision
+refusal with actual files and no leftover temporary file. The original-engine
+ownership and authorized-root design above remain accurate. The retained
+packaged-runtime probe reproduced invalid-handle status with two valid handles
+and succeeded after changing only `RootDirectory` to null. See Microsoft's
+[rename contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information).
+
 Issue #23 TipTap advisories. Toolkit 0.19.3 pins its TipTap packages at
 3.30.1, and @tiptap/core 3.30.1 carries the high GHSA-j95f-988m-3j2f and the
 moderate GHSA-cp6q-959q-f8rh. TipTap packages pin each other exactly, so

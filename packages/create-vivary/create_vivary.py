@@ -3948,7 +3948,6 @@ def _windows_create_temporary_file(
 
 def _windows_rename_open_file(
     file_handle: int,
-    parent_handle: object,
     name: str,
     *,
     replace_existing: bool,
@@ -3958,7 +3957,9 @@ def _windows_rename_open_file(
     buffer = ctypes.create_string_buffer(size)
     information = _WindowsRenameInformation.from_buffer(buffer)
     information.replace_if_exists = replace_existing
-    information.root_directory = parent_handle
+    # The temporary file and destination share the locked parent. Windows
+    # requires a null RootDirectory for this same-directory rename.
+    information.root_directory = None
     information.file_name_length = len(encoded_name)
     ctypes.memmove(
         ctypes.addressof(buffer) + _WindowsRenameInformation.file_name.offset,
@@ -4174,7 +4175,6 @@ def _atomic_write_bytes_no_follow(
                     before_commit()
                 _windows_rename_open_file(
                     file_handle,
-                    parent_handle,
                     dst.name,
                     replace_existing=replace_existing,
                 )

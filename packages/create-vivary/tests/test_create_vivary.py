@@ -194,6 +194,28 @@ def apply_published_workspace_fixture(target: Path, version: str) -> None:
 
 
 class CreateVivaryTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "native Windows rename semantics")
+    def test_windows_atomic_write_commits_in_locked_parent(self):
+        with temp_workspace() as td:
+            target = Path(td)
+            destination = target / ".gitignore"
+            create_vivary._atomic_write_bytes_no_follow(
+                target, destination, b"first\n", replace_existing=False,
+            )
+            self.assertEqual(destination.read_bytes(), b"first\n")
+            self.assertEqual(sorted(p.name for p in target.iterdir()), [".gitignore"])
+
+            create_vivary._atomic_write_bytes_no_follow(
+                target, destination, b"replacement\n", replace_existing=True,
+            )
+            self.assertEqual(destination.read_bytes(), b"replacement\n")
+            with self.assertRaises(create_vivary.ScaffoldError):
+                create_vivary._atomic_write_bytes_no_follow(
+                    target, destination, b"must not replace\n", replace_existing=False,
+                )
+            self.assertEqual(destination.read_bytes(), b"replacement\n")
+            self.assertEqual(sorted(p.name for p in target.iterdir()), [".gitignore"])
+
     def test_symlink_or_junction_uses_windows_reparse_fallback(self):
         class FakeStat:
             st_file_attributes = getattr(
