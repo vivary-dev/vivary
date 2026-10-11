@@ -7617,6 +7617,22 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-11 Windows bundled Node shutdown. The Windows packager pins Node
+24.20.0 and its official executable checksum, retaining ABI 137 and the existing
+SQLite 12.11.1 asset. The exact-version Workbench build marker remains required.
+This replaces the Node 24.19.0 runtime that reproducibly asserts during exit
+after a failed loopback fetch. The upstream delayed-task shutdown guard is
+included in [Node 24.20.0](https://nodejs.org/en/blog/release/v24.20.0).
+A maintained pure-runtime control tests plain exit and failed-fetch exit four
+times each with cleared child environments and bounded timeouts. Parent Windows
+controls passed all eight with the verified 24.20.0 binary, and the unchanged
+0dd3ed9d application server passed its twelve local persistence and restart
+checks with only the runtime replaced. This evidence identifies the bundled
+runtime failure without changing application shutdown or masking exit codes.
+It does not establish Electron UI acceptance or a new built package. The
+packager retains hash verification and exact-version license collection.
+
+
 2026-10-11 original creator wizard failure handling. Optional embedded
 backend installation, including interactive selection, now shares the wizard's
 existing configuration-error boundary. A failed install returns exit 1 and the requested JSON error
