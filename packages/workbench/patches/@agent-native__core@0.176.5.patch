@@ -470,10 +470,46 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
              networkProtocol: options.networkProtocol,
              networkId: options.networkId,
              networkPeer: options.networkPeer,
-@@ -3335,6 +3355,65 @@
-     });
+@@ -3025,6 +3045,12 @@
+     // `oneOf` the caller never meant to match.
+     verbose: true,
+ });
++// Valid JSON inputs must keep their semantic types. Coercion is a fallback
++// only for inputs that fail validation in their original form.
++const rawToolInputNonCoercingAjv = new Ajv({
++    ...rawToolInputAjv.opts,
++    coerceTypes: false,
++});
+ const rawToolInputValidatorCache = new WeakMap();
+ const optionalPlaceholderAjv = new Ajv({
+     strict: false,
+@@ -3258,7 +3284,10 @@
+     const cached = rawToolInputValidatorCache.get(schema);
+     if (cached)
+         return cached;
+-    const validator = rawToolInputAjv.compile(schema);
++    const validator = {
++        validate: rawToolInputNonCoercingAjv.compile(schema),
++        coerce: rawToolInputAjv.compile(schema),
++    };
+     rawToolInputValidatorCache.set(schema, validator);
+     return validator;
  }
- /**
+@@ -3327,12 +3356,72 @@
+     catch (err) {
+         return `tool schema is invalid: ${sanitizeToolErrorValue(err)}`;
+     }
+-    if (validator(input === undefined ? {} : input))
++    const value = input === undefined ? {} : input;
++    if (validator.validate(value) || validator.coerce(value))
+         return null;
+-    return rawToolInputAjv.errorsText(narrowUnionBranchErrors(validator.errors), {
++    return rawToolInputAjv.errorsText(narrowUnionBranchErrors(validator.coerce.errors), {
+         separator: "; ",
+         dataVar: "input",
+     });
++}
++/**
 + * Usage for one agent turn, summed over its model calls and internal
 + * continuations. `startCall` counts each model call the agent loop starts. A
 + * retry replaces the failed attempt it retries, so it adds no call. `add` sums
@@ -531,12 +567,10 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
 +        },
 +    };
 +    return turn;
-+}
-+/**
+ }
+ /**
   * The core agent loop — calls the engine iteratively until no more tool calls.
-  * Decoupled from HTTP transport so it can run in the background.
-  * Returns accumulated token usage for cost tracking.
-@@ -3625,6 +3704,7 @@
+@@ -3625,6 +3714,7 @@
                      providerOptions: opts.providerOptions,
                  };
                  usage.llmCalls = (usage.llmCalls ?? 0) + 1;
@@ -544,7 +578,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                  const eventStream = engine.stream(streamOpts);
                  let thinkingBuffer = "";
                  const toolInputNames = new Map();
-@@ -3941,6 +4021,7 @@
+@@ -3941,6 +4031,7 @@
                                  cacheReadTokens: event.cacheReadTokens ?? 0,
                                  cacheWriteTokens: event.cacheWriteTokens ?? 0,
                                  model,
@@ -552,7 +586,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                              };
                              usage.inputTokens += eventUsage.inputTokens;
                              usage.outputTokens += eventUsage.outputTokens;
-@@ -4363,7 +4444,8 @@
+@@ -4363,7 +4454,8 @@
                  });
              };
              const finalizeToolErrorResult = (rawResult) => {
@@ -562,7 +596,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                  // Counting is the wrong instrument for a precondition the turn cannot
                  // satisfy: six identical round-trips through a missing API key cost the
                  // user minutes and end where the first one did. Classified first so the
-@@ -5085,6 +5167,10 @@
+@@ -5085,6 +5177,10 @@
                      let resultStr = typeof resultForAgent === "string"
                          ? resultForAgent
                          : JSON.stringify(resultForAgent, null, 2);
@@ -573,7 +607,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                      if (resultStr.length > toolMaxResultChars) {
                          const truncated = resultStr.slice(0, toolMaxResultChars);
                          resultStr = `${truncated}\n\n...[truncated — full result was ${resultStr.length.toLocaleString()} chars; only first ${toolMaxResultChars.toLocaleString()} shown]`;
-@@ -5136,7 +5222,7 @@
+@@ -5136,7 +5232,7 @@
                  // so nothing stays pending to bleed into a later tool's result.
                  const agentWarnings = drainAgentWarnings();
                  if (agentWarnings.length > 0) {
@@ -582,7 +616,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                  }
                  // Auto-refresh the UI after a successful mutating tool call. Any call
                  // that isn't read-only — by its own per-call Plan-mode effect, else the
-@@ -5469,6 +5555,11 @@
+@@ -5469,6 +5565,11 @@
      const message = event.error.toLowerCase();
      if (code === "builder_gateway_error")
          return false;
@@ -594,7 +628,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
      // An explicit flag outranks the message sniff below, which exists for events
      // that carry no flag at all. Every guard stop sets `recoverable: false`, and
      // sniffing its prose is how a stop that merely NAMES a connection or a
-@@ -5890,7 +5981,7 @@
+@@ -5890,7 +5991,7 @@
              await persistError(opts.runId, terminalEvent.errorCode, terminalEvent.details || terminalEvent.error);
          }
          else if (terminalEvent?.type === "missing_api_key") {
@@ -603,7 +637,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
          }
      }
      return updated;
-@@ -6629,6 +6720,10 @@
+@@ -6629,6 +6730,10 @@
              }
          }
          const { message, history = [], structuredHistory, references = [], threadId, attachments, displayMessage, parentId, queuedMessageId, internalContinuation, turnId: requestTurnId, model: requestModel, engine: requestEngine, effort: requestEffort, browserTabId, scope, harness: requestHarness, trackInRunsTray, } = body;
@@ -614,7 +648,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
          const requestParentId = parentId === null
              ? null
              : typeof parentId === "string" && parentId.trim()
-@@ -7186,13 +7281,13 @@
+@@ -7186,13 +7291,13 @@
              }
              if (history.length === 0) {
                  try {
@@ -630,7 +664,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                      if (allResources.length > 0) {
                          const fileLines = [];
                          const skillLines = [];
-@@ -7216,10 +7311,11 @@
+@@ -7216,10 +7321,11 @@
                              if (kind === "skill" ||
                                  kind === "agent" ||
                                  kind === "remote-agent") {
@@ -644,7 +678,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                                  if (!full)
                                      continue;
                                  if (kind === "skill") {
-@@ -7389,12 +7485,12 @@
+@@ -7389,12 +7495,12 @@
              attachments: requestAttachments,
          });
          const historyMessages = structuredHistoryToEngineMessages(structuredHistory) ??
@@ -659,7 +693,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
          const messages = [
              ...historyMessages,
              { role: "user", content: userContent },
-@@ -8299,13 +8395,7 @@
+@@ -8299,13 +8405,7 @@
                  : typeof message === "string" && message.trim().length > 0
                      ? message
                      : undefined;
@@ -674,7 +708,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
              const agentLoopOpts = {
                  engine,
                  model: effectiveModel,
-@@ -8318,13 +8408,8 @@
+@@ -8318,13 +8418,8 @@
                  actions: requestActions,
                  send,
                  signal,
@@ -690,7 +724,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                  ownerEmail,
                  orgId: getRequestOrgId() ?? null,
                  attachments: requestAttachments,
-@@ -8493,11 +8578,7 @@
+@@ -8493,11 +8588,7 @@
                          const { recordUsage } = await import("../usage/store.js");
                          await recordUsage({
                              ownerEmail: resolvedOwnerEmail,
@@ -13292,7 +13326,15 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
              const browserTools = createBuilderBrowserTool({
                  getOrigin: () => getRequestRunContext()?.requestOrigin ?? "http://localhost:3000",
                  getOwner: () => getRequestRunContext()?.owner ?? getRequestUserEmail(),
-@@ -956,31 +965,27 @@
+@@ -644,6 +653,7 @@
+                                     discoveredActionsAll[name] = {
+                                         tool: def.tool,
+                                         run: def.run,
++                                        ...(def.schema !== undefined ? { schema: def.schema } : {}),
+                                         ...(def.http !== undefined ? { http: def.http } : {}),
+                                         ...(typeof def.agentTool === "boolean"
+                                             ? { agentTool: def.agentTool }
+@@ -956,31 +966,27 @@
                  coreAttachmentTools = createCoreAttachmentActionEntries();
              }
              catch { }
@@ -13344,7 +13386,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
              };
              // -----------------------------------------------------------------------
              // Production code-execution mode resolution.
-@@ -1906,6 +1911,14 @@
+@@ -1906,6 +1912,14 @@
              const getFrameworkPromptActions = () => Object.fromEntries(Object.entries(prodActions).filter(([name]) => !templateScripts[name] && !mcpActionEntries[name]));
              const resolveRequestBasePrompt = () => (options?.systemPrompt ??
                  filterFrameworkPromptToSurface(lazyContext ? PROD_FRAMEWORK_PROMPT_COMPACT : PROD_FRAMEWORK_PROMPT, getFrameworkPromptActions(), getRequestRunContext()?.allowedActionNames)) + resolveRequestActionsPrompt("tool");
@@ -13359,7 +13401,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
              const resolveRequestLeanPrompt = () => (options?.systemPrompt ?? "") + resolveRequestLeanActionsPrompt();
              const resolveRequestDevPrompt = () => {
                  if (devNative)
-@@ -2838,6 +2851,10 @@
+@@ -2838,6 +2852,10 @@
  
  Non-code requests are still fine on this surface: read data, navigate the UI, summarize, search, create/update extensions (sandboxed Alpine.js mini-apps stored in SQL), and call template actions. The restriction is specifically about direct edits to the host app's own source files.
  </app-rendered-chat-no-direct-code-edits>`;
@@ -13370,7 +13412,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
              // System-prompt note appended when production code execution is enabled.
              const prodCodeExecPromptNote = !canToggle && effectiveProdCodeExec !== "off"
                  ? effectiveProdCodeExec === "trusted"
-@@ -2854,7 +2871,9 @@
+@@ -2854,7 +2872,9 @@
                      const requestLeanPrompt = resolveRequestLeanPrompt();
                      const runtimeContext = runtimeContextForEvent(event);
                      const codeEditingSurfaceRestriction = shouldBlockInProductCodeEditing(event)
@@ -13381,7 +13423,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                          : "";
                      const hostedHarnessRuntime = getRequestRunContext()?.hostedHarnessRuntime;
                      const hostedHarnessPromptNote = hostedHarnessRuntime
-@@ -3816,15 +3835,21 @@
+@@ -3816,15 +3836,21 @@
                              return pathOrder;
                          return a.path.localeCompare(b.path);
                      });
@@ -13406,7 +13448,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                              if (full) {
                                  const fm = parseSkillFrontmatter(full.content);
                                  if (!isRuntimeVisibleScope(fm.scope))
-@@ -4649,6 +4674,24 @@
+@@ -4649,6 +4675,24 @@
                                  setResponseStatus(event, 404);
                                  return { error: "Thread not found" };
                              }
@@ -13431,7 +13473,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                              let newThreadData = body.threadData || thread.threadData;
                              let newMessageCount = body.messageCount ?? thread.messageCount;
                              let nextTitle = typeof body.title === "string" ? body.title : thread.title;
-@@ -4666,34 +4709,20 @@
+@@ -4666,34 +4710,20 @@
                                          nextTitle = meta.title;
                                  }
                              };
@@ -13453,11 +13495,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
 -                                catch {
 -                                    // Invalid JSON in either side — fall back to raw body blob.
 -                                }
-+                            // Keep the original snapshot until the store's CAS attempt. A
-+                            // preliminary merge would hide which head the browser requested.
-+                            try {
-+                                preserveTitleOverride(JSON.parse(thread.threadData));
-                             }
+-                            }
 -                            else {
 -                                try {
 -                                    preserveTitleOverride(JSON.parse(newThreadData));
@@ -13465,6 +13503,13 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
 -                                catch {
 -                                    // Invalid JSON — keep the title supplied by the client.
 -                                }
+-                            }
+-                            await updateThreadData(threadId, newThreadData, nextTitle, nextPreview, newMessageCount, { ignoreConflicts: true });
++                            // Keep the original snapshot until the store's CAS attempt. A
++                            // preliminary merge would hide which head the browser requested.
++                            try {
++                                preserveTitleOverride(JSON.parse(thread.threadData));
++                            }
 +                            catch { }
 +                            const saved = await updateThreadData(threadId, newThreadData, nextTitle, nextPreview, newMessageCount, {
 +                                expectedHeadRevision: Number.isSafeInteger(body.expectedHeadRevision)
@@ -13473,12 +13518,11 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
 +                            if (!saved) {
 +                                setResponseStatus(event, 404);
 +                                return { error: "Thread not found" };
-                             }
--                            await updateThreadData(threadId, newThreadData, nextTitle, nextPreview, newMessageCount, { ignoreConflicts: true });
++                            }
                              // Scope updates piggyback on the PUT — the client uses this
                              // path for detach and for claiming a legacy unscoped thread.
                              // A scoped thread cannot be retagged across resources here.
-@@ -4701,7 +4730,7 @@
+@@ -4701,7 +4731,7 @@
                                  const incomingScope = parseScopeFromBody(body.scope);
                                  await setThreadScope(threadId, incomingScope);
                              }
@@ -13487,7 +13531,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                          });
                      }
                      // POST /threads/:id/queued — debounced writes from the client
-@@ -5113,32 +5142,13 @@
+@@ -5113,32 +5143,13 @@
                      ? preparedMarker.automationRunId
                      : undefined;
                  if (typeof automationRunId === "string" && automationRunId) {
@@ -13521,7 +13565,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                          }
                          catch {
                              setResponseStatus(event, 500);
-@@ -5146,7 +5156,7 @@
+@@ -5146,7 +5157,7 @@
                          }
                      }
                      const waitUntil = event.req?.waitUntil;
@@ -13530,7 +13574,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                      if (typeof waitUntil === "function") {
                          void waitUntil(runPromise);
                      }
-@@ -5321,34 +5331,19 @@
+@@ -5321,34 +5332,19 @@
              // Poll every 60 seconds for due recurring jobs and execute them.
              // Long-lived runtimes use setInterval; serverless runtimes rely on a
              // platform-owned sweep because an invocation cannot own a durable loop.
@@ -13569,7 +13613,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                      apiKey: options?.apiKey,
                      model: resolveConfiguredAgentModel(options),
                      appId: options?.appId,
-@@ -5439,15 +5434,24 @@
+@@ -5439,15 +5435,24 @@
                      }
                  }
                  else {
@@ -13596,7 +13640,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                      }, 10_000);
                  }
              }
-@@ -5759,27 +5763,48 @@
+@@ -5759,27 +5764,48 @@
              // Event and webhook automations remain live when the recurring scheduler
              // is disabled; only the cron driver is gated above.
              const { initTriggerDispatcher } = await import("../triggers/dispatcher.js");
@@ -13655,7 +13699,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
          })().catch((err) => {
              // If the init fails, the routes never get registered and requests
              // to /_agent-native/agent-chat silently 404. Register a fallback
-@@ -5803,6 +5828,7 @@
+@@ -5803,6 +5829,7 @@
                  "/mcp",
                  "/.well-known/agent-card.json",
                  "/_agent-native/a2a",
@@ -15815,21 +15859,31 @@ diff --git a/dist/jobs/frontmatter.d.ts b/dist/jobs/frontmatter.d.ts
 diff --git a/dist/server/action-discovery.js b/dist/server/action-discovery.js
 --- a/dist/server/action-discovery.js
 +++ b/dist/server/action-discovery.js
-@@ -640,6 +640,14 @@
-             () => import("../jobs/actions/run-automation-now.js"),
-         ],
+@@ -162,6 +162,9 @@
+ }
+ function preserveActionFlags(entry) {
+     const out = {};
++    // The advertised JSON schema does not replace the action's validator.
++    if (entry.schema !== undefined)
++        out.schema = entry.schema;
+     if (typeof entry.agentTool === "boolean")
+         out.agentTool = entry.agentTool;
+     if (typeof entry.mcpTool === "boolean")
+@@ -638,6 +641,14 @@
          [
+             "run-automation-now",
+             () => import("../jobs/actions/run-automation-now.js"),
++        ],
++        [
 +            "inspect-automation-run",
 +            () => import("../jobs/actions/inspect-automation-run.js"),
 +        ],
 +        [
 +            "decide-automation-approval",
 +            () => import("../jobs/actions/decide-automation-approval.js"),
-+        ],
-+        [
-             "list-automation-runs",
-             () => import("../jobs/actions/list-automation-runs.js"),
          ],
+         [
+             "list-automation-runs",
 diff --git a/dist/automations/service.js b/dist/automations/service.js
 --- a/dist/automations/service.js
 +++ b/dist/automations/service.js

@@ -11,6 +11,38 @@ Core package. Issue #9 also applies `@agent-native__toolkit@0.19.3.patch` to the
 pinned Toolkit package. The lockfile records both patch hashes. Install with
 `pnpm install --frozen-lockfile` from `packages/workbench`.
 
+## Native action JSON values
+
+Offline Windows acceptance found that a Native `vivary-project-evaluate` Decide
+call with numeric `turns_used: 0` and `actions_used: 0` reached the adapter with
+strings. Core's discovery discarded the action's Standard Schema. The agent
+loop then validated its advertised JSON schema with coercion enabled. A JSON
+record's first union branch accepts strings, so valid numbers, booleans and nulls
+could change before the action's strict validator ran. This affected other
+record-valued actions and manually declared JSON-schema tools too.
+
+The maintained patch retains the declared schema through static, filesystem,
+and development action discovery. The action's wrapped validator remains the
+validation owner. For manually declared JSON-schema tools, Native first checks
+the original input without coercion. Already valid JSON keeps its types. Only
+an input that fails that check enters the existing coercing compatibility path.
+Malformed inputs still fail, and authorization still runs after validation.
+
+The patch changes `dist/server/action-discovery.js`,
+`dist/server/agent-chat-plugin.js`, and `dist/agent/production-agent.js`.
+`tests/native-action-schema.test.ts` invokes Native's actual agent loop with an
+injected deterministic engine. It checks both static export forms, JSON scalars,
+nested records and arrays, raw-schema compatibility and rejection, numeric Decide
+budgets, and actor, evidence, owner-only and foreign-path refusals before a runner.
+The maintained Native test command includes this regression. The existing
+project-evaluate tests cover the broader governed adapter contract.
+
+The frozen Windows acceptance package remains unchanged. Acceptance of a new
+package is a separate gate. The original review/control tool contract belongs
+to [issue #20](https://github.com/vivary-dev/Vivary-New/issues/20).
+Remove these hunks when a pinned upstream Core release preserves action schemas
+through discovery and passes the JSON-value regressions without this patch.
+
 ## Claude provider session continuity
 
 Issue [#10](https://github.com/vivary-dev/vivary/issues/10) connects the pinned
