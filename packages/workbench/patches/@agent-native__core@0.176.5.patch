@@ -2949,7 +2949,7 @@ index e30f3fd04b4949bfe81bc340f1142dfe4398db6f..fa56229a0256de81c8c9116d83b89dda
 +    return (_jsx("div", { className: "space-y-2", "data-testid": "file-storage-setup-card", children: _jsx(BuilderConnectCard, { title: "Connect Builder for file storage", description: "Builder keeps uploaded images and files on durable object storage so the agent can reuse them throughout this thread.", trackingSource: "file_upload_chat_card", render: ({ viewModel, className }) => (_jsxs("div", { className: "space-y-2", children: [_jsx(DefaultBuilderConnectCardView, { viewModel: viewModel, className: className }), customStorageButton] })) }) }));
  }
 diff --git a/dist/client/MultiTabAssistantChat.js b/dist/client/MultiTabAssistantChat.js
-index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac99042112f1f886 100644
+index 24eb57b9a053b7205f14e29b94c03a91151a1200..90f04c18957067280c224fdedc6bceca917fea6b 100644
 --- a/dist/client/MultiTabAssistantChat.js
 +++ b/dist/client/MultiTabAssistantChat.js
 @@ -7,7 +7,7 @@ import { DEFAULT_REASONING_EFFORT, isReasoningEffort, resolveReasoningEffortSele
@@ -3007,7 +3007,15 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
          queueMicrotask(() => {
              window.dispatchEvent(new CustomEvent(CHAT_MODEL_SELECTION_CHANGED_EVENT, {
                  detail: { key },
-@@ -576,6 +599,15 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -469,6 +492,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+         : null);
+     const [deepLinkedThreadId] = useState(() => threadUrlSyncEnabled ? null : readUrlThreadId(DEFAULT_THREAD_URL_PARAM));
+     const [activeDeepLinkedThreadId, setActiveDeepLinkedThreadId] = useState(deepLinkedThreadId);
++    const explicitlySelectedThreadId = threadUrlSyncEnabled ? urlThreadId : activeDeepLinkedThreadId;
+     const urlThreadIdRef = useRef(urlThreadId);
+     urlThreadIdRef.current = urlThreadId;
+     useEffect(() => {
+@@ -576,6 +600,15 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
          switchThreadState(threadId);
          writeThreadUrl(threadId, options);
      }, [switchThreadState, writeThreadUrl]);
@@ -3023,7 +3031,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
      // Namespace all localStorage keys by storageKey when provided (for per-app isolation in frame)
      const keyPrefix = storageKey ? `:${storageKey}` : "";
      const modelSelectionKey = chatModelSelectionStorageKey(storageKey);
-@@ -621,6 +653,18 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -621,6 +654,18 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
      const threadModelRef = useRef(new Map());
      const [persistedModelSelection, setPersistedModelSelection] = useState(() => readStoredModelSelection(modelSelectionKey));
      const [modelSelectionVersion, setModelSelectionVersion] = useState(0);
@@ -3042,7 +3050,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
      useEffect(() => {
          setPersistedModelSelection(readStoredModelSelection(modelSelectionKey));
      }, [modelSelectionKey]);
-@@ -701,7 +745,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -701,7 +746,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
      const resolveThreadModelSelection = useCallback((threadId) => resolveModelSelection(threadModelRef.current.get(threadId) ?? persistedModelSelection, availableModels), [availableModels, persistedModelSelection, modelSelectionVersion]);
      const persistModelSelection = useCallback((selection) => {
          setPersistedModelSelection(selection);
@@ -3051,7 +3059,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
      }, [modelSelectionKey]);
      const handleModelChange = useCallback((model, engine) => {
          const threadId = activeThreadIdRef.current;
-@@ -822,18 +866,56 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -822,18 +867,56 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
                  builderConnected,
                  currentEngineName,
                  currentModel,
@@ -3109,7 +3117,17 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
      // Parent-child thread mapping — persisted to localStorage.
      // Maps childThreadId → parentThreadId for sub-agent tabs.
      const PARENT_MAP_KEY = `agent-chat-parent-map${keyPrefix}`;
-@@ -1050,7 +1132,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1017,6 +1100,9 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+         // are removed from the sidebar on load but remain accessible via history.
+         const now = Date.now();
+         const isStale = (id) => {
++            // Age may prune restored tabs, but must not replace the conversation the URL selected.
++            if (id === activeThreadId && id === explicitlySelectedThreadId)
++                return false;
+             const thread = threadMap.get(id);
+             return thread
+                 ? now - thread.updatedAt > STALE_THREAD_THRESHOLD_MS
+@@ -1050,7 +1136,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
          if (!parentMap[activeThreadId] && isStale(activeThreadId)) {
              void createThread().then((id) => {
                  if (id)
@@ -3118,7 +3136,29 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
              });
          }
      }, [
-@@ -1103,7 +1185,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1060,6 +1146,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+         switchThread,
+         createThread,
+         writeThreadUrl,
++        explicitlySelectedThreadId,
+     ]);
+     // Ensure active thread is always in open tabs.
+     // Use functional update to check inside the setter — avoids race with the
+@@ -1074,11 +1161,12 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+             return;
+         const activeThread = threads.find((thread) => thread.id === activeThreadId);
+         if (activeThread &&
++            activeThreadId !== explicitlySelectedThreadId &&
+             Date.now() - activeThread.updatedAt > STALE_THREAD_THRESHOLD_MS) {
+             return;
+         }
+         setOpenTabIds((prev) => prev.includes(activeThreadId) ? prev : [...prev, activeThreadId]);
+-    }, [activeThreadId, openTabIds, parentMap, threads]);
++    }, [activeThreadId, openTabIds, parentMap, threads, explicitlySelectedThreadId]);
+     // Ensure at least one tab is always open — auto-create if sidebar is empty.
+     // Skipped when an active thread already exists (e.g. the hook generated an
+     // optimistic id for a brand-new session); the activeThreadId effect above
+@@ -1103,7 +1191,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
              }
              newThreadIds.current.add(id);
              setOpenTabIds([id]);
@@ -3127,7 +3167,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
          });
      }, [
          activeThreadId,
-@@ -1113,7 +1195,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1113,7 +1201,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
          writeThreadUrl,
      ]);
      useEffect(() => {
@@ -3136,7 +3176,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
              return;
          if (openTabIds.length === 0 && !activeThreadId) {
              autoCreatingRef.current = true;
-@@ -1122,11 +1204,11 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1122,11 +1210,11 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
                  if (id) {
                      newThreadIds.current.add(id);
                      setOpenTabIds([id]);
@@ -3150,7 +3190,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
      usePollLoop(async (signal) => {
          const runsUrl = `${apiUrl.replace(/\/$/, "")}/runs/list?goalId=agent-team`;
          try {
-@@ -1533,7 +1615,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1533,7 +1621,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
          const id = await createThread();
          if (id) {
              newThreadIds.current.add(id);
@@ -3159,7 +3199,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
          }
          return id;
      }, [createThread, writeThreadUrl]);
-@@ -1588,7 +1670,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1588,7 +1676,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
                      if (newId) {
                          newThreadIds.current.add(newId);
                          setOpenTabIds([newId]);
@@ -3168,7 +3208,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
                      }
                  }
                  catch (error) {
-@@ -1654,7 +1736,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1654,7 +1742,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
              newThreadIds.current.add(id);
              setOpenTabIds([id]);
              switchThreadState(id);
@@ -3177,7 +3217,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
              dismissedSubAgentTabsRef.current.clear();
              // Clean up all old refs
              chatRefs.current.clear();
-@@ -1711,7 +1793,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1711,7 +1799,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
                      if (!createdId)
                          return;
                      setOpenTabIds((prev) => prev.includes(createdId) ? prev : [...prev, createdId]);
@@ -3186,7 +3226,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
                  });
                  return;
              }
-@@ -1852,12 +1934,13 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1852,12 +1940,13 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
          });
      }, [generateTitle, saveThreadData]);
      const handleSaveThread = useCallback((threadId, data) => {
@@ -3201,7 +3241,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
      }, [saveThreadData, writeThreadUrl]);
      // ─── Slash command handler ──────────────────────────────────────────
      const [helpVisible, setHelpVisible] = useState(false);
-@@ -2045,6 +2128,8 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -2045,6 +2134,8 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
                                              chatRefs.current.delete(tabId);
                                          }
                                      }, threadId: tabId, tabId: tabId, browserTabId: browserTabId, contextScope: scope, contextNamespace: contextNamespace, isolateHistoryByScope: isolateHistoryByScope, isActiveComposer: tabId === activeThreadId, apiUrl: apiUrl, isNewThread: newThreadIds.current.has(tabId) || isNewThread(tabId), onThreadRestoreNotFound: tabId === activeThreadId &&
@@ -3210,7 +3250,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
                                          (props.agentChatSurface !== "desktop" ||
                                              props.desktopIdentityAuthenticated === true)
                                          ? clearActiveTab
-@@ -2061,10 +2146,10 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -2061,10 +2152,10 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
                                      // sub-agent tab would start a fresh run on that thread and kill
                                      // the in-flight team chunk. Disable the composer and show a
                                      // hint so users know to send via the orchestrator chat instead.

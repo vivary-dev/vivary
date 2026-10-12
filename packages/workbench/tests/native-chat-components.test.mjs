@@ -31,6 +31,8 @@ const proofSource = String.raw`
 import { act, createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { AssistantChat } from "@proof/assistant-chat";
+import { MultiTabAssistantChat } from "@proof/multi-tab-chat";
+import { useState } from "react";
 import { getRunErrorMetadata, RunErrorRecoveryCard } from "@proof/run-recovery";
 import * as messages from "@proof/message-components";
 import { processEvent } from "@proof/sse-event-processor";
@@ -46,7 +48,7 @@ async function mount(element) {
   document.body.appendChild(host);
   const root = createRoot(host);
   await act(async () => { root.render(element); });
-  return { host, async unmount() { await act(async () => { root.unmount(); }); host.remove(); } };
+  return { host, root, async unmount() { await act(async () => { root.unmount(); }); host.remove(); } };
 }
 
 // Issue #131. A sidebar row menu opened from the keyboard, with the Toolkit's Rename and Pin and Vivary's Archive,
@@ -313,6 +315,42 @@ export async function reloadThread(threadId, texts) {
   return snapshot;
 }
 
+// The real multi-tab component and thread hook load an old saved conversation.
+// Only HTTP responses and the host draft adapter are inert test boundaries.
+export async function inspectInitialSelection({ threadId, scope, explicit = true, transition }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const navigations = [];
+  const draft = { isReady: () => true, ensureThread: async () => {}, resetKeyForThread: () => "ready",
+    textForThread: () => "", hasDraftStateForThread: () => false, onChange() {} };
+  function Surface({ selected, currentScope }) {
+    const [route, setRoute] = useState(selected);
+    return <MultiTabAssistantChat apiUrl={CHAT_API} scope={currentScope} isolateHistoryByScope
+      storageKey={"selection-" + currentScope.id} restoreActiveThread={!explicit} hostComposerDraft={draft}
+      showTabBar={false} showHeader={false} availableModels={[]} modelListLoading={false}
+      providerStatusChecksEnabled={false} agentTeamPollMs={60000}
+      threadUrlSync={explicit ? { routeThreadId: route, getPath: id => "/native?thread=" + encodeURIComponent(id ?? ""),
+        navigate: next => { const url = new URL(next, window.location.href); window.location = url;
+          navigations.push(url.searchParams.get("thread")); setRoute(url.searchParams.get("thread")); } } : false} />;
+  }
+  const render = (selected, currentScope) => <QueryClientProvider client={client}>
+    <Surface key={currentScope.id} selected={selected} currentScope={currentScope} />
+  </QueryClientProvider>;
+  const initial = transition ?? { threadId, scope };
+  window.location = new URL("http://127.0.0.1/native" + (explicit ? "?thread=" + initial.threadId : ""));
+  if (!explicit) localStorage.setItem("agent-chat-active-thread:selection-" + scope.id + ":scope:" + scope.type + ":" + scope.id, threadId);
+  const view = await mount(render(initial.threadId, initial.scope));
+  try {
+    await act(async () => { await sleep(300); });
+    if (transition) {
+      window.location = new URL("http://127.0.0.1/native?thread=" + threadId);
+      await act(async () => { view.root.render(render(threadId, scope)); await sleep(300); });
+      await act(async () => { await sleep(300); });
+    }
+    return { route: window.location.searchParams.get("thread"), navigations,
+      text: view.host.textContent, active: localStorage.getItem("agent-chat-active-thread:selection-" + scope.id + ":scope:" + scope.type + ":" + scope.id) };
+  } finally { await view.unmount(); client.clear(); }
+}
+
 // The Settings Usage tab reads its metrics and alert rules through the action query cache. The
 // cache holds what the server returns, so the tab renders without a request.
 export async function renderUsage(metrics, alertRules = []) {
@@ -349,6 +387,7 @@ const require = createProofRequire(${JSON.stringify(join(WORKBENCH, "package.jso
       setup(build) {
         build.onResolve({ filter: /.*/ }, args => {
           if (args.path === "@proof/assistant-chat") return { path: join(CLIENT, "AssistantChat.js") };
+          if (args.path === "@proof/multi-tab-chat") return { path: join(CLIENT, "MultiTabAssistantChat.js") };
           if (args.path === "@proof/run-recovery") return { path: join(CLIENT, "chat", "run-recovery.js") };
           if (args.path === "@proof/message-components") return { path: join(CLIENT, "chat", "message-components.js") };
           if (args.path === "@proof/sse-event-processor") return { path: join(CLIENT, "sse-event-processor.js") };
@@ -398,6 +437,13 @@ function installDom() {
   const getComputedStyle = () => new Proxy({ getPropertyValue: () => "" }, { get: (style, name) => style[name] ?? "" });
   // linkedom has no location. Core's action paths read the page's path when they load.
   view.location = new URL("http://127.0.0.1/settings");
+  view.location.reload = () => {};
+  // Core publishes chat navigation to its enclosing window. There is no enclosing app in this DOM.
+  view.parent = view;
+  view.postMessage = () => {};
+  view.history = { state: null, length: 1, go() {}, back() {}, forward() {},
+    pushState(_state, _title, url) { view.location = new URL(url, view.location.href); },
+    replaceState(_state, _title, url) { view.location = new URL(url, view.location.href); } };
   // The whole chat also keeps state in storage, watches media queries, and scrolls its messages.
   const memoryStorage = () => {
     const items = new Map();
@@ -491,11 +537,72 @@ function installChatServer(savedThreads = {}) {
   return () => { globalThis.fetch = originalFetch; };
 }
 
+function installSelectionServer(rows) {
+  const saved = Object.fromEntries(rows.map(row => [row.id, row.threadData]));
+  const restore = installChatServer(saved);
+  const contentFetch = globalThis.fetch;
+  let modelSubmits = 0;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input instanceof Request ? input.url : input), "http://chat.test");
+    const method = (init.method ?? "GET").toUpperCase();
+    if (method === "POST" && url.pathname.endsWith("/agent-chat")) { modelSubmits++; throw new Error("selection must not submit a model request"); }
+    if (method === "GET" && url.pathname.endsWith("/threads")) {
+      await new Promise(resolve => setTimeout(resolve, 30));
+      return Response.json({ threads: rows.filter(row => row.scope.type === url.searchParams.get("scopeType") && row.scope.id === url.searchParams.get("scopeId")) });
+    }
+    const selected = rows.find(row => url.pathname.endsWith("/threads/" + row.id));
+    if (method === "GET" && selected) {
+      if (selected.scope.type !== url.searchParams.get("scopeType") || selected.scope.id !== url.searchParams.get("scopeId")) return new Response(null, { status: 404 });
+      return Response.json(selected);
+    }
+    return contentFetch(input, init);
+  };
+  return { close() { restore(); }, get modelSubmits() { return modelSubmits; } };
+}
+
 test("Native chat controls", async t => {
   // Tiptap reads the DOM when its module loads, so the DOM goes in first.
   const closeChannels = installDom();
   const proof = await import(`data:text/javascript;base64,${Buffer.from(await buildProof()).toString("base64")}`);
   t.after(() => closeChannels());
+
+  const scope = { type: "workspace-app", id: "unassigned-owner" };
+  const projectScope = { type: "workspace-app", id: "project-owner" };
+  const old = Date.now() - 13 * 60 * 60 * 1000;
+  const savedRow = (id, currentScope, text) => ({ id, title: "Saved selection", createdAt: old, updatedAt: old,
+    scope: currentScope, messageCount: 1, threadData: JSON.stringify({ headId: id + "-message", messages: [
+      { parentId: null, message: { id: id + "-message", role: "user", content: [{ type: "text", text }] } },
+    ] }) });
+  const rows = [savedRow("old-unassigned", scope, "Retained Unassigned selection"),
+    savedRow("old-project", projectScope, "Retained project selection")];
+  for (const selected of rows) for (const transition of [false, true]) {
+    const other = rows.find(row => row.id !== selected.id);
+    await t.test("an explicit old " + selected.id + " selection survives initial list completion" + (transition ? " after a scope transition" : ""), async () => {
+      localStorage.clear(); sessionStorage.clear();
+      const server = installSelectionServer(rows);
+      try {
+        const snapshot = await proof.inspectInitialSelection({ threadId: selected.id, scope: selected.scope,
+          ...(transition ? { transition: { threadId: other.id, scope: other.scope } } : {}) });
+        assert.equal(snapshot.route, selected.id, "initialization must not replace the selected ID with an empty UUID");
+        assert.equal(snapshot.active, selected.id);
+        assert.match(snapshot.text, new RegExp(selected.id === "old-unassigned" ? "Retained Unassigned selection" : "Retained project selection"));
+        assert.doesNotMatch(snapshot.text, new RegExp(selected.id === "old-unassigned" ? "Retained project selection" : "Retained Unassigned selection"));
+        assert.deepEqual(snapshot.navigations, [], "selected history must not create or navigate to a replacement");
+        assert.equal(server.modelSubmits, 0);
+      } finally { server.close(); }
+    });
+  }
+  for (const selected of rows) await t.test("without explicit selection the ordinary stale " + selected.id + " chat still starts fresh", async () => {
+    localStorage.clear(); sessionStorage.clear();
+    const server = installSelectionServer(rows);
+    try {
+      const snapshot = await proof.inspectInitialSelection({ threadId: selected.id, scope: selected.scope, explicit: false });
+      assert.ok(snapshot.active && snapshot.active !== selected.id);
+      assert.equal(snapshot.route, null);
+      assert.doesNotMatch(snapshot.text, /Retained (?:Unassigned|project) selection/);
+      assert.equal(server.modelSubmits, 0);
+    } finally { server.close(); }
+  });
 
   // Issue #101.
   await t.test("a provider stream error shows its message and a Retry, and does not continue on its own", async () => {

@@ -7617,6 +7617,18 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Explicit Native history selection. The maintained Core tab initialization and
+active-tab inclusion retain the conversation named by the URL even when its last
+activity is older than twelve hours. This applies to both project and Unassigned
+history on first mount and after changing scope. Ordinary startup without an
+explicit selection still replaces a stale restored tab with a fresh chat. The
+existing scoped thread lookup and message restoration remain the owners of
+access and content, so the conversation storage and project boundaries above
+still hold. The real Core component regressions exercise both scopes, route and
+active-ID retention, saved messages, scope changes and the no-selection controls
+without a model submission. Source checks do not establish acceptance of a new
+Windows package.
+
 Native action JSON input. The maintained Core patch retains each action's
 declared Standard Schema through discovery, so its wrapped validator owns input
 validation instead of a coercing check of the advertised schema. Manually
