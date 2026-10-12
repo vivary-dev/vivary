@@ -307,6 +307,19 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+Native action JSON input. The maintained Core patch retains each action's
+declared Standard Schema through discovery, so its wrapped validator owns input
+validation instead of a coercing check of the advertised schema. Manually
+declared JSON-schema tools first validate without coercion and keep valid JSON
+numbers, booleans, nulls, records and arrays. Otherwise invalid but coercible
+inputs retain the existing compatibility path. Native's real agent-loop
+regressions use an injected engine and the actual Decide adapter to check numeric
+budgets, JSON values, malformed inputs, and authority refusals before the runner.
+The selected-project and actor boundaries above remain unchanged. The
+[patch notes](../packages/workbench/patches/README.md#native-action-json-values)
+describe the conversion failure and validation owners. The frozen Windows
+package remains unchanged, and a fixed package's native acceptance remains open.
+
 Issue #23 TipTap advisories. Toolkit 0.19.3 pins its TipTap packages at
 3.30.1, and @tiptap/core 3.30.1 carries the high GHSA-j95f-988m-3j2f and the
 moderate GHSA-cp6q-959q-f8rh. TipTap packages pin each other exactly, so
