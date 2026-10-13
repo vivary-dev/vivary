@@ -25,6 +25,9 @@ import {
 } from "@agent-native/core/code-agents";
 
 import { getCodexModels, type CodexModelCatalog } from "./codex-models";
+import { CLAUDE_CODE_DEFAULT_MODEL, CLAUDE_CODE_LEGACY_ALIASES, CLAUDE_CODE_MODELS,
+  claudeCodeModelChoices, type ClaudeCodeModelId } from "../shared/claude-models";
+import { assertCodeSubscriptionFunding, codeSubscriptionFunding, type CodeSubscriptionFunding } from "./code-subscription-funding";
 import { codexSessionLogLifecycle } from "./codex-session-process";
 import { projectReconnectionPending } from "./project-reconnection-admission.mjs";
 
@@ -42,13 +45,9 @@ export const VIVARY_CODE_DEFAULT_ENGINE: VivaryCodeEngine = "claude-cli";
 
 const VIVARY_CODE_GOAL_ID = "vivary-local-code";
 const VIVARY_CODE_APP_MARKER = "vivary-workbench-local-code";
-export type VivaryCodeModel = "sonnet" | "opus" | "fable";
-export const VIVARY_CODE_MODELS = [
-  "sonnet",
-  "opus",
-  "fable",
-] satisfies [VivaryCodeModel, ...VivaryCodeModel[]];
-export const VIVARY_CODE_DEFAULT_MODEL: VivaryCodeModel = "sonnet";
+export type VivaryCodeModel = ClaudeCodeModelId;
+export const VIVARY_CODE_MODELS = CLAUDE_CODE_MODELS.map(model => model.id);
+export const VIVARY_CODE_DEFAULT_MODEL: VivaryCodeModel = CLAUDE_CODE_DEFAULT_MODEL;
 const MAX_RUNS = 20;
 const MAX_TRANSCRIPT_EVENTS = 400;
 const MAX_FOLLOW_UP_EVENTS = 24;
@@ -163,7 +162,8 @@ export type VivaryCodeState = VivaryCodeHostState & {
   defaultEngine: VivaryCodeEngine;
   runtime: VivaryRuntimeStatus;
   permissionMode: CodePermissionMode;
-  engines: { engine: VivaryCodeEngine; label: string; models: string[]; configured: boolean; runtime: VivaryRuntimeStatus; modelCatalog: CodexModelCatalog | null }[];
+  engines: { engine: VivaryCodeEngine; label: string; models: string[]; configured: boolean; runtime: VivaryRuntimeStatus; modelCatalog: CodexModelCatalog | null;
+    claudeModels: ReturnType<typeof claudeCodeModelChoices> | null; funding: CodeSubscriptionFunding }[];
   runs: VivaryCodeRunSummary[];
   run: VivaryCodeRunState | null;
   error?: string;
@@ -883,6 +883,8 @@ export async function getVivaryCodeState(
     const models = engine === "claude-cli" ? [...VIVARY_CODE_MODELS]
       : modelCatalog?.status === "ready" ? modelCatalog.models.map(model => model.id) : [];
     return { engine, label: engine === "claude-cli" ? "Claude Code" : "Codex", models, modelCatalog,
+      claudeModels: engine === "claude-cli" ? claudeCodeModelChoices(runtime.version) : null,
+      funding: codeSubscriptionFunding(engine),
       configured: runtime.status === "ready" && (engine !== "codex-cli" || modelCatalog?.status === "ready"), runtime };
   }));
 
@@ -905,10 +907,11 @@ export async function getVivaryCodeState(
   if (!selectedRuntime) fail("Choose an available coding runtime.", {
     errorCode: "vivary_code_runtime_unavailable", statusCode: 503,
   });
-  if (selected && selectedEngine === "codex-cli" && !selectedRuntime.models.includes(modelFromRun(selected))) {
+  if (selected && !selectedRuntime.models.includes(modelFromRun(selected))) {
     selectedRuntime.models.push(modelFromRun(selected));
   }
   selectedRuntime.runtime = runtime;
+  if (selectedEngine === "claude-cli") selectedRuntime.claudeModels = claudeCodeModelChoices(runtime.version);
   selectedRuntime.configured = runtime.status === "ready"
     && (selectedEngine !== "codex-cli" || selectedRuntime.modelCatalog?.status === "ready");
 
@@ -973,6 +976,18 @@ export async function sendVivaryCodeMessage(input: {
   if (input.engine && input.engine !== selectedEngine) {
     fail("Start a new conversation to change coding runtimes.", { errorCode: "vivary_code_engine_changed", statusCode: 409 });
   }
+  // Refuse before any CLI probe, run record, transcript append, or worker launch.
+  // Ownership and pinned project checks still apply to retained conversations.
+  if (existing && input.model && input.model !== modelFromRun(existing)) {
+    fail("Start a new conversation to change its model.", { errorCode: "vivary_code_model_changed", statusCode: 409 });
+  }
+  if (input.revalidateWorkspace) {
+    const current = await input.revalidateWorkspace();
+    if (!current || !sameWorkspace(current, workspace)) {
+      fail("The selected project changed. Select it again.", { errorCode: "vivary_code_project_changed", statusCode: 409 });
+    }
+  }
+  assertCodeSubscriptionFunding(selectedEngine);
   const runtime = await getVivaryRuntimeStatus(selectedEngine);
   if (runtime.status !== "ready") {
     fail(runtime.message, { errorCode: "vivary_code_runtime_unavailable", statusCode: 503 });
@@ -983,12 +998,9 @@ export async function sendVivaryCodeMessage(input: {
   }
   const supportedModels = catalog?.status === "ready" ? catalog.models.map(model => model.id) : [];
   const recordedModel = existing ? modelFromRun(existing) : undefined;
-  if (existing && input.model && input.model !== recordedModel) {
-    fail("Start a new conversation to change its model.", { errorCode: "vivary_code_model_changed", statusCode: 409 });
-  }
   const selectedModel = resolveVivaryCodeModel(selectedEngine,
     input.model ?? recordedModel ?? (catalog?.status === "ready" ? catalog.defaultModel : undefined),
-    recordedModel ? [...supportedModels, recordedModel] : supportedModels);
+    recordedModel ? [...supportedModels, recordedModel] : supportedModels, recordedModel);
   if (!existing && selectedEngine === "codex-cli" && selectedModel === "default") {
     fail("Choose a model reported by Codex before starting a conversation.", { errorCode: "vivary_code_model_unsupported", statusCode: 400 });
   }
@@ -1540,7 +1552,7 @@ function engineLabelFromRun(run: CodeAgentRunRecord): string {
 function modelFromRun(run: CodeAgentRunRecord): string {
   return metadataString(run, "model")
     ?? (metadataString(run, "engine") === "claude-cli"
-      ? VIVARY_CODE_DEFAULT_MODEL
+      ? "sonnet"
       : "default");
 }
 
@@ -1552,13 +1564,14 @@ function engineFromRun(run: CodeAgentRunRecord): VivaryCodeEngine {
   });
 }
 
-export function resolveVivaryCodeModel(engine: VivaryCodeEngine, requested?: string, codexModels: readonly string[] = []): string {
+export function resolveVivaryCodeModel(engine: VivaryCodeEngine, requested?: string, codexModels: readonly string[] = [], retainedModel?: string): string {
   if (engine === "codex-cli") {
     if (!requested || requested === "default") return "default";
     if (codexModels.includes(requested)) return requested;
   } else {
     if (!requested) return VIVARY_CODE_DEFAULT_MODEL;
-    if (VIVARY_CODE_MODELS.some(model => model === requested)) return requested;
+    if (VIVARY_CODE_MODELS.some(model => model === requested)
+      || CLAUDE_CODE_LEGACY_ALIASES.includes(requested) || requested === retainedModel) return requested;
   }
   fail("Choose a model supported by the selected coding runtime.", {
     errorCode: "vivary_code_model_unsupported", statusCode: 400,

@@ -1,13 +1,40 @@
+import { claudeCodeModelChoices } from "../shared/claude-models.ts";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { codingRuntimeEnvironment, getVivaryRuntimeStatus, resolveVivaryRuntimeCommand, vivaryRuntimeStatusFromProbe } from "../server/local-runtime-setup.ts";
+import { codingRuntimeEnvironment, getVivaryRuntimeStatus, resolveVivaryRuntimeCommand, runtimeInstallationVersion, vivaryRuntimeStatusFromProbe } from "../server/local-runtime-setup.ts";
 
 describe("local coding runtime status", () => {
+  it("marks exact Claude IDs by installed version and labels API list prices", () => {
+    const server = claudeCodeModelChoices("2.1.289");
+    assert.equal(server.find(model => model.id === "claude-haiku-5-5")?.support, "upgrade-required");
+    assert.equal(server.find(model => model.id === "claude-sonnet-5-5")?.support, "supported");
+    assert.equal(server.find(model => model.id === "claude-fable-5-1")?.apiPrice, "$10 input / $50 output");
+    assert.equal(claudeCodeModelChoices("2.1.296").every(model => model.support === "supported"), true);
+    assert.equal(claudeCodeModelChoices().every(model => model.support === "unverified"), true);
+    assert.equal(claudeCodeModelChoices("bad.version").every(model => model.support === "unverified"), true);
+  });
+
+  it("reads named CLI installation metadata without executing the entry", async () => {
+    const fixture = await mkdtemp(path.join(tmpdir(), "vivary-runtime-version-"));
+    try {
+      const entry = path.join(fixture, "cli.js");
+      await writeFile(entry, "throw new Error('Must not run');");
+      await writeFile(path.join(fixture, "package.json"), JSON.stringify({ name: "@anthropic-ai/claude-code", version: "2.1.289" }));
+      assert.equal(await runtimeInstallationVersion({ executable: process.execPath, prefix: [entry] }, "claude-cli"), "2.1.289");
+      await mkdir(path.join(fixture, "bin"));
+      const nativeEntry = path.join(fixture, "bin", "claude.exe");
+      await writeFile(nativeEntry, "Not an executable");
+      assert.equal(await runtimeInstallationVersion({ executable: nativeEntry, prefix: [] }, "claude-cli"), "2.1.289");
+      await writeFile(path.join(fixture, "package.json"), JSON.stringify({ name: "another-package", version: "9.0.0" }));
+      assert.equal(await runtimeInstallationVersion({ executable: process.execPath, prefix: [entry] }, "claude-cli"), undefined);
+    } finally { await rm(fixture, { recursive: true, force: true }); }
+  });
+
   it("uses Claude's boolean status without returning account details", () => {
     const result = vivaryRuntimeStatusFromProbe("claude-cli", {
       kind: "exited", exitCode: 0,

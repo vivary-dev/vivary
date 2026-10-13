@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -20,17 +20,30 @@ const threads = await import(pathToFileURL(join(CORE, "dist", "agent", "thread-d
 // Only the Builder connect flow, which polls a status route, is stubbed. It is matched by the file
 // it resolves to, so every importer gets the same stub.
 const stubs = new Map([
+  [join(WORKBENCH, "app", "lib", "native-actions.ts"), `
+    export function useNativeActionCaller() { return { call: async () => { throw new Error("No Code action expected"); } }; }`],
+  [join(WORKBENCH, "app", "lib", "chat-draft.ts"), `
+    export function useNativeChatDraft() { return { statusForThread: () => null, draftSaveStatusForThread: () => null,
+      rejectKnownSubmission: async () => {}, hostComposerDraft: undefined }; }
+    export function registerSelectionCloseFlush() { return () => {}; }
+    export function trackSelectionWrite() {}
+    export async function flushChatDraftsForClose() {}
+    export function useChatDraftList() { return { data: [] }; }`],
   [join(CLIENT, "settings", "useBuilderStatus.js"), `
     export function useBuilderConnectFlow() {
       return { configured: false, connecting: false, error: null, orgName: null, statusResolved: true, start() {} };
     }
-    export function useBuilderStatus() { return { status: null, refetch() {} }; }`],
+    export function useBuilderStatus() { return { status: null, refetch() {} }; }
+    export function withBuilderConnectTrackingParams(url) { return url; }
+    export function openBuilderConnectPopup() { throw new Error("No account connection expected"); }`],
 ]);
 
 const proofSource = String.raw`
 import { act, createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { AssistantChat } from "@proof/assistant-chat";
+import { LocalCodeConversation } from "@proof/workbench-code";
+import { claudeCodeModelChoices } from "../shared/claude-models.ts";
 import { MultiTabAssistantChat } from "@proof/multi-tab-chat";
 import { useState } from "react";
 import { getRunErrorMetadata, RunErrorRecoveryCard } from "@proof/run-recovery";
@@ -42,6 +55,37 @@ import { TiptapComposer } from "@proof/tiptap-composer";
 import { TooltipProvider } from "@proof/tooltip";
 import { UsageSection } from "@proof/usage-section";
 import * as chatHistory from "@proof/chat-history";
+
+export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", active = false, history = false }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const choices = [];
+  const engine = { engine: "claude-cli", label: "Claude Code", configured: true,
+    runtime: { status: "ready", message: "Signed in", version: "2.1.296" }, modelCatalog: null,
+    models: claudeCodeModelChoices("2.1.296").map(model => model.id),
+    claudeModels: claudeCodeModelChoices("2.1.296"),
+    funding: { policy: "included-only", status: "unverified", message: "Funding unverified" } };
+  const state = { engines: [engine], defaultEngine: "claude-cli", defaultModel: "claude-sonnet-5-5", cleanup: null };
+  const selection = { key: "composer-review", runId: history ? "retained-run" : null, choice: { engine: "claude-cli", model } };
+  const props = { state, selection, ownerKey: "fixture-owner", projectId: null, workspaceAvailable: true,
+    previewScope: "fixture", notices: <div data-testid="preserved-notice">Existing notice</div>, active, streaming: false,
+    stopping: false, run: history ? { id: "retained-run", engine: "claude-cli", model, events: [], status: "completed" } : null,
+    onChoice: choice => choices.push(choice), onStarted() {}, onStreaming() {}, onSettled() {},
+    onStop: async () => false, onSettings() {} };
+  const view = await mount(<QueryClientProvider client={client}><LocalCodeConversation {...props} /></QueryClientProvider>);
+  const runtime = view.host.querySelector('[aria-label="Conversation runtime"]');
+  const select = view.host.querySelector('[aria-label="Conversation model"]');
+  const toolbar = view.host.querySelector('[data-agent-composer-slot="toolbar"]');
+  const send = view.host.querySelector('[data-agent-composer-slot="send-button"]');
+  const nodes = toolbar ? [...toolbar.querySelectorAll("select,button")] : [];
+  const snapshot = { embedded: !!toolbar?.contains(runtime) && !!toolbar?.contains(select),
+    beforeSend: nodes.indexOf(runtime) < nodes.indexOf(send) && nodes.indexOf(select) < nodes.indexOf(send),
+    noticesOutsideToolbar: !toolbar?.contains(view.host.querySelector('[data-testid="preserved-notice"]')),
+    model: select?.value, labels: [runtime?.getAttribute("aria-label"), select?.getAttribute("aria-label")],
+    disabled: [runtime?.disabled, select?.disabled, send?.disabled], choices,
+    text: view.host.textContent };
+  await view.unmount(); client.clear();
+  return snapshot;
+}
 
 async function mount(element) {
   const host = document.createElement("div");
@@ -377,6 +421,7 @@ async function buildProof() {
     format: "esm",
     target: "node22",
     jsx: "automatic",
+    loader: { ".css": "empty", ".svg": "dataurl" },
     logLevel: "silent",
     define: { "process.env.NODE_ENV": '"development"' },
     // Core's assistant message loads react-dom/server, whose CommonJS build requires Node built-ins.
@@ -386,6 +431,10 @@ const require = createProofRequire(${JSON.stringify(join(WORKBENCH, "package.jso
       name: "native-chat-proof",
       setup(build) {
         build.onResolve({ filter: /.*/ }, args => {
+          if (args.path === "@proof/workbench-code") return { path: join(WORKBENCH, "app", "components", "workspace", "CodeConversation.tsx"), namespace: "workbench-code" };
+          const candidate = args.path.startsWith("@/") ? join(WORKBENCH, "app", args.path.slice(2) + ".ts")
+            : args.path.startsWith(".") ? resolve(args.resolveDir, args.path) + (args.path.endsWith(".ts") ? "" : ".ts") : null;
+          if (candidate && stubs.has(candidate)) return { path: candidate, namespace: "stub" };
           if (args.path === "@proof/assistant-chat") return { path: join(CLIENT, "AssistantChat.js") };
           if (args.path === "@proof/multi-tab-chat") return { path: join(CLIENT, "MultiTabAssistantChat.js") };
           if (args.path === "@proof/run-recovery") return { path: join(CLIENT, "chat", "run-recovery.js") };
@@ -409,6 +458,10 @@ const require = createProofRequire(${JSON.stringify(join(WORKBENCH, "package.jso
           }
           return undefined;
         });
+        build.onLoad({ filter: /.*/, namespace: "workbench-code" }, args => ({
+          contents: readFileSync(args.path, "utf8") + "\nexport { LocalCodeConversation };",
+          loader: "tsx", resolveDir: dirname(args.path),
+        }));
         build.onLoad({ filter: /.*/, namespace: "stub" }, args => (
           { contents: stubs.get(args.path), loader: "tsx", resolveDir: WORKBENCH }));
       },
@@ -565,6 +618,34 @@ test("Native chat controls", async t => {
   const closeChannels = installDom();
   const proof = await import(`data:text/javascript;base64,${Buffer.from(await buildProof()).toString("base64")}`);
   t.after(() => closeChannels());
+
+  await t.test("the Workbench selectors render inside the actual composer before Send, with notices outside", async () => {
+    const server = installChatServer();
+    try {
+      const snapshot = await proof.renderWorkbenchComposer({});
+      assert.equal(snapshot.embedded, true);
+      assert.equal(snapshot.beforeSend, true);
+      assert.equal(snapshot.noticesOutsideToolbar, true);
+      assert.deepEqual(snapshot.labels, ["Conversation runtime", "Conversation model"]);
+      assert.deepEqual(snapshot.disabled, [false, false, true]);
+      assert.match(snapshot.text, /Subscription-only funding is unverified/);
+      assert.doesNotMatch(snapshot.text, /API list price/);
+    } finally { server(); }
+  });
+  await t.test("the Workbench retains a saved legacy choice and locks active and retained conversations", async () => {
+    const server = installChatServer();
+    try {
+      const saved = await proof.renderWorkbenchComposer({ model: "sonnet" });
+      assert.equal(saved.model, "sonnet");
+      assert.deepEqual(saved.choices, []);
+      assert.match(saved.text, /legacy or unavailable/);
+      for (const input of [{ active: true }, { history: true }]) {
+        const snapshot = await proof.renderWorkbenchComposer(input);
+        assert.equal(snapshot.embedded, true);
+        assert.deepEqual(snapshot.disabled.slice(0, 2), [true, true]);
+      }
+    } finally { server(); }
+  });
 
   const scope = { type: "workspace-app", id: "unassigned-owner" };
   const projectScope = { type: "workspace-app", id: "project-owner" };

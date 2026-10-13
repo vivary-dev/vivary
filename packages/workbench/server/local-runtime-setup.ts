@@ -1,7 +1,9 @@
 import type { CodexModelCatalog } from "./codex-models";
+import { type CodeSubscriptionFunding } from "./code-subscription-funding";
+import { claudeCodeModelChoices } from "../shared/claude-models";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { access, readdir, stat } from "node:fs/promises";
+import { access, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -12,14 +14,16 @@ export type VivaryRuntimeStatus = {
   status: "ready" | "sign-in-required" | "not-installed" | "unavailable";
   message: string;
   checkedAt: string;
+  version?: string;
 };
 export type VivaryRuntimeStatusResult = {
   codexModels: CodexModelCatalog | null;
-  runtimes: Array<VivaryRuntimeStatus & { engine: VivaryCodeEngine; label: string }>;
+  claudeModels: ReturnType<typeof claudeCodeModelChoices>;
+  runtimes: Array<VivaryRuntimeStatus & { engine: VivaryCodeEngine; label: string; funding: CodeSubscriptionFunding }>;
 };
 
 type ProbeResult =
-  | { kind: "exited"; exitCode: number; stdout: string; stderr: string }
+  | { kind: "exited"; exitCode: number; stdout: string; stderr: string; version?: string }
   | { kind: "not-installed" }
   | { kind: "unavailable" };
 export type CommandLaunch = { executable: string; prefix: string[]; env: NodeJS.ProcessEnv };
@@ -123,7 +127,8 @@ export function vivaryRuntimeStatusFromProbe(
     return unavailable;
   }
   return signedIn
-    ? { status: "ready", message: `${label} is ready to use.`, checkedAt }
+    ? { status: "ready", message: `${label} is signed in. Subscription-only funding remains unverified.`, checkedAt,
+        ...(result.version ? { version: result.version } : {}) }
     : { status: "sign-in-required", message: `Sign in to ${label} in your terminal, then refresh.`, checkedAt };
 }
 
@@ -160,6 +165,7 @@ export function getVivaryRuntimeStatus(
 async function probeRuntime(engine: VivaryCodeEngine): Promise<ProbeResult> {
   const launch = await resolveVivaryRuntimeCommand(engine);
   if (!launch) return { kind: "not-installed" };
+  const version = await runtimeInstallationVersion(launch, engine);
   return new Promise(resolve => {
     const child = execFile(launch.executable, [...launch.prefix, ...commands[engine].args], {
       cwd: homedir(),
@@ -174,10 +180,10 @@ async function probeRuntime(engine: VivaryCodeEngine): Promise<ProbeResult> {
       if (error) {
         if (error.code === "ENOENT") { resolve({ kind: "not-installed" }); return; }
         if (error.killed || typeof error.code !== "number") { resolve({ kind: "unavailable" }); return; }
-        resolve({ kind: "exited", exitCode: error.code, stdout, stderr });
+        resolve({ kind: "exited", exitCode: error.code, stdout, stderr, version });
         return;
       }
-      resolve({ kind: "exited", exitCode: 0, stdout, stderr });
+      resolve({ kind: "exited", exitCode: 0, stdout, stderr, version });
     });
     child.stdin?.end();
   });
@@ -231,6 +237,27 @@ export async function resolveVivaryRuntimeCommand(engine: VivaryCodeEngine): Pro
     }
   }
   return null;
+}
+
+// Read installation metadata without running the CLI or consulting an account.
+export async function runtimeInstallationVersion(launch: Pick<CommandLaunch, "executable" | "prefix">,
+  engine: VivaryCodeEngine): Promise<string | undefined> {
+  try {
+    const entry = await realpath(launch.prefix[0] ?? launch.executable);
+    const expectedName = engine === "claude-cli" ? "@anthropic-ai/claude-code" : "@openai/codex";
+    for (const directory of [path.dirname(entry), path.dirname(path.dirname(entry))]) {
+      const text = await readFile(path.join(directory, "package.json"), "utf8").catch(() => null);
+      if (!text) continue;
+      const manifest: unknown = JSON.parse(text);
+      if (manifest && typeof manifest === "object" && "name" in manifest && manifest.name === expectedName
+        && "version" in manifest && typeof manifest.version === "string" && /^\d+\.\d+\.\d+$/.test(manifest.version)) {
+        return manifest.version;
+      }
+    }
+  } catch {
+    // Native installers without a package manifest keep version support unverified.
+  }
+  return undefined;
 }
 
 async function isFile(file: string): Promise<boolean> {

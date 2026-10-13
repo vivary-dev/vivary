@@ -5,6 +5,7 @@ import { setTextRedactor } from "@agent-native/core/audit";
 import { executeCodeAgentRun, getCodeAgentRunRecord } from "@agent-native/core/code-agents";
 import { runWithRequestContext } from "@agent-native/core/server";
 
+import { assertCodeSubscriptionFunding } from "./code-subscription-funding";
 import { resolveVivaryRuntimeCommand } from "./local-runtime-setup";
 
 import { isVivaryCodeWorkerRequest } from "./code-execution-protocol";
@@ -40,13 +41,15 @@ async function receive(message: unknown) {
   // fingerprints rather than values. For the same reason the host starts this worker without credential-shaped names (#98).
   setTextRedactor(createFingerprintRedactor(message.redaction).redact);
   const record = getCodeAgentRunRecord(message.runId);
+  const engine = record?.metadata?.engine;
   if (!record || record.metadata?.ownerEmail !== message.ownerEmail ||
       record.metadata?.app !== "vivary-workbench-local-code" ||
-      !["claude-cli", "codex-cli"].includes(String(record.metadata?.engine))) {
+      (engine !== "claude-cli" && engine !== "codex-cli")) {
     reply({ type: "vivary:code-worker:failed", runId: message.runId });
     return;
   }
   try {
+    assertCodeSubscriptionFunding(engine);
     const codexLaunch = record.metadata?.engine === "codex-cli" ? await resolveVivaryRuntimeCommand("codex-cli") : null;
     if (record.metadata?.engine === "codex-cli" && !codexLaunch) throw new Error("Codex could not be started. Refresh Runtime settings.");
     await runWithRequestContext({ userEmail: message.ownerEmail, orgId: message.orgId }, () =>

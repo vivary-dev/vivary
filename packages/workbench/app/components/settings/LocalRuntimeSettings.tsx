@@ -22,7 +22,7 @@ const runtimes = [
     signInCommand: "codex login",
     installUrl: "https://developers.openai.com/codex/cli",
     helpUrl: "https://developers.openai.com/codex/auth",
-    description: "Use your ChatGPT subscription, Codex models, and configured tools.",
+    description: "Inspect your ChatGPT sign-in, Codex models, and configured tools.",
   },
 ] satisfies Array<{
   engine: VivaryCodeEngine;
@@ -37,7 +37,7 @@ const runtimes = [
 const permissionModes: readonly CodePermissionMode[] = ["normal", "read-only", "yolo"];
 
 const statusLabels: Record<VivaryRuntimeStatus["status"], string> = {
-  ready: "Ready",
+  ready: "Signed in",
   "sign-in-required": "Sign-in required",
   "not-installed": "Not installed",
   unavailable: "Check needed",
@@ -128,6 +128,16 @@ export function LocalRuntimeSettings() {
             : <p className="text-sm leading-6 text-muted-foreground" role="status">
                 {current?.message ?? "Refresh to check this runtime."}
               </p>}
+          <p className="mt-3 text-sm leading-6 text-muted-foreground" role="status">
+            {current?.funding?.message ?? "Subscription-only funding is unverified. New and resumed turns are blocked."}
+          </p>
+          {runtime.engine === "claude-cli" && status.data?.claudeModels && <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+            <p>Installed version: {current?.version ?? "Unverified"}. Model IDs and API list prices verified 2026-10-13.</p>
+            {status.data.claudeModels.map(model => <p key={model.id}>
+              {model.label} ({model.id}). {model.message} API list price per million tokens: {model.apiPrice}.
+            </p>)}
+            <p>API list prices are reference information. They do not describe your subscription bill or included model access.</p>
+          </div>}
           {runtime.engine === "codex-cli" && status.data?.codexModels && <div className="mt-3 space-y-2 text-sm text-muted-foreground">
             <p>{status.data.codexModels.message}</p>
             {status.data.codexModels.status === "ready" && <>

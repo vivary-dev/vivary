@@ -45,6 +45,44 @@ Workbench composes Agent-Native's application, chat, run, action, and storage ow
 
 The selected coding runtime owns execution, tools, model access, and native session continuity. Workbench currently supports Claude Code and Codex through Native Code records and the local Code host. Codex uses its app-server and account-effective model catalog. Workbench relays native approvals, progress, child activity, and Stop. Native provider chat uses Native's chat owner with a project send guard. The [harness adapter contract](product/multi-project/specification/harness-adapters.md), [Native owner map](product/multi-project/native-owners.md), and [runtime source map](product/multi-project/source-map/modules/native-runtime/index.md) describe the distinct owners.
 
+### Coding model selection and funding
+
+The Code composer embeds the runtime and model selectors inside its existing
+toolbar. Saved draft choices remain unchanged when a model catalog changes.
+Retained conversations keep their recorded model ID. A historical Claude run
+without a model still means the legacy `sonnet` alias, independently of the exact
+`claude-sonnet-5-5` default for new conversations.
+
+[`shared/claude-models.ts`](../packages/workbench/shared/claude-models.ts) owns the
+Claude Code IDs, minimum CLI versions, and API list price references, verified
+2026-10-13 against Anthropic's
+[model overview](https://platform.claude.com/docs/en/models/overview),
+[pricing](https://platform.claude.com/docs/en/about-claude/pricing), and
+[Claude Code configuration](https://code.claude.com/docs/en/model-config).
+Installation manifests establish CLI version support without an account call.
+An unknown installation version remains unverified. Codex's account-effective
+`model/list` remains its model authority. API list prices do not establish a
+subscription bill or included model entitlement. Native's separate API model
+picker, defaults, and cost estimator remain unchanged and retain older Claude
+metadata, which is stale against the 2026-10-13 model catalog. This Code catalog does not refresh those API paths.
+
+First-party Claude or ChatGPT sign-in establishes authentication, not an
+included-only funding guarantee. Both CLIs can consume paid credits. No supported
+per-process control has been verified to prevent that spending. The Workbench
+[funding owner](../packages/workbench/server/code-subscription-funding.ts)
+therefore refuses every new and resumed Code turn before CLI probes, run creation,
+transcript writes, or worker launch. The coding worker applies the same policy
+before reaching Native execution, including a direct IPC start. Runtime status,
+catalog review, retained history, and Stop remain available. Running processes
+are not ended by this admission rule. There is no environment flag or user
+attestation that overrides the refusal. Anthropic's
+[Fable plan guide](https://support.claude.com/en/articles/15424964-claude-fable-models-on-your-plan)
+and [usage credits guide](https://support.claude.com/en/articles/12429409-manage-usage-credits-for-paid-claude-plans)
+explain paid credit use. The
+[Codex credits guide](https://help.openai.com/en/articles/12642688-using-credits-for-flexible-usage-in-chatgpt-personal-plans)
+is not used as an admission guarantee. These source checks do not establish
+packaged Windows acceptance or a live provider trial.
+
 ### Original engine
 
 The original engine remains a package family, not another agent loop. `vivary-core` owns pure validation and projection while callers retain execution, persistence, and human approval. Tropo observes, builds typed graph context, and retrieves. Strato evaluates policy. Ozone verifies evidence and proposes gated repairs. Exo projects claims, dependencies, and handoffs. `create-vivary` creates and adopts workspaces. The optional MCP and semantic-memory adapters are outside the default package path. The `vivary` front door routes ten verbs to their package owners. The Workbench bundles this Python runtime and calls its established commands rather than reimplementing their decisions. See [the command reference](COMMANDS.md) and [package manifests](../packages).
@@ -306,6 +344,16 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-13 Code catalog, funding, and composer. Workbench uses exact Claude
+model IDs, keeps saved choices and historical model interpretation, and embeds
+the existing selectors through Native's public composer toolbar slot. Installed
+metadata determines version support. Subscription authentication remains separate
+from funding verification. The server send boundary and coding worker refuse
+unverified included-only execution before any provider work. The affected tests
+check no execution or transcript mutation on new and resumed requests, retained
+identity, version support, and draft recovery. Build, real provider execution,
+and packaged Windows acceptance remain separate gates.
 
 Explicit Native history selection. The maintained Core tab initialization and
 active-tab inclusion retain the conversation named by the URL even when its last

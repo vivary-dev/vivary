@@ -1,3 +1,5 @@
+import { codeSubscriptionFunding } from "../server/code-subscription-funding";
+import { claudeCodeModelChoices } from "../shared/claude-models";
 import { homedir } from "node:os";
 import { getCodexModels } from "../server/codex-models";
 import { defineAction, fail, type ActionRunContext } from "@agent-native/core/action";
@@ -36,9 +38,9 @@ export default defineAction({
       getVivaryRuntimeStatus("codex-cli", { refresh }),
     ]);
     const codexModels = codex.status === "ready" ? await getCodexModels(homedir(), { refresh }) : null;
-    return { codexModels, runtimes: [
-      { engine: "claude-cli", label: CLI_REGISTRY.claude.label, ...claude },
-      { engine: "codex-cli", label: CLI_REGISTRY.codex.label, ...codex },
+    return { codexModels, claudeModels: claudeCodeModelChoices(claude.version), runtimes: [
+      { engine: "claude-cli", label: CLI_REGISTRY.claude.label, ...claude, funding: codeSubscriptionFunding("claude-cli") },
+      { engine: "codex-cli", label: CLI_REGISTRY.codex.label, ...codex, funding: codeSubscriptionFunding("codex-cli") },
     ] };
   },
 });

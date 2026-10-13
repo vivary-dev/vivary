@@ -1,3 +1,5 @@
+import { claudeCodeModelChoices } from "../shared/claude-models.ts";
+import { codeSubscriptionFunding } from "../server/code-subscription-funding.ts";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { compileFunction } from "node:vm";
@@ -59,6 +61,7 @@ function stateFixture(overrides = {}) {
     VIVARY_CODE_ENGINES: ["claude-cli", "codex-cli"],
     VIVARY_CODE_DEFAULT_ENGINE: "codex-cli",
     VIVARY_CODE_MODELS: [],
+    claudeCodeModelChoices, codeSubscriptionFunding,
     VIVARY_CODE_DEFAULT_MODEL: "fixture-model",
     getVivaryRuntimeStatus: async engine => ({ status: "ready", message: engine }),
     getCodexModels: async () => ({ status: "ready", models: [{ id: "fixture-model" }] }),
