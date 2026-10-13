@@ -3169,3 +3169,13 @@ Listing and component controls cover unavailable legacy rows and current Inspect
 positives. These successor controls are source-checked and await controller
 runtime validation. Existing eb9bce9 evidence remains historical acceptance of the
 preceding bytes.
+
+## Command menu return focus
+
+The maintained Native command menu is a controlled Radix dialog without a
+registered trigger. `client/command-menu-focus.js` captures the current focused
+opener before dialog autofocus and restores it after close only if it is still
+connected, the route is unchanged, and another control has not taken focus.
+`CommandMenu.js` owns the dialog callback wiring. Existing keyboard opening and
+menu navigation remain unchanged. The focused tests exercise the installed focus
+owner with DOM elements. They do not establish real-dialog or Windows acceptance.

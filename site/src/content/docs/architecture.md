@@ -176,6 +176,11 @@ Coordinated releases publish Core before its dependent role packages.
 
 ## Runtime flows
 
+Search Vivary uses Native's command menu. Closing returns focus to its connected
+opener while the same route remains current and another control has not taken
+focus. The [maintained focus owner](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#command-menu-return-focus)
+keeps this contract separate from menu navigation.
+
 1. **Select a project.** Workbench resolves the authenticated actor, stable project ID, current binding, policy revision, and observed root. Project selection changes the files and history shown. A missing folder leaves authorized history available but blocks file-dependent execution. [Project registry](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/source-map/modules/project-registry/index.md) owns the identity contract.
 2. **Send and continue.** A Native chat send rechecks its pinned project scope before model or attachment work. A Code send starts or resumes the selected native session against its bound project. Native stores the resulting run and transcript. A model choice or project switch cannot silently move an active run. [`native-chat-project.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/native-chat-project.ts), [`local-code-agent.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/local-code-agent.ts), and the [session model](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/desktop-release.md#one-understandable-model) own this flow.
    Each project message also loads the project's context when it starts. [`project-memory.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-memory.ts) reads the law files, the state file, and the fact files in the memory folders from the admitted project only, and renders one block of at most 8,000 characters. A Code send puts the full block before the engine prompt on every turn, for new runs and Claude or Codex follow-ups. A resumed provider session therefore accumulates one block per turn, up to 8,000 characters each. That cost is accepted so a session never depends on an earlier block that its runtime may have compacted away. Only Full chat blocks name Native's owner-wide tools. The transcript keeps only the typed message, and one note per turn, which the Code view shows, names the loaded revision and whether it changed. The panel's last load is recorded only after the send passes its refusals and claims the host slot. Full chat returns the block from Native's `extraContext` on every send. Its three Vivary hooks, the send guard (`prepareRequest`), `extraContext`, and `resolveActionSurface`, each classify the pinned chat scope again rather than sharing one match. A change to a fact file therefore applies from the next message, in new and open conversations, and after a restart. A reply already running keeps what it started with.
@@ -376,6 +381,18 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-13 Search Vivary return focus. Native's controlled command menu has no
+registered dialog trigger. Its focus owner now captures the actual focused opener
+before opening and restores that connected element on close only while the same
+route remains current and no other control has taken focus. Keyboard opening,
+menu commands, and navigation keep their existing owners. Focus-contract tests
+cover button and keyboard openers, removed openers, route/query changes, and focus
+already held elsewhere. Delayed close events cannot take focus from a reopened
+menu. The existing DOM component fixture could not initialize
+the real menu within its bound, so rendered dialog and Windows keyboard acceptance
+remain required. File-version conflict guards are unchanged because the observed
+Alpha save conflict has not been reproduced with its identity/stat tuple.
 
 2026-10-13 fresh Native provider fallback. Rendered acceptance found that a fresh
 unconfigured instance reported Anthropic with the global Builder model. Core's

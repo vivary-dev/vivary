@@ -16713,3 +16713,69 @@ index b3b6ab68bb71711a99141278989af4c8fe7332b6..d36799565ea9cb054d1cf1741acbaf97
      const id = model.toLowerCase().replace(/^anthropic\//, "");
      if (id.includes("fable-5") || id.includes("mythos-5"))
          return false;
+diff --git a/dist/client/CommandMenu.js b/dist/client/CommandMenu.js
+index ee47efcdf74bfdf219629df5e13bffde0cbd319a..383e6d77f21be1355375c82d33c7bdf815676631 100644
+--- a/dist/client/CommandMenu.js
++++ b/dist/client/CommandMenu.js
+@@ -25,6 +25,7 @@ import { ChangelogDialog, useChangelogSeen } from "./changelog/Changelog.js";
+ import { Dialog, DialogContent, DialogTitle } from "./components/ui/dialog.js";
+ import { useT } from "./i18n.js";
+ import { cn } from "./utils.js";
++import { captureCommandMenuFocus, restoreCommandMenuFocus } from "./command-menu-focus.js";
+ const CommandMenuContext = createContext(null);
+ function useCommandMenuContext() {
+     const ctx = useContext(CommandMenuContext);
+@@ -128,6 +129,7 @@ export function CommandMenu({ open, onOpenChange, children, renderResults, place
+     const [search, setSearch] = useState("");
+     const inputRef = useRef(null);
+     const containerRef = useRef(null);
++    const returnFocusRef = useRef(null);
+     const t = useT();
+     // Built-in "What's new" changelog surface (only active when `changelog` is
+     // passed). The dialog is rendered alongside the menu so it survives the menu
+@@ -273,7 +275,12 @@ export function CommandMenu({ open, onOpenChange, children, renderResults, place
+         (child.type === CommandGroup || child.type === CommandDocsGroup));
+     const dynamicResults = open ? renderResults?.(search) : null;
+     const hasDynamicResults = Boolean(dynamicResults);
+-    return (_jsxs(_Fragment, { children: [_jsx(Dialog, { open: open, onOpenChange: onOpenChange, children: _jsxs(DialogContent, { ref: containerRef, "aria-describedby": undefined, hideClose: true, motion: "instant", overlayClassName: "fixed inset-0 z-50 bg-black/50 backdrop-blur-none transition-none", overlayStyle: {
++    return (_jsxs(_Fragment, { children: [_jsx(Dialog, { open: open, onOpenChange: onOpenChange, children: _jsxs(DialogContent, { ref: containerRef, onOpenAutoFocus: () => {
++                    returnFocusRef.current = captureCommandMenuFocus(containerRef.current);
++                }, onCloseAutoFocus: (event) => {
++                    restoreCommandMenuFocus(returnFocusRef.current, event);
++                    if (returnFocusRef.current?.content === event.target) returnFocusRef.current = null;
++                }, "aria-describedby": undefined, hideClose: true, motion: "instant", overlayClassName: "fixed inset-0 z-50 bg-black/50 backdrop-blur-none transition-none", overlayStyle: {
+                         zIndex: 50,
+                         backgroundColor: "rgb(0 0 0 / 0.5)",
+                         backdropFilter: "none",
+diff --git a/dist/client/command-menu-focus.js b/dist/client/command-menu-focus.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..34e39ef5f53601ce067c3f1228076133daf5a1a8
+--- /dev/null
++++ b/dist/client/command-menu-focus.js
+@@ -0,0 +1,26 @@
++// Controlled command menus have no Radix DialogTrigger to restore automatically.
++export function captureCommandMenuFocus(content) {
++    if (!content) return null;
++    const document = content.ownerDocument;
++    const view = document.defaultView;
++    const invoker = document.activeElement;
++    return {
++        content,
++        invoker: invoker instanceof view.HTMLElement && invoker !== document.body && !content.contains(invoker)
++            ? invoker : null,
++        location: view.location.href,
++    };
++}
++export function restoreCommandMenuFocus(snapshot, event) {
++    event.preventDefault();
++    if (!snapshot?.invoker || event.target !== snapshot.content) return;
++    const { content, invoker, location } = snapshot;
++    const document = content.ownerDocument;
++    const active = document.activeElement;
++    // Navigation or another focused control owns focus now. Removed openers cannot receive it.
++    if (invoker.isConnected && invoker.ownerDocument === document
++        && document.defaultView.location.href === location
++        && (active === document.body || active === document.documentElement || content.contains(active))) {
++        invoker.focus({ preventScroll: true });
++    }
++}
