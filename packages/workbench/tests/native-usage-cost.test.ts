@@ -473,3 +473,74 @@ test("the webhook handler records and settles a failed integration run", async t
       requests: 0, usedMicros: 0, reservedMicros: 0, rows: [] });
   });
 });
+
+
+test("new direct API estimates require route, request length and cache TTL evidence", () => {
+  const estimate = (model: string, inputTokens: number, outputTokens: number, cacheReadTokens = 0,
+    cacheWriteTokens = 0, cacheWrite1hTokens?: number, engineName = "anthropic") =>
+    store.estimateUsageCost({ model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens,
+      cacheWrite1hTokens, engineName }, { perRequest: true });
+  assert.equal(estimate("claude-sonnet-5-5", 1_000_000, 1_000_000), 120_000);
+  assert.equal(estimate("claude-opus-5-5", 1_000_000, 1_000_000), 240_000);
+  assert.equal(estimate("claude-fable-5-1", 1_000_000, 1_000_000), 600_000);
+  assert.equal(estimate("claude-haiku-5-5", 100_000, 1000), 105);
+  assert.equal(estimate("claude-haiku-5-5", 100_001, 1000), 525);
+  assert.equal(estimate("claude-haiku-5-5", 100_000, 1000, 100_000), 15);
+  assert.equal(estimate("claude-haiku-5-5", 100_001, 1000, 100_000), 75);
+  for (const [model, rate] of [["claude-sonnet-5-5", 1000], ["claude-opus-5-5", 2000], ["claude-fable-5-1", 2500]] as const) {
+    assert.equal(estimate(model, 1_000_000, 0, 1_000_000), rate);
+  }
+  assert.equal(estimate("claude-haiku-5-5", 100_001, 0, 0, 100_001, 0), 625);
+  assert.equal(estimate("claude-haiku-5-5", 100_001, 0, 0, 100_001, 100_001), 1000);
+  assert.equal(estimate("claude-sonnet-5-5", 1_000_000, 0, 0, 1_000_000, 0), 25_000);
+  assert.equal(estimate("claude-sonnet-5-5", 1_000_000, 0, 0, 1_000_000, 1_000_000), 40_000);
+  assert.equal(estimate("claude-sonnet-5-5", 50_000, 0, 0, 10_000), undefined);
+  assert.equal(estimate("claude-sonnet-5-5", 50_000, 0, 0, 0, 0, "builder"), undefined);
+  assert.equal(estimate("claude-sonnet-5-5", 50_000, 0, 0, 0, 0, "ai-sdk:openrouter"), undefined);
+  assert.equal(estimate("anthropic/claude-sonnet-5-5", 50_000, 0), undefined);
+  assert.equal(estimate("claude-custom-unpriced", 50_000, 0), undefined);
+});
+
+test("Haiku turns sum individual request estimates and reported cost takes precedence", async () => {
+  const model = "claude-haiku-5-5";
+  const usage = { model, inputTokens: 60_000, outputTokens: 0, cacheReadTokens: 0,
+    cacheWriteTokens: 0, cacheWrite1hTokens: 0, engineName: "anthropic" };
+  const turn = agent.createTurnUsage(model);
+  for (let call = 0; call < 2; call++) { turn.startCall(); turn.add(usage); }
+  const record = turn.usageRecord();
+  assert.equal(record.inputTokens, 120_000);
+  assert.equal(record.costCentsX100, 120);
+  assert.equal(record.costSource, "estimated");
+  const runId = "run-" + randomUUID();
+  await store.recordUsage({ ownerEmail: "owner-" + randomUUID() + "@example.test", ...record, runId });
+  assert.deepEqual(await usageRows("run_id", runId), [{ tokens: 120_000, centicents: 120, source: "estimated" }]);
+  const reported = agent.createTurnUsage(model);
+  reported.startCall(); reported.add({ ...usage, cacheWriteTokens: 1000, cacheWrite1hTokens: undefined, costUsd: 0 });
+  assert.equal(reported.usageRecord().costCentsX100, 0);
+  assert.equal(reported.usageRecord().costSource, "reported");
+  const mixed = agent.createTurnUsage(model);
+  mixed.startCall(); mixed.add({ ...usage, costUsd: 0.0123 });
+  mixed.startCall(); mixed.add(usage);
+  assert.equal(mixed.usageRecord().costCentsX100, 183);
+  assert.equal(mixed.usageRecord().costSource, "estimated");
+});
+
+test("incomplete new API evidence records Unknown and gateway reported cost wins", async () => {
+  const ownerEmail = "owner-" + randomUUID() + "@example.test";
+  for (const incomplete of [
+    { model: "claude-haiku-5-5", engineName: "anthropic", inputTokens: 120_000, outputTokens: 0 },
+    { model: "claude-sonnet-5-5", inputTokens: 1000, outputTokens: 200 },
+    { model: "claude-sonnet-5-5", engineName: "anthropic", inputTokens: 1000, outputTokens: 200, cacheWriteTokens: 500 },
+  ]) {
+    const runId = "run-" + randomUUID();
+    await store.recordUsage({ ownerEmail, ...incomplete, runId });
+    assert.equal((await usageRows("run_id", runId))[0].source, "unavailable");
+  }
+  const incomplete = agent.createTurnUsage("claude-haiku-5-5");
+  incomplete.startCall(); incomplete.add({ model: "claude-haiku-5-5", engineName: "anthropic", inputTokens: 1000,
+    outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 500 });
+  assert.equal(incomplete.usageRecord().costSource, "unavailable");
+  const routed = await recordTurn("anthropic/claude-sonnet-5-5", answer(0.0123));
+  assert.equal(routed.rows[0].centicents, 123);
+  assert.equal(routed.rows[0].source, "reported");
+});

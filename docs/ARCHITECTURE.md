@@ -62,9 +62,34 @@ Claude Code IDs, minimum CLI versions, and API list price references, verified
 Installation manifests establish CLI version support without an account call.
 An unknown installation version remains unverified. Codex's account-effective
 `model/list` remains its model authority. API list prices do not establish a
-subscription bill or included model entitlement. Native's separate API model
-picker, defaults, and cost estimator remain unchanged and retain older Claude
-metadata, which is stale against the 2026-10-13 model catalog. This Code catalog does not refresh those API paths.
+subscription bill or included model entitlement.
+
+Native's [maintained API patch](../packages/workbench/patches/README.md#native-api-claude-catalog)
+separately owns direct Anthropic and AI-SDK Anthropic catalog metadata. New defaults
+use `claude-sonnet-5-5`. Sonnet 5.5, Haiku 5.5, Opus 5.5, and Fable 5.1 have
+documented 1M context and 128K output limits. Older catalog IDs and saved choices
+remain intact. Builder and OpenRouter keep their own IDs and defaults. No account
+availability is inferred from the catalog, and the optional AI-SDK Anthropic
+adapter remains hidden by Workbench. The pinned dependency graph includes its SDK.
+
+The API estimator requires the actual direct engine identity before applying
+these new rates. It prices Haiku per request, using total prompt tokens including
+cache reads and writes to choose the tier above 100,000 tokens. Observed cache-write
+duration determines the 5-minute or 1-hour rate. Native's existing turn owner sums
+request estimates. Missing route, request-length, or cache-duration evidence stays
+unknown, including aggregates that cannot establish a Haiku tier. Provider-reported
+cost takes precedence. These are standard global API estimates, not bills, plan
+entitlements, or controls preventing paid usage. Historical estimates for these
+model IDs are not recalculated. Existing Native usage labels and unknown-cost
+display remain the owners of presentation.
+
+Exact new models use adaptive thinking and omit withdrawn sampling parameters.
+Supported explicit thinking settings remain usable. The pinned AI SDK cannot
+encode Sonnet's `between_tools` mode, so that adapter refuses it locally. Incompatible saved settings
+receive a local error before provider transport. Native preserves signed thinking
+blocks, but offline request checks cannot verify provider-side signature binding
+after a change to earlier history. Live API and installed optional-adapter
+acceptance remain separate from fake-transport validation.
 
 First-party Claude or ChatGPT sign-in establishes authentication, not an
 included-only funding guarantee. Both CLIs can consume paid credits. No supported
@@ -344,6 +369,17 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-13 Native API catalog. The maintained Core patch updates only direct
+Anthropic model metadata and defaults, preserves older saved selections, and leaves
+gateway catalogs unchanged. Actual engine identity, individual Haiku prompt length,
+and observed cache-write duration govern new API estimates. Missing evidence is
+unknown and reported cost wins. The existing usage, budget, and trace owners retain
+that distinction without adding an account or funding probe. Focused regressions
+inspect real SDK requests through intercepted transport, catalog separation,
+saved choices, tier boundaries, cache durations, and unknown estimates. Code's
+included-only refusal remains unchanged. Live API, rendered UI, and packaged
+Windows acceptance remain separate gates.
 
 2026-10-13 Code catalog, funding, and composer. Workbench uses exact Claude
 model IDs, keeps saved choices and historical model interpretation, and embeds

@@ -1,12 +1,16 @@
 diff --git a/dist/agent/engine/ai-sdk-engine.js b/dist/agent/engine/ai-sdk-engine.js
-index 3e95a40707e4c2fcc95c0a54085a25f3e21aaffa..dc00d64ba9aacf78207709e3ff03643c9c2200c2 100644
+index 3e95a40707e4c2fcc95c0a54085a25f3e21aaffa..010343e6bafc9d8d2c24466fe4b2ca343401991e 100644
 --- a/dist/agent/engine/ai-sdk-engine.js
 +++ b/dist/agent/engine/ai-sdk-engine.js
-@@ -14,7 +14,7 @@
+@@ -12,9 +12,9 @@
+  * so the core package remains installable without the AI SDK.
+  */
  import { clearProviderCredentialAuthFailure, readDeployCredentialEnv, recordProviderCredentialAuthFailure, } from "../../server/credential-provider.js";
- import { allowsSamplingParams, anthropicManualThinkingBudget, normalizeReasoningEffortForModel, supportsClaudeAdaptiveThinking, } from "../../shared/reasoning-effort.js";
- import { AI_SDK_MODEL_CONFIG } from "../model-config.js";
+-import { allowsSamplingParams, anthropicManualThinkingBudget, normalizeReasoningEffortForModel, supportsClaudeAdaptiveThinking, } from "../../shared/reasoning-effort.js";
+-import { AI_SDK_MODEL_CONFIG } from "../model-config.js";
 -import { LLM_MISSING_CREDENTIALS_ERROR_CODE, LLM_MISSING_CREDENTIALS_MESSAGE, } from "./credential-errors.js";
++import { allowsSamplingParams, anthropicManualThinkingBudget, normalizeReasoningEffortForModel, supportsClaudeAdaptiveThinking, validateAnthropicApiThinking, } from "../../shared/reasoning-effort.js";
++import { AI_SDK_MODEL_CONFIG, ANTHROPIC_API_MODELS } from "../model-config.js";
 +import { LLM_MISSING_CREDENTIALS_ERROR_CODE, LLM_MISSING_CREDENTIALS_MESSAGE, llmMissingCredentialsMessage, } from "./credential-errors.js";
  import { classifyProviderError, describeErrorWithCauses, } from "./error-detail.js";
  import { createFirstEventAbortController } from "./first-event-timeout.js";
@@ -20,7 +24,37 @@ index 3e95a40707e4c2fcc95c0a54085a25f3e21aaffa..dc00d64ba9aacf78207709e3ff03643c
                  errorCode: LLM_MISSING_CREDENTIALS_ERROR_CODE,
              };
              return;
-@@ -397,9 +397,15 @@ class AISDKEngine {
+@@ -258,6 +258,7 @@ class AISDKEngine {
+         const providerOpts = {};
+         if (this.provider === "anthropic" && opts.providerOptions?.anthropic) {
+             const anthropicOpts = opts.providerOptions.anthropic;
++            validateAnthropicApiThinking(opts.model, anthropicOpts.thinking, opts.reasoningEffort);
+             if (anthropicOpts.thinking) {
+                 // Only the "enabled" config carries a numeric budgetTokens; clamp it
+                 // so thinking can't consume the entire maxOutputTokens budget and
+@@ -266,7 +267,7 @@ class AISDKEngine {
+                 providerOpts.anthropic = {
+                     ...(providerOpts.anthropic ?? {}),
+                     thinking: {
+-                        type: "enabled",
++                        type: anthropicOpts.thinking.type,
+                         budgetTokens: typeof anthropicOpts.thinking.budgetTokens === "number"
+                             ? clampThinkingBudgetTokens(anthropicOpts.thinking.budgetTokens, resolvedMaxOutputTokens)
+                             : anthropicOpts.thinking.budgetTokens,
+@@ -288,9 +289,9 @@ class AISDKEngine {
+                     providerOpts.anthropic = {
+                         ...(providerOpts.anthropic ?? {}),
+                         thinking: explicitThinking ?? { type: "adaptive" },
+-                        ...(explicitThinking
+-                            ? {}
+-                            : { outputConfig: { effort: reasoningEffort } }),
++                        ...(ANTHROPIC_API_MODELS[opts.model]
++                            ? { effort: reasoningEffort }
++                            : explicitThinking ? {} : { outputConfig: { effort: reasoningEffort } }),
+                     };
+                 }
+                 else {
+@@ -397,9 +398,15 @@ class AISDKEngine {
              // Buffer the terminal stop so assistant-content can be emitted just
              // before it, regardless of where `finish` arrives in the stream.
              let bufferedStop;
@@ -36,7 +70,7 @@ index 3e95a40707e4c2fcc95c0a54085a25f3e21aaffa..dc00d64ba9aacf78207709e3ff03643c
                  // "start" is a synthetic lifecycle marker the AI SDK enqueues
                  // synchronously when the stream begins — before any provider bytes
                  // arrive — so it does not count as real progress. Every other part
-@@ -411,6 +417,9 @@ class AISDKEngine {
+@@ -411,6 +418,9 @@ class AISDKEngine {
                  }
                  for (const event of aiSdkPartToEngineEvents(part, toolNameMap)) {
                      observeStreamedToolInput(toolInputs, event);
@@ -46,7 +80,7 @@ index 3e95a40707e4c2fcc95c0a54085a25f3e21aaffa..dc00d64ba9aacf78207709e3ff03643c
                      if (event.type === "stop" &&
                          event.reason === "error" &&
                          event.statusCode === 401) {
-@@ -424,7 +433,18 @@ class AISDKEngine {
+@@ -424,7 +434,18 @@ class AISDKEngine {
                          credentialFailureRecorded = true;
                      }
                      if (event.type === "stop") {
@@ -66,7 +100,7 @@ index 3e95a40707e4c2fcc95c0a54085a25f3e21aaffa..dc00d64ba9aacf78207709e3ff03643c
                      }
                      else {
                          yield event;
-@@ -611,6 +631,16 @@ function isLocalBaseUrl(baseUrl) {
+@@ -611,6 +632,16 @@ function isLocalBaseUrl(baseUrl) {
          return true;
      return false;
  }
@@ -84,19 +118,48 @@ index 3e95a40707e4c2fcc95c0a54085a25f3e21aaffa..dc00d64ba9aacf78207709e3ff03643c
      return s.charAt(0).toUpperCase() + s.slice(1);
  }
 diff --git a/dist/agent/engine/anthropic-engine.js b/dist/agent/engine/anthropic-engine.js
-index f66ece32d03e3a4e719ad745449a0d31c7dbf16f..4221dfff002a55f511add203f47e9f025b2b1d47 100644
+index f66ece32d03e3a4e719ad745449a0d31c7dbf16f..673e05084f07bb68bb3ea44abf639c45dbf65e78 100644
 --- a/dist/agent/engine/anthropic-engine.js
 +++ b/dist/agent/engine/anthropic-engine.js
-@@ -10,7 +10,7 @@
+@@ -8,9 +8,9 @@
+  * All providerOptions.anthropic fields are forwarded directly to the SDK.
+  */
  import { clearProviderCredentialAuthFailure, readDeployCredentialEnv, recordProviderCredentialAuthFailure, } from "../../server/credential-provider.js";
- import { allowsSamplingParams, anthropicManualThinkingBudget, normalizeReasoningEffortForModel, supportsClaudeAdaptiveThinking, } from "../../shared/reasoning-effort.js";
- import { ANTHROPIC_MODEL_CONFIG } from "../model-config.js";
+-import { allowsSamplingParams, anthropicManualThinkingBudget, normalizeReasoningEffortForModel, supportsClaudeAdaptiveThinking, } from "../../shared/reasoning-effort.js";
+-import { ANTHROPIC_MODEL_CONFIG } from "../model-config.js";
 -import { LLM_MISSING_CREDENTIALS_ERROR_CODE, LLM_MISSING_CREDENTIALS_MESSAGE, } from "./credential-errors.js";
++import { allowsSamplingParams, anthropicManualThinkingBudget, normalizeReasoningEffortForModel, supportsClaudeAdaptiveThinking, validateAnthropicApiThinking, } from "../../shared/reasoning-effort.js";
++import { ANTHROPIC_MODEL_CONFIG, ANTHROPIC_API_MODELS } from "../model-config.js";
 +import { LLM_MISSING_CREDENTIALS_ERROR_CODE, LLM_MISSING_CREDENTIALS_MESSAGE, llmMissingCredentialsMessage, } from "./credential-errors.js";
  import { describeErrorWithCauses } from "./error-detail.js";
  import { createFirstEventAbortController } from "./first-event-timeout.js";
  import { limitProviderTools } from "./limit-provider-tools.js";
-@@ -320,7 +320,7 @@ export function createAnthropicEngine(config = {}) {
+@@ -50,6 +50,7 @@ class AnthropicEngine {
+         // Resolved once so both max_tokens and the thinking-budget headroom
+         // clamp below agree on the same ceiling.
+         const resolvedMaxOutputTokens = resolveMaxOutputTokensForEngine(this.name, opts.maxOutputTokens, opts.model);
++        validateAnthropicApiThinking(opts.model, anthropicOpts?.thinking, opts.reasoningEffort);
+         // Build extra body params for Anthropic-native features
+         const extra = {};
+         if (anthropicOpts?.thinking) {
+@@ -78,6 +79,7 @@ class AnthropicEngine {
+                 }
+             }
+         }
++        if (ANTHROPIC_API_MODELS[opts.model] && reasoningEffort) extra.output_config = { effort: reasoningEffort };
+         // Thinking and the sampling parameters cannot travel together: Anthropic
+         // rejects any temperature but 1 once thinking is on, and the Opus 4.7+ /
+         // Sonnet 5 families removed temperature/top_k outright. Effort defaults to
+@@ -221,6 +223,8 @@ class AnthropicEngine {
+                     outputTokens: finalMessage.usage.output_tokens ?? 0,
+                     cacheReadTokens,
+                     cacheWriteTokens,
++                    cacheWrite1hTokens: cacheWriteTokens === 0 ? 0 : finalMessage.usage.cache_creation?.ephemeral_1h_input_tokens,
++                    engineName: this.name,
+                 };
+             }
+             yield { type: "assistant-content", parts: assistantContent };
+@@ -320,7 +324,7 @@ export function createAnthropicEngine(config = {}) {
                  yield {
                      type: "stop",
                      reason: "error",
@@ -283,10 +346,10 @@ index 4e80d7dd9e363aaa7356b55e676a0435c0a3a142..a137c7a53445fd78f1efefae0a359950
      switch (reason) {
          case "tool-calls":
 diff --git a/dist/agent/engine/types.d.ts b/dist/agent/engine/types.d.ts
-index 422572c276296bee64fb3f57785a9922ff576d39..3257162e14d3627c8b100f9d402038d14fb21d47 100644
+index 422572c276296bee64fb3f57785a9922ff576d39..308b280320dcceef5c81b079ae4798f361b7ead3 100644
 --- a/dist/agent/engine/types.d.ts
 +++ b/dist/agent/engine/types.d.ts
-@@ -196,6 +196,11 @@ export type EngineEvent = {
+@@ -196,6 +196,14 @@ export type EngineEvent = {
      cacheWriteTokens?: number;
      totalTokens?: number;
      reasoningTokens?: number;
@@ -295,13 +358,17 @@ index 422572c276296bee64fb3f57785a9922ff576d39..3257162e14d3627c8b100f9d402038d1
 +     * 0 for a free model. Absent when the provider reported no cost.
 +     */
 +    costUsd?: number;
++    /** Observed 1-hour cache writes, a subset of cacheWriteTokens. */
++    cacheWrite1hTokens?: number;
++    engineName?: string;
  } | {
      /** Final assistant content for the turn. Engines MUST emit this
       *  exactly once, immediately before the terminal `stop` event. */
 diff --git a/dist/agent/production-agent.d.ts b/dist/agent/production-agent.d.ts
+index 2c1f3c527573540b1a4c0bd5ce09a5d74816dd6b..a43784feb7ede6d301d6e9916bb4bfa7288e8be9 100644
 --- a/dist/agent/production-agent.d.ts
 +++ b/dist/agent/production-agent.d.ts
-@@ -534,6 +534,12 @@
+@@ -534,6 +534,14 @@ export interface AgentLoopUsage {
      cacheReadTokens: number;
      cacheWriteTokens: number;
      model: string;
@@ -311,10 +378,12 @@ diff --git a/dist/agent/production-agent.d.ts b/dist/agent/production-agent.d.ts
 +     * reported no cost.
 +     */
 +    costUsd?: number;
++    cacheWrite1hTokens?: number;
++    engineName?: string;
      /** Number of provider model-stream attempts, including retries. */
      llmCalls?: number;
      /**
-@@ -736,6 +742,9 @@
+@@ -736,6 +744,9 @@ export type AgentToolCallExecutionResult = {
      output: string;
  };
  export interface ExecuteAgentToolCallOptions {
@@ -324,10 +393,11 @@ diff --git a/dist/agent/production-agent.d.ts b/dist/agent/production-agent.d.ts
      actions: Record<string, ActionEntry>;
      name: string;
      input?: unknown;
-@@ -835,6 +844,35 @@
+@@ -834,6 +845,35 @@ export declare function shouldGuardRepeatedSourceSweep(opts: {
+     priorCalls: number;
      message: string;
  } | null;
- /**
++/**
 + * Usage for one agent turn. Pass `startCall` as the agent loop's
 + * `onModelCall` and `add` as its `onUsage`. `usageRecord` returns the fields
 + * `recordUsage` stores.
@@ -352,15 +422,14 @@ diff --git a/dist/agent/production-agent.d.ts b/dist/agent/production-agent.d.ts
 +        cacheWriteTokens: number;
 +        model: string;
 +        costCentsX100?: number;
-+        costSource?: "reported";
++        costSource?: "reported" | "estimated" | "unavailable";
 +    };
 +}
 +export declare function createTurnUsage(model: string): TurnUsage;
-+/**
+ /**
   * The core agent loop — calls the engine iteratively until no more tool calls.
   * Decoupled from HTTP transport so it can run in the background.
-  * Returns accumulated token usage for cost tracking.
-@@ -852,6 +890,13 @@
+@@ -852,6 +892,13 @@ export declare function runAgentLoop(opts: {
      signal: AbortSignal;
      /** Observe usage as each model response reports it, including aborted loops. */
      onUsage?: (usage: AgentLoopUsage) => void;
@@ -375,9 +444,16 @@ diff --git a/dist/agent/production-agent.d.ts b/dist/agent/production-agent.d.ts
      onOutcome?: (outcome: AgentLoopOutcome) => void;
      ownerEmail?: string | null;
 diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
+index 04c2c4fce3d658d5ed4ee0d7aa603d2073f5fa66..606e458028edcb6439ff134a134ac9541eab89ea 100644
 --- a/dist/agent/production-agent.js
 +++ b/dist/agent/production-agent.js
-@@ -31,7 +31,7 @@
+@@ -1,3 +1,5 @@
++import { ANTHROPIC_API_MODELS } from "./model-config.js";
++import { estimateUsageCost } from "../usage/store.js";
+ import { randomUUID } from "node:crypto";
+ import Ajv from "ajv";
+ import { defineEventHandler, getHeader, setResponseHeader, setResponseStatus, getMethod, } from "h3";
+@@ -31,7 +33,7 @@ import { buildSystemManifestSections, readContextXraySystemSections, } from "./c
  import { AGENT_CHAT_BACKGROUND_RUN_FIELD, AGENT_CHAT_PROCESS_RUN_PATH, backgroundRuntimeDiagnosticDetail, dispatchPathTargetsNetlifyBackgroundFunction, isAgentChatDurableBackgroundEnabled, isAgentChatForegroundSelfChainEnabled, isInBackgroundFunctionRuntime, resolveAgentChatProcessRunDispatchPath, shouldUseBackgroundFunctionTimeoutForWorker, } from "./durable-background.js";
  import { applyContextXrayTransformForIteration } from "./engine/context-directives-transform.js";
  import { attemptContinuationDispatch } from "./engine/continuation-dispatch-retry.js";
@@ -386,7 +462,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
  import { BUILDER_GATEWAY_INTERNAL_ERROR_CODE, isContextOverflowCode, isContextOverflowMessage, isProviderConnectionErrorMessage, } from "./engine/error-detail.js";
  import { resolveEngine, explicitEngineName, registerBuiltinEngines, getStoredModelForEngine, normalizeModelForEngine, isResolvedEngineUsableForRequest, } from "./engine/index.js";
  import { resolveEmptyResponseRetryMaxOutputTokens, resolveMainChatMaxOutputTokens, resolveMaxOutputTokensForEngine, } from "./engine/output-tokens.js";
-@@ -46,9 +46,11 @@
+@@ -46,9 +48,11 @@ import { ProcessorChain, TripWire, toolCallsFromContent, } from "./processors.js
  import { startRun, subscribeToRun, getActiveRunForThread, getActiveRunForThreadAsync, getRun, abortRun, abortRunDurably, abortTurnDurably, tryClaimRunSlot, isHostedRuntime, resolveRunSoftTimeoutMs, resolveRunToolTimeoutCeilingMs, endsAfterCompletedToolWithoutAssistantFinal, endsDuringActionPreparation, } from "./run-manager.js";
  import { writeLedgerEntry, readLedgerEntry, clearLedgerForThread, insertRun, insertRunEvent, isTurnAborted, markRunAborted, updateRunHeartbeat, updateRunStatusIfRunning, setRunError, setRunTerminalReason, claimBackgroundRun, readBackgroundRunClaim, recordRunDiagnostic, countRunsForTurn, RUN_DIAG_STAGE, UNCLAIMED_BACKGROUND_RUN_GRACE_MS, turnRunLedgerExhausted, } from "./run-store.js";
  import { buildCurrentTimeUserContext } from "./runtime-context.js";
@@ -398,7 +474,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
  import { describeToolResultImages, extractAgentImagesFromActionResult, } from "./tool-result-images.js";
  import { createToolSearchEntry, searchToolRegistry, TOOL_SEARCH_ACTION_NAME, } from "./tool-search.js";
  // Register built-in engines on first import
-@@ -968,6 +970,11 @@
+@@ -968,6 +972,11 @@ export function isRetryableError(err) {
      // Hard non-retryable codes — check these first.
      if (code === "builder_gateway_timeout")
          return false;
@@ -410,7 +486,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
      if (code === "rate_limit_exceeded" ||
          msg.includes("daily gateway request cap"))
          return false;
-@@ -1395,8 +1402,11 @@
+@@ -1395,8 +1404,11 @@ export function structuredHistoryToEngineMessages(history) {
              messages.push({ role: message.role, content });
          }
      }
@@ -423,7 +499,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
          : null;
  }
  /** Build enriched message with file/skill/mention references */
-@@ -1423,7 +1433,7 @@
+@@ -1423,7 +1435,7 @@ export async function resolveSkillReferenceContent(ref) {
          if (!ownerEmail || !ref.path)
              return null;
          try {
@@ -432,7 +508,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
              const resourceOptions = {
                  userEmail: ownerEmail,
                  orgId: getRequestOrgId() ?? null,
-@@ -1433,10 +1443,12 @@
+@@ -1433,10 +1445,12 @@ export async function resolveSkillReferenceContent(ref) {
              });
              if (!effective.effectiveResource)
                  return null;
@@ -448,7 +524,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                  return null;
              }
              return full.content;
-@@ -1708,6 +1720,11 @@
+@@ -1708,6 +1722,11 @@ export function isResumableEngineError(err) {
      if (!(err instanceof Error))
          return false;
      const code = err instanceof EngineError ? (err.errorCode ?? "").toLowerCase() : "";
@@ -460,7 +536,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
      if (code === "builder_gateway_timeout" ||
          code === "builder_gateway_network_error" ||
          // A gateway stream that stopped mid-turn. It reached here as
-@@ -2358,6 +2375,9 @@
+@@ -2358,6 +2377,9 @@ export async function executeAgentToolCall(options) {
              ownerEmail: options.ownerEmail,
              orgId: options.orgId,
              actionCaller: options.caller,
@@ -470,7 +546,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
              networkProtocol: options.networkProtocol,
              networkId: options.networkId,
              networkPeer: options.networkPeer,
-@@ -3025,6 +3045,12 @@
+@@ -3025,6 +3047,12 @@ const rawToolInputAjv = new Ajv({
      // `oneOf` the caller never meant to match.
      verbose: true,
  });
@@ -483,7 +559,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
  const rawToolInputValidatorCache = new WeakMap();
  const optionalPlaceholderAjv = new Ajv({
      strict: false,
-@@ -3258,7 +3284,10 @@
+@@ -3258,7 +3286,10 @@ function getRawToolInputValidator(schema) {
      const cached = rawToolInputValidatorCache.get(schema);
      if (cached)
          return cached;
@@ -495,7 +571,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
      rawToolInputValidatorCache.set(schema, validator);
      return validator;
  }
-@@ -3327,12 +3356,72 @@
+@@ -3327,13 +3358,85 @@ function validateRawToolInput(entry, input) {
      catch (err) {
          return `tool schema is invalid: ${sanitizeToolErrorValue(err)}`;
      }
@@ -508,7 +584,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
          separator: "; ",
          dataVar: "input",
      });
-+}
+ }
 +/**
 + * Usage for one agent turn, summed over its model calls and internal
 + * continuations. `startCall` counts each model call the agent loop starts. A
@@ -521,6 +597,9 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
 + * from its table or records the cost as unknown.
 + */
 +export function createTurnUsage(model) {
++    const requestPriced = Boolean(ANTHROPIC_API_MODELS[model]);
++    let pricedCalls = 0;
++    let estimatedCost = 0;
 +    const turn = {
 +        inputTokens: 0,
 +        outputTokens: 0,
@@ -540,6 +619,11 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
 +            turn.cacheReadTokens += usage.cacheReadTokens;
 +            turn.cacheWriteTokens += usage.cacheWriteTokens;
 +            turn.model = usage.model;
++            if (requestPriced) {
++                const cost = usage.costUsd !== undefined ? (usage.costUsd > 0 ? Math.max(1, Math.round(usage.costUsd * 10_000)) : 0)
++                    : estimateUsageCost(usage, { perRequest: true });
++                if (cost !== undefined) { pricedCalls += 1; estimatedCost += cost; }
++            }
 +            if (usage.costUsd === undefined)
 +                return;
 +            turn.reportedCalls += 1;
@@ -554,8 +638,12 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
 +                model: turn.model,
 +            };
 +            if (turn.startedCalls === 0 ||
-+                turn.reportedCalls !== turn.startedCalls)
++                turn.reportedCalls !== turn.startedCalls) {
++                if (requestPriced) return { ...record,
++                    costSource: turn.startedCalls > 0 && pricedCalls === turn.startedCalls ? "estimated" : "unavailable",
++                    ...(turn.startedCalls > 0 && pricedCalls === turn.startedCalls ? { costCentsX100: estimatedCost } : {}) };
 +                return record;
++            }
 +            // Centicents, rounded as calculateCost rounds, so a small reported
 +            // cost never reads as free.
 +            const centicents = turn.reportedCostUsd * 10_000;
@@ -567,10 +655,19 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
 +        },
 +    };
 +    return turn;
- }
++}
  /**
   * The core agent loop — calls the engine iteratively until no more tool calls.
-@@ -3625,6 +3714,7 @@
+  * Decoupled from HTTP transport so it can run in the background.
+@@ -3402,6 +3505,7 @@ export async function runAgentLoop(opts) {
+         cacheReadTokens: 0,
+         cacheWriteTokens: 0,
+         model,
++        engineName: engine.name,
+     };
+     const maxIterations = normalizeMaxIterations(opts.maxIterations, getDefaultMaxIterations());
+     const maxRunInputTokens = normalizeMaxRunInputTokens(opts.maxRunInputTokens, getDefaultMaxRunInputTokens());
+@@ -3625,6 +3729,7 @@ export async function runAgentLoop(opts) {
                      providerOptions: opts.providerOptions,
                  };
                  usage.llmCalls = (usage.llmCalls ?? 0) + 1;
@@ -578,15 +675,17 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                  const eventStream = engine.stream(streamOpts);
                  let thinkingBuffer = "";
                  const toolInputNames = new Map();
-@@ -3941,6 +4031,7 @@
+@@ -3941,6 +4046,9 @@ export async function runAgentLoop(opts) {
                                  cacheReadTokens: event.cacheReadTokens ?? 0,
                                  cacheWriteTokens: event.cacheWriteTokens ?? 0,
                                  model,
++                                cacheWrite1hTokens: event.cacheWrite1hTokens,
++                                engineName: engine.name,
 +                                costUsd: event.costUsd,
                              };
                              usage.inputTokens += eventUsage.inputTokens;
                              usage.outputTokens += eventUsage.outputTokens;
-@@ -4363,7 +4454,8 @@
+@@ -4363,7 +4471,8 @@ export async function runAgentLoop(opts) {
                  });
              };
              const finalizeToolErrorResult = (rawResult) => {
@@ -596,7 +695,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                  // Counting is the wrong instrument for a precondition the turn cannot
                  // satisfy: six identical round-trips through a missing API key cost the
                  // user minutes and end where the first one did. Classified first so the
-@@ -5085,6 +5177,10 @@
+@@ -5085,6 +5194,10 @@ export async function runAgentLoop(opts) {
                      let resultStr = typeof resultForAgent === "string"
                          ? resultForAgent
                          : JSON.stringify(resultForAgent, null, 2);
@@ -607,7 +706,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                      if (resultStr.length > toolMaxResultChars) {
                          const truncated = resultStr.slice(0, toolMaxResultChars);
                          resultStr = `${truncated}\n\n...[truncated — full result was ${resultStr.length.toLocaleString()} chars; only first ${toolMaxResultChars.toLocaleString()} shown]`;
-@@ -5136,7 +5232,7 @@
+@@ -5136,7 +5249,7 @@ export async function runAgentLoop(opts) {
                  // so nothing stays pending to bleed into a later tool's result.
                  const agentWarnings = drainAgentWarnings();
                  if (agentWarnings.length > 0) {
@@ -616,7 +715,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                  }
                  // Auto-refresh the UI after a successful mutating tool call. Any call
                  // that isn't read-only — by its own per-call Plan-mode effect, else the
-@@ -5469,6 +5565,11 @@
+@@ -5469,6 +5582,11 @@ export function isRecoverableContinuationError(event) {
      const message = event.error.toLowerCase();
      if (code === "builder_gateway_error")
          return false;
@@ -628,7 +727,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
      // An explicit flag outranks the message sniff below, which exists for events
      // that carry no flag at all. Every guard stop sets `recoverable: false`, and
      // sniffing its prose is how a stop that merely NAMES a connection or a
-@@ -5890,7 +5991,7 @@
+@@ -5890,7 +6008,7 @@ export async function markBackgroundContinuationChunkTerminal(opts) {
              await persistError(opts.runId, terminalEvent.errorCode, terminalEvent.details || terminalEvent.error);
          }
          else if (terminalEvent?.type === "missing_api_key") {
@@ -637,7 +736,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
          }
      }
      return updated;
-@@ -6629,6 +6730,10 @@
+@@ -6629,6 +6747,10 @@ export function createProductionAgentHandler(options) {
              }
          }
          const { message, history = [], structuredHistory, references = [], threadId, attachments, displayMessage, parentId, queuedMessageId, internalContinuation, turnId: requestTurnId, model: requestModel, engine: requestEngine, effort: requestEffort, browserTabId, scope, harness: requestHarness, trackInRunsTray, } = body;
@@ -648,7 +747,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
          const requestParentId = parentId === null
              ? null
              : typeof parentId === "string" && parentId.trim()
-@@ -7186,13 +7291,13 @@
+@@ -7186,13 +7308,13 @@ export function createProductionAgentHandler(options) {
              }
              if (history.length === 0) {
                  try {
@@ -664,7 +763,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                      if (allResources.length > 0) {
                          const fileLines = [];
                          const skillLines = [];
-@@ -7216,10 +7321,11 @@
+@@ -7216,10 +7338,11 @@ export function createProductionAgentHandler(options) {
                              if (kind === "skill" ||
                                  kind === "agent" ||
                                  kind === "remote-agent") {
@@ -678,7 +777,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                                  if (!full)
                                      continue;
                                  if (kind === "skill") {
-@@ -7389,12 +7495,12 @@
+@@ -7389,12 +7512,12 @@ export function createProductionAgentHandler(options) {
              attachments: requestAttachments,
          });
          const historyMessages = structuredHistoryToEngineMessages(structuredHistory) ??
@@ -693,7 +792,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
          const messages = [
              ...historyMessages,
              { role: "user", content: userContent },
-@@ -8299,13 +8405,7 @@
+@@ -8299,13 +8422,7 @@ export function createProductionAgentHandler(options) {
                  : typeof message === "string" && message.trim().length > 0
                      ? message
                      : undefined;
@@ -708,7 +807,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
              const agentLoopOpts = {
                  engine,
                  model: effectiveModel,
-@@ -8318,13 +8418,8 @@
+@@ -8318,13 +8435,8 @@ export function createProductionAgentHandler(options) {
                  actions: requestActions,
                  send,
                  signal,
@@ -724,7 +823,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                  ownerEmail,
                  orgId: getRequestOrgId() ?? null,
                  attachments: requestAttachments,
-@@ -8493,11 +8588,7 @@
+@@ -8493,11 +8605,7 @@ export function createProductionAgentHandler(options) {
                          const { recordUsage } = await import("../usage/store.js");
                          await recordUsage({
                              ownerEmail: resolvedOwnerEmail,
@@ -6158,7 +6257,7 @@ index d86ba8c8975aa27234f661b9906259e40d0998b7..59da4cffbbed15f4557d894f6f6af72b
 +}): Promise<void>;
  export declare function recordIntegrationResponseDelivery(payload: IntegrationResponseDeliveryTaskPayload, receipt: PlatformDeliveryReceipt): Promise<void>;
 diff --git a/dist/integrations/webhook-handler.js b/dist/integrations/webhook-handler.js
-index 7027e9b195cf2b24fa4aa526cce40e8b4d75d751..efd06506f7e39f9afdc4b3227d9d26b808400b42 100644
+index 7027e9b195cf2b24fa4aa526cce40e8b4d75d751..ee214638aec3af3fcf33bacecc6a55e959909ce8 100644
 --- a/dist/integrations/webhook-handler.js
 +++ b/dist/integrations/webhook-handler.js
 @@ -4,7 +4,7 @@ import { isInBackgroundFunctionRuntime } from "../agent/durable-background.js";
@@ -6303,10 +6402,12 @@ index 7027e9b195cf2b24fa4aa526cce40e8b4d75d751..efd06506f7e39f9afdc4b3227d9d26b8
 +        actualCostMicros = usage.costCentsX100 * 100;
 +    }
 +    else if (usage) {
-+        const { calculateCost, hasTablePrice } = await import("../usage/store.js");
++        const { estimateUsageCost } = await import("../usage/store.js");
          // token_usage uses centicents; one centicent is 100 currency micros.
-         actualCostMicros =
-             calculateCost(usage.inputTokens, usage.outputTokens, usage.model, usage.cacheReadTokens, usage.cacheWriteTokens) * 100;
+-        actualCostMicros =
+-            calculateCost(usage.inputTokens, usage.outputTokens, usage.model, usage.cacheReadTokens, usage.cacheWriteTokens) * 100;
++        const estimate = usage.costSource === "unavailable" ? undefined : estimateUsageCost(usage);
++        actualCostMicros = (estimate ?? 0) * 100;
 +        // A run that used tokens of a model Core has no price for has an
 +        // unknown cost. It keeps its reservation estimate, and a budget cap
 +        // still fills. A run that used no tokens costs 0.
@@ -6314,7 +6415,7 @@ index 7027e9b195cf2b24fa4aa526cce40e8b4d75d751..efd06506f7e39f9afdc4b3227d9d26b8
 +            usage.outputTokens +
 +            usage.cacheReadTokens +
 +            usage.cacheWriteTokens;
-+        unknownCost = tokens > 0 && !hasTablePrice(usage.model);
++        unknownCost = tokens > 0 && estimate === undefined;
      }
      await Promise.all(reservations.map((reservation) => settleIntegrationUsageBudget({
          budgetId: reservation.budgetId,
@@ -15077,23 +15178,45 @@ index 9a3a72d8f08edc0e902814934d749c432b4228bb..8ff65b608d1e83807046ca4f7affeab2
          },
          byLabel,
 diff --git a/dist/usage/store.d.ts b/dist/usage/store.d.ts
-index c9cd99152199d4c5a2cb8d8eb9c1723790e820a0..5d7e9e71da0db59d810a1ac302583c55aa51c342 100644
+index c9cd99152199d4c5a2cb8d8eb9c1723790e820a0..5fac2770ccad8c2faabea10cd6fa7b14f6540c26 100644
 --- a/dist/usage/store.d.ts
 +++ b/dist/usage/store.d.ts
-@@ -67,6 +67,8 @@ export declare function ensureUsageTable(): Promise<void>;
+@@ -19,6 +19,10 @@ export interface UsageRecord {
+     outputTokens: number;
+     cacheReadTokens?: number;
+     cacheWriteTokens?: number;
++    /** Observed 1-hour writes, included in cacheWriteTokens. */
++    cacheWrite1hTokens?: number;
++    /** Actual execution engine, required for new direct API estimates. */
++    engineName?: string;
+     model: string;
+     /** Category for this call — e.g. "chat", "automation", "job", "custom-agent". */
+     label?: string;
+@@ -66,7 +70,10 @@ export declare function ensureUsageTable(): Promise<void>;
+  * Non-cache-aware callers pass 0 for the cache fields and get the full rate on
   * everything, which is correct for a provider with no prompt caching.
   */
- export declare function calculateCost(inputTokens: number, outputTokens: number, model: string, cacheReadTokens?: number, cacheWriteTokens?: number): number;
+-export declare function calculateCost(inputTokens: number, outputTokens: number, model: string, cacheReadTokens?: number, cacheWriteTokens?: number): number;
++export declare function calculateCost(inputTokens: number, outputTokens: number, model: string, cacheReadTokens?: number, cacheWriteTokens?: number, pricingContext?: { cacheWrite1hTokens?: number; engineName?: string }): number;
++export declare function estimateUsageCost(usage: Pick<UsageRecord, "inputTokens" | "outputTokens" | "model" | "cacheReadTokens" | "cacheWriteTokens" | "cacheWrite1hTokens" | "engineName">, options?: { perRequest?: boolean }): number | undefined;
 +/** Whether the price table prices a model, so `calculateCost` is its cost. */
 +export declare function hasTablePrice(model: string): boolean;
  /**
   * Record token usage from an LLM call.
   *
 diff --git a/dist/usage/store.js b/dist/usage/store.js
-index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbbaf1a0c20 100644
+index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..9588cd733350146788047f53c2be5cc931fa83f4 100644
 --- a/dist/usage/store.js
 +++ b/dist/usage/store.js
-@@ -63,6 +63,11 @@ const PRICING = [
+@@ -7,6 +7,7 @@
+  *
+  * Cost is stored as "centicents" (1/100th of a cent) for integer precision.
+  */
++import { ANTHROPIC_API_MODELS } from "../agent/model-config.js";
+ import { getDbExec, intType, isPostgres } from "../db/client.js";
+ import { ensureColumnExists, ensureIndexExists, ensureTableExists, } from "../db/ddl-guard.js";
+ import { widenIntColumnsToBigInt } from "../db/widen-columns.js";
+@@ -63,6 +64,11 @@ const PRICING = [
          match: /haiku/i,
          pricing: { input: 100, output: 500, cacheRead: 10, cacheWrite: 125 },
      },
@@ -15105,7 +15228,7 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
      // ── OpenAI / Codex ──────────────────────────────────────────────────────────
      // Short-context rates from OpenAI's published table (read 2026-08-25):
      // https://developers.openai.com/api/docs/pricing#text-tokens
-@@ -138,18 +143,40 @@ const PRICING = [
+@@ -138,18 +144,46 @@ const PRICING = [
          match: /mistral-small|mistral-medium/i,
          pricing: { input: 20, output: 60, cacheRead: 0, cacheWrite: 0 },
      },
@@ -15120,6 +15243,11 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
 -    for (const entry of PRICING) {
 -        if (entry.match.test(model))
 -            return entry.pricing;
++    const current = ANTHROPIC_API_MODELS[model];
++    if (current) return current;
++    // These direct API rates do not establish gateway prices for a routed ID.
++    const unqualified = model.slice(model.lastIndexOf("/") + 1);
++    if (ANTHROPIC_API_MODELS[unqualified]) return undefined;
 +    return PRICING.find((entry) => entry.match.test(model))?.pricing;
 +}
 +/** Whether the price table prices a model, so `calculateCost` is its cost. */
@@ -15139,7 +15267,8 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
 +        const { rows } = await client.execute(`SELECT DISTINCT model FROM token_usage WHERE cost_source = 'estimated'`);
 +        for (const row of rows) {
 +            const model = String(row.model ?? "");
-+            if (hasTablePrice(model))
++            // Keep these historical estimates intact. Current requests need route/TTL evidence.
++            if (ANTHROPIC_API_MODELS[model.slice(model.lastIndexOf("/") + 1)] || hasTablePrice(model))
 +                continue;
 +            await client.execute({
 +                sql: `UPDATE token_usage SET cost_source = 'unavailable', cost_cents_x100 = 0
@@ -15155,7 +15284,7 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
  }
  let _initPromise;
  export async function ensureUsageTable() {
-@@ -232,6 +259,7 @@ export async function ensureUsageTable() {
+@@ -232,6 +266,7 @@ export async function ensureUsageTable() {
                  // the whole release. The SHARE lock is the cost of a build that lands.
                  await ensureIndexExists("idx_token_usage_lower_owner_created", `CREATE INDEX IF NOT EXISTS idx_token_usage_lower_owner_created ON token_usage (LOWER(owner_email), created_at)`);
                  await ensureIndexExists("idx_token_usage_org_app_created", `CREATE INDEX IF NOT EXISTS idx_token_usage_org_app_created ON token_usage (org_id, LOWER(app), created_at)`);
@@ -15163,7 +15292,7 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
                  return;
              }
              // SQLite (local dev): no lock problem — keep the original behaviour.
-@@ -265,6 +293,7 @@ export async function ensureUsageTable() {
+@@ -265,6 +300,7 @@ export async function ensureUsageTable() {
                      // through the Postgres branch above, which probes before creating.
                  }
              }
@@ -15171,9 +15300,36 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
          })().catch((err) => {
              // Retry init on the next call after a failed startup.
              _initPromise = undefined;
-@@ -292,6 +321,10 @@ export async function ensureUsageTable() {
+@@ -290,8 +326,36 @@ export async function ensureUsageTable() {
+  * Non-cache-aware callers pass 0 for the cache fields and get the full rate on
+  * everything, which is correct for a provider with no prompt caching.
   */
- export function calculateCost(inputTokens, outputTokens, model, cacheReadTokens = 0, cacheWriteTokens = 0) {
+-export function calculateCost(inputTokens, outputTokens, model, cacheReadTokens = 0, cacheWriteTokens = 0) {
++/** An API list-price estimate, never a bill or funding guarantee.
++ * Haiku needs the individual request length. Cache writes need their observed TTL split.
++ * Missing evidence remains unknown instead of treating a turn as one long prompt.
++ */
++export function estimateUsageCost(usage, { perRequest = false } = {}) {
++    const { inputTokens, outputTokens, model, cacheReadTokens = 0, cacheWriteTokens = 0, cacheWrite1hTokens } = usage;
++    const current = ANTHROPIC_API_MODELS[model];
++    if (!current) return hasTablePrice(model)
++        ? calculateCost(inputTokens, outputTokens, model, cacheReadTokens, cacheWriteTokens) : undefined;
++    if (!["anthropic", "ai-sdk:anthropic"].includes(usage.engineName)) return undefined;
++    if (current.longContext && !perRequest) return undefined;
++    if (![inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens].every(value => Number.isFinite(value) && value >= 0)) return undefined;
++    if (cacheReadTokens + cacheWriteTokens > inputTokens) return undefined;
++    const write1h = cacheWriteTokens === 0 ? 0 : cacheWrite1hTokens;
++    if (!Number.isFinite(write1h) || write1h < 0 || write1h > cacheWriteTokens) return undefined;
++    const p = current.longContext && inputTokens > current.longContext.threshold ? current.longContext : current;
++    const dollars = ((inputTokens - cacheReadTokens - cacheWriteTokens) * p.input +
++        outputTokens * p.output + cacheReadTokens * p.cacheRead +
++        (cacheWriteTokens - write1h) * p.cacheWrite5m + write1h * p.cacheWrite1h) / 1_000_000;
++    return dollars > 0 ? Math.max(1, Math.round(dollars * 10_000)) : 0;
++}
++
++export function calculateCost(inputTokens, outputTokens, model, cacheReadTokens = 0, cacheWriteTokens = 0, pricingContext = {}) {
++    if (ANTHROPIC_API_MODELS[model]) return estimateUsageCost({ inputTokens, outputTokens, model,
++        cacheReadTokens, cacheWriteTokens, ...pricingContext }, { perRequest: true }) ?? 0;
      const p = pricingFor(model);
 +    // An unpriced model costs an unknown amount. Callers that need a number get
 +    // 0, and recordUsage records the cost as unavailable.
@@ -15182,22 +15338,25 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
      // An engine that still emits the exclusive convention would drive this
      // negative and credit the bill. Clamping keeps the partition non-negative;
      // the fix for a caller that trips it is that engine, not a wider clamp here.
-@@ -334,7 +367,14 @@ export async function recordUsage(recordOrOwner, inputTokens, outputTokens, mode
+@@ -334,11 +398,15 @@ export async function recordUsage(recordOrOwner, inputTokens, outputTokens, mode
      }
      // Prefer an explicit precomputed cost (e.g. a provider-reported dollar cost);
      // otherwise derive it from tokens via the pricing table.
 -    const resolvedCostSource = costSource ?? (costCentsX100 == null ? "estimated" : "reported");
 +    // With no reported cost, a model the table cannot price records an unknown
 +    // cost instead of a guess.
-+    const resolvedCostSource = costSource ??
-+        (costCentsX100 != null
-+            ? "reported"
-+            : pricingFor(modelName)
-+                ? "estimated"
-+                : "unavailable");
++    const estimate = estimateUsageCost(record);
++    const resolvedCostSource = costSource === "unavailable" ? "unavailable"
++        : costCentsX100 != null ? costSource ?? "reported"
++        : estimate !== undefined ? "estimated" : "unavailable";
      const costX100 = resolvedCostSource === "unavailable"
          ? 0
-         : (costCentsX100 ??
+-        : (costCentsX100 ??
+-            calculateCost(inTok, outTok, modelName, cacheReadTokens, cacheWriteTokens));
++        : (costCentsX100 ?? estimate ?? 0);
+     const id = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+     await client.execute({
+         sql: `INSERT INTO token_usage
 diff --git a/dist/cli/claude-session-log.js b/dist/cli/claude-session-log.js
 new file mode 100644
 --- /dev/null
@@ -16282,3 +16441,260 @@ index 809d774..df69e6b 100644
          };
      }
      return undefined;
+diff --git a/dist/agent/model-config.d.ts b/dist/agent/model-config.d.ts
+index d0900cb03de78545ee338d333c0bf56290a51102..8e1f9e3cfebff0600039358e06c7b4627d3583af 100644
+--- a/dist/agent/model-config.d.ts
++++ b/dist/agent/model-config.d.ts
+@@ -21,6 +21,18 @@ export declare function getContextWindowForModel(modelId: string): number;
+  * a positive integer.
+  */
+ export declare function getMaxOutputTokensForModel(modelId: string | undefined): number;
++export interface AnthropicApiPricing {
++    input: number;
++    output: number;
++    cacheRead: number;
++    cacheWrite5m: number;
++    cacheWrite1h: number;
++}
++export declare const ANTHROPIC_API_MODELS: Readonly<Record<string, AnthropicApiPricing & {
++    contextWindow: number;
++    maxOutputTokens: number;
++    longContext?: AnthropicApiPricing & { threshold: number };
++}>>;
+ export declare const CLAUDE_SONNET_MODEL_ID: string;
+ export declare const CLAUDE_SONNET_MODEL_LABEL: string;
+ export declare const AGENT_MODEL_CONFIG: {
+@@ -29,13 +41,13 @@ export declare const AGENT_MODEL_CONFIG: {
+         readonly supportedModels: readonly ["auto", string, "gpt-5-6-terra", "gpt-5-6-sol", "claude-haiku-4-5", "claude-sonnet-4-6" | "claude-sonnet-5", "claude-opus-4-8", "gemini-3-5-flash", "gemini-3-1-pro"];
+     };
+     readonly anthropic: {
+-        readonly defaultModel: "claude-sonnet-4-6" | "claude-sonnet-5";
+-        readonly supportedModels: readonly ["claude-haiku-4-5-20251001", "claude-sonnet-4-6" | "claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"];
++        readonly defaultModel: "claude-sonnet-5-5";
++        readonly supportedModels: readonly string[];
+     };
+     readonly aiSdk: {
+         readonly anthropic: {
+-            readonly defaultModel: "claude-sonnet-4-6" | "claude-sonnet-5";
+-            readonly supportedModels: readonly ["claude-haiku-4-5-20251001", "claude-sonnet-4-6" | "claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"];
++            readonly defaultModel: "claude-sonnet-5-5";
++            readonly supportedModels: readonly string[];
+         };
+         readonly openai: {
+             readonly defaultModel: "gpt-5.6-luna";
+@@ -72,13 +84,13 @@ export declare const BUILDER_MODEL_CONFIG: {
+     readonly supportedModels: readonly ["auto", string, "gpt-5-6-terra", "gpt-5-6-sol", "claude-haiku-4-5", "claude-sonnet-4-6" | "claude-sonnet-5", "claude-opus-4-8", "gemini-3-5-flash", "gemini-3-1-pro"];
+ };
+ export declare const ANTHROPIC_MODEL_CONFIG: {
+-    readonly defaultModel: "claude-sonnet-4-6" | "claude-sonnet-5";
+-    readonly supportedModels: readonly ["claude-haiku-4-5-20251001", "claude-sonnet-4-6" | "claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"];
++    readonly defaultModel: "claude-sonnet-5-5";
++    readonly supportedModels: readonly string[];
+ };
+ export declare const AI_SDK_MODEL_CONFIG: {
+     readonly anthropic: {
+-        readonly defaultModel: "claude-sonnet-4-6" | "claude-sonnet-5";
+-        readonly supportedModels: readonly ["claude-haiku-4-5-20251001", "claude-sonnet-4-6" | "claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"];
++        readonly defaultModel: "claude-sonnet-5-5";
++        readonly supportedModels: readonly string[];
+     };
+     readonly openai: {
+         readonly defaultModel: "gpt-5.6-luna";
+@@ -112,4 +124,4 @@ export declare const AI_SDK_MODEL_CONFIG: {
+ export type AISDKProvider = keyof typeof AI_SDK_MODEL_CONFIG;
+ export declare const DEFAULT_MODEL: string;
+ export declare const DEFAULT_OPENAI_MODEL: "gpt-5.6-luna";
+-export declare const DEFAULT_ANTHROPIC_MODEL: "claude-sonnet-4-6" | "claude-sonnet-5";
++export declare const DEFAULT_ANTHROPIC_MODEL: "claude-sonnet-5-5";
+diff --git a/dist/agent/model-config.js b/dist/agent/model-config.js
+index e43c149476d0cc68d78e5723e3db6fc4e67bb693..310a27798e6c7d2480709e168acea02051a7186c 100644
+--- a/dist/agent/model-config.js
++++ b/dist/agent/model-config.js
+@@ -23,6 +23,28 @@
+ // Note: Fable 5, Sonnet 5, Sonnet 4.6, and Opus 4.6/4.7/4.8 support 1M via the API
+ // at standard prices.
+ // ---------------------------------------------------------------------------
++// Direct Claude API reference metadata, verified 2026-10-13.
++// https://platform.claude.com/docs/en/models/{model}/overview
++// https://platform.claude.com/docs/en/about-claude/pricing
++// USD per million tokens, standard global inference. Gateway catalogs are separate.
++export const ANTHROPIC_API_MODELS = {
++    "claude-sonnet-5-5": { contextWindow: 1_000_000, maxOutputTokens: 128_000,
++        input: 2, output: 10, cacheRead: 0.10, cacheWrite5m: 2.50, cacheWrite1h: 4 },
++    "claude-haiku-5-5": { contextWindow: 1_000_000, maxOutputTokens: 128_000,
++        input: 0.10, output: 0.50, cacheRead: 0.01, cacheWrite5m: 0.125, cacheWrite1h: 0.20,
++        longContext: { threshold: 100_000, input: 0.50, output: 2.50,
++            cacheRead: 0.05, cacheWrite5m: 0.625, cacheWrite1h: 1 } },
++    "claude-opus-5-5": { contextWindow: 1_000_000, maxOutputTokens: 128_000,
++        input: 4, output: 20, cacheRead: 0.20, cacheWrite5m: 5, cacheWrite1h: 8 },
++    "claude-fable-5-1": { contextWindow: 1_000_000, maxOutputTokens: 128_000,
++        input: 10, output: 50, cacheRead: 0.25, cacheWrite5m: 12.50, cacheWrite1h: 20 },
++};
++const ANTHROPIC_API_SUPPORTED_MODELS = [
++    ...Object.keys(ANTHROPIC_API_MODELS),
++    // Preserve existing selections without migrating conversations or settings.
++    "claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-4-8", "claude-fable-5",
++];
++
+ const MODEL_CONTEXT_WINDOWS = {
+     // ── Anthropic / Claude (via Builder gateway or Anthropic direct) ──────────
+     "claude-fable-5": 1_000_000,
+@@ -73,6 +95,8 @@ const DEFAULT_CONTEXT_WINDOW = 128_000;
+ export function getContextWindowForModel(modelId) {
+     if (!modelId)
+         return DEFAULT_CONTEXT_WINDOW;
++    const current = ANTHROPIC_API_MODELS[modelId];
++    if (current) return current.contextWindow;
+     const exact = MODEL_CONTEXT_WINDOWS[modelId];
+     if (exact !== undefined)
+         return exact;
+@@ -162,6 +186,8 @@ const DEFAULT_MAX_OUTPUT_TOKENS_CEILING = 64_000;
+ export function getMaxOutputTokensForModel(modelId) {
+     if (!modelId)
+         return DEFAULT_MAX_OUTPUT_TOKENS_CEILING;
++    const current = ANTHROPIC_API_MODELS[modelId];
++    if (current) return current.maxOutputTokens;
+     const exact = MODEL_MAX_OUTPUT_TOKENS[modelId];
+     if (exact !== undefined)
+         return exact;
+@@ -198,7 +224,7 @@ export const CLAUDE_SONNET_MODEL_LABEL = ENABLE_CLAUDE_SONNET_5
+ const OPENROUTER_CLAUDE_SONNET_MODEL_ID = ENABLE_CLAUDE_SONNET_5
+     ? "anthropic/claude-sonnet-5"
+     : "anthropic/claude-sonnet-4.6";
+-const ANTHROPIC_DEFAULT_MODEL_ID = CLAUDE_SONNET_MODEL_ID;
++const ANTHROPIC_DEFAULT_MODEL_ID = "claude-sonnet-5-5";
+ function builderGatewayModelId(model) {
+     return model.replace(/\./g, "-");
+ }
+@@ -230,22 +256,12 @@ export const AGENT_MODEL_CONFIG = {
+     },
+     anthropic: {
+         defaultModel: ANTHROPIC_DEFAULT_MODEL_ID,
+-        supportedModels: [
+-            "claude-haiku-4-5-20251001",
+-            CLAUDE_SONNET_MODEL_ID,
+-            "claude-opus-4-8",
+-            "claude-fable-5",
+-        ],
++        supportedModels: ANTHROPIC_API_SUPPORTED_MODELS,
+     },
+     aiSdk: {
+         anthropic: {
+             defaultModel: ANTHROPIC_DEFAULT_MODEL_ID,
+-            supportedModels: [
+-                "claude-haiku-4-5-20251001",
+-                CLAUDE_SONNET_MODEL_ID,
+-                "claude-opus-4-8",
+-                "claude-fable-5",
+-            ],
++            supportedModels: ANTHROPIC_API_SUPPORTED_MODELS,
+         },
+         openai: {
+             defaultModel: FRAMEWORK_DEFAULT_OPENAI_MODEL,
+diff --git a/dist/observability/traces.js b/dist/observability/traces.js
+index 470675eaf3bc80cde3338264166ddcfd2f7be363..f154dffa14c1841c99c506f4e93a21182be87d32 100644
+--- a/dist/observability/traces.js
++++ b/dist/observability/traces.js
+@@ -890,11 +890,11 @@ export async function instrumentAgentLoop(opts) {
+             let costCentsX100 = 0;
+             // Held for the per-generation costs below, which price each round-trip
+             // from its own tokens rather than splitting the run total.
+-            let calculateCost;
++            let estimateUsageCost;
+             try {
+-                ({ calculateCost } = await import("../usage/store.js"));
++                ({ estimateUsageCost } = await import("../usage/store.js"));
+                 if (usage) {
+-                    costCentsX100 = calculateCost(usage.inputTokens, usage.outputTokens, usage.model, usage.cacheReadTokens, usage.cacheWriteTokens);
++                    costCentsX100 = usage.costCentsX100 ?? estimateUsageCost(usage) ?? 0;
+                 }
+                 // Cost estimation is enrichment: a pricing-table miss leaves the span
+                 // without a cost rather than failing the trace.
+@@ -1016,9 +1016,10 @@ export async function instrumentAgentLoop(opts) {
+                 for (const generation of generations) {
+                     const callUsage = generation.callUsage;
+                     let callCostCentsX100;
+-                    if (calculateCost && callUsage && generation.tokensKnown) {
++                    if (estimateUsageCost && callUsage && generation.tokensKnown) {
+                         try {
+-                            callCostCentsX100 = calculateCost(callUsage.inputTokens, callUsage.outputTokens, callUsage.model, callUsage.cacheReadTokens, callUsage.cacheWriteTokens);
++                            callCostCentsX100 = callUsage.costUsd !== undefined ? Math.round(callUsage.costUsd * 10_000)
++                                : estimateUsageCost(callUsage, { perRequest: modelRoundTrips.length > 0 });
+                             // Cost estimation is enrichment: a pricing-table miss leaves the
+                             // generation without a cost rather than failing the trace.
+                         }
+diff --git a/dist/shared/reasoning-effort.d.ts b/dist/shared/reasoning-effort.d.ts
+index d54c726a2a53370272f92ee909f90d42638bfffd..bd0db6201142659453700c5ff83e2738593fcb5e 100644
+--- a/dist/shared/reasoning-effort.d.ts
++++ b/dist/shared/reasoning-effort.d.ts
+@@ -37,6 +37,7 @@ export declare function supportsClaudeAdaptiveThinking(model: string | undefined
+  * Map the shared effort ladder to Anthropic's manual thinking budgets for
+  * models that do not support adaptive thinking (currently Claude Haiku 4.5).
+  */
++export declare function validateAnthropicApiThinking(model: string, thinking: { type: string; budgetTokens?: number } | undefined, effort?: string): void;
+ export declare function anthropicManualThinkingBudget(effort: ReasoningEffort): 1024 | 4096 | 8000 | 16000 | 32000;
+ /**
+  * Whether a request may carry the sampling parameters (`temperature`,
+diff --git a/dist/shared/reasoning-effort.js b/dist/shared/reasoning-effort.js
+index b3b6ab68bb71711a99141278989af4c8fe7332b6..d36799565ea9cb054d1cf1741acbaf97aefe447a 100644
+--- a/dist/shared/reasoning-effort.js
++++ b/dist/shared/reasoning-effort.js
+@@ -1,3 +1,5 @@
++import { ANTHROPIC_API_MODELS } from "../agent/model-config.js";
++
+ export const REASONING_EFFORTS = [
+     "auto",
+     "none",
+@@ -126,6 +128,7 @@ export function isGPTReasoningModel(model) {
+     return /^gpt-5/.test(id) || /^o\d/.test(id);
+ }
+ function isClaudeReasoningModel(model) {
++    if (ANTHROPIC_API_MODELS[model]) return true;
+     const id = model.toLowerCase().replace(/^anthropic\//, "");
+     if (id.includes("fable-5") || id.includes("mythos-5"))
+         return true;
+@@ -142,6 +145,7 @@ function isClaudeReasoningModel(model) {
+  * requires the legacy manual `budget_tokens` configuration.
+  */
+ export function supportsClaudeAdaptiveThinking(model) {
++    if (ANTHROPIC_API_MODELS[model]) return true;
+     if (!model)
+         return false;
+     const id = model.toLowerCase().replace(/^anthropic\//, "");
+@@ -156,6 +160,20 @@ export function supportsClaudeAdaptiveThinking(model) {
+  * Map the shared effort ladder to Anthropic's manual thinking budgets for
+  * models that do not support adaptive thinking (currently Claude Haiku 4.5).
+  */
++// Preserve legacy settings. Refuse incompatible options only for these exact new IDs.
++export function validateAnthropicApiThinking(model, thinking, effort) {
++    if (!ANTHROPIC_API_MODELS[model] || !thinking) return;
++    const type = thinking.type;
++    const off = type === "disabled" && model === "claude-haiku-5-5";
++    const between = type === "between_tools" && model === "claude-sonnet-5-5";
++    if (type !== "adaptive" && !off && !between) {
++        throw new Error(`${model} requires adaptive thinking. Keep the saved model or choose compatible thinking settings.`);
++    }
++    if (thinking.budgetTokens !== undefined || ((off || between) && ["xhigh", "max"].includes(effort))) {
++        throw new Error(`${model} does not accept this thinking budget or effort combination. Saved settings have not been changed.`);
++    }
++}
++
+ export function anthropicManualThinkingBudget(effort) {
+     switch (effort) {
+         case "low":
+@@ -173,6 +191,7 @@ export function anthropicManualThinkingBudget(effort) {
+     }
+ }
+ function supportsClaudeXHigh(model) {
++    if (ANTHROPIC_API_MODELS[model]) return true;
+     const id = model.toLowerCase().replace(/^anthropic\//, "");
+     // Models that support the xhigh effort tier (built-in extended thinking via
+     // output_config.effort). Keep this version-aware so any future Claude model
+@@ -201,6 +220,7 @@ function isGeminiReasoningModel(model) {
+  * thinking is on.
+  */
+ function claudeAcceptsSamplingParams(model) {
++    if (ANTHROPIC_API_MODELS[model]) return false;
+     const id = model.toLowerCase().replace(/^anthropic\//, "");
+     if (id.includes("fable-5") || id.includes("mythos-5"))
+         return false;

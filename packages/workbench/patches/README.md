@@ -11,6 +11,66 @@ Core package. Issue #9 also applies `@agent-native__toolkit@0.19.3.patch` to the
 pinned Toolkit package. The lockfile records both patch hashes. Install with
 `pnpm install --frozen-lockfile` from `packages/workbench`.
 
+## Native API Claude catalog
+
+Issue #38. The maintained Core patch updates direct Anthropic and AI-SDK Anthropic
+model metadata to Sonnet 5.5, Haiku 5.5, Opus 5.5, and Fable 5.1. The direct default
+is `claude-sonnet-5-5`. Existing older IDs stay listed, saved Settings and composer
+choices remain selected, and no conversation model is migrated. To upgrade an
+existing choice, select the exact new model intentionally. Builder and OpenRouter
+keep their separate model IDs and defaults. The optional AI-SDK Anthropic adapter
+remains hidden by Workbench. The pinned dependency graph includes its SDK. Catalog metadata does not establish account availability.
+
+`agent/model-config.js` owns exact IDs, 1M context and 128K output limits, and direct
+API rate metadata. The definitions were verified on 2026-10-13 against official
+[Sonnet](https://platform.claude.com/docs/en/models/sonnet-5-5/overview),
+[Haiku](https://platform.claude.com/docs/en/models/haiku-5-5/overview),
+[Opus](https://platform.claude.com/docs/en/models/opus-5-5/overview),
+[Fable](https://platform.claude.com/docs/en/models/fable-5-1/overview), and
+[pricing](https://platform.claude.com/docs/en/about-claude/pricing) documentation.
+Rates below are USD per million tokens for standard global inference.
+
+| Direct model | Input | Output | Cache read | 5m write | 1h write |
+|---|---:|---:|---:|---:|---:|
+| `claude-sonnet-5-5` | 2 | 10 | 0.10 | 2.50 | 4 |
+| `claude-haiku-5-5`, prompt through 100K | 0.10 | 0.50 | 0.01 | 0.125 | 0.20 |
+| `claude-haiku-5-5`, prompt above 100K | 0.50 | 2.50 | 0.05 | 0.625 | 1 |
+| `claude-opus-5-5` | 4 | 20 | 0.20 | 5 | 8 |
+| `claude-fable-5-1` | 10 | 50 | 0.25 | 12.50 | 20 |
+
+`usage/store.js` estimates these rates only with an actual `anthropic` or
+`ai-sdk:anthropic` engine identity. A routed ID or an unknown engine does not inherit
+the direct rate. Haiku's tier uses each request's entire prompt, including cached
+tokens. `createTurnUsage` sums request estimates before aggregation. Cache writes
+need their observed 1-hour subset, emitted by the direct engine from SDK usage.
+An aggregate with no Haiku request lengths, a write with no duration breakdown,
+or a call with no route evidence remains unknown. Provider-reported cost wins,
+including zero. Integration budgets retain their existing reservation fallback for
+unknown costs. Traces omit an unverified generation estimate and retain their
+existing zero placeholder for an unknown run estimate. Historical estimates for
+these model IDs remain unchanged. Batch, fast mode, regional routing, server-tool
+fees, negotiated prices, and subscriptions are not established by this table.
+
+The installed SDK 0.93.0 accepts string model IDs and adaptive thinking. Native's
+reasoning helpers recognize exact new Opus and Haiku IDs and omit withdrawn
+sampling parameters. The engine validates explicit thinking options before
+transport. Haiku accepts disabled thinking through high effort. Sonnet's
+`between_tools` setting accepts low through high on the direct engine. The pinned
+AI SDK lacks this mode, so its hidden adapter refuses it locally. Manual budgets are refused for
+these new models, and Opus/Fable cannot disable thinking. Saved settings are not
+rewritten. See the official [effort guide](https://platform.claude.com/docs/en/build-with-claude/effort)
+and [migration guides](https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide).
+Native retains signed thinking blocks. Fake transport can check replay shape,
+but it cannot establish the provider's signature checks when earlier history,
+system instructions, tools, model, or account changes.
+
+Focused checks use `native-anthropic-models.test.ts`, its intercepted-transport
+fixture, `native-usage-cost.test.ts`, and `chat-model-groups.test.mjs`. They exercise
+the actual installed model owners and SDK without contacting a provider. The Code
+funding guard remains unchanged. API prices do not establish included-only funding.
+Both installed SDK adapters are checked through intercepted transport. Live API
+acceptance remains unrun.
+
 ## Native action JSON values
 
 Offline Windows acceptance found that a Native `vivary-project-evaluate` Decide
