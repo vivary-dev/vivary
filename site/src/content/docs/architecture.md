@@ -391,6 +391,17 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-13 Native usage record ID collisions. The usage writer retains its numeric
+primary key and existing schema. If another writer already inserted its generated
+ID, it tries the next ID, up to 16 candidates. Only primary-key conflicts retry.
+Other database failures and exhaustion still reject the write, existing records
+are never replaced, and alert evaluation starts only after a successful insert.
+The regression forces independent store modules to choose the same clock/random
+candidate and checks that both records retain their costs. A second case fills
+all candidates and checks explicit failure without changing those records.
+Pricing, aggregation, provider execution, and funding admission are unchanged,
+so the existing Native usage flow and trust boundaries still hold.
+
 2026-10-13 resource editor preservation and height. Windows acceptance reproduced
 an untouched instruction table being flattened and saved merely by opening Visual.
 Toolkit's editability effect emitted an update without a document change, and the

@@ -15220,7 +15220,7 @@ index c9cd99152199d4c5a2cb8d8eb9c1723790e820a0..5fac2770ccad8c2faabea10cd6fa7b14
   * Record token usage from an LLM call.
   *
 diff --git a/dist/usage/store.js b/dist/usage/store.js
-index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..9588cd733350146788047f53c2be5cc931fa83f4 100644
+index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..75681271e6ac888c407e7a95aeb91eaa8a00895a 100644
 --- a/dist/usage/store.js
 +++ b/dist/usage/store.js
 @@ -7,6 +7,7 @@
@@ -15353,7 +15353,7 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..9588cd733350146788047f53c2be5cc9
      // An engine that still emits the exclusive convention would drive this
      // negative and credit the bill. Clamping keeps the partition non-negative;
      // the fix for a caller that trips it is that engine, not a wider clamp here.
-@@ -334,11 +398,15 @@ export async function recordUsage(recordOrOwner, inputTokens, outputTokens, mode
+@@ -334,16 +398,21 @@ export async function recordUsage(recordOrOwner, inputTokens, outputTokens, mode
      }
      // Prefer an explicit precomputed cost (e.g. a provider-reported dollar cost);
      // otherwise derive it from tokens via the pricing table.
@@ -15370,8 +15370,38 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..9588cd733350146788047f53c2be5cc9
 -            calculateCost(inTok, outTok, modelName, cacheReadTokens, cacheWriteTokens));
 +        : (costCentsX100 ?? estimate ?? 0);
      const id = Date.now() * 1000 + Math.floor(Math.random() * 1000);
-     await client.execute({
+-    await client.execute({
++    const insert = {
          sql: `INSERT INTO token_usage
+       (id, owner_email, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_cents_x100, cost_source, model, label, app, ref_id, org_id, run_id, thread_id, task_id, integration_scope_id, source_platform, source_id, created_at)
+-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
++      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
++      ON CONFLICT (id) DO NOTHING`,
+         args: [
+             id,
+             ownerEmail,
+@@ -366,7 +435,20 @@ export async function recordUsage(recordOrOwner, inputTokens, outputTokens, mode
+             sourceId ?? null,
+             Date.now(),
+         ],
+-    });
++    };
++    // Timestamp/random IDs can collide across workers. Only an occupied primary key
++    // retries. Other database errors propagate, and no existing usage row is replaced.
++    let inserted = false;
++    for (let attempt = 0; attempt < 16; attempt++) {
++        const result = await client.execute(insert);
++        if (result.rowsAffected === 1) {
++            inserted = true;
++            break;
++        }
++        insert.args[0] += 1;
++    }
++    if (!inserted)
++        throw new Error("Could not allocate a unique token usage ID after 16 attempts.");
+     // Alert delivery is deliberately detached from the usage write. A provider
+     // or email outage must not make a successful model call fail, and the alert
+     // evaluator serializes its own work so the hot path stays one insert.
 diff --git a/dist/cli/claude-session-log.js b/dist/cli/claude-session-log.js
 new file mode 100644
 --- /dev/null

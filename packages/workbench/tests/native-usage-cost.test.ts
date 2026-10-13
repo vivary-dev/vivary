@@ -270,6 +270,46 @@ test("the Usage tab's model list keeps a model whose cost is unknown", async () 
     ["probe/unpriced-model", "anthropic/claude-sonnet-5", "mistral-large-latest", "anthropic/claude-haiku-5"]);
 });
 
+test("usage writers preserve both records when their generated numeric IDs collide", async t => {
+  const stores = await Promise.all([startStore("collision-first"), startStore("collision-second")]);
+  await Promise.all(stores.map(writer => writer.ensureUsageTable()));
+  const owner = `owner-${randomUUID()}@example.test`;
+  // Independent workers can choose the same timestamp/random suffix. Exercise the real primary key.
+  t.mock.method(Date, "now", () => 1_700_000_000_000);
+  t.mock.method(Math, "random", () => 0);
+  await Promise.all(stores.map((writer, index) => writer.recordUsage({ ownerEmail: owner,
+    inputTokens: INPUT_TOKENS, outputTokens: OUTPUT_TOKENS, label: "chat", model: "probe/free-model",
+    costCentsX100: index, costSource: "reported", runId: `collision-${index}` })));
+  const { rows } = await getDbExec().execute({
+    sql: "SELECT id, run_id, cost_cents_x100, cost_source FROM token_usage WHERE owner_email = ? ORDER BY run_id",
+    args: [owner],
+  });
+  assert.equal(rows.length, 2);
+  assert.equal(new Set(rows.map(row => Number(row.id))).size, 2);
+  assert.deepEqual(rows.map(row => [row.run_id, Number(row.cost_cents_x100), row.cost_source]),
+    [["collision-0", 0, "reported"], ["collision-1", 1, "reported"]]);
+});
+
+test("usage writer reports exhausted IDs without replacing existing records", async t => {
+  await store.ensureUsageTable();
+  const owner = `owner-${randomUUID()}@example.test`;
+  const now = 1_700_000_000_100;
+  const ids = Array.from({ length: 16 }, (_, index) => now * 1000 + index);
+  for (const id of ids) await getDbExec().execute({
+    sql: "INSERT INTO token_usage (id, owner_email, created_at) VALUES (?, ?, ?)", args: [id, owner, now],
+  });
+  t.mock.method(Date, "now", () => now);
+  t.mock.method(Math, "random", () => 0);
+  await assert.rejects(store.recordUsage({ ownerEmail: owner, inputTokens: INPUT_TOKENS,
+    outputTokens: OUTPUT_TOKENS, model: "probe/free-model", costCentsX100: 123, costSource: "reported" }),
+    /Could not allocate a unique token usage ID after 16 attempts/);
+  const { rows } = await getDbExec().execute({
+    sql: "SELECT id, input_tokens, cost_cents_x100 FROM token_usage WHERE owner_email = ? ORDER BY id", args: [owner],
+  });
+  assert.deepEqual(rows.map(row => [Number(row.id), Number(row.input_tokens), Number(row.cost_cents_x100)]),
+    ids.map(id => [id, 0, 0]));
+});
+
 // Rows written before this change hold the catch-all Sonnet price for models the table does not
 // price. The table setup runs once per process, so a fresh copy of the store module stands in for
 // the first start after an upgrade.
