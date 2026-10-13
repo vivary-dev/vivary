@@ -409,6 +409,7 @@ process.exit(2);
     }
     await writeFile(path.join(server, "vivary-code-worker.mjs"),
       `import {writeFileSync} from "node:fs"; writeFileSync(${JSON.stringify(workerProbe)}, "started");`);
+    // guard:allow-env-credential - Capture nonsecret executable path and local-mode test state for restoration after the disposable fixture.
     const previous = { cwd: process.cwd(), path: process.env.PATH, mode: process.env.VIVARY_ACCESS_MODE,
       store: process.env.AGENT_NATIVE_CODE_AGENTS_HOME };
     const workspace = { root: fixture, label: "Funding fixture", projectId: "funding-project",

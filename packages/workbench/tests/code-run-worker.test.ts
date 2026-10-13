@@ -32,6 +32,7 @@ require("node:fs").writeFileSync(${JSON.stringify(probe)}, "started");
       const record = getCodeAgentRunRecord(runId);
       const child = fork(path.join(import.meta.dirname, "..", "server", "code-execution-worker.ts"), [], {
         execArgv: ["--import", "tsx"], cwd: path.join(import.meta.dirname, ".."),
+        // guard:allow-env-credential - Nonsecret executable search path for disposable fake runtimes. All other child environment fields remain filtered.
         env: { ...codingRuntimeEnvironment(process.env), PATH: bin + path.delimiter + (process.env.PATH ?? "") },
         detached: true, stdio: ["ignore", "ignore", "ignore", "ipc"],
       });
