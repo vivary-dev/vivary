@@ -181,6 +181,15 @@ opener while the same route remains current and another control has not taken
 focus. The [maintained focus owner](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#command-menu-return-focus)
 keeps this contract separate from menu navigation.
 
+Resource editing separates viewing from content changes. Toolkit's shared rich
+editor emits saved content only for document-changing transactions and changes
+editability without an update event. Opening Visual or switching views therefore
+does not autosave a serialized replacement of the stored source. Settings gives
+the existing resource panel a responsive height within its normal scrolling page,
+so Code uses the panel's available editing space rather than two intrinsic rows.
+The [maintained editor contract](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#resource-editor-preservation-and-height)
+keeps schema support and the existing one-second autosave owner unchanged.
+
 1. **Select a project.** Workbench resolves the authenticated actor, stable project ID, current binding, policy revision, and observed root. Project selection changes the files and history shown. A missing folder leaves authorized history available but blocks file-dependent execution. [Project registry](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/source-map/modules/project-registry/index.md) owns the identity contract.
 2. **Send and continue.** A Native chat send rechecks its pinned project scope before model or attachment work. A Code send starts or resumes the selected native session against its bound project. Native stores the resulting run and transcript. A model choice or project switch cannot silently move an active run. [`native-chat-project.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/native-chat-project.ts), [`local-code-agent.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/local-code-agent.ts), and the [session model](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/desktop-release.md#one-understandable-model) own this flow.
    Each project message also loads the project's context when it starts. [`project-memory.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-memory.ts) reads the law files, the state file, and the fact files in the memory folders from the admitted project only, and renders one block of at most 8,000 characters. A Code send puts the full block before the engine prompt on every turn, for new runs and Claude or Codex follow-ups. A resumed provider session therefore accumulates one block per turn, up to 8,000 characters each. That cost is accepted so a session never depends on an earlier block that its runtime may have compacted away. Only Full chat blocks name Native's owner-wide tools. The transcript keeps only the typed message, and one note per turn, which the Code view shows, names the loaded revision and whether it changed. The panel's last load is recorded only after the send passes its refusals and claims the host slot. Full chat returns the block from Native's `extraContext` on every send. Its three Vivary hooks, the send guard (`prepareRequest`), `extraContext`, and `resolveActionSurface`, each classify the pinned chat scope again rather than sharing one match. A change to a fact file therefore applies from the next message, in new and open conversations, and after a restart. A reply already running keeps what it started with.
@@ -381,6 +390,22 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-13 resource editor preservation and height. Windows acceptance reproduced
+an untouched instruction table being flattened and saved merely by opening Visual.
+Toolkit's editability effect emitted an update without a document change, and the
+shared callback serialized that snapshot. The effect now suppresses emission and
+the callback rejects non-document updates before serialization. Real local edits
+retain the existing reconciliation guards and host callback. Separately, Settings
+mounted the percentage-height resource editor in normal document flow, leaving
+Code at its two-row intrinsic height. A responsive height at the Settings panel
+boundary now supplies the definite space its existing flex layout requires.
+The installed-editor regression uses the supported JSON-document seam because the
+existing DOM fixture cannot establish Markdown display fidelity. It also exercises
+the real resource view-switch/autosave boundary and renders the Settings height
+owner. Actual Markdown rendering, pixel layout, and Windows acceptance remain
+required. Resource schema features, autosave timing, provider behavior, and file
+version guards are unchanged.
 
 2026-10-13 Search Vivary return focus. Native's controlled command menu has no
 registered dialog trigger. Its focus owner now captures the actual focused opener

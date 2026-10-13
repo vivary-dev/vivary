@@ -16779,3 +16779,24 @@ index 0000000000000000000000000000000000000000..34e39ef5f53601ce067c3f1228076133
 +        invoker.focus({ preventScroll: true });
 +    }
 +}
+diff --git a/dist/client/agent-page/AgentWorkspaceContent.js b/dist/client/agent-page/AgentWorkspaceContent.js
+index 18309c2b890f9630878246f447cfff825badcf7c..d45d2f3a3db25932cb4ef3799ce4749a7b5c1cb0 100644
+--- a/dist/client/agent-page/AgentWorkspaceContent.js
++++ b/dist/client/agent-page/AgentWorkspaceContent.js
+@@ -62,6 +62,7 @@ function initialHubState() {
+     return { tab: "overview", resource };
+ }
+ function ResourceContent({ resource }) {
++    // Settings uses document flow. Give the existing panel/editor flex layout a definite height.
+     const copy = RESOURCE_TABS.find((tab) => tab.id === resource);
+     return (_jsxs("div", { className: "space-y-5", children: [_jsx("div", { className: "flex items-center gap-1 overflow-x-auto", children: RESOURCE_TABS.map((tab) => {
+                     const Icon = tab.icon;
+@@ -76,7 +77,7 @@ function ResourceContent({ resource }) {
+                             : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"), children: [_jsx(Icon, { className: "size-3.5" }), tab.label] }, tab.id));
+                 }) }), _jsxs("header", { className: "space-y-1", children: [_jsx("h2", { className: "text-lg font-semibold tracking-tight text-foreground", children: copy?.label ?? "Resources" }), _jsx("p", { className: "text-sm leading-5 text-muted-foreground", children: resource === "files"
+                             ? "Add context the agent can use across conversations."
+-                            : "Manage the resources that shape how the agent works." })] }), _jsx(Suspense, { fallback: _jsx("div", { className: "h-48 animate-pulse rounded-xl border border-border bg-muted/20" }), children: _jsx(ResourcesPanel, { showMcpServers: false, resourceFilter: resource, resourceTreeVariant: "collection", scope: "personal" }, resource) })] }));
++                            : "Manage the resources that shape how the agent works." })] }), _jsx("div", { style: { height: "clamp(18rem, 50dvh, 40rem)" }, children: _jsx(Suspense, { fallback: _jsx("div", { className: "h-48 animate-pulse rounded-xl border border-border bg-muted/20" }), children: _jsx(ResourcesPanel, { showMcpServers: false, resourceFilter: resource, resourceTreeVariant: "collection", scope: "personal" }, resource) }) })] }));
+ }
+ export function AgentWorkspaceContent({ overview, className, activeTab, }) {
+     const [{ resource }, setState] = useState(initialHubState);

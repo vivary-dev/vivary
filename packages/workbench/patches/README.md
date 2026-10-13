@@ -3179,3 +3179,18 @@ connected, the route is unchanged, and another control has not taken focus.
 `CommandMenu.js` owns the dialog callback wiring. Existing keyboard opening and
 menu navigation remain unchanged. The focused tests exercise the installed focus
 owner with DOM elements. They do not establish real-dialog or Windows acceptance.
+
+## Resource editor preservation and height
+
+Toolkit's `SharedRichEditor` rejects updates whose transaction did not change the
+document before reading or emitting saved content. Its editability effect also
+uses TipTap's supported no-update option. This prevents mount and editability
+events from sending a normalized snapshot into a host's autosave callback.
+Real document edits keep the existing reconciliation and collaboration guards.
+Core's Settings resource section gives `ResourcesPanel` a definite responsive
+height in its otherwise normal document flow. Existing editor flex sizing,
+internal scrolling, and the outer Settings scroll remain responsible for layout.
+The resource schema and one-second autosave contract are unchanged. Code remains
+the source editor for syntax outside the Visual schema. Focused installed-component
+checks cover non-content updates, real edits, view switching, and height ownership.
+They do not establish Markdown display fidelity or native pixel acceptance.
