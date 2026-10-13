@@ -7378,7 +7378,10 @@ Native's [maintained API patch](https://github.com/vivary-dev/vivary/blob/dev/pa
 separately owns direct Anthropic and AI-SDK Anthropic catalog metadata. New defaults
 use `claude-sonnet-5-5`. Sonnet 5.5, Haiku 5.5, Opus 5.5, and Fable 5.1 have
 documented 1M context and 128K output limits. Older catalog IDs and saved choices
-remain intact. Builder and OpenRouter keep their own IDs and defaults. No account
+remain intact. A fresh, unconfigured Native instance reports Anthropic with its
+registered Sonnet 5.5 default and `chosen: false`, so Custom keys starts with a model
+from the displayed provider. Explicit stored/app choices and custom-model handling
+retain their existing paths. Builder and OpenRouter keep their own IDs and defaults. No account
 availability is inferred from the catalog, and the optional AI-SDK Anthropic
 adapter remains hidden by Workbench. The pinned dependency graph includes its SDK.
 
@@ -7679,6 +7682,15 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-13 fresh Native provider fallback. Rendered acceptance found that a fresh
+unconfigured instance reported Anthropic with the global Builder model. Core's
+engine-list owner now pairs that fallback with the registered Anthropic default,
+without writing settings or changing saved/app candidates, custom normalization,
+readiness, or funding. A real installed action regression reproduces the prior
+mismatch and checks fresh, saved legacy, and custom choices through disposable
+storage with outbound transport refused. The provider catalog and request owners
+above remain accurate. Final rendered and package checks remain separate gates.
 
 2026-10-13 Native API catalog. The maintained Core patch updates only direct
 Anthropic model metadata and defaults, preserves older saved selections, and leaves

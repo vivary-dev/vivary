@@ -11171,10 +11171,25 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
      return moved;
  }
 diff --git a/dist/scripts/agent-engines/list-agent-engines.js b/dist/scripts/agent-engines/list-agent-engines.js
-index fbf87b306902458e7426c727455251f706c7f028..0513231b7f297e511c2214feb354097b12d0f633 100644
+index fbf87b306902458e7426c727455251f706c7f028..d96b5a2e92e553eee8bda17d99c56a6ae4dd1e6f 100644
 --- a/dist/scripts/agent-engines/list-agent-engines.js
 +++ b/dist/scripts/agent-engines/list-agent-engines.js
-@@ -119,6 +119,9 @@ export async function run(args = {}) {
+@@ -73,9 +73,13 @@ export async function run(args = {}) {
+     const preserveCustomModels = currentEntry
+         ? await resolveEnginePreservesCustomModels(currentEntry)
+         : false;
++    // Keep the reported unconfigured engine and model in the same catalog.
++    const fallbackModel = !currentEntry && !envUnavailable
++        ? getAgentEngineEntry(currentEngineName)?.defaultModel
++        : undefined;
+     const currentModel = currentEntry && !envUnavailable
+         ? normalizeModelForEngine(currentEntry, currentModelCandidate ?? currentEntry.defaultModel, { preserveCustomModels })
+-        : (currentModelCandidate ?? DEFAULT_MODEL);
++        : (currentModelCandidate ?? fallbackModel ?? DEFAULT_MODEL);
+     // Readiness has to be resolved here: `requiredEnvVars` alone cannot see
+     // vault-stored keys or the deploy-injected Builder gateway lane, so a client
+     // that re-derives it from env keys marks working engines unconfigured.
+@@ -119,6 +123,9 @@ export async function run(args = {}) {
              : {
                  engine: currentEngineName,
                  model: currentModel,

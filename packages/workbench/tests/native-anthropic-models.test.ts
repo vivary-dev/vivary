@@ -67,3 +67,23 @@ test("real Anthropic SDK request compatibility uses intercepted transport", asyn
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("engine listing pairs the fresh provider default and preserves chosen legacy/custom models", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "vivary-engine-default-"));
+  try {
+    // A minimal child environment excludes real provider credentials and uses only disposable storage.
+    const environment = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
+      ["PATH", "HOME", "USER", "LANG", "TEMP", "TMP", "TMPDIR"].includes(name)));
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL("./fixtures/native-engine-defaults.mjs", import.meta.url))], {
+      timeout: 60_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8",
+      env: { ...environment, APP_NAME: "Vivary", NODE_ENV: "production",
+        DATABASE_URL: "file:" + path.join(root, "fixture.sqlite"), DATABASE_URL_UNPOOLED: "file:" + path.join(root, "fixture.sqlite"),
+        BETTER_AUTH_SECRET: "vivary-offline-fixture-secret-no-account-access" },
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /OFFLINE_ENGINE_DEFAULTS_VERIFIED/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

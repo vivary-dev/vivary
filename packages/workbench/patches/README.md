@@ -21,6 +21,15 @@ existing choice, select the exact new model intentionally. Builder and OpenRoute
 keep their separate model IDs and defaults. The optional AI-SDK Anthropic adapter
 remains hidden by Workbench. The pinned dependency graph includes its SDK. Catalog metadata does not establish account availability.
 
+Rendered acceptance also found that `list-agent-engines` returned Anthropic with
+the global Builder model when no engine was configured. Its no-entry fallback now
+uses the reported engine's registered default, keeping `chosen: false`. A fresh
+Custom keys form therefore starts with `claude-sonnet-5-5`. Stored/app model
+candidates and custom model normalization remain unchanged. The offline action
+fixture checks the fresh result and saved legacy/custom choices with a disposable
+SQLite store and no outbound transport. Explicit provider selection continues to
+use that provider's catalog default.
+
 `agent/model-config.js` owns exact IDs, 1M context and 128K output limits, and direct
 API rate metadata. The definitions were verified on 2026-10-13 against official
 [Sonnet](https://platform.claude.com/docs/en/models/sonnet-5-5/overview),
