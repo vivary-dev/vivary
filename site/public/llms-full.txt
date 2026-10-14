@@ -7482,6 +7482,15 @@ Coordinated releases publish Core before its dependent role packages.
 
 ## Runtime flows
 
+Desktop outgoing OAuth setup and browser reauthorization are unavailable
+under the existing desktop callback and navigation controls. Connection forms
+explain this before sign-in. Saved OAuth Test and retry can still use a valid
+grant or a successful bound refresh. When no usable grant remains, they explain
+that signing in again is unavailable and retain the saved connection. Other
+launches and non-OAuth connections retain their existing flow. The
+[maintained OAuth contract](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#desktop-outgoing-oauth-availability)
+owns the request and credential details.
+
 Search Vivary uses Native's command menu. Closing returns focus to its connected
 opener while the same route remains current and another control has not taken
 focus. The [maintained focus owner](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#command-menu-return-focus)
@@ -7509,6 +7518,11 @@ keeps schema support and the existing one-second autosave owner unchanged.
 8. **Wait for an automation approval.** Scheduler, Run now, event and webhook paths use Native's background runner and restricted registry. At a gated call the existing history row becomes `waiting_approval` before the worker yields. Ready waiting is published only after the retained turn save and confirmed Native terminal finalization, awaited outside its completion callback. Waiting metadata is written atomically against that exact history and current chunk, so a late original caller cannot revive a terminal wait. Settings > Agent > Automations > Details > Past runs includes scoped unresolved or recoverable approvals alongside recent history, without duplicating rows. Inspect run reads the retained Native thread and exact pending input. Listed runs carry a server-derived inspection capability from the same read-only app, retained thread owner, organization and current-membership checks. Organization members retain shared history visibility without gaining another owner's transcript or approval access. Details offers Inspect only when permitted. Inspection and decisions revalidate current bindings rather than trusting this advisory flag. Older history without an application binding stays listed with inspection unavailable, rather than offering a failing action. Approval decisions still require exact application identity. Authorization uses the persisted run scope and retained owner binding. A personal run keeps its null organization even when the normal action transport supplies an active organization. Organization runs require that exact retained organization and current membership for inspection and decisions. The approved tool result is saved before the follow-up model work. Later saves replace that current chunk by Native event sequence and retain prior chunks in the same assistant turn. An owner decision claims that ask once. Approve uses Native's guarded tool executor and continues the same history, thread and logical turn in a fresh execution chunk. Decline ends it without the pending action. Waiting persists across restart and prevents another execution, schedule advancement, final delivery and a finished event. A webhook stays under its original Native pending-task owner. Interactive chat send and resume reject automation-owned threads on the server. [The maintained patch contract](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#durable-automation-approvals) owns binding and crash rules. The [automation approval statechart](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/journeys.md#automation-approval-waits) shows the user-visible states. Maintained regression controls cover this flow. Test counts, builds and reviews are recorded per commit in the pull request and its receipts rather than here. A built UI journey on the final head, live PostgreSQL execution and packaged Windows acceptance remain separate pending gates. Native pruning retains terminal chunks referenced by unresolved approval history. An approval continuation retains exact known execution outcome evidence in its existing approval history context before terminal bookkeeping. Exhausted terminal writes propagate a typed bookkeeping failure to completion while preserving the execution outcome. When that evidence was stored successfully, the existing sweep can settle it only after confirming its exact terminal Native identity. If every evidence write fails, completion reports an unsettled outcome without a durable automatic-recovery guarantee. Recovery redispatches no model, tool or delivery and does not infer an outcome from age or liveness. Terminal history keeps a reconciliation marker and its exact task and resource binding until existing sweeps finish bookkeeping. Recovery never dispatches tools or delivery and cannot replace a newer history outcome. Declared configured tools await the existing lazy MCP initializer before their registry is built. Deletion refuses unresolved waits and terminal approval history whose outcome is not yet reconciled. The authenticated resource DELETE route applies that same exact persisted-history guard inside the snapshot deletion custody transaction for jobs. Its full mutable-row snapshot comparison remains intact, and ordinary non-job deletion keeps its existing behavior. This preserves owner discovery and lets settlement finish before history cleanup, so a same-name replacement cannot inherit the deleted definition's runs.
 
 ## Data and trust boundaries
+
+Outgoing OAuth availability uses the existing listener-owned desktop
+request identity. Core refuses an unavailable interactive start before discovery
+or registration. This adds no origin, callback, cookie, capability or navigation
+authority. Existing manager startup and tool-call ownership remain unchanged.
 
 | Data or effect | Owner and boundary |
 | --- | --- |
@@ -7696,6 +7710,18 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-13 desktop outgoing OAuth and hourly schedule summary. Native's
+production origin fallback, desktop redirect restriction and callback admission
+cannot complete the current browser sign-in journey. The maintained Core patch
+accepts Workbench's trusted availability policy and carries its reason to the
+existing forms. Saved Test and retry preserve valid grants and bound refresh.
+Only an unusable grant reports that reauthorization is unavailable. Installed
+handler and rendered-component fixtures cover these paths without a provider.
+The Custom hourly preview now states the interval and minute while preserving
+Native's cron generator. Issuer and desktop capability regressions remain part
+of focused validation. This is source evidence. A new package and its native
+Windows acceptance remain separate gates.
 
 2026-10-13 Native usage record ID collisions. The usage writer retains its numeric
 primary key and existing schema. If another writer already inserted its generated

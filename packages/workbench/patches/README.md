@@ -250,6 +250,52 @@ Remove these OAuth hunks when a pinned Native release supplies trusted managed
 issuers and refuses unbound revocation while preserving local unlink and revision
 custody, and the installed-owner regressions pass without the patch.
 
+## Desktop outgoing OAuth availability
+
+The desktop app cannot complete Native's browser sign-in journey under its
+current callback and navigation controls. Workbench supplies an outgoing OAuth
+availability policy from the listener-owned desktop request identity. Core
+checks that policy before interactive OAuth discovery or registration and
+returns `mcp_oauth_interactive_unavailable`. The connection list carries the
+same availability and reason. Custom, catalog and first-run OAuth Connect
+controls show that reason and do not start sign-in. Other launches retain their
+existing OAuth flow. Browser headers and user-agent text cannot establish this
+desktop identity.
+
+Saved OAuth Test stays available. An unexpired bearer or a successful bound
+server-to-server refresh can still connect. The desktop saved-connection action
+retries that grant through the existing POST reconnect route. Only when token
+resolution returns no usable token do Test and retry return
+`mcp_oauth_reauthorization_unavailable`, without an anonymous connection attempt
+or an extra refresh. The saved connection is retained. Non-OAuth Test, retry and
+tool calls keep their existing owners. Manager initialization and background
+credential work remain unchanged, so refusal of a new interactive request is
+not a promise that no earlier startup request occurred.
+
+This treatment does not loosen issuer binding, incoming MCP refusal, desktop
+capabilities, callback authentication, cookies, origin checks or navigation.
+It does not claim to implement desktop OAuth setup or browser reauthorization.
+The existing built loopback OAuth fixture supplies an explicit HTTP origin and
+manually delivers callback cookies. Its passing result does not prove the
+desktop browser journey.
+
+`mcp-oauth-desktop.test.mjs` exercises the installed handlers, the Workbench
+policy, synthetic encrypted grants and intercepted transport. It covers refusal
+before new setup requests, saved grants, one refresh, unavailable authorization
+and non-OAuth controls. `mcp-oauth-desktop-components.test.mjs` renders the actual
+Native components with presentation and query fixtures. It checks custom,
+catalog, first-run, saved retry and saved Test controls. Existing issuer and
+desktop capability tests remain required. These checks make no account or
+provider calls and do not replace packaged Windows acceptance.
+
+## Custom hourly schedule summary
+
+The Custom schedule preview now includes its hourly interval and minute. An
+interval of 2 at minute 15 reads "Runs every 2 hours at minute 15." and still
+generates `15 */2 * * *`. The installed-component regression checks singular and
+plural intervals and compares the preview with Native's existing cron generator.
+Cron storage, execution and timezone handling are unchanged.
+
 ## Email BCC delivery
 
 Issue [#112](https://github.com/vivary-dev/vivary/issues/112) fixes an email action

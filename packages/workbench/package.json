@@ -58,7 +58,7 @@
     "test:browser-access-app": "node --test tests/browser-access-app.test.mjs",
     "test:owner-sign-in-app": "node --test tests/owner-sign-in-app.test.mjs",
     "test:hosted-mcp-app": "node --test tests/hosted-mcp-app.test.mjs",
-    "test:mcp-oauth": "node --test --test-concurrency=1 tests/mcp-oauth-issuer.test.mjs",
+    "test:mcp-oauth": "node --import tsx --test --test-concurrency=1 tests/mcp-oauth-issuer.test.mjs tests/mcp-oauth-desktop.test.mjs tests/mcp-oauth-desktop-components.test.mjs",
     "test:mcp-oauth-app": "node --test tests/mcp-oauth-app.test.mjs"
   },
   "devDependencies": {
