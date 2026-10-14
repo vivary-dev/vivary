@@ -35,10 +35,11 @@ import {
 } from "../server/local-code-agent.ts";
 
 import { claimProjectReconnection } from "../server/project-reconnection-admission.mjs";
+import { codingRuntimeEnvironment } from "../server/local-runtime-setup.ts";
 import { renderUnavailableContext } from "../server/project-memory.ts";
 
 const stateRoot = await mkdtemp(path.join(os.tmpdir(), "vivary-code-test-state-"));
-const previousPath = process.env.PATH;
+const previousPath = codingRuntimeEnvironment(process.env).PATH;
 const isolatedBin = path.join(stateRoot, "bin");
 await mkdir(isolatedBin);
 for (const command of ["claude", "codex"]) await writeFile(path.join(isolatedBin, command), "#!/usr/bin/env node\nprocess.exit(1);\n", { mode: 0o755 });
