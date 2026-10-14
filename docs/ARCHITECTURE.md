@@ -307,6 +307,8 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+This dependency review raises fast-uri from 3.1.7 to 3.1.8 and ip-address from 10.7.0 to 10.7.4 within their existing dependency ranges. The Native runtime, provider funding admission, project boundaries, and pinned Astro cache replacement keep their existing owners and contracts. Only the two Workbench transitive resolutions change.
+
 Issue #23 TipTap advisories. Toolkit 0.19.3 pins its TipTap packages at
 3.30.1, and @tiptap/core 3.30.1 carries the high GHSA-j95f-988m-3j2f and the
 moderate GHSA-cp6q-959q-f8rh. TipTap packages pin each other exactly, so
