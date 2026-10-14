@@ -76,12 +76,12 @@ test("provider limit rejections stop clearly without treating estimated cost as 
 });
 
 
-test("verified CLI 296 retains its version in the worker binding and enables its supported Haiku ID", () => {
+for (const version of ["2.1.296", "2.1.300"] as const) test(`verified CLI ${version} retains its version in the worker binding and enables its supported Haiku ID`, () => {
   const snapshot = { account: claudeAccount, usage: includedClaudeUsage() };
   const runtime = "a".repeat(64);
-  const binding = { version: "2.1.296", account: claudeSubscriptionAccount(snapshot), runtime };
+  const binding = { version, account: claudeSubscriptionAccount(snapshot), runtime };
   assert.equal(check(snapshot.usage, "claude-haiku-5-5", claudeAccount, binding.version).status, "ready");
   assert.doesNotThrow(() => assertClaudeWorkerFunding(snapshot, "claude-haiku-5-5", binding, runtime));
-  assert.throws(() => assertClaudeWorkerFunding(snapshot, "claude-haiku-5-5", { ...binding, version: "2.1.297" }, runtime), /changed after admission/);
-  assert.equal(check(snapshot.usage, "claude-haiku-5-5", claudeAccount, "2.1.297").status, "unavailable");
+  assert.throws(() => assertClaudeWorkerFunding(snapshot, "claude-haiku-5-5", { ...binding, version: "2.1.301" }, runtime), /changed after admission/);
+  assert.equal(check(snapshot.usage, "claude-haiku-5-5", claudeAccount, "2.1.301").status, "unavailable");
 });

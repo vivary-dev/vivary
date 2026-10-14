@@ -17368,7 +17368,7 @@ index f6d2580..51daf2d 100644
  export declare const CLAUDE_CODE_PARTICIPANT_TESTED_VERSION = "2.1.208";
  export {};
 diff --git a/dist/cli/claude-code-participant.js b/dist/cli/claude-code-participant.js
-index 4d427f8..3a0fe92 100644
+index 4d427f87dc030d76059b54a7377298f226caf2b3..29c87b7f0782aa03761683cae6c7742a39ff0bc8 100644
 --- a/dist/cli/claude-code-participant.js
 +++ b/dist/cli/claude-code-participant.js
 @@ -57,7 +57,7 @@ function isClaudeUnauthenticatedError(error) {
@@ -17531,6 +17531,19 @@ index 4d427f8..3a0fe92 100644
      events.push(event);
      onEvent?.(event);
  }
+@@ -328,7 +375,11 @@ function assertClaudeCodeSubscription(status) {
+     }
+ }
+ function safeEnvironment(input) {
+-    return Object.fromEntries(SAFE_ENVIRONMENT_KEYS.flatMap((key) => typeof input[key] === "string" ? [[key, input[key]]] : []));
++    const env = Object.fromEntries(SAFE_ENVIRONMENT_KEYS.flatMap((key) => typeof input[key] === "string" ? [[key, input[key]]] : []));
++    // Windows Node needs SystemRoot for its crypto provider. Environment names are case-insensitive.
++    const systemRoot = Object.entries(input).find(([name, value]) => name.toUpperCase() === "SYSTEMROOT" && typeof value === "string");
++    if (systemRoot) env.SystemRoot = systemRoot[1];
++    return env;
+ }
+ function validateInput(options) {
+     if (!readString(options.prompt))
 diff --git a/dist/cli/code-agent-executor.d.ts b/dist/cli/code-agent-executor.d.ts
 index 4a48e7b..9ecf63d 100644
 --- a/dist/cli/code-agent-executor.d.ts

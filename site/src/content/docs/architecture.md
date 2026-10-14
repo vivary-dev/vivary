@@ -434,6 +434,8 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+The Native Claude participant retains only the Windows SystemRoot setting across case variants so Node-based runtimes can initialize crypto. Its existing credential and environment allowlist boundary stays in place. Claude 2.1.300 joins the experimentally verified control-protocol versions after native and SDK metadata-only Windows checks. Funding admission, shared allowance limits, record ownership, and the unknown-version refusal remain unchanged.
+
 2026-10-14 Windows Claude control compatibility. A metadata-only probe used
 the existing packaged SDK 0.3.288 and Windows CLI 2.1.296, allowed only initialize
 and get_usage input, read the same explicit OFF fields and exhausted weekly

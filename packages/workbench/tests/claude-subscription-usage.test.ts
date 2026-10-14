@@ -7,7 +7,7 @@ import { claudeSubscriptionProbeLaunch, readClaudeSubscriptionUsage } from "../s
 import { claudeAccount, includedClaudeUsage } from "./fixtures/claude-subscription.ts";
 import { codingRuntimeEnvironment } from "../server/local-runtime-setup.ts";
 
-for (const version of ["2.1.289", "2.1.296"] as const) test(`the installed SDK reads Claude ${version} controls without sending any user message`, {
+for (const version of ["2.1.289", "2.1.296", "2.1.300"] as const) test(`the installed SDK reads Claude ${version} controls without sending any user message`, {
   timeout: 20_000, skip: process.platform === "win32",
 }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "vivary-claude-usage-"));
@@ -72,7 +72,7 @@ test("unsupported Claude versions and failed usage reads stay unavailable", {
   try {
     const pidFile = path.join(root, "pid");
     const executable = path.join(root, "claude");
-    await writeFile(executable, '#!/usr/bin/env node\nconsole.log("2.1.288 (Claude Code)");\n', { mode: 0o755 });
+    await writeFile(executable, '#!/usr/bin/env node\nconsole.log("2.1.301 (Claude Code)");\n', { mode: 0o755 });
     const launch = { executable, prefix: [], env: codingRuntimeEnvironment(process.env) };
     const old = await readClaudeSubscriptionUsage(root, { launch, timeoutMs: 2_000 });
     assert.equal(old.status, "unavailable");

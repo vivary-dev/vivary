@@ -5,7 +5,7 @@ import { codingRuntimeEnvironment, resolveVivaryRuntimeCommand, type CommandLaun
 import { checkWorkerCleanup, hardStopWorkerTree, workerCleanupTarget, type CleanupTarget } from "./code-execution-host";
 
 const execute = promisify(execFile);
-export const CLAUDE_FUNDING_CLI_VERSIONS = ["2.1.289", "2.1.296"] as const;
+export const CLAUDE_FUNDING_CLI_VERSIONS = ["2.1.289", "2.1.296", "2.1.300"] as const;
 export type ClaudeFundingCliVersion = typeof CLAUDE_FUNDING_CLI_VERSIONS[number];
 let unconfirmedStop: CleanupTarget | null = null;
 
