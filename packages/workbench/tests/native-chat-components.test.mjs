@@ -56,14 +56,14 @@ import { TooltipProvider } from "@proof/tooltip";
 import { UsageSection } from "@proof/usage-section";
 import * as chatHistory from "@proof/chat-history";
 
-export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", active = false, history = false }) {
+export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", active = false, history = false, funding }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const choices = [];
   const engine = { engine: "claude-cli", label: "Claude Code", configured: true,
     runtime: { status: "ready", message: "Signed in", version: "2.1.296" }, modelCatalog: null,
     models: claudeCodeModelChoices("2.1.296").map(model => model.id),
     claudeModels: claudeCodeModelChoices("2.1.296"),
-    funding: { policy: "included-only", status: "unverified", message: "Funding unverified" } };
+    funding: funding ?? { policy: "included-only", status: "unavailable", message: "Subscription controls need verification" } };
   const state = { engines: [engine], defaultEngine: "claude-cli", defaultModel: "claude-sonnet-5-5", cleanup: null };
   const selection = { key: "composer-review", runId: history ? "retained-run" : null, choice: { engine: "claude-cli", model } };
   const props = { state, selection, ownerKey: "fixture-owner", projectId: null, workspaceAvailable: true,
@@ -628,8 +628,21 @@ test("Native chat controls", async t => {
       assert.equal(snapshot.noticesOutsideToolbar, true);
       assert.deepEqual(snapshot.labels, ["Conversation runtime", "Conversation model"]);
       assert.deepEqual(snapshot.disabled, [false, false, true]);
-      assert.match(snapshot.text, /Subscription-only funding is unverified/);
+      assert.match(snapshot.text, /Subscription controls need verification/);
       assert.doesNotMatch(snapshot.text, /API list price/);
+    } finally { server(); }
+  });
+  await t.test("the Workbench shows the selected model's funding refusal", async () => {
+    const server = installChatServer();
+    try {
+      const funding = { policy: "included-only", status: "ready", message: "Included allowance ready", models: {
+        "claude-fable-5-1": { status: "exhausted", message: "Fable's included weekly allowance is exhausted" },
+      } };
+      const selected = await proof.renderWorkbenchComposer({ model: "claude-fable-5-1", funding });
+      assert.match(selected.text, /Fable's included weekly allowance is exhausted/);
+      assert.equal(selected.disabled[2], true);
+      const ready = await proof.renderWorkbenchComposer({ funding });
+      assert.doesNotMatch(ready.text, /Subscription controls need verification|Fable's included weekly/);
     } finally { server(); }
   });
   await t.test("the Workbench retains a saved legacy choice and locks active and retained conversations", async () => {

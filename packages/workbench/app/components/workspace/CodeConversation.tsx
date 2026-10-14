@@ -584,8 +584,9 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   const selectedClaudeModel = selectedEngine?.claudeModels?.find(model => model.id === choice.model);
   const selectedModelAvailable = modelChoices.includes(choice.model)
     && (!selectedClaudeModel || selectedClaudeModel.support === "supported");
-  const fundingMessage = !selectedEngine?.funding || selectedEngine.funding.status === "unverified"
-    ? "Subscription-only funding is unverified. New and resumed turns are blocked." : undefined;
+  const selectedFunding = selectedEngine?.funding?.models?.[choice.model] ?? selectedEngine?.funding;
+  const fundingMessage = selectedFunding?.status === "ready" ? undefined
+    : selectedFunding?.message ?? "Subscription controls are unavailable. Refresh Runtime settings.";
   const runtime = selectedEngine?.runtime;
   const events = props.run?.events ?? [];
   const snapshotKey = events.length + ":" + (events.at(-1)?.id ?? "") + ":" + (props.run?.status ?? "") + ":" + (props.matchedEventId ?? "");

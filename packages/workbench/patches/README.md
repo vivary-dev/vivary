@@ -11,6 +11,29 @@ Core package. Issue #9 also applies `@agent-native__toolkit@0.19.3.patch` to the
 pinned Toolkit package. The lockfile records both patch hashes. Install with
 `pnpm install --frozen-lockfile` from `packages/workbench`.
 
+## Claude subscription admission before a prompt
+
+The optional `claudeCli.beforePrompt` callback uses Native's existing Claude
+process and stream parser to initialize and read usage controls before writing
+the user envelope. The callback may refuse without Native run or transcript
+writes. Control replies and buffered pre-admission events stay private until
+admission. The control wait is bounded to twelve seconds, with the existing
+participant stop lifecycle. Other callers retain their text-input path. Resolved
+launcher prefixes are preserved for auth checks and execution. Queued follow-ups
+retain the callback.
+
+Workbench owns the funding decision. Its experimental compatibility contract is
+pinned to Claude Code 2.1.289 and SDK 0.3.288. The provider UI's Usage credits OFF
+state was correlated with the native response. A temporary zero balance is not
+OFF. The execution callback freshly checks the actual account and applicable
+quota under the admitted runtime and workspace. Rate-limit events can stop and
+explain exhaustion, with no paid executor fallback. Fake CLI tests exercise the
+installed patched Native worker's new and resumed paths and pre-prompt refusal.
+A control-only check through the installed participant also read the real CLI
+controls, refused before a user envelope, and verified child exit and owned
+cleanup. These checks do not establish live model execution or Windows package
+acceptance.
+
 ## Native API Claude catalog
 
 Issue #38. The maintained Core patch updates direct Anthropic and AI-SDK Anthropic
@@ -75,8 +98,8 @@ system instructions, tools, model, or account changes.
 
 Focused checks use `native-anthropic-models.test.ts`, its intercepted-transport
 fixture, `native-usage-cost.test.ts`, and `chat-model-groups.test.mjs`. They exercise
-the actual installed model owners and SDK without contacting a provider. The Code
-funding guard remains unchanged. API prices do not establish included-only funding.
+the actual installed model owners and SDK without contacting a provider. API
+catalog metadata does not change Code funding admission. API prices do not establish included-only funding.
 Both installed SDK adapters are checked through intercepted transport. Live API
 acceptance remains unrun.
 

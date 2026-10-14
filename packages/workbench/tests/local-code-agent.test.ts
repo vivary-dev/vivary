@@ -38,9 +38,16 @@ import { claimProjectReconnection } from "../server/project-reconnection-admissi
 import { renderUnavailableContext } from "../server/project-memory.ts";
 
 const stateRoot = await mkdtemp(path.join(os.tmpdir(), "vivary-code-test-state-"));
+const previousPath = process.env.PATH;
+const isolatedBin = path.join(stateRoot, "bin");
+await mkdir(isolatedBin);
+for (const command of ["claude", "codex"]) await writeFile(path.join(isolatedBin, command), "#!/usr/bin/env node\nprocess.exit(1);\n", { mode: 0o755 });
+process.env.PATH = isolatedBin + path.delimiter + (previousPath ?? ""); // guard:allow-env-credential - Prevent tests from reaching installed account runtimes.
 const previousDatabase = process.env.DATABASE_URL; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
 process.env.DATABASE_URL = "file:" + path.join(stateRoot, "state.sqlite"); // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
 after(async () => {
+  if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath; // guard:allow-env-credential - Restore disposable search path.
+
   if (previousDatabase === undefined) delete process.env.DATABASE_URL; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
   else process.env.DATABASE_URL = previousDatabase; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
   await rm(stateRoot, { recursive: true, force: true });
@@ -392,7 +399,7 @@ process.stdout.write('{"loggedIn":true}');
     }
   });
 
-  it("refuses new and resumed turns before any auth, model discovery, worker launch, or transcript write", async () => {
+  it("refuses unavailable runtimes before new or resumed run and transcript writes", async () => {
     const fixture = await mkdtemp(path.join(os.tmpdir(), "vivary-code-funding-"));
     temporaryRoots.push(fixture);
     const bin = path.join(fixture, "bin");
@@ -436,7 +443,7 @@ process.exit(2);
           await assert.rejects(sendVivaryCodeMessage({ ownerEmail, engine, runId: selectedRunId, model,
             message: "Refuse before any execution", workspace,
             revalidateWorkspace: async () => workspace, recordProjectContext: () => { contextsRecorded++; } }),
-          { errorCode: "vivary_code_subscription_funding_unverified", statusCode: 409 });
+          { errorCode: "vivary_code_runtime_unavailable", statusCode: 503 });
         }
         assert.equal(listCodeAgentRunRecords("vivary-local-code").length, count);
         assert.deepEqual(getCodeAgentRunRecord(runId), record);
@@ -444,7 +451,6 @@ process.exit(2);
         assert.equal(contextsRecorded, 0);
         assert.equal((await getVivaryCodeHostState(ownerEmail)).busy, false);
       }
-      await assert.rejects(readFile(probe), { code: "ENOENT" });
       await assert.rejects(readFile(workerProbe), { code: "ENOENT" });
       await assert.rejects(sendVivaryCodeMessage({ ownerEmail, message: "Changed binding", workspace,
         revalidateWorkspace: async () => ({ ...workspace, bindingRevision: 2 }) }),
@@ -474,7 +480,7 @@ process.exit(2);
       assert.equal(getCodeAgentRunRecord("missing-model-history")?.metadata?.model, undefined);
       assert.ok(state.engines.find(engine => engine.engine === "claude-cli")?.models.includes("sonnet"));
       assert.equal(state.defaultModel, "claude-sonnet-5-5");
-      assert.equal(state.engines.every(engine => engine.funding.status === "unverified"), true);
+      assert.equal(state.engines.every(engine => engine.funding.status !== "ready"), true);
     } finally {
       // guard:allow-env-credential - Restore only the temporary Native store setting.
       if (previousStore === undefined) delete process.env.AGENT_NATIVE_CODE_AGENTS_HOME;

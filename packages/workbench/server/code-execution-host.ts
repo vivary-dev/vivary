@@ -332,7 +332,14 @@ export async function executeVivaryCodeWorker(input: {
       }
       if (message.type !== "vivary:code-worker:done" && message.type !== "vivary:code-worker:failed") return;
       reported = true;
-      if (message.type === "vivary:code-worker:failed") failure ??= new Error("The Native coding executor failed.");
+      if (message.type === "vivary:code-worker:failed") {
+        const funding = "funding" in message ? message.funding : null;
+        const detail = funding && typeof funding === "object" && "policy" in funding && funding.policy === "included-only"
+          && "status" in funding && ["unavailable", "exhausted", "paid-funding-enabled"].includes(String(funding.status))
+          && "message" in funding && typeof funding.message === "string" && funding.message.length <= 700
+          ? funding.message : "The Native coding executor failed.";
+        failure ??= new Error(detail);
+      }
       stopTree();
     };
     const startupDeadline = setTimeout(() => requestStop(

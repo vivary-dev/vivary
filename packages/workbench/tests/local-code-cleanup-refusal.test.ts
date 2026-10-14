@@ -61,6 +61,8 @@ process.stdout.write('{"loggedIn":true}');
 `, { mode: 0o755 });
 // The runtime lookup adds `.exe` while the platform reads as Windows.
 await copyFile(path.join(bin, "claude"), path.join(bin, "claude.exe"));
+await writeFile(path.join(bin, "codex"), "#!/usr/bin/env node\nprocess.exit(1);\n", { mode: 0o755 });
+await copyFile(path.join(bin, "codex"), path.join(bin, "codex.exe"));
 // A run whose prompt asks for it exits after it receives its run, like a worker that died on its own.
 await writeFile(path.join(fixture, ".output", "server", "vivary-code-worker.mjs"), `
 import { writeFileSync } from "node:fs";
@@ -322,7 +324,7 @@ test("Continue anyway lifts a refusal Vivary cannot check, records who chose it,
   assert.equal(lastStatus("legacy-marker"),
     "You chose to continue. Vivary could not check whether this run's coding processes stopped. "
     + "Vivary accepts new messages again.");
-  await assert.rejects(send("Start after continuing"), { errorCode: "vivary_code_subscription_funding_unverified" });
+  await assert.rejects(send("Start after continuing"), { errorCode: "vivary_code_runtime_unavailable" });
   const runId = await sendAndSettle("Previously admitted before funding guard");
   assert.notEqual(getCodeAgentRunRecord(runId)?.status, "errored");
 });
@@ -353,7 +355,7 @@ test("a live process group keeps refusing by name, and a send after it stops lif
     });
     process.kill(-groupId, "SIGKILL");
     await exited;
-    await assert.rejects(send("Start after it stopped"), { errorCode: "vivary_code_subscription_funding_unverified" });
+    await assert.rejects(send("Start after it stopped"), { errorCode: "vivary_code_runtime_unavailable" });
     const runId = await sendAndSettle("Previously admitted before funding guard");
     assert.notEqual(getCodeAgentRunRecord(runId)?.status, "errored");
     assert.equal((metadataOf("live-group").cleanupLifted as { how?: string }).how, "rechecked");

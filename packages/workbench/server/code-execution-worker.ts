@@ -5,7 +5,8 @@ import { setTextRedactor } from "@agent-native/core/audit";
 import { executeCodeAgentRun, getCodeAgentRunRecord } from "@agent-native/core/code-agents";
 import { runWithRequestContext } from "@agent-native/core/server";
 
-import { assertCodeSubscriptionFunding } from "./code-subscription-funding";
+import { assertClaudeWorkerFunding, claudeSubscriptionRuntime, claudeFundingLimitEvent,
+  CodeSubscriptionFundingError, codexIncludedOnlyUnavailable, type CodeSubscriptionFunding } from "./code-subscription-funding";
 import { resolveVivaryRuntimeCommand } from "./local-runtime-setup";
 
 import { isVivaryCodeWorkerRequest } from "./code-execution-protocol";
@@ -48,13 +49,35 @@ async function receive(message: unknown) {
     reply({ type: "vivary:code-worker:failed", runId: message.runId });
     return;
   }
+  let admitted = false;
+  let fundingFailure: CodeSubscriptionFunding | undefined;
+  const checked = (operation: () => void) => {
+    try { operation(); } catch (error) {
+      if (error instanceof CodeSubscriptionFundingError) fundingFailure = error.funding;
+      throw error;
+    }
+  };
   try {
-    assertCodeSubscriptionFunding(engine);
+    if (engine === "codex-cli") throw new CodeSubscriptionFundingError(codexIncludedOnlyUnavailable());
+    if (!record.metadata?.subscriptionFundingBinding) throw new CodeSubscriptionFundingError({ policy: "included-only",
+      status: "unavailable", message: "This retained Claude run needs a fresh subscription check. Send again from its conversation. No message was sent." });
+    const claudeLaunch = await resolveVivaryRuntimeCommand("claude-cli");
+    if (!claudeLaunch) throw new Error("Claude Code could not be started. Refresh Runtime settings.");
+    if (!record.cwd) throw new Error("The saved Claude workspace is unavailable.");
+    const savedModel = typeof record.metadata?.model === "string" ? record.metadata.model : "sonnet";
+    if (message.model !== savedModel) throw new Error("The saved Claude model changed.");
+    const runtime = await claudeSubscriptionRuntime(record.cwd, claudeLaunch);
     const codexLaunch = record.metadata?.engine === "codex-cli" ? await resolveVivaryRuntimeCommand("codex-cli") : null;
-    if (record.metadata?.engine === "codex-cli" && !codexLaunch) throw new Error("Codex could not be started. Refresh Runtime settings.");
     await runWithRequestContext({ userEmail: message.ownerEmail, orgId: message.orgId }, () =>
       executeCodeAgentRun({
         runId: message.runId,
+        claudeCli: { command: claudeLaunch.executable, argsPrefix: claudeLaunch.prefix, env: claudeLaunch.env,
+          beforePrompt: snapshot => {
+            checked(() => assertClaudeWorkerFunding(snapshot, message.model ?? "", record.metadata?.subscriptionFundingBinding, runtime));
+            admitted = true;
+          },
+          onEvent: event => checked(() => claudeFundingLimitEvent(event)),
+        },
         ...(codexLaunch ? { codexCli: { command: codexLaunch.executable, argsPrefix: codexLaunch.prefix,
           env: codexLaunch.env, configMode: "native" as const,
           permissionMode: message.permissionMode ?? "normal",
@@ -73,8 +96,11 @@ async function receive(message: unknown) {
         signal: controller.signal,
       }));
     reply({ type: "vivary:code-worker:done", runId: message.runId });
-  } catch {
-    reply({ type: "vivary:code-worker:failed", runId: message.runId });
+  } catch (error) {
+    if (error instanceof CodeSubscriptionFundingError) fundingFailure = error.funding;
+    if (!admitted && !fundingFailure) fundingFailure = { policy: "included-only", status: "unavailable",
+      message: "Claude did not confirm its subscription controls before the prompt. Refresh Runtime settings. No message was sent." };
+    reply({ type: "vivary:code-worker:failed", runId: message.runId, ...(fundingFailure ? { funding: fundingFailure } : {}) });
   }
   // Keep the ancestor alive until the parent has stopped the owned process tree.
 }

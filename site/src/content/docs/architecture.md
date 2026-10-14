@@ -105,22 +105,44 @@ cloud-provider, and unknown auth routes stay unavailable in Code. Native API
 providers remain a separate selection. These checks do not change saved runtime,
 model, or conversation selections.
 
-First-party Claude or ChatGPT sign-in establishes authentication, not an
-included-only funding guarantee. Both CLIs can consume paid credits. No supported
-per-process control has been verified to prevent that spending. The Workbench
-[funding owner](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/code-subscription-funding.ts)
-therefore refuses every new and resumed Code turn before CLI probes, run creation,
-transcript writes, or worker launch. The coding worker applies the same policy
-before reaching Native execution, including a direct IPC start. Runtime status,
-catalog review, retained history, and Stop remain available. Running processes
-are not ended by this admission rule. There is no environment flag or user
-attestation that overrides the refusal. Anthropic's
-[Fable plan guide](https://support.claude.com/en/articles/15424964-claude-fable-models-on-your-plan)
-and [usage credits guide](https://support.claude.com/en/articles/12429409-manage-usage-credits-for-paid-claude-plans)
-explain paid credit use. The
-[Codex credits guide](https://help.openai.com/en/articles/12642688-using-credits-for-flexible-usage-in-chatgpt-personal-plans)
-is not used as an admission guarantee. These source checks do not establish
-packaged Windows acceptance or a live provider trial.
+First-party sign-in establishes authentication. The Workbench
+[funding owner](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/code-subscription-funding.ts) also
+reads Claude's live account controls without yielding a user message. The reader
+uses the installed SDK's experimental `get_usage` bridge, pinned to SDK 0.3.288
+and Claude Code 2.1.289. The compatibility contract was checked against the
+provider's Usage credits switch before and after an explicitly authorized OFF
+change. Admission requires the observed explicit-off fields, first-party personal
+subscription authentication, and available global and applicable model allowance.
+A zero credit balance, auto-reload off, missing scope, or unknown response cannot
+establish readiness. Metadata reads have one process owner at a time, and canceled
+queued reads cannot launch. An unconfirmed cleanup refuses subsequent probes. Pro Fable requires usage credits and stays unavailable here.
+See Anthropic's [usage credits guide](https://support.claude.com/en/articles/12429409-manage-usage-credits-for-paid-claude-plans)
+and [Fable plan guide](https://support.claude.com/en/articles/15424964-claude-fable-models-on-your-plan).
+
+Each send refreshes controls before creating a run or writing its transcript.
+The private admission binding covers the account, resolved runtime, and workspace.
+Native's execution process then reads its own account and usage controls before
+receiving the prompt. A refusal leaves its retained record and transcript intact.
+Control replies stay private. The worker rechecks new and resumed execution,
+and provider limit rejection stops with an allowance explanation. The account's
+explicit Usage credits OFF control prevents paid overflow. Event monitoring is
+only a stop and explanation mechanism. Compatibility changes fail closed until
+the version and shape are checked again. There is no manual attestation bypass.
+
+Codex discovery reads the backend's ordinary-usage permission and quota windows
+through its existing app-server process. These are observations, not a funding
+cap. The current personal-account CLI has no verified control that prevents
+existing ChatGPT credits from funding overflow, so Codex gives a specific refusal
+even when included allowance remains. The [Codex credits guide](https://help.openai.com/en/articles/12642688-using-credits-for-flexible-usage-in-chatgpt-personal-plans)
+describes automatic credit use. API chat is an explicit separate surface. Saved
+runtime, model, and surface choices remain unchanged, and neither subscription
+route falls back to it. Runtime status, retained history, and Stop remain usable.
+Synthetic positive and refusal tests establish source behavior. A control-only
+read through the installed Native participant also verified its actual CLI
+initialize/usage exchange, refusal before a user envelope, and owned cleanup.
+The actual Claude OFF account still had exhausted global weekly allowance, so no live model
+turn was accepted. Builds, live provider execution, and packaged Windows
+acceptance remain separate gates.
 
 ### Original engine
 
@@ -411,6 +433,18 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-14 conditional Code funding admission. Claude's exact installed
+experimental control bridge replaces unconditional refusal with explicit-off,
+allowance, account, runtime, and workspace checks at send and Native execution.
+Focused fixtures cover positive new and resumed turns, refusal before writes,
+changed account and credits, model-specific UI messages, and private control
+metadata. The provider UI OFF change and matching metadata read established the
+version-specific control shape. Actual weekly allowance remained exhausted.
+Codex stays blocked for the precise missing overflow-control capability. The
+maintained Core patch adds an optional pre-prompt callback, preserving other
+participant callers. Source tests do not establish live execution or package
+acceptance.
 
 2026-10-14, Code subscription authentication: Claude readiness now requires its
 reported Claude sign-in method, first-party provider, and subscription type.
