@@ -64,7 +64,7 @@ function stateFixture(overrides = {}) {
     VIVARY_CODE_MODELS: [],
     claudeCodeModelChoices, assessCodexSubscription,
     resolveVivaryRuntimeCommand: async () => null,
-    getClaudeSubscriptionFunding: async () => ({ funding: assessClaudeSubscription({ account: claudeAccount, usage: includedClaudeUsage() }, "claude-fable-5-1") }),
+    getClaudeSubscriptionFunding: async () => ({ funding: assessClaudeSubscription({ account: claudeAccount, usage: includedClaudeUsage() }, "claude-fable-5-1", "2.1.289") }),
     VIVARY_CODE_DEFAULT_MODEL: "fixture-model",
     getVivaryRuntimeStatus: async engine => ({ status: "ready", message: engine }),
     getCodexModels: async () => ({ status: "ready", funding: assessCodexSubscription(undefined), models: [{ id: "fixture-model" }] }),

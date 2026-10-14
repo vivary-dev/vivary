@@ -29,7 +29,7 @@ function fixture() {
     resolveVivaryRuntimeCommand: async () => null,
     getClaudeSubscriptionFunding: async (cwd, model, launch, options) => {
       assert.equal(options.refresh, true, "each send must request fresh provider metadata");
-      return { funding: assessClaudeSubscription({ account: claudeAccount, usage }, model),
+      return { funding: assessClaudeSubscription({ account: claudeAccount, usage }, model, "2.1.289"),
         binding: { version: "2.1.289", account: "fixture-account", runtime: "fixture-runtime" } };
     },
     assessCodexSubscription, refuseCodeSubscriptionFunding,

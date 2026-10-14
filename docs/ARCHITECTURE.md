@@ -105,7 +105,7 @@ First-party sign-in establishes authentication. The Workbench
 [funding owner](../packages/workbench/server/code-subscription-funding.ts) also
 reads Claude's live account controls without yielding a user message. The reader
 uses the installed SDK's experimental `get_usage` bridge, pinned to SDK 0.3.288
-and Claude Code 2.1.289. The compatibility contract was checked against the
+and verified Claude Code versions 2.1.289 and 2.1.296. The compatibility contract was checked against the
 provider's Usage credits switch before and after an explicitly authorized OFF
 change. Admission requires the observed explicit-off fields, first-party personal
 subscription authentication, and available global and applicable model allowance.
@@ -429,6 +429,15 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-14 Windows Claude control compatibility. A metadata-only probe used
+the existing packaged SDK 0.3.288 and Windows CLI 2.1.296, allowed only initialize
+and get_usage input, read the same explicit OFF fields and exhausted weekly
+allowance, and verified all owned processes closed. The allowlist now accepts
+that exact version alongside server 2.1.289. Bindings retain the observed version
+so model minimum versions use the actual runtime. Unknown versions still refuse.
+This establishes control-read compatibility only. Positive model execution and
+the package containing this source remain separate acceptance gates.
 
 2026-10-14 conditional Code funding admission. Claude's exact installed
 experimental control bridge replaces unconditional refusal with explicit-off,

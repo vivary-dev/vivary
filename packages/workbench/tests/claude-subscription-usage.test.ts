@@ -7,7 +7,7 @@ import { claudeSubscriptionProbeLaunch, readClaudeSubscriptionUsage } from "../s
 import { claudeAccount, includedClaudeUsage } from "./fixtures/claude-subscription.ts";
 import { codingRuntimeEnvironment } from "../server/local-runtime-setup.ts";
 
-test("the installed SDK reads Claude controls without sending any user message", {
+for (const version of ["2.1.289", "2.1.296"] as const) test(`the installed SDK reads Claude ${version} controls without sending any user message`, {
   timeout: 20_000, skip: process.platform === "win32",
 }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "vivary-claude-usage-"));
@@ -22,7 +22,7 @@ test("the installed SDK reads Claude controls without sending any user message",
         model_scoped: [], extra_usage: { is_enabled: false, monthly_limit: null, used_credits: 0, utilization: 0 } } };
     await writeFile(executable, `#!/usr/bin/env node
 const fs = require("node:fs");
-if (process.argv.includes("--version")) { console.log("2.1.289 (Claude Code)"); process.exit(0); }
+if (process.argv.includes("--version")) { console.log("${version} (Claude Code)"); process.exit(0); }
 fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
 fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");
 require("node:readline").createInterface({ input: process.stdin }).on("line", line => {
@@ -40,6 +40,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
     });
     assert.equal(observed.status, "observed");
     if (observed.status !== "observed") assert.fail(observed.message);
+    assert.equal(observed.version, version);
     assert.deepEqual(observed.account, account);
     assert.deepEqual(observed.usage, usage);
     const events = (await readFile(calls, "utf8")).trim().split("\n").map(line => JSON.parse(line));

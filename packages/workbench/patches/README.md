@@ -23,7 +23,7 @@ launcher prefixes are preserved for auth checks and execution. Queued follow-ups
 retain the callback.
 
 Workbench owns the funding decision. Its experimental compatibility contract is
-pinned to Claude Code 2.1.289 and SDK 0.3.288. The provider UI's Usage credits OFF
+pinned to SDK 0.3.288 with verified Claude Code 2.1.289 and 2.1.296. The observed CLI version stays in the worker binding. The provider UI's Usage credits OFF
 state was correlated with the native response. A temporary zero balance is not
 OFF. The execution callback freshly checks the actual account and applicable
 quota under the admitted runtime and workspace. Rate-limit events can stop and

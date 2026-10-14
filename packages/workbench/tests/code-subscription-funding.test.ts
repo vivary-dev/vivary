@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assessClaudeSubscription, assessCodexSubscription, claudeFundingLimitEvent } from "../server/code-subscription-funding.ts";
+import { assessClaudeSubscription, assessCodexSubscription, claudeFundingLimitEvent, assertClaudeWorkerFunding, claudeSubscriptionAccount } from "../server/code-subscription-funding.ts";
 import { claudeAccount, includedClaudeUsage } from "./fixtures/claude-subscription.ts";
 
 const check = (usage: unknown = includedClaudeUsage(), model = "claude-fable-5-1", account: unknown = claudeAccount, version = "2.1.289") =>
@@ -73,4 +73,15 @@ test("provider limit rejections stop clearly without treating estimated cost as 
   assert.doesNotThrow(() => claudeFundingLimitEvent({ type: "rate_limit_event", rate_limit_info: { status: "allowed_warning" } }));
   assert.throws(() => claudeFundingLimitEvent({ type: "rate_limit_event", rate_limit_info: { status: "rejected" } }), /included subscription allowance is exhausted/);
   assert.throws(() => claudeFundingLimitEvent({ type: "rate_limit_event", rate_limit_info: { status: "allowed", isUsingOverage: true } }), /usage-credit spending/);
+});
+
+
+test("verified CLI 296 retains its version in the worker binding and enables its supported Haiku ID", () => {
+  const snapshot = { account: claudeAccount, usage: includedClaudeUsage() };
+  const runtime = "a".repeat(64);
+  const binding = { version: "2.1.296", account: claudeSubscriptionAccount(snapshot), runtime };
+  assert.equal(check(snapshot.usage, "claude-haiku-5-5", claudeAccount, binding.version).status, "ready");
+  assert.doesNotThrow(() => assertClaudeWorkerFunding(snapshot, "claude-haiku-5-5", binding, runtime));
+  assert.throws(() => assertClaudeWorkerFunding(snapshot, "claude-haiku-5-5", { ...binding, version: "2.1.297" }, runtime), /changed after admission/);
+  assert.equal(check(snapshot.usage, "claude-haiku-5-5", claudeAccount, "2.1.297").status, "unavailable");
 });

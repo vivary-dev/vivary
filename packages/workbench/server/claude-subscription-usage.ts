@@ -5,7 +5,8 @@ import { codingRuntimeEnvironment, resolveVivaryRuntimeCommand, type CommandLaun
 import { checkWorkerCleanup, hardStopWorkerTree, workerCleanupTarget, type CleanupTarget } from "./code-execution-host";
 
 const execute = promisify(execFile);
-export const CLAUDE_FUNDING_CLI_VERSION = "2.1.289";
+export const CLAUDE_FUNDING_CLI_VERSIONS = ["2.1.289", "2.1.296"] as const;
+export type ClaudeFundingCliVersion = typeof CLAUDE_FUNDING_CLI_VERSIONS[number];
 let unconfirmedStop: CleanupTarget | null = null;
 
 export function claudeSubscriptionProbeLaunch(launch: CommandLaunch, requested: Pick<SpawnOptions, "command" | "args">) {
@@ -17,7 +18,7 @@ export function claudeSubscriptionProbeLaunch(launch: CommandLaunch, requested: 
 }
 
 export type ClaudeSubscriptionUsage =
-  | { status: "observed"; version: typeof CLAUDE_FUNDING_CLI_VERSION; account: AccountInfo; usage: SDKControlGetUsageResponse }
+  | { status: "observed"; version: ClaudeFundingCliVersion; account: AccountInfo; usage: SDKControlGetUsageResponse }
   | { status: "unavailable"; message: string };
 
 type UsageReadOptions = { launch?: CommandLaunch; timeoutMs?: number; signal?: AbortSignal };
@@ -61,8 +62,9 @@ async function readOwnedClaudeSubscriptionUsage(cwd: string, {
       cwd, env: launch.env, encoding: "utf8", signal: controller.signal,
       timeout: timeoutMs, maxBuffer: 16 * 1024, windowsHide: true, shell: false,
     });
-    if (version.stdout.trim() !== `${CLAUDE_FUNDING_CLI_VERSION} (Claude Code)`) {
-      outcome = { status: "unavailable", message: `Claude subscription controls are verified for CLI ${CLAUDE_FUNDING_CLI_VERSION}. This installation needs a compatibility check.` };
+    const observedVersion = CLAUDE_FUNDING_CLI_VERSIONS.find(value => version.stdout.trim() === `${value} (Claude Code)`);
+    if (!observedVersion) {
+      outcome = { status: "unavailable", message: `Claude subscription controls are verified for CLI ${CLAUDE_FUNDING_CLI_VERSIONS.join(" or ")}. This installation needs a compatibility check.` };
       return outcome;
     }
     const inputClosed = new Promise<void>(resolve => { releaseInput = resolve; });
@@ -89,7 +91,7 @@ async function readOwnedClaudeSubscriptionUsage(cwd: string, {
     } });
     const account = await active.accountInfo();
     const usage = await active.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true });
-    outcome = { status: "observed", version: CLAUDE_FUNDING_CLI_VERSION, account, usage };
+    outcome = { status: "observed", version: observedVersion, account, usage };
   } catch {
     // Leave unavailable reads separate from an observed account control.
   } finally {

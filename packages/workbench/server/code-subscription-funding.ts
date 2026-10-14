@@ -5,7 +5,7 @@ import { fail } from "@agent-native/core/action";
 import { z } from "zod";
 import { CLAUDE_CODE_MODELS, CLAUDE_CODE_LEGACY_ALIASES, claudeCodeModelChoices } from "../shared/claude-models";
 import type { CommandLaunch } from "./local-runtime-setup";
-import { CLAUDE_FUNDING_CLI_VERSION, readClaudeSubscriptionUsage } from "./claude-subscription-usage";
+import { CLAUDE_FUNDING_CLI_VERSIONS, readClaudeSubscriptionUsage, type ClaudeFundingCliVersion } from "./claude-subscription-usage";
 
 export type CodeSubscriptionFunding = {
   policy: "included-only";
@@ -30,10 +30,10 @@ const usageSchema = z.object({ subscription_type: z.enum(["pro", "max"]), rate_l
 
 /** The experimental CLI contract is pinned and unknown fields never establish admission. */
 export function assessClaudeSubscription(snapshot: { account: unknown; usage: unknown }, model: string,
-  version: string = CLAUDE_FUNDING_CLI_VERSION): CodeSubscriptionFunding {
+  version: string): CodeSubscriptionFunding {
   const account = accountSchema.safeParse(snapshot.account);
   const usage = usageSchema.safeParse(snapshot.usage);
-  if (version !== CLAUDE_FUNDING_CLI_VERSION || !account.success || !usage.success) return unavailable();
+  if (!CLAUDE_FUNDING_CLI_VERSIONS.some(verified => verified === version) || !account.success || !usage.success) return unavailable();
   const limits = usage.data.rate_limits;
   // A zero balance is temporary. Only the account's explicit off control can prevent later overflow.
   if (limits.extra_usage.is_enabled || !limits.extra_usage.user_disabled) return funding("paid-funding-enabled",
@@ -81,8 +81,8 @@ export async function claudeSubscriptionRuntime(cwd: string, launch: CommandLaun
   })).digest("hex");
 }
 
-export type ClaudeFundingBinding = { version: typeof CLAUDE_FUNDING_CLI_VERSION; account: string; runtime: string };
-const bindingSchema = z.object({ version: z.literal(CLAUDE_FUNDING_CLI_VERSION),
+export type ClaudeFundingBinding = { version: ClaudeFundingCliVersion; account: string; runtime: string };
+const bindingSchema = z.object({ version: z.enum(CLAUDE_FUNDING_CLI_VERSIONS),
   account: z.string().regex(/^[a-f0-9]{64}$/), runtime: z.string().regex(/^[a-f0-9]{64}$/) });
 
 export function assertClaudeWorkerFunding(snapshot: { account: unknown; usage: unknown }, model: string,
@@ -130,8 +130,8 @@ export async function getClaudeSubscriptionFunding(cwd: string, model: string, l
       ...CLAUDE_CODE_MODELS.map(choice => choice.id), ...CLAUDE_CODE_LEGACY_ALIASES,
     ].map(id => { const state = assessClaudeSubscription(observed, id, observed.version);
       return [id, { status: state.status, message: state.message }]; })) : undefined;
-    const value: { funding: CodeSubscriptionFunding; binding?: ClaudeFundingBinding } = { funding: { ...status, ...(modelStates ? { models: modelStates } : {}) }, ...(status.status === "ready" && account ? {
-      binding: { version: CLAUDE_FUNDING_CLI_VERSION, account, runtime },
+    const value: { funding: CodeSubscriptionFunding; binding?: ClaudeFundingBinding } = { funding: { ...status, ...(modelStates ? { models: modelStates } : {}) }, ...(status.status === "ready" && account && observed.status === "observed" ? {
+      binding: { version: observed.version, account, runtime },
     } : {}) };
     if (cache.size >= 32) cache.delete(cache.keys().next().value ?? "");
     cache.set(key, { expires: Date.now() + 30_000, value });
