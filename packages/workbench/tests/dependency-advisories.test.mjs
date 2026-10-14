@@ -8,6 +8,8 @@ import test from "node:test";
 const advisoryFloors = [
   { name: "proxy-addr", fixed: "2.0.8", advisories: ["GHSA-jqcg-44mw-7w3h"] },
   { name: "brace-expansion", fixed: "5.0.12", advisories: ["GHSA-qhr7-859c-m2p7", "GHSA-6j4f-fj2g-mc7p", "GHSA-q2hr-2g5m-vwhr"] },
+  { name: "fast-uri", fixed: "3.1.8", advisories: ["GHSA-hrr3-gc8f-f4qj"] },
+  { name: "ip-address", fixed: "10.7.4", advisories: ["GHSA-rxp7-6hxx-x8q5"] },
   { name: "pdfjs-dist", fixed: "6.2.108", advisories: ["GHSA-hq66-cqwq-w95j"] },
   { name: "xlsx", fixed: "0.19.3", advisories: ["GHSA-4r6h-8v6p-xvw6"] },
   { name: "xlsx", fixed: "0.20.2", advisories: ["GHSA-5pgg-2g8v-p4x9"] },
