@@ -35,10 +35,10 @@ describe("local coding runtime status", () => {
     } finally { await rm(fixture, { recursive: true, force: true }); }
   });
 
-  it("uses Claude's boolean status without returning account details", () => {
+  it("requires first-party Claude subscription sign-in without returning account details", () => {
     const result = vivaryRuntimeStatusFromProbe("claude-cli", {
       kind: "exited", exitCode: 0,
-      stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai", email: "private@example.test", organization: "private" }),
+      stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", subscriptionType: "max", email: "private@example.test", organization: "private" }),
       stderr: "private diagnostics",
     });
     assert.equal(result.status, "ready");
@@ -46,6 +46,28 @@ describe("local coding runtime status", () => {
     assert.equal(vivaryRuntimeStatusFromProbe("claude-cli", {
       kind: "exited", exitCode: 1, stdout: '{"loggedIn":false}', stderr: "",
     }).status, "sign-in-required");
+  });
+
+  it("rejects Claude API keys, cloud providers, and unknown sign-in routes", () => {
+    for (const auth of [
+      { authMethod: "apiKey", apiProvider: "firstParty" },
+      { authMethod: "claude.ai", apiProvider: "bedrock" },
+      { authMethod: "claude.ai", apiProvider: "vertex" },
+      { authMethod: "claude.ai", apiProvider: "foundry" },
+      { authMethod: "claude.ai", apiProvider: "firstParty", subscriptionType: "" },
+      { authMethod: "claude.ai", apiProvider: "firstParty", subscriptionType: "  " },
+      { authMethod: "claude.ai", apiProvider: "firstParty", subscriptionType: null },
+      { authMethod: "claude.ai", apiProvider: "firstParty", subscriptionType: undefined },
+      { authMethod: "claude.ai" },
+      { apiProvider: "firstParty" },
+      {},
+    ]) {
+      const result = vivaryRuntimeStatusFromProbe("claude-cli", {
+        kind: "exited", exitCode: 0, stdout: JSON.stringify({ loggedIn: true, subscriptionType: "max", ...auth }), stderr: "",
+      });
+      assert.equal(result.status, "unavailable");
+      assert.match(result.message, /Claude subscription/);
+    }
   });
 
   it("rejects malformed, misleading, and failed Claude status", () => {
@@ -91,7 +113,7 @@ if (JSON.stringify(process.argv.slice(2)) !== '["auth","status","--json"]') proc
 const file = ${JSON.stringify(countFile)};
 const count = fs.existsSync(file) ? Number(fs.readFileSync(file, "utf8")) : 0;
 fs.writeFileSync(file, String(count + 1));
-setTimeout(() => process.stdout.write('{"loggedIn":true,"email":"private@example.test"}'), 50);
+setTimeout(() => process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max","email":"private@example.test"}'), 50);
 `;
       await writeFile(path.join(fixture, "claude"), script, { mode: 0o755 });
       // guard:allow-env-credential - Locate only the disposable allowlisted CLI fixture before normal executables.

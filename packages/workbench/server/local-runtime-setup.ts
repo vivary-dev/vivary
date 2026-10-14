@@ -116,6 +116,11 @@ export function vivaryRuntimeStatusFromProbe(
       return unavailable;
     }
     if (result.exitCode !== 0 && !(result.exitCode === 1 && !data.loggedIn)) return unavailable;
+    if (data.loggedIn && (!("authMethod" in data) || data.authMethod !== "claude.ai"
+      || !("apiProvider" in data) || data.apiProvider !== "firstParty"
+      || !("subscriptionType" in data) || typeof data.subscriptionType !== "string" || !data.subscriptionType.trim())) {
+      return { ...unavailable, message: "Sign in to Claude Code with your Claude subscription to use it in Vivary. API-key and cloud-provider access are separate from this integration." };
+    }
     signedIn = data.loggedIn;
   } else if (result.exitCode === 0 && /Logged in using ChatGPT/i.test(`${result.stdout}\n${result.stderr}`)) {
     signedIn = true;

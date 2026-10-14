@@ -7404,6 +7404,13 @@ blocks, but offline request checks cannot verify provider-side signature binding
 after a change to earlier history. Live API and installed optional-adapter
 acceptance remain separate from fake-transport validation.
 
+Runtime readiness requires Claude Code to report both `authMethod: "claude.ai"`
+and `apiProvider: "firstParty"`, with a nonempty `subscriptionType`, or Codex to
+report ChatGPT sign-in. Claude API-key,
+cloud-provider, and unknown auth routes stay unavailable in Code. Native API
+providers remain a separate selection. These checks do not change saved runtime,
+model, or conversation selections.
+
 First-party Claude or ChatGPT sign-in establishes authentication, not an
 included-only funding guarantee. Both CLIs can consume paid credits. No supported
 per-process control has been verified to prevent that spending. The Workbench
@@ -7710,6 +7717,12 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-14, Code subscription authentication: Claude readiness now requires its
+reported Claude sign-in method, first-party provider, and subscription type.
+This matches the existing Native executor and Codex's ChatGPT-only route check. Focused status tests cover API keys, cloud routes, missing
+fields, and private account data. This establishes route separation only. The
+included-only funding guarantee and live subscription acceptance remain separate.
 
 2026-10-13 desktop outgoing OAuth and hourly schedule summary. Native's
 production origin fallback, desktop redirect restriction and callback admission
