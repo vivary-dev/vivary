@@ -133,7 +133,8 @@ export function vivaryRuntimeStatusFromProbe(
   return signedIn
     ? { status: "ready", message: `${label} is signed in.`, checkedAt,
         ...(result.version ? { version: result.version } : {}) }
-    : { status: "sign-in-required", message: `Sign in to ${label} in your terminal, then refresh.`, checkedAt };
+    : { status: "sign-in-required", message: `Sign in to ${label} in your terminal, then refresh.`, checkedAt,
+        ...(result.version ? { version: result.version } : {}) };
 }
 
 export function getVivaryRuntimeStatus(

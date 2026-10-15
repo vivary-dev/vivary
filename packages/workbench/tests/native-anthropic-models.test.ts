@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -12,7 +12,7 @@ const catalog = await load("agent/model-config.js");
 const reasoning = await load("shared/reasoning-effort.js");
 const { buildChatModelGroups } = await load("client/chat-model-groups.js");
 const current = ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5", "claude-fable-5-1"];
-const legacy = ["claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"];
+const legacy = ["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"];
 
 test("direct Anthropic defaults and limits update while old choices stay selected", () => {
   for (const config of [catalog.AGENT_MODEL_CONFIG.anthropic, catalog.AGENT_MODEL_CONFIG.aiSdk.anthropic]) {
@@ -85,5 +85,21 @@ test("engine listing pairs the fresh provider default and preserves chosen legac
     assert.match(result.stdout, /OFFLINE_ENGINE_DEFAULTS_VERIFIED/);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("review regression: direct Anthropic retains Sonnet 4.6 with either legacy switch", async () => {
+  const source = await readFile(path.join(core, "dist/agent/model-config.js"), "utf8");
+  for (const enabled of [true, false]) {
+    assert.ok(source.includes("const ENABLE_CLAUDE_SONNET_5 = true;"));
+    const variant = source.replace("const ENABLE_CLAUDE_SONNET_5 = true;", `const ENABLE_CLAUDE_SONNET_5 = ${enabled};`);
+    const models = await import(`data:text/javascript;base64,${Buffer.from(variant).toString("base64")}`);
+    assert.equal(models.CLAUDE_SONNET_MODEL_ID, enabled ? "claude-sonnet-5" : "claude-sonnet-4-6");
+    for (const config of [models.AGENT_MODEL_CONFIG.anthropic, models.AGENT_MODEL_CONFIG.aiSdk.anthropic]) {
+      assert.ok(config.supportedModels.includes("claude-sonnet-4-6"));
+      assert.ok(config.supportedModels.includes("claude-sonnet-5"));
+      assert.equal(config.defaultModel, "claude-sonnet-5-5");
+      assert.equal(new Set(config.supportedModels).size, config.supportedModels.length);
+    }
   }
 });

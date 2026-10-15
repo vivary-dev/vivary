@@ -49,7 +49,9 @@ The selected coding runtime owns execution, tools, model access, and native sess
 
 The Code composer embeds the runtime and model selectors inside its existing
 toolbar. Saved draft choices remain unchanged when a model catalog changes.
-Retained conversations keep their recorded model ID. A historical Claude run
+Unavailable selections keep the composer disabled with a reason to choose another
+model, update Claude Code, or verify its installed version. Retained conversations
+keep their recorded model ID. A historical Claude run
 without a model still means the legacy `sonnet` alias, independently of the exact
 `claude-sonnet-5-5` default for new conversations.
 
@@ -64,7 +66,9 @@ When native Claude has no usable manifest, Workbench runs `--version` through
 the same resolved executable, launch prefix, and filtered environment. It accepts
 only a successful complete Claude version response. This local probe retains the
 existing ten-second process timeout and output bound and creates no model turn.
-An unknown installation version remains unverified. The send boundary checks the
+An unknown installation version remains unverified. A discovered version stays
+visible while signed out, so compatibility is independent of sign-in state. The
+send boundary checks the
 selected Claude catalog ID against that installed version before creating a run,
 appending a message, or launching a worker, including resumed conversations after
 a CLI downgrade. Legacy aliases and retained historical IDs keep their existing
@@ -76,7 +80,8 @@ Native's [maintained API patch](../packages/workbench/patches/README.md#native-a
 separately owns direct Anthropic and AI-SDK Anthropic catalog metadata. New defaults
 use `claude-sonnet-5-5`. Sonnet 5.5, Haiku 5.5, Opus 5.5, and Fable 5.1 have
 documented 1M context and 128K output limits. Older catalog IDs and saved choices
-remain intact. A fresh, unconfigured Native instance reports Anthropic with its
+remain intact, including Sonnet 4.6 and Sonnet 5 regardless of Native's legacy
+Sonnet switch. A fresh, unconfigured Native instance reports Anthropic with its
 registered Sonnet 5.5 default and `chosen: false`, so Custom keys starts with a model
 from the displayed provider. Explicit stored/app choices and custom-model handling
 retain their existing paths. Builder and OpenRouter keep their own IDs and defaults. No account

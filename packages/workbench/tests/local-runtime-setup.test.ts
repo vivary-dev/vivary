@@ -277,3 +277,21 @@ describe("coding runtime launch environment", () => {
     }
   });
 });
+
+it("review regression: signed-out installations retain known model compatibility", () => {
+  for (const engine of ["claude-cli", "codex-cli"] as const) {
+    const result = vivaryRuntimeStatusFromProbe(engine, {
+      kind: "exited", exitCode: 1, version: "2.1.289",
+      stdout: engine === "claude-cli" ? '{"loggedIn":false}' : "Not logged in", stderr: "",
+    });
+    assert.equal(result.status, "sign-in-required");
+    assert.equal(result.version, "2.1.289");
+    if (engine === "claude-cli") {
+      assert.equal(claudeCodeModelChoices(result.version).find(model => model.id === "claude-sonnet-5-5")?.support, "supported");
+      assert.equal(claudeCodeModelChoices(result.version).find(model => model.id === "claude-haiku-5-5")?.support, "upgrade-required");
+    }
+  }
+  assert.equal(vivaryRuntimeStatusFromProbe("claude-cli", {
+    kind: "exited", exitCode: 1, stdout: '{"loggedIn":false}', stderr: "",
+  }).version, undefined);
+});

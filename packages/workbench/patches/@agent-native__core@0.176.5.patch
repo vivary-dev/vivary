@@ -16655,7 +16655,7 @@ index e43c149476d0cc68d78e5723e3db6fc4e67bb693..310a27798e6c7d2480709e168acea020
 +const ANTHROPIC_API_SUPPORTED_MODELS = [
 +    ...Object.keys(ANTHROPIC_API_MODELS),
 +    // Preserve existing selections without migrating conversations or settings.
-+    "claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-4-8", "claude-fable-5",
++    "claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-sonnet-5", "claude-opus-4-8", "claude-fable-5",
 +];
 +
  const MODEL_CONTEXT_WINDOWS = {
