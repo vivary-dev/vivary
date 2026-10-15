@@ -998,6 +998,11 @@ export async function sendVivaryCodeMessage(input: {
   const selectedModel = resolveVivaryCodeModel(selectedEngine,
     input.model ?? recordedModel ?? (catalog?.status === "ready" ? catalog.defaultModel : undefined),
     recordedModel ? [...supportedModels, recordedModel] : supportedModels, recordedModel);
+  const claudeModel = selectedEngine === "claude-cli"
+    ? claudeCodeModelChoices(runtime.version).find(model => model.id === selectedModel) : undefined;
+  if (claudeModel && claudeModel.support !== "supported") {
+    fail(claudeModel.message, { errorCode: "vivary_code_model_unsupported", statusCode: 400 });
+  }
   if (!existing && selectedEngine === "codex-cli" && selectedModel === "default") {
     fail("Choose a model reported by Codex before starting a conversation.", { errorCode: "vivary_code_model_unsupported", statusCode: 400 });
   }

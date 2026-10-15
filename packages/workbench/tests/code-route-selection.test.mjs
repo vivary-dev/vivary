@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { compileFunction } from "node:vm";
 import test from "node:test";
 import { transform } from "esbuild";
+import { claudeCodeModelChoices } from "../shared/claude-models.ts";
 
 const source = await readFile(new URL("../server/local-code-agent.ts", import.meta.url), "utf8");
 const start = source.indexOf("export async function sendVivaryCodeMessage(");
@@ -11,7 +12,7 @@ assert.ok(start >= 0 && end > start);
 const { code } = await transform(source.slice(start, end).replace("export ", ""), { loader: "ts" });
 
 function fixture() {
-  let runtime = { status: "ready" };
+  let runtime = { status: "ready", version: "2.1.300" };
   const records = new Map(), events = [], launches = [], writes = [];
   const workspace = { root: "/fixture", label: "Fixture" };
   const owners = {
@@ -24,6 +25,7 @@ function fixture() {
     getVivaryRuntimeStatus: async () => runtime,
     getCodexModels: async () => ({ status: "ready", models: [{ id: "gpt-fixture" }], defaultModel: "gpt-fixture" }),
     resolveVivaryCodeModel: (engine, model) => model ?? (engine === "claude-cli" ? "claude-sonnet-5-5" : "gpt-fixture"),
+    claudeCodeModelChoices,
     getCodePermissionMode: async () => "normal", refreshHeldCredentials: async () => {},
     VIVARY_CODE_GOAL_ID: "vivary-local-code", VIVARY_CODE_APP_MARKER: "vivary-workbench-local-code",
     titleFromMessage: message => message,
@@ -69,4 +71,38 @@ test("sign-in, changed runtime, changed model, and changed project refuse before
     message: "Codex needs sign-in", errorCode: "vivary_code_runtime_unavailable",
   });
   assert.equal(JSON.stringify([Array.from(value.records), value.events, value.launches, value.writes]), before);
+});
+
+for (const version of ["2.1.289", undefined, "bad.version"]) {
+  for (const resumed of [false, true]) test(`Claude ${version ?? "unverified"} refuses ${resumed ? "retained" : "new"} unsupported catalog model before writes`, async () => {
+    const value = fixture();
+    const input = { ownerEmail: "fixture@example.test", engine: "claude-cli", message: "First", model: "claude-haiku-5-5", workspace: value.workspace };
+    const first = resumed ? await value.send(input) : undefined;
+    const before = JSON.stringify([Array.from(value.records), value.events, value.launches, value.writes]);
+    value.setRuntime({ status: "ready", version });
+    await assert.rejects(value.send({ ...input, message: "After version change", runId: first?.run.id,
+      model: resumed ? undefined : input.model }), { errorCode: "vivary_code_model_unsupported", statusCode: 400 });
+    assert.equal(JSON.stringify([Array.from(value.records), value.events, value.launches, value.writes]), before);
+  });
+}
+
+test("Claude minimum versions apply to the selected catalog model without replacing it", async () => {
+  for (const [version, model] of [["2.1.289", "claude-sonnet-5-5"], ["2.1.293", "claude-haiku-5-5"]]) {
+    const value = fixture();
+    value.setRuntime({ status: "ready", version });
+    const result = await value.send({ ownerEmail: "fixture@example.test", engine: "claude-cli", message: "Supported", model, workspace: value.workspace });
+    assert.equal(result.run.metadata.model, model);
+    assert.deepEqual(value.launches.map(launch => launch.model), [model]);
+  }
+});
+
+test("Claude aliases and retained historical IDs keep their existing admission behavior", async () => {
+  for (const model of ["sonnet", "claude-sonnet-4-20250514"]) {
+    const value = fixture();
+    const first = await value.send({ ownerEmail: "fixture@example.test", engine: "claude-cli", message: "First", model: "sonnet", workspace: value.workspace });
+    value.records.get(first.run.id).metadata.model = model;
+    value.setRuntime({ status: "ready" });
+    await value.send({ ownerEmail: "fixture@example.test", runId: first.run.id, message: "Resume", workspace: value.workspace });
+    assert.equal(value.launches.at(-1).model, model);
+  }
 });

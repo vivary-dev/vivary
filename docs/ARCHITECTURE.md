@@ -64,7 +64,11 @@ When native Claude has no usable manifest, Workbench runs `--version` through
 the same resolved executable, launch prefix, and filtered environment. It accepts
 only a successful complete Claude version response. This local probe retains the
 existing ten-second process timeout and output bound and creates no model turn.
-An unknown installation version remains unverified. Codex's account-effective
+An unknown installation version remains unverified. The send boundary checks the
+selected Claude catalog ID against that installed version before creating a run,
+appending a message, or launching a worker, including resumed conversations after
+a CLI downgrade. Legacy aliases and retained historical IDs keep their existing
+admission behavior. Codex's account-effective
 `model/list` remains its model authority. API list prices do not establish a
 subscription bill or included model entitlement.
 
