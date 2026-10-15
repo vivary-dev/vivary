@@ -7734,6 +7734,20 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-15 Code model-choice review. The composer and send adapter now share
+new-conversation model admission from the current catalog. Exact historical IDs
+remain available for retained conversations, and saved supported Claude aliases
+pass both layers without replacing their identity. The server still owns runtime
+compatibility, record ownership, and retained-route immutability. The picker and
+actual-adapter regressions reproduced the mismatches before their fixes. The
+restored real-host and worker fixture verifies opaque held-value fingerprint
+delivery and redaction in transcripts, state, and follow-up context, alongside the
+existing Claude and Codex route fixtures. The 25-test worker and composer run and
+the final 24-test adapter and composer run passed without skips, with unchanged
+worker sources in the latter. Type checking passed. Maintained CI discovers the
+new tests. Execution ownership and credential boundaries remain as described
+above. Live provider and Windows package acceptance remain separate.
+
 2026-10-15 provider route correction. The app-wide included-only policy and its
 metadata probes, funding bindings, and pre-prompt control exchange are removed.
 The selected Code runtime or Native API provider remains authoritative. Send and

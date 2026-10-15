@@ -5,6 +5,7 @@ import {
 } from "@agent-native/core/client/agent-chat";
 import { actionErrorMessage, callAction } from "@agent-native/core/client/hooks";
 import type { NativeActionCaller } from "./native-actions";
+import { codeConversationModelChoices } from "./code-conversation-model-choices";
 import type {
   VivaryCodeState,
 } from "../../server/local-code-agent";
@@ -64,7 +65,7 @@ export function createLocalCodeChatAdapter(
       }
       const engine = options.engines().find(item => item.engine === options.context.engineRef.current);
       const model = options.context.modelRef.current;
-      if (!engine || !model || !engine.models.includes(model)) {
+      if (!engine || !model || !codeConversationModelChoices(engine, options.runIdRef.current !== null, model).includes(model)) {
         throw await rejectLocal("Choose an available runtime and model.");
       }
       if (input.abortSignal.aborted) {

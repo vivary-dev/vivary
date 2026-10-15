@@ -19,6 +19,7 @@ import { IconHistory, IconPlus, IconSettings, IconSquare } from "@tabler/icons-r
 import type { VivaryCodeRunState, VivaryCodeSessionDetails, VivaryCodeState } from "../../../server/local-code-agent";
 import { codeDraftSelectionKey, codeDraftThreadId } from "../../../shared/code-draft";
 import { createLocalCodeChatAdapter } from "../../lib/local-code-chat-adapter";
+import { codeConversationModelChoices } from "../../lib/code-conversation-model-choices";
 import { useProjects } from "../projects/ProjectContext";
 import "@agent-native/toolkit/chat-history.css";
 import "../../local-agent.css";
@@ -573,13 +574,11 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   }, []);
   const availableModels = useMemo(() => props.state.engines
     .filter(engine => !props.selection.runId || engine.engine === choice.engine)
-    .map(engine => ({ ...engine, models: engine.engine === choice.engine && !engine.models.includes(choice.model)
-      ? [...engine.models, choice.model] : [...engine.models] })),
+    .map(engine => ({ ...engine, models: codeConversationModelChoices(engine, Boolean(props.selection.runId),
+      engine.engine === choice.engine ? choice.model : undefined) })),
   [props.state.engines, props.selection.runId, choice.engine, choice.model]);
   const selectedEngine = props.state.engines.find(engine => engine.engine === choice.engine);
-  const modelChoices = !props.selection.runId && choice.engine === "codex-cli"
-    ? selectedEngine?.modelCatalog?.status === "ready" ? selectedEngine.modelCatalog.models.map(model => model.id) : []
-    : selectedEngine?.models ?? [];
+  const modelChoices = availableModels.find(engine => engine.engine === choice.engine)?.models ?? [];
   // Keep a saved choice even when the catalog changes. Only a deliberate selection replaces it.
   const selectedClaudeModel = selectedEngine?.claudeModels?.find(model => model.id === choice.model);
   const selectedModelAvailable = modelChoices.includes(choice.model)
