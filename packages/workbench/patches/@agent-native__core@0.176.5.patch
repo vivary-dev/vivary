@@ -16138,3 +16138,53 @@ diff --git a/dist/jobs/actions/list-automation-runs.d.ts b/dist/jobs/actions/lis
 +    includePendingApprovals?: boolean;
 +}, (AutomationRun & { canInspect: boolean })[]>;
  export default _default;
+diff --git a/dist/mcp-client/oauth-client.js b/dist/mcp-client/oauth-client.js
+index 135139d..259fcff 100644
+--- a/dist/mcp-client/oauth-client.js
++++ b/dist/mcp-client/oauth-client.js
+@@ -642,6 +642,12 @@ export async function revokeMcpOAuthCredentials(options) {
+         legacyAccountKey: true,
+         validateCredential: (credential) => serverUrlsMatch(credential.serverUrl, serverUrl),
+         revoke: async ({ credential }) => {
++            const expectedIssuer = issuerForDiscovery(credential.discoveryState);
++            if (!expectedIssuer ||
++                credential.clientInformation?.issuer !== expectedIssuer ||
++                credential.tokens.issuer !== expectedIssuer) {
++                return "unsupported";
++            }
+             const endpoint = credential.discoveryState?.authorizationServerMetadata?.revocation_endpoint;
+             if (!endpoint)
+                 return "unsupported";
+diff --git a/dist/mcp-client/oauth-routes.js b/dist/mcp-client/oauth-routes.js
+index 809d774..df69e6b 100644
+--- a/dist/mcp-client/oauth-routes.js
++++ b/dist/mcp-client/oauth-routes.js
+@@ -28,6 +28,7 @@ const MCP_WORKSPACE_STATE_PROVIDER = "mcp";
+ const MANAGED_MCP_OAUTH_CLIENTS = [
+     {
+         serverOrigins: ["https://mcp.hubspot.com"],
++        issuer: "https://mcp.hubspot.com",
+         credentialPairs: [
+             ["HUBSPOT_MCP_CLIENT_ID", "HUBSPOT_MCP_CLIENT_SECRET"],
+             ["HUBSPOT_INTEGRATION_CLIENT_ID", "HUBSPOT_INTEGRATION_CLIENT_SECRET"],
+@@ -46,10 +47,12 @@ const MANAGED_MCP_OAUTH_CLIENTS = [
+             "https://people.googleapis.com",
+         ],
+         credentialPairs: [["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]],
++        issuer: "https://accounts.google.com",
+     },
+     {
+         serverOrigins: ["https://workspacemcp.googleapis.com"],
+         credentialPairs: [["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]],
++        issuer: "https://accounts.google.com",
+     },
+ ];
+ export function resolveMcpOAuthReturnPath(connected, flow) {
+@@ -324,6 +327,7 @@ export async function resolveManagedMcpOAuthClient(serverUrl) {
+             client_id: clientId,
+             client_secret: clientSecret,
+             token_endpoint_auth_method: "client_secret_post",
++            issuer: client.issuer,
+         };
+     }
+     return undefined;

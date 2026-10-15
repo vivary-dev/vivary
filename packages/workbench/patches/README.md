@@ -59,7 +59,7 @@ the affected built-browser polling and held-response acceptance, with synthetic
 activity transitions distinguished from real provider execution.
 
 `packageExtensions` declares Agent SDK 0.3.288 as a Native peer. Workbench pins
-that SDK, API SDK 0.93.0 and MCP SDK 1.30.0; Core retains API 0.90.0 and root Zod
+that SDK, API SDK 0.93.0 and MCP SDK 1.31.0. Core retains API 0.90.0 and root Zod
 4.5.4 satisfies its reader peer. Exactly eight optional SDK executors are excluded
 through `ignoredOptionalDependencies`. The frozen install and dependency audit
 passed; installed package files are not edited.
@@ -102,6 +102,52 @@ records the API, summary semantics, runtime limits and pending installed/browser
 private Windows validation. Preserve all previous patch hunks; regenerate the
 Core patch hash through supported pnpm resolution before frozen install. Installed
 regressions must use the resulting patched dependency, not a source-only import.
+
+## MCP OAuth issuer binding
+
+Issue [#214](https://github.com/vivary-dev/vivary/issues/214) raises Workbench's
+MCP SDK to 1.31.0 and overrides Native's SDK to match. Native's client, core and
+server dependencies move together to 2.2.0. These versions fix
+[GHSA-6qxp-vccf-f47h](https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-6qxp-vccf-f47h).
+The unrelated WebMCP types dependency retains its server and core 2.0.0 packages.
+The advisory excludes server-only use, and no affected SDK or client remains.
+
+The managed-client catalog pins HubSpot's issuer to `https://mcp.hubspot.com`
+and Google's to `https://accounts.google.com`. Configured client information
+returns that trusted issuer with its credentials. Discovery cannot choose their
+binding. Native's existing SDK provider preserves saved issuers, filters reads
+for another issuer and keeps the PKCE callback's recorded registration binding.
+Its direct refresh path retains the same nonempty issuer check across discovery,
+client information and tokens before sending a request.
+
+Revocation now applies that check too. Missing or different bindings return
+`unsupported` without a request, then retain Native's local revision comparison
+and deletion. A concurrent replacement remains saved. This lets an old unbound
+grant be disconnected or replaced safely. An unexpired legacy bearer can still
+serve its exact canonical MCP resource without an authorization-server request.
+The generic credential validator and incoming MCP route policy are unchanged.
+
+Run `pnpm --dir packages/workbench test:mcp-oauth` and
+`node --test packages/workbench/tests/dependency-advisories.test.mjs`.
+The installed-owner tests use synthetic credentials, a disposable SQLite store
+and a fake fetch transport. They cover static-client PKCE, changed discovery,
+issuer persistence, refresh rotation, refused credential requests, local unlink
+and replacement custody. They make no provider or account calls.
+
+After `pnpm --dir packages/workbench build`, run
+`pnpm --dir packages/workbench test:mcp-oauth-app`. This starts the normal built
+local server with a disposable owner profile, a loopback OAuth and MCP fixture,
+and a child-only fetch guard that refuses destinations outside loopback.
+The existing configured-origin setting supplies the exact HTTP app origin.
+The route-level journey connects through PKCE, verifies tool discovery, restarts
+with the same stored connection and disconnects with bound revocation. Incoming
+Native MCP server, connect and OAuth routes remain refused before and after it.
+This verifies production handlers without a real provider or account. It does
+not establish a browser redirect journey or packaged Windows acceptance.
+
+Remove these OAuth hunks when a pinned Native release supplies trusted managed
+issuers and refuses unbound revocation while preserving local unlink and revision
+custody, and the installed-owner regressions pass without the patch.
 
 ## Email BCC delivery
 
